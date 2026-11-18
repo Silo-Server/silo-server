@@ -2,15 +2,15 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
-	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 const listNotificationPluginDestinationsOperation = "listNotificationPluginDestinations"
@@ -38,16 +38,65 @@ type NotificationPluginDestinationCapability struct {
 // NotificationPluginChannel is a channel an enabled plugin provides, with
 // the form for one destination's settings.
 type NotificationPluginChannel struct {
-	PluginID     string             `json:"plugin_id" doc:"Names the channel together with capability_id; both stay stable across plugin upgrades"`
-	CapabilityID string             `json:"capability_id"`
-	DisplayName  string             `json:"display_name"`
-	Description  string             `json:"description"`
-	SettingsForm PluginSettingsForm `json:"settings_form" doc:"The destination settings form the plugin declares: a flat object of string, integer, number and boolean fields. Fields marked secret are write-only"`
+	PluginID     string                         `json:"plugin_id" doc:"Names the channel together with capability_id; both stay stable across plugin upgrades"`
+	CapabilityID string                         `json:"capability_id"`
+	DisplayName  string                         `json:"display_name"`
+	Description  string                         `json:"description"`
+	SettingsForm NotificationPluginSettingsForm `json:"settings_form" doc:"The destination settings form the plugin declares"`
 }
 
-// PluginSettingsForm is a plugin-declared settings form outside the admin
-// plugin pages; it has the shape of AdminPluginConfigSchema.
-type PluginSettingsForm AdminPluginConfigSchema
+// NotificationPluginSettingsForm is a destination settings form: one flat
+// list of fields, rendered in order. Labels, descriptions and placeholders
+// are the plugin's text.
+type NotificationPluginSettingsForm struct {
+	Fields []NotificationPluginSettingsField `json:"fields"`
+}
+
+// NotificationPluginSettingsField is one setting of a destination form.
+type NotificationPluginSettingsField struct {
+	Key          string                             `json:"key" doc:"The setting's key in settings"`
+	Label        string                             `json:"label"`
+	Description  string                             `json:"description" doc:"Help text; empty when the plugin gives none"`
+	Placeholder  string                             `json:"placeholder" doc:"Empty when the plugin gives none"`
+	Control      string                             `json:"control" enum:"text,password,number,switch,select" doc:"How to render the input. password hides what is typed; select picks one of options"`
+	Type         string                             `json:"type" enum:"string,integer,number,boolean" doc:"The JSON type the value is sent as"`
+	Required     bool                               `json:"required" doc:"A value must be present. A stored secret left blank on an edit counts"`
+	Secret       bool                               `json:"secret" doc:"Write-only: never returned in settings; listed in secret_settings_set when stored. Leave it blank on an edit to keep the stored value. A destination's secret_settings_set can also name a setting saved as secret before a plugin upgrade unmarked it; treat that one as secret too"`
+	DefaultValue NotificationPluginSettingValue     `json:"default_value,omitempty" doc:"The value a new destination starts with; absent when there is none"`
+	Options      []NotificationPluginSettingsOption `json:"options" doc:"The choices of a select field, in order; empty for other controls"`
+	Minimum      *float64                           `json:"minimum" doc:"Smallest allowed number, inclusive; null when unbounded"`
+	Maximum      *float64                           `json:"maximum" doc:"Largest allowed number, inclusive; null when unbounded"`
+	MinLength    *int                               `json:"min_length" doc:"Fewest characters in a string; null when unbounded"`
+	MaxLength    *int                               `json:"max_length" doc:"Most characters in a string; null when unbounded"`
+	Pattern      string                             `json:"pattern" doc:"JSON Schema pattern (a regular expression) a string must match somewhere in it; empty when there is none"`
+}
+
+// NotificationPluginSettingsOption is one choice of a select field.
+type NotificationPluginSettingsOption struct {
+	Value string `json:"value" doc:"The choice as a string; send it as the field's type"`
+	Label string `json:"label"`
+}
+
+// NotificationPluginSettingValue is a setting's scalar JSON value.
+type NotificationPluginSettingValue json.RawMessage
+
+func (v NotificationPluginSettingValue) MarshalJSON() ([]byte, error) {
+	if len(v) == 0 {
+		return []byte("null"), nil
+	}
+	return json.RawMessage(v).MarshalJSON()
+}
+
+func (v *NotificationPluginSettingValue) UnmarshalJSON(data []byte) error {
+	*v = append((*v)[:0], data...)
+	return nil
+}
+
+func (NotificationPluginSettingValue) Schema(huma.Registry) *huma.Schema {
+	return &huma.Schema{Description: "A string, number or boolean, as the field's type says", OneOf: []*huma.Schema{
+		{Type: huma.TypeString}, {Type: huma.TypeNumber}, {Type: huma.TypeBoolean},
+	}}
+}
 
 type NotificationPluginChannelListOutput struct {
 	Body Collection[NotificationPluginChannel]
@@ -108,20 +157,35 @@ func notificationPluginDestinationOf(view notifications.PluginDestinationView) N
 }
 
 func notificationPluginChannelOf(channel notifications.PluginChannel) (NotificationPluginChannel, error) {
-	forms, err := adminPluginConfigSchemasOf(plugins.ConfigSchemaViews([]*pluginv1.ConfigSchema{channel.Schema}))
-	if err != nil {
-		return NotificationPluginChannel{}, err
+	fields := channel.FormFields()
+	form := NotificationPluginSettingsForm{Fields: make([]NotificationPluginSettingsField, 0, len(fields))}
+	for _, field := range fields {
+		item := NotificationPluginSettingsField{
+			Key: field.Key, Label: field.Label, Description: field.Description, Placeholder: field.Placeholder,
+			Control: field.Control, Type: field.Type, Required: field.Required, Secret: field.Secret,
+			Options: make([]NotificationPluginSettingsOption, 0, len(field.Options)),
+			Minimum: field.Minimum, Maximum: field.Maximum, MinLength: field.MinLength, MaxLength: field.MaxLength,
+			Pattern: field.Pattern,
+		}
+		if field.Default != nil {
+			raw, err := json.Marshal(field.Default)
+			if err != nil {
+				return NotificationPluginChannel{}, err
+			}
+			item.DefaultValue = raw
+		}
+		for _, option := range field.Options {
+			item.Options = append(item.Options, NotificationPluginSettingsOption{Value: option.Value, Label: option.Label})
+		}
+		form.Fields = append(form.Fields, item)
 	}
-	out := NotificationPluginChannel{
+	return NotificationPluginChannel{
 		PluginID:     channel.PluginID,
 		CapabilityID: channel.CapabilityID,
 		DisplayName:  channel.DisplayName,
 		Description:  channel.Description,
-	}
-	if len(forms) > 0 {
-		out.SettingsForm = PluginSettingsForm(forms[0])
-	}
-	return out, nil
+		SettingsForm: form,
+	}, nil
 }
 
 // NotificationPluginDestinationWrite is an update. A field left out keeps
@@ -221,6 +285,10 @@ func notificationPluginDestinationProblem(err error) error {
 	case errors.Is(err, notifications.ErrPluginDestinationInvalid):
 		detail := strings.TrimPrefix(err.Error(), notifications.ErrPluginDestinationInvalid.Error()+": ")
 		return validationProblem(locationBody, codeInvalid, detail)
+	case errors.Is(err, notifications.ErrPluginChannelNotProvided):
+		// Waiting won't change it: the destination's plugin is uninstalled
+		// or turned off. A create maps it to a field error instead.
+		return NewProblem(TypeConflict, "The plugin that provides this destination's channel isn't installed or is turned off.")
 	case errors.Is(err, notifications.ErrPluginChannelUnavailable):
 		return NewProblem(TypeDependencyUnavailable, "The plugin that provides this channel isn't available.").WithRetryAfter(30)
 	}
@@ -311,7 +379,7 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	create.DefaultStatus = http.StatusCreated
 	create.RetrySafety = RetrySafetyNonRetryable
 	create.MaxBodyBytes = 32768
-	create.Summary = "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination."
+	create.Summary = "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. A channel no enabled plugin provides is a 422 at body.capability_id. Send once; a replay answers 422 for the name already taken."
 	Register(reg, create, func(ctx context.Context, in *NotificationPluginDestinationCreateInput) (*NotificationPluginDestinationOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
@@ -322,6 +390,9 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 			return nil, p
 		}
 		row, err := svc.Create(ctx, user, profile, in.Body.input())
+		if errors.Is(err, notifications.ErrPluginChannelNotProvided) {
+			return nil, validationProblem(locationBody+".capability_id", codeInvalid, "No enabled plugin provides this channel.")
+		}
 		if err != nil {
 			return nil, notificationPluginDestinationProblem(err)
 		}
@@ -333,8 +404,10 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	update.Guarded = true
 	update.RetrySafety = RetrySafetyNaturalIdempotent
 	update.MaxBodyBytes = 32768
-	// 409: this server can't decrypt the stored settings, so a settings
-	// change is refused.
+	// 409: this server can't decrypt the stored settings, or no enabled
+	// plugin provides the destination's channel, so a settings change is
+	// refused. 503 (declared on every operation) is a plugin that failed to
+	// answer its check.
 	update.Errors = []int{http.StatusConflict}
 	update.Summary = "Update a plugin destination using the original observed validator. Changed settings are checked by the plugin again. Never rebase or replay an uncertain update."
 	Register(reg, update, func(ctx context.Context, in *NotificationPluginDestinationUpdateInput) (*NotificationPluginDestinationOutput, error) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
@@ -57,6 +58,9 @@ func (h pluginChannelHost) AvailableChannels(ctx context.Context, tx pgx.Tx) ([]
 
 func (h pluginChannelHost) Connect(ctx context.Context, ref notifications.PluginChannelRef) (*notifications.PluginChannel, notifications.PluginChannelClient, error) {
 	channel, client, err := h.plugins.NotificationChannelClientFor(ctx, ref.PluginID, ref.CapabilityID)
+	if errors.Is(err, plugins.ErrInstallationNotFound) {
+		return nil, nil, fmt.Errorf("%w: %w: %w", notifications.ErrPluginChannelUnavailable, notifications.ErrPluginChannelNotProvided, err)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", notifications.ErrPluginChannelUnavailable, err)
 	}

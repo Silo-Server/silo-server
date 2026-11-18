@@ -42042,8 +42042,8 @@
             "type": "string"
           },
           "settings_form": {
-            "$ref": "#/components/schemas/PluginSettingsForm",
-            "description": "The destination settings form the plugin declares: a flat object of string, integer, number and boolean fields. Fields marked secret are write-only"
+            "$ref": "#/components/schemas/NotificationPluginSettingsForm",
+            "description": "The destination settings form the plugin declares"
           }
         },
         "required": [
@@ -42269,6 +42269,161 @@
             "x-silo-extension-bag": "plugin-json-value"
           }
         },
+        "type": "object"
+      },
+      "NotificationPluginSettingsField": {
+        "additionalProperties": false,
+        "properties": {
+          "control": {
+            "description": "How to render the input. password hides what is typed; select picks one of options",
+            "enum": [
+              "text",
+              "password",
+              "number",
+              "switch",
+              "select"
+            ],
+            "type": "string"
+          },
+          "default_value": {
+            "description": "The value a new destination starts with; absent when there is none",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "description": {
+            "description": "Help text; empty when the plugin gives none",
+            "type": "string"
+          },
+          "key": {
+            "description": "The setting's key in settings",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "max_length": {
+            "description": "Most characters in a string; null when unbounded",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "maximum": {
+            "description": "Largest allowed number, inclusive; null when unbounded",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "min_length": {
+            "description": "Fewest characters in a string; null when unbounded",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "minimum": {
+            "description": "Smallest allowed number, inclusive; null when unbounded",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "options": {
+            "description": "The choices of a select field, in order; empty for other controls",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPluginSettingsOption"
+            },
+            "type": "array"
+          },
+          "pattern": {
+            "description": "JSON Schema pattern (a regular expression) a string must match somewhere in it; empty when there is none",
+            "type": "string"
+          },
+          "placeholder": {
+            "description": "Empty when the plugin gives none",
+            "type": "string"
+          },
+          "required": {
+            "description": "A value must be present. A stored secret left blank on an edit counts",
+            "type": "boolean"
+          },
+          "secret": {
+            "description": "Write-only: never returned in settings; listed in secret_settings_set when stored. Leave it blank on an edit to keep the stored value. A destination's secret_settings_set can also name a setting saved as secret before a plugin upgrade unmarked it; treat that one as secret too",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "The JSON type the value is sent as",
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "description",
+          "placeholder",
+          "control",
+          "type",
+          "required",
+          "secret",
+          "options",
+          "minimum",
+          "maximum",
+          "min_length",
+          "max_length",
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginSettingsForm": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationPluginSettingsField"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginSettingsOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "description": "The choice as a string; send it as the field's type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
         "type": "object"
       },
       "NotificationPreferences": {
@@ -47081,37 +47236,6 @@
         "required": [
           "installation",
           "values"
-        ],
-        "type": "object"
-      },
-      "PluginSettingsForm": {
-        "additionalProperties": false,
-        "properties": {
-          "admin_form": {
-            "$ref": "#/components/schemas/AdminPluginForm"
-          },
-          "description": {
-            "type": "string"
-          },
-          "json_schema": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "title": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "title",
-          "description",
-          "json_schema",
-          "required"
         ],
         "type": "object"
       },
@@ -194638,7 +194762,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination.",
+        "summary": "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. A channel no enabled plugin provides is a 422 at body.capability_id. Send once; a replay answers 422 for the name already taken.",
         "tags": [
           "notifications"
         ],

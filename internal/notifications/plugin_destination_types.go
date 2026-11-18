@@ -69,7 +69,9 @@ type PluginChannelHost interface {
 	// Connect resolves ref to the installation that provides it, the one
 	// Channels describes, and returns its channel and a client, starting
 	// the plugin when needed. It returns when ctx ends even while the
-	// plugin is still starting. Its errors wrap ErrPluginChannelUnavailable.
+	// plugin is still starting. Its errors wrap ErrPluginChannelUnavailable,
+	// and also ErrPluginChannelNotProvided when no enabled plugin provides
+	// the channel.
 	Connect(ctx context.Context, ref PluginChannelRef) (*PluginChannel, PluginChannelClient, error)
 }
 
@@ -143,6 +145,11 @@ var (
 	// ErrPluginChannelUnavailable means no enabled plugin provides the channel
 	// right now, or its plugin couldn't be reached.
 	ErrPluginChannelUnavailable = errors.New("plugin notification channel unavailable")
+	// ErrPluginChannelNotProvided means no enabled plugin provides the
+	// channel: it isn't installed, or is turned off. Errors that carry it
+	// also carry ErrPluginChannelUnavailable; this one tells a condition
+	// that waiting won't fix from a plugin that failed to answer.
+	ErrPluginChannelNotProvided = errors.New("no enabled plugin provides this notification channel")
 	// ErrPluginDestinationSettingsUnreadable refuses a settings edit when
 	// this server can't decrypt the stored settings, typically a wrong
 	// at-rest key: merging over nothing would drop the stored secrets.

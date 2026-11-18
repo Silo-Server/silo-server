@@ -10070,7 +10070,7 @@ export interface paths {
     /** List the acting profile's plugin destinations. A destination whose plugin is disabled or removed reads as unavailable, without its settings. */
     get: operations["listNotificationPluginDestinations"];
     put?: never;
-    /** Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination. */
+    /** Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. A channel no enabled plugin provides is a 422 at body.capability_id. Send once; a replay answers 422 for the name already taken. */
     post: operations["createNotificationPluginDestination"];
     delete?: never;
     options?: never;
@@ -30338,8 +30338,8 @@ export interface components {
       display_name: string;
       /** @description Names the channel together with capability_id; both stay stable across plugin upgrades */
       plugin_id: string;
-      /** @description The destination settings form the plugin declares: a flat object of string, integer, number and boolean fields. Fields marked secret are write-only */
-      settings_form: components["schemas"]["PluginSettingsForm"];
+      /** @description The destination settings form the plugin declares */
+      settings_form: components["schemas"]["NotificationPluginSettingsForm"];
     };
     NotificationPluginDestination: {
       /** @description An enabled plugin provides the destination's channel. False while that plugin is disabled or uninstalled; nothing is sent then */
@@ -30417,6 +30417,63 @@ export interface components {
       settings?: {
         [key: string]: unknown;
       };
+    };
+    NotificationPluginSettingsField: {
+      /**
+       * @description How to render the input. password hides what is typed; select picks one of options
+       * @enum {string}
+       */
+      control: "text" | "password" | "number" | "switch" | "select";
+      /** @description The value a new destination starts with; absent when there is none */
+      default_value?: string | number | boolean;
+      /** @description Help text; empty when the plugin gives none */
+      description: string;
+      /** @description The setting's key in settings */
+      key: string;
+      label: string;
+      /**
+       * Format: int64
+       * @description Most characters in a string; null when unbounded
+       */
+      max_length: number | null;
+      /**
+       * Format: double
+       * @description Largest allowed number, inclusive; null when unbounded
+       */
+      maximum: number | null;
+      /**
+       * Format: int64
+       * @description Fewest characters in a string; null when unbounded
+       */
+      min_length: number | null;
+      /**
+       * Format: double
+       * @description Smallest allowed number, inclusive; null when unbounded
+       */
+      minimum: number | null;
+      /** @description The choices of a select field, in order; empty for other controls */
+      options: components["schemas"]["NotificationPluginSettingsOption"][];
+      /** @description JSON Schema pattern (a regular expression) a string must match somewhere in it; empty when there is none */
+      pattern: string;
+      /** @description Empty when the plugin gives none */
+      placeholder: string;
+      /** @description A value must be present. A stored secret left blank on an edit counts */
+      required: boolean;
+      /** @description Write-only: never returned in settings; listed in secret_settings_set when stored. Leave it blank on an edit to keep the stored value. A destination's secret_settings_set can also name a setting saved as secret before a plugin upgrade unmarked it; treat that one as secret too */
+      secret: boolean;
+      /**
+       * @description The JSON type the value is sent as
+       * @enum {string}
+       */
+      type: "string" | "integer" | "number" | "boolean";
+    };
+    NotificationPluginSettingsForm: {
+      fields: components["schemas"]["NotificationPluginSettingsField"][];
+    };
+    NotificationPluginSettingsOption: {
+      label: string;
+      /** @description The choice as a string; send it as the field's type */
+      value: string;
     };
     NotificationPreferences: {
       enabled: boolean;
@@ -32428,14 +32485,6 @@ export interface components {
        * @description Display title; empty when the plugin gives none
        * @example Region
        */
-      title: string;
-    };
-    PluginSettingsForm: {
-      admin_form?: components["schemas"]["AdminPluginForm"];
-      description: string;
-      json_schema: string;
-      key: string;
-      required: boolean;
       title: string;
     };
     PluginSettingsInstallation: {
