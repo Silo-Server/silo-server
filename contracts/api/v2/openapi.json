@@ -14224,6 +14224,13 @@
           "enabled": {
             "type": "boolean"
           },
+          "env_managed": {
+            "description": "Configuration fields the node declared from its own environment at its last start, named as in the update body. updateAdminNode refuses a change to any of them; restating the current value is accepted. Empty when the node declares nothing. Requires the env_declarations node capability.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "group": {
             "type": [
               "string",
@@ -14334,7 +14341,8 @@
           "created_at",
           "drain_requested",
           "drain_state",
-          "key_issued"
+          "key_issued",
+          "env_managed"
         ],
         "type": "object"
       },
@@ -14347,6 +14355,10 @@
           },
           "drain": {
             "description": "Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows.",
+            "type": "boolean"
+          },
+          "env_declarations": {
+            "description": "Nodes can declare their own configuration from their environment: env_managed on node rows names the fields a node declares, and updateAdminNode refuses a change to them with field code managed_by_environment.",
             "type": "boolean"
           },
           "node_keys": {
@@ -14381,6 +14393,7 @@
           "summary",
           "node_keys",
           "source_access",
+          "env_declarations",
           "revision",
           "state",
           "allowed"
@@ -104544,7 +104557,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update stored node configuration under the original If-Match revision. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown.",
+        "summary": "Update stored node configuration under the original If-Match revision. A field named in the node's env_managed is set by the node's environment: a change to it is 422 validation_failed with field code managed_by_environment at body.\u003cfield\u003e, and restating its current value is accepted. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown.",
         "tags": [
           "admin-nodes"
         ],
@@ -247056,6 +247069,107 @@
         }
       },
       {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_Registration"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "The configuration the calling node declares from its environment, sent once at startup before its first configuration read. The core validates the declared fields as an administrator update is validated, writes them to the node's row, and sets env_managed to exactly the declared field names, so a field the node no longer declares is unlocked; an empty body unlocks every field. Administrator updates that would change a locked field are refused. A changed URL must be free among transcode nodes (409 url_taken). A refused value is 422 invalid naming its field. 404: the node row is gone. 429: the node exceeded its request budget on this server. 503 is transient.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "PUT",
+        "path": "/api/internal/nodes/self/registration",
+        "handler": "(*internal/nodecontrol.Server).HandleRegistration",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_RegistrationResult"
+                }
+              }
+            },
+            "description": "Applied."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_RegistrationRefusal"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_RegistrationRefusal"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
         "parameters": [
           {
             "description": "The source grant, as sources/open last returned it. A header, so access logs never record it; the node's signature covers it.",
@@ -248821,6 +248935,90 @@
           "transcode_dir",
           "segment_retention_seconds",
           "trickplay_node_capacity"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_Registration": {
+        "additionalProperties": false,
+        "properties": {
+          "download_artifact_dir_override": {
+            "type": "string"
+          },
+          "download_artifact_max_bytes_override": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "group": {
+            "type": "string"
+          },
+          "hw_accel_override": {
+            "enum": [
+              "auto",
+              "qsv",
+              "vaapi",
+              "nvenc",
+              "none"
+            ],
+            "type": "string"
+          },
+          "hw_device_override": {
+            "type": "string"
+          },
+          "max_jobs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_access": {
+            "enum": [
+              "local",
+              "core"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "nodecontrol_RegistrationRefusal": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "field"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_RegistrationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "env_managed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "node": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_NodeIdentity"
+          }
+        },
+        "required": [
+          "node",
+          "env_managed"
         ],
         "type": "object"
       },
