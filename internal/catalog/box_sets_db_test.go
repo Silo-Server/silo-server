@@ -265,11 +265,11 @@ func TestBoxSetCollectionsOfDisabledLibraryDB(t *testing.T) {
 	}
 	refetch := func() bool {
 		t.Helper()
-		ids, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
+		fetches, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return slices.Contains(ids, f.franchise)
+		return slices.ContainsFunc(fetches, func(c CollectionFetch) bool { return c.ID == f.franchise })
 	}
 	if !refetch() {
 		t.Fatal("a stale collection of a box set library is not due for a fetch")
@@ -291,6 +291,72 @@ func TestBoxSetCollectionsOfDisabledLibraryDB(t *testing.T) {
 	}
 	if !refetch() {
 		t.Fatal("a collection of a library that turned box sets back on is not fetched anew")
+	}
+}
+
+// TestBoxSetCollectionLanguageDB checks that a collection is fetched in the
+// metadata language of its box set library, and fetched again once that
+// language changes, rather than only when the stored copy goes stale.
+func TestBoxSetCollectionLanguageDB(t *testing.T) {
+	f := seedBoxSets(t)
+	ctx := t.Context()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	due := func() (string, bool) {
+		t.Helper()
+		fetches, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range fetches {
+			if c.ID == f.franchise {
+				return c.Language, true
+			}
+		}
+		return "", false
+	}
+	store := func(language string) {
+		t.Helper()
+		if err := f.repo.UpsertCollection(ctx, TMDBMovieCollection{ID: f.franchise, Name: "Saga", Language: language}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store("en")
+	if language, ok := due(); ok {
+		t.Fatalf("a fresh collection in its library's language is due for a fetch in %q", language)
+	}
+	exec(`UPDATE media_folders SET metadata_language = 'de' WHERE id = $1`, f.lib)
+	if language, ok := due(); !ok || language != "de" {
+		t.Fatalf("after the library switched to de, due = %q, %v; want a fetch in de", language, ok)
+	}
+	store("de")
+	if language, ok := due(); ok {
+		t.Fatalf("a collection stored in de is still due for a fetch in %q", language)
+	}
+
+	// Another library ahead of it in the library order holds one of the
+	// collection's movies: its language wins, so every run asks for the same.
+	var first int
+	if err := f.pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled,box_sets_enabled,metadata_language,sort_order) VALUES('movies',$1,true,true,'fr',-1) RETURNING id`, f.prefix+"-fr").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, first) })
+	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, f.id("first"), first)
+	if language, ok := due(); !ok || language != "fr" {
+		t.Fatalf("with a French library first, due = %q, %v; want a fetch in fr", language, ok)
+	}
+	// A collection TMDB no longer serves is not asked for again in the same
+	// language on every run.
+	if err := f.repo.TouchCollection(ctx, f.franchise, "fr"); err != nil {
+		t.Fatal(err)
+	}
+	if language, ok := due(); ok {
+		t.Fatalf("a touched collection is still due for a fetch in %q", language)
 	}
 }
 

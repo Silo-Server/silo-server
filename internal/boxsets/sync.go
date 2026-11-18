@@ -38,16 +38,16 @@ const (
 // TMDB is the slice of *tmdb.Client the sync uses.
 type TMDB interface {
 	GetMovieCollection(ctx context.Context, movieID int) (*tmdb.CollectionRef, error)
-	GetCollection(ctx context.Context, id int) (*tmdb.Collection, error)
+	GetCollection(ctx context.Context, id int, language string) (*tmdb.Collection, error)
 }
 
 // Store is the slice of *catalog.BoxSetRepository the sync uses.
 type Store interface {
 	MoviesNeedingCollectionLookup(ctx context.Context, staleBefore time.Time, limit int, skip []string) ([]catalog.MovieCollectionLookup, error)
 	RecordMovieCollection(ctx context.Context, contentID string, tmdbID int64, collectionID *int64) error
-	CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]int64, error)
+	CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]catalog.CollectionFetch, error)
 	UpsertCollection(ctx context.Context, c catalog.TMDBMovieCollection) error
-	TouchCollection(ctx context.Context, id int64) error
+	TouchCollection(ctx context.Context, id int64, language string) error
 	DeleteUnusedCollections(ctx context.Context) (int64, error)
 	CollectionArtworkNeedingCache(ctx context.Context, limit int, skip []int64) ([]catalog.CollectionArtworkDue, error)
 	SetCollectionArtwork(ctx context.Context, id int64, slot catalog.CollectionArtworkSlot, sourcePath, path, thumbhash string) error
@@ -165,7 +165,8 @@ func (s *Syncer) lookUpMovies(ctx context.Context, res *Result, failed *[]string
 	}
 }
 
-// fetchCollections stores every due collection. tried collects the
+// fetchCollections stores every due collection in the language it is due
+// in. tried collects the
 // collections this run could not store: failed fetches, and ones TMDB no
 // longer serves that were never stored.
 func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int64, report func(float64, string)) error {
@@ -175,16 +176,17 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 		if err != nil || len(due) == 0 {
 			return err
 		}
-		for _, id := range due {
+		for _, fetch := range due {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			c, err := s.tmdb.GetCollection(ctx, int(id))
+			id := fetch.ID
+			c, err := s.tmdb.GetCollection(ctx, int(id), fetch.Language)
 			if errors.Is(err, tmdb.ErrNotFound) {
 				// Keep a stored copy rather than refetching a collection TMDB
 				// no longer serves on every run. One never stored stays due
 				// for the next run.
-				if err := s.store.TouchCollection(ctx, id); err != nil {
+				if err := s.store.TouchCollection(ctx, id, fetch.Language); err != nil {
 					return err
 				}
 				*tried = append(*tried, id)
@@ -199,7 +201,7 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 				}
 				continue
 			}
-			if err := s.store.UpsertCollection(ctx, storedCollection(id, c)); err != nil {
+			if err := s.store.UpsertCollection(ctx, storedCollection(id, fetch.Language, c)); err != nil {
 				return err
 			}
 			res.CollectionsFetched++
@@ -267,7 +269,7 @@ func tmdbOriginalURL(path string) string {
 // storedCollection converts a fetched collection, listing its movies in
 // release order. TMDB returns parts in no reliable order, and a part without
 // a release date (an announced sequel) goes last.
-func storedCollection(id int64, c *tmdb.Collection) catalog.TMDBMovieCollection {
+func storedCollection(id int64, language string, c *tmdb.Collection) catalog.TMDBMovieCollection {
 	parts := append([]tmdb.CollectionPart(nil), c.Parts...)
 	sort.SliceStable(parts, func(i, j int) bool {
 		a, b := parts[i].ReleaseDate, parts[j].ReleaseDate
@@ -289,5 +291,6 @@ func storedCollection(id int64, c *tmdb.Collection) catalog.TMDBMovieCollection 
 		PosterSourcePath:   tmdbOriginalURL(c.PosterPath),
 		BackdropSourcePath: tmdbOriginalURL(c.BackdropPath),
 		MemberTMDBIDs:      members,
+		Language:           language,
 	}
 }

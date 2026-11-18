@@ -3722,7 +3722,7 @@ type tmdbFranchiseAdapter struct {
 }
 
 func (a *tmdbFranchiseAdapter) GetCollection(ctx context.Context, id int) ([]catalog.TMDBCollectionEntry, error) {
-	collection, err := a.client.GetCollection(ctx, id)
+	collection, err := a.client.GetCollection(ctx, id, "")
 	if err != nil {
 		return nil, err
 	}

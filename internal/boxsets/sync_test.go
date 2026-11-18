@@ -19,6 +19,8 @@ type fakeStore struct {
 	recorded    map[string]*int64
 	collections map[int64]catalog.TMDBMovieCollection
 	touched     []int64
+	// language is the language every collection is due in.
+	language string
 }
 
 func (s *fakeStore) MoviesNeedingCollectionLookup(_ context.Context, _ time.Time, limit int, skip []string) ([]catalog.MovieCollectionLookup, error) {
@@ -36,17 +38,21 @@ func (s *fakeStore) RecordMovieCollection(_ context.Context, contentID string, _
 	return nil
 }
 
-func (s *fakeStore) CollectionsNeedingFetch(_ context.Context, _ time.Time, _ int, skip []int64) ([]int64, error) {
-	var out []int64
+func (s *fakeStore) CollectionsNeedingFetch(_ context.Context, _ time.Time, _ int, skip []int64) ([]catalog.CollectionFetch, error) {
+	var ids []int64
 	for _, id := range s.recorded {
-		if id == nil || slices.Contains(out, *id) || slices.Contains(s.touched, *id) || slices.Contains(skip, *id) {
+		if id == nil || slices.Contains(ids, *id) || slices.Contains(s.touched, *id) || slices.Contains(skip, *id) {
 			continue
 		}
 		if _, stored := s.collections[*id]; !stored {
-			out = append(out, *id)
+			ids = append(ids, *id)
 		}
 	}
-	slices.Sort(out)
+	slices.Sort(ids)
+	out := make([]catalog.CollectionFetch, len(ids))
+	for i, id := range ids {
+		out[i] = catalog.CollectionFetch{ID: id, Language: s.language}
+	}
 	return out, nil
 }
 
@@ -87,7 +93,7 @@ func (s *fakeStore) DeleteUnusedCollections(context.Context) (int64, error) { re
 
 // TouchCollection marks only a stored collection fetched, as the
 // repository's UPDATE does.
-func (s *fakeStore) TouchCollection(_ context.Context, id int64) error {
+func (s *fakeStore) TouchCollection(_ context.Context, id int64, _ string) error {
 	if _, stored := s.collections[id]; stored {
 		s.touched = append(s.touched, id)
 	}
@@ -103,6 +109,8 @@ type fakeTMDB struct {
 	lookups map[int]int
 	// onCollection runs on each collection fetch.
 	onCollection func()
+	// languages records the language each collection was asked for in.
+	languages map[int]string
 }
 
 func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.CollectionRef, error) {
@@ -119,7 +127,10 @@ func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.Collecti
 	return ref, nil
 }
 
-func (f *fakeTMDB) GetCollection(_ context.Context, id int) (*tmdb.Collection, error) {
+func (f *fakeTMDB) GetCollection(_ context.Context, id int, language string) (*tmdb.Collection, error) {
+	if f.languages != nil {
+		f.languages[id] = language
+	}
 	if f.onCollection != nil {
 		f.onCollection()
 	}
@@ -142,8 +153,10 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 		catalog.MovieCollectionLookup{ContentID: "heat", TMDBID: 949},
 		catalog.MovieCollectionLookup{ContentID: "gone", TMDBID: 1},
 	)
+	store.language = "de"
 	client := &fakeTMDB{
-		movies: map[int]*tmdb.CollectionRef{671: {ID: 1241, Name: "Harry Potter Collection"}, 949: nil},
+		languages: map[int]string{},
+		movies:    map[int]*tmdb.CollectionRef{671: {ID: 1241, Name: "Harry Potter Collection"}, 949: nil},
 		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection", PosterPath: "/p.jpg", Parts: []tmdb.CollectionPart{
 			{ID: 674, ReleaseDate: "2005-11-16"},
 			{ID: 999, ReleaseDate: ""},
@@ -169,6 +182,10 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 		}
 	}
 	stored := store.collections[1241]
+	// The collection is asked for and stored in the language it is due in.
+	if client.languages[1241] != "de" || stored.Language != "de" {
+		t.Fatalf("fetched in %q, stored as %q; want de", client.languages[1241], stored.Language)
+	}
 	if want := []int64{671, 673, 674, 999}; !slices.Equal(stored.MemberTMDBIDs, want) {
 		t.Fatalf("members = %v, want release order %v with the undated part last", stored.MemberTMDBIDs, want)
 	}
