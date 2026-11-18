@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -101,7 +102,7 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 			}
 
 			// Skip per-chunk stream requests (segments, manifests after start)
-			onStreamPath := hasAnyPrefix(path, streamPrefixes)
+			onStreamPath := slices.ContainsFunc(streamPrefixes, func(prefix string) bool { return strings.HasPrefix(path, prefix) })
 			if onStreamPath && isStreamChunk(path) {
 				next.ServeHTTP(rw, r)
 				return
@@ -216,15 +217,6 @@ func isStreamChunk(path string) bool {
 	return strings.Contains(path, "/segment/") ||
 		strings.Contains(path, "/master.m3u8") ||
 		strings.Contains(path, "/subtitles/")
-}
-
-func hasAnyPrefix(path string, prefixes []string) bool {
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 // isRangeContinuation reports whether a Range header asks for bytes after a
