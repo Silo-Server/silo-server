@@ -329,6 +329,12 @@
       "value": "No s’ha pogut llegir la sol·licitud."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ho defineix l’entorn del node. Canvia-ho allà i reinicia el node."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -54353,6 +54359,12 @@
       "value": ", de manera que el selector de dispositius no s’hi aplica. Si es deixa buit, hereta la configuració de dispositius de tot el clúster, que també ha de ser una identitat CUDA perquè NVENC la pugui utilitzar — defineix-ne una aquí quan el clúster estigui configurat amb rutes de renderització."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ho defineix l’entorn d’aquest node. Canvia-ho allà i reinicia el node."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -66209,6 +66221,20 @@
     {
       "type": 0,
       "value": "S’està carregant la configuració…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Ho defineix la variable "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " a l’entorn del servidor."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

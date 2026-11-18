@@ -329,6 +329,12 @@
       "value": "Die Anfrage konnte nicht gelesen werden."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Wird über die Umgebung des Knotens festgelegt. Ändere den Wert dort und starte den Knoten neu."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48378,6 +48384,12 @@
       "value": ", daher gilt die Geräteauswahl hier nicht. Bleibt das Feld leer, wird die clusterweite Geräteeinstellung übernommen, die selbst eine CUDA-Identität sein muss, damit NVENC sie nutzen kann – lege hier eine fest, wenn der Cluster mit Renderpfaden konfiguriert ist."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Wird über die Umgebung dieses Knotens festgelegt. Ändere den Wert dort und starte den Knoten neu."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59367,6 +59379,20 @@
     {
       "type": 0,
       "value": "Einstellungen werden geladen"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Wird über "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " in der Umgebung des Servers festgelegt."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

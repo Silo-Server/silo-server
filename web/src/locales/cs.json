@@ -329,6 +329,12 @@
       "value": "Požadavek se nepodařilo přečíst."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Nastaveno prostředím uzlu. Změňte to tam a restartujte uzel."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -60168,6 +60174,12 @@
       "value": ", takže se na něj výběr zařízení nevztahuje. Když pole necháte prázdné, převezme se nastavení zařízení pro celý cluster, které samo musí být identitou CUDA, aby ho NVENC mohl použít — pokud je cluster nastaven s cestami k vykreslovacím zařízením, zadejte identitu zde."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Nastaveno prostředím tohoto uzlu. Změňte to tam a restartujte uzel."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -72931,6 +72943,20 @@
     {
       "type": 0,
       "value": "Načítání nastavení"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Nastaveno proměnnou "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " v prostředí serveru."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

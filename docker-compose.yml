@@ -109,6 +109,8 @@ services:
       - /proc/meminfo:/host/proc/meminfo:ro
       - /proc/stat:/host/proc/stat:ro
       - /proc/loadavg:/host/proc/loadavg:ro
+    # .env also carries the server settings an operator sets from the
+    # environment (SILO_PUBLIC_URL, SILO_SMTP_HOST, ...); .env.example lists them.
     env_file:
       - path: .env
         required: false

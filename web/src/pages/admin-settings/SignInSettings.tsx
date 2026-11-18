@@ -233,6 +233,7 @@ export default function SignInSettings() {
             value={form.getValue("signup.enabled")}
             onChange={(v) => form.setValue("signup.enabled", v)}
             restartRequired={restartKeys.has("signup.enabled")}
+            managedByEnv={form.envVar("signup.enabled")}
           />
           <SettingField
             label={t("web.admin.settings.signIn.page.passwordResetLabel")}

@@ -21681,6 +21681,10 @@ export interface components {
     AdminSensitiveStatus: {
       configured: string[];
       managed_by_env: string[];
+      /** @description The environment variable that sets each key in managed_by_env, keyed by setting key. */
+      managed_by_env_vars: {
+        [key: string]: string;
+      };
     };
     AdminServerHealth: {
       /** Format: int64 */

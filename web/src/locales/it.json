@@ -329,6 +329,12 @@
       "value": "Impossibile leggere la richiesta."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Impostato dall’ambiente del nodo. Modificalo lì e riavvia il nodo."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -54101,6 +54107,12 @@
       "value": ", quindi il selettore dei dispositivi non si applica. Se lasci vuoto, viene ereditata l’impostazione dei dispositivi a livello di cluster, che deve essere a sua volta un’identità CUDA perché NVENC possa usarla — impostane una qui quando il cluster è configurato con percorsi di rendering."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Impostato dall’ambiente di questo nodo. Modificalo lì e riavvia il nodo."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -65977,6 +65989,20 @@
     {
       "type": 0,
       "value": "Caricamento impostazioni"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Impostato da "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " nell’ambiente del server."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

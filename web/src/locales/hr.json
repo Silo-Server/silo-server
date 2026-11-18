@@ -329,6 +329,12 @@
       "value": "Zahtjev nije moguće pročitati."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Postavlja okruženje čvora. Promijenite to ondje i ponovno pokrenite čvor."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -54349,6 +54355,12 @@
       "value": ", pa se birač uređaja na njega ne primjenjuje. Ako ovo ostavite prazno, nasljeđuje se postavka uređaja za cijeli klaster, koja i sama mora biti CUDA identitet da bi je NVENC mogao koristiti — postavite ga ovdje kad je klaster konfiguriran s putanjama za renderiranje."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Postavlja okruženje ovog čvora. Promijenite to ondje i ponovno pokrenite čvor."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -66217,6 +66229,20 @@
     {
       "type": 0,
       "value": "Učitavanje postavki"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Postavlja "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " u okruženju poslužitelja."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

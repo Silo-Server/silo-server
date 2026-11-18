@@ -329,6 +329,12 @@
       "value": "Forespørgslen kunne ikke læses."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Angivet af nodens miljø. Skift det dér, og genstart noden."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48574,6 +48580,12 @@
       "value": ", så enhedsvælgeren gælder ikke for den. Hvis feltet er tomt, arves den klyngeomfattende enhedsindstilling, som selv skal være en CUDA-identitet, for at NVENC kan bruge den — angiv en her, når klyngen er konfigureret med renderstier."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Angivet af denne nodes miljø. Skift det dér, og genstart noden."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59539,6 +59551,20 @@
     {
       "type": 0,
       "value": "Indlæser indstillinger"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Angivet af "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " i serverens miljø."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

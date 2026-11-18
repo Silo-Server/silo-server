@@ -329,6 +329,12 @@
       "value": "Impossible de lire la demande."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Défini par l’environnement du nœud. Modifiez-le à cet endroit et redémarrez le nœud."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -54077,6 +54083,12 @@
       "value": " ; le sélecteur d’appareils ne s’y applique donc pas. Si ce champ est vide, le nœud hérite du paramètre d’appareil défini pour le cluster, qui doit lui-même être une identité CUDA pour que NVENC l’utilise — définissez-en une ici si le cluster est configuré avec des chemins de rendu."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Défini par l’environnement de ce nœud. Modifiez-le à cet endroit et redémarrez le nœud."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -65905,6 +65917,20 @@
     {
       "type": 0,
       "value": "Chargement des paramètres"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Défini par "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " dans l’environnement du serveur."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
