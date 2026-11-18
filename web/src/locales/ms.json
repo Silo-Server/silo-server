@@ -329,6 +329,12 @@
       "value": "Permintaan tidak dapat dibaca."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh persekitaran nod. Ubah di sana dan mulakan semula nod."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -43002,6 +43008,12 @@
       "value": ", jadi pemilih peranti tidak terpakai padanya. Jika medan ini dibiarkan kosong, tetapan peranti seluruh kluster diwarisi, dan tetapan itu sendiri mesti identiti CUDA untuk digunakan oleh NVENC — tetapkan satu di sini apabila kluster dikonfigurasikan dengan laluan render."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh persekitaran nod ini. Ubah di sana dan mulakan semula nod."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53136,6 +53148,20 @@
     {
       "type": 0,
       "value": "Memuatkan tetapan…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " dalam persekitaran pelayan."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

@@ -329,6 +329,12 @@
       "value": "Pyyntöä ei voitu lukea."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Asetettu solmun ympäristössä. Muuta asetusta siellä ja käynnistä solmu uudelleen."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48578,6 +48584,12 @@
       "value": " perusteella, joten laitevalitsin ei koske sitä. Jos jätät tämän tyhjäksi, käytetään koko klusterin laiteasetusta, jonka on itsessään oltava CUDA-tunniste, jotta NVENC voi käyttää sitä — aseta tunniste tässä, jos klusteriin on määritetty renderöintipolkuja."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Asetettu tämän solmun ympäristössä. Muuta asetusta siellä ja käynnistä solmu uudelleen."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59595,6 +59607,20 @@
     {
       "type": 0,
       "value": "Ladataan asetuksia…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Asetettu palvelimen ympäristössä muuttujalla "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

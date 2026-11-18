@@ -329,6 +329,12 @@
       "value": "Permintaan tidak dapat dibaca."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh lingkungan node. Ubah di sana, lalu mulai ulang node."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -43014,6 +43020,12 @@
       "value": ", sehingga pemilih perangkat tidak berlaku untuk NVENC. Jika dikosongkan, node mewarisi pengaturan perangkat seluruh kluster, yang juga harus berupa identitas CUDA agar dapat digunakan NVENC — tetapkan di sini jika kluster dikonfigurasi dengan jalur render."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh lingkungan node ini. Ubah di sana, lalu mulai ulang node."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53148,6 +53160,20 @@
     {
       "type": 0,
       "value": "Memuat pengaturan…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " di lingkungan server."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

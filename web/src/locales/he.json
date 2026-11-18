@@ -329,6 +329,12 @@
       "value": "לא ניתן היה לקרוא את הבקשה."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "הערך נקבע בסביבה של הצומת. יש לשנות אותו שם ולהפעיל מחדש את הצומת."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -53704,6 +53710,12 @@
       "value": ", ולכן בורר המכשירים לא חל עליו. אם משאירים את השדה ריק, הצומת יורש את הגדרת המכשירים של האשכול כולו, שגם היא חייבת להיות זהות CUDA כדי ש-NVENC ישתמש בה – אם האשכול מוגדר עם נתיבי רינדור, יש להגדיר כאן זהות CUDA."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "הערך נקבע בסביבה של הצומת הזה. יש לשנות אותו שם ולהפעיל מחדש את הצומת."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -65582,6 +65594,20 @@
     {
       "type": 0,
       "value": "ההגדרות בטעינה…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "הערך נקבע על ידי המשתנה "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " בסביבה של השרת."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

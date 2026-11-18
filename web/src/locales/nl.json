@@ -329,6 +329,12 @@
       "value": "Het verzoek kan niet worden gelezen."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ingesteld door de omgeving van de node. Wijzig het daar en herstart de node."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48286,6 +48292,12 @@
       "value": ", dus de apparaatkiezer is hier niet van toepassing. Laat je dit leeg, dan wordt de clusterbrede apparaatinstelling overgenomen, en die moet zelf een CUDA-identiteit zijn om door NVENC gebruikt te worden — stel er hier een in als het cluster met renderpaden is geconfigureerd."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ingesteld door de omgeving van deze node. Wijzig het daar en herstart de node."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59267,6 +59279,20 @@
     {
       "type": 0,
       "value": "Instellingen worden geladen"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Ingesteld door "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " in de omgeving van de server."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

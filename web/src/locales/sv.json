@@ -329,6 +329,12 @@
       "value": "Det gick inte att läsa förfrågan."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Anges av nodens miljö. Ändra det där och starta om noden."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48518,6 +48524,12 @@
       "value": ", så enhetsväljaren gäller inte för den. Lämnas fältet tomt ärvs den klusterövergripande enhetsinställningen, som själv måste vara en CUDA-identitet för att NVENC ska kunna använda den – ange en här när klustret är konfigurerat med renderingssökvägar."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Anges av den här nodens miljö. Ändra det där och starta om noden."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59483,6 +59495,20 @@
     {
       "type": 0,
       "value": "Läser in inställningar"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Anges av "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " i serverns miljö."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

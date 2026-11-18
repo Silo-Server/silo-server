@@ -329,6 +329,12 @@
       "value": "無法讀取此請求。"
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "此項目由節點的環境設定。請在該處變更，然後重新啟動節點。"
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -43504,6 +43510,12 @@
       "value": " 轉譯路徑，因此裝置選擇器不適用於它。留空會沿用叢集層級的裝置設定，而該設定本身必須是 CUDA 識別碼，NVENC 才能使用——若叢集設定的是轉譯路徑，請在此設定。"
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "此項目由此節點的環境設定。請在該處變更，然後重新啟動節點。"
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53758,6 +53770,20 @@
     {
       "type": 0,
       "value": "正在載入設定"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "由伺服器環境中的 "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " 設定。"
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

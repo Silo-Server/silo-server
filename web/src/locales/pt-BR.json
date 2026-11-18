@@ -329,6 +329,12 @@
       "value": "Não foi possível ler a solicitação."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Definido pelo ambiente do nó. Altere lá e reinicie o nó."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -54377,6 +54383,12 @@
       "value": ", então o seletor de dispositivos não se aplica a ele. Deixar em branco herda a configuração de dispositivo de todo o cluster, que também precisa ser uma identidade CUDA para o NVENC usá-la — defina uma aqui quando o cluster estiver configurado com caminhos de renderização."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Definido pelo ambiente deste nó. Altere lá e reinicie o nó."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -66189,6 +66201,20 @@
     {
       "type": 0,
       "value": "Carregando configurações"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Definido por "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " no ambiente do servidor."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

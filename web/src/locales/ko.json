@@ -329,6 +329,12 @@
       "value": "요청을 읽을 수 없어요."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "노드의 환경에서 설정된 값이에요. 노드 환경에서 변경한 후 노드를 다시 시작하세요."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -43354,6 +43360,12 @@
       "value": " 렌더 경로가 아니라 CUDA 식별자로 GPU를 지정하므로 기기 선택기가 적용되지 않아요. 비워 두면 클러스터 전체 기기 설정을 상속하는데, NVENC가 이를 사용하려면 그 설정도 CUDA 식별자여야 해요. 클러스터가 렌더 경로로 설정되어 있다면 여기에서 지정하세요."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "이 노드의 환경에서 설정된 값이에요. 노드 환경에서 변경한 후 노드를 다시 시작하세요."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53532,6 +53544,20 @@
     {
       "type": 0,
       "value": "설정 불러오는 중"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "서버 환경의 "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " 변수로 설정된 값이에요."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

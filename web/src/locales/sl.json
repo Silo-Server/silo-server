@@ -329,6 +329,12 @@
       "value": "Zahteve ni bilo mogoče prebrati."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v okolju vozlišča. Spremenite ga tam in znova zaženite vozlišče."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -59907,6 +59913,12 @@
       "value": ", zato izbirnik naprav zanj ne velja. Če pustite prazno, se podeduje nastavitev naprav za celotno gručo, ki mora biti tudi sama identiteta CUDA, da jo NVENC lahko uporabi – nastavite jo tukaj, kadar je gruča nastavljena s potmi upodabljanja."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v okolju tega vozlišča. Spremenite ga tam in znova zaženite vozlišče."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -72694,6 +72706,20 @@
     {
       "type": 0,
       "value": "Nalaganje nastavitev …"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Nastavljeno s spremenljivko "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " v okolju strežnika."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

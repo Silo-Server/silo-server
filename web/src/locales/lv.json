@@ -329,6 +329,12 @@
       "value": "Pieprasījumu neizdevās nolasīt."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Iestatīts mezgla vidē. Mainiet to tur un restartējiet mezglu."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -55200,6 +55206,12 @@
       "value": " renderēšanas ceļa, tāpēc ierīču atlasītājs tam neattiecas. Ja šo lauku atstāsiet tukšu, tiks mantots visa klastera ierīču iestatījums, kam pašam jābūt CUDA identitātei, lai NVENC to varētu izmantot – iestatiet to šeit, ja klasterī ir konfigurēti renderēšanas ceļi."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Iestatīts šī mezgla vidē. Mainiet to tur un restartējiet mezglu."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -67208,6 +67220,20 @@
     {
       "type": 0,
       "value": "Notiek iestatījumu ielāde…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Iestatīts ar mainīgo "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " servera vidē."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

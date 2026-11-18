@@ -329,6 +329,12 @@
       "value": "无法读取请求。"
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "由节点的环境设置。请在环境中更改，然后重启节点。"
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -43374,6 +43380,12 @@
       "value": "渲染路径，因此设备选择器对它不适用。留空则继承集群范围的设备设置，而该设置本身必须是CUDA标识，NVENC才能使用——当集群配置的是渲染路径时，请在此处设置一个。"
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "由此节点的环境设置。请在环境中更改，然后重启节点。"
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53624,6 +53636,20 @@
     {
       "type": 0,
       "value": "正在加载设置"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "由服务器环境中的"
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "设置。"
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

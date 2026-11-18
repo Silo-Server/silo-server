@@ -62913,6 +62913,20 @@
       "value": "\u200F\u202ELoading settings\u202C"
     }
   ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "\u202E in the server’s environment.\u202C"
+    }
+  ],
   "web.admin.settings.fields.passwordConfigured": [
     {
       "type": 0,

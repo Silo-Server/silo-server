@@ -329,6 +329,12 @@
       "value": "تعذّرت قراءة الطلب."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "يُعيَّن هذا الخيار من بيئة العقدة. غيّره هناك وأعد تشغيل العقدة."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -70306,6 +70312,12 @@
       "value": "، لذا لا ينطبق منتقي الأجهزة عليه. ترك هذا الحقل فارغًا يورث إعداد الجهاز على مستوى العنقود، والذي يجب أن يكون هو نفسه هوية CUDA كي يستخدمه NVENC — حدّد واحدة هنا عندما يكون العنقود مكوّنًا بمسارات العرض."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "يُعيَّن هذا الخيار من بيئة هذه العقدة. غيّره هناك وأعد تشغيل العقدة."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -84512,6 +84524,20 @@
     {
       "type": 0,
       "value": "جارٍ تحميل الإعدادات"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "يُعيَّن بواسطة "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " في بيئة الخادم."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
