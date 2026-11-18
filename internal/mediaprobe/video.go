@@ -328,6 +328,29 @@ func videoRangeLabel(stream Stream, dvProfile int) string {
 	return ""
 }
 
+// Profile10RangeType returns the range type of a Dolby Vision profile 10
+// (AV1) stream from its base-layer compatibility id, as Jellyfin maps it:
+// 10.1 has an HDR10 base layer, 10.2 an SDR one and 10.4 an HLG one. Unlike
+// profile 8 it never guesses from the transfer characteristics, because a
+// 10.0 stream with no compatible base layer is PQ-tagged as well, and a
+// display without Dolby Vision cannot show it. Id 0 and any id Jellyfin does
+// not map stay DOVI.
+func Profile10RangeType(compatID int, hdr10Plus bool) string {
+	switch compatID {
+	case 1:
+		if hdr10Plus {
+			return rangeTypeDOVIWithHDR10Plus
+		}
+		return "DOVIWithHDR10"
+	case 2:
+		return "DOVIWithSDR"
+	case 4:
+		return "DOVIWithHLG"
+	default:
+		return "DOVI"
+	}
+}
+
 func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) string {
 	if dvProfile > 0 {
 		switch dvProfile {
@@ -358,6 +381,8 @@ func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) stri
 				}
 				return "DOVIWithSDR"
 			}
+		case 10:
+			return Profile10RangeType(compatID, hdr10Plus)
 		default:
 			return "DOVI"
 		}

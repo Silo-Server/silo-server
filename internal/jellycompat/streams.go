@@ -2234,6 +2234,7 @@ const (
 	compatRangeDOVIWithHLG     = "DOVIWithHLG"
 	compatRangeDOVIWithHDR     = "DOVIWithHDR10"
 	compatRangeDOVIWithHDRPlus = "DOVIWithHDR10Plus"
+	compatRangeDOVIWithSDR     = "DOVIWithSDR"
 	compatRangeHDR10Plus       = "HDR10Plus"
 	compatRangeHDR10           = "HDR10"
 	compatRangeHLG             = "HLG"

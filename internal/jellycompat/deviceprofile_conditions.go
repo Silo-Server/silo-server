@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -660,8 +661,10 @@ func compatAudioCodec(version catalog.FileVersion, streamIndex *int) string {
 func compatVideoRange(track models.VideoTrack, versionHDR bool) string {
 	rangeType := compatVideoRangeType(track, versionHDR)
 	switch rangeType {
-	case "SDR":
-		return "SDR"
+	case compatRangeSDR, compatRangeDOVIWithSDR:
+		// Jellyfin reports a Dolby Vision stream with an SDR base layer as
+		// SDR: a client without Dolby Vision shows that base layer.
+		return compatRangeSDR
 	case compatRangeUnknown:
 		return compatRangeUnknown
 	default:
@@ -671,6 +674,12 @@ func compatVideoRange(track models.VideoTrack, versionHDR bool) string {
 
 func compatVideoRangeType(track models.VideoTrack, versionHDR bool) string {
 	if value := strings.TrimSpace(track.VideoRangeType); value != "" {
+		// Scans before profile 10 was mapped stored every profile 10 stream as
+		// DOVI. The stored compatibility id still names its base layer, so a
+		// 10.1, 10.2 or 10.4 file gets its real range type without a rescan.
+		if strings.EqualFold(value, compatRangeDOVI) && compatDolbyVisionProfile(track) == 10 {
+			return mediaprobe.Profile10RangeType(track.DVBLCompatID, track.HDR10Plus)
+		}
 		return value
 	}
 	if profile := compatDolbyVisionProfile(track); profile > 0 {
@@ -702,6 +711,8 @@ func compatVideoRangeType(track models.VideoTrack, versionHDR bool) string {
 				}
 				return "DOVIWithSDR"
 			}
+		case 10:
+			return mediaprobe.Profile10RangeType(track.DVBLCompatID, track.HDR10Plus)
 		default:
 			return "DOVI"
 		}
