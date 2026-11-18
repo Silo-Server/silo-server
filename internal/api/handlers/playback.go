@@ -1792,8 +1792,12 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 		card.RemuxResumeLeadingPictureDrop = s.RemuxResumeLeadingPictureDrop
 		card.TargetCodecAudio = s.TargetAudioCodec
 		if !s.TranscodeAudio {
-			// A copied track's planned codec is the source track's codec.
-			card.CopyAudioCodec = s.TargetAudioCodec
+			// A copied track's planned codec is the source track's codec, but the
+			// remux filter exists for ADTS framing only: a copied E-AC-3, TrueHD
+			// or DTS track would be refused by aac_adtstoasc, and AAC in MKV/MP4
+			// is already AudioSpecificConfig. Carry the codec only when the
+			// container really frames it as ADTS.
+			card.CopyAudioCodec = playback.CopiedAudioADTSCodec(s.TargetAudioCodec, s.SourceContainer)
 		}
 		card.TargetAudioChannels = s.TargetAudioChannels
 		card.TargetAudioBitrateKbps = s.TargetAudioBitrateKbps

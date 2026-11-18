@@ -265,12 +265,17 @@ type Session struct {
 	RoutingEgressNodeID     int
 	RoutingEgressNodeURL    string
 
-	StreamBitrateKbps      int          // currently delivered bitrate, when known
-	TargetResolution       string       // requested output resolution for transcodes
-	TargetVideoCodec       string       // requested output video codec for transcodes
-	OutputContainer        string       // selected muxer/segment container; empty when unreported
-	OutputProtocol         string       // hls or http, independent of the container
-	TargetAudioCodec       string       // requested output audio codec when audio is transcoded
+	StreamBitrateKbps int    // currently delivered bitrate, when known
+	TargetResolution  string // requested output resolution for transcodes
+	TargetVideoCodec  string // requested output video codec for transcodes
+	OutputContainer   string // selected muxer/segment container; empty when unreported
+	OutputProtocol    string // hls or http, independent of the container
+	TargetAudioCodec  string // requested output audio codec when audio is transcoded
+	// SourceContainer is the effective source file's container. It stays beside
+	// the copied-audio recipe because a copied AAC track needs ADTS framing
+	// converted only when its container frames it that way (see
+	// CopiedAudioADTSCodec); a codec label alone is not enough evidence.
+	SourceContainer        string
 	SourceAudioChannels    int          // selected source track channels; zero means unknown/legacy
 	TargetAudioChannels    int          // requested encoded audio channel count
 	TargetAudioBitrateKbps int          // requested encoded audio bitrate cap
@@ -371,17 +376,21 @@ type SessionStreamState struct {
 	// across a stream-state snapshot. A full route-set commit merges it rather
 	// than replacing it, so a later replan that reads a drifted catalog value
 	// cannot overwrite the pinned profile.
-	DVProfilePin                     DVPinV3
-	ClientIP                         string
-	ClientName                       string
-	ClientVersion                    string
-	ClientUserAgent                  string
-	StreamBitrateKbps                int
-	TargetResolution                 string
-	TargetVideoCodec                 string
-	OutputContainer                  string
-	OutputProtocol                   string
-	TargetAudioCodec                 string
+	DVProfilePin      DVPinV3
+	ClientIP          string
+	ClientName        string
+	ClientVersion     string
+	ClientUserAgent   string
+	StreamBitrateKbps int
+	TargetResolution  string
+	TargetVideoCodec  string
+	OutputContainer   string
+	OutputProtocol    string
+	TargetAudioCodec  string
+	// SourceContainer is the effective source's container, kept with the audio
+	// recipe because a copied AAC track needs ADTS framing converted only when
+	// the container frames it that way (see CopiedAudioADTSCodec).
+	SourceContainer                  string
 	SourceAudioChannels              int
 	TargetAudioChannels              int
 	TargetAudioBitrateKbps           int
@@ -1644,6 +1653,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 		// codec, channel, or transcode facts.
 		s.TranscodeAudio = state.TranscodeAudio
 		s.TargetAudioCodec = state.TargetAudioCodec
+		s.SourceContainer = state.SourceContainer
 		s.SourceAudioChannels = state.SourceAudioChannels
 		s.TargetAudioChannels = state.TargetAudioChannels
 		s.TargetAudioBitrateKbps = state.TargetAudioBitrateKbps
@@ -1818,6 +1828,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		OutputContainer:                            s.OutputContainer,
 		OutputProtocol:                             s.OutputProtocol,
 		TargetAudioCodec:                           s.TargetAudioCodec,
+		SourceContainer:                            s.SourceContainer,
 		SourceAudioChannels:                        s.SourceAudioChannels,
 		TargetAudioChannels:                        s.TargetAudioChannels,
 		TargetAudioBitrateKbps:                     s.TargetAudioBitrateKbps,
@@ -1896,6 +1907,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetResolution = state.TargetResolution
 	s.TargetVideoCodec = state.TargetVideoCodec
 	s.TargetAudioCodec = state.TargetAudioCodec
+	s.SourceContainer = state.SourceContainer
 	s.OutputContainer = state.OutputContainer
 	s.OutputProtocol = state.OutputProtocol
 	s.SourceAudioChannels = state.SourceAudioChannels

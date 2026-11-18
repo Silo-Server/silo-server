@@ -2180,8 +2180,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				SourceAudioChannels:       session.SourceAudioChannels,
 				TargetAudioChannels:       session.TargetAudioChannels,
 				TargetAudioBitrateKbps:    session.TargetAudioBitrateKbps,
-				// For a copied track the planned codec is the source's.
-				CopyAudioCodec: session.TargetAudioCodec,
+				// For a copied track the planned codec is the source's, but the
+				// ADTS filter applies only when the container frames that track as
+				// ADTS (see playback.CopiedAudioADTSCodec).
+				CopyAudioCodec: playback.CopiedAudioADTSCodec(session.TargetAudioCodec, fileContainerV3(file)),
 				Abort:          remuxAbort,
 				// A pre-body start failure must leave the response
 				// uncommitted so the handler can fail over to a sibling
@@ -2207,7 +2209,11 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			// once with it excluded so the next-ranked release is tried. A
 			// client that disconnected is not a candidate failure: the remux
 			// (and its provider fetch) already aborted on the request context.
-			if !isClientCancellation(r.Context(), remuxErr) && !stoppedServerSide() && isVirtualPlaybackFile(file) && hasVirtualMediaResolver(h) {
+			// A fault in the recipe this server built (a bitstream filter that
+			// refuses the mapped stream) is not evidence about the release. Do
+			// not mark the candidate failed or rotate: that indicts healthy bytes
+			// and hands the client a verdict about a file it never faulted.
+			if !isClientCancellation(r.Context(), remuxErr) && !errors.Is(remuxErr, playback.ErrRemuxRecipeFault) && !stoppedServerSide() && isVirtualPlaybackFile(file) && hasVirtualMediaResolver(h) {
 				if releaseInput != nil {
 					releaseInput()
 					releaseInput = nil
@@ -2308,7 +2314,14 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				// unlocked; a mid-stream failure returns nil instead. Commit one
 				// coherent error here. A client that disconnected needs no body.
 				if !isClientCancellation(r.Context(), remuxErr) && !stoppedServerSide() {
-					http.Error(w, "failed to start remux", http.StatusBadGateway)
+					// The remux produced nothing: a provider release, a relay, or
+					// this server's own spawn. That is a dependency failure the
+					// client may retry, not a verdict about the file, so keep the
+					// v1 502 the byte-delivery adapter maps to dependency_unavailable
+					// and carry the same Retry-After the resolve failure above sends.
+					// Without it a 503 delivery answer reaches the client with no
+					// delay to back off by.
+					writeRemuxStartFailure(w)
 				}
 			}
 		}
@@ -2321,6 +2334,16 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error",
 			"Unknown play method")
 	}
+}
+
+// writeRemuxStartFailure answers a remux that produced no media byte. It keeps
+// the v1 502 a byte-delivery adapter maps to a retryable dependency_unavailable
+// — the failure says nothing about the file — and carries the same Retry-After
+// the virtual resolve refusal sends, so a client that retries the stream has a
+// delay to back off by. A 503 delivery answer used to arrive without one.
+func writeRemuxStartFailure(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(virtualServeResolveRetryAfterSeconds))
+	http.Error(w, "failed to start remux", http.StatusBadGateway)
 }
 
 // loadSidecarSession resolves the session a subtitle or font request names.
@@ -4105,6 +4128,20 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		)
 	}
 	if extractErr != nil {
+		var pageUnavailable *playback.SubtitleExtractionUnavailableError
+		if errors.As(extractErr, &pageUnavailable) {
+			// The page's track artifact could not reach it inside its recovery
+			// budget (or stopped advancing toward it). Repeating the same page
+			// pays the same container prefix again, so this is the one answer the
+			// client must stop on: no Retry-After, no further recovery warm.
+			if response.Status() != 0 {
+				panic(http.ErrAbortHandler)
+			}
+			playback.SetSubtitleCoverageRange(w.Header(), 0, pageUnavailable.CoveredUntil)
+			writeError(w, http.StatusServiceUnavailable, playback.SubtitlePageUnavailableReason,
+				"This subtitle page could not be prepared in time. Choose another subtitle track.")
+			return
+		}
 		var extractionRetry *playback.SubtitleExtractionRetryError
 		if errors.As(extractErr, &extractionRetry) {
 			// The per-identity backoff after an upstream failure is still
@@ -4116,7 +4153,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 			if response.Status() != 0 {
 				panic(http.ErrAbortHandler)
 			}
-			if extractionRetry.Reason == playback.SubtitlePageTooCostlyReason {
+			if extractionRetry.Reason == playback.SubtitlePageTooCostlyReason && extractionRetry.PageRecoveryDue {
 				// The page could not be cut from the source at an affordable
 				// read cost. The track's progressive artifact is what serves it,
 				// and that fill must outlive this request's relay registration,
@@ -4730,6 +4767,12 @@ func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models
 		for attempt := 0; attempt < virtualSubtitleWarmRekeyAttempts; attempt++ {
 			attemptOpts := warmOpts
 			extract, rekeyed, release := h.virtualSubtitleWarmExtractor(file, track, session, planTracks, seed, attemptOpts, live)
+			if pageWaiting {
+				// A page refused for its read cost must be served by this fill, and
+				// it is the page's own ledger that allows exactly one. A previous
+				// failed warm's cooldown must not suppress it.
+				h.SubtitleCache.AllowWarmAfterPageRefusal(attemptOpts)
+			}
 			<-h.SubtitleCache.WarmTrackInBackground(attemptOpts, extract, requestID)
 			next := rekeyed()
 			release()

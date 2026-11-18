@@ -8188,6 +8188,16 @@ func bindPlannedVirtualFileV3(file *models.MediaFile, plan *playback.PlanV3, own
 	return &bound
 }
 
+// fileContainerV3 names an effective file's container for the copy-audio
+// decision, or "" when there is no file to ask (an older token or a synthetic
+// row), which CopiedAudioADTSCodec reads as the historical answer.
+func fileContainerV3(file *models.MediaFile) string {
+	if file == nil {
+		return ""
+	}
+	return file.Container
+}
+
 // v3SessionStreamState builds the durable stream state for a prepared transport.
 func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3, mode mediaAuthModeV3) playback.SessionStreamState {
 	state := playback.SessionStreamState{
@@ -8227,6 +8237,7 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		StreamBitrateKbps:         result.TargetBitrateKbps,
 		TargetVideoCodec:          result.TargetVideoCodec,
 		TargetAudioCodec:          result.TargetAudioCodec,
+		SourceContainer:           fileContainerV3(file),
 		SourceAudioChannels:       result.SourceAudioChannels,
 		TargetAudioChannels:       result.TargetAudioChannels,
 		TargetAudioBitrateKbps:    result.TargetAudioBitrateKbps,

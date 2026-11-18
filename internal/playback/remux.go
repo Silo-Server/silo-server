@@ -250,8 +250,9 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 // buildRemuxArgsWithLeadingPictureDropV3 adds the resume leading-picture drop
 // to the video bitstream filters. It applies only to a seeked copy with video:
 // a start at zero begins on the stream's first keyframe and has no leading
-// pictures to drop. copyAudioCodec is the codec of the source audio track a
-// copy remux carries over.
+// pictures to drop. copyAudioCodec is the copied audio codec that needs ADTS
+// framing converted for MP4, as answered by CopiedAudioADTSCodec; empty means
+// this copy needs no audio bitstream filter.
 func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int, dropLeadingPictures bool, copyAudioCodec string) []string {
 	args := []string{
 		"-nostdin",
@@ -360,7 +361,9 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 			// muxer rejects the first ADTS packet ("Malformed AAC bitstream")
 			// and the response ends after the header. The filter passes
 			// already-raw AAC from MKV/MP4 through unchanged, but it refuses
-			// any other codec, so it is only added for a copied AAC track.
+			// any other codec, so the caller passes a codec only when the
+			// source container really frames that track as ADTS (see
+			// CopiedAudioADTSCodec).
 			args = append(args, "-bsf:a", "aac_adtstoasc")
 		}
 	}
@@ -519,6 +522,23 @@ func (s *RemuxSession) Close() error {
 // stable identity to match.
 var errRemuxNoOutput = errors.New("remux produced no output")
 
+// ErrRemuxRecipeFault reports a remux that FFmpeg refused because of an argument
+// this server built — a bitstream filter that does not accept the mapped stream
+// ("Codec 'eac3' ... is not supported by the bitstream filter 'aac_adtstoasc'").
+// It says nothing about the source bytes, so a caller must not treat it as the
+// release failing: indicting the candidate rotates away from a healthy release
+// and the verdict the client ends up with is about a file it never faulted.
+var ErrRemuxRecipeFault = errors.New("remux recipe fault")
+
+// remuxRecipeFault classifies FFmpeg's own rejection of the arguments we built.
+// An empty answer means the failure is not attributable to the recipe.
+func remuxRecipeFault(stderr string) error {
+	if !strings.Contains(stderr, "is not supported by the bitstream filter") {
+		return nil
+	}
+	return fmt.Errorf("%w: ffmpeg rejected a bitstream filter: %s", ErrRemuxRecipeFault, strings.TrimSpace(stderr))
+}
+
 // Kind values for remuxInputKind.
 const (
 	remuxInputVirtual = "virtual"
@@ -617,6 +637,40 @@ func copiedAudioIsAAC(copyAudioCodec string) bool {
 	return strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac")
 }
 
+// CopiedAudioADTSCodec answers which copied audio codec a remux must move from
+// ADTS framing into MP4, or "" when this copy needs no audio bitstream filter.
+//
+// Only AAC is ever ADTS-framed, and only in containers that carry it that way:
+// MPEG-TS and raw ADTS (and a container the row does not name, which keeps the
+// historical answer for older tokens). Matroska, MP4 and WebM store the
+// AudioSpecificConfig, so their AAC frames need no filter and are copied
+// unmoved. A codec string alone is not enough evidence: a copied E-AC-3,
+// TrueHD or DTS track is refused by aac_adtstoasc ("Codec 'eac3' ... is not
+// supported by the bitstream filter"), and production reached that with a
+// row whose copy codec was mislabeled AAC. Any other codec therefore never
+// gets the filter, and neither does an AAC copy whose container cannot frame
+// it as ADTS.
+func CopiedAudioADTSCodec(codec, container string) string {
+	if !copiedAudioIsAAC(codec) {
+		return ""
+	}
+	switch normalizeContainerV3(container) {
+	case "", containerMPEGTSV3, containerM2TSV3, containerRawAACV3, containerADTSV3:
+		return audioCodecAACV3
+	}
+	return ""
+}
+
+// Container spellings that carry AAC as ADTS. normalizeContainerV3 answers "ts"
+// for mpegts; the others are the raw-ADTS names a catalog row or an older token
+// can still carry.
+const (
+	containerMPEGTSV3 = "ts"
+	containerM2TSV3   = "m2ts"
+	containerRawAACV3 = "aac"
+	containerADTSV3   = "adts"
+)
+
 // RemuxServeOptions carries the optional serving concerns that not every
 // caller sets, keeping the positional argument list from growing further.
 type RemuxServeOptions struct {
@@ -637,9 +691,11 @@ type RemuxServeOptions struct {
 	SourceAudioChannels    int
 	TargetAudioChannels    int
 	TargetAudioBitrateKbps int
-	// CopyAudioCodec is the codec of the source audio track the remux copies;
-	// a copied AAC track gets aac_adtstoasc. Empty (older tokens) keeps the
-	// plain copy. It is ignored when audio is transcoded.
+	// CopyAudioCodec is the copied audio codec that needs ADTS framing moved
+	// into MP4, as answered by CopiedAudioADTSCodec. A copied AAC track gets
+	// aac_adtstoasc; every other codec, and AAC that the container already
+	// frames with a config record, keeps the plain copy. Empty (older tokens)
+	// keeps the plain copy. It is ignored when audio is transcoded.
 	CopyAudioCodec string
 	// DropResumeLeadingPictures removes open-GOP leading pictures from a
 	// seeked video copy when this executor's FFmpeg supports it. It is a
@@ -840,6 +896,10 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		// after the diagnostic line was written.
 		_ = session.Close()
 		logRemuxNoOutput(r.Context(), filePath, session)
+		if fault := remuxRecipeFault(session.stderr.String()); fault != nil {
+			writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+			return fault
+		}
 		err := fmt.Errorf("%w: first output timeout after %s: %w", errRemuxNoOutput, firstTimeout, io.EOF)
 		writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
 		return err
@@ -849,6 +909,10 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	} else if readErr != nil {
 		_ = session.Close()
 		logRemuxNoOutput(r.Context(), filePath, session)
+		if fault := remuxRecipeFault(session.stderr.String()); fault != nil {
+			writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+			return fault
+		}
 		err := fmt.Errorf("%w: %w", errRemuxNoOutput, readErr)
 		writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
 		return err

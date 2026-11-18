@@ -104,6 +104,24 @@ func TestPlaybackDeliveryMapsUpstreamFailureToDependencyUnavailable(t *testing.T
 	}
 }
 
+// A remux start failure is a 502 plus the resolve route's Retry-After. The
+// adapter must keep that delay on the 503 dependency_unavailable it maps to:
+// production saw the delivery 503 with no Retry-After while the manifest and
+// segment routes sent one.
+func TestPlaybackDeliveryKeepsRetryAfterOnMappedDependencyFailure(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.PlaybackMedia = &PlaybackMediaHandlers{Original: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "failed to start remux", http.StatusBadGateway)
+	})}
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, Prefix+"/stream/"+deliveryTestSession+"?st=opaque", "", viewerHeaders())
+	requireProblem(t, rec, TypeDependencyUnavailable)
+	if got := rec.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After = %q, want the handler's 5", got)
+	}
+}
+
 // TestPlaybackDeliveryProviderUnavailableProblem proves the code-carrying
 // adapter: a v1 media handler that answers 503 with the provider_unavailable
 // code surfaces the distinct v2 provider_unavailable problem (retry this
