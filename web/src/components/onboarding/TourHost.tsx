@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { onlineManager } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import {
@@ -18,6 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type { OnboardingFlow, OnboardingStep, OnboardingStepLink } from "@/api/v2/onboarding";
 import { getProfileToken } from "@/api/client";
+import type { Profile } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useOnboardingProgress } from "@/hooks/queries/onboarding";
@@ -75,6 +76,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   const [saveFailed, setSaveFailed] = useState(false);
   const t = useT();
   const primaryRef = useRef<HTMLButtonElement>(null);
+  const syncProfileField = useProfileFieldSync();
 
   const step = steps[index];
 
@@ -170,7 +172,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
             <DialogPrimitive.Title className="sr-only">
               {t("web.onboarding.tour.label")}
             </DialogPrimitive.Title>
-            <StepBody step={step} />
+            <StepBody step={step} syncProfileField={syncProfileField} />
 
             <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
               <Button
@@ -239,7 +241,42 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   );
 }
 
-function StepBody({ step }: { step: OnboardingStep }) {
+type SyncProfileField = (field: string) => (updated: Profile) => void;
+
+/**
+ * Applies a tour step's saved profile field to the active profile. A step can
+ * unmount while its save is in flight, so this lives with the tour, not the
+ * step. Each field takes the response of its newest pick that saved, and only
+ * that field is copied, so one step's response can't undo another's.
+ */
+function useProfileFieldSync(): SyncProfileField {
+  const { profile, selectProfile } = useAuth();
+  const latest = useRef({ profile, selectProfile });
+  useLayoutEffect(() => {
+    latest.current = { profile, selectProfile };
+  }, [profile, selectProfile]);
+  const picks = useRef(new Map<string, { picked: number; applied: number }>());
+  return useCallback((field) => {
+    const entry = picks.current.get(field) ?? { picked: 0, applied: 0 };
+    picks.current.set(field, entry);
+    const pick = ++entry.picked;
+    return (updated) => {
+      const { profile: current, selectProfile: select } = latest.current;
+      if (pick < entry.applied || current?.id !== updated.id) return;
+      entry.applied = pick;
+      const value = (updated as unknown as Record<string, unknown>)[field];
+      select({ ...current, [field]: value }, getProfileToken() ?? undefined);
+    };
+  }, []);
+}
+
+function StepBody({
+  step,
+  syncProfileField,
+}: {
+  step: OnboardingStep;
+  syncProfileField: SyncProfileField;
+}) {
   const Icon = ILLUSTRATIONS[step.illustration ?? ""] ?? Sparkles;
 
   return (
@@ -255,7 +292,7 @@ function StepBody({ step }: { step: OnboardingStep }) {
         <div className="border-border bg-popover mt-5 rounded-xl border p-4">
           {/* One instance per step: each starts from its own field, and a late
               rollback from an earlier step can't land on this one. */}
-          <SettingControl key={step.id} step={step} />
+          <SettingControl key={step.id} step={step} syncProfileField={syncProfileField} />
         </div>
       )}
       {step.links && step.links.length > 0 && (
@@ -342,9 +379,15 @@ function GooglePlayLogo({ className }: { className?: string }) {
  * dispatched on the spec's target. Saves are immediate — by the end of the
  * tour the account is genuinely configured.
  */
-function SettingControl({ step }: { step: OnboardingStep }) {
+function SettingControl({
+  step,
+  syncProfileField,
+}: {
+  step: OnboardingStep;
+  syncProfileField: SyncProfileField;
+}) {
   const spec = step.setting!;
-  const { profile, selectProfile } = useAuth();
+  const { profile } = useAuth();
   const updateProfile = useUpdateProfile();
   const setSettingValue = useSetSettingValue();
 
@@ -370,10 +413,9 @@ function SettingControl({ step }: { step: OnboardingStep }) {
         // can't be replayed later or land after a failure was shown.
         save: (v) =>
           onlineManager.isOnline()
-            ? updateProfile.mutateAsync(
-                { id: profile.id, body: { [spec.key]: v } },
-                { onSuccess: (updated) => selectProfile(updated, getProfileToken() ?? undefined) },
-              )
+            ? updateProfile
+                .mutateAsync({ id: profile.id, body: { [spec.key]: v } })
+                .then(syncProfileField(spec.key))
             : Promise.reject(new SettingWriteOfflineError()),
         // The mutation reports its own errors; a refusal never reached it.
         unsaved: (error) =>
