@@ -17,6 +17,7 @@ import {
   getProfileToken,
   refreshAuthentication,
 } from "@/api/client";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
@@ -135,23 +136,27 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       {children}
       {activeRequest && (
         <PlayerConfigProvider config={playerConfig}>
-          <Suspense fallback={null}>
-            <AudiobookPlayer
-              key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
-              contentId={activeRequest.contentId}
-              title={activeRequest.title}
-              author={activeRequest.author}
-              narrator={activeRequest.narrator}
-              posterUrl={activeRequest.posterUrl}
-              posterThumbhash={activeRequest.posterThumbhash}
-              files={activeRequest.files}
-              initialPositionSeconds={activeRequest.initialPositionSeconds}
-              autoPlay={activeRequest.autoPlay}
-              onClose={stopPlayback}
-              onPlaybackStateChange={setActive}
-              onControlsChange={setControls}
-            />
-          </Suspense>
+          {/* The player renders over every page: if its chunk fails to load,
+            end this playback instead of taking the page down. */}
+          <LocalErrorBoundary onError={stopPlayback}>
+            <Suspense fallback={null}>
+              <AudiobookPlayer
+                key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
+                contentId={activeRequest.contentId}
+                title={activeRequest.title}
+                author={activeRequest.author}
+                narrator={activeRequest.narrator}
+                posterUrl={activeRequest.posterUrl}
+                posterThumbhash={activeRequest.posterThumbhash}
+                files={activeRequest.files}
+                initialPositionSeconds={activeRequest.initialPositionSeconds}
+                autoPlay={activeRequest.autoPlay}
+                onClose={stopPlayback}
+                onPlaybackStateChange={setActive}
+                onControlsChange={setControls}
+              />
+            </Suspense>
+          </LocalErrorBoundary>
         </PlayerConfigProvider>
       )}
     </AudiobookPlaybackControllerContext.Provider>

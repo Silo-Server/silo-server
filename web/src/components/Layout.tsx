@@ -404,14 +404,20 @@ export default function Layout({ children }: LayoutProps) {
         <div className="hidden lg:block" onTransitionEnd={handleSidebarTransitionEnd}>
           {isSettingsRoute ? (
             // Settings take over the sidebar column rather than adding a
-            // second one beside it. The fallback holds the column's place.
-            <Suspense
-              fallback={
-                <div className="border-sidebar-border/70 bg-sidebar/92 fixed start-0 top-0 bottom-0 z-40 w-[260px] border-e" />
-              }
+            // second one beside it. The placeholder holds the column's place
+            // while the chunk loads; if it fails to load, the app sidebar
+            // stands in so the page stays usable.
+            <LocalErrorBoundary
+              fallback={<AppSidebar collapsed={visualDetailImmersion} swap={sidebarSwap} />}
             >
-              <UserSettingsSidebar backTo={settingsReturnPath} swap={sidebarSwap} />
-            </Suspense>
+              <Suspense
+                fallback={
+                  <div className="border-sidebar-border/70 bg-sidebar/92 fixed start-0 top-0 bottom-0 z-40 w-[260px] border-e" />
+                }
+              >
+                <UserSettingsSidebar backTo={settingsReturnPath} swap={sidebarSwap} />
+              </Suspense>
+            </LocalErrorBoundary>
           ) : (
             <AppSidebar collapsed={visualDetailImmersion} swap={sidebarSwap} />
           )}
