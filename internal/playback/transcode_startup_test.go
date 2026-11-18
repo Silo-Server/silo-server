@@ -514,7 +514,7 @@ while :; do sleep 0.1; done
 }
 
 // An explicit QSV or VAAPI start whose GPU cannot decode the source failed on
-// every executor: the start-path retry only recognised NVDEC's rejection, so
+// every executor: the start-path retry only matched NVDEC's rejection, so
 // a transcode node gave up and the local retry ran the same command again. The
 // stderr below is FFmpeg's, from the two reports.
 //   - #4319: a codec with no GPU decoder is decoded on the CPU, and the
@@ -618,13 +618,17 @@ func assertProcessGone(t *testing.T, pidFile string) {
 	if err != nil {
 		return
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	// An orphan's exit has no event to wait on, so poll until it is reaped.
+	deadline := time.After(2 * time.Second)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
 	for process.Signal(syscall.Signal(0)) == nil {
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline:
 			_ = process.Kill()
 			t.Fatalf("the stopped attempt's child process %d is still running", pid)
+		case <-poll.C:
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 

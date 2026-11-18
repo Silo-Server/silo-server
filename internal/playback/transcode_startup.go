@@ -240,7 +240,7 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 //     QSV or VAAPI start fails for a codec or profile the GPU lacks.
 //
 // The generic "Failed setup for format" line is left out: FFmpeg prints it
-// for other hardware initialisation failures too, and goes on to decode in
+// when other hardware setup fails too, and goes on to decode in
 // software where the codec has a software decoder.
 var hardwareDecodeUnsupportedMarkers = []string{
 	"Hardware is lacking required capabilities",
