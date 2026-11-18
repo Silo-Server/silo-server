@@ -15,12 +15,23 @@ function harness(now: () => number) {
   };
 }
 
-/** Dispatches Vite's cancelable event and lets the handler's server check settle. */
-async function failChunk() {
+/** Dispatches Vite's cancelable event, as its preload helper does. */
+function failChunk() {
   const event = new Event("vite:preloadError", { cancelable: true });
   window.dispatchEvent(event);
-  await new Promise((resolve) => setTimeout(resolve, 0));
   return event;
+}
+
+/**
+ * A handler that decides not to reload leaves no state to wait on. The stubbed
+ * probe settles within microtasks, so one macrotask turn lets the handler finish.
+ */
+async function letHandlerFinish() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function expectReloads(reload: ReturnType<typeof vi.fn>, times: number) {
+  await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(times));
 }
 
 function stubServer(ok: boolean) {
@@ -48,14 +59,15 @@ describe("installPreloadErrorReload", () => {
     stubServer(true);
 
     cleanups.push(installPreloadErrorReload(deps));
-    await failChunk();
-    expect(reload).toHaveBeenCalledTimes(1);
+    failChunk();
+    await expectReloads(reload, 1);
 
     // Post-reload page still hits the error seconds later: give up instead
     // of reload-looping.
     clock += 5_000;
     cleanups.push(installPreloadErrorReload(deps));
-    await failChunk();
+    failChunk();
+    await letHandlerFinish();
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
@@ -65,13 +77,13 @@ describe("installPreloadErrorReload", () => {
     stubServer(true);
 
     cleanups.push(installPreloadErrorReload(deps));
-    await failChunk();
-    expect(reload).toHaveBeenCalledTimes(1);
+    failChunk();
+    await expectReloads(reload, 1);
 
     clock += 10 * 60_000;
     cleanups.push(installPreloadErrorReload(deps));
-    await failChunk();
-    expect(reload).toHaveBeenCalledTimes(2);
+    failChunk();
+    await expectReloads(reload, 2);
   });
 
   it("leaves the page alone while the server cannot be reached, then reloads once it can", async () => {
@@ -80,13 +92,14 @@ describe("installPreloadErrorReload", () => {
 
     // Offline or restarting: a reload would land on the browser's error page.
     stubServer(false);
-    const event = await failChunk();
+    const event = failChunk();
+    await letHandlerFinish();
     expect(reload).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
 
     // The unreachable attempt must not use up the loop guard.
     stubServer(true);
-    await failChunk();
-    expect(reload).toHaveBeenCalledTimes(1);
+    failChunk();
+    await expectReloads(reload, 1);
   });
 });
