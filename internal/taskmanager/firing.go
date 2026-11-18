@@ -127,9 +127,8 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 	}
 	slot, window, ok := FiringSlot(trigger, firedAt)
 	if !ok {
-		// No trigger fired (a schedule change woke the loop), or its slot
-		// isn't one every server would compute: running here could repeat on
-		// another server, so skip.
+		// No trigger fired, or its slot isn't one every server would
+		// compute: running here could repeat on another server, so skip.
 		m.logger.WarnContext(ctx, "scheduled task firing has no cluster-wide slot; skipping it",
 			"task", w.task.Key(), "trigger", trigger.Type)
 		return false
