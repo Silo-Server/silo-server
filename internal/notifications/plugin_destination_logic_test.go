@@ -121,7 +121,7 @@ func TestPluginSettingsSavedSecretOutlivesItsMarking(t *testing.T) {
 	v2 := PluginChannel{Schema: &pluginv1.ConfigSchema{JsonSchema: schema}, PublicFields: []string{"token", "topic"}}
 
 	saved, err := mergePluginSettings(v1, pluginSettings{}, map[string]any{"topic": "alerts", "token": "s3cret"}, nil)
-	if err != nil || !reflect.DeepEqual(saved.Secret, []string{"token"}) {
+	if err != nil || !reflect.DeepEqual(saved.WriteOnly, []string{"token"}) {
 		t.Fatalf("saved under v1 = %+v, %v; want token recorded as secret", saved, err)
 	}
 	raw, err := json.Marshal(saved)
@@ -142,18 +142,18 @@ func TestPluginSettingsSavedSecretOutlivesItsMarking(t *testing.T) {
 	}
 	// An editor that sends the field blank keeps it, still secret.
 	kept, err := mergePluginSettings(v2, stored, map[string]any{"token": "", "topic": "news"}, nil)
-	if err != nil || kept.Values["token"] != "s3cret" || !reflect.DeepEqual(kept.Secret, []string{"token"}) {
+	if err != nil || kept.Values["token"] != "s3cret" || !reflect.DeepEqual(kept.WriteOnly, []string{"token"}) {
 		t.Fatalf("blank edit under v2 = %+v, %v; want the secret kept and still secret", kept, err)
 	}
 	// Replacing it takes v2's classification.
 	replaced, err := mergePluginSettings(v2, kept, map[string]any{"token": "visible"}, nil)
-	if err != nil || len(replaced.Secret) != 0 {
+	if err != nil || len(replaced.WriteOnly) != 0 {
 		t.Fatalf("replaced under v2 = %+v, %v; want nothing secret", replaced, err)
 	}
 
 	// Settings stored before the record follow the current schema.
 	legacy, err := decodePluginSettings([]byte(`{"topic":"alerts","token":"s3cret"}`))
-	if err != nil || legacy.Secret != nil || legacy.Values["token"] != "s3cret" {
+	if err != nil || legacy.WriteOnly != nil || legacy.Values["token"] != "s3cret" {
 		t.Fatalf("legacy envelope = %+v, %v", legacy, err)
 	}
 }

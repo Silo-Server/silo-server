@@ -577,12 +577,12 @@ to the plugin service, so neither package imports the other.
   and `capability_id`, which survive plugin upgrades and reinstalls. Settings
   are one `enc:v1:` envelope bound to the row id
   (`notification_plugin_destination:<id>:config`) holding
-  `{"settings": {...}, "secret_keys": [...]}`; an envelope written before
-  `secret_keys` existed is the bare settings object (its values are flat
+  `{"settings": {...}, "write_only": [...]}`; an envelope written before
+  `write_only` existed is the bare settings object (its values are flat
   scalars, so a top-level `settings` object marks the newer shape). Secret
   fields, classified by `plugins.ConfigSchemaFieldSets` as for plugin
   configuration, are never returned; a write that leaves one blank keeps the
-  stored value. `secret_keys` records which keys were saved as secret, and
+  stored value. `write_only` records which keys were saved as secret, and
   they stay write-only (never returned, listed in `secret_settings_set`)
   whatever a later manifest says, until the owner replaces or clears them, so
   a plugin upgrade that drops a secret marking can't expose a credential.

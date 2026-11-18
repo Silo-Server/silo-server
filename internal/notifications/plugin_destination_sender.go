@@ -176,8 +176,8 @@ func (s *pluginDestinationSender) encryptConfig(id string, config pluginSettings
 	if config.Values == nil {
 		config.Values = map[string]any{}
 	}
-	if config.Secret == nil {
-		config.Secret = []string{}
+	if config.WriteOnly == nil {
+		config.WriteOnly = []string{}
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {

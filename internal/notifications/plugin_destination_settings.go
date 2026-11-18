@@ -85,24 +85,24 @@ func collectPluginSettingErrors(e *jsonschema.ValidationError, out *[]PluginSett
 // keys that were saved as secret.
 type pluginSettings struct {
 	Values map[string]any `json:"settings"`
-	// Secret names the keys saved as secret. They stay write-only whatever a
+	// WriteOnly names the keys saved as secret. They stay write-only whatever a
 	// later manifest says, until the owner replaces or clears them, so a
 	// plugin upgrade that drops a field's secret marking can't expose a
 	// saved credential. nil for settings stored before the record existed,
 	// which follow the current schema alone.
-	Secret []string `json:"secret_keys"`
+	WriteOnly []string `json:"write_only"`
 }
 
 // isSecret reports whether key is write-only: the channel marks it secret,
 // or it was saved as secret.
 func (p pluginSettings) isSecret(channel PluginChannel, key string) bool {
-	return slices.Contains(channel.SecretFields, key) || slices.Contains(p.Secret, key)
+	return slices.Contains(channel.SecretFields, key) || slices.Contains(p.WriteOnly, key)
 }
 
 // isPublic reports whether key may be returned: the channel declares it
 // public and it wasn't saved as secret. A nil channel has no public keys.
 func (p pluginSettings) isPublic(channel *PluginChannel, key string) bool {
-	return channel != nil && slices.Contains(channel.PublicFields, key) && !slices.Contains(p.Secret, key)
+	return channel != nil && slices.Contains(channel.PublicFields, key) && !slices.Contains(p.WriteOnly, key)
 }
 
 // decodePluginSettings reads a decrypted settings envelope. One written
@@ -121,8 +121,8 @@ func decodePluginSettings(raw []byte) (pluginSettings, error) {
 		if out.Values == nil {
 			out.Values = map[string]any{}
 		}
-		if out.Secret == nil {
-			out.Secret = []string{}
+		if out.WriteOnly == nil {
+			out.WriteOnly = []string{}
 		}
 		return out, nil
 	}

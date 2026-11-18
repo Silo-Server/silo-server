@@ -370,12 +370,12 @@ func mergePluginSettings(channel PluginChannel, stored pluginSettings, write map
 	}
 	secret := []string{}
 	for key := range merged {
-		if slices.Contains(channel.SecretFields, key) || (slices.Contains(stored.Secret, key) && !replaced[key]) {
+		if slices.Contains(channel.SecretFields, key) || (slices.Contains(stored.WriteOnly, key) && !replaced[key]) {
 			secret = append(secret, key)
 		}
 	}
 	slices.Sort(secret)
-	return pluginSettings{Values: merged, Secret: secret}, nil
+	return pluginSettings{Values: merged, WriteOnly: secret}, nil
 }
 
 // publicPluginSettings returns the stored settings the owner may read (the

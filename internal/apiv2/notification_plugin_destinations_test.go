@@ -97,24 +97,6 @@ func TestNotificationPluginDestinationRoutes(t *testing.T) {
 	create := `{"plugin_id":"example.ntfy","capability_id":"ntfy","name":"Phone","settings":{"topic":"alerts"}}`
 	notProvided := fmt.Errorf("%w: %w", notifications.ErrPluginChannelUnavailable, notifications.ErrPluginChannelNotProvided)
 
-	// The channel list carries the flat form, not the admin schema.
-	rec := do(t, h, http.MethodGet, Prefix+"/notifications/plugin-channels", "", owner)
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "json_schema") || strings.Contains(rec.Body.String(), "admin_form") {
-		t.Fatalf("channels = %d %s", rec.Code, rec.Body.String())
-	}
-	var channels struct {
-		Items []NotificationPluginChannel `json:"items"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &channels); err != nil || len(channels.Items) != 1 {
-		t.Fatalf("channels body %s: %v", rec.Body.String(), err)
-	}
-	fields := channels.Items[0].SettingsForm.Fields
-	if len(fields) != 3 || fields[0].Key != "topic" || !fields[0].Required || fields[0].Type != "string" || *fields[0].MaxLength != 32 || fields[0].Pattern != "^[a-z]+$" ||
-		fields[1].Control != "password" || !fields[1].Secret ||
-		fields[2].Type != "integer" || fields[2].Control != "select" || string(fields[2].DefaultValue) != "3" || *fields[2].Maximum != 5 || len(fields[2].Options) != 2 {
-		t.Fatalf("form fields = %+v", fields)
-	}
-
 	for _, tc := range []struct {
 		name    string
 		method  string
@@ -155,7 +137,7 @@ func TestNotificationPluginDestinationRoutes(t *testing.T) {
 	}
 	fake.err = nil
 
-	rec = do(t, h, http.MethodPost, base, create, owner)
+	rec := do(t, h, http.MethodPost, base, create, owner)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") == "" {
 		t.Fatalf("create = %d %s", rec.Code, rec.Body.String())
 	}
@@ -169,7 +151,38 @@ func TestNotificationPluginDestinationRoutes(t *testing.T) {
 		t.Fatalf("test = %d %s", rec.Code, rec.Body.String())
 	}
 
-	// Demo mode refuses every write before it reaches the service.
+}
+
+// The channel list carries the flat form, not the admin schema.
+func TestNotificationPluginChannelsListFlatForm(t *testing.T) {
+	deps := parityDeps(false)
+	deps.NotificationPluginDestinations = &fakePluginDestinations{}
+	h := newTestHandler(t, deps)
+	owner := profileOwner()
+	rec := do(t, h, http.MethodGet, Prefix+"/notifications/plugin-channels", "", owner)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "json_schema") || strings.Contains(rec.Body.String(), "admin_form") {
+		t.Fatalf("channels = %d %s", rec.Code, rec.Body.String())
+	}
+	var channels struct {
+		Items []NotificationPluginChannel `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &channels); err != nil || len(channels.Items) != 1 {
+		t.Fatalf("channels body %s: %v", rec.Body.String(), err)
+	}
+	fields := channels.Items[0].SettingsForm.Fields
+	if len(fields) != 3 || fields[0].Key != "topic" || !fields[0].Required || fields[0].Type != "string" || *fields[0].MaxLength != 32 || fields[0].Pattern != "^[a-z]+$" ||
+		fields[1].Control != "password" || !fields[1].Secret ||
+		fields[2].Type != "integer" || fields[2].Control != "select" || string(fields[2].DefaultValue) != "3" || *fields[2].Maximum != 5 || len(fields[2].Options) != 2 {
+		t.Fatalf("form fields = %+v", fields)
+	}
+
+}
+
+// Demo mode refuses every write before it reaches the service.
+func TestNotificationPluginDestinationWritesInDemoMode(t *testing.T) {
+	const base = Prefix + "/notifications/plugin-destinations"
+	current := with(profileOwner(), "If-Match", notificationPluginDestinationTag("p-owner", "dest", 7).String())
+	create := `{"plugin_id":"example.ntfy","capability_id":"ntfy","name":"Phone","settings":{"topic":"alerts"}}`
 	demo := parityDeps(true)
 	demoFake := &fakePluginDestinations{}
 	demo.NotificationPluginDestinations = demoFake
