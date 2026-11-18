@@ -3457,6 +3457,9 @@ export function VideoPlayer({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("error", onError);
     video.addEventListener("ended", onVideoEnded);
+    // hls.js reports an end it stalled into without a native `ended`; with At
+    // end nothing else would open Next Up then.
+    video.addEventListener(MEDIA_ENDED_EVENT, onVideoEnded);
     window.addEventListener("offline", onNetworkChange);
     window.addEventListener("online", onNetworkChange);
 
@@ -3478,6 +3481,7 @@ export function VideoPlayer({
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("error", onError);
       video.removeEventListener("ended", onVideoEnded);
+      video.removeEventListener(MEDIA_ENDED_EVENT, onVideoEnded);
     };
     // Listener behavior depends on pending seek reconciliation. Watch-together
     // deps are intentionally narrowed to the primitives the handlers read so
