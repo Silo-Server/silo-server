@@ -42,6 +42,8 @@ interface Served {
 type Fault =
   | { kind: "status"; status: number }
   | { kind: "contentRange"; value: string }
+  /** The request's own first and last byte, with `*` where the file's size goes. */
+  | { kind: "unknownSize" }
   | { kind: "total"; total: number }
   | { kind: "lastModified"; value: string }
   | { kind: "fetchError" }
@@ -142,7 +144,9 @@ class FakeServer {
     const total = fault?.kind === "total" ? fault.total : size;
     const modified = fault?.kind === "lastModified" ? fault.value : MODIFIED;
     const contentRange =
-      fault?.kind === "contentRange" ? fault.value : `bytes ${request.start}-${last}/${total}`;
+      fault?.kind === "contentRange"
+        ? fault.value
+        : `bytes ${request.start}-${last}/${fault?.kind === "unknownSize" ? "*" : total}`;
     const status =
       fault?.kind === "status" ? fault.status : fault?.kind === "ignoreRange" ? 200 : 206;
     const responseHeaders = new Map([["last-modified", modified]]);
@@ -668,7 +672,7 @@ describe("ParallelRangeSource failures", () => {
   it.each([
     ["a 502", { kind: "status", status: 502 }],
     ["a 404", { kind: "status", status: 404 }],
-    ["a Content-Range without the file's size", { kind: "contentRange", value: "bytes 0-1/*" }],
+    ["a Content-Range without the file's size", { kind: "unknownSize" }],
     [
       "a Content-Range that names other bytes",
       { kind: "contentRange", value: `bytes 1-2/${SIZE}` },
