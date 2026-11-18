@@ -417,12 +417,13 @@ export function useLibraryPageStatePreference() {
           return result;
         },
         (error: unknown) => {
-          // A sent write that failed offline isn't retried, so the view isn't remembered.
-          if (mutationStarted) reportOfflineSettingFailure();
+          // A sent write that failed offline never reached the server and isn't
+          // retried, so drop it: kept, it would ride along in the next save.
+          const failedOffline = mutationStarted && reportOfflineSettingFailure();
           settlePreferenceWrite(
             queue,
             pendingWrite,
-            !mutationStarted || isDefinitiveSettingMutationRejection(error)
+            !mutationStarted || failedOffline || isDefinitiveSettingMutationRejection(error)
               ? "definitive_failure"
               : "ambiguous_failure",
             attemptedPreference,

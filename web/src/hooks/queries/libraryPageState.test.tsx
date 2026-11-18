@@ -150,6 +150,47 @@ describe("useLibraryPageStatePreference", () => {
     });
   });
 
+  // The offline write never reached the server, so carrying it into the next
+  // whole-document save would replace a view another tab saved meanwhile.
+  it("drops a write that failed offline before advancing the queue", async () => {
+    let rejectFirst: ((reason?: unknown) => void) | undefined;
+    mocks.mutateAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useLibraryPageStatePreference());
+
+    const offline = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    const offlineError = offline.catch((error: unknown) => error);
+    const queued = result.current.saveLibrarySearch(9, "tab=collections");
+
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    onlineManager.setOnline(false);
+    try {
+      await act(async () => {
+        rejectFirst?.(new TypeError("Failed to fetch"));
+        await offlineError;
+      });
+    } finally {
+      onlineManager.setOnline(true);
+    }
+    await act(async () => {
+      await queued;
+    });
+
+    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
+      version: 1,
+      libraries: {
+        "3": { search: "tab=collections" },
+        "9": { search: "tab=collections" },
+      },
+    });
+  });
+
   it("treats a server error as ambiguous before advancing the queue", async () => {
     mocks.mutateAsync
       .mockRejectedValueOnce(v2Problem(503, "unavailable", "service unavailable"))
