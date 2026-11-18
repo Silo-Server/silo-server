@@ -332,7 +332,9 @@ function ProfileEditorForm({
           requireAdvisoryAgeSupported,
           requestsAllowedSupported,
         });
-        if (preserveExistingUpload || deleteExistingUpload) {
+        // A chosen file replaces the avatar through the upload that follows;
+        // clearing it here first would lose the old one if that upload fails.
+        if (preserveExistingUpload || deleteExistingUpload || avatarFile) {
           delete body.avatar;
         }
         savedProfile = save
