@@ -403,11 +403,13 @@ export class ParallelRangeSource extends InternalUrlSource {
           try {
             responseEnd = this.checkResponse(response, position, range.end) + 1;
           } catch (error) {
+            // Nobody reads a rejected body: cancel it before its slot frees, whichever URL it
+            // came from.
+            void response.body?.cancel().catch(() => {});
             // Any answer from the stripe URL that is not a readable 206 for these bytes of this
             // file is the stripe URL failing: a refusal there says nothing about the plan's URL,
             // which serves the range and is checked the same way.
             if (!onStripe) throw error;
-            void response.body?.cancel().catch(() => {});
             this.stripeFailed = true;
             continue;
           }
