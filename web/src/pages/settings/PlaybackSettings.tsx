@@ -49,7 +49,6 @@ import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
  * surfaces cannot land on different scopes.
  */
 const BASE_PLAYBACK_KEYS: SettingKey[] = [
-  SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
   SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
@@ -753,21 +752,6 @@ export default function PlaybackSettings() {
           than on the admin plugin page, which is server-wide. */}
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
-        <SettingRow
-          label={t("web.settings.playback.nextEpisode.previewLabel")}
-          description={t("web.settings.playback.nextEpisode.previewDescription")}
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW, checked)
-              }
-            />
-          )}
-        />
-
         <SettingRow
           label={t("settings.nextUp.title")}
           description={settingDescription(
