@@ -140,6 +140,84 @@ func TestBuildPlaybackInfoCollapsesProbedResultChurn(t *testing.T) {
 	}
 }
 
+// TestBuildPlaybackInfoCollapsesOneCandidateAcrossNeutralPaths pins the
+// concrete-candidate rule: one provider candidate registered under two virtual
+// paths (two of the item's provider title ids) is one file, and the compat
+// PlaybackInfo must not offer it twice with different stream lists. The measured
+// payload listed the same file three times, one copy probed with 14 streams and the
+// others declared with 2, so a TV client could pick the copy with no subtitles.
+func TestBuildPlaybackInfoCollapsesOneCandidateAcrossNeutralPaths(t *testing.T) {
+	probed := virtualDupRow(91, 20_000_000_000, "virtual://movie/1375646?result=71134e86", "eng", true)
+	probed.AudioTracks = rotationlessTracks(2)
+	probed.SubtitleTracks = append(probed.SubtitleTracks, virtualDupSubtitle(3), virtualDupSubtitle(4))
+	// Same provider candidate, a different virtual path prefix, and no probe.
+	declared := virtualDupRow(92, 20_000_000_000, "virtual://movie/tt34385135?result=71134e86", "", false)
+
+	for _, order := range [][]*models.MediaFile{{probed, declared}, {declared, probed}} {
+		versions := buildDupVersions(t, order)
+		if len(versions) != 1 {
+			t.Fatalf("one candidate under two neutral paths projected %d versions, want 1", len(versions))
+		}
+		kept := versions[0]
+		if kept.FileID != probed.ID {
+			t.Fatalf("survivor = file %d, want the probed copy %d", kept.FileID, probed.ID)
+		}
+		if len(kept.AudioTracks) != 2 || len(kept.SubtitleTracks) != 2 {
+			t.Fatalf("survivor inventory = %d audio / %d subtitles, want the probed 2 / 2",
+				len(kept.AudioTracks), len(kept.SubtitleTracks))
+		}
+	}
+
+	// Distinct candidates stay distinct, even under one neutral path.
+	other := virtualDupRow(93, 20_000_000_000, "virtual://movie/tt34385135?result=another", "", false)
+	if versions := buildDupVersions(t, []*models.MediaFile{declared, other}); len(versions) != 2 {
+		t.Fatalf("distinct candidates projected %d versions, want 2", len(versions))
+	}
+}
+
+// TestBuildPlaybackInfoUnionsDeclaredTracksForDuplicateRows pins the consistency
+// half: when two unprobed rows name one candidate, the surviving version lists the
+// union of the declarations rather than whichever row happened to be first. Neither
+// row is evidence, so the union is the honest superset; a probed copy always wins
+// instead (see the test above).
+func TestBuildPlaybackInfoUnionsDeclaredTracksForDuplicateRows(t *testing.T) {
+	first := virtualDupRow(94, 20_000_000_000, "virtual://movie/dup?result=same", "", false)
+	first.AudioTracks = []models.AudioTrack{{Codec: "truehd", Channels: 8, Language: "eng"}}
+	first.SubtitleTracks = nil
+	second := virtualDupRow(95, 20_000_000_000, "virtual://movie/dup?result=same", "", false)
+	second.AudioTracks = []models.AudioTrack{
+		{Codec: "truehd", Channels: 8, Language: "eng"},
+		{Codec: "ac3", Channels: 6, Language: "eng"},
+	}
+	second.SubtitleTracks = []models.SubtitleTrack{virtualDupSubtitle(3)}
+
+	versions := buildDupVersions(t, []*models.MediaFile{first, second})
+	if len(versions) != 1 {
+		t.Fatalf("duplicate declarations projected %d versions, want 1", len(versions))
+	}
+	if got := len(versions[0].AudioTracks); got != 2 {
+		t.Fatalf("union audio tracks = %d, want 2", got)
+	}
+	if got := len(versions[0].SubtitleTracks); got != 1 {
+		t.Fatalf("union subtitle tracks = %d, want 1", got)
+	}
+	if versions[0].ProbedAt != nil {
+		t.Fatal("a union of declarations was reported as probe evidence")
+	}
+}
+
+func rotationlessTracks(count int) []models.AudioTrack {
+	tracks := make([]models.AudioTrack, count)
+	for i := range tracks {
+		tracks[i] = models.AudioTrack{Codec: "truehd", Channels: 8, Language: "eng", Index: i}
+	}
+	return tracks
+}
+
+func virtualDupSubtitle(index int) models.SubtitleTrack {
+	return models.SubtitleTrack{Codec: "subrip", Language: "eng", Index: index}
+}
+
 // TestBuildPlaybackInfoDoesNotCollapseLocalFiles proves the collapse is scoped
 // to virtual rows: two local rows with the same content/size but distinct paths
 // are still listed (their paths are their identity).

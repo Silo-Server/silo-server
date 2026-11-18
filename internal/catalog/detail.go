@@ -4719,6 +4719,39 @@ func virtualExactReleaseKey(f *models.MediaFile) string {
 	return f.ContentID + "\x00" + strconv.FormatInt(f.FileSize, 10) + "\x00" + f.FilePath
 }
 
+// virtualConcreteCandidateID returns the row's concrete provider candidate id (the
+// ?result= hash), or "" for a provider-neutral row.
+func virtualConcreteCandidateID(uri string) string {
+	parsed, err := url.Parse(strings.TrimSpace(uri))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Query().Get("result"))
+}
+
+// virtualConcreteReleaseKey identifies a virtual row by the concrete provider
+// candidate it names, independent of the neutral path the row was stored under.
+//
+// It exists because one provider candidate can be registered under more than one
+// virtual path: the same release was listed under two of the item's provider title
+// ids (`1375646` and `tt34385135` in the measured case), so the neutral-path key
+// treated them as different releases and the compat PlaybackInfo answered three
+// sources for one file, two of them unprobed and one probed. A ?result= hash names
+// one provider listing entry, so two rows carrying the same hash are the same bytes
+// regardless of the path prefix. The presentation identity is part of the key so a
+// release used as two parts of one edition is never merged.
+func virtualConcreteReleaseKey(f *models.MediaFile) string {
+	if f == nil || !isVirtualMediaFile(f) {
+		return ""
+	}
+	candidate := virtualConcreteCandidateID(f.FilePath)
+	if candidate == "" {
+		return ""
+	}
+	return f.ContentID + "\x00" + candidate + "\x00" + f.EditionKey + "\x00" + f.PresentationKind + "\x00" +
+		f.PresentationGroupKey + "\x00" + strconv.Itoa(f.PresentationPartIndex)
+}
+
 // collapseDuplicateVirtualVersionFiles drops duplicate virtual catalog rows so
 // one release lists once. Duplicate rows for a release share a candidate URI
 // (and, for a neutral row, its provider-neutral key) and differ only by the
@@ -4739,15 +4772,49 @@ func collapseDuplicateVirtualVersionFiles(files []*models.MediaFile) []*models.M
 	}
 	out := make([]*models.MediaFile, 0, len(files))
 	keptProbedByNeutral := make(map[string][]*models.MediaFile)
+	// keptConcrete points at the output slot already listing one concrete provider
+	// candidate, so a later row naming the same candidate is folded into it instead
+	// of listed again. Its declared tracks are unioned only when the survivor is
+	// still unprobed; a probed survivor's inventory is the measurement.
+	keptConcrete := make(map[string]int)
 	seenExact := make(map[string]struct{})
 	for _, f := range files {
 		if f == nil {
 			continue
 		}
+		concrete := virtualConcreteReleaseKey(f)
+		if slot, ok := keptConcrete[concrete]; ok && concrete != "" {
+			kept := out[slot]
+			conflict := virtualConcreteRowsConflict(kept, f)
+			switch {
+			case conflict:
+				// A contradictory durable identity: the candidate id alone is not
+				// proof enough, so the row takes the ordinary path below.
+			case f.ProbeUpdatedAt != nil && kept.ProbeUpdatedAt == nil:
+				// The duplicate carries probe evidence: it is the authoritative row for
+				// these bytes and replaces the unprobed survivor.
+				out[slot] = f
+				continue
+			case f.ProbeUpdatedAt == nil:
+				// An unprobed duplicate of these bytes: fold it in. A probed survivor
+				// already holds the measured inventory; an unprobed survivor takes the
+				// union of the declarations.
+				if kept.ProbeUpdatedAt == nil {
+					out[slot] = virtualFileWithMergedDeclaredTracks(kept, f)
+				}
+				continue
+			}
+			// Two probed rows naming one candidate under different neutral paths: the
+			// concrete id alone cannot settle which inventory is the file's, so keep both
+			// and let the neutral-path rule below decide (it keeps them apart).
+		}
 		if f.ProbeUpdatedAt != nil {
 			key := virtualNeutralReleaseKey(f)
 			if key == "" {
 				out = append(out, f)
+				if concrete != "" {
+					keptConcrete[concrete] = len(out) - 1
+				}
 				continue
 			}
 			if probedCollapsesAgainstProbedRelease(f, keptProbedByNeutral[key]) {
@@ -4755,6 +4822,9 @@ func collapseDuplicateVirtualVersionFiles(files []*models.MediaFile) []*models.M
 			}
 			keptProbedByNeutral[key] = append(keptProbedByNeutral[key], f)
 			out = append(out, f)
+			if concrete != "" {
+				keptConcrete[concrete] = len(out) - 1
+			}
 			continue
 		}
 		exact := virtualExactReleaseKey(f)
@@ -4770,6 +4840,85 @@ func collapseDuplicateVirtualVersionFiles(files []*models.MediaFile) []*models.M
 		}
 		seenExact[exact] = struct{}{}
 		out = append(out, f)
+		if concrete != "" {
+			keptConcrete[concrete] = len(out) - 1
+		}
+	}
+	return out
+}
+
+// virtualConcreteRowsConflict reports whether two rows naming the same concrete
+// provider candidate carry contradictory durable identities. The candidate id binds
+// the bytes, so a stale declared size or an absent declaration is not a conflict; only
+// a differing video hash or source GUID (both non-empty) is strong enough to keep two
+// rows apart.
+func virtualConcreteRowsConflict(a, b *models.MediaFile) bool {
+	if a == nil || b == nil {
+		return true
+	}
+	return providerIdentityTierConflicts(a.ProviderVideoHash, b.ProviderVideoHash) ||
+		providerIdentityTierConflicts(a.ProviderGUID, b.ProviderGUID)
+}
+
+// virtualFileWithMergedDeclaredTracks returns base with the declared audio and
+// subtitle inventory of duplicate folded in, deduplicated, for two unprobed rows of
+// the same release. Neither row's declaration was enumerated, so either may name a
+// track the other missed; listing the union keeps the menu honest without claiming a
+// probe. A probed survivor never takes this path — its inventory is the measurement.
+func virtualFileWithMergedDeclaredTracks(base, duplicate *models.MediaFile) *models.MediaFile {
+	if base == nil || duplicate == nil {
+		return base
+	}
+	merged := *base
+	merged.AudioTracks = mergeDeclaredAudioTracksV3(base.AudioTracks, duplicate.AudioTracks)
+	merged.SubtitleTracks = mergeDeclaredSubtitleTracksV3(base.SubtitleTracks, duplicate.SubtitleTracks)
+	merged.ExternalSubtitles = mergeDeclaredExternalSubtitlesV3(base.ExternalSubtitles, duplicate.ExternalSubtitles)
+	return &merged
+}
+
+// mergeDeclaredAudioTracksV3 appends tracks of duplicate that base does not already
+// declare, comparing the fields a declaration actually carries.
+func mergeDeclaredAudioTracksV3(base, duplicate []models.AudioTrack) []models.AudioTrack {
+	out := append([]models.AudioTrack(nil), base...)
+	for _, candidate := range duplicate {
+		if slices.ContainsFunc(out, func(existing models.AudioTrack) bool {
+			return existing.Index == candidate.Index && existing.Codec == candidate.Codec &&
+				existing.Language == candidate.Language && existing.Channels == candidate.Channels
+		}) {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+// mergeDeclaredSubtitleTracksV3 appends subtitle tracks of duplicate that base does
+// not already declare.
+func mergeDeclaredSubtitleTracksV3(base, duplicate []models.SubtitleTrack) []models.SubtitleTrack {
+	out := append([]models.SubtitleTrack(nil), base...)
+	for _, candidate := range duplicate {
+		if slices.ContainsFunc(out, func(existing models.SubtitleTrack) bool {
+			return existing.Index == candidate.Index && existing.Codec == candidate.Codec &&
+				existing.Language == candidate.Language && existing.Title == candidate.Title
+		}) {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+// mergeDeclaredExternalSubtitlesV3 appends external subtitle descriptors of
+// duplicate that base does not already declare.
+func mergeDeclaredExternalSubtitlesV3(base, duplicate []models.ExternalSubtitle) []models.ExternalSubtitle {
+	out := append([]models.ExternalSubtitle(nil), base...)
+	for _, candidate := range duplicate {
+		if slices.ContainsFunc(out, func(existing models.ExternalSubtitle) bool {
+			return existing.Path == candidate.Path && existing.Language == candidate.Language
+		}) {
+			continue
+		}
+		out = append(out, candidate)
 	}
 	return out
 }
