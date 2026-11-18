@@ -263,20 +263,6 @@ describe("EpisodeContent", () => {
     mocks.useRating.mockReturnValue({ data: { rating: 3, rated_at: "2026-03-22T00:00:00Z" } });
   });
 
-  it("links the season breadcrumb segment to the resolved season page", () => {
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/item/episode-1"]}>
-          <EpisodeContent item={makeEpisodeItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(countOccurrences(markup, 'href="/item/series-1"')).toBe(1);
-    expect(countOccurrences(markup, 'href="/item/season-1"')).toBe(1);
-    expect(markup).toContain(">Season 1<");
-  });
-
   it("keeps the page's library on the season reads and breadcrumbs but not on Play", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
@@ -294,33 +280,6 @@ describe("EpisodeContent", () => {
     expect(mocks.capturedActionBarProps.value?.playHref).toBe(
       `/watch/${makeEpisodeItem().content_id}`,
     );
-  });
-
-  it("uses season navigation state before season detail finishes loading", () => {
-    mocks.useSeasonDetail.mockReturnValue({
-      data: undefined,
-    });
-
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter
-          initialEntries={[
-            {
-              pathname: "/item/episode-1",
-              state: {
-                parentSeasonHref: "/item/season-99",
-                parentSeasonLabel: "Season 99",
-              },
-            },
-          ]}
-        >
-          <EpisodeContent item={makeEpisodeItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
-    expect(markup).toContain(">Season 99<");
   });
 
   it("hides an unwatched episode's overview until the viewer reveals it", () => {

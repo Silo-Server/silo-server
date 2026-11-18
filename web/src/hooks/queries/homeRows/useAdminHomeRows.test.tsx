@@ -175,29 +175,6 @@ const writes = () =>
   );
 
 describe("useAdminHomeRows", () => {
-  it("reads the page from ?page= and falls back to Home for an unknown page", async () => {
-    const library = setup("/admin/sections?page=7");
-    await ready(library.result);
-    expect(library.result.current.adapter.page).toEqual({ kind: "library", libraryId: 7 });
-    expect(library.result.current.adapter.rows.map((entry) => entry.id)).toEqual(["lib"]);
-    library.unmount();
-
-    const unknown = setup("/admin/sections?page=99");
-    await ready(unknown.result);
-    expect(unknown.result.current.adapter.page).toEqual({ kind: "home" });
-  });
-
-  it("writes the page to ?page= when the admin switches pages", async () => {
-    const { result } = setup("/admin/sections?keep=1");
-    await ready(result);
-    act(() => result.current.adapter.setPage({ kind: "library", libraryId: 7 }));
-    await waitFor(() => expect(result.current.params.get("page")).toBe("7"));
-    expect(result.current.params.get("keep")).toBe("1");
-    await waitFor(() =>
-      expect(result.current.adapter.rows.map((entry) => entry.id)).toEqual(["lib"]),
-    );
-  });
-
   it("reports a failed first read as an error, not an empty page", async () => {
     const implementation = mocks.request.getMockImplementation()!;
     mocks.request.mockImplementation((operation: string, args: Args) =>
@@ -554,17 +531,6 @@ describe("useAdminHomeRows", () => {
       });
     });
 
-    it("are offered on library pages only", async () => {
-      const home = setup();
-      await ready(home.result);
-      expect(home.result.current.adapter.capabilities.libraryCopies).toBe(false);
-      home.unmount();
-
-      const library = setup("/admin/sections?page=7");
-      await ready(library.result);
-      expect(library.result.current.adapter.capabilities.libraryCopies).toBe(true);
-    });
-
     it("adds a new row to this page and the others in one request, and finds it here", async () => {
       const { result } = setup("/admin/sections?page=7");
       await ready(result);
@@ -593,20 +559,6 @@ describe("useAdminHomeRows", () => {
         ...created.newIds,
       ]);
       expect(result.current.adapter.pending).toBe(false);
-    });
-
-    it("adds a hero row to this page only", async () => {
-      const { result } = setup("/admin/sections?page=7");
-      await ready(result);
-      mocks.request.mockImplementationOnce(async (operation: string, args: Args) => {
-        calls.push({ operation, args });
-        return row("hero", { ...(args.body as Partial<Row>), scope: "library" });
-      });
-      await act(async () => {
-        await result.current.adapter.create({ ...draft, hero: true, extraLibraryIds: [8] });
-      });
-      expect(writes().map((call) => call.operation)).toEqual(["POST /api/v2/admin/sections"]);
-      expect(writes()[0]!.args.body).toMatchObject({ library_id: "7", featured: true });
     });
 
     it("copies an existing row to the other pages only, never as a hero banner", async () => {

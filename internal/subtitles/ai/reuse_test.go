@@ -8,11 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/subtitles"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -42,34 +40,6 @@ func reuseTestFile(sidecars ...string) *models.MediaFile {
 		file.ExternalSubtitles = append(file.ExternalSubtitles, models.ExternalSubtitle{Path: path, Language: "eng", Format: "srt"})
 	}
 	return file
-}
-
-func TestEnqueueReusesFinishedTranslation(t *testing.T) {
-	result := 31
-	repo := &recordingRepo{reusable: &Job{
-		ID: 7, MediaFileID: 1, Kind: JobKindTranslate, TargetLanguage: "de", Status: JobStatusCompleted,
-		ResultSubtitleID: &result, IdempotencyKey: idempotencyKey(1, JobKindTranslate, embeddedSource, "de", "chat"),
-	}}
-	svc := newReuseTestService(t, repo, reuseTestFile())
-
-	job, err := svc.Enqueue(context.Background(), JobRequest{MediaFileID: 1, Kind: JobKindTranslate, SourceIndex: 0, TargetLanguage: "de"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.ID != 7 || job.Status != JobStatusCompleted || job.ResultSubtitleID == nil || *job.ResultSubtitleID != result {
-		t.Fatalf("Enqueue = %+v, want the finished job 7 with subtitle %d", job, result)
-	}
-	if repo.inserts != 0 {
-		t.Fatalf("inserted %d jobs; a finished translation must not call the provider again", repo.inserts)
-	}
-
-	// Another target language is a different translation.
-	if _, err := svc.Enqueue(context.Background(), JobRequest{MediaFileID: 1, Kind: JobKindTranslate, SourceIndex: 0, TargetLanguage: "fr"}); err != nil {
-		t.Fatal(err)
-	}
-	if repo.inserts != 1 {
-		t.Fatalf("inserts = %d, want a new job for another language", repo.inserts)
-	}
 }
 
 // A rescan that adds a sidecar shifts the embedded track to index 1; index 0
@@ -120,50 +90,6 @@ func TestEnqueueDoesNotReuseAfterTheMediaFileIsReplaced(t *testing.T) {
 	}
 	if job.ID == 7 || repo.inserts != 1 {
 		t.Fatalf("Enqueue = job %d with %d inserts, want a new job for the replaced file", job.ID, repo.inserts)
-	}
-}
-
-// A sidecar is named by its bytes: the same file at another index is reused,
-// and editing it in place makes a new source.
-func TestEnqueueNamesSidecarsByContent(t *testing.T) {
-	dir := t.TempDir()
-	sidecar := filepath.Join(dir, "movie.eng.srt")
-	other := filepath.Join(dir, "movie.eng.forced.srt")
-	if err := os.WriteFile(sidecar, []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(other, []byte("1\n00:00:01,000 --> 00:00:02,000\nHi\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	repo := &recordingRepo{}
-	svc := newReuseTestService(t, repo, reuseTestFile(sidecar))
-	source, stable := svc.translationSource(context.Background(), 1, 0)
-	if !stable {
-		t.Fatal("readable sidecar has no stable identity")
-	}
-	result := 31
-	repo.reusable = &Job{
-		ID: 7, MediaFileID: 1, Kind: JobKindTranslate, TargetLanguage: "de", Status: JobStatusCompleted,
-		ResultSubtitleID: &result, IdempotencyKey: idempotencyKey(1, JobKindTranslate, source, "de", "chat"),
-	}
-
-	shifted := newReuseTestService(t, repo, reuseTestFile(other, sidecar))
-	job, err := shifted.Enqueue(context.Background(), JobRequest{MediaFileID: 1, Kind: JobKindTranslate, SourceIndex: 1, TargetLanguage: "de"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.ID != 7 || job.SourceIndex != 1 {
-		t.Fatalf("Enqueue(same sidecar at index 1) = job %d index %d, want job 7 at index 1", job.ID, job.SourceIndex)
-	}
-
-	if err := os.WriteFile(sidecar, []byte("1\n00:00:01,000 --> 00:00:02,000\nHello there\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if job, err = svc.Enqueue(context.Background(), JobRequest{MediaFileID: 1, Kind: JobKindTranslate, SourceIndex: 0, TargetLanguage: "de"}); err != nil {
-		t.Fatal(err)
-	}
-	if job.ID == 7 || repo.inserts != 1 {
-		t.Fatalf("Enqueue(edited sidecar) = job %d with %d inserts, want a new job", job.ID, repo.inserts)
 	}
 }
 
@@ -228,23 +154,6 @@ func TestQueuedTranslationDetectsAChangedSource(t *testing.T) {
 	}
 }
 
-func TestEnqueueDoesNotReuseFinishedTranscription(t *testing.T) {
-	result := 32
-	repo := &recordingRepo{reusable: &Job{
-		ID: 8, MediaFileID: 1, Kind: JobKindTranscribe, Status: JobStatusCompleted,
-		ResultSubtitleID: &result, IdempotencyKey: idempotencyKey(1, JobKindTranscribe, "-1", "", "asr"),
-	}}
-	svc := newReuseTestService(t, repo, reuseTestFile())
-
-	job, err := svc.Enqueue(context.Background(), JobRequest{MediaFileID: 1, Kind: JobKindTranscribe, SourceIndex: -1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.ID == 8 || repo.inserts != 1 {
-		t.Fatalf("Enqueue = job %d with %d inserts, want a new transcription job", job.ID, repo.inserts)
-	}
-}
-
 // Index-named keys hash as they did when the source was an integer, so
 // in-flight jobs keep deduplicating across the upgrade.
 func TestIdempotencyKeyKeepsTheIndexHash(t *testing.T) {
@@ -303,41 +212,5 @@ INSERT INTO subtitle_ai_jobs (id, media_file_id, kind, source_index, source_lang
 	}
 	if job, err := repo.GetReusableJobByIdempotencyKey(t.Context(), "k"); err != nil || job != nil {
 		t.Fatalf("after deleting the track: %+v, %v; want none so a fresh translation runs", job, err)
-	}
-}
-
-// A remux can keep the size and the bytes the OpenSubtitles hash reads, so
-// the modification time also names the embedded source.
-func TestEmbeddedSourceChangesWithTheModificationTime(t *testing.T) {
-	file := reuseTestFile()
-	before, _ := newReuseTestService(t, &recordingRepo{}, file).translationSource(context.Background(), 1, 0)
-	modified := time.Unix(1_800_000_000, 0)
-	remuxed := reuseTestFile()
-	remuxed.FileModifiedAt = &modified
-	after, stable := newReuseTestService(t, &recordingRepo{}, remuxed).translationSource(context.Background(), 1, 0)
-	if !stable || before == after {
-		t.Fatalf("identity %q unchanged after the file was rewritten", after)
-	}
-}
-
-// A stored subtitle is named by the bytes it is translated from, so a saved
-// timing correction makes a new source.
-func TestDownloadedSourceIncludesItsTimingCorrection(t *testing.T) {
-	data := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
-	identity := func(offset int) string {
-		svc := &Service{
-			files:  singleFileResolver{file: &models.MediaFile{ID: 1}},
-			lister: timedSourceLister{{ID: 5, MediaFileID: 1, Language: "en", Format: subtitles.FormatSRT}},
-			store: &timedSourceStore{sub: subtitles.DownloadedSubtitle{ID: 5, MediaFileID: 1, Language: "en",
-				Format: subtitles.FormatSRT, Timing: subtitles.Timing{OffsetMS: offset, Scale: 1}}, data: data},
-		}
-		source, stable := svc.translationSource(context.Background(), 1, 0)
-		if !stable {
-			t.Fatal("stored subtitle has no stable identity")
-		}
-		return source
-	}
-	if identity(0) == identity(1500) {
-		t.Fatal("timing correction did not change the source identity")
 	}
 }

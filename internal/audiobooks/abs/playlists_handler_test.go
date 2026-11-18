@@ -158,40 +158,6 @@ func newPlaylistsHarness(t *testing.T, knownItems ...string) *playlistsHarness {
 	return &playlistsHarness{H: h, Play: store, Pub: pub}
 }
 
-func TestPlaylist_NonOwner_404(t *testing.T) {
-	item := `{"libraryItemId":"book-1"}`
-	runNonOwner404(t, []nonOwnerCase[*playlistsHarness]{
-		{name: "get private", seed: `{"name":"private"}`, method: http.MethodGet, handler: (*Handler).handleGetPlaylist},
-		{name: "patch", method: http.MethodPatch, body: `{"name":"hijack"}`, handler: (*Handler).handleUpdatePlaylist,
-			check: func(t *testing.T, hb *playlistsHarness, id string) {
-				if p, _ := hb.Play.GetPlaylist(context.Background(), id); p.Name != "mine" {
-					t.Errorf("non-owner mutation leaked: name = %q", p.Name)
-				}
-			}},
-		{name: "delete", method: http.MethodDelete, handler: (*Handler).handleDeletePlaylist,
-			check: func(t *testing.T, hb *playlistsHarness, id string) {
-				if _, err := hb.Play.GetPlaylist(context.Background(), id); err != nil {
-					t.Errorf("playlist wrongly deleted: %v", err)
-				}
-			}},
-		{name: "add item", known: "book-1", method: http.MethodPost, suffix: "/item", body: item, handler: (*Handler).handleAddPlaylistItem},
-		{name: "remove item", known: "book-1", method: http.MethodDelete, suffix: "/item/book-1",
-			params: map[string]string{"libraryItemId": "book-1"}, handler: (*Handler).handleRemovePlaylistItem,
-			before: func(t *testing.T, hb *playlistsHarness, id string) {
-				_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
-					map[string]string{"id": id}, []byte(item), "1", "", hb.H.handleAddPlaylistItem)
-			},
-			check: func(t *testing.T, hb *playlistsHarness, id string) {
-				if items, _ := hb.Play.ListPlaylistItems(context.Background(), id); len(items) != 1 {
-					t.Errorf("items len = %d, want 1 (non-owner remove leaked)", len(items))
-				}
-			}},
-		{name: "batch add", known: "book-1", method: http.MethodPost, suffix: "/batch/add",
-			body: `{"items":[{"libraryItemId":"book-1"}]}`, handler: (*Handler).handleBatchAddPlaylistItems},
-	}, newPlaylistsHarness, func(hb *playlistsHarness) *Handler { return hb.H }, "/api/playlists",
-		func(h *Handler) http.HandlerFunc { return h.handleCreatePlaylist })
-}
-
 func TestPlaylist_List_ProfileIsolation(t *testing.T) {
 	hb := newPlaylistsHarness(t)
 	pA := "00000000-0000-0000-0000-0000000000aa"

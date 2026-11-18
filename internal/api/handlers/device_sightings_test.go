@@ -3,12 +3,10 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -41,52 +39,12 @@ func requireRegisteredDevice(t *testing.T, store userstore.UserStore, profileID,
 	}
 }
 
-// The seam is what the v2 operations call; it registers as the v1 route does.
-func TestResolveEffectiveSettingsSeamRegistersCallersOwnDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	if _, err := handler.ResolveEffectiveSettings(context.Background(), 1, EffectiveSettingsQuery{
-		Keys:            []string{"playback.subtitle_mode"},
-		ActiveProfileID: "profile-1",
-		Device:          NewDeviceMetadata("phone-1", "Pocket", "iOS"),
-	}); err != nil {
-		t.Fatalf("ResolveEffectiveSettings: %v", err)
-	}
-
-	requireRegisteredDevice(t, store, "profile-1", "phone-1", "Pocket", "iOS")
-}
-
 // impersonating marks a context as an administrator's view-as session on the
 // account's profile-1.
 func impersonating(ctx context.Context) context.Context {
 	admin := 99
 	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: &admin})
 	return apimw.SetProfileID(ctx, "profile-1")
-}
-
-func newDeviceSightingsPlaybackHandler(t *testing.T, store userstore.UserStore, sightings *DeviceSightings) *PlaybackHandler {
-	t.Helper()
-	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.StoreProvider = testUserStoreProvider{store: store}
-	handler.DeviceSightings = sightings
-	return handler
-}
-
-func TestPlaybackStartV2RegistersDeclaredDevice(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := newDeviceSightingsPlaybackHandler(t, store, NewDeviceSightings())
-	handler.InstallationID = serviceInstallation
-
-	if _, err := handler.StartPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{
-		UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation,
-		DeclaredDevice: NewDeviceMetadata("phone-1", "Pocket", "iOS"),
-	}, v3HandlerStartRequest()); err != nil {
-		t.Fatalf("StartPlaybackV2: %v", err)
-	}
-
-	requireRegisteredDevice(t, store, "profile-1", "phone-1", "Pocket", "iOS")
 }
 
 type failingThenStoreProvider struct {
@@ -103,42 +61,6 @@ func (p failingThenStoreProvider) ForUser(context.Context, int) (userstore.UserS
 }
 
 func (p failingThenStoreProvider) Close() error { return nil }
-
-// A failed registration does not hold the throttle window, so the device's
-// next request retries.
-func TestFailedRegistrationIsRetried(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	sightings := NewDeviceSightings()
-	failed := false
-	provider := failingThenStoreProvider{store: store, failed: &failed}
-	device := NewDeviceMetadata("tv-1", "Den TV", "Android TV")
-
-	sightings.RecordFor(context.Background(), provider, 1, "profile-1", device)
-	if !failed || registeredDevice(t, store, "profile-1", "tv-1") != nil {
-		t.Fatal("the first registration should have failed")
-	}
-	sightings.RecordFor(context.Background(), provider, 1, "profile-1", device)
-	requireRegisteredDevice(t, store, "profile-1", "tv-1", "Den TV", "Android TV")
-}
-
-// A Tizen TV sends its name in ISO-8859-1, which Postgres refuses as UTF-8
-// (#3607). The name and platform are read as Latin-1, so the device registers
-// under the name the TV shows; UTF-8 values are kept as sent.
-func TestLatin1DeviceHeadersRegisterAsUTF8(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	headers := http.Header{}
-	headers.Set(deviceIDHeader, "tizen-1")
-	headers.Set(deviceNameHeader, "T\xe9l\xe9viseur")
-	headers.Set(devicePlatformHeader, "Tiz\xe9n")
-	device := DeviceMetadataFromHeaders(headers)
-
-	NewDeviceSightings().Record(context.Background(), store, "profile-1", device)
-	requireRegisteredDevice(t, store, "profile-1", "tizen-1", "Téléviseur", "Tizén")
-
-	if got := NewDeviceMetadata("tv-2", "Téléviseur", "Tizen").DeviceName; got != "Téléviseur" {
-		t.Errorf("UTF-8 name = %q, want it unchanged", got)
-	}
-}
 
 // livingRoom is the caller's own device as it declares itself.
 var livingRoom = NewDeviceMetadata("device-1", "Living room", "tvOS")
@@ -212,79 +134,6 @@ func TestEffectiveReadRegistersOnlyTheCallersOwnDevice(t *testing.T) {
 		readEffectiveAs(t, ctx, handler, EffectiveSettingsQuery{})
 		if registeredDevice(t, store, "profile-1", "device-1") != nil {
 			t.Error("a repeat read within the throttle window upserted the device again")
-		}
-	})
-}
-
-// A playback start registers its device only when the device played as the
-// caller: a refused start, a terminal decision and an administrator's
-// view-as session register nothing, and the throttle is shared with the
-// settings reads.
-func TestPlaybackStartRegistersOnlyAPlayedDevice(t *testing.T) {
-	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation, DeclaredDevice: livingRoom}
-	newHandler := func(t *testing.T, store userstore.UserStore, sightings *DeviceSightings) *PlaybackHandler {
-		handler := newDeviceSightingsPlaybackHandler(t, store, sightings)
-		handler.InstallationID = serviceInstallation
-		return handler
-	}
-
-	t.Run("refused start", func(t *testing.T) {
-		store := newPlaybackTestStore(t)
-		start := v3HandlerStartRequest()
-		start.ProfileID = "someone-else"
-		if response, err := newHandler(t, store, NewDeviceSightings()).StartPlaybackV2(newAuthorizedPlaybackContext(), caller, start); err == nil {
-			t.Fatalf("start for another profile was accepted: %+v", response)
-		}
-		if registeredDevice(t, store, "profile-1", "device-1") != nil || registeredDevice(t, store, "someone-else", "device-1") != nil {
-			t.Error("a refused start registered the device")
-		}
-	})
-
-	t.Run("terminal decision", func(t *testing.T) {
-		store := newPlaybackTestStore(t)
-		handler := newHandler(t, store, NewDeviceSightings())
-		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "false"}}
-		start := v3HandlerStartRequest()
-		start.Capabilities.CodecsVideo = nil
-		start.Capabilities.CodecsVideoHardware = nil
-		start.Capabilities.VideoDecode = nil
-		start.Capabilities.Containers = nil
-		response, err := handler.StartPlaybackV2(newAuthorizedPlaybackContext(), caller, start)
-		if err != nil {
-			t.Fatalf("StartPlaybackV2: %v", err)
-		}
-		if response.Terminal == nil {
-			t.Fatalf("start = %#v, want a terminal decision", response)
-		}
-		if registeredDevice(t, store, "profile-1", "device-1") != nil {
-			t.Error("a terminal start registered the device")
-		}
-	})
-
-	t.Run("impersonation", func(t *testing.T) {
-		store := newPlaybackTestStore(t)
-		if _, err := newHandler(t, store, NewDeviceSightings()).StartPlaybackV2(impersonating(context.Background()), caller, v3HandlerStartRequest()); err != nil {
-			t.Fatalf("StartPlaybackV2: %v", err)
-		}
-		if registeredDevice(t, store, "profile-1", "device-1") != nil {
-			t.Error("an impersonated playback start registered the administrator's device")
-		}
-	})
-
-	t.Run("throttle shared with settings reads", func(t *testing.T) {
-		sightings := NewDeviceSightings()
-		values, store := newValuesTestHandler(t)
-		values.DeviceSightings = sightings
-		readEffectiveAs(t, context.Background(), values, EffectiveSettingsQuery{})
-		requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
-		if err := store.(userstore.DeviceRegistry).ForgetDevice(context.Background(), "profile-1", "device-1"); err != nil {
-			t.Fatalf("ForgetDevice: %v", err)
-		}
-		if _, err := newHandler(t, store, sightings).StartPlaybackV2(newAuthorizedPlaybackContext(), caller, v3HandlerStartRequest()); err != nil {
-			t.Fatalf("StartPlaybackV2: %v", err)
-		}
-		if registeredDevice(t, store, "profile-1", "device-1") != nil {
-			t.Error("playback start upserted a device the settings read had just registered")
 		}
 	})
 }

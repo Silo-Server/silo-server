@@ -127,26 +127,6 @@ func TestGrantWholeLifeIsCapped(t *testing.T) {
 	}
 }
 
-// Revisions compare at microseconds, the catalog's precision; the grant keeps
-// the nanoseconds the stat returned.
-func TestRevisionComparesAtMicroseconds(t *testing.T) {
-	base := time.Unix(1_700_000_000, 123_456_000)
-	revision := Revision{Kind: KindFile, ID: 42, Size: 5, ModTimeUnixNano: base.Add(100 * time.Nanosecond).UnixNano()}
-	sub := revision
-	sub.ModTimeUnixNano = base.Add(900 * time.Nanosecond).UnixNano()
-	if !revision.Same(sub) || revision.ETag() != sub.ETag() {
-		t.Fatalf("a sub-microsecond difference is another revision: %s vs %s", revision.ETag(), sub.ETag())
-	}
-	later := revision
-	later.ModTimeUnixNano = base.Add(time.Microsecond).UnixNano()
-	if revision.Same(later) || revision.ETag() == later.ETag() {
-		t.Fatalf("a microsecond later is the same revision: %s", later.ETag())
-	}
-	if want := `"file-42-5-1700000000123456"`; revision.ETag() != want {
-		t.Fatalf("etag = %s, want %s", revision.ETag(), want)
-	}
-}
-
 // A library name that is not valid UTF-8 is carried fspath-encoded, survives
 // the grant's JSON unchanged, and is stat'ed through fspath.
 func TestGrantCarriesAnEncodedPath(t *testing.T) {

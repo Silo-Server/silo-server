@@ -9,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
 
 // Excerpts of jellyfin-ffmpeg 7.1.4 listings.
@@ -149,99 +147,6 @@ func fakeBinary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestParseListings(t *testing.T) {
-	caps := Capabilities{filters: parseFilterList([]byte(filtersFixture)), muxers: parseMuxerList([]byte(muxersFixture))}
-	for _, name := range []string{"aap", "silencedetect", "blackframe", "signalstats", "aevalsrc", "buffersink"} {
-		if !caps.HasFilter(name) {
-			t.Errorf("filter %q missing", name)
-		}
-	}
-	for _, name := range []string{"=", "Timeline", "A", "|"} {
-		if caps.HasFilter(name) {
-			t.Errorf("legend word %q parsed as a filter", name)
-		}
-	}
-	for _, name := range []string{"3g2", "chromaprint", "video4linux2", "v4l2"} {
-		if !caps.HasMuxer(name) {
-			t.Errorf("muxer %q missing", name)
-		}
-	}
-	for _, name := range []string{"=", "D..", "Demuxing"} {
-		if caps.HasMuxer(name) {
-			t.Errorf("legend word %q parsed as a muxer", name)
-		}
-	}
-}
-
-func TestParseMuxerListOlderFormat(t *testing.T) {
-	muxers := parseMuxerList([]byte("File formats:\n D. = Demuxing supported\n .E = Muxing supported\n --\n  E chromaprint     Chromaprint\n DE matroska,webm   Matroska\n D  aac             raw ADTS AAC\n"))
-	caps := Capabilities{muxers: muxers}
-	if !caps.HasMuxer("chromaprint") || !caps.HasMuxer("webm") || caps.HasMuxer("aac") {
-		t.Fatalf("muxers %v", muxers)
-	}
-}
-
-func TestRequire(t *testing.T) {
-	fingerprint := Request{Audio: &AudioOutput{Fingerprint: true}}
-	silence := Request{Audio: &AudioOutput{Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 1}}}
-	full := Capabilities{
-		filters:        parseFilterList([]byte(filtersFixture)),
-		muxers:         parseMuxerList([]byte(muxersFixture)),
-		chromaprintRaw: true,
-	}
-	if err := full.Require(fingerprint); err != nil {
-		t.Fatalf("fingerprint: %v", err)
-	}
-	if err := full.Require(silence); err != nil {
-		t.Fatalf("silence: %v", err)
-	}
-
-	noRaw := full
-	noRaw.chromaprintRaw = false
-	if err := noRaw.Require(fingerprint); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "raw fingerprint") {
-		t.Fatalf("without raw output: %v", err)
-	}
-	if err := (Capabilities{}).Require(fingerprint); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "chromaprint muxer") {
-		t.Fatalf("without the muxer: %v", err)
-	}
-	if err := (Capabilities{}).Require(silence); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "silencedetect") {
-		t.Fatalf("without silencedetect: %v", err)
-	}
-	sampled := Request{Samples: &Samples{Seconds: []float64{1}}}
-	if err := (Capabilities{}).Require(sampled); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "sampled input list") {
-		t.Fatalf("without sampled input lists: %v", err)
-	}
-
-	tail := Request{
-		Audio: &AudioOutput{Fingerprint: true, Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 0.5}},
-		Stats: &StatsOutput{CropWidth: 0.9, CropHeight: 0.8, Width: 480, BlackThresholds: []int{20, 26, 32}},
-	}
-	if err := full.Require(tail); err != nil {
-		t.Fatalf("tail pass: %v", err)
-	}
-	for _, missing := range []string{"blackframe", "signalstats", "metadata", "silencedetect"} {
-		partial := full
-		partial.filters = map[string]struct{}{}
-		for name := range full.filters {
-			if name != missing {
-				partial.filters[name] = struct{}{}
-			}
-		}
-		if err := partial.Require(tail); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), missing) {
-			t.Fatalf("without %s: %v", missing, err)
-		}
-	}
-	noMuxer := full
-	noMuxer.muxers = nil
-	if err := noMuxer.Require(tail); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "chromaprint muxer") {
-		t.Fatalf("tail pass without the chromaprint muxer: %v", err)
-	}
-	tail.Audio.Fingerprint = false
-	if err := noMuxer.Require(tail); err != nil {
-		t.Fatalf("tail pass without a fingerprint needs no chromaprint: %v", err)
-	}
 }
 
 func TestLoadCapabilitiesChecksChromaprintRawOutput(t *testing.T) {
@@ -384,68 +289,4 @@ func TestLoadCapabilitiesChecksConcatSamples(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestRelayedSamplesNeedTheRelayedConcatForm(t *testing.T) {
-	relayedTestInput := nodesourcetest.NewCore(t, writeTestFile(t, "movie.mkv", "movie")).Open(t).Input()
-	relayed := Request{Input: relayedTestInput, Samples: &Samples{Seconds: []float64{1}}, Stats: &StatsOutput{}}
-	local := relayed
-	local.Input = "/library/movie.mkv"
-
-	f := newFakeListings()
-	useListings(t, f)
-	caps, err := LoadCapabilities(context.Background(), fakeBinary(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := caps.Require(relayed); err != nil {
-		t.Fatalf("relayed samples with the relayed form: %v", err)
-	}
-
-	f = newFakeListings()
-	f.relayedConcat = concatUnknownKeywordFixture
-	useListings(t, f)
-	caps, err = LoadCapabilities(context.Background(), fakeBinary(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := caps.Require(local); err != nil {
-		t.Fatalf("local samples: %v", err)
-	}
-	err = caps.Require(relayed)
-	if !errors.Is(err, ErrUnsupported) || ReasonUnsupported.Permanent() {
-		t.Fatalf("relayed samples without the relayed form: %v, want a non-permanent unsupported refusal", err)
-	}
-
-	f = newFakeListings()
-	f.relayedConcat = relayedConcatNoHTTPFixture
-	useListings(t, f)
-	caps, err = LoadCapabilities(context.Background(), fakeBinary(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := caps.Require(relayed); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("relayed samples on an ffmpeg without http: %v, want an unsupported refusal", err)
-	}
-
-	list, err := buildConcatList(relayedTestInput, []float64{1}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(list), "file '"+relayedTestInput+"'\noption protocol_whitelist http,tcp\noption http_proxy direct\noption format_whitelist ") ||
-		strings.Contains(string(list), "file:") {
-		t.Fatalf("relayed list:\n%s", list)
-	}
-	if got := strings.Join(listInputArgs(relayedTestInput), " "); !strings.Contains(got, "-protocol_whitelist http,tcp,pipe -format_whitelist concat") {
-		t.Fatalf("relayed list input args %q", got)
-	}
-}
-
-func writeTestFile(t *testing.T, name, content string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }

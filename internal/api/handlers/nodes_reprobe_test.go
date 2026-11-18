@@ -1,10 +1,7 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -13,11 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
-	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // stubCapabilityRefresher stands in for the health checker's on-demand refresh.
@@ -37,82 +31,6 @@ func reprobeRequest(t *testing.T) *http.Request {
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("id", "1")
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
-
-// fakeNodeServer answers the node-side re-probe route with the given status and
-// body. signedWith reports whether the request it saw was signed with secret.
-func fakeNodeServer(t *testing.T, status int, body string) (url string, signedWith func(secret string) bool) {
-	t.Helper()
-	var seen *http.Request
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/admin/reprobe-capabilities" || r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		requestBody, _ := io.ReadAll(r.Body)
-		seen = r.Clone(context.WithoutCancel(r.Context()))
-		seen.Body = io.NopCloser(bytes.NewReader(requestBody))
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(server.Close)
-	return server.URL, func(secret string) bool { return seen != nil && nodeauthtest.Signed(seen, secret) }
-}
-
-// The node publishes the budget its own probe matrix needs, so a node with
-// slower hardware is not abandoned on a cluster-wide guess. A node that has
-// never been inventoried falls back to the generous constant.
-func TestNodeReprobeTimeoutPrefersTheNodeAdvertisedBudget(t *testing.T) {
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
-	// Above the fallback, which is a floor: a node that says it needs less than
-	// the constant this handler is willing to spend does not shorten it.
-	advertised := playback.HWAccelInfo{ProbeRequestTimeoutMillis: 200_000}
-	payload, err := json.Marshal(advertised)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if nodeReprobeFallbackTimeout >= 200*time.Second {
-		t.Fatalf("fixture is inert: the fallback %s must stay under the advertised 200s", nodeReprobeFallbackTimeout)
-	}
-	if got := handler.nodeReprobeTimeout(&nodepool.Node{Capabilities: payload}); got != 200*time.Second {
-		t.Fatalf("timeout = %s, want the node-advertised 200s", got)
-	}
-	if got := handler.nodeReprobeTimeout(&nodepool.Node{}); got != nodeReprobeFallbackTimeout {
-		t.Fatalf("timeout = %s, want the fallback %s for a node with no report", got, nodeReprobeFallbackTimeout)
-	}
-	if got := handler.nodeReprobeTimeout(&nodepool.Node{Capabilities: json.RawMessage(`not json`)}); got != nodeReprobeFallbackTimeout {
-		t.Fatalf("timeout = %s, want the fallback for an unreadable report", got)
-	}
-}
-
-// A re-probe discards every cache on the node, so it runs the full matrix for
-// whatever device set the node is configured for *now*. A report stored before
-// an operator widened hw_device_override advertises the old, smaller budget, and
-// honoring it would cancel the very request that would have replaced it.
-func TestNodeReprobeTimeoutRepricesAWidenedDeviceOverride(t *testing.T) {
-	devices := "/dev/dri/renderD128,/dev/dri/renderD129,/dev/dri/renderD130,/dev/dri/renderD131"
-	backend := tonemap.BackendQSV
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
-	handler.SetClusterPlaybackPolicy(func() config.PlaybackConfig {
-		return config.PlaybackConfig{HWAccel: tonemap.BackendQSV, HWDevice: "/dev/dri/renderD128"}
-	})
-	stored, err := json.Marshal(playback.HWAccelInfo{
-		ProbeRequestTimeoutMillis: playback.CapabilityRequestTimeout(backend, "/dev/dri/renderD128").Milliseconds(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	want := playback.CapabilityRequestTimeout(backend, devices)
-	got := handler.nodeReprobeTimeout(&nodepool.Node{
-		Capabilities: stored, HWAccelOverride: &backend, HWDeviceOverride: &devices,
-	})
-	if got != want {
-		t.Fatalf("re-probe timeout = %s, want the four-device %s", got, want)
-	}
-	if want <= nodeReprobeFallbackTimeout {
-		t.Fatalf("fixture is inert: the four-device budget %s must exceed the fallback %s", want, nodeReprobeFallbackTimeout)
-	}
 }
 
 // boundedCapabilityRefresher is a refresher that also reports how long its

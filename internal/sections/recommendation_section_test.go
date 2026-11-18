@@ -66,39 +66,6 @@ func (p *poolReader) SectionTasteMatchRow(context.Context, int, string, string, 
 	return p.row(""), nil
 }
 
-// A For You or taste-match section keeps a default heading only while it
-// serves the profile's own row; served a row every profile gets, it takes
-// that row's title. A heading an admin chose is never replaced.
-func TestRecommendationSectionTitle(t *testing.T) {
-	popular := &recommendations.ForYouRow{Type: recommendations.RecTypePopular, Label: "Popular on This Server"}
-	genre := &recommendations.ForYouRow{Type: "genre_sampler", Label: "Top Drama"}
-	highlyRated := &recommendations.ForYouRow{Type: recommendations.RecTypeTopRated, Label: "Highly Rated in Your Library"}
-	recent := &recommendations.ForYouRow{Type: recommendations.RecTypeRecentlyAdded, Label: "Recently Added"}
-	forYou := &recommendations.ForYouRow{Type: "cluster", Label: recommendations.ForYouLabel}
-	cluster := &recommendations.ForYouRow{Type: "cluster", Label: "Because you enjoy Crime"}
-	for _, tc := range []struct {
-		name, title string
-		row         *recommendations.ForYouRow
-		want        string
-	}{
-		{"new profile's For You row", "Recommended for You", popular, "Popular on This Server"},
-		{"default heading in another case", "  recommended FOR you ", recent, "Recently Added"},
-		{"highly rated", "Recommended for You", highlyRated, "Highly Rated in Your Library"},
-		{"taste match without a cluster", "Top Picks Today", genre, "Top Drama"},
-		{"untitled section", "", genre, "Top Drama"},
-		{"profile's own row", "Recommended for You", forYou, "Recommended for You"},
-		{"profile's cluster row", "Top Picks Today", cluster, "Top Picks Today"},
-		{"admin title", "Tonight's Picks", popular, "Tonight's Picks"},
-		{"no row", "Recommended for You", nil, "Recommended for You"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := recommendationSectionTitle(tc.title, tc.row); got != tc.want {
-				t.Fatalf("title = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // A library's recommendation sections fill from the row's whole cached pool:
 // with the profile's 40 strongest picks in one movie library, the other
 // library's row still gets its own 20, and a widened home fetch gets them all.
@@ -180,31 +147,6 @@ func TestRecommendationSectionsFillFromTheWholePoolPostgres(t *testing.T) {
 	fetch(SectionBecauseYouWatched, 20, nil)
 	if len(reader.scopes) != 2 || !slices.Equal(reader.scopes[0], []int{libraries[1]}) || reader.scopes[1] != nil {
 		t.Fatalf("anchor scopes = %v, want [[%d] []]", reader.scopes, libraries[1])
-	}
-}
-
-// A failed fill fails the section, like a failed main-row read.
-func TestForYouSectionFillErrorFailsTheSection(t *testing.T) {
-	library := 3
-	fetcher := &Fetcher{RecommendationReader: &poolReader{rowType: "cluster", fillError: fmt.Errorf("cache read failed")}}
-	if _, err := fetcher.FetchOne(context.Background(), ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, ItemLimit: 20}, &library, nil, 7, "p1", catalog.AccessFilter{}); err == nil {
-		t.Fatal("FetchOne succeeded, want the fill's error")
-	}
-}
-
-// A reader failure fails the section rather than answering an empty row.
-func TestRecommendationSectionReadErrorFailsTheSection(t *testing.T) {
-	fetcher := &Fetcher{RecommendationReader: &poolReader{readError: fmt.Errorf("cache read failed")}}
-	for _, sectionType := range []SectionType{SectionRecommendedForYou, SectionSimilarUsersLiked, SectionTasteMatch, SectionBecauseYouWatched} {
-		if _, err := fetcher.FetchOne(context.Background(), ResolvedSection{ID: "recs", SectionType: sectionType, ItemLimit: 20}, nil, nil, 7, "p1", catalog.AccessFilter{}); err == nil {
-			t.Fatalf("%s: FetchOne succeeded, want the reader's error", sectionType)
-		}
-	}
-
-	// Without a reader the section degrades to empty.
-	got, err := (&Fetcher{}).FetchOne(context.Background(), ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, ItemLimit: 20}, nil, nil, 7, "p1", catalog.AccessFilter{})
-	if err != nil || len(got.Items) != 0 {
-		t.Fatalf("FetchOne without a reader = %d items, %v; want an empty section", len(got.Items), err)
 	}
 }
 

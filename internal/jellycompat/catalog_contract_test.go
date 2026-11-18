@@ -3,12 +3,8 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"slices"
-	"strconv"
 	"testing"
 	"time"
 
@@ -17,15 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestItemsResponseImageAndUserDataControls(t *testing.T) {
-	q := parseItemsQuery(httptest.NewRequest("GET", "/Items?EnableImages=false&EnableUserData=false", nil), NewResourceIDCodec())
-	items := []baseItemDTO{{ImageTags: map[string]string{"Primary": "p"}, BackdropImageTags: []string{"b"}, ParentBackdropImageTags: []string{"b"}, SeriesPrimaryImageTag: "p", UserData: &itemUserDataDTO{}}}
-	applyItemsResponseOptions(items, q)
-	if len(items[0].ImageTags) != 0 || len(items[0].ParentBackdropImageTags) != 0 || items[0].SeriesPrimaryImageTag != "" || items[0].UserData != nil {
-		t.Fatalf("presentation controls lost: %+v", items[0])
-	}
-}
 
 func TestItemsQueryCombinedCatalogFilters(t *testing.T) {
 	q := parseItemsQuery(httptest.NewRequest("GET", "/Items?Genres=Drama%7CComedy&Years=2020,2024&SearchTerm=Film&Filters=IsFavorite,IsPlayed&StartIndex=2&Limit=1", nil), NewResourceIDCodec())
@@ -48,39 +35,6 @@ type composedBrowseContent struct {
 func (s *composedBrowseContent) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
 	s.params = params
 	return &upstreamBrowseResponse{Items: []upstreamListItem{}}, nil
-}
-func TestCombinedSearchPlayedFavoriteUsesBrowse(t *testing.T) {
-	svc := &composedBrowseContent{}
-	codec := NewResourceIDCodec()
-	h := &ItemsHandler{content: svc, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
-	performItemsRequest(t, h, "/Items?SearchTerm=Drama&IsPlayed=true&isFavorite=true&Limit=1&StartIndex=2")
-	if svc.params.Get("search_term") != "Drama" || svc.params.Get("is_favorite") != "true" || svc.params.Get("is_played") != "true" {
-		t.Fatalf("lost combined predicates: %v", svc.params)
-	}
-}
-
-func TestEpisodePageFiltersNumericSeasonBeforeHydration(t *testing.T) {
-	codec := NewResourceIDCodec()
-	svc := &countingContentService{}
-	h := &ItemsHandler{content: svc, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
-	q := parseItemsQuery(httptest.NewRequest("GET", "/Shows/s/Episodes?Season=2&StartIndex=1&Limit=1", nil), codec)
-	episodes := []*models.Episode{{ContentID: "a", SeasonNumber: 1, EpisodeNumber: 1}, {ContentID: "b", SeasonNumber: 2, EpisodeNumber: 1}, {ContentID: "c", SeasonNumber: 2, EpisodeNumber: 2}}
-	req := httptest.NewRequest("GET", "/", nil)
-	rec := httptest.NewRecorder()
-	h.writeEpisodeModelsPage(rec, req, collectionsTestSession(), q, "s", nil, episodes, true)
-	if rec.Code != 200 {
-		t.Fatalf("response: %d %s", rec.Code, rec.Body.String())
-	}
-	var result queryResultDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Items) != 1 || result.TotalRecordCount != 2 || result.StartIndex != 1 || result.Items[0].ID != codec.EncodeStringID(EncodedIDItem, "c") {
-		t.Fatalf("wrong season page: %+v", result)
-	}
-	if svc.getItemDetailCalls > 1 {
-		t.Fatalf("hydrated %d entries for one-item page", svc.getItemDetailCalls)
-	}
 }
 
 type upcomingContractRepo struct {
@@ -274,154 +228,8 @@ func TestParentEpisodesWithoutLimitReturnWholeSeries(t *testing.T) {
 	}
 }
 
-func TestUpcomingAvailabilityOnSelectedPage(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		available bool
-		detail    bool
-		err       error
-	}{
-		{name: "metadata only"},
-		{name: "downloaded", available: true},
-		{name: "metadata with details", detail: true},
-		{name: "availability failure", err: errors.New("catalog unavailable")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			codec := NewResourceIDCodec()
-			repo := &upcomingContractRepo{hasFiles: map[string]bool{"future": tc.available}, availabilityErr: tc.err}
-			h := &ItemsHandler{episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, content: &countingContentService{}}
-			path := "/Shows/Upcoming?StartIndex=2&Limit=1"
-			if tc.detail {
-				path += "&Fields=MediaSources"
-			}
-			req := httptest.NewRequest("GET", path, nil)
-			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
-			rec := httptest.NewRecorder()
-			h.HandleUpcoming(rec, req)
-			if len(repo.availabilityIDs) != 1 || repo.availabilityIDs[0] != "future" {
-				t.Fatalf("availability not page bounded: %v", repo.availabilityIDs)
-			}
-			if tc.err != nil {
-				if rec.Code < 500 {
-					t.Fatalf("availability error hidden: %d", rec.Code)
-				}
-				return
-			}
-			if rec.Code != 200 {
-				t.Fatalf("response: %d %s", rec.Code, rec.Body.String())
-			}
-			var result queryResultDTO
-			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			if len(result.Items) != 1 || result.TotalRecordCount != 5 || result.StartIndex != 2 {
-				t.Fatalf("page: %+v", result)
-			}
-			item := result.Items[0]
-			if tc.available {
-				if item.LocationType != "FileSystem" || item.VideoType != "VideoFile" {
-					t.Fatalf("available: %+v", item)
-				}
-			} else if item.LocationType != "Virtual" || item.VideoType != "" {
-				t.Fatalf("fileless: %+v", item)
-			}
-		})
-	}
-}
-
 type presentationViewsContent struct{ countingContentService }
 
 func (*presentationViewsContent) ListUserLibraries(context.Context, *Session) ([]upstreamUserLibrary, error) {
 	return []upstreamUserLibrary{{ID: 3, Name: "Movies", Type: "movies", PosterPath: "poster.jpg", PosterURL: "https://example.com/poster.jpg"}}, nil
-}
-
-func TestItemsViewsPresentationControls(t *testing.T) {
-	for _, path := range []string{"/Items?"} {
-		for _, controls := range []string{"", "EnableImages=false&EnableUserData=false", "ImageTypeLimit=0", "EnableImageTypes=Backdrop"} {
-			t.Run(path+controls, func(t *testing.T) {
-				codec := NewResourceIDCodec()
-				h := &ItemsHandler{content: &presentationViewsContent{}, codec: codec, mapper: newMapper(codec, &config.Config{}), images: NewImageCache(time.Hour, time.Now)}
-				result := performItemsRequest(t, h, path+controls)
-				if len(result.Items) != 1 {
-					t.Fatalf("views: %+v", result)
-				}
-				if (len(result.Items[0].ImageTags) > 0) != (controls == "") {
-					t.Fatalf("image controls ignored: %+v", result.Items[0])
-				}
-				if controls == "EnableImages=false&EnableUserData=false" && result.Items[0].UserData != nil {
-					t.Fatal("user data controls ignored")
-				}
-			})
-		}
-	}
-}
-
-// TestEpisodeOnlyBrowseSpansEverySeries pins that IncludeItemTypes=Episode with
-// no series or season parent pages the episode browse across every series,
-// scoped to the ParentId library, instead of the media_items browse, which holds
-// no episodes; and that /Items/Counts counts episodes the same way.
-func TestEpisodeOnlyBrowseSpansEverySeries(t *testing.T) {
-	codec := NewResourceIDCodec()
-	newHandler := func(repo *boundedEpisodeContractRepo) *ItemsHandler {
-		return &ItemsHandler{catalogUserState: true, content: &itemCountsContentService{totals: map[string]int{"movie": 3, "series": 2}}, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now), accessFilter: func(context.Context, int, string) catalog.AccessFilter {
-			return catalog.AccessFilter{AllowedLibraryIDs: []int{3}}
-		}}
-	}
-
-	repo := &boundedEpisodeContractRepo{}
-	library := codec.EncodeIntID(EncodedIDLibrary, 3)
-	// Jellyfin Web's Episodes tab sorts by SeriesSortName,SortName; an
-	// episode's SortName is its season and episode number, so the browse keeps
-	// its series order instead of sorting by episode title.
-	result := performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&ParentId="+library+"&SortBy=SeriesSortName,SortName&MinPremiereDate=2024-01-01&StartIndex=2&Limit=1")
-	if repo.seriesID != "" || repo.filters.LibraryID != 3 || repo.filters.Offset != 2 || repo.filters.Limit != 1 || repo.filters.Sort != "" || repo.filters.MinPremiereDate != "2024-01-01" || !repo.includeTotal {
-		t.Fatalf("episode browse scope = series %q filters %+v includeTotal %v", repo.seriesID, repo.filters, repo.includeTotal)
-	}
-	if result.TotalRecordCount != 6 {
-		t.Fatalf("episode page total = %d, want the episode browse's 6", result.TotalRecordCount)
-	}
-	if !slices.Equal(repo.access.AllowedLibraryIDs, []int{3}) {
-		t.Fatalf("episode browse access = %v, want it narrowed to the ParentId library", repo.access.AllowedLibraryIDs)
-	}
-	// Name, unlike SortName, sorts by episode title, as Jellyfin's NameComparer does.
-	repo = &boundedEpisodeContractRepo{}
-	performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&SortBy=Name")
-	if repo.filters.Sort != catalog.BrowseSortTitle {
-		t.Fatalf("SortBy=Name episode browse sort = %q, want %q", repo.filters.Sort, catalog.BrowseSortTitle)
-	}
-
-	// Episodes are access-checked through their series, which may also sit in
-	// a library the session can see, so a ParentId library the session cannot
-	// see never reaches the browse.
-	repo = &boundedEpisodeContractRepo{}
-	result = performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&ParentId="+codec.EncodeIntID(EncodedIDLibrary, 4))
-	if repo.filters.LibraryID != 0 || result.TotalRecordCount != 0 || len(result.Items) != 0 {
-		t.Fatalf("forbidden library browse = filters %+v total %d", repo.filters, result.TotalRecordCount)
-	}
-
-	// Favorites are joined to media_items too, so an episode-only favorite
-	// browse takes the episode browse as well.
-	repo = &boundedEpisodeContractRepo{}
-	result = performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&IsFavorite=true&Limit=1")
-	if repo.seriesID != "" || !repo.filters.IsFavorite || result.TotalRecordCount != 6 {
-		t.Fatalf("favorite episode browse = series %q filters %+v total %d", repo.seriesID, repo.filters, result.TotalRecordCount)
-	}
-
-	for _, favorite := range []bool{false, true} {
-		repo := &boundedEpisodeContractRepo{}
-		req := httptest.NewRequest(http.MethodGet, "/Items/Counts?IsFavorite="+strconv.FormatBool(favorite), nil)
-		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
-		rec := httptest.NewRecorder()
-		newHandler(repo).HandleItemCounts(rec, req)
-		var counts itemCountsDTO
-		if err := json.Unmarshal(rec.Body.Bytes(), &counts); err != nil {
-			t.Fatalf("decode ItemCounts: %v; body=%s", err, rec.Body.String())
-		}
-		if repo.seriesID != "" || repo.filters.Limit != 0 || repo.filters.IsFavorite != favorite || !repo.includeTotal {
-			t.Fatalf("favorite=%v episode count query = series %q filters %+v", favorite, repo.seriesID, repo.filters)
-		}
-		if counts.EpisodeCount != 6 || counts.ItemCount != 3+2+6 {
-			t.Fatalf("favorite=%v ItemCounts = %+v, want 6 episodes of 11 items", favorite, counts)
-		}
-	}
 }

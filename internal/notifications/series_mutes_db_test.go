@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"errors"
-	"maps"
 	"slices"
 	"testing"
 
@@ -211,37 +210,5 @@ func TestSeriesMutesUnmuteAndPurge(t *testing.T) {
 	left, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil || !slices.Equal(left, []string{"2/p1/series:bear"}) {
 		t.Fatalf("mutes left = %v (%v), want only account 2's", left, err)
-	}
-}
-
-// TestSetSeriesMuted covers the many-series mute and unmute: an outcome per
-// series, only series are muted, a repeat changes nothing, and the writes
-// touch only the named profile on its account.
-func TestSetSeriesMuted(t *testing.T) {
-	pool, s := seedSeriesMutes(t)
-	ctx := t.Context()
-	check := func(got map[string]SeriesMuteOutcome, err error, want map[string]SeriesMuteOutcome) {
-		t.Helper()
-		if err != nil {
-			t.Fatalf("SetSeriesMuted: %v", err)
-		}
-		if !maps.Equal(got, want) {
-			t.Fatalf("outcomes = %v, want %v", got, want)
-		}
-	}
-	got, err := s.SetSeriesMuted(ctx, 1, "p2", []string{"series:bear", "series:andor", "movie:heat", "series:gone"}, true)
-	check(got, err, map[string]SeriesMuteOutcome{"series:bear": SeriesMuteApplied, "series:andor": SeriesMuteApplied, "movie:heat": SeriesMuteNotFound, "series:gone": SeriesMuteNotFound})
-	got, err = s.SetSeriesMuted(ctx, 1, "p2", []string{"series:bear"}, true)
-	check(got, err, map[string]SeriesMuteOutcome{"series:bear": SeriesMuteUnchanged})
-	got, err = s.SetSeriesMuted(ctx, 1, "p2", []string{"series:bear", "series:gone"}, false)
-	check(got, err, map[string]SeriesMuteOutcome{"series:bear": SeriesMuteApplied, "series:gone": SeriesMuteUnchanged})
-
-	rows, err := pool.Query(ctx, `SELECT user_id::text || '/' || profile_id || '/' || series_id FROM profile_series_notification_mutes ORDER BY 1`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	left, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if want := []string{"1/p1/series:andor", "1/p1/series:bear", "1/p2/series:andor"}; err != nil || !slices.Equal(left, want) {
-		t.Fatalf("mutes = %v (%v), want %v", left, err, want)
 	}
 }

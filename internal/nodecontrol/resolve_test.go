@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -19,7 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
-	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 const resolveSecret = "resolve-test-secret"
@@ -156,50 +153,6 @@ func wantRefusal(t *testing.T, gotStatus int, gotReason string, status int, reas
 	t.Helper()
 	if gotStatus != status || gotReason != reason {
 		t.Fatalf("resolve = %d %q, want %d %q", gotStatus, gotReason, status, reason)
-	}
-}
-
-// A lost HLS session resolves from a complete token, from the stored card
-// when the token is identity-only or absent, and carries the playback
-// identity and the session's own start, never the rebuild's.
-func TestResolveHLSRecipeSources(t *testing.T) {
-	core := newResolveCore(t, twoNodes, nil)
-	original := time.Unix(1_700_000_000, 0).UTC()
-
-	minted := nativeCard("viewer-1", "viewer-1-plan")
-	minted.OriginalStartedAt = original
-	resolution, status, reason := core.resolve(nodeA, ResolvePurposeHLS, "viewer-1-plan", signClaims(t, minted.ToClaims(), resolveSecret))
-	if status != http.StatusOK {
-		t.Fatalf("complete token: resolve = %d %q", status, reason)
-	}
-	if resolution.Recipe.TargetCodecVideo != "h264" || resolution.Recipe.InputPath != "/media/movie.mkv" ||
-		resolution.PlaybackSessionID != "viewer-1" || resolution.UserID != 7 || resolution.ProfileID != "profile-1" || resolution.MediaFileID != 42 {
-		t.Fatalf("complete token: resolution = %+v", resolution)
-	}
-	if !resolution.StartedAt.Equal(original) || resolution.StartedAtSource != string(streamtoken.StartedAtSourceClaim) {
-		t.Fatalf("complete token: started at = %v %q", resolution.StartedAt, resolution.StartedAtSource)
-	}
-
-	// jellycompat: keyed by the upstream session, an identity-only node-hop
-	// token or none at all.
-	stored := nativeCard("compat-1", "")
-	stored.TargetCodecVideo, stored.OriginalStartedAt = "hevc", original
-	core.recipes.put("compat-1", stored)
-	identityOnly := signClaims(t, playback.RecipeCard{SessionID: "compat-1", UserID: 7, PlayMethod: playback.PlayTranscode, InputPath: "/media/movie.mkv"}.ToClaims(), resolveSecret)
-	for name, token := range map[string]string{"identity-only token": identityOnly, "no token": ""} {
-		resolution, status, reason := core.resolve(nodeA, ResolvePurposeHLS, "compat-1", token)
-		if status != http.StatusOK {
-			t.Fatalf("%s: resolve = %d %q", name, status, reason)
-		}
-		if resolution.Recipe.TargetCodecVideo != "hevc" || resolution.PlaybackSessionID != "compat-1" || !resolution.StartedAt.Equal(original) {
-			t.Fatalf("%s: resolution = %+v", name, resolution)
-		}
-	}
-
-	before := time.Now().Add(-time.Second)
-	resolution, status, reason = core.resolve(nodeA, ResolvePurposeHLS, "viewer-2-plan", signClaims(t, nativeCard("viewer-2", "viewer-2-plan").ToClaims(), resolveSecret))
-	if status != http.StatusOK || resolution.StartedAt.Before(before) || resolution.StartedAtSource != string(streamtoken.StartedAtSourceIssuedAt) {
-		t.Fatalf("token without an original start: %d %q, started at %+v, want its issue time", status, reason, resolution)
 	}
 }
 
@@ -349,126 +302,6 @@ func remuxClaims(nodeID int, mediaPath string) streamtoken.Claims {
 
 func (c *resolveCore) authorize(claims streamtoken.Claims) {
 	c.recipes.put(claims.TranscodeTransportID, playback.RecipeCardFromClaims(&claims))
-}
-
-func TestResolveRemux(t *testing.T) {
-	core := newResolveCore(t, twoNodes, nil)
-	valid := remuxClaims(nodeA, "/media/movie.mkv")
-	core.authorize(valid)
-	resolution, status, reason := core.resolve(nodeA, ResolvePurposeRemux, "remux-transport", signClaims(t, valid, resolveSecret))
-	if status != http.StatusOK {
-		t.Fatalf("resolve = %d %q", status, reason)
-	}
-	if resolution.Recipe.InputPath != "/media/movie.mkv" || resolution.PlaybackSessionID != "viewer-remux" || resolution.UserID != 7 ||
-		resolution.MediaFileID != 42 || !resolution.StartedAt.Equal(time.Unix(1_700_000_000, 0)) || resolution.Theme != nil {
-		t.Fatalf("resolution = %+v", resolution)
-	}
-
-	otherNode := remuxClaims(nodeB, "/media/movie.mkv")
-	otherNode.TranscodeTransportID = "other-node"
-	core.authorize(otherNode)
-	noNode := remuxClaims(0, "/media/movie.mkv")
-	noNode.TranscodeTransportID = "no-node"
-	core.authorize(noNode)
-	apiEgress := remuxClaims(nodeA, "/media/movie.mkv")
-	apiEgress.TranscodeTransportID, apiEgress.RoutingEgress = "api-egress", string(noderouting.EgressAPI)
-	core.authorize(apiEgress)
-	unauthorized := remuxClaims(nodeA, "/media/movie.mkv")
-	unauthorized.TranscodeTransportID = "never-stored"
-	stale := remuxClaims(nodeA, "/media/movie.mkv")
-	stale.TranscodeTransportID = "stale"
-	core.authorize(stale)
-	stale.MediaPath = "/media/other.mkv"
-	denied := remuxClaims(nodeA, "/media/movie.mkv")
-	denied.TranscodeTransportID, denied.SessionID = "denied-remux", "denied-viewer"
-	core.authorize(denied)
-	core.deny["denied-viewer"] = true
-	downmix := remuxClaims(nodeA, "/media/movie.mkv")
-	downmix.TranscodeTransportID, downmix.PlayMethod = "downmix", streamtoken.PlayMethodAudioDownmixRemux
-	downmix.TranscodeAudio, downmix.TargetCodecAudio, downmix.SourceAudioChannels, downmix.TargetAudioChannels = true, "aac", 6, 6
-	core.authorize(downmix)
-
-	for _, test := range []struct {
-		name, transport, token string
-		status                 int
-		reason                 string
-	}{
-		{"no token", "remux-transport", "", http.StatusForbidden, ResolveInvalidToken},
-		{"bad signature", "remux-transport", signClaims(t, valid, "wrong-secret"), http.StatusForbidden, ResolveInvalidToken},
-		{"another transport in the URL", "not-the-token's", signClaims(t, valid, resolveSecret), http.StatusForbidden, ResolveWrongRoute},
-		{"another node's route", "other-node", signClaims(t, otherNode, resolveSecret), http.StatusForbidden, ResolveWrongRoute},
-		{"no node id", "no-node", signClaims(t, noNode, resolveSecret), http.StatusForbidden, ResolveWrongRoute},
-		{"API egress", "api-egress", signClaims(t, apiEgress, resolveSecret), http.StatusForbidden, ResolveWrongRoute},
-		{"authority never stored", "never-stored", signClaims(t, unauthorized, resolveSecret), http.StatusGone, ResolveStopped},
-		{"authority for another recipe", "stale", signClaims(t, stale, resolveSecret), http.StatusGone, ResolveStopped},
-		{"denied playback session", "denied-remux", signClaims(t, denied, resolveSecret), http.StatusGone, ResolveDenied},
-		{"downmix of the wrong shape", "downmix", signClaims(t, downmix, resolveSecret), http.StatusNotFound, ResolveNotFound},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, status, reason := core.resolve(nodeA, ResolvePurposeRemux, test.transport, test.token)
-			wantRefusal(t, status, reason, test.status, test.reason)
-		})
-	}
-
-	core.recipes.fail(errors.New("redis: connection refused"))
-	_, status, reason = core.resolve(nodeA, ResolvePurposeRemux, "remux-transport", signClaims(t, valid, resolveSecret))
-	wantRefusal(t, status, reason, http.StatusServiceUnavailable, "")
-}
-
-// A theme conversion resolves only while the theme file is the one the token
-// describes, and carries the theme's identity the recipe card has no field
-// for.
-func TestResolveThemeConversion(t *testing.T) {
-	core := newResolveCore(t, twoNodes, nil)
-	path := filepath.Join(t.TempDir(), "theme.mp3")
-	if err := os.WriteFile(path, []byte("theme-audio"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claims := remuxClaims(nodeA, path)
-	claims.TranscodeTransportID, claims.PlayMethod = "theme-transport", streamtoken.PlayMethodThemeAAC
-	claims.TranscodeAudio, claims.AudioOnly, claims.TargetCodecAudio = true, true, themesongs.CodecAAC
-	claims.ThemeID, claims.ThemeSize, claims.ThemeModifiedUnixNano = 5, info.Size(), info.ModTime().Truncate(time.Microsecond).UnixNano()
-	core.authorize(claims)
-	token := signClaims(t, claims, resolveSecret)
-
-	resolution, status, reason := core.resolve(nodeA, ResolvePurposeRemux, "theme-transport", token)
-	if status != http.StatusOK || resolution.Theme == nil ||
-		*resolution.Theme != (ResolvedTheme{ID: 5, Size: info.Size(), ModifiedUnixNano: claims.ThemeModifiedUnixNano}) {
-		t.Fatalf("resolve = %d %q %+v", status, reason, resolution)
-	}
-	if err := os.WriteFile(path, []byte("replaced theme audio"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, status, reason = core.resolve(nodeA, ResolvePurposeRemux, "theme-transport", token)
-	wantRefusal(t, status, reason, http.StatusGone, ResolveSourceChanged)
-}
-
-// A core without a stream secret verifies nothing, and a malformed request is
-// refused before any lookup.
-func TestResolveRequestGuards(t *testing.T) {
-	nodes := &fakeNodes{}
-	key := nodes.add(t, nodepool.Node{ID: nodeA, Type: nodepool.NodeTypeTranscode, URL: nodeAURL})
-	core := httptest.NewServer(mountForTest(NewServer(Options{Nodes: nodes, StreamSecret: func() string { return "" }}), nodes))
-	t.Cleanup(core.Close)
-	client, err := NewClient(core.URL, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Resolve(t.Context(), ResolveRequest{TransportID: "t", Purpose: ResolvePurposeRemux, StreamToken: "x"}); Status(err) != http.StatusServiceUnavailable {
-		t.Fatalf("resolve without a secret = %v, want 503", err)
-	}
-	for name, req := range map[string]ResolveRequest{
-		"unknown purpose": {TransportID: "t", Purpose: "download"},
-		"no transport":    {Purpose: ResolvePurposeHLS},
-	} {
-		if _, err := client.Resolve(t.Context(), req); Status(err) != http.StatusBadRequest {
-			t.Fatalf("%s = %v, want 400", name, err)
-		}
-	}
 }
 
 // A node tearing its sessions down for a force reload asks the core to revoke

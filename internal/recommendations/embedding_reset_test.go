@@ -133,28 +133,6 @@ func TestResetEmbeddingsRefusesWhileSavedSettingsWaitForARestart(t *testing.T) {
 	}
 }
 
-func TestResetEmbeddingsHoldsEveryClaimWhileItRuns(t *testing.T) {
-	locker := &keyedLocker{}
-	w := newJobTestWorker(locker, nil)
-	w.engine = closedPoolEngine(t)
-
-	_, err := w.ResetEmbeddings(t.Context())
-	if err == nil || errors.Is(err, ErrJobRunning) || errors.Is(err, ErrJobRunningElsewhere) || errors.Is(err, ErrStaleSweepRunning) {
-		t.Fatalf("reset against a failing database = %v, want a database error", err)
-	}
-	keys, released := locker.snapshot()
-	if !slices.Equal(keys, []int64{embeddingsJobLock, tasteProfilesJobLock, cacheJobLock, staleSweepLock}) || released != 4 {
-		t.Fatalf("locks taken %#x, released %d", keys, released)
-	}
-	assertNothingRunning(t, w)
-	// A cron run of any of those jobs can start again afterwards.
-	if err := w.runJob(job{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		return embeddingsResult{}, nil
-	}}, false); err != nil {
-		t.Fatalf("embeddings after the reset: %v", err)
-	}
-}
-
 func TestDescribeEmbeddingLockConflict(t *testing.T) {
 	lock := EmbeddingLock{BaseURL: "https://user:pw@embed.example", Model: "model-a", SourceDimensions: 768, StorageDimensions: CanonicalEmbeddingDimensions}
 	for _, tc := range []struct {

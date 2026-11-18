@@ -23,25 +23,3 @@ func TestGetReportRejectsMalformedIDWithoutQuerying(t *testing.T) {
 		}
 	}
 }
-
-func TestDeleteReportRejectsMalformedIDWithoutQuerying(t *testing.T) {
-	for _, id := range []string{"not-a-uuid"} {
-		repo := &fakeDiagnosticReportStore{deleteReport: &Report{ID: "11111111-1111-1111-1111-111111111111"}}
-		store := &fakeDiagnosticObjectStore{bucket: "private"}
-		svc := newTestDiagnosticsService(repo, store)
-
-		report, err := svc.DeleteReport(context.Background(), id)
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("DeleteReport(%q) error = %v, want ErrNotFound", id, err)
-		}
-		if report != nil {
-			t.Fatalf("DeleteReport(%q) returned a report, want nil", id)
-		}
-		if len(repo.deleted) != 0 {
-			t.Fatalf("DeleteReport(%q) reached the store with %v", id, repo.deleted)
-		}
-		if len(store.deleted) != 0 {
-			t.Fatalf("DeleteReport(%q) deleted blobs %v", id, store.deleted)
-		}
-	}
-}

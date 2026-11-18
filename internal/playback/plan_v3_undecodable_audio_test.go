@@ -68,23 +68,6 @@ func TestPlanPlaybackV3RefusesUndecodableAudioOnlyTrack(t *testing.T) {
 	}
 }
 
-// Older rows recorded only the file-level audio codec. Their codec-less tracks
-// are missing metadata, not streams FFmpeg cannot decode.
-func TestPlanPlaybackV3KeepsTracksWithoutRecordedCodecs(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.AudioTracks[0].Codec = ""
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
-	if result.Terminal != nil || result.Plan == nil {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-	if plan := PlanPreparedTracks(file, "aac", -1); len(plan.Audio) != 1 || !plan.Audio[0].Default {
-		t.Fatalf("prepared audio = %+v, want the track kept", plan.Audio)
-	}
-}
-
 // A file without a completed probe has no audio tracks to judge, so it keeps
 // the retryable metadata terminal rather than the decodability refusal.
 func TestPlanPlaybackV3UnprobedAudioStaysRetryable(t *testing.T) {

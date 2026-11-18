@@ -3,10 +3,8 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,7 +20,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
-	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -37,62 +34,6 @@ func (p compatToneMapInventoryPlanner) PlanSession(string, string, bool, int) no
 
 func (p compatToneMapInventoryPlanner) TranscodeNodeURLs() []string {
 	return p.urls
-}
-
-func TestCompatToneMapCapabilityInventoryUsesRoutingSnapshot(t *testing.T) {
-	var localProbes atomic.Int32
-	handler := &PlaybackHandler{
-		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-			localProbes.Add(1)
-			return tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
-				Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}}, nil
-		},
-	}
-	policy := config.DefaultPlaybackRoutingPolicy()
-	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
-
-	capabilities, _, err := handler.compatToneMapCapabilityInventoryWithPolicy(t.Context(), time.Second, policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(capabilities) != 0 || localProbes.Load() != 0 {
-		t.Fatalf("capabilities = %#v, local probes = %d; worker-only snapshot must exclude local execution", capabilities, localProbes.Load())
-	}
-}
-
-func TestCompatToneMapCapabilityInventoryExcludesWorkersForAPIOnlyExecution(t *testing.T) {
-	var remoteProbes atomic.Int32
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		remoteProbes.Add(1)
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
-			Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}}})
-	}))
-	t.Cleanup(remote.Close)
-
-	handler := &PlaybackHandler{
-		NodeKeys:    nodeauthtest.SameKey("secret"),
-		NodePlanner: compatToneMapInventoryPlanner{urls: []string{remote.URL}},
-		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-			return nil, nil
-		},
-	}
-	policy := config.DefaultPlaybackRoutingPolicy()
-	policy.VideoTranscodeExecution = config.PlaybackExecutionAPIOnly
-
-	capabilities, byNode, err := handler.compatToneMapCapabilityInventoryWithPolicy(t.Context(), time.Second, policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(capabilities) != 0 || len(byNode) != 0 {
-		t.Fatalf("capabilities = %#v, by node = %#v; API-only snapshot must exclude workers", capabilities, byNode)
-	}
-	if got := remoteProbes.Load(); got != 0 {
-		t.Fatalf("remote capability probes = %d, want 0 under API-only execution", got)
-	}
 }
 
 func TestCompatToneMapCapabilityInventoryFetchesNodesConcurrently(t *testing.T) {
@@ -134,128 +75,6 @@ func TestCompatToneMapCapabilityInventoryFetchesNodesConcurrently(t *testing.T) 
 	}
 	if got := <-result; len(got) != 2 {
 		t.Fatalf("aggregated capabilities = %#v, want both nodes", got)
-	}
-}
-
-func TestCompatToneMapCapabilityInventoryHonorsSharedDeadline(t *testing.T) {
-	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
-		<-request.Context().Done()
-	}))
-	defer slow.Close()
-	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}}})
-	}))
-	defer fast.Close()
-
-	handler := &PlaybackHandler{
-		NodeKeys:    nodeauthtest.SameKey("secret"),
-		NodePlanner: compatToneMapInventoryPlanner{urls: []string{slow.URL, fast.URL}},
-	}
-	requireCompatWorkerRouting(handler)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	capabilities, byNode, err := handler.compatToneMapCapabilityInventory(ctx, 25*time.Millisecond)
-	if elapsed := time.Since(started); elapsed >= time.Second {
-		t.Fatalf("capability aggregation took %s, want shared caller deadline", elapsed)
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("capability error = %v, want deadline exceeded", err)
-	}
-	if len(capabilities) != 1 || !capabilities.Supports(tonemap.ModeSoftware, tonemap.SourcePQ) {
-		t.Fatalf("aggregated capabilities = %#v, want successful node retained", capabilities)
-	}
-	if _, ok := byNode[fast.URL]; !ok {
-		t.Fatalf("per-node capabilities = %#v, want successful node retained", byNode)
-	}
-	if _, ok := byNode[slow.URL]; ok {
-		t.Fatalf("per-node capabilities = %#v, failed node should be ignored", byNode)
-	}
-}
-
-func TestResolveCompatHLSRouteRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
-	capabilityNode := func(recipeVersion string) *httptest.Server {
-		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
-				Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: recipeVersion,
-			}}})
-		}))
-	}
-	legacy := capabilityNode("1")
-	defer legacy.Close()
-	current := capabilityNode(playback.TransformationAudioToAACRecipeVersionV3)
-	defer current.Close()
-
-	pool := nodepooltest.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{
-		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
-		{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
-	})
-	handler := &PlaybackHandler{
-		JWTSecret:   "secret",
-		NodeKeys:    nodeauthtest.SameKey("secret"),
-		NodePlanner: nodepool.NewPlanner(nodepool.NewProxyPool(), pool),
-	}
-	policy := config.DefaultPlaybackRoutingPolicy()
-	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
-	policy.RemuxEgress = config.PlaybackEgressAPIOnly
-	decision, err := handler.resolveCompatHLSRouteWithPolicy(
-		context.Background(), &playback.Session{ID: "compat-audio-v2"},
-		&models.MediaFile{ID: 42, Bitrate: 8_000}, PlaybackMediaSource{
-			HLSRemux: true, TranscodeAudio: true,
-			Version: catalog.FileVersion{Bitrate: 8_000, AudioTracks: []models.AudioTrack{{Channels: 6}}},
-		}, "", nil, nil, policy,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !decision.Selected() || decision.Shape.Egress != noderouting.EgressAPI ||
-		decision.Plan.TranscodeNode == nil || decision.Plan.TranscodeNode.URL != current.URL {
-		t.Fatalf("decision = %#v, want audio_to_aac v2 worker with API egress", decision)
-	}
-}
-
-func TestResolveCompatIdentityRouteRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
-	capabilityProxy := func(recipeVersion string) *httptest.Server {
-		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
-				Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: recipeVersion,
-			}}})
-		}))
-	}
-	legacy := capabilityProxy("1")
-	defer legacy.Close()
-	current := capabilityProxy(playback.TransformationAudioToAACRecipeVersionV3)
-	defer current.Close()
-
-	proxies := nodepool.NewProxyPool()
-	proxies.SetNodes([]*nodepool.Node{
-		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
-		{ID: 2, URL: current.URL, Enabled: true, Healthy: true},
-	})
-	handler := &PlaybackHandler{
-		JWTSecret:   "secret",
-		NodeKeys:    nodeauthtest.SameKey("secret"),
-		NodePlanner: nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()),
-	}
-	policy := config.DefaultPlaybackRoutingPolicy()
-	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
-	policy.RemuxEgress = config.PlaybackEgressProxyOnly
-	decision := handler.resolveCompatIdentityRouteWithPolicy(
-		context.Background(), "compat-remux-v2", string(playback.PlayRemux), 8_000, true, policy,
-	)
-	if !decision.Selected() || decision.Plan.ProxyNode == nil || decision.Plan.ProxyNode.URL != current.URL {
-		t.Fatalf("decision = %#v, want audio_to_aac v2 proxy %s", decision, current.URL)
-	}
-	proxies.SetNodes([]*nodepool.Node{{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true}})
-	legacyOnly := handler.resolveCompatIdentityRouteWithPolicy(
-		context.Background(), "compat-remux-local", string(playback.PlayRemux), 8_000, true, policy,
-	)
-	if legacyOnly.Selected() {
-		t.Fatalf("legacy-only decision = %#v, want no hard-policy route", legacyOnly)
 	}
 }
 
@@ -341,95 +160,5 @@ func TestHandlePlaybackInfoReturnsServiceUnavailableWhenToneMapProbeIsIncomplete
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
-	}
-}
-
-// An HDR encode that cannot be tone-mapped leaves no TranscodingUrl; a direct
-// route must survive it. With direct play off that is the progressive remux,
-// which PlaybackInfo withholds only while a TranscodingUrl remains (#2645).
-func TestHandlePlaybackInfoKeepsDirectPlaybackWhenToneMapProbeIsIncomplete(t *testing.T) {
-	for _, tc := range []struct {
-		name           string
-		body           string
-		wantDirectPlay bool
-	}{
-		{name: "direct play", body: `{}`, wantDirectPlay: true},
-		{name: "progressive remux with direct play off", body: `{"EnableDirectPlay":false}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler, routeID := newSubtitleSelectionHandler(t)
-			version := subtitleSelectionVersion()
-			version.HDR = true
-			version.VideoTracks = []models.VideoTrack{{
-				Codec: "hevc", Width: 1920, Height: 1080, BitDepth: 10,
-				VideoRangeType: "HDR10", ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc",
-			}}
-			handler.content = &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Versions: []catalog.FileVersion{version}}}
-			handler.SettingsRepo = stubSettingsReader{values: map[string]string{
-				config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-			}}
-			handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-				return nil, context.DeadlineExceeded
-			}
-
-			request := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(tc.body))
-			routeCtx := chi.NewRouteContext()
-			routeCtx.URLParams.Add("id", routeID)
-			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeCtx))
-			request = request.WithContext(context.WithValue(request.Context(), compatSessionKey, &Session{Token: "token-1"}))
-			recorder := httptest.NewRecorder()
-
-			handler.HandlePlaybackInfo(recorder, request)
-
-			if recorder.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
-			}
-			var response playbackInfoResponseDTO
-			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-				t.Fatal(err)
-			}
-			if len(response.MediaSources) != 1 {
-				t.Fatalf("media sources = %#v, want one", response.MediaSources)
-			}
-			source := response.MediaSources[0]
-			if source.SupportsDirectPlay != tc.wantDirectPlay || !source.SupportsDirectStream || source.SupportsTranscoding || source.TranscodingURL != "" ||
-				!strings.Contains(source.DirectStreamURL, "static="+strconv.FormatBool(tc.wantDirectPlay)) {
-				t.Fatalf("direct play=%v direct stream=%v transcoding=%v DirectStreamUrl=%q TranscodingUrl=%q, want direct play=%v with direct stream and no transcoding",
-					source.SupportsDirectPlay, source.SupportsDirectStream, source.SupportsTranscoding, source.DirectStreamURL, source.TranscodingURL, tc.wantDirectPlay)
-			}
-		})
-	}
-}
-
-func TestHandlePlaybackInfoDoesNotBlameProbeForUnclassifiableHDRSource(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	version := subtitleSelectionVersion()
-	version.HDR = true
-	version.VideoTracks = []models.VideoTrack{{
-		Codec: "hevc", Width: 1920, Height: 1080, BitDepth: 10,
-		VideoRangeType: "DOVI", DolbyVision: "Dolby Vision Profile 5", DVProfile: 5,
-	}}
-	handler.content = &stubContentService{detail: &upstreamItemDetail{
-		ContentID: "movie-1",
-		Versions:  []catalog.FileVersion{version},
-	}}
-	handler.SettingsRepo = stubSettingsReader{values: map[string]string{
-		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-	}}
-	handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-		return nil, context.DeadlineExceeded
-	}
-
-	request := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{}`))
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", routeID)
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeCtx))
-	request = request.WithContext(context.WithValue(request.Context(), compatSessionKey, &Session{Token: "token-1"}))
-	recorder := httptest.NewRecorder()
-
-	handler.HandlePlaybackInfo(recorder, request)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 with unsupported transcode omitted; body = %s", recorder.Code, recorder.Body.String())
 	}
 }

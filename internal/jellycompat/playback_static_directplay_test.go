@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	"errors"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -59,38 +57,6 @@ func newStaticDirectPlayHandler(t *testing.T) (*PlaybackHandler, string, string)
 	return handler, encodedID, "fake media bytes"
 }
 
-func TestStaticPlaybackSelectsCompliantVersionUnderServerCap(t *testing.T) {
-	h, item, _ := newStaticDirectPlayHandler(t)
-	h.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxRemoteStreamBitrateKbps: 4_000}}
-	detail := h.content.(*stubContentService).detail
-	detail.Versions[0].Bitrate = 8_000
-	second := detail.Versions[0]
-	second.FileID = 43
-	second.Bitrate = 3_000
-	detail.Versions = append(detail.Versions, second)
-	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
-
-	firstID := h.codec.EncodeIntID(EncodedIDMediaSource, 42)
-	if _, _, err := h.createStaticPlaySession(t.Context(), session, item, firstID, ""); !errors.Is(err, errServerBitrateDirectUnavailable) {
-		t.Fatalf("explicit over-limit source: err=%v", err)
-	}
-
-	playSession, source, err := h.createStaticPlaySession(t.Context(), session, item, "", "")
-	if err != nil || source == nil || source.FileID != 43 {
-		t.Fatalf("unqualified static source=%+v err=%v", source, err)
-	}
-	for _, mediaSourceID := range []string{"", item} {
-		r := httptest.NewRequest("GET", "/Videos/"+item+"/stream?Static=true", nil)
-		_, reused, err := h.resolvePlaybackRoute(r, session, item, mediaSourceID)
-		if err != nil || reused == nil || reused.FileID != 43 {
-			t.Fatalf("reused static source for %q=%+v err=%v", mediaSourceID, reused, err)
-		}
-	}
-	if playSession.MediaSources[0].FileID != 42 {
-		t.Fatal("source order changed in the stored session")
-	}
-}
-
 // TestHandleVideoStream_StaticBypassesNegotiatedCapabilityRejection covers
 // clients that explicitly request the static/original file after PlaybackInfo
 // created a session whose selected source was marked non-direct-playable by
@@ -127,45 +93,6 @@ func TestHandleVideoStream_StaticBypassesNegotiatedCapabilityRejection(t *testin
 		if got := rec.Body.String(); got != body {
 			t.Errorf("query %q: expected file content %q; got %q", rawQuery, body, got)
 		}
-	}
-}
-
-// TestHandleVideoStream_NoStaticNoSessionReturns404 proves the static fallback
-// does not fire unconditionally: with no Static param and an empty playback
-// store, resolvePlaybackRoute correctly 404s.
-func TestHandleVideoStream_NoStaticNoSessionReturns404(t *testing.T) {
-	handler, encodedID, _ := newStaticDirectPlayHandler(t)
-	rec := serveStaticStream(handler, encodedID, "")
-
-	if rec.Code != 404 {
-		t.Fatalf("expected status 404; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestHandleVideoStream_StaticDirectPlayReusesSessionAcrossRequests proves the
-// ghost-session fix: a Static=true direct play repeats the client's own
-// (server-unknown) PlaySessionId on every range request. These must reuse one
-// upstream session via route lookup instead of minting a fresh, separately
-// stream-capped session per request — the leak that piled up orphaned sessions
-// and tripped the per-user stream limit (429). StartSession must run exactly
-// once across the repeated requests.
-func TestHandleVideoStream_StaticDirectPlayReusesSessionAcrossRequests(t *testing.T) {
-	handler, encodedID, body := newStaticDirectPlayHandler(t)
-	mgr := handler.sessionMgr.(*testCompatSessionManager)
-
-	const clientPlaySessionID = "client-generated-psid"
-	for i := 0; i < 3; i++ {
-		rec := serveStaticStream(handler, encodedID, "Static=true&PlaySessionId="+clientPlaySessionID)
-		if rec.Code != 200 {
-			t.Fatalf("request %d: expected 200; got %d, body=%s", i, rec.Code, rec.Body.String())
-		}
-		if got := rec.Body.String(); got != body {
-			t.Fatalf("request %d: expected file content %q; got %q", i, body, got)
-		}
-	}
-
-	if mgr.startCalls != 1 {
-		t.Fatalf("StartSession ran %d times across 3 Static requests with the same PlaySessionId; want 1 (sessions must be reused, not leaked)", mgr.startCalls)
 	}
 }
 

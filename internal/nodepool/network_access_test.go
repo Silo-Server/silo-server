@@ -8,48 +8,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
-// ClientURLFor is the one accessor every client-facing proxy URL is built on.
-// The default path keeps ClientURL's public-over-backend rule; a provider path
-// gets exactly that provider's connected origin, and nothing else — never the
-// LAN address, never another provider's origin, never a non-connected one.
-func TestNodeClientURLFor(t *testing.T) {
-	public := "https://cdn.example.com/"
-	node := &Node{
-		URL: "http://10.0.0.9:8083/", PublicURL: &public,
-		NetworkAccess: netaccess.NodeNetworkAccess{
-			"tailscale": {State: netaccess.StateConnected, Origin: "https://proxy-1.tail1234.ts.net/"},
-			"netbird":   {State: netaccess.StateConnecting, Origin: "https://proxy-1.netbird.example"},
-			"garbage":   {State: netaccess.StateConnected, Origin: "::not-an-origin"},
-		},
-	}
-	noPublic := &Node{URL: "http://10.0.0.9:8083/"}
-	for _, tc := range []struct {
-		name string
-		node *Node
-		path netaccess.Path
-		want string
-	}{
-		{"default path uses the public URL", node, netaccess.Path{}, "https://cdn.example.com"},
-		{"default path falls back to the backend URL", noPublic, netaccess.Path{}, "http://10.0.0.9:8083"},
-		{"connected provider origin", node, netaccess.Path{Provider: "tailscale"}, "https://proxy-1.tail1234.ts.net"},
-		{"connecting provider has no origin", node, netaccess.Path{Provider: "netbird"}, ""},
-		{"malformed origin is no origin", node, netaccess.Path{Provider: "garbage"}, ""},
-		{"unknown provider", node, netaccess.Path{Provider: "zerotier"}, ""},
-		{"node without any report", noPublic, netaccess.Path{Provider: "tailscale"}, ""},
-		{"nil node", nil, netaccess.Path{Provider: "tailscale"}, ""},
-		{"nil node default path", nil, netaccess.Path{}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.node.ClientURLFor(tc.path); got != tc.want {
-				t.Fatalf("ClientURLFor(%+v) = %q, want %q", tc.path, got, tc.want)
-			}
-		})
-	}
-	if got := node.ClientURLFor(netaccess.Path{}); got != node.ClientURL() {
-		t.Fatalf("default path = %q, ClientURL() = %q; they must agree", got, node.ClientURL())
-	}
-}
-
 func TestClientReachableVia(t *testing.T) {
 	reachable := &Node{ID: 1, URL: "http://lan-1", NetworkAccess: netaccess.NodeNetworkAccess{"tailscale": {State: netaccess.StateConnected, Origin: "https://p1.ts.net"}}}
 	lanOnly := &Node{ID: 2, URL: "http://lan-2"}

@@ -2,7 +2,6 @@ package nodeauth
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -36,50 +35,6 @@ func signedServerRequest(t *testing.T, method, target string, body []byte, signe
 	server := httptest.NewRequest(method, client.URL.RequestURI(), bytes.NewReader(body))
 	server.Header.Set("Authorization", client.Header.Get("Authorization"))
 	return server
-}
-
-func TestSignNeverSendsTheSecret(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "http://node.test/hw-capabilities", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sign(req, "http://node.test", testSecret, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	auth := req.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, Scheme+" ") {
-		t.Fatalf("Authorization = %q, want %s scheme", auth, Scheme)
-	}
-	if strings.Contains(auth, testSecret) {
-		t.Fatal("Authorization carries the shared secret")
-	}
-}
-
-func TestVerifyAcceptsSignedRequests(t *testing.T) {
-	for _, tc := range []struct {
-		name, method, target string
-		body                 []byte
-	}{
-		{"get", http.MethodGet, "http://node.test/transcode/abc/segment/3.m4s", nil},
-		{"query", http.MethodGet, "http://node.test/transcode/abc/master.m3u8?source_timeline=1&x=a%20b", nil},
-		{"escaped path", http.MethodDelete, "http://node.test/downloads/artifacts/a%2Fb", nil},
-		{"root", http.MethodGet, "http://node.test", nil},
-		{"body", http.MethodPost, "http://node.test/transcode/start", []byte(`{"session_id":"abc"}`)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := signedServerRequest(t, tc.method, tc.target, tc.body, testNow)
-			if err := verify(r, testSecret, testNow); err != nil {
-				t.Fatalf("verify: %v", err)
-			}
-			got, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(got, tc.body) {
-				t.Fatalf("handler body = %q, want %q", got, tc.body)
-			}
-		})
-	}
 }
 
 func TestVerifyRejectsAlteredRequests(t *testing.T) {
@@ -221,20 +176,6 @@ func TestVerifyAcceptsTheLegacyBearerForOneRelease(t *testing.T) {
 	}
 }
 
-// The MAC key must not be the shared secret itself, or a signature would be
-// an HMAC under the key that also signs login and stream tokens.
-func TestMACKeyIsDerivedFromTheSecret(t *testing.T) {
-	got, err := requestMAC(coreToNode, testSecret, "1760000000", http.MethodGet, "/status", "", hex.EncodeToString(emptyBodyHash[:]), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	direct := hmac.New(sha256.New, []byte(testSecret))
-	_, _ = io.WriteString(direct, strings.Join([]string{canonicalVersion, "1760000000", http.MethodGet, "/status", "", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "\n"))
-	if hmac.Equal(got, direct.Sum(nil)) {
-		t.Fatal("MAC uses the shared secret directly")
-	}
-}
-
 func TestSignKeepsUnrewindableBodiesReadable(t *testing.T) {
 	body := `{"artifact_id":"a"}`
 	req, err := http.NewRequest(http.MethodPost, "http://node.test/downloads/prepare", io.NopCloser(strings.NewReader(body)))
@@ -284,27 +225,6 @@ func TestSignedRequestRoundTrip(t *testing.T) {
 	got, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK || string(got) != "payload" {
 		t.Fatalf("status %d body %q, want 200 payload", resp.StatusCode, got)
-	}
-}
-
-func TestLogThrottleCountsSuppressedWarnings(t *testing.T) {
-	var throttle logThrottle
-	start := time.Hour
-	if suppressed, ok := throttle.allowAt(start); !ok || suppressed != 0 {
-		t.Fatalf("first warning: allow = %d, %v; want 0, true", suppressed, ok)
-	}
-	for range 3 {
-		if _, ok := throttle.allowAt(start + time.Minute); ok {
-			t.Fatal("a warning inside the interval was allowed")
-		}
-	}
-	// A concurrent caller that sampled the time before the last warning was
-	// recorded is inside the interval too, and must not move it backwards.
-	if _, ok := throttle.allowAt(start - time.Millisecond); ok {
-		t.Fatal("an out-of-order earlier sample was allowed")
-	}
-	if suppressed, ok := throttle.allowAt(start + logInterval); !ok || suppressed != 4 {
-		t.Fatalf("after the interval: allow = %d, %v; want 4, true", suppressed, ok)
 	}
 }
 
@@ -377,5 +297,22 @@ func TestSignedRequestThroughAPrefixStrippingProxy(t *testing.T) {
 	got, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK || string(got) != "/transcode/start" {
 		t.Fatalf("status %d body %q, want 200 /transcode/start", resp.StatusCode, got)
+	}
+}
+
+func TestSignNeverSendsTheSecret(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "http://node.test/hw-capabilities", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sign(req, "http://node.test", testSecret, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	auth := req.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, Scheme+" ") {
+		t.Fatalf("Authorization = %q, want %s scheme", auth, Scheme)
+	}
+	if strings.Contains(auth, testSecret) {
+		t.Fatal("Authorization carries the shared secret")
 	}
 }

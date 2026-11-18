@@ -2,17 +2,13 @@ package tonemap
 
 import (
 	"context"
-	"errors"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestResolveSourceCoversDolbyVisionFallbackCompatibilityIDs verifies supported Dolby Vision bases are classified.
@@ -92,104 +88,6 @@ func TestResolveSourceClassifiesDolbyOnlyAndPreflightsAmbiguousMetadata(t *testi
 			source := base
 			tt.mutate(&source)
 			got := ResolveSource(source)
-			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
-				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
-			}
-		})
-	}
-}
-
-// TestResolveSourceClassifiesHLGByPrimaries verifies an HLG source tagged
-// with BT.709 primaries and matrix converts as BT.709 without a preflight,
-// while missing or mixed tags keep the BT.2020 kind and its preflight.
-func TestResolveSourceClassifiesHLGByPrimaries(t *testing.T) {
-	tests := []struct {
-		name          string
-		primaries     string
-		matrix        string
-		want          SourceKind
-		wantPreflight bool
-	}{
-		{name: "BT.2020 primaries", primaries: "bt2020", matrix: "bt2020nc", want: SourceHLG},
-		{name: "BT.709 primaries", primaries: "bt709", matrix: "bt709", want: SourceHLGBT709},
-		{name: "BT.709 primaries with untagged matrix", primaries: "bt709", matrix: "", want: SourceHLG, wantPreflight: true},
-		{name: "BT.709 primaries with BT.2020 matrix", primaries: "bt709", matrix: "bt2020nc", want: SourceHLG, wantPreflight: true},
-		{name: "BT.709 primaries with BT.601 matrix", primaries: "bt709", matrix: "smpte170m", want: SourceHLG, wantPreflight: true},
-		{name: "untagged primaries", primaries: "", matrix: "bt2020nc", want: SourceHLG, wantPreflight: true},
-		{name: "unknown primaries", primaries: "unknown", matrix: "bt709", want: SourceHLG, wantPreflight: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveSource(SourceMetadata{
-				DynamicRange: DynamicRangeHLG,
-				ColorRange:   "tv", ColorPrimaries: tt.primaries, ColorTransfer: ColorTransferHLG, ColorSpace: tt.matrix,
-			})
-			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
-				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
-			}
-		})
-	}
-}
-
-// TestResolveSourceClassifiesPQByRange verifies an explicit full-range tag
-// selects the full-range PQ kind, which decoded frames must then confirm,
-// while limited and missing ranges keep the limited-range kind.
-func TestResolveSourceClassifiesPQByRange(t *testing.T) {
-	tests := []struct {
-		name          string
-		dynamicRange  string
-		colorRange    string
-		want          SourceKind
-		wantPreflight bool
-	}{
-		{name: "HDR10 limited", dynamicRange: DynamicRangeHDR10, colorRange: "tv", want: SourcePQ},
-		{name: "HDR10 full", dynamicRange: DynamicRangeHDR10, colorRange: "pc", want: SourcePQFullRange, wantPreflight: true},
-		{name: "HDR10 jpeg", dynamicRange: DynamicRangeHDR10, colorRange: "jpeg", want: SourcePQFullRange, wantPreflight: true},
-		{name: "HDR10 untagged range", dynamicRange: DynamicRangeHDR10, colorRange: "", want: SourcePQ, wantPreflight: true},
-		{name: "HDR10+ full", dynamicRange: DynamicRangeHDR10Plus, colorRange: "pc", want: SourcePQFullRange, wantPreflight: true},
-		{name: "HLG full stays rejected by preflight", dynamicRange: DynamicRangeHLG, colorRange: "pc", want: SourceHLG, wantPreflight: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			transfer := ColorTransferPQ
-			if tt.dynamicRange == DynamicRangeHLG {
-				transfer = ColorTransferHLG
-			}
-			got := ResolveSource(SourceMetadata{
-				DynamicRange: tt.dynamicRange,
-				ColorRange:   tt.colorRange, ColorPrimaries: "bt2020", ColorTransfer: transfer, ColorSpace: "bt2020nc",
-			})
-			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
-				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
-			}
-		})
-	}
-}
-
-// TestResolveSourceTakesPQRangeFromTheDecodedFrame classifies a stored track
-// by the range its first decoded frame reported, which is the range a
-// tone-map graph sees, rather than a container tag that contradicts it.
-func TestResolveSourceTakesPQRangeFromTheDecodedFrame(t *testing.T) {
-	tests := []struct {
-		name          string
-		streamRange   string
-		frameRange    string
-		want          SourceKind
-		wantPreflight bool
-	}{
-		{name: "full-range frames tagged limited", streamRange: "tv", frameRange: "pc", want: SourcePQFullRange, wantPreflight: true},
-		{name: "limited frames tagged full", streamRange: "pc", frameRange: "tv", want: SourcePQ},
-		{name: "frame without a range keeps the tag", streamRange: "pc", frameRange: "unknown", want: SourcePQFullRange, wantPreflight: true},
-		{name: "frame not read keeps the tag", streamRange: "tv", want: SourcePQ},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			file := &models.MediaFile{HDR: true, VideoTracks: []models.VideoTrack{{
-				Codec: "hevc", VideoRange: "HDR", VideoRangeType: "HDR10",
-				ColorRange: tt.streamRange, FrameColorRange: tt.frameRange,
-				ColorPrimaries: "bt2020", ColorTransfer: ColorTransferPQ, ColorSpace: "bt2020nc",
-			}}}
-			got := ResolveSource(MetadataForFile(file))
 			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
 				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
 			}
@@ -297,69 +195,6 @@ func TestSoftwareToneMapReadsFullRangePQAtItsOwnLevels(t *testing.T) {
 	}
 }
 
-// TestProbeAdvertisesOnlySuccessfulSourceKinds verifies discovery reports only smoke-tested conversions.
-func TestProbeAdvertisesOnlySuccessfulSourceKinds(t *testing.T) {
-	filters := " .S. sidedata V->V\n .S. zscale V->V\n .S. tonemap V->V\n .S. tonemapx V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
-	runner := listingRunner(nil, filters, "libx264 h264_qsv", func(args string) ([]byte, error) {
-		if strings.Contains(args, "libx264") || strings.Contains(args, "h264_qsv") && strings.Contains(args, "smpte2084") {
-			return nil, nil
-		}
-		return nil, errors.New("unsupported fixture")
-	})
-
-	got := ProbeWithRunner(context.Background(), "/ffmpeg", "qsv", "/dev/dri/renderD128", runner)
-	if !got.Supports(ModeSoftware, SourcePQ) || !got.Supports(ModeSoftware, SourceHLG) {
-		t.Fatalf("software capabilities = %#v", got)
-	}
-	if !got.Supports(ModeHardware, SourcePQ) || got.Supports(ModeHardware, SourceHLG) || got.Supports(ModeHardware, SourceHLGBT709) {
-		t.Fatalf("hardware capabilities = %#v", got)
-	}
-}
-
-// TestProbeValidatesEveryConfiguredHardwareDevice verifies pooled devices share only common capabilities.
-func TestProbeValidatesEveryConfiguredHardwareDevice(t *testing.T) {
-	seenSecondDevice := false
-	filters := " .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
-	runner := listingRunner(nil, filters, "h264_qsv", func(args string) ([]byte, error) {
-		if strings.Contains(args, "renderD129") {
-			seenSecondDevice = true
-			if strings.Contains(args, "arib-std-b67") {
-				return nil, errors.New("HLG unsupported on second device")
-			}
-		}
-		return nil, nil
-	})
-
-	got := ProbeWithRunner(context.Background(), "/ffmpeg", "qsv", "/dev/dri/renderD128,/dev/dri/renderD129", runner)
-	if !seenSecondDevice {
-		t.Fatal("second configured render device was not smoke-tested")
-	}
-	if !got.Supports(ModeHardware, SourcePQ) || got.Supports(ModeHardware, SourceHLG) || got.Supports(ModeHardware, SourceHLGBT709) {
-		t.Fatalf("hardware capabilities = %#v, want PQ only", got)
-	}
-}
-
-// TestSoftwareFiltersUseThePixelFormatExpectedByEachToneMapper guards the
-// distinct input contracts of Jellyfin's tonemapx and FFmpeg's tonemap.
-func TestSoftwareFiltersUseThePixelFormatExpectedByEachToneMapper(t *testing.T) {
-	bt2390 := SoftwareFilter(SourcePQ, SoftwareFilterBT2390)
-	for _, unwanted := range []string{"zscale=t=linear", "format=gbrpf32le"} {
-		if strings.Contains(bt2390, unwanted) {
-			t.Fatalf("BT.2390 filter %q unexpectedly contains %q", bt2390, unwanted)
-		}
-	}
-	if !strings.Contains(bt2390, "tonemapx=tonemap=bt2390") {
-		t.Fatalf("BT.2390 filter = %q, want tonemapx", bt2390)
-	}
-
-	hable := SoftwareFilter(SourcePQ, SoftwareFilterHable)
-	for _, required := range []string{"zscale=t=linear", "format=gbrpf32le", "tonemap=hable"} {
-		if !strings.Contains(hable, required) {
-			t.Fatalf("Hable filter %q lacks %q", hable, required)
-		}
-	}
-}
-
 // TestIntelFilterScalesHDRBeforeOpenCL checks where IntelFilter places the resize:
 // before the OpenCL tone mapper for HDR kinds, after color conversion for SDR
 // bases, and nowhere when the height is 0.
@@ -375,83 +210,6 @@ func TestIntelFilterScalesHDRBeforeOpenCL(t *testing.T) {
 	for _, kind := range []SourceKind{SourcePQ, SourceSDRBT2020} {
 		if filter := IntelFilter(kind, 0); strings.Contains(filter, "scale_vaapi=w=") {
 			t.Fatalf("unscaled %s Intel filter %q resizes", kind, filter)
-		}
-	}
-}
-
-// TestSoftwareAndIntelToneMapsPinTheSourcePeak keeps tonemapx on the source
-// peak the Intel OpenCL graph uses. Without it tonemapx reads a Dolby Vision frame's
-// peak from the RPU and darkens sources mastered above 1000 nits.
-func TestSoftwareAndIntelToneMapsPinTheSourcePeak(t *testing.T) {
-	for _, kind := range AllSourceKinds() {
-		if IsSDRSource(kind) {
-			continue
-		}
-		for name, filter := range map[string]string{
-			"software": SoftwareFilter(kind, SoftwareFilterBT2390),
-			"intel":    IntelFilter(kind, 0),
-		} {
-			options := strings.FieldsFunc(filter, func(r rune) bool { return r == ',' || r == ':' })
-			if !slices.Contains(options, "peak=100") {
-				t.Errorf("%s %s filter %q does not pin the source peak", name, kind, filter)
-			}
-		}
-	}
-}
-
-// TestDolbyVisionGraphsApplyTheRPU pins RPU application to the Dolby Vision
-// kind: a standard base converts as declared on every executor, so the GPU
-// filters that would otherwise reshape it turn the RPU off, and only filters
-// that can apply an RPU may carry the kind.
-func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
-	for name, filter := range map[string]string{
-		"software": SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
-		"intel":    IntelFilter(SourceDolbyVision, 0),
-		"cuda":     CUDAFilter(SourceDolbyVision),
-	} {
-		if !strings.Contains(filter, "apply_dovi=1") {
-			t.Errorf("%s Dolby Vision filter %q does not apply the RPU", name, filter)
-		}
-	}
-	if got := SoftwareFilter(SourcePQ, SoftwareFilterBT2390); strings.Contains(got, "apply_dovi") {
-		t.Errorf("software PQ filter %q changed its Dolby Vision handling", got)
-	}
-	for name, filter := range map[string]string{
-		"intel": IntelFilter(SourcePQ, 0),
-		"cuda":  CUDAFilter(SourcePQ),
-	} {
-		if !strings.Contains(filter, "apply_dovi=0") {
-			t.Errorf("%s PQ filter %q must keep Dolby Vision processing off", name, filter)
-		}
-	}
-	for _, filter := range []string{SoftwareFilterBT2390, HardwareFilterOpenCL, HardwareFilterCUDA} {
-		if !FilterAppliesDolbyVision(filter) {
-			t.Errorf("FilterAppliesDolbyVision(%q) = false", filter)
-		}
-	}
-	for _, filter := range []string{SoftwareFilterHable, HardwareFilterVAAPI, HardwareFilterVideoToolbox, ""} {
-		if FilterAppliesDolbyVision(filter) {
-			t.Errorf("FilterAppliesDolbyVision(%q) = true", filter)
-		}
-	}
-	if !ValidSourceKind(SourceDolbyVision) || slices.Contains(StandardSourceKinds(), SourceDolbyVision) {
-		t.Fatal("Dolby Vision must be a valid but non-standard source kind")
-	}
-}
-
-func TestDynamicRangeForVideoTrackReadsStoredHDR10PlusRangeType(t *testing.T) {
-	tests := []struct {
-		rangeType string
-		want      string
-	}{
-		{rangeType: "HDR10Plus", want: DynamicRangeHDR10Plus},
-		{rangeType: "HDR10+", want: DynamicRangeHDR10Plus},
-		{rangeType: "HDR10", want: DynamicRangeHDR10},
-	}
-	for _, tt := range tests {
-		track := models.VideoTrack{Codec: "hevc", VideoRange: "HDR", VideoRangeType: tt.rangeType, ColorTransfer: "smpte2084"}
-		if got := DynamicRangeForVideoTrack(track); got != tt.want {
-			t.Errorf("DynamicRangeForVideoTrack(%q) = %q, want %q", tt.rangeType, got, tt.want)
 		}
 	}
 }

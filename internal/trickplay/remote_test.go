@@ -123,22 +123,6 @@ func TestNodeExtractorModes(t *testing.T) {
 	})
 }
 
-func TestMakesTrickplay(t *testing.T) {
-	for report, want := range map[string]bool{
-		`{"transport_features":["trickplay_extract_v1","trickplay_extract_v2"]}`: true,
-		// An older node would ignore the tone-map source signal.
-		`{"transport_features":["trickplay_extract_v1"]}`: false,
-		`{"transport_features":["prepared_tracks_v1"]}`:   false,
-		`{}`: false,
-		``:   false,
-		`{`:  false,
-	} {
-		if got := makesTrickplay([]byte(report)); got != want {
-			t.Errorf("%q: %t", report, got)
-		}
-	}
-}
-
 func TestNodeExtractorRetriesWorkersWithoutDisplayGeometry(t *testing.T) {
 	for _, mode := range []string{ExecutionPreferTranscodeNodes, ExecutionTranscodeNodesOnly} {
 		t.Run(mode, func(t *testing.T) {

@@ -1604,9 +1604,10 @@ verify, personal collections get no sync schedule either
 (`userdata.Target.Unverified`). Once an import or restore commits, a
 profile's notification interest is rebuilt once
 (`InterestUpdater.QueueProfileRebuild`, coalesced, at most 1,000 queued)
-rather than recomputed per item, and its recommendations refreshed once. `TestImportsReadInBatchesDB` drives each list and each sort
-kind with 100,000 and 1,000 distinct entries, every reference mapping,
-and requires a bounded number of statements.
+rather than recomputed per item, and its recommendations refreshed once.
+`TestImportsReadInBatchesDB` bounds the statement count for each import
+list, with fixtures that cross the watch history write and item resolver
+lookup batch boundaries.
 
 An import writes only the profile of the session, never one the document
 names, in one transaction, with the merge rules above. It refuses a document

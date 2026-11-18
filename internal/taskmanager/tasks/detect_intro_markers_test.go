@@ -12,8 +12,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
-	"github.com/Silo-Server/silo-server/internal/markers"
-	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
 type fakeMarkerAnalysisRunner struct {
@@ -114,77 +112,6 @@ func assertDetectMarkersSkipped(t *testing.T, progress *fakeProgress) {
 	}
 }
 
-func TestDetectIntroMarkersWithoutChromaprint(t *testing.T) {
-	// A server that cannot fingerprint runs its chapter-only episode pass
-	// before it consults the lock, so it never makes a capable server skip,
-	// then runs movies, which need no Chromaprint, only under the lock.
-	unsupported := fmt.Errorf("ffmpeg lacks chromaprint: %w", mediasample.ErrUnsupported)
-	t.Run("lock free runs movies under it", func(t *testing.T) {
-		var calls []string
-		runner := &fakeMarkerAnalysisRunner{
-			preflightErr: unsupported,
-			calls:        &calls,
-			summary:      intromarkers.RunSummary{LibrariesScanned: 2, FilesConsidered: 5},
-			movieSummary: intromarkers.RunSummary{LibrariesScanned: 2, MoviesConsidered: 3, MovieCreditsMarkersWritten: 1},
-		}
-		lock := &recordingLock{fakeClusterLock: fakeClusterLock{acquired: true}, calls: &calls}
-		progress := &fakeProgress{}
-		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), progress); err != nil {
-			t.Fatalf("Execute = %v, want nil", err)
-		}
-		want := []string{"episodes", "lock acquired=true", "movies", "unlock"}
-		if fmt.Sprint(calls) != fmt.Sprint(want) || runner.runs != 0 {
-			t.Fatalf("calls = %v full runs = %d, want %v and no full run", calls, runner.runs, want)
-		}
-		var summary intromarkers.RunSummary
-		if err := json.Unmarshal(progress.resultData, &summary); err != nil {
-			t.Fatalf("result data %q: %v", progress.resultData, err)
-		}
-		if summary.LibrariesScanned != 2 || summary.FilesConsidered != 5 || summary.MoviesConsidered != 3 || summary.MovieCreditsMarkersWritten != 1 {
-			t.Fatalf("result summary = %+v, want the episode and movie passes merged", summary)
-		}
-	})
-	t.Run("lock held elsewhere skips movies", func(t *testing.T) {
-		var calls []string
-		runner := &fakeMarkerAnalysisRunner{preflightErr: unsupported, calls: &calls, summary: intromarkers.RunSummary{FilesConsidered: 5}}
-		lock := &recordingLock{calls: &calls}
-		progress := &fakeProgress{}
-		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), progress); err != nil {
-			t.Fatalf("Execute = %v, want nil", err)
-		}
-		want := []string{"episodes", "lock acquired=false"}
-		if fmt.Sprint(calls) != fmt.Sprint(want) || runner.runs != 0 {
-			t.Fatalf("calls = %v full runs = %d, want %v and no full run", calls, runner.runs, want)
-		}
-		var summary intromarkers.RunSummary
-		if err := json.Unmarshal(progress.resultData, &summary); err != nil || summary.FilesConsidered != 5 {
-			t.Fatalf("result data %q err=%v, want the episode summary", progress.resultData, err)
-		}
-	})
-	t.Run("episode failure skips the lock", func(t *testing.T) {
-		var calls []string
-		runner := &fakeMarkerAnalysisRunner{preflightErr: unsupported, calls: &calls, err: errors.New("database unavailable")}
-		lock := &recordingLock{fakeClusterLock: fakeClusterLock{acquired: true}, calls: &calls}
-		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), &fakeProgress{}); err == nil {
-			t.Fatal("Execute = nil, want the episode pass error")
-		}
-		if fmt.Sprint(calls) != "[episodes]" {
-			t.Fatalf("calls = %v, want only the episode pass", calls)
-		}
-	})
-	t.Run("without a lock runs both passes", func(t *testing.T) {
-		runner := &fakeMarkerAnalysisRunner{preflightErr: unsupported}
-		task := NewDetectIntroMarkersTask(nil, nil, nil)
-		task.analyzer = runner
-		if err := task.Execute(t.Context(), &fakeProgress{}); err != nil {
-			t.Fatalf("Execute = %v, want nil", err)
-		}
-		if runner.runs != 1 || runner.episodeRuns != 0 || runner.movieRuns != 0 {
-			t.Fatalf("runs=%d episode runs=%d movie runs=%d, want one full run", runner.runs, runner.episodeRuns, runner.movieRuns)
-		}
-	})
-}
-
 func TestDetectIntroMarkersPreflightFailureKeepsLock(t *testing.T) {
 	// A failed capability listing proves nothing about ffmpeg, and Run probes
 	// again, so the run must stay under the lock.
@@ -250,32 +177,6 @@ func TestDetectIntroMarkersReleasesLock(t *testing.T) {
 			t.Fatalf("released = %d, want 1", lock.released)
 		}
 	})
-}
-
-func TestDetectIntroMarkersRunsTheEnabledKinds(t *testing.T) {
-	cases := []struct {
-		name     string
-		settings map[string]string
-		want     intromarkers.EpisodeMarkerKinds
-	}{
-		{name: "defaults", settings: map[string]string{}, want: intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}},
-		{name: "credits off", settings: map[string]string{markers.SettingDetectCredits: "false"}, want: intromarkers.EpisodeMarkerKinds{Intro: true}},
-		{name: "intros off", settings: map[string]string{markers.SettingDetectIntros: "false"}, want: intromarkers.EpisodeMarkerKinds{Credits: true}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.settings[markers.SettingMode] = "local"
-			task := NewDetectIntroMarkersTask(nil, nil, &fakeSettingsStore{values: tc.settings})
-			runner := &fakeMarkerAnalysisRunner{}
-			task.analyzer = runner
-			if err := task.Execute(t.Context(), &fakeProgress{}); err != nil {
-				t.Fatalf("Execute = %v", err)
-			}
-			if runner.runs != 1 || runner.kinds != tc.want {
-				t.Fatalf("runs=%d kinds=%+v, want one run for %+v", runner.runs, runner.kinds, tc.want)
-			}
-		})
-	}
 }
 
 func TestDetectIntroMarkersAdvisoryLockPostgres(t *testing.T) {

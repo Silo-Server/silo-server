@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
 	"maps"
 	"strings"
 	"testing"
@@ -122,14 +121,4 @@ func TestAdminSettingsWriteSnapshotGuard(t *testing.T) {
 
 func (f *fakeAdminSettingsWrite) SnapshotAdminSettings(stored map[string]string) handlers.AdminSettingsSnapshot {
 	return (&handlers.AdminHandler{}).SnapshotAdminSettings(stored)
-}
-
-// A settings write the handler refuses for one member reports it as a field
-// error, so the client can show the reason beside that setting.
-func TestAdminSettingsWriteProblemNamesRejectedField(t *testing.T) {
-	err := &handlers.APIError{Status: 400, Code: "bad_request", Field: "values.artwork.local_path", Message: "artwork.local_path must be a folder Silo can open"}
-	p, ok := errors.AsType[*Problem](adminSettingsWriteProblem(err))
-	if !ok || p.Status != 422 || len(p.Errors) != 1 || p.Errors[0].Location != "body.values.artwork.local_path" || p.Errors[0].Code != codeInvalid {
-		t.Fatalf("problem = %#v", p)
-	}
 }

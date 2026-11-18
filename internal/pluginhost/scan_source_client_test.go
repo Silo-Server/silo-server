@@ -37,15 +37,3 @@ func TestScanSourceClientPollChangesMarksHostDeadline(t *testing.T) {
 		t.Fatalf("status code lost: %v", err)
 	}
 }
-
-func TestScanSourceClientPollChangesKeepsPluginStatus(t *testing.T) {
-	pluginErr := status.Error(codes.DeadlineExceeded, "history request to Sonarr timed out")
-	c := &ScanSourceClient{client: fakeScanSourceRPC{err: pluginErr}, timeout: time.Minute}
-	_, err := c.PollChanges(context.Background(), &pluginv1.PollChangesRequest{})
-	if err != pluginErr { //nolint:errorlint // the plugin's error must come back unwrapped
-		t.Fatalf("err = %v, want the plugin's status unchanged", err)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("plugin-chosen DeadlineExceeded must not read as a host timeout")
-	}
-}

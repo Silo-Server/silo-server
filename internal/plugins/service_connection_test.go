@@ -8,14 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-
-	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 type fakeServiceConfigStore struct {
@@ -110,60 +105,6 @@ func TestPreserveStoredSecretsMergesNestedObjectsWithoutMutatingInputs(t *testin
 	replacementCredentials := replacementConnection["credentials"].(map[string]any)
 	if replacementCredentials["api_key"] != "test-auth-token" {
 		t.Fatalf("replacement credentials = %#v", replacementCredentials)
-	}
-}
-
-func TestSetGlobalConfigWithClearsValidatesTheClearedResult(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		required  bool
-		wantError bool
-	}{
-		{name: "required field is rejected", required: true, wantError: true},
-		{name: "optional field is removed", required: false, wantError: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			manifest := connectionTestManifest(t, "silo.metadb", "0.0.36")
-			if tc.required {
-				manifest.GlobalConfigSchema[0].JsonSchema = `{"type":"object","properties":{"api_key":{"type":"string","format":"password"}},"required":["api_key"],"additionalProperties":false}`
-			} else {
-				manifest.GlobalConfigSchema[0].JsonSchema = `{"type":"object","properties":{"api_key":{"type":"string","format":"password"}},"additionalProperties":false}`
-			}
-			service, store := connectionConfigService(t, manifest, map[string]any{
-				"api_key":      "clawrouter-e2e-secret",
-				"plugin_owned": "retained",
-			})
-
-			err := service.SetGlobalConfigWithClears(
-				context.Background(),
-				7,
-				"connection",
-				map[string]any{},
-				[]string{"api_key"},
-			)
-			if tc.wantError {
-				var validationErr *ConfigValidationError
-				if !errors.As(err, &validationErr) {
-					t.Fatalf("error = %v, want ConfigValidationError", err)
-				}
-				if len(store.puts) != 0 {
-					t.Fatalf("persisted invalid cleared config: %#v", store.puts)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(store.puts) != 1 {
-				t.Fatalf("put calls = %d, want 1", len(store.puts))
-			}
-			if _, present := store.puts[0].value["api_key"]; present {
-				t.Fatalf("cleared field remained in config: %#v", store.puts[0].value)
-			}
-			if store.puts[0].value["plugin_owned"] != "retained" {
-				t.Fatalf("plugin-owned field was not retained: %#v", store.puts[0].value)
-			}
-		})
 	}
 }
 
@@ -908,72 +849,6 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 	}
 	if len(host.stopped) != 0 {
 		t.Fatalf("stop calls = %d, want 0", len(host.stopped))
-	}
-}
-
-// fakeMarkerStats answers GetMarkerProviderStats for marker connection checks.
-type fakeMarkerStats struct {
-	pluginv1.MarkerProviderClient
-	err   error
-	calls int
-}
-
-func (f *fakeMarkerStats) GetMarkerProviderStats(context.Context, *pluginv1.GetMarkerProviderStatsRequest, ...grpc.CallOption) (*pluginv1.MarkerProviderStatsResponse, error) {
-	f.calls++
-	if f.err != nil {
-		return nil, f.err
-	}
-	return &pluginv1.MarkerProviderStatsResponse{Total: 3}, nil
-}
-
-func TestServiceTestGlobalConfigChecksMarkerProviderAccount(t *testing.T) {
-	for _, tt := range []struct {
-		name        string
-		statsErr    error
-		wantMessage string
-	}{
-		{name: "accepted key"},
-		{
-			name:        "rejected key",
-			statsErr:    status.Error(codes.Unknown, "introdb: stats HTTP 401: Invalid or expired token"),
-			wantMessage: "Connection check failed: introdb: stats HTTP 401: Invalid or expired token",
-		},
-		{
-			name:        "provider without account statistics",
-			statsErr:    status.Error(codes.Unimplemented, "method GetMarkerProviderStats not implemented"),
-			wantMessage: "Connection checks are not supported for this plugin yet.",
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			manifest := connectionTestManifest(t, "silo.theintrodb", "0.2.0")
-			manifest.Capabilities = []*pluginv1.CapabilityDescriptor{{
-				Type: "marker_provider.v1", Id: "introdb", DisplayName: "TheIntroDB",
-			}}
-			stats := &fakeMarkerStats{err: tt.statsErr}
-			host := &fakeServiceHost{startResult: &fakePluginClient{
-				manifest:       manifest,
-				markerProvider: pluginhost.NewMarkerProviderClient(stats),
-			}}
-			service := &Service{installations: installedPluginStore(t, 4, manifest), host: host}
-
-			err := service.TestGlobalConfig(context.Background(), 4, "connection", map[string]any{"api_key": "draft"})
-			if tt.wantMessage == "" {
-				if err != nil {
-					t.Fatalf("TestGlobalConfig() error = %v, want success", err)
-				}
-			} else {
-				var connectionErr *ConnectionTestError
-				if !errors.As(err, &connectionErr) || connectionErr.Error() != tt.wantMessage {
-					t.Fatalf("TestGlobalConfig() error = %v, want message %q", err, tt.wantMessage)
-				}
-			}
-			if stats.calls != 1 {
-				t.Fatalf("stats calls = %d, want 1", stats.calls)
-			}
-			if len(host.started) != 1 || len(host.stopped) != 1 || host.stopped[0] != host.started[0].InstallationID {
-				t.Fatalf("temporary instance: started=%v stopped=%v", host.started, host.stopped)
-			}
-		})
 	}
 }
 

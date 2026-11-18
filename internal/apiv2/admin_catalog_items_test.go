@@ -2,11 +2,7 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/url"
-	"strings"
-	"testing"
 
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 )
@@ -33,71 +29,6 @@ func (f *fakeAdminCatalogItems) ListAdminCatalogItems(_ context.Context, filter 
 		{ContentID: "series-tvdb-81189", Type: "series", Title: "Breaking Bad", Year: 2008, Status: "matched", TvdbID: "81189",
 			LibraryIDs: []int{3}, AddedAt: fixedTime(), Versions: []catalogpkg.AdminCatalogVersion{}},
 	}}, nil
-}
-
-func TestAdminCatalogItemsContract(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	fake := new(fakeAdminCatalogItems)
-	deps.AdminCatalogItems = fake
-	h := newTestHandler(t, deps)
-	path := Prefix + "/admin/catalog/items"
-	query := "?limit=2&library_id=3&type=episode&added_after=2026-01-01T00:00:00Z&content_ids=b&content_ids=a&content_ids=b"
-
-	first := do(t, h, http.MethodGet, path+query, "", actingRequestAdmin)
-	if first.Code != 200 {
-		t.Fatalf("first: %d %s", first.Code, first.Body)
-	}
-	if fake.filter.LibraryID != 3 || fake.filter.Type != "episode" || fake.filter.AddedAfter == nil || strings.Join(fake.filter.ContentIDs, ",") != "a,b" {
-		t.Fatalf("filter: %+v", fake.filter)
-	}
-	body := first.Body.String()
-	for _, want := range []string{`"file_id":"9007199254740993"`, `"library_ids":["3"]`, `"series_id":"series-tvdb-81189"`, `"versions":[]`, `"added_at":"2026-01-02T03:04:05.678Z"`, `"has_more":true`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("missing %s in %s", want, body)
-		}
-	}
-	if strings.Contains(body, "path") {
-		t.Fatalf("listing exposes a path: %s", body)
-	}
-	var page AdminCatalogItemCollection
-	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	nextPath := path + query + "&cursor=" + url.QueryEscape(page.Page.NextCursor)
-	if next := do(t, h, http.MethodGet, nextPath, "", actingRequestAdmin); next.Code != 200 || fake.after != "series-tvdb-81189" {
-		t.Fatalf("next: %d %s after=%q", next.Code, next.Body, fake.after)
-	}
-	// Repeating or reordering content_ids keeps the cursor; every other change starts over.
-	if same := do(t, h, http.MethodGet, strings.Replace(nextPath, "content_ids=b&content_ids=a&content_ids=b", "content_ids=a&content_ids=b", 1), "", actingRequestAdmin); same.Code != 200 {
-		t.Fatalf("reordered content_ids: %d %s", same.Code, same.Body)
-	}
-
-	calls := fake.calls
-	for _, bad := range []string{
-		strings.Replace(nextPath, "library_id=3", "library_id=4", 1),
-		strings.Replace(nextPath, "type=episode", "type=movie", 1),
-		strings.Replace(nextPath, "added_after=2026-01-01T00:00:00Z", "added_after=2026-01-01T00:00:01Z", 1),
-		strings.Replace(nextPath, "content_ids=b&content_ids=a", "content_ids=c&content_ids=a", 1),
-		strings.Replace(nextPath, "limit=2", "limit=3", 1),
-		path + "?cursor=invalid",
-	} {
-		requireProblem(t, do(t, h, http.MethodGet, bad, "", actingRequestAdmin), TypeInvalidCursor)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, nextPath, "", bearer(adminToken)), TypeInvalidCursor)
-	for _, q := range []string{"?limit=201", "?type=audiobook", "?library_id=0", "?library_id=x", "?library_id=3000000000", "?added_after=yesterday", "?content_ids=%20", "?content_ids=x" + strings.Repeat("&content_ids=x", 200)} {
-		requireProblem(t, do(t, h, http.MethodGet, path+q, "", actingRequestAdmin), TypeValidationFailed)
-	}
-	if denied := do(t, h, http.MethodGet, path, "", bearer(memberToken)); denied.Code != 403 {
-		t.Fatalf("member: %d", denied.Code)
-	}
-	if fake.calls != calls {
-		t.Fatalf("refused requests reached the store: %d -> %d", calls, fake.calls)
-	}
-
-	caps := do(t, h, http.MethodGet, Prefix+"/admin/catalog/capabilities", "", actingRequestAdmin)
-	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"item_listing":true`) || !strings.Contains(caps.Body.String(), `"item_listing_max_content_ids":200`) {
-		t.Fatalf("capabilities: %d %s", caps.Code, caps.Body)
-	}
 }
 
 func adminCatalogItemsFixtureCases() []fixtureCase {

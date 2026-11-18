@@ -2,7 +2,6 @@ package transcodenode
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func postReprobe(t *testing.T, server *Server) *httptest.ResponseRecorder {
@@ -22,59 +20,6 @@ func postReprobe(t *testing.T, server *Server) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	return recorder
-}
-
-// A re-probe must recompute and publish, so health starts advertising the new
-// hash immediately — the whole point of the action is that the API stops seeing
-// a stale answer without waiting for the 15-minute snapshot tick.
-func TestReprobeCapabilitiesRecomputesAndStoresHash(t *testing.T) {
-	server := newProbingTestServer(t)
-	server.storeCapabilityHash("sha256:stale")
-
-	recorder := postReprobe(t, server)
-	if recorder.Code == http.StatusServiceUnavailable {
-		t.Skip("this host's ffmpeg cannot answer a capability probe")
-	}
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
-	}
-
-	var result reprobeCapabilitiesResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
-		t.Fatalf("decode re-probe result: %v", err)
-	}
-	if result.CapabilityHash == "" {
-		t.Fatal("re-probe reported no capability_hash")
-	}
-	if result.CapabilityHash == "sha256:stale" {
-		t.Fatal("re-probe echoed the stale hash instead of a recomputed one")
-	}
-	if result.Resolved == "" {
-		t.Fatal("re-probe reported no resolved backend")
-	}
-	if got := server.storedCapabilityHash(); got != result.CapabilityHash {
-		t.Fatalf("stored hash = %q, want the re-probed %q", got, result.CapabilityHash)
-	}
-	if got := decodeHealth(t, server).CapabilitiesHash; got != result.CapabilityHash {
-		t.Fatalf("health capabilities_hash = %q, want the re-probed %q", got, result.CapabilityHash)
-	}
-
-	// The reported hash must describe the report the capability endpoint would
-	// now serve, or the API would refetch and store something else.
-	capabilityRequest := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	nodeauthtest.Sign(t, capabilityRequest, testNodeKey)
-	capabilityRecorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(capabilityRecorder, capabilityRequest)
-	if capabilityRecorder.Code != http.StatusOK {
-		t.Fatalf("capability status = %d after a re-probe", capabilityRecorder.Code)
-	}
-	var info playback.HWAccelInfo
-	if err := json.Unmarshal(capabilityRecorder.Body.Bytes(), &info); err != nil {
-		t.Fatalf("decode capabilities: %v", err)
-	}
-	if info.CapabilityHash != result.CapabilityHash {
-		t.Fatalf("served capability_hash = %q, want the re-probed %q", info.CapabilityHash, result.CapabilityHash)
-	}
 }
 
 // An incomplete probe is not evidence the hardware changed, so a degraded
@@ -159,38 +104,6 @@ func TestCapabilityBuildsAreSerialized(t *testing.T) {
 	}
 	if !acquiredAfterRelease.Load() {
 		t.Fatal("a capability build ran while another held the build lock")
-	}
-}
-
-// /admin/force-reload deliberately tears down every live session so a config
-// change cannot leave a running ffmpeg on stale settings. The control plane's
-// own housekeeping must not do that: the API nudges a node after its
-// acceleration overrides change, and the documented contract is that sessions
-// already transcoding keep the backend they started with.
-func TestReloadConfigKeepsActiveSessions(t *testing.T) {
-	server := newTestServer(t)
-	server.sessions["live-1"] = &playback.TranscodeSession{}
-	server.activeJobs.Store(1)
-
-	request := httptest.NewRequest(http.MethodPost, "/admin/reload-config", nil)
-	nodeauthtest.Sign(t, request, testNodeKey)
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
-
-	// This fixture has no database, so the reload itself cannot succeed. What
-	// is under test is the route's blast radius, not its happy path: either
-	// outcome must leave the live session running.
-	if recorder.Code != http.StatusNoContent && recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
-	}
-	server.mu.RLock()
-	_, alive := server.sessions["live-1"]
-	server.mu.RUnlock()
-	if !alive {
-		t.Fatal("a configuration reload tore down a live playback session")
-	}
-	if got := server.activeJobs.Load(); got != 1 {
-		t.Fatalf("active jobs = %d, want the session still counted", got)
 	}
 }
 

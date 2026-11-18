@@ -80,20 +80,28 @@ func loadSources(root string, analyzed []string) (*sourceSet, error) {
 		return nil, err
 	}
 	fset := token.NewFileSet()
+	pkgs, err := loadPackages(root, fset)
+	if err != nil {
+		return nil, fmt.Errorf("load packages under %s: %w", root, err)
+	}
+	return indexSources(root, analyzed, fset, pkgs)
+}
+
+func loadPackages(root string, fset *token.FileSet) ([]*packages.Package, error) {
 	// The router packages are loaded by name beside the module so the
 	// registration signatures (routerKind's method-set check) come from the
 	// packages themselves, whether or not anything in the module imports them.
 	// LoadSyntax includes NeedFiles, which populates IgnoredFiles: the files
 	// the build context left out, which ignoredSources refuses.
-	pkgs, err := packages.Load(&packages.Config{
+	return packages.Load(&packages.Config{
 		Mode: packages.LoadSyntax | packages.NeedModule,
 		Dir:  root,
 		Fset: fset,
 		Env:  productionEnv(),
 	}, "./...", chiImportPath, httpImportPath)
-	if err != nil {
-		return nil, fmt.Errorf("load packages under %s: %w", root, err)
-	}
+}
+
+func indexSources(root string, analyzed []string, fset *token.FileSet, pkgs []*packages.Package) (*sourceSet, error) {
 	set := &sourceSet{
 		fset:         fset,
 		root:         root,
