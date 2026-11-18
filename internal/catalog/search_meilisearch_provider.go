@@ -180,6 +180,9 @@ type MeilisearchSearchProvider struct {
 	capMu       sync.Mutex
 	capCache    CatalogSearchSemanticCapability
 	capCachedAt time.Time
+	// capCacheUID is the active index capCache describes; a rebuild that
+	// publishes another index makes the cached answer stale at once.
+	capCacheUID string
 }
 
 type cachedCatalogSearchQueryVector struct {
@@ -1552,8 +1555,17 @@ func (p *MeilisearchSearchProvider) SemanticCapability(ctx context.Context) Cata
 	if p == nil || p.client == nil {
 		return CatalogSearchSemanticCapability{OK: false, Reason: "meilisearch client unavailable"}
 	}
+	// The cached answer holds only for the index it was computed for. An
+	// unreadable state leaves activeUID empty, which matches no cached index
+	// and so probes again.
+	activeUID := ""
+	if p.stateRepo != nil {
+		if state, _, err := p.indexState(ctx); err == nil {
+			activeUID = strings.TrimSpace(state.ActiveIndexUID)
+		}
+	}
 	p.capMu.Lock()
-	if !p.capCachedAt.IsZero() && time.Since(p.capCachedAt) < semanticCapabilityProbeTTL {
+	if !p.capCachedAt.IsZero() && time.Since(p.capCachedAt) < semanticCapabilityProbeTTL && activeUID != "" && p.capCacheUID == activeUID {
 		cached := p.capCache
 		p.capMu.Unlock()
 		return cached
@@ -1565,6 +1577,7 @@ func (p *MeilisearchSearchProvider) SemanticCapability(ctx context.Context) Cata
 	p.capMu.Lock()
 	p.capCache = capability
 	p.capCachedAt = time.Now()
+	p.capCacheUID = activeUID
 	p.capMu.Unlock()
 	return capability
 }
