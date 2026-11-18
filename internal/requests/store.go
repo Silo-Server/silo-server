@@ -156,14 +156,17 @@ type Store interface {
 }
 
 type CreateRequestRecord struct {
-	ID        string
-	Input     CreateRequestInput
-	Status    Status
-	Outcome   Outcome
-	IsAnime   bool
-	Facts     RoutingFacts
-	Requester Viewer
-	Now       time.Time
+	ID      string
+	Input   CreateRequestInput
+	Status  Status
+	Outcome Outcome
+	IsAnime bool
+	Facts   RoutingFacts
+	// SeasonDetails are the requested seasons' TMDB air dates and episode
+	// counts, stored with the request.
+	SeasonDetails []SeasonDetail
+	Requester     Viewer
+	Now           time.Time
 	// Quota, when non-nil, instructs the store to atomically verify the
 	// requester is below their per-user limit before inserting. The check
 	// runs inside the same transaction as the insert with a per-user

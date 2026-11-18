@@ -869,14 +869,15 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		status = StatusApproved
 	}
 	record := CreateRequestRecord{
-		ID:        id,
-		Input:     normalized,
-		Status:    status,
-		Outcome:   OutcomeActive,
-		IsAnime:   facts.Anime,
-		Facts:     facts,
-		Requester: viewer,
-		Now:       s.now(),
+		ID:            id,
+		Input:         normalized,
+		Status:        status,
+		Outcome:       OutcomeActive,
+		IsAnime:       facts.Anime,
+		Facts:         facts,
+		SeasonDetails: seasonDetails(detail, normalized.Seasons),
+		Requester:     viewer,
+		Now:           s.now(),
 		// Re-requesting a title that failed for this user (e.g. a transient
 		// integration error) replaces their failed row.
 		ReplaceFailed: true,
