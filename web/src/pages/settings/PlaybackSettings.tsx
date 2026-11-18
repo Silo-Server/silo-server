@@ -34,6 +34,7 @@ import {
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
+import { NextUpPromptSetting } from "./NextUpPromptSetting";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -53,17 +54,6 @@ const BASE_PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
   SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
 ];
-
-/** Show Next Up choices, in seconds before the end; 0 is "At end". The native apps offer the same. */
-const NEXT_UP_PROMPT_CHOICES = [0, 10, 30, 60, 120];
-
-function nextUpPromptLabel(t: Translate, seconds: number) {
-  if (seconds <= 0) return t("settings.nextUp.atEnd");
-  if (seconds % 60 === 0) {
-    return t("settings.nextUp.minutesBeforeEnd", { count: seconds / 60 });
-  }
-  return t("settings.nextUp.secondsBeforeEnd", { count: seconds });
-}
 
 const BUFFERING_MODE_SETTING = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE];
 
@@ -752,36 +742,10 @@ export default function PlaybackSettings() {
           than on the admin plugin page, which is server-wide. */}
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
-        <SettingRow
-          label={t("settings.nextUp.title")}
-          description={settingDescription(
-            SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS],
-          )}
-          control={(id) => {
-            const seconds = read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS);
-            return (
-              <Select
-                value={String(seconds)}
-                disabled={pending}
-                onValueChange={(value) =>
-                  saveValue(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS, Number(value))
-                }
-              >
-                <SelectTrigger id={id} className="w-full sm:w-[220px]">
-                  {/* Named here, so a value another client stored off the list
-                      (the device slider allows any second) still reads as itself. */}
-                  <SelectValue>{nextUpPromptLabel(t, seconds)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {NEXT_UP_PROMPT_CHOICES.map((choice) => (
-                    <SelectItem key={choice} value={String(choice)}>
-                      {nextUpPromptLabel(t, choice)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            );
-          }}
+        <NextUpPromptSetting
+          seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
+          disabled={pending}
+          onChange={(seconds) => saveValue(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS, seconds)}
         />
 
         <AutoPlayNextSetting />
