@@ -98,9 +98,11 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * state rather than a preference — it has no control in the manifest at all.
  * `playback.auto_play_next_preview` has no effect in any player, so a control
  * here would save a choice that changes nothing.
+ * `playback.next_up_enabled` stays off until the web player applies it.
  */
 const HIDDEN_KEYS = new Set<string>([
   "playback.auto_play_next_preview",
+  "playback.next_up_enabled",
   "ui.app_language",
   "ui.theme",
   "ui.text_scale",

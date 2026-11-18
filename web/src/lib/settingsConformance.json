@@ -383,6 +383,7 @@
         "playback.subtitle_mode",
         "playback.show_forced_subtitles",
         "playback.next_up_prompt_seconds",
+        "playback.next_up_enabled",
         "playback.audio_language",
         "ui.app_language"
       ],
@@ -391,6 +392,7 @@
         { "key": "playback.subtitle_mode", "value": "auto", "source": "default" },
         { "key": "playback.show_forced_subtitles", "value": true, "source": "default" },
         { "key": "playback.next_up_prompt_seconds", "value": 30, "source": "default" },
+        { "key": "playback.next_up_enabled", "value": true, "source": "default" },
         { "key": "playback.audio_language", "value": null, "source": "default" },
         { "key": "ui.app_language", "value": null, "source": "default" }
       ]
