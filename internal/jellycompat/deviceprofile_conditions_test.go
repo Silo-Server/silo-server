@@ -662,9 +662,9 @@ func TestCompatDOVIVariantEligibleCodecProfiles(t *testing.T) {
 		{"hevc", 5, 0, true},
 		{"h265", 5, 0, true},
 		{"av1", 10, 0, true},
-		// 10.1 has an HDR10 base layer, so it is not a DOVI-only stream, even
-		// on a row scanned before profile 10 was mapped.
-		{"av1", 10, 1, false},
+		// 10.1 keeps the dav1 variant: Silo has no av01 CODECS entry for
+		// HDR AV1 to carry Jellyfin's SUPPLEMENTAL-CODECS instead.
+		{"av1", 10, 1, true},
 		{"h264", 9, 0, false},
 		{"hevc", 10, 0, false},
 		{"av1", 5, 0, false},

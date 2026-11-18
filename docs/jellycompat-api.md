@@ -659,16 +659,25 @@ VP9 get no entry. When Silo cannot name every format a variant carries (an
 unknown level, another AV1 or VP9 profile or color, or copied audio with no
 entry), that variant has no `CODECS` or `SUPPLEMENTAL-CODECS`, where Jellyfin
 writes a partial list or a short form. For Dolby Vision without a compatible
-base layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
+base layer (HEVC profile 5, AV1 profile 10.0), a client whose device profile lists
 `DOVI` in a `VideoRangeType` condition also gets Jellyfin 12's `dvh1`/`dav1`
 variant, listed before the fallback variant, unless the copied audio has no
-entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
+entry. AV1 profile 10 with a compatible base layer gets the `dav1` variant as
+well, where Jellyfin adds `SUPPLEMENTAL-CODECS` to the `av01` variant, because
+HDR AV1 has no `CODECS` entry to add it to. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
 carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
 English. `LocalizedLanguage` and `DisplayTitle` name a tag with a region or
 script by its CLDR name, such as "Brazilian Portuguese" for `pt-BR` or
 "Portuguese (Angola)" for `pt-AO`; `Language` keeps the stored tag. A tag
 with any other subtag, or a script or region CLDR has no name for, keeps the
 title-cased tag ("Ca ES Valencia"), so distinct tags never share a label.
+A video stream's `VideoRangeType` follows Jellyfin's: Dolby Vision profiles 8
+and 10 are named by their base layer's compatibility ID (`DOVIWithHDR10`,
+`DOVIWithSDR` or `DOVIWithHLG`, `DOVIWithHDR10Plus` when the base layer carries
+HDR10+), and profile 10.0 is `DOVI`. Silo also reports `DOVI` for a profile 10
+compatibility ID Jellyfin calls `DOVIInvalid`. `DOVIWithSDR` has `VideoRange`
+`SDR`. Profile 10 files scanned before Silo mapped profile 10 store `DOVI` and
+are labelled from their stored compatibility ID.
 A video stream's `DisplayTitle` follows Jellyfin's: resolution, upper-cased
 codec, then the Dolby Vision profile or the video range ("4K HEVC Dolby Vision
 Profile 8.1 (HDR10)", "1080p H264 SDR"). Silo also names HDR10+ ("4K HEVC

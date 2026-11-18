@@ -4488,7 +4488,7 @@ func compatMasterVideoRange(video models.VideoTrack, versionHDR bool) string {
 		return compatRangeHLG
 	case compatRangeHDR10, compatRangeHDR10Plus, compatRangeDOVI, compatRangeDOVIWithHDR, compatRangeDOVIWithHDRPlus:
 		return "PQ"
-	case compatRangeSDR:
+	case compatRangeSDR, compatRangeDOVIWithSDR:
 		return compatRangeSDR
 	default:
 		return ""

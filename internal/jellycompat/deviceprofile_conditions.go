@@ -818,18 +818,22 @@ func (p DeviceProfile) declaresVideoRangeType(codec, rangeType string) bool {
 	return false
 }
 
-// compatDOVIVariantEligible reports whether a version's primary video is
-// Dolby Vision with no compatible base layer and a known level, the streams
-// Jellyfin 12 advertises with a dvh1/dav1 HLS variant: HEVC profile 5 or AV1
-// profile 10. Other codecs have no dvh1/dav1 sample entry to advertise.
+// compatDOVIVariantEligible reports whether a version's primary video gets the
+// dvh1/dav1 HLS variant Jellyfin 12 advertises for Dolby Vision with no
+// compatible base layer and a known level: HEVC profile 5 or AV1 profile 10.
+// Other codecs have no dvh1/dav1 sample entry to advertise. AV1 profile 10
+// keeps the variant when it has a compatible base layer (10.1, 10.2, 10.4):
+// Jellyfin signals those with SUPPLEMENTAL-CODECS on the av01 variant, which
+// Silo cannot write because HDR AV1 gets no CODECS entry, and the variant is
+// only offered to clients that list DOVI.
 func compatDOVIVariantEligible(version catalog.FileVersion) bool {
 	video := compatPrimaryVideoTrack(version)
-	if video.DVLevel <= 0 || compatVideoRangeType(video, version.HDR) != compatRangeDOVI {
+	if video.DVLevel <= 0 {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(video.Codec)) {
 	case compatVideoCodecHEVC, compatVideoCodecH265:
-		return video.DVProfile == 5
+		return video.DVProfile == 5 && compatVideoRangeType(video, version.HDR) == compatRangeDOVI
 	case compatVideoCodecAV1:
 		return video.DVProfile == 10
 	default:
