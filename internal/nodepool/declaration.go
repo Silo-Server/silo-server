@@ -370,6 +370,13 @@ func (s *AdminConfigurationStore) DeclareProxy(ctx context.Context, identity Pro
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if register {
+		// A row this creates takes an address, so it waits its turn with the
+		// writes that give a transcode node one. Taken first, as they take it.
+		if err = lockTranscodeURLs(ctx, tx); err != nil {
+			return nil, false, err
+		}
+	}
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, proxyRegistrationLock); err != nil {
 		return nil, false, err
 	}
@@ -380,6 +387,10 @@ func (s *AdminConfigurationStore) DeclareProxy(ctx context.Context, identity Pro
 	if id == 0 {
 		if !register {
 			return nil, false, ErrProxyNotRegistered
+		}
+		// No row has this URL as written, but one may under another spelling.
+		if errors.Is(checkDeclaredURLFree(ctx, tx, 0, nodeURL), ErrTranscodeNodeURLTaken) {
+			return nil, false, fmt.Errorf("%w: another node already has this URL under another spelling", ErrNodeIdentityConflict)
 		}
 		if id, err = createProxyRow(ctx, tx, nodeURL, strings.TrimSpace(identity.NewRowName)); err != nil {
 			return nil, false, err

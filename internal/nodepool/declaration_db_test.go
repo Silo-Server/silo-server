@@ -97,6 +97,11 @@ func TestProxyDeclarationsDB(t *testing.T) {
 	if !created || proxy.Type != NodeTypeProxy || !proxy.Enabled || proxy.URL != proxyURL || !slices.Equal(proxy.EnvManaged, []string{FieldPublicURL}) {
 		t.Fatalf("self-registered proxy: created %v, %+v", created, proxy)
 	}
+	// Nor does a proxy add itself at an address a node has under another
+	// spelling.
+	if _, _, err := store.DeclareProxy(ctx, ProxyIdentity{URL: node.URL + ":80"}, UpdateNodeInput{}, true); !errors.Is(err, ErrNodeIdentityConflict) {
+		t.Fatalf("registering at a transcode node's URL: %v, want ErrNodeIdentityConflict", err)
+	}
 	// A node's key must not take a proxy's address under another spelling.
 	shadow := proxyURL + "/"
 	if _, _, err := store.Declare(ctx, node.ID, UpdateNodeInput{URL: &shadow}); !errors.Is(err, ErrTranscodeNodeURLTaken) {
