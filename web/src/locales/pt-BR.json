@@ -65433,6 +65433,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Reproduzir sem login a partir do mesmo endereço"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Alguns apps do Jellyfin, como o Findroid, abrem links de reprodução direta e de download sem fazer login. Quando esta opção está ativada, o Silo atende essa solicitação se um app conectado no mesmo endereço de rede pediu para reproduzir esse arquivo nas últimas duas horas. Qualquer pessoa que compartilhe esse endereço, como quem está na mesma rede doméstica, operadora de celular ou VPN, também poderá reproduzir esse arquivo. Ative-a somente se você usar um desses apps."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

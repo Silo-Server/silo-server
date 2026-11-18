@@ -65457,6 +65457,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Redare fără conectare de la aceeași adresă"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Unele aplicații Jellyfin, precum Findroid, deschid linkurile de redare directă și de descărcare fără conectare. Când această opțiune este activată, Silo onorează o astfel de cerere dacă o aplicație conectată de la aceeași adresă de rețea a solicitat redarea fișierului respectiv în ultimele două ore. Oricine folosește aceeași adresă, cum ar fi persoanele din aceeași rețea de acasă, de la același operator de telefonie mobilă sau din același VPN, poate reda apoi și fișierul respectiv. Activați opțiunea doar dacă folosiți una dintre aceste aplicații."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

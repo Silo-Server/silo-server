@@ -65349,6 +65349,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Reproducir sin iniciar sesión desde la misma dirección"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Algunas apps de Jellyfin, como Findroid, abren enlaces de reproducción directa y de descarga sin iniciar sesión. Cuando esta opción está activada, Silo atiende esa solicitud si una app con la sesión iniciada en la misma dirección de red solicitó reproducir ese archivo en las últimas dos horas. Cualquiera que comparta esa dirección, como las personas de la misma red doméstica, operador de telefonía o VPN, también podrá reproducir ese archivo. Actívala solo si usas una de esas apps."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

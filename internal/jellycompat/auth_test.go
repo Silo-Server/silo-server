@@ -23,7 +23,7 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 	playbackStore := NewPlaybackSessionStore(time.Hour, clock)
 	playbackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm", MediaSources: []PlaybackMediaSource{{ID: "x"}}})
 
-	mw := PlaybackSessionAuth(sessions, playbackStore, nil)
+	mw := PlaybackSessionAuth(sessions, playbackStore, nil, nil)
 
 	cases := []struct {
 		name     string
@@ -72,7 +72,7 @@ func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
 	sessions := NewSessionStore(30*24*time.Hour, clock)
 	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
 	deps.PlaybackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm"})
-	mw := PlaybackSessionAuth(sessions, deps.PlaybackStore, nil)
+	mw := PlaybackSessionAuth(sessions, deps.PlaybackStore, nil, nil)
 
 	for _, tc := range []struct {
 		elapsed  time.Duration
@@ -126,7 +126,7 @@ func TestPlaybackSessionAuth_PlaySessionStoreUnavailable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 			router := chi.NewRouter()
-			guarded := router.With(PlaybackSessionAuth(sessions, tc.store, nil))
+			guarded := router.With(PlaybackSessionAuth(sessions, tc.store, nil, addressGrantSettings(true)))
 			guarded.Handle("/Videos/{id}/master.m3u8", ok)
 			guarded.Handle("/Videos/{id}/stream", ok)
 			rec := httptest.NewRecorder()

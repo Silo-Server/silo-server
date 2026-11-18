@@ -72179,6 +72179,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Přehrávat bez přihlášení ze stejné adresy"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Některé aplikace Jellyfin, například Findroid, otevírají odkazy pro přímé přehrávání a stahování bez přihlášení. Když je tato možnost zapnutá, Silo takový požadavek obslouží, pokud o přehrání daného souboru během posledních dvou hodin požádala přihlášená aplikace ze stejné síťové adresy. Kdokoli, kdo tuto adresu sdílí, například lidé ve stejné domácí síti, u stejného mobilního operátora nebo ve stejné VPN, pak může tento soubor přehrát také. Zapněte ji, jen pokud některou z těchto aplikací používáte."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

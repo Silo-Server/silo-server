@@ -62139,6 +62139,18 @@
       "value": "\u200F\u202EAutoscan\u202C"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlay without sign-in from the same address\u202C"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESome Jellyfin apps, such as Findroid, open direct-play and download links without signing in. When this is on, Silo serves such a request if a signed-in app at the same network address asked to play that file in the last two hours. Anyone who shares that address, such as people on the same home network, mobile carrier or VPN, can then play that file too. Turn it on only if you use one of those apps.\u202C"
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

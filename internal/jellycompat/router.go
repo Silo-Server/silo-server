@@ -383,7 +383,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Media requests require a token or a PlaySessionId scoped to the negotiated source.
 	r.Group(func(r chi.Router) {
-		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
+		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth, deps.SettingsRepo))
 		r.Use(rateLimit)
 		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Get("/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Items/{id}/Download", playbackHandler.HandleDownload))

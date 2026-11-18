@@ -71942,6 +71942,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Predvajanje brez prijave z istega naslova"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Nekatere aplikacije Jellyfin, na primer Findroid, odpirajo povezave za neposredno predvajanje in prenos brez prijave. Ko je to vklopljeno, Silo obdela takšno zahtevo, če je prijavljena aplikacija z istega omrežnega naslova v zadnjih dveh urah zahtevala predvajanje te datoteke. Takrat lahko to datoteko predvaja tudi vsakdo, ki si deli ta naslov, na primer osebe v istem domačem omrežju, pri istem mobilnem operaterju ali v istem omrežju VPN. To možnost vklopite samo, če uporabljate eno od teh aplikacij."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

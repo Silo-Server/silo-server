@@ -58783,6 +58783,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Afspil uden login fra samme adresse"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Nogle Jellyfin-apps, f.eks. Findroid, åbner links til direkte afspilning og download uden at logge ind. Når dette er slået til, imødekommer Silo en sådan forespørgsel, hvis en app, der er logget ind, på samme netværksadresse har bedt om at afspille filen inden for de seneste to timer. Alle, der deler den adresse, f.eks. personer på samme hjemmenetværk, hos samme mobiloperatør eller på samme VPN, kan så også afspille filen. Slå det kun til, hvis du bruger en af disse apps."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

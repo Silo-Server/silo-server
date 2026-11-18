@@ -65221,6 +65221,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Riproduci senza accesso dallo stesso indirizzo"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Alcune app Jellyfin, come Findroid, aprono i link di riproduzione diretta e di download senza effettuare l’accesso. Quando questa opzione è attiva, Silo soddisfa una richiesta di questo tipo se un’app con accesso effettuato dallo stesso indirizzo di rete ha chiesto di riprodurre quel file nelle ultime due ore. Chiunque condivida quell’indirizzo, ad esempio le persone sulla stessa rete domestica, sullo stesso operatore mobile o sulla stessa VPN, può quindi riprodurre anche quel file. Attivala solo se usi una di queste app."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

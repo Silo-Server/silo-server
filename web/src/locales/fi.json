@@ -58839,6 +58839,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Toisto ilman kirjautumista samasta osoitteesta"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Jotkin Jellyfin-sovellukset, kuten Findroid, avaavat suoran toiston linkkejä ja latauslinkkejä kirjautumatta sisään. Kun tämä on päällä, Silo käsittelee tällaisen pyynnön, jos samassa verkko-osoitteessa oleva kirjautunut sovellus on pyytänyt kyseisen tiedoston toistoa viimeisten kahden tunnin aikana. Silloin kuka tahansa, jolla on sama osoite, kuten saman kotiverkon, mobiilioperaattorin tai VPN:n käyttäjät, voi myös toistaa kyseisen tiedoston. Ota tämä käyttöön vain, jos käytät jotakin näistä sovelluksista."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

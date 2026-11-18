@@ -66456,6 +66456,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Atskaņot bez pierakstīšanās no tās pašas adreses"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Dažas Jellyfin lietotnes, piemēram, Findroid, atver tiešās atskaņošanas un lejupielādes saites bez pierakstīšanās. Kad šis iestatījums ir ieslēgts, Silo apkalpo šādu pieprasījumu, ja pēdējo divu stundu laikā lietotne, kurā ir veikta pierakstīšanās, no tās pašas tīkla adreses pieprasīja atskaņot šo failu. Tad šo failu var atskaņot arī ikviens, kas koplieto šo adresi, piemēram, cilvēki tajā pašā mājas tīklā, ar to pašu mobilo sakaru operatoru vai to pašu VPN. Ieslēdziet to tikai tad, ja izmantojat kādu no šīm lietotnēm."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

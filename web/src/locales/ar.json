@@ -83756,6 +83756,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "التشغيل دون تسجيل الدخول من العنوان نفسه"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "تفتح بعض تطبيقات Jellyfin، مثل Findroid، روابط التشغيل المباشر والتنزيل دون تسجيل الدخول. عند تفعيل هذا الخيار، يلبّي Silo مثل هذا الطلب إذا طلب تطبيقٌ مسجَّل الدخول على عنوان الشبكة نفسه تشغيل ذلك الملف خلال الساعتين الماضيتين. ويمكن عندئذٍ لأي شخص يشارك ذلك العنوان، مثل الأشخاص على الشبكة المنزلية نفسها أو لدى مشغّل شبكة الهاتف المحمول نفسه أو على شبكة VPN نفسها، تشغيل ذلك الملف أيضًا. لا تفعّله إلا إذا كنت تستخدم أحد تلك التطبيقات."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

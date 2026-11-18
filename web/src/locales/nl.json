@@ -58511,6 +58511,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Afspelen zonder inloggen vanaf hetzelfde adres"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Sommige Jellyfin-apps, zoals Findroid, openen links voor direct afspelen en downloaden zonder in te loggen. Als dit aan staat, verwerkt Silo zo’n verzoek als een ingelogde app op hetzelfde netwerkadres in de afgelopen twee uur heeft gevraagd dat bestand af te spelen. Iedereen die dat adres deelt, zoals mensen op hetzelfde thuisnetwerk, bij dezelfde mobiele provider of op dezelfde VPN, kan dat bestand dan ook afspelen. Zet dit alleen aan als je een van die apps gebruikt."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

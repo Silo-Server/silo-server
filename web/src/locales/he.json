@@ -64826,6 +64826,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "הפעלה ללא התחברות מאותה כתובת"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "חלק מאפליקציות Jellyfin, כמו Findroid, פותחות קישורים להפעלה ישירה ולהורדה ללא התחברות. כשהאפשרות הזו מופעלת, Silo מטפל בבקשה כזו אם אפליקציה מחוברת מאותה כתובת רשת ביקשה להפעיל את הקובץ הזה בשעתיים האחרונות. כל מי שחולק את הכתובת הזו, כמו אנשים באותה רשת ביתית, אצל אותו ספק סלולר או באותו VPN, יוכל אז להפעיל גם את הקובץ הזה. יש להפעיל את האפשרות רק אם אחת מהאפליקציות האלה נמצאת בשימוש."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

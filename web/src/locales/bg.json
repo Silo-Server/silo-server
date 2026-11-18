@@ -59039,6 +59039,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждане без вход от същия адрес"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Някои приложения за Jellyfin, като Findroid, отварят връзките за директно възпроизвеждане и изтегляне без вход. Когато тази опция е включена, Silo обслужва такава заявка, ако приложение с изпълнен вход от същия мрежов адрес е заявило възпроизвеждане на този файл през последните два часа. Тогава всеки, който споделя този адрес, например хората в същата домашна мрежа, при същия мобилен оператор или във VPN, също може да възпроизвежда този файл. Включете я само ако използвате някое от тези приложения."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

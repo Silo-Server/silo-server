@@ -2661,6 +2661,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			source.SupportsDirectStream = true
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
+		// The client gets, and the play records, a per-play ETag that a
+		// static stream can present as its credential (PlaybackSessionAuth).
+		source.ETag = compatPlayTag(playSessionID, source.ETag)
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, source)
 		// Jellyfin Web stops retrying a failed stream with copy refused once the

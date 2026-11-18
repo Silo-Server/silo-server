@@ -72838,6 +72838,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Leisti be prisijungimo iš to paties adreso"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Kai kurios „Jellyfin“ programos, pvz., „Findroid“, atidaro tiesioginio leidimo ir atsisiuntimo nuorodas be prisijungimo. Kai ši parinktis įjungta, „Silo“ aptarnauja tokią užklausą, jei prisijungusi programa tuo pačiu tinklo adresu per pastarąsias dvi valandas paprašė leisti tą failą. Tada tą failą galės leisti ir visi, kurie naudoja tą patį adresą, pvz., žmonės tame pačiame namų tinkle, to paties mobiliojo ryšio operatoriaus tinkle ar VPN. Įjunkite ją tik tada, jei naudojate vieną iš šių programų."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,
