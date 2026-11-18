@@ -579,6 +579,7 @@ function DeviceDetail({
         onClose={() => setAppearanceOpen(false)}
         canReset={appearanceChangedHere}
         onReset={() => {
+          appearance.discardQueued();
           clearValue.mutate(
             { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
             {

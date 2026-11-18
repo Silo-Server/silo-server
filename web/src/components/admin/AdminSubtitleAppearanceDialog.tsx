@@ -53,6 +53,7 @@ export function AdminSubtitleAppearanceDialog({
     draft.edit(patch, (next) => onSave(setting, JSON.stringify(next)));
 
   const handleReset = () => {
+    draft.discardQueued();
     onReset(setting);
     onClose();
   };

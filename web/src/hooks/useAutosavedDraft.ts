@@ -52,7 +52,8 @@ function send<T>(
  * themselves (the save function may toast and rethrow).
  *
  * The queue keeps draining after the editor unmounts, so closing it right
- * after a change doesn't drop that change.
+ * after a change doesn't drop that change; call `discardQueued` before
+ * clearing the stored value instead.
  */
 export function useAutosavedDraft<T extends object>(initial: T) {
   const machine = useRef<Machine<T>>({
@@ -94,5 +95,16 @@ export function useAutosavedDraft<T extends object>(initial: T) {
     [publish],
   );
 
-  return { value: view.value, saving: view.saving, edit, reset };
+  /**
+   * Drop edits not sent yet, for when the stored value is about to be cleared:
+   * a queued save would otherwise land after the clear and write it back.
+   */
+  const discardQueued = useCallback(() => {
+    const m = machine.current;
+    m.queued = null;
+    m.queuedSave = null;
+    publish(m);
+  }, [publish]);
+
+  return { value: view.value, saving: view.saving, edit, reset, discardQueued };
 }

@@ -29,14 +29,17 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function renderDialog(onSave: (s: AdminDeviceSetting, value: string) => Promise<unknown>) {
+function renderDialog(
+  onSave: (s: AdminDeviceSetting, value: string) => Promise<unknown>,
+  onReset = vi.fn(),
+) {
   render(
     <AdminSubtitleAppearanceDialog
       setting={setting}
       isOverride
       onClose={vi.fn()}
       onSave={onSave}
-      onReset={vi.fn()}
+      onReset={onReset}
     />,
   );
 }
@@ -74,4 +77,19 @@ it("keeps a newer change when an earlier save fails", async () => {
   expect(radio("Monospace")).toHaveAttribute("aria-checked", "true");
   expect(onSave).toHaveBeenCalledTimes(2);
   expect(savedValue(onSave, 1)).toMatchObject({ fontSize: "medium", fontFamily: "monospace" });
+});
+
+it("doesn't send a queued change after the override is reset", async () => {
+  const first = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const onReset = vi.fn();
+  renderDialog(onSave, onReset);
+
+  fireEvent.click(radio("Large"));
+  fireEvent.click(radio("Monospace"));
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  await act(async () => first.resolve());
+
+  expect(onReset).toHaveBeenCalledTimes(1);
+  expect(onSave).toHaveBeenCalledTimes(1);
 });
