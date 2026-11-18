@@ -86,6 +86,18 @@ func TestRegistrationOverTheWire(t *testing.T) {
 		})
 	}
 
+	// Registration reloads every API server's node pools, so one node gets a
+	// handful of them and then 429.
+	registrar.err = nil
+	spendKey := f.addNode(9, "gpu-9")
+	last := 0
+	for range nodeRegistrationBurst + 1 {
+		last = f.serve(9, spendKey, http.MethodPut, PathRegistration, Registration{}, nil).Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("after the registration budget: %d, want 429", last)
+	}
+
 	// A core that predates the route answers 404 from its router.
 	f.server.opts.Registrar = nil
 	old := httptest.NewServer(http.NotFoundHandler())

@@ -34,7 +34,7 @@ func (s *Server) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var registration Registration
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegistrationBodyBytes))
 	// A field this core does not know would otherwise read as "not declared"
 	// and release that field's lock.
 	decoder.DisallowUnknownFields()

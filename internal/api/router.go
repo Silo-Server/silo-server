@@ -3503,10 +3503,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 				r.Post("/resolve", nodeControl.HandleResolve)
 				r.Post("/sources/open", nodeControl.HandleSourceOpen)
 			})
+			// A changed registration makes every API server reload its node
+			// pools, so it has a much smaller budget of its own.
+			r.With(nodeControl.LimitNodeRegistration).Put("/registration", nodeControl.HandleRegistration)
 			r.Group(func(r chi.Router) {
 				r.Use(nodeControl.LimitNode)
 				r.Get("/config", nodeControl.HandleConfig)
-				r.Put("/registration", nodeControl.HandleRegistration)
 				r.Post("/report", nodeControl.HandleReport)
 				r.Post("/logs", nodeControl.HandleLogs)
 				r.Post("/health-changed", nodeControl.HandleHealthChanged)

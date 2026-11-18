@@ -164,6 +164,23 @@
     {
       "id": 8,
       "middleware": [
+        "httpstream.NoSniff",
+        "apimw.RequestID",
+        "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
+        "apimw.RequestLogger(deps.NodeID)",
+        "middleware.Recoverer",
+        "apimw.Metrics",
+        "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "nodecontrol.RequireNode(deps.NodeKeyRegistry)",
+        "nodeControl.LimitNodeRegistration"
+      ]
+    },
+    {
+      "id": 9,
+      "middleware": [
         "s.requireBearer"
       ]
     }
@@ -3539,7 +3556,7 @@
       "handler_expr": "nodeControl.HandleRegistration",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 6,
+      "middleware_chain": 8,
       "auth_class": "node_signed",
       "auth_traits": [
         "node_signed",
@@ -6711,7 +6728,7 @@
       "handler_expr": "s.handleForceReload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6738,7 +6755,7 @@
       "handler_expr": "s.handleReloadConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6765,7 +6782,7 @@
       "handler_expr": "s.handleReprobeCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6817,7 +6834,7 @@
       "handler_expr": "s.handleChapterThumbnailExtract",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6844,7 +6861,7 @@
       "handler_expr": "s.handleListDownloadArtifacts",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6871,7 +6888,7 @@
       "handler_expr": "s.handleDeleteDownloadArtifact",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6898,7 +6915,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/downloads/artifacts/{artifact_id}\", s.handleDownloadArtifact)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6925,7 +6942,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodHead, \"/downloads/artifacts/{artifact_id}\", s.handleDownloadArtifact)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6952,7 +6969,7 @@
       "handler_expr": "s.handleDownloadPrepare",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -6979,7 +6996,7 @@
       "handler_expr": "s.handleDownloadPrepareProgress",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7006,7 +7023,7 @@
       "handler_expr": "s.handleHWCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7033,7 +7050,7 @@
       "handler_expr": "s.handleMediaSample",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7085,7 +7102,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/remux/{session_id}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7112,7 +7129,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodHead, \"/remux/{session_id}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7139,7 +7156,7 @@
       "handler_expr": "s.handleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7166,7 +7183,7 @@
       "handler_expr": "s.handleStart",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7193,7 +7210,7 @@
       "handler_expr": "s.handleStop",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7220,7 +7237,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/transcode/{session_id}/master.m3u8\", s.handleManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7247,7 +7264,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/transcode/{session_id}/segment/{name}\", s.handleSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7274,7 +7291,7 @@
       "handler_expr": "s.handleSegmentDownloaded",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -7301,7 +7318,7 @@
       "handler_expr": "s.handleTrickplayExtract",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"

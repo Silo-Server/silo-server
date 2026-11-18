@@ -256,8 +256,11 @@ gateway that briefly refused the route looks the same.
 | `401`, `429`, `5xx`, no answer | text | Retries with the configuration read's backoff, 1 to 30 seconds. |
 | `403`, `404`, `405`, `501` (a core without the route, or a gateway in front of it that blocks the request) | text | Starts, warns once, and offers the declaration every 30 seconds until it is accepted, then rereads its configuration. |
 
-The route sits in the per-node budget of the background routes. A declaration
-is made at startup only; changing a variable takes a restart.
+The route has its own per-node budget on each API replica, far below the
+background routes': a burst of six, refilled one every ten seconds, and a 16
+KiB body. A changed declaration commits a configuration revision and makes
+every API server reload its node pools, so a node cannot repeat it quickly. A
+declaration is made at startup only; changing a variable takes a restart.
 
 ## Configuration
 

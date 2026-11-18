@@ -101,6 +101,8 @@ type Server struct {
 	limiter *nodeLimiter
 	// playbackLimiter is the separate budget of resolve and sources/open.
 	playbackLimiter *nodeLimiter
+	// registrationLimiter is the small budget of registration.
+	registrationLimiter *nodeLimiter
 	// logBytes is the byte budget of log batches.
 	logBytes *nodeLimiter
 	// warnings throttles the per-node report warnings: a node reports every
@@ -128,14 +130,16 @@ const reportWarnInterval = time.Minute
 // NewServer returns the routes' handlers.
 func NewServer(opts Options) *Server {
 	s := &Server{opts: opts, now: time.Now,
-		limiter:           newNodeLimiter(nodeWriteRate, nodeWriteBurst),
-		playbackLimiter:   newNodeLimiter(nodePlaybackRate, nodePlaybackBurst),
-		logBytes:          newNodeLimiter(nodeLogBytesRate, nodeLogBytesBurst),
-		warnings:          logthrottle.New[reportWarning](reportWarnInterval),
-		sourceStreamLimit: maxSourceStreamsPerNode}
+		limiter:             newNodeLimiter(nodeWriteRate, nodeWriteBurst),
+		playbackLimiter:     newNodeLimiter(nodePlaybackRate, nodePlaybackBurst),
+		registrationLimiter: newNodeLimiter(nodeRegistrationRate, nodeRegistrationBurst),
+		logBytes:            newNodeLimiter(nodeLogBytesRate, nodeLogBytesBurst),
+		warnings:            logthrottle.New[reportWarning](reportWarnInterval),
+		sourceStreamLimit:   maxSourceStreamsPerNode}
 	s.warnings.SetClock(func() time.Time { return s.now() })
 	s.limiter.now = func() time.Time { return s.now() }
 	s.playbackLimiter.now = func() time.Time { return s.now() }
+	s.registrationLimiter.now = func() time.Time { return s.now() }
 	s.logBytes.now = func() time.Time { return s.now() }
 	return s
 }
