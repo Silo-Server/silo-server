@@ -59625,6 +59625,20 @@
       "value": "Loading settings"
     }
   ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Set by "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " in the server’s environment."
+    }
+  ],
   "web.admin.settings.fields.passwordConfigured": [
     {
       "type": 0,

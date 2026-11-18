@@ -244,6 +244,7 @@ export default function LibraryMetadataSettings() {
             value={form.getValue("scanner.workers")}
             onChange={(value) => form.setValue("scanner.workers", value)}
             restartRequired={restartKeys.has("scanner.workers")}
+            managedByEnv={form.envVar("scanner.workers")}
           />
           <SettingField
             label={t("web.admin.settings.libraryMetadata.scanning.matcherWorkers.label")}
@@ -254,6 +255,7 @@ export default function LibraryMetadataSettings() {
             value={form.getValue("matcher.workers")}
             onChange={(value) => form.setValue("matcher.workers", value)}
             restartRequired={restartKeys.has("matcher.workers")}
+            managedByEnv={form.envVar("matcher.workers")}
           />
           <SettingField
             label={t("web.admin.settings.libraryMetadata.scanning.imageWorkers.label")}

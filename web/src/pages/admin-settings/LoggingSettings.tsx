@@ -99,6 +99,7 @@ export default function LoggingSettings() {
               { value: "warn", label: t("web.admin.settings.logging.server.level.warn") },
               { value: "error", label: t("web.admin.settings.logging.server.level.error") },
             ]}
+            managedByEnv={form.envVar("server.log_level")}
           />
           <AdvancedSection
             id="logging.server"

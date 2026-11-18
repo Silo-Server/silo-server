@@ -283,6 +283,12 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
   const sensitiveManagedByEnv = sensitiveData?.managed_by_env ?? [];
+  const envVars = sensitiveData?.managed_by_env_vars;
+  /**
+   * The environment variable that sets `key` on the server, or undefined when
+   * an admin can save it. Pass it to a field's `managedByEnv`.
+   */
+  const envVar = useCallback((key: string) => envVars?.[key], [envVars]);
 
   return {
     isLoading,
@@ -311,6 +317,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     restartRequired,
     sensitiveConfigured,
     sensitiveManagedByEnv,
+    envVar,
     sensitiveStatusReady: sensitiveData != null,
     sensitiveStatusError,
     buildConnectionCheckRequest,
