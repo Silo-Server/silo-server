@@ -124,7 +124,6 @@ const USER_SETTINGS_GROUPS: UserSettingsNavGroupSource[] = [
           "recap",
           "auto play",
           "next up",
-          "preview",
           "rewind",
           "fast forward",
           "fast-forward",
