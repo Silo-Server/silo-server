@@ -92,6 +92,7 @@
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
+./internal/catalog TestBoxSetCollectionLanguageDB
 
 # Audiobook Series, Authors, and Narrators browse: group counts and durations,
 # cover order, the viewer's own progress, count-sorted cursor pages, the search

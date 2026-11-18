@@ -2934,7 +2934,7 @@ func (s *MetadataService) mergeAndPersist(
 	// localization tables like any other non-canonical refresh.
 	canonicalLanguage, isCanonicalWrite := canonicalMetadataLanguage(req, existingItem, locked)
 	// Read once, so artwork and text in this write follow the same setting.
-	fallbackLanguage := s.configuredFallbackLanguage()
+	fallbackLanguage := s.FallbackLanguage()
 	switch {
 	case isCanonicalWrite:
 		// Fallback text belongs to the provider IDs it was fetched with, so it
@@ -4805,7 +4805,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			if err := s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode, reset); err != nil {
 				return err
 			}
-		} else if s.configuredFallbackLanguage() != "" {
+		} else if s.FallbackLanguage() != "" {
 			// Text a provider marked as another language is no translation.
 			dropForeignChildText(seasons, episodes, language)
 		}
