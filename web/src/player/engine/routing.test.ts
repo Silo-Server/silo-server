@@ -74,6 +74,13 @@ describe("resolveOriginalPlaybackRoute", () => {
       want: "https://media.example.test/api/v2/stream/s?token=access",
     },
     {
+      name: "a parallel_range_url whose origin new URL() rejects falls through to the other rules",
+      parallelRangeUrl: "https://a<b.example/api/v2/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "http/1.1",
+      want: "/api/v2/stream/s?st=x&token=access",
+    },
+    {
       name: "a plan without parallel_range_url reads stream.url with its token",
       streamUrl: "/api/v2/stream/s?st=x&token=access",
       navigationProtocol: "http/1.1",

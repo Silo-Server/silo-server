@@ -74,6 +74,7 @@ function isAbsoluteUrl(url: string): boolean {
  *
  * 1. The server named a media origin: stripe on it. The URL's `st` authorizes
  *    each range, so the login token is added only when the URL has no `st`.
+ *    A URL that does not parse is skipped, and the rules below apply.
  * 2. `streamUrl` is on the page's own origin (relative) and the page itself
  *    came over HTTP/1.1, where parallel connections are real.
  * 3. `streamUrl` is absolute, so it is a proxy node's URL. It is used as the
@@ -89,7 +90,8 @@ function parallelRangeUrlFor(
   navigationProtocol: string,
 ): string | undefined {
   if (plan.stream.parallel_range_url) {
-    return buildParallelRangeUrl(plan.stream.parallel_range_url, accessToken);
+    const named = buildParallelRangeUrl(plan.stream.parallel_range_url, accessToken);
+    if (named !== null) return named;
   }
   if (isAbsoluteUrl(streamUrl)) return streamUrl;
   if (navigationProtocol === "http/1.1") return streamUrl;

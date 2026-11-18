@@ -73,12 +73,18 @@ export function buildPlayerStreamUrl(
  * URL carries `st`, that reference alone authorizes each range request, so no
  * account token is added; without `st`, the access token is appended. Every
  * other absolute URL, a proxy node's included, never receives the login token.
+ *
+ * Returns null when the URL does not parse: Go's URL parser accepts origins,
+ * such as `https://a<b.example`, that `new URL()` rejects.
  */
-export function buildParallelRangeUrl(url: string, token: string | null): string {
-  if (new URL(url, "https://placeholder.invalid").searchParams.has("st")) {
-    return url;
+export function buildParallelRangeUrl(url: string, token: string | null): string | null {
+  let hasStreamToken: boolean;
+  try {
+    hasStreamToken = new URL(url, "https://placeholder.invalid").searchParams.has("st");
+  } catch {
+    return null;
   }
-  return appendAccessToken(url, token);
+  return hasStreamToken ? url : appendAccessToken(url, token);
 }
 
 function appendAccessToken(url: string, token: string | null): string {
