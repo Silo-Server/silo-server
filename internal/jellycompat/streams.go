@@ -639,6 +639,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
+		h.endPlayIfFileGone(r, playSession, err)
 		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
@@ -831,6 +832,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
+		h.endPlayIfFileGone(r, playSession, err)
 		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
@@ -2816,6 +2818,11 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 		}
 	} else {
 		card = playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
+		if method == string(playback.PlayTranscode) {
+			// A transcode whose recipe isn't saved yet still rebuilds as a
+			// transcode, so the user's transcode limit admits and counts it.
+			card.PlayMethod = playback.PlayTranscode
+		}
 	}
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
@@ -2941,7 +2948,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			if h.tm != nil {
 				card := h.upstreamRecipeCard(playSession, compatSession, source, method)
 				fillReconstructedClientInfo(&card, playback.ClientInfoFromContext(ctx))
-				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {
+				reconstructed, admissionErr := h.tm.ReconstructSessionWithError(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card)
+				if admissionErr != nil {
+					// The user's limits refused the play. Keep its upstream session
+					// id: replacing it here could detach a transcode that another
+					// API server is still starting, and a retry admits under it.
+					return nil, admissionErr
+				}
+				if reconstructed != nil {
 					if !playSession.ProgressPersistenceKnown ||
 						playSession.DisableProgressPersistence != reconstructed.DisableProgressPersistence {
 						h.recordCompatProgressPersistence(playSession.ID, reconstructed.DisableProgressPersistence)
@@ -4121,6 +4135,15 @@ type playSessionReadError struct {
 
 func (e *playSessionReadError) Error() string { return "reading play session: " + e.err.Error() }
 func (e *playSessionReadError) Unwrap() error { return e.err }
+
+// endPlayIfFileGone ends a play whose file row is gone, as the other terminal
+// failures of a playback start do. Any other lookup failure keeps the play so
+// the client's retry of the retryable 503 finds it.
+func (h *PlaybackHandler) endPlayIfFileGone(r *http.Request, playSession *PlaybackSession, err error) {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil)
+	}
+}
 
 // writeCompatFileLookupError answers a media route whose file lookup failed:
 // 404 only when the file row is gone. Any other failure (a database timeout,

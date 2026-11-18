@@ -5,12 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
@@ -93,5 +95,61 @@ func TestTranscodeStartupFileLookupFailureKeepsPlayRetryable(t *testing.T) {
 	writeCompatTranscodeError(recorder, err)
 	if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Retry-After") == "" {
 		t.Fatalf("status = %d, Retry-After = %q; want a retryable 503", recorder.Code, recorder.Header().Get("Retry-After"))
+	}
+}
+
+// A play whose file row is gone has ended: the stream and master playlist tear
+// it down before answering 404, so its native session stops counting against
+// the user's limits. Any other lookup failure keeps the play for the client's
+// retry.
+func TestPlaybackStartFileLookupEndsPlayOnlyWhenFileGone(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantEnded  bool
+	}{
+		{name: "file gone", err: scanner.ErrFileNotFound, wantStatus: http.StatusNotFound, wantEnded: true},
+		{name: "lookup fails", err: errors.New("database unavailable"), wantStatus: http.StatusServiceUnavailable},
+	} {
+		for _, route := range []struct {
+			name   string
+			method string
+			path   string
+			serve  func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+		}{
+			{name: "stream", method: "direct", path: "/Videos/item-1/stream", serve: (*PlaybackHandler).HandleVideoStream},
+			{name: "master", method: "transcode", path: "/Videos/item-1/master.m3u8", serve: (*PlaybackHandler).HandleMasterManifest},
+		} {
+			t.Run(tc.name+"/"+route.name, func(t *testing.T) {
+				mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+				h, store := newActiveEncodingsHandler(mgr)
+				h.fileResolver = cancelingErrorFileResolver{cancel: func() {}, err: tc.err}
+				source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+				store.Put(PlaybackSession{
+					ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1",
+					UpstreamSessionID: "upstream-1", UpstreamPlayMethod: route.method,
+					MediaSources: []PlaybackMediaSource{source},
+				})
+				routeCtx := chi.NewRouteContext()
+				routeCtx.URLParams.Add("id", "item-1")
+				ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+				target := route.path + "?PlaySessionId=play-1&MediaSourceId=" + url.QueryEscape(source.ID)
+				recorder := httptest.NewRecorder()
+
+				route.serve(h, recorder, httptest.NewRequest(http.MethodGet, target, nil).WithContext(ctx))
+
+				if recorder.Code != tc.wantStatus {
+					t.Fatalf("status = %d, body = %s; want %d", recorder.Code, recorder.Body.String(), tc.wantStatus)
+				}
+				if _, kept := store.Get("play-1"); kept == tc.wantEnded {
+					t.Fatalf("play session kept = %v, want %v", kept, !tc.wantEnded)
+				}
+				if ended := len(mgr.stopCalls) > 0; ended != tc.wantEnded {
+					t.Fatalf("upstream stop calls = %v, want ended = %v", mgr.stopCalls, tc.wantEnded)
+				}
+			})
+		}
 	}
 }
