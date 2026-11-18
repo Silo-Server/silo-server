@@ -398,7 +398,19 @@ func planPlaybackOnceV3(input PlannerInputV3) (result PlannerResultV3) {
 	// a codec the probe could not name. Default selection skips such tracks,
 	// so this one was chosen explicitly or the file has no other. Retrying
 	// cannot help; choosing another track can.
-	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) && !AudioTrackDecodable(file.AudioTracks, input.AudioTrackIndex, file.CodecAudio) {
+	//
+	// The refusal needs measurement behind it (AudioCodecVerdictSupported). A
+	// declared provider row names its tracks without codec ids, so this gate saw
+	// "an unnamed track was selected" and published a non-retryable codec
+	// verdict about a file nobody had probed. A replan pins the previous plan's
+	// audio index, which is what made the gate reachable at all: the first play
+	// passes index -1 (auto) and the replan passes the resolved index. When the
+	// row has no probe evidence the gate has nothing to say — the same posture
+	// the auto path takes — and a delivery that fails afterwards answers the
+	// retryable transport cause instead of a codec verdict.
+	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) &&
+		AudioCodecVerdictSupported(file) &&
+		!AudioTrackDecodable(file.AudioTracks, input.AudioTrackIndex, file.CodecAudio) {
 		message := TerminalAudioTrackUndecodableMessageV3
 		if !AnyAudioTrackDecodable(file.AudioTracks, file.CodecAudio) {
 			message = TerminalNoDecodableAudioMessageV3
