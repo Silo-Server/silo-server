@@ -329,6 +329,12 @@
       "value": "\u200F\u202EThe request couldn’t be read.\u202C"
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by the node’s environment. Change it there and restart the node.\u202C"
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -51404,6 +51410,12 @@
     {
       "type": 0,
       "value": "\u202E render path, so the device picker does not apply to it. Leaving this empty inherits the cluster-wide device setting, which must itself be a CUDA identity for NVENC to use it — set one here when the cluster is configured with render paths.\u202C"
+    }
+  ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by this node’s environment. Change it there and restart the node.\u202C"
     }
   ],
   "web.admin.nodes.form.gpuDevices": [
