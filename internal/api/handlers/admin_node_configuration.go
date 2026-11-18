@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -68,22 +69,27 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 }
 
 // DeclareNode applies the configuration a transcode node declares from its
-// environment at startup (PUT /api/internal/nodes/self/registration), then
-// does what an administrator update does after a change. It does not ask the
-// node to reload: the node is starting, and reads its configuration next.
-func (h *NodeHandler) DeclareNode(ctx context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, error) {
+// environment (PUT /api/internal/nodes/self/registration), at startup and
+// again every minute while it runs, then does what an administrator update
+// does after a change. An unchanged declaration commits no configuration
+// revision, so it publishes nothing and reloads nothing. It does not ask the
+// node to reload: the node runs with what it declares and reads the rest at
+// its next poll. changed reports a declaration that changed the row or its
+// locks.
+func (h *NodeHandler) DeclareNode(ctx context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, bool, error) {
 	if h.configuration == nil {
-		return nil, ErrAdminNodesUnavailable
+		return nil, false, ErrAdminNodesUnavailable
 	}
 	node, previous, err := h.configuration.Declare(ctx, id, input)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if node.AdminRevision != previous.AdminRevision {
+	configured := node.AdminRevision != previous.AdminRevision
+	if configured {
 		h.nodesChanged(ctx, id)
 		h.afterNodeConfigured(ctx, previous, node, false)
 	}
-	return node, nil
+	return node, configured || !slices.Equal(node.EnvManaged, previous.EnvManaged), nil
 }
 
 // afterNodeConfigured is the post-commit work of a configuration change, off

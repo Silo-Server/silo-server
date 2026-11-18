@@ -17,12 +17,12 @@ type declaringNodes struct {
 	declared map[int]nodepool.UpdateNodeInput
 }
 
-func (d *declaringNodes) DeclareNode(_ context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, error) {
+func (d *declaringNodes) DeclareNode(_ context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, bool, error) {
 	if d.err != nil {
-		return nil, d.err
+		return nil, false, d.err
 	}
 	d.declared[id] = input
-	return &nodepool.Node{ID: id, Name: "gpu-7", URL: "http://gpu-7:8080", EnvManaged: input.SetFields()}, nil
+	return &nodepool.Node{ID: id, Name: "gpu-7", URL: "http://gpu-7:8080", EnvManaged: input.SetFields()}, true, nil
 }
 
 // A registration applies to the node whose key signed it, and the node's

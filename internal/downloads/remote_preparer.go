@@ -164,71 +164,27 @@ func (p *NodeAwarePreparer) prepareLocally(ctx context.Context, artifactID strin
 	return p.local.PrepareFile(ctx, artifactID, opts, outputPath)
 }
 
+// maxCapacityRefusals bounds how many nodes in a row may refuse one
+// preparation at their own job cap before it takes the path any other
+// refusal takes.
+const maxCapacityRefusals = 4
+
 // PrepareFile routes an artifact job to a compatible node or allowed local fallback.
 func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
+	return p.prepareFile(ctx, artifactID, opts, outputPath, 0)
+}
+
+// prepareFile is PrepareFile after refusals nodes at their own job cap gave
+// it. Such a node started nothing and is held back by the planner, so the
+// next reservation picks another node, or none and the local fallback.
+func (p *NodeAwarePreparer) prepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string, refusals int) (PreparedArtifact, error) {
 	cfg := p.config()
 	keys := p.nodeKeys
 	if cfg == nil || keys == nil || p.remote == nil || p.planner == nil || !downloadprepare.ValidArtifactID(artifactID) {
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 	request := downloadprepare.NewRequest(artifactID, opts)
-	var node *nodepool.Node
-	var release func()
-	// storageRejected records a node turned away only for want of space, so a
-	// job no node can take says it waits for space rather than failing.
-	storageRejected := false
-	hasStorage := func(n *nodepool.Node) bool {
-		if p.hasStorage(n) {
-			return true
-		}
-		storageRejected = true
-		return false
-	}
-	if request.ToneMapRequested() || request.StereoDownmixBoostRequested() || request.PreparedTracksRequested() {
-		selector, ok := p.planner.(eligibleTranscodeWorkPlanner)
-		if ok {
-			toneMapCapable := map[string]struct{}{}
-			if request.ToneMapRequested() {
-				toneMapCapable = p.capableToneMapNodeURLs(ctx, opts.ToneMapMode, opts.ToneMapSourceKind)
-			}
-			audioBoostCapable := map[string]struct{}{}
-			if request.StereoDownmixBoostRequested() {
-				audioBoostCapable = p.audioBoostCapableNodeURLs(ctx)
-			}
-			tracksCapable := map[string]struct{}{}
-			if request.PreparedTracksRequested() {
-				tracksCapable = p.preparedTracksCapableNodeURLs(ctx)
-			}
-			node, release = selector.ReserveTranscodeWorkWith("download-prepare-"+artifactID, func(candidate *nodepool.Node) bool {
-				if candidate == nil {
-					return false
-				}
-				nodeURL := strings.TrimRight(candidate.URL, "/")
-				if request.ToneMapRequested() {
-					if _, supported := toneMapCapable[nodeURL]; !supported {
-						return false
-					}
-				}
-				if request.StereoDownmixBoostRequested() {
-					if _, supported := audioBoostCapable[nodeURL]; !supported {
-						return false
-					}
-				}
-				if request.PreparedTracksRequested() {
-					if _, supported := tracksCapable[nodeURL]; !supported {
-						return false
-					}
-				}
-				// Last, so only a node that could run the recipe counts as
-				// turned away for space.
-				return hasStorage(candidate)
-			})
-		}
-	} else if selector, ok := p.planner.(eligibleTranscodeWorkPlanner); ok && p.storageFull != nil {
-		node, release = selector.ReserveTranscodeWorkWith("download-prepare-"+artifactID, hasStorage)
-	} else {
-		node, release = p.planner.ReserveTranscodeWork("download-prepare-" + artifactID)
-	}
+	node, release, storageRejected := p.reserveNode(ctx, artifactID, request, opts)
 	if node == nil {
 		if storageRejected && !p.LocalFallbackAllowed(ctx) {
 			return PreparedArtifact{}, ErrStorageFull
@@ -251,6 +207,13 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 	result, err := p.remote.Prepare(ctx, node.URL, keys, request)
 	stopProgress()
 	release()
+	if errors.Is(err, downloadprepare.ErrNodeAtCapacity) {
+		nodepool.ReportAtCapacity(p.planner, node.URL)
+	}
+	if errors.Is(err, downloadprepare.ErrNodeAtCapacity) && refusals+1 < maxCapacityRefusals && ctx.Err() == nil {
+		slog.InfoContext(ctx, "transcode node is at its job limit; placing the download artifact prepare again", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
+		return p.prepareFile(ctx, artifactID, opts, outputPath, refusals+1)
+	}
 	prepareReturned := err == nil
 	if prepareReturned {
 		if remotePrepareResultMatches(result, artifactID, request) {
@@ -294,6 +257,62 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 	}
 	slog.WarnContext(ctx, "remote download artifact prepare unavailable; falling back to local", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", err)
 	return p.prepareLocally(ctx, artifactID, opts, outputPath)
+}
+
+// reserveNode reserves the node a preparation runs on: one that can run its
+// recipe and has room for it. storageRejected reports a node turned away only
+// for want of space, so a job no node can take says it waits for space rather
+// than failing. A nil node means none.
+func (p *NodeAwarePreparer) reserveNode(ctx context.Context, artifactID string, request downloadprepare.Request, opts playback.TranscodeOpts) (node *nodepool.Node, release func(), storageRejected bool) {
+	hasStorage := func(n *nodepool.Node) bool {
+		if p.hasStorage(n) {
+			return true
+		}
+		storageRejected = true
+		return false
+	}
+	workID := "download-prepare-" + artifactID
+	selector, selective := p.planner.(eligibleTranscodeWorkPlanner)
+	switch {
+	case request.ToneMapRequested() || request.StereoDownmixBoostRequested() || request.PreparedTracksRequested():
+		if selective {
+			node, release = selector.ReserveTranscodeWorkWith(workID, p.recipeCapable(ctx, request, opts, hasStorage))
+		}
+	case selective && p.storageFull != nil:
+		node, release = selector.ReserveTranscodeWorkWith(workID, hasStorage)
+	default:
+		node, release = p.planner.ReserveTranscodeWork(workID)
+	}
+	return node, release, storageRejected
+}
+
+// recipeCapable is the reservation predicate of a preparation whose recipe
+// needs node capabilities: tone mapping, the stereo downmix boost, or
+// prepared tracks. hasStorage runs last, so only a node that could run the
+// recipe counts as turned away for space.
+func (p *NodeAwarePreparer) recipeCapable(ctx context.Context, request downloadprepare.Request, opts playback.TranscodeOpts, hasStorage func(*nodepool.Node) bool) func(*nodepool.Node) bool {
+	var required []map[string]struct{}
+	if request.ToneMapRequested() {
+		required = append(required, p.capableToneMapNodeURLs(ctx, opts.ToneMapMode, opts.ToneMapSourceKind))
+	}
+	if request.StereoDownmixBoostRequested() {
+		required = append(required, p.audioBoostCapableNodeURLs(ctx))
+	}
+	if request.PreparedTracksRequested() {
+		required = append(required, p.preparedTracksCapableNodeURLs(ctx))
+	}
+	return func(candidate *nodepool.Node) bool {
+		if candidate == nil {
+			return false
+		}
+		nodeURL := strings.TrimRight(candidate.URL, "/")
+		for _, capable := range required {
+			if _, supported := capable[nodeURL]; !supported {
+				return false
+			}
+		}
+		return hasStorage(candidate)
+	}
 }
 
 // remoteProgressReader is implemented by remote preparers that can read a

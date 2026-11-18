@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 )
 
@@ -114,4 +115,101 @@ func RetryDeclaration(ctx context.Context, registrar Registrar, registration nod
 			return
 		}
 	}
+}
+
+// SetDeclared makes the node run with the values it declares from its
+// environment wherever it acts on them itself: hardware acceleration and
+// device, source access, and the prepared-download directory and budget. The
+// core writes the same values to the node's row, and the configuration
+// document it serves follows the row, but whoever runs the core can change
+// the row; these hold whatever the document says. Call it before Load.
+func (r *Remote) SetDeclared(declared nodecontrol.Registration) {
+	r.declared = declared
+}
+
+// applyDeclared writes the declared values over the document's.
+func (r *Remote) applyDeclared(cfg *config.Config) {
+	d := r.declared
+	if d.HWAccelOverride != nil {
+		cfg.Playback.HWAccel = *d.HWAccelOverride
+	}
+	if d.HWDeviceOverride != nil {
+		cfg.Playback.HWDevice = *d.HWDeviceOverride
+	}
+	if d.DownloadArtifactDirOverride != nil {
+		cfg.Download.ArtifactDir = *d.DownloadArtifactDirOverride
+	}
+	if d.DownloadArtifactMaxBytesOverride != nil {
+		cfg.Download.ArtifactMaxBytes = *d.DownloadArtifactMaxBytesOverride
+	}
+}
+
+// DeclarationRefreshInterval is how often a node that declares something
+// sends its declaration again while it runs, so a row or a lock changed on
+// the core behind its back is put back within a minute and without a
+// restart. The node enforces what it acts on itself either way; the row is
+// what the core's planner and the node editor read, so the interval bounds
+// how long they can disagree with the node. One send a minute is a sixth of
+// the registration budget's refill (one every ten seconds), leaving the burst
+// for restarts, and an unchanged declaration commits no configuration
+// revision, so it costs the core one small transaction on the node's row.
+const DeclarationRefreshInterval = time.Minute
+
+// MaintainDeclaration sends the declaration every DeclarationRefreshInterval
+// until ctx ends. pending is a node that started without the core taking its
+// declaration (an older core, or a gateway that blocks the route): it is
+// offered every RemotePollInterval instead until the core takes it, and then
+// accepted runs. A failure never stops the node: it is logged once, and again
+// only after a send has succeeded, so a core that keeps refusing does not
+// fill the log.
+func MaintainDeclaration(ctx context.Context, registrar Registrar, registration nodecontrol.Registration, pending bool, accepted func(*nodecontrol.RegistrationResult)) {
+	logged := false
+	for {
+		interval := DeclarationRefreshInterval
+		if pending {
+			interval = RemotePollInterval
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		result, err := registrar.Register(ctx, registration)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			// A pending node already said at startup that the core does not
+			// take declarations; only a refusal is news.
+			_, refused := errors.AsType[*nodecontrol.RegistrationError](err)
+			if !logged && (refused || !pending) {
+				logged = true
+				logRefreshFailure(ctx, err)
+			}
+			continue
+		}
+		logged = false
+		switch {
+		case pending:
+			pending = false
+			accepted(result)
+		case result.Changed:
+			slog.InfoContext(ctx, "the main server's row for this node differed from its declaration and was put back",
+				"component", "nodeconfig", "env_managed", result.EnvManaged)
+		}
+	}
+}
+
+// logRefreshFailure logs a declaration the core did not take while the node
+// runs.
+func logRefreshFailure(ctx context.Context, err error) {
+	if refused, ok := errors.AsType[*nodecontrol.RegistrationError](err); ok {
+		slog.ErrorContext(ctx, "the main server refused this node's declaration; the node keeps running with its own values, but its row may disagree until the variable is fixed",
+			"component", "nodeconfig", "field", refused.Field, "reason", refused.Reason, "detail", refused.Detail)
+		return
+	}
+	slog.WarnContext(ctx, "cannot send this node's declaration to the main server; offering it again at the next interval",
+		"component", "nodeconfig", "route", "PUT "+nodecontrol.PathRegistration, "error", err)
 }

@@ -500,9 +500,11 @@ deleting and issuing a key are unaffected. `GET /admin/nodes/capabilities`
 reports `env_declarations`. Writing `env_managed` alone is not a configuration
 change: it moves neither the node's ETag nor the pool generation.
 
-The declaration is made once per start (`nodedeclare`, `nodepool.Declare`). An
-unset or blank variable declares nothing and leaves that field to the
-administrator, so removing a variable unlocks its field at the next start.
+A proxy declares once per start; a transcode node declares at startup and
+again every minute while it runs, so a row or lock changed behind its back is
+put back (`nodedeclare`, `nodepool.Declare`). An unset or blank variable
+declares nothing and leaves that field to the administrator, so removing a
+variable unlocks its field at the next start.
 Values follow the update body: `0` for a cap is unlimited, `0` for the
 download budget is no budget. A node checks each value before sending it and
 refuses to start on a bad one, naming the variable.
@@ -538,7 +540,14 @@ still have one, registered at an address clients reach it by; a second row at
 row that is not a proxy refuses
 startup when the proxy declares anything and is only logged when it does not.
 A transcode node declares through the core; see
-[transcode nodes](architecture/transcode-nodes.md#registration).
+[transcode nodes](architecture/transcode-nodes.md#registration). A transcode
+node also enforces the values it acts on itself, its job cap, acceleration,
+device, source access and prepared-download directory and budget, whatever
+its row says; its group, name and URL are placement and identity on the main
+server's side and hold only through the row. See
+[what the node enforces](architecture/transcode-nodes.md#what-the-node-enforces).
+A proxy reads its row from the database the main server owns, so it is run
+by the same operator and enforces nothing beyond its row.
 
 Upgrade order: the main server first, since its migration adds the column.
 Proxies read node rows with it, so they follow the main server. A proxy that

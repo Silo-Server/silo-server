@@ -17,7 +17,8 @@ import (
 // administrator update does after a change, so every API server and proxy
 // follows. *handlers.NodeHandler implements it.
 type Registrar interface {
-	DeclareNode(ctx context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, error)
+	// changed reports a declaration that changed the row or its locks.
+	DeclareNode(ctx context.Context, id int, input nodepool.UpdateNodeInput) (node *nodepool.Node, changed bool, err error)
 }
 
 // HandleRegistration serves PUT /api/internal/nodes/self/registration: the
@@ -43,7 +44,7 @@ func (s *Server) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 			RegistrationRefusal{Reason: RegistrationInvalid, Detail: "the registration body is not one this main server reads"})
 		return
 	}
-	node, err := s.opts.Registrar.DeclareNode(r.Context(), id, registration.Input())
+	node, changed, err := s.opts.Registrar.DeclareNode(r.Context(), id, registration.Input())
 	if err != nil {
 		s.registrationFailed(w, r, id, err)
 		return
@@ -57,6 +58,7 @@ func (s *Server) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(RegistrationResult{
 		Node:       NodeIdentity{ID: node.ID, Name: node.Name, URL: node.URL},
 		EnvManaged: envManaged,
+		Changed:    changed,
 	}); err != nil {
 		slog.DebugContext(r.Context(), "write node registration", "component", "nodecontrol", "node_id", id, "error", err)
 	}

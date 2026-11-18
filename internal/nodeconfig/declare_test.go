@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodecontrol"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 // scriptedRegistrar answers each Register call with the next error in its
@@ -71,6 +73,52 @@ func TestRetryDeclarationUntilAccepted(t *testing.T) {
 		RetryDeclaration(t.Context(), registrar, nodecontrol.Registration{}, func(r *nodecontrol.RegistrationResult) { accepted = r })
 		if accepted == nil || registrar.calls != 3 {
 			t.Fatalf("accepted %v after %d calls, want a result after 3", accepted, registrar.calls)
+		}
+	})
+}
+
+// The node runs with the values it declares, whatever the document built from
+// its row says: a row edited on the core behind the node's back changes
+// neither its acceleration, its device, its source access nor its
+// prepared-download storage.
+func TestRemoteRunsWithDeclaredValues(t *testing.T) {
+	body := remoteBody()
+	body.Playback.HWAccel, body.Playback.HWDevice = "nvenc", "/dev/dri/renderD129"
+	body.SourceAccess = nodesource.ModeCore
+	body.Download = nodecontrol.DownloadConfig{ArtifactDir: "/edited", ArtifactMaxBytes: 1 << 40}
+	remote := NewRemote(newFakeCore(body), ":8080")
+	accel, device, access, dir, budget := "vaapi", "/dev/dri/renderD128", nodesource.ModeLocal, "/declared", int64(1<<30)
+	remote.SetDeclared(nodecontrol.Registration{HWAccelOverride: &accel, HWDeviceOverride: &device, SourceAccess: &access,
+		DownloadArtifactDirOverride: &dir, DownloadArtifactMaxBytesOverride: &budget})
+	if err := remote.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	cfg := remote.Config()
+	if cfg.Playback.HWAccel != accel || cfg.Playback.HWDevice != device || remote.SourceAccess() != access ||
+		cfg.Download.ArtifactDir != dir || cfg.Download.ArtifactMaxBytes != budget {
+		t.Fatalf("node runs with accel %q device %q access %q dir %q budget %d, want its declared values",
+			cfg.Playback.HWAccel, cfg.Playback.HWDevice, remote.SourceAccess(), cfg.Download.ArtifactDir, cfg.Download.ArtifactMaxBytes)
+	}
+}
+
+// A running node keeps sending its declaration; a refusal does not stop it.
+func TestMaintainDeclarationOutlivesARefusal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		refusal := &nodecontrol.RegistrationError{Status: http.StatusUnprocessableEntity,
+			RegistrationRefusal: nodecontrol.RegistrationRefusal{Reason: nodecontrol.RegistrationInvalid, Field: "group"}}
+		registrar := &scriptedRegistrar{answers: []error{refusal, status(http.StatusServiceUnavailable)}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			MaintainDeclaration(ctx, registrar, nodecontrol.Registration{}, false, nil)
+		}()
+		time.Sleep(3*DeclarationRefreshInterval + time.Second) //nolint:forbidigo // synctest fake clock: advances three refresh intervals instantly
+		synctest.Wait()
+		cancel()
+		<-done
+		if registrar.calls != 3 {
+			t.Fatalf("%d sends in three intervals, want 3", registrar.calls)
 		}
 	})
 }

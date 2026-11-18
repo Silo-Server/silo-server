@@ -166,6 +166,8 @@ func runTranscodeNode() {
 	defer appCancel()
 
 	remote := nodeconfig.NewRemote(client, env.listen)
+	// The node runs with what it declares, whatever its row says.
+	remote.SetDeclared(nodecontrol.RegistrationFrom(env.declaration))
 	remote.OnLoad(normalizeLoadedConfig)
 	// A 401 from the core means the key was rotated or the node deleted:
 	// health says so, which takes the node out of placement, until a
@@ -208,6 +210,7 @@ func runTranscodeNode() {
 	streamTelemetry := newNodeStreamTelemetry(nodeName)
 
 	srv := transcodenode.NewServer(remote, tracker)
+	applyDeclaredLimits(srv, env.declaration)
 	srv.SetNodeKey(env.nodeKey)
 	srv.SetKeyRejected(remote.KeyRejected)
 	srv.SetCore(client)
@@ -266,12 +269,16 @@ func runTranscodeNode() {
 }
 
 // declareTranscodeNode sends the node's declaration to the core, retrying
-// while the core cannot take it. A declaration the core refuses stops the
-// process, naming the variable. Against a core that predates declarations the
-// node starts anyway: with something declared it warns once and keeps
-// offering it at the configuration poll interval, rereading its configuration
-// once it lands; with nothing declared there is nothing to unlock, and it says
-// nothing. It reports false when ctx ended first.
+// while the core cannot take it, and then keeps it in line: every
+// nodeconfig.DeclarationRefreshInterval it is sent again, so a row or lock
+// changed on the core is put back without a restart. A declaration the core
+// refuses at startup stops the process, naming the variable; one refused
+// later is logged and the node keeps running with its own values. Against a
+// core that predates declarations the node starts anyway: with something
+// declared it warns once and keeps offering it at the configuration poll
+// interval, rereading its configuration once it lands; with nothing declared
+// there is nothing to unlock, and it says nothing. It reports false when ctx
+// ended first.
 func declareTranscodeNode(ctx, appCtx context.Context, client *nodecontrol.Client, remote *nodeconfig.Remote, declaration nodepool.UpdateNodeInput) bool {
 	if len(declaration.SetFields()) == 0 {
 		// Nothing to apply, so nothing to wait for.
@@ -283,11 +290,12 @@ func declareTranscodeNode(ctx, appCtx context.Context, client *nodecontrol.Clien
 	switch {
 	case err == nil:
 		slog.InfoContext(ctx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
+		go nodeconfig.MaintainDeclaration(appCtx, client, registration, false, nil)
 		return true
 	case errors.Is(err, nodeconfig.ErrRegistrationUnsupported):
 		slog.WarnContext(ctx, "the main server does not accept node declarations: it predates them, or a gateway in front of it blocks this route. Starting without them and offering them again every poll",
 			"route", "PUT "+nodecontrol.PathRegistration, "variables", declaredVariables(declaration))
-		go nodeconfig.RetryDeclaration(appCtx, client, registration, func(result *nodecontrol.RegistrationResult) {
+		go nodeconfig.MaintainDeclaration(appCtx, client, registration, true, func(result *nodecontrol.RegistrationResult) {
 			slog.InfoContext(appCtx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
 			remote.RequestReload()
 		})
@@ -302,6 +310,21 @@ func declareTranscodeNode(ctx, appCtx context.Context, client *nodecontrol.Clien
 		os.Exit(1)
 	}
 	return false
+}
+
+// applyDeclaredLimits makes the node enforce the declared values it checks
+// on each job: its job cap, its hardware acceleration and its prepared-
+// download budget.
+func applyDeclaredLimits(srv *transcodenode.Server, declaration nodepool.UpdateNodeInput) {
+	if declaration.MaxJobs != nil {
+		srv.SetJobCap(*declaration.MaxJobs)
+	}
+	if declaration.HWAccelOverride != nil {
+		srv.SetDeclaredHWAccel(*declaration.HWAccelOverride)
+	}
+	if declaration.DownloadArtifactMaxBytesOverride != nil {
+		srv.SetArtifactBudget(*declaration.DownloadArtifactMaxBytesOverride)
+	}
 }
 
 // declaredVariables names the variables a declaration came from.

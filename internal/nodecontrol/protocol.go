@@ -160,7 +160,8 @@ func (b *NodeConfigBody) ApplyTo(cfg *config.Config) {
 }
 
 // Registration is the configuration a transcode node declares from its
-// environment, sent once at startup before its first configuration read. An
+// environment, sent at startup before its first configuration read and again
+// every nodeconfig.DeclarationRefreshInterval while it runs. An
 // absent field is not declared and stays the administrator's; the core writes
 // the declared ones to the node's row and locks exactly those against
 // administrator edits, so an empty registration unlocks every field. Values
@@ -193,10 +194,13 @@ func (r Registration) Input() nodepool.UpdateNodeInput {
 }
 
 // RegistrationResult is the core's answer to an accepted registration: the
-// node's row identity after it, and the fields now locked as the node's.
+// node's row identity after it, the fields now locked as the node's, and
+// whether the registration changed the row or its locks (a core that
+// predates the field never sets it).
 type RegistrationResult struct {
 	Node       NodeIdentity `json:"node"`
 	EnvManaged []string     `json:"env_managed"`
+	Changed    bool         `json:"changed,omitempty"`
 }
 
 // Reasons a registration is refused, in the body of a 409 or 422.

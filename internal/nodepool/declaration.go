@@ -293,9 +293,14 @@ func declareInTx(ctx context.Context, tx pgx.Tx, id int, input UpdateNodeInput) 
 	if fields == nil {
 		fields = []string{}
 	}
-	if err = tx.QueryRow(ctx, `UPDATE stream_nodes SET env_managed = $2 WHERE id = $1 RETURNING env_managed`, id, fields).Scan(&node.EnvManaged); err != nil {
-		return nil, nil, fmt.Errorf("record declared node fields: %w", err)
+	// A node sends its declaration every minute, so an unchanged one leaves
+	// env_managed alone rather than writing the same array again.
+	if !slices.Equal(previous.EnvManaged, fields) {
+		if _, err = tx.Exec(ctx, `UPDATE stream_nodes SET env_managed = $2 WHERE id = $1`, id, fields); err != nil {
+			return nil, nil, fmt.Errorf("record declared node fields: %w", err)
+		}
 	}
+	node.EnvManaged = fields
 	if node.AdminRevision, err = readConfigurationRevision(ctx, tx, id); err != nil {
 		return nil, nil, err
 	}

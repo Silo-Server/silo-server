@@ -255,7 +255,7 @@ and treats both alike; its next configuration read then gets `401`.
 
 | Answer | Body | Node |
 |---|---|---|
-| `200` | `{"node": {"id", "name", "url"}, "env_managed": [...]}` | Continues to the configuration read. |
+| `200` | `{"node": {"id", "name", "url"}, "env_managed": [...], "changed": bool}` | Continues to the configuration read. |
 | `422` | `{"reason": "invalid", "field", "detail"}` | Exits, naming the variable for `field`; `field` is empty for a body the core could not read. |
 | `409` | `{"reason": "url_taken", "field": "url", "detail"}` | Exits, naming `SILO_NODE_URL`. |
 | `401`, `429`, `5xx` other than `501`, no answer | text | Retries with the configuration read's backoff, 1 to 30 seconds. |
@@ -264,8 +264,44 @@ and treats both alike; its next configuration read then gets `401`.
 The route has its own per-node budget on each API replica, far below the
 background routes': a burst of six, refilled one every ten seconds, and a 16
 KiB body. A changed declaration commits a configuration revision and makes
-every API server reload its node pools, so a node cannot repeat it quickly. A
-declaration is made at startup only; changing a variable takes a restart.
+every API server reload its node pools, so a node cannot repeat it quickly.
+Changing a variable takes a restart.
+
+A node that declared something sends its declaration again every minute while
+it runs (`nodeconfig.MaintainDeclaration`, `DeclarationRefreshInterval`), so a
+row or an `env_managed` list changed on the core, by SQL or otherwise, is put
+back within a minute without a restart. `changed` in the answer says whether
+it was, and the node logs it. An unchanged declaration commits no
+configuration revision, moves no pool generation, publishes no
+`node_pool_changed` and asks no server to reload: it costs one transaction
+that rewrites the node's row with its own values and leaves `env_managed`
+alone. One send a minute is a sixth of the budget's refill, so restarts keep
+the burst. A refusal on a re-send never stops the node: it logs it once (again
+only after a later send succeeds) and keeps running with its own values. A
+node that started against a core without the route keeps offering it every 30
+seconds, as before, and moves to the one-minute cadence once it is taken.
+
+## What the node enforces
+
+The row is what the core's planner and the node editor read, and whoever runs
+the core can change it. A node can be run by someone else (a rented or lent
+GPU), so the node itself holds the values it acts on to what its environment
+says, whatever its row or its configuration document says:
+
+| Variable | Enforced by |
+|---|---|
+| `SILO_NODE_MAX_TRANSCODES` | The node: it refuses new work past the cap ([worker protocol](worker-http-protocol.md)). The planner also reads the row's `max_jobs`. |
+| `SILO_NODE_HW_ACCEL` | The node: `nodeconfig.Remote` uses it over the document's `hw_accel`, and a start runs with it whatever backend the request names (`Server.jobHWAccel`). The core may still ask for `none`, and a hardware tone map keeps the backend the core chose from the node's own capability report. |
+| `SILO_NODE_HW_DEVICE` | The node: used over the document's `hw_device`. |
+| `SILO_NODE_SOURCE_ACCESS` | The node: `Remote.SourceAccess` returns it over the document's. With `local` the node never fetches source bytes over HTTP; with `core` it never opens a local path. The core still grants and serves sources either way. |
+| `SILO_NODE_DOWNLOAD_ARTIFACT_DIR` | The node: used over the document's `artifact_dir`. |
+| `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | The node, as a ceiling: it refuses a new preparation once its last measurement of the directory reaches the budget. Clean-up and the core's own budget check still read the row. |
+| `SILO_NODE_GROUP` | The row only. A group is placement on the main server's side; the node does not act on it. |
+| `SILO_NODE_NAME`, `SILO_NODE_URL` | The row only. They are the node's identity and address in the main server's pools. The node cannot stop the main server from naming or addressing it otherwise; the minute re-send puts them back. |
+
+The node never sees which planner, if any, sends it work, so the row-only
+fields are as strong as the main server's operator allows. The values the
+node enforces hold even against a main server that ignores the row.
 
 ## Configuration
 

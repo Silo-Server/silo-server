@@ -63,6 +63,18 @@ func TestNodeDeclarationsLockFieldsDB(t *testing.T) {
 	if r, g := versions(); r != revision || g != generation {
 		t.Fatal("recording which fields a node declares moved the revision or the generation")
 	}
+	// The running node's periodic re-send of an unchanged declaration is
+	// cheap: no revision, no pool generation, the same locks.
+	again, _, err := store.Declare(ctx, node.ID, UpdateNodeInput{Group: &group, HWAccelOverride: &accel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(again.EnvManaged, undeclared.EnvManaged) {
+		t.Fatalf("re-sent declaration: env_managed %v", again.EnvManaged)
+	}
+	if r, g := versions(); r != revision || g != generation {
+		t.Fatal("an unchanged declaration moved the revision or the generation")
+	}
 	limit := 4
 	if _, _, err := store.Update(ctx, node.ID, UpdateNodeInput{MaxJobs: &limit}, accept); err != nil {
 		t.Fatalf("an undeclared field stays editable: %v", err)
