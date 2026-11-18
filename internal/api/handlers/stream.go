@@ -123,9 +123,21 @@ type StreamHandler struct {
 	// zero value (nil map) is usable.
 	virtualSubtitleLayoutMu sync.Mutex
 	virtualSubtitleLayouts  map[string]virtualSubtitleLayoutVerdict
-	SubtitleRepo            subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client                subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket                string               // bucket for subtitle storage
+	// virtualSubtitleLayoutMisses records the opposite verdict: a probe that
+	// completed and found no live track this plan ordinal could carry. Only the
+	// warm establishes it (it probes its own relay registration), and a serve
+	// that never probes again would otherwise start the same fill forever: every
+	// page is refused, the fill abandons on the same positive mismatch, and the
+	// loop has no answer. The serve consults it and answers
+	// `subtitle_source_changed` so the client replans onto the rotated
+	// inventory. Keyed like virtualSubtitleLayouts and kept much shorter: a
+	// rotated release is a fact about the bytes, and the client needs to re-select
+	// soon. A probe error never records one — only a completed probe that found
+	// no match. The zero value (nil map) is usable.
+	virtualSubtitleLayoutMisses map[string]time.Time
+	SubtitleRepo                subtitles.Repository // optional; enables S3-sourced subtitles
+	S3Client                    subtitles.S3Client   // optional; needed for fetching S3 subtitles
+	S3Bucket                    string               // bucket for subtitle storage
 	// VirtualMediaResolver resolves virtual:// URIs to a real provider URL.
 	// Required for embedded subtitle extraction from virtual sources.
 	VirtualMediaResolver         VirtualMediaResolver
@@ -2341,9 +2353,17 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 // — the failure says nothing about the file — and carries the same Retry-After
 // the virtual resolve refusal sends, so a client that retries the stream has a
 // delay to back off by. A 503 delivery answer used to arrive without one.
+//
+// The body is the standard v1 error envelope with a machine-readable code. A
+// plain-text body left the byte-delivery adapter with nothing to name the
+// failure by, so its request log recorded code=internal_error for a provider or
+// relay refusal and made a dependency outage look like a server defect. The code
+// is additive: the 502 and its dependency_unavailable problem type are
+// unchanged.
 func writeRemuxStartFailure(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", strconv.Itoa(virtualServeResolveRetryAfterSeconds))
-	http.Error(w, "failed to start remux", http.StatusBadGateway)
+	writeError(w, http.StatusBadGateway, "remux_start_failed",
+		"Failed to start the remux; the stream produced no media. Retry after the advertised delay.")
 }
 
 // loadSidecarSession resolves the session a subtitle or font request names.
@@ -3887,6 +3907,12 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	if isVirtualPlaybackFile(file) && hasVirtualMediaResolver(h) && h.RemoteStreamRelay != nil && session != nil {
 		resolved, cleanup, resolveErr := h.resolveVirtualInputURI(r.Context(), file, session.UserID, session.ProfileID, false)
 		if resolveErr != nil {
+			// The pinned source could not be resolved for this extract. Nothing
+			// about it is a verdict on the file — the provider or the relay may
+			// answer on the next attempt — so the refusal carries the same
+			// Retry-After the remux start failure does. Without it a client
+			// retries a 502 on its own few-second cadence.
+			w.Header().Set("Retry-After", strconv.Itoa(virtualServeResolveRetryAfterSeconds))
 			writeError(w, http.StatusBadGateway, subtitleSourceUnavailableErrorCode,
 				"Failed to resolve the virtual source for subtitle extraction; the video source is unchanged.")
 			return
@@ -4055,6 +4081,25 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 				verifiedAt:    time.Now(),
 			}
 		}
+	}
+
+	// A detached warm probes its own relay registration. When that probe
+	// completed and found no live track for this plan ordinal, it recorded the
+	// verdict; without this answer every later page is refused again, starts the
+	// same warm, and abandons the same way — a loop with no failure and no
+	// progress. A committed artifact still pins the release it was extracted
+	// from, so it is served rather than reported as rotated.
+	if virtualActive &&
+		h.virtualSubtitleLayoutUnmatchable(&opts, time.Now()) &&
+		!h.SubtitleCache.HasCommittedEntry(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, opts.SourceCodec, opts.TargetFormat) {
+		slog.WarnContext(r.Context(), "virtual subtitle request answered from the warm's rotation verdict",
+			"component", "api",
+			"file_id", file.ID,
+			"track", opts.TrackIndex,
+			"codec", opts.SourceCodec,
+			"language", track.Language)
+		writeSubtitleSourceChanged(w)
+		return
 	}
 
 	// A HEAD probe (.sup is the only embedded format that does not early-return)
@@ -4433,6 +4478,69 @@ func (h *StreamHandler) rememberVirtualSubtitleLayout(planKey string, opts playb
 		sourceCodec: opts.SourceCodec,
 		verifiedAt:  now,
 	}
+	// A match recorded now is newer evidence than an earlier rotation verdict
+	// for the same ordinal.
+	delete(h.virtualSubtitleLayoutMisses, planKey)
+}
+
+// virtualSubtitleLayoutMissTTL bounds how long a positive "the live release has
+// no track this ordinal can carry" verdict answers page requests. It is much
+// shorter than the match memo: the verdict exists to end a loop that produces
+// nothing, not to hide a release that might be re-listed under it. Every page a
+// client asks for inside the window is answered with the same rotation verdict,
+// so the client stops retrying and replans. A re-listed release changes the
+// pinned result and therefore the identity, which is a different key.
+const virtualSubtitleLayoutMissTTL = 60 * time.Second
+
+// rememberVirtualSubtitleLayoutMiss records that a completed probe found no live
+// track for this plan ordinal. Only a completed probe that positively found no
+// match may call it: a probe error (timeout, provider failure, cancellation) is
+// not evidence about the bytes and must leave the next request free to try.
+func (h *StreamHandler) rememberVirtualSubtitleLayoutMiss(planKey string, now time.Time) {
+	if h == nil || planKey == "" {
+		return
+	}
+	h.virtualSubtitleLayoutMu.Lock()
+	defer h.virtualSubtitleLayoutMu.Unlock()
+	if h.virtualSubtitleLayoutMisses == nil {
+		h.virtualSubtitleLayoutMisses = make(map[string]time.Time)
+	}
+	if len(h.virtualSubtitleLayoutMisses) >= virtualSubtitleLayoutCacheMaxEntries {
+		for key, at := range h.virtualSubtitleLayoutMisses {
+			if now.Sub(at) > virtualSubtitleLayoutMissTTL {
+				delete(h.virtualSubtitleLayoutMisses, key)
+			}
+		}
+		if len(h.virtualSubtitleLayoutMisses) >= virtualSubtitleLayoutCacheMaxEntries {
+			clear(h.virtualSubtitleLayoutMisses)
+		}
+	}
+	h.virtualSubtitleLayoutMisses[planKey] = now
+	// A rotation verdict supersedes a mapping recorded against the same ordinal
+	// before the release moved.
+	delete(h.virtualSubtitleLayouts, planKey)
+}
+
+// virtualSubtitleLayoutUnmatchable reports whether a completed probe already
+// found no live track for this plan ordinal inside the miss TTL. The serve path
+// answers it like an immediate positive mismatch, without starting another fill
+// that can only abandon the same way.
+func (h *StreamHandler) virtualSubtitleLayoutUnmatchable(opts *playback.StreamExtractOpts, now time.Time) bool {
+	if h == nil || opts == nil || opts.CacheIdentity == "" {
+		return false
+	}
+	key := virtualSubtitleLayoutKey(opts.CacheIdentity, opts.TrackIndex)
+	h.virtualSubtitleLayoutMu.Lock()
+	defer h.virtualSubtitleLayoutMu.Unlock()
+	at, ok := h.virtualSubtitleLayoutMisses[key]
+	if !ok {
+		return false
+	}
+	if now.Sub(at) > virtualSubtitleLayoutMissTTL {
+		delete(h.virtualSubtitleLayoutMisses, key)
+		return false
+	}
+	return true
 }
 
 // warmVirtualSubtitleAfterWindowMiss starts detached cache fill work for a
@@ -4550,6 +4658,16 @@ func (h *StreamHandler) resolveWarmExtractLayout(warmCtx context.Context, file *
 		// this path), and this is a deliberate abandonment rather than a
 		// source failure, so it must not arm the warm failure cooldown:
 		// the next windowed miss re-evaluates the layout itself.
+		//
+		// The verdict is recorded, though. This warm probed the live release
+		// and found nothing for the plan ordinal: leaving it unrecorded is a
+		// loop, because the page path never probes (it trusts the row's
+		// evidence) and every page it refuses starts the same warm, which
+		// abandons the same way. The next page request is answered with the
+		// rotation verdict so the client replans onto the rotated inventory.
+		// Only this positive result is recorded; a probe error returns below
+		// and records nothing.
+		h.rememberVirtualSubtitleLayoutMiss(virtualSubtitleLayoutKey(extractOpts.CacheIdentity, extractOpts.TrackIndex), time.Now())
 		slog.WarnContext(context.Background(), "virtual subtitle warm abandoned: live layout has no match for the planned track",
 			"component", "api", "file_id", file.ID,
 			"plan_codec", track.Codec, "plan_language", track.Language)
@@ -5285,10 +5403,17 @@ func (h *StreamHandler) verifyVirtualSubtitleLayout(ctx context.Context, file *m
 	}
 	liveOrdinal, liveTrack, matched := playback.MatchEmbeddedSubtitleTrack(requestedTrack, liveTracks)
 	if !matched {
+		// "No track in this class" and "the class is there in other languages"
+		// are different problems — one is a rotated layout, the other is a
+		// selection that no longer exists — and they used to log identically.
+		classCount, classLanguages := playback.SubtitleLayoutClassInventory(requestedTrack.Codec, liveTracks)
 		slog.WarnContext(ctx, "virtual subtitle layout rotated without a usable match", "component", "api",
 			"requested_codec", requestedTrack.Codec,
 			"requested_language", requestedTrack.Language,
-			"live_subtitle_count", len(liveTracks))
+			"requested_muxer_class", playback.SubtitleLayoutClass(requestedTrack.Codec),
+			"live_subtitle_count", len(liveTracks),
+			"live_class_track_count", classCount,
+			"live_class_languages", strings.Join(classLanguages, ","))
 		return false, nil
 	}
 	// Class preservation is the hard rule: the URL extension was minted at

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,5 +19,17 @@ func TestRemuxStartFailureAnswersRetryableWithRetryAfter(t *testing.T) {
 	}
 	if got := rec.Header().Get("Retry-After"); got != "5" {
 		t.Fatalf("Retry-After = %q, want 5", got)
+	}
+	// A plain-text body left the delivery adapter nothing to name the failure
+	// by, so its log recorded code=internal_error for a provider or relay
+	// refusal. The code is additive: same status, same problem type.
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v (body = %q)", err, rec.Body.String())
+	}
+	if body.Error != "remux_start_failed" {
+		t.Fatalf("error code = %q, want remux_start_failed", body.Error)
 	}
 }

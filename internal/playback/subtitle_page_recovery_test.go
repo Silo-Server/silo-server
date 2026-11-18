@@ -131,24 +131,60 @@ func TestUnreachableBitmapPageAnswersOnceBounded(t *testing.T) {
 	}
 }
 
-// A fill that stops advancing ends the wait immediately instead of accepting
-// retries until the budget lapses: nothing is ever going to cross the page.
-func TestStalledBitmapArtifactEndsThePageWait(t *testing.T) {
+// A stalled watermark only ends the page wait once nothing is filling the track
+// any more: a running fill is still the thing that could cross the page, and the
+// recovery budget bounds it. Coverage that has not moved with no fill left to
+// move it is the dead end, and that answer is final.
+func TestStalledBitmapArtifactEndsThePageWaitOnlyWithNoFillLeft(t *testing.T) {
 	c, source := newTestCache(t)
 	opts := progressiveSUPOpts(source, 600, 120)
 	c.SetPageRecoveryBudgetForTest(time.Hour)
+	// The page's discarded prefix is priced beyond the budget at this observed
+	// read rate, so a request with nothing left to fill it is refused before it
+	// reads the source.
+	c.notePageReadRate(opts.CacheIdentity, 3_000_000)
 	now := time.Unix(1_700_000_000, 0)
 	c.pageWaitNow = func() time.Time { return now }
 
 	fill := startProgressiveFill(t, c, opts, pgsDisplaySetAt(10))
-	defer fill.Discard()
-	extract := func(context.Context, StreamExtractOpts) error { return nil }
+	extract := func(context.Context, StreamExtractOpts) error {
+		t.Error("the source was read for a page nothing is filling")
+		return nil
+	}
 
 	if err := serveSUPPage(t, c, opts, extract); !errors.As(err, new(*SubtitleExtractionRetryError)) {
 		t.Fatalf("first answer = %v, want the retryable shape", err)
 	}
+
+	// The client's own backoff is longer than the old window. A page that is
+	// still being filled stays retryable however long it has waited: the fill is
+	// slow, not dead.
+	now = now.Add(subtitlePageRecoveryStallWindow + time.Second)
+	var retry *SubtitleExtractionRetryError
+	if err := serveSUPPage(t, c, opts, extract); !errors.As(err, &retry) {
+		t.Fatalf("answer with a fill in flight = %v, want the retryable shape", err)
+	}
+
+	// With the fill gone and the watermark still short of the page, nothing can
+	// advance it. That wait ends, once.
+	opts.DisableBackgroundWarm = true
+	fill.Discard()
 	now = now.Add(subtitlePageRecoveryStallWindow + time.Second)
 	if err := serveSUPPage(t, c, opts, extract); !IsSubtitlePageUnavailable(err) {
 		t.Fatalf("stalled artifact answer = %v, want the final shape", err)
+	}
+}
+
+// The stall window is measured from the client's last refusal, so it must be
+// longer than the client's own page retry ladder (5, 10, 20, 40 s). A window
+// shorter than the longest gap finalized a page whose fill was healthy whenever
+// the client legitimately backed off.
+func TestPageRecoveryStallWindowOutlastsTheClientRetryLadder(t *testing.T) {
+	const clientLongestBackoff = 40 * time.Second
+	if subtitlePageRecoveryStallWindow <= clientLongestBackoff {
+		t.Fatalf("stall window = %s, want more than the client's %s backoff", subtitlePageRecoveryStallWindow, clientLongestBackoff)
+	}
+	if subtitlePageRecoveryStallWindow >= subtitlePageRecoveryBudget {
+		t.Fatalf("stall window = %s, want it inside the %s recovery budget", subtitlePageRecoveryStallWindow, subtitlePageRecoveryBudget)
 	}
 }

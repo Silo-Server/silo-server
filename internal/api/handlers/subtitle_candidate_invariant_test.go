@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -92,6 +93,12 @@ func TestSubtitleSidecarResolveFailureStaysSubtitleLocalAndDoesNotRotate(t *test
 	}
 	if body.Error != subtitleSourceUnavailableErrorCode {
 		t.Fatalf("sidecar error code = %q, want the subtitle-local %q", body.Error, subtitleSourceUnavailableErrorCode)
+	}
+	// The refusal says nothing about the file: the provider or relay may answer
+	// on the next attempt. It carries the same Retry-After the remux start
+	// failure does, so the client backs off instead of hammering.
+	if got := recorder.Header().Get("Retry-After"); got != strconv.Itoa(virtualServeResolveRetryAfterSeconds) {
+		t.Fatalf("Retry-After = %q, want %d", got, virtualServeResolveRetryAfterSeconds)
 	}
 	if spy.candidateStamped {
 		t.Fatal("a subtitle sidecar resolve failure stamped the video candidate failed")

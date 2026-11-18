@@ -38,10 +38,17 @@ const (
 	subtitlePageRecoveryBudget = 90 * time.Second
 
 	// subtitlePageRecoveryStallWindow is how long the watermark may stay put
-	// before the page stops waiting for it. A real artifact advances between
-	// refusals; one that has not moved in this long is ended or wedged, and the
-	// answer must not be "retry" forever.
-	subtitlePageRecoveryStallWindow = 20 * time.Second
+	// before the page stops waiting for it, once nothing is filling the track
+	// any more. A real artifact advances between refusals; one that has not
+	// moved in this long, with no fill left to move it, is ended or abandoned,
+	// and the answer must not be "retry" forever.
+	//
+	// It exceeds the client's page retry ladder (5, 10, 20, 40 s between
+	// attempts) on purpose. The window is measured from the last refusal, and a
+	// client that is legitimately backing off must never look like a stalled
+	// artifact: a 40 s gap alone used to trip a 20 s window and finalize a
+	// healthy slow fill. The recovery budget stays the outer bound.
+	subtitlePageRecoveryStallWindow = 45 * time.Second
 
 	// subtitlePageRecoveryMaxEntries caps the wait ledger. Only pages that are
 	// refused and not yet answered keep an entry; the cap only exists so
@@ -106,6 +113,12 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		return 0, false, false
 	}
 	now := c.pageRecoveryNow()
+	// Whether a fill still holds this identity's slot decides the stall verdict,
+	// so it is read before the ledger lock. A running fill is the thing that
+	// could still cross the page: a page whose coverage has not moved while
+	// something is still filling it is slow, not dead, and the recovery budget
+	// bounds it.
+	filling := c.progressiveFillInFlight(opts)
 	c.pageWaitMu.Lock()
 	defer c.pageWaitMu.Unlock()
 	if c.pageWaits == nil {
@@ -120,11 +133,26 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		return 0, true, false
 	}
 	wait = now.Sub(entry.first)
-	stalled = covered <= entry.lastCover && now.Sub(entry.lastSeen) >= subtitlePageRecoveryStallWindow
+	stalled = !filling && covered <= entry.lastCover && now.Sub(entry.lastSeen) >= subtitlePageRecoveryStallWindow
 	entry.lastSeen = now
 	entry.lastCover = covered
 	c.pageWaits[key] = entry
 	return wait, false, stalled
+}
+
+// progressiveFillInFlight reports whether a progressive .sup fill currently holds
+// this identity's slot — the request path's, a warm's, or another request's.
+func (c *SubtitleCache) progressiveFillInFlight(opts StreamExtractOpts) bool {
+	if c == nil {
+		return false
+	}
+	key, ok := c.formatEntryKey(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, subtitleFormatSUP)
+	if !ok {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inflight[key] != nil
 }
 
 // clearPageRecovery forgets a page's wait once it has been answered, so a later
