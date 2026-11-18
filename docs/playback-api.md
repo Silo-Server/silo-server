@@ -410,9 +410,10 @@ node has no room to read yet answers `503` with `Retry-After`; retry it then.
 A plan may carry `stream.parallel_range_url`, the same stream on the media origin
 the administrator set in `server.web_media_url`. It appears only for an attempt
 that a login session started and that sent client feature
-`parallel_range_origin_v1`, on an API-served `original_http` plan, and is
-omitted otherwise. A client that negotiated `parallel_range_origin_v1` reads the
-file from `parallel_range_url` when the plan has one, as parallel closed ranges.
+`parallel_range_origin_v1` without `header_authenticated_media_v1`, on an
+API-served `original_http` plan, and is omitted otherwise. A client that
+negotiated `parallel_range_origin_v1` reads the file from `parallel_range_url`
+when the plan has one, as parallel closed ranges.
 When that URL carries `st`, the reference alone authorizes each range request
 and the client sends no account token; when it carries no `st`, the client sends
 its account access token. A plan without `parallel_range_url` is read from

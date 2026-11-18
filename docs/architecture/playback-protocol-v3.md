@@ -144,7 +144,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `native_embedded_limitations_v1` | The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
 | `hls_subtitle_renditions_all_v1` | Only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
-| `parallel_range_origin_v1` | The client sends it in `client_features`; the plan's `stream.parallel_range_url` may then name the administrator's media origin (§4.2). The client promises to read the file from `parallel_range_url` when the plan has one, as parallel closed ranges, and from `stream.url` otherwise |
+| `parallel_range_origin_v1` | The client sends it in `client_features`; the plan's `stream.parallel_range_url` may then name the administrator's media origin (§4.2), unless the client also sends `header_authenticated_media_v1`. The client promises to read the file from `parallel_range_url` when the plan has one, as parallel closed ranges, and from `stream.url` otherwise |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -1001,10 +1001,12 @@ A plan may also carry `stream.parallel_range_url` beside `stream.url`. It is the
 API stream on the media origin an administrator set (`server.web_media_url`):
 `{web_media_url}/api/v2/stream/{session_id}` plus the same query as `stream.url`
 (`seek`, `st`). The server sets it only for an attempt started by a login
-session whose `client_features` listed `parallel_range_origin_v1`, on an
-`original_http` plan the API serves itself, while the setting is non-empty. A
-client that negotiated `parallel_range_origin_v1` reads the file from
-`parallel_range_url` when the plan has one. When that URL carries `st`, the
+session whose `client_features` listed `parallel_range_origin_v1` and did not
+list `header_authenticated_media_v1` (that feature's stream URL carries no
+`st`, and the media origin's preflight allows only `Range`, so the field is
+absent), on an `original_http` plan the API serves itself, while the setting is
+non-empty. A client that negotiated `parallel_range_origin_v1` reads the file
+from `parallel_range_url` when the plan has one. When that URL carries `st`, the
 reference alone authorizes each range request and the client sends no account
 token; when it carries no `st`, the client sends its account access token. A
 plan without `parallel_range_url` is read from `stream.url`. `stream.url` stays

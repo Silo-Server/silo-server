@@ -259,17 +259,22 @@ func withNativeDeliveryFeaturesV3(mode mediaAuthModeV3, req playback.StartReques
 
 // setPlanStreamURLsV3 publishes the prepared transport's URL as the plan's
 // stream URL, and, when every condition holds, the same stream on the admin's
-// media origin as stream.parallel_range_url. The URL's st alone authorizes each
-// range request, so the client sends no account token. The stream reference
-// authorizes only an attempt that a login session started (loginBound), so the
-// field appears only for such an attempt that negotiated
+// media origin as stream.parallel_range_url. When the URL carries st, st alone
+// authorizes each range request and the client sends no account token; when
+// signing yields no st, the client sends its account access token. The stream
+// reference authorizes only an attempt that a login session started
+// (loginBound), so the field appears only for such an attempt that negotiated
 // parallel_range_origin_v1, on an API-served original_http plan, while
-// server.web_media_url is set. Any other attempt reads stream.url.
+// server.web_media_url is set. A client that also negotiated
+// header_authenticated_media_v1 gets a stream URL with no st, and the media
+// origin's preflight allows only Range, so it reads stream.url. Any other
+// attempt reads stream.url.
 func (h *PlaybackHandler) setPlanStreamURLsV3(ctx context.Context, plan *playback.PlanV3, transport preparedTransportV3, clientFeatures []string, loginBound bool) {
 	plan.Stream.URL = transport.url
 	plan.Stream.ParallelRangeURL = ""
 	if !loginBound || h.SettingsRepo == nil ||
 		!playback.HasFeatureV3(clientFeatures, playback.FeatureParallelRangeOriginV1) ||
+		playback.HasFeatureV3(clientFeatures, playback.FeatureHeaderAuthenticatedMediaV3) ||
 		plan.Delivery != playback.DeliveryOriginalHTTPV3 ||
 		transport.routingEgress != noderouting.EgressAPI ||
 		!strings.HasPrefix(transport.url, "/stream/") {

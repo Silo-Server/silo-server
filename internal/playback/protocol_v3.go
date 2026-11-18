@@ -1002,9 +1002,10 @@ type StreamV3 struct {
 	HeaderRefresh    HeaderRefreshModeV3 `json:"header_refresh"`
 	HeaderRefreshURL string              `json:"header_refresh_url,omitempty" format:"uri-reference"`
 	// ParallelRangeURL is the same API stream on the admin's media origin, for a
-	// client that negotiated parallel_range_origin_v1, on an attempt started by a
-	// login session. It carries the same query as URL, st included, which alone
-	// authorizes each range request.
+	// client that negotiated parallel_range_origin_v1 without
+	// header_authenticated_media_v1, on an attempt started by a login session. It
+	// carries the same query as URL. When that query has st, st alone authorizes
+	// each range request.
 	ParallelRangeURL string `json:"parallel_range_url,omitempty" format:"uri"`
 }
 

@@ -4933,6 +4933,7 @@ func TestParallelRangeURLV3Conditions(t *testing.T) {
 		{name: "setting off", features: []string{playback.FeatureParallelRangeOriginV1}, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
 		{name: "proxy egress", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: "https://node.example.test/stream/direct/opaque"},
 		{name: "remux", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, delivery: playback.DeliveryRemuxProgressiveV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
+		{name: "header authenticated media", features: []string{playback.FeatureParallelRangeOriginV1, playback.FeatureHeaderAuthenticatedMediaV3}, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

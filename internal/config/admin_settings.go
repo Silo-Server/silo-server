@@ -301,7 +301,8 @@ const ServerLocalURLSettingKey = "server.local_url"
 
 // WebMediaURLSettingKey is an optional https origin that serves the same API
 // over HTTP/1.1 only. The web player stripes direct-play range reads across it
-// (parallel_range_url in the playback plan); the URL's st authorizes each range.
+// (parallel_range_url in the playback plan); the URL's st, when present, authorizes
+// each range.
 // Empty is off. Read per request, so a change applies without restart.
 const WebMediaURLSettingKey = "server.web_media_url"
 
