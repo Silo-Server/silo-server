@@ -1649,33 +1649,30 @@ function DeviceDetailPanel({
         overrides land in exactly the shape clients consume. Other JSON
         settings fall through to the raw textarea editor below.
       */}
-      <AdminSubtitleAppearanceDialog
-        setting={
-          jsonEditor && jsonEditor.setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
-            ? jsonEditor.setting
-            : null
-        }
-        isOverride={jsonEditor?.isOverride ?? false}
-        onClose={closeJsonEditor}
-        onSave={(setting, value) =>
-          updateSetting.mutate({
-            userId: data.user_id,
-            profileId: setting.profile_id,
-            deviceId: setting.device_id,
-            key: setting.key,
-            value,
-          })
-        }
-        onReset={(setting) =>
-          deleteSetting.mutate({
-            userId: data.user_id,
-            profileId: setting.profile_id,
-            deviceId: setting.device_id,
-            key: setting.key,
-          })
-        }
-        saving={updateSetting.isPending}
-      />
+      {jsonEditor?.setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE && (
+        <AdminSubtitleAppearanceDialog
+          setting={jsonEditor.setting}
+          isOverride={jsonEditor.isOverride}
+          onClose={closeJsonEditor}
+          onSave={(setting, value) =>
+            updateSetting.mutateAsync({
+              userId: data.user_id,
+              profileId: setting.profile_id,
+              deviceId: setting.device_id,
+              key: setting.key,
+              value,
+            })
+          }
+          onReset={(setting) =>
+            deleteSetting.mutate({
+              userId: data.user_id,
+              profileId: setting.profile_id,
+              deviceId: setting.device_id,
+              key: setting.key,
+            })
+          }
+        />
+      )}
 
       <Dialog
         open={

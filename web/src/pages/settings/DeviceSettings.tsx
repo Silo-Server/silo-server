@@ -34,11 +34,12 @@ import {
   useSetSettingValue,
   useStoredSettingValues,
 } from "@/hooks/queries/settingValues";
+import { useAutosavedDraft } from "@/hooks/useAutosavedDraft";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
-import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
+import { parseSubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
 import { isImeComposing } from "@/lib/imeComposition";
 
@@ -322,12 +323,12 @@ function DeviceDetail({
     enabled: canUseDeviceSettings,
   });
 
-  // The subtitle appearance panel edits its object locally so dragging a
-  // colour or opacity feels instant, persisting each patch as it lands. The
-  // server value reasserts itself whenever the panel is (re)opened.
+  // The subtitle appearance panel shows each change at once and saves it in
+  // the background; a change the server rejects drops back out of the panel.
+  // The server value reasserts itself whenever the panel is (re)opened.
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-  const [appearance, setAppearance] = useState<SubtitleAppearance | null>(null);
   const appearanceSetting = settings[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE];
+  const appearance = useAutosavedDraft(parseSubtitleAppearance(appearanceSetting?.value));
   const appearanceChangedHere = appearanceSetting?.scope === "profile_device";
 
   const changedCount = device.changed_count;
@@ -552,26 +553,29 @@ function DeviceDetail({
             )
           }
           onOpenPanel={() => {
-            setAppearance(parseSubtitleAppearance(appearanceSetting?.value));
+            appearance.reset(parseSubtitleAppearance(appearanceSetting?.value));
             setAppearanceOpen(true);
           }}
         />
       )}
 
       <SubtitleAppearancePanelView
-        open={appearanceOpen && appearance !== null}
-        value={appearance ?? parseSubtitleAppearance(undefined)}
-        onChange={(patch) => {
-          const next = { ...(appearance ?? parseSubtitleAppearance(undefined)), ...patch };
-          setAppearance(next);
-          setValue.mutate(
-            { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, value: next, identity },
-            {
-              onError: (error) =>
-                toast.error(v2ErrorText(error, t("web.settings.device.saveFailed"))),
-            },
-          );
-        }}
+        open={appearanceOpen}
+        value={appearance.value}
+        onChange={(patch) =>
+          appearance.edit(patch, (next) =>
+            setValue
+              .mutateAsync({
+                key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
+                value: next,
+                identity,
+              })
+              .catch((error: unknown) => {
+                toast.error(v2ErrorText(error, t("web.settings.device.saveFailed")));
+                throw error;
+              }),
+          )
+        }
         onClose={() => setAppearanceOpen(false)}
         canReset={appearanceChangedHere}
         onReset={() => {
@@ -593,7 +597,7 @@ function DeviceDetail({
           device.custom_name || device.device_name || t("web.settings.device.appearance.thisDevice")
         }
         status={
-          setValue.isPending
+          appearance.saving
             ? t("web.settings.device.saving")
             : t("web.settings.device.appearance.savedAutomatically")
         }
