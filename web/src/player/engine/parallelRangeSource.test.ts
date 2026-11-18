@@ -47,6 +47,7 @@ type Fault =
   | { kind: "fetchError" }
   | { kind: "bodyError"; afterBytes: number }
   | { kind: "short"; bytes: number }
+  | { kind: "ignoreRange" }
   | { kind: "holdBody" }
   | { kind: "holdBodyUntilAbort" }
   | { kind: "slowBody"; intervalMs: number }
@@ -57,6 +58,8 @@ interface FakeReply {
   ok: boolean;
   status: number;
   statusText: string;
+  type: "basic";
+  redirected: false;
   headers: { get(name: string): string | null; has(name: string): boolean };
   body: ReadableStream<Uint8Array>;
 }
@@ -89,12 +92,13 @@ class FakeServer {
     run?: MediaRun,
   ): Promise<FakeReply> => {
     const headers = init?.headers as Record<string, string>;
-    const asked = /^bytes=(\d+)-(\d+)$/.exec(headers.Range ?? "");
+    const asked = /^bytes=(\d+)-(\d*)$/.exec(headers.Range ?? "");
     if (!asked) throw new Error(`unexpected Range ${headers.Range}`);
     const request: Served = {
       url: String(input),
       start: Number(asked[1]),
-      last: Number(asked[2]),
+      // An open-ended range, which only the stock source sends, asks for the rest of the file.
+      last: asked[2] === "" ? Number.POSITIVE_INFINITY : Number(asked[2]),
       run,
       signal: init?.signal as AbortSignal,
       index: this.requests.length,
@@ -132,16 +136,18 @@ class FakeServer {
     const size = this.bytes.length;
     const last = Math.min(request.last, size - 1);
     let payload = this.bytes.subarray(request.start, last + 1);
+    // A server that ignores Range sends the whole file from byte 0, with its length.
+    if (fault?.kind === "ignoreRange") payload = this.bytes;
     if (fault?.kind === "short") payload = payload.subarray(0, fault.bytes);
     const total = fault?.kind === "total" ? fault.total : size;
     const modified = fault?.kind === "lastModified" ? fault.value : MODIFIED;
     const contentRange =
       fault?.kind === "contentRange" ? fault.value : `bytes ${request.start}-${last}/${total}`;
-    const status = fault?.kind === "status" ? fault.status : 206;
-    const responseHeaders = new Map([
-      ["content-range", contentRange],
-      ["last-modified", modified],
-    ]);
+    const status =
+      fault?.kind === "status" ? fault.status : fault?.kind === "ignoreRange" ? 200 : 206;
+    const responseHeaders = new Map([["last-modified", modified]]);
+    if (fault?.kind === "ignoreRange") responseHeaders.set("content-length", String(size));
+    else responseHeaders.set("content-range", contentRange);
     let sent = 0;
     const body = new ReadableStream<Uint8Array>({
       pull: async (controller) => {
@@ -179,6 +185,8 @@ class FakeServer {
       ok: status >= 200 && status < 300,
       status,
       statusText: "",
+      type: "basic",
+      redirected: false,
       headers: {
         get: (name: string) => responseHeaders.get(name.toLowerCase()) ?? null,
         has: (name: string) => responseHeaders.has(name.toLowerCase()),
@@ -578,6 +586,27 @@ describe("ParallelRangeSource failures", () => {
     expect(server.requests.some((request) => request.start >= size)).toBe(false);
     expect(getRetryDelay).not.toHaveBeenCalled();
     expect(handleUnhandledError).not.toHaveBeenCalled();
+  });
+
+  // The stock source reads the file from one response and keeps it sequential, with a warning
+  // that Mediabunny logs once per origin.
+  it("plays a plan URL that ignores Range sequentially", async () => {
+    // The VM test context has no web streams, and the stock source wraps the body in one.
+    vi.stubGlobal("ReadableStream", ReadableStream);
+    try {
+      const server = new FakeServer(pattern(SIZE));
+      server.fault = (request) => (request.url === HEAD_URL ? { kind: "ignoreRange" } : undefined);
+      const getRetryDelay = vi.fn(() => 0);
+      const { source } = makeSource(server, { getRetryDelay });
+      expect(same(await read(source, 0, 20 * MIB), server.bytes.subarray(0, 20 * MIB))).toBe(true);
+      expect(
+        same(await read(source, 40 * MIB, 41 * MIB), server.bytes.subarray(40 * MIB, 41 * MIB)),
+      ).toBe(true);
+      expect(server.requests.some((request) => request.url === STRIPE_URL)).toBe(false);
+      expect(getRetryDelay).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("fails a range at its fourth failure in a row that delivered nothing", async () => {

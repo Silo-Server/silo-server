@@ -11,7 +11,8 @@
  * answer other than a readable 206 that matches its request, or transport failure (fetch, body
  * read, early end, or no byte for `STRIPE_INACTIVITY_MS`), from the stripe URL ends its use:
  * the rest of that range and every later range go to the plan's own URL, with no retry spent on the
- * stripe URL.
+ * stripe URL. A plan URL whose first answer is a whole-file `200` ignores `Range`: the source
+ * then becomes the stock `UrlSource`, which reads the file sequentially.
  *
  * It subclasses `UrlSource` and overrides its private `_runWorker`, so
  * Mediabunny keeps its read orchestrator, its cache, its read workers and its
@@ -19,7 +20,8 @@
  * internals it relies on:
  *
  * - `UrlSource`: `_orchestrator`, `_abortControllers`, `_requestInit`, `_url`,
- *   `_getRetryDelay`, `_fileSizeDetermined`, `_dispatchRead`. The parent
+ *   `_getRetryDelay`, `_fileSizeDetermined`, `_dispatchRead`, and `_runWorker`,
+ *   which a plan URL that ignores `Range` hands each worker to. The parent
  *   constructor binds `this._runWorker`, so the override runs.
  * - `ReadOrchestrator`: `fileSize`, `supplyFileSize`, `supplyWorkerData`,
  *   `signalWorkerStoppedRunning`, and `options.prefetchProfile`, which the
@@ -89,6 +91,7 @@ interface UrlSourceInternals {
   _abortControllers: Map<ReadWorker, AbortController>;
   _fileSizeDetermined: boolean;
   _dispatchRead(start: number, end: number): void;
+  _runWorker(worker: ReadWorker): Promise<void>;
 }
 
 const InternalUrlSource = UrlSource as unknown as new (
@@ -144,6 +147,11 @@ export class ParallelRangeSource extends InternalUrlSource {
    * plan's URL.
    */
   private stripeFailed = false;
+  /**
+   * Set when the plan's URL answered its first request with a whole-file `200`: the source is
+   * the stock `UrlSource` from then on, and every worker runs the parent's `_runWorker`.
+   */
+  private ignoresRange = false;
 
   /**
    * `headUrl` is the plan's own stream URL, which carries the warm head and the
@@ -156,7 +164,8 @@ export class ParallelRangeSource extends InternalUrlSource {
     options: UrlSourceOptions,
     metered: MeteredFetch,
   ) {
-    super(headUrl, options);
+    // The stock reads, which the source falls back to, are metered too.
+    super(headUrl, { ...options, fetchFn: metered.fetch });
     this.stripeUrl = stripeUrl;
     this.metered = metered;
     const orchestrator = this._orchestrator;
@@ -230,7 +239,8 @@ export class ParallelRangeSource extends InternalUrlSource {
    * the orchestrator in file order. Called by Mediabunny's orchestrator in
    * place of `UrlSource._runWorker`.
    */
-  async _runWorker(worker: ReadWorker): Promise<void> {
+  override async _runWorker(worker: ReadWorker): Promise<void> {
+    if (this.ignoresRange) return super._runWorker(worker);
     const orchestrator = this._orchestrator;
     if (worker.aborted) {
       orchestrator.signalWorkerStoppedRunning(worker);
@@ -263,6 +273,7 @@ export class ParallelRangeSource extends InternalUrlSource {
       (orchestrator.fileSize !== null || (ranges.length === 0 && this.slots.active === 0));
     try {
       while (true) {
+        if (this.ignoresRange) break;
         if (worker.aborted) {
           orchestrator.signalWorkerStoppedRunning(worker);
           return;
@@ -331,6 +342,8 @@ export class ParallelRangeSource extends InternalUrlSource {
       this.slots.wakers.delete(notify);
       this.wakeWorkers();
     }
+    // The plan's URL ignores `Range`: the stock source reads the file from here on.
+    return super._runWorker(worker);
   }
 
   /**
@@ -378,6 +391,13 @@ export class ParallelRangeSource extends InternalUrlSource {
           } catch (error) {
             failures = await this.failed(failures, error, url, signal, onStripe);
             continue;
+          }
+          // The plan's URL answered the first request of the source with the whole file: it
+          // ignores `Range`, so no stripe can work either. The stock source reads it sequentially.
+          if (!onStripe && response.status === 200 && this.firstTotal === null) {
+            void response.body?.cancel().catch(() => {});
+            this.ignoresRange = true;
+            break;
           }
           let responseEnd: number;
           try {
