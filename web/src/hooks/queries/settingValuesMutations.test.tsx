@@ -419,12 +419,11 @@ describe("typed setting mutations", () => {
     },
   );
 
-  // A write held until reconnect would replace whatever another device saved
-  // to the same key in the meantime.
-  it.each([false, true])("sends an offline write at once (clear: %s)", async (clear) => {
+  // A write held until reconnect, or sent once the connection returns, would
+  // replace whatever another device saved to the same key in the meantime.
+  it.each([false, true])("refuses an offline write at once, unsent (clear: %s)", async (clear) => {
     onlineManager.setOnline(false);
     try {
-      v2Mock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       const { wrapper } = createHarness();
       const { result } = renderHook(
         () => ({ set: useSetSettingValue(), clear: useClearSettingValue() }),
@@ -433,19 +432,19 @@ describe("typed setting mutations", () => {
       const key = SETTING_KEYS.NAV_PRIMARY_MENU;
       const identity = { scope: "profile_client" } as const;
 
-      let outcome!: Promise<unknown>;
+      let outcome: unknown = "pending";
       act(() => {
         const write = clear
           ? result.current.clear.mutateAsync({ key, identity })
           : result.current.set.mutateAsync({ key, value: { items: [] }, identity });
-        outcome = write.then(
-          () => "saved",
-          (error: unknown) => error,
+        write.then(
+          () => (outcome = "saved"),
+          (error: unknown) => (outcome = error),
         );
       });
 
-      await waitFor(() => expect(v2Mock).toHaveBeenCalledTimes(1));
-      expect(await outcome).toMatchObject({ message: "Failed to fetch" });
+      await waitFor(() => expect(outcome).toMatchObject({ name: "SettingWriteOfflineError" }));
+      expect(v2Mock).not.toHaveBeenCalled();
     } finally {
       onlineManager.setOnline(true);
     }

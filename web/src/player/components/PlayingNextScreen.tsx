@@ -6,7 +6,7 @@ import { isStillWatchingGated } from "../stillWatching";
 import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
-import { saveReportingOffline } from "@/hooks/queries/settingWriteOffline";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
@@ -78,7 +78,7 @@ function PlayingNextContent({
   const spoilerPrefs = useEpisodeSpoilerPrefs();
 
   const toggleAutoplay = useCallback(() => {
-    saveReportingOffline(() => setAutoplay(!autoplaySetting));
+    setAutoplay(!autoplaySetting).catch(reportOfflineSettingFailure);
   }, [autoplaySetting, setAutoplay]);
 
   // -- Countdown (only starts after video has ended) --

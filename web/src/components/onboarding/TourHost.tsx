@@ -23,7 +23,7 @@ import { useOnboardingProgress } from "@/hooks/queries/onboarding";
 import { useUpdateProfile } from "@/hooks/queries/profiles";
 import { settingValueFromString } from "@/hooks/queries/admin/users";
 import { useSetSettingValue, type SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure, sendingOffline } from "@/hooks/queries/settingWriteOffline";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
@@ -347,7 +347,6 @@ function SettingControl({ step }: { step: OnboardingStep }) {
   const stored = useRef(value);
 
   function save(next: string) {
-    const offline = sendingOffline();
     setValue(next);
     if (spec.target === "profile_field") {
       if (!profile) return;
@@ -375,9 +374,9 @@ function SettingControl({ step }: { step: OnboardingStep }) {
         () => {
           stored.current = next;
         },
-        () => {
-          // Sent offline, nothing was stored, so show the stored choice again.
-          if (offline && reportOfflineSettingFailure()) setValue(stored.current);
+        (error: unknown) => {
+          // Refused offline, nothing was stored, so show the stored choice again.
+          if (reportOfflineSettingFailure(error)) setValue(stored.current);
         },
       );
   }

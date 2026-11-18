@@ -12,7 +12,7 @@ import {
   type EffectiveSettingsMap,
 } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure, sendingOffline } from "@/hooks/queries/settingWriteOffline";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS, SETTINGS_API_VERSION, type SettingKey } from "@/lib/settingsContract";
 import { catalogKeys, sectionKeys, settingsKeys } from "@/hooks/queries/keys";
 import { storage } from "@/utils/storage";
@@ -113,7 +113,6 @@ export function useOverlayPrefs() {
         ...current,
         [key]: { key, value, source: "profile", scope: "profile" },
       }));
-      const offline = sendingOffline();
       setSettingValue(
         { key, value, identity: PROFILE_SCOPE },
         {
@@ -124,8 +123,8 @@ export function useOverlayPrefs() {
           // unpersisted optimistic value, while a refetch reconciles the cache
           // with what the server actually stored.
           onError: (error) => {
-            // Sent offline, that refetch waits for reconnect: say the change is lost.
-            if (offline) reportOfflineSettingFailure();
+            // Refused offline, that refetch waits for reconnect: say the change is lost.
+            reportOfflineSettingFailure(error);
             if (isDefinitiveSettingMutationRejection(error)) {
               void queryClient.invalidateQueries({ queryKey: effectiveQueryKey });
             }

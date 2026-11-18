@@ -1,8 +1,8 @@
-import { onlineManager } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { v2Problem } from "@/api/v2/problems.test-support";
+import { SettingWriteOfflineError } from "@/hooks/queries/settingWriteOffline";
 import {
   libraryPageStateWriteRetryDelay,
   shouldRetryLibraryPageStateWrite,
@@ -152,21 +152,16 @@ describe("useLibraryPageStatePreference", () => {
 
   // The offline write never reached the server, so carrying it into the next
   // whole-document save would replace a view another tab saved meanwhile.
-  it("drops a write that failed offline before advancing the queue", async () => {
+  it("drops a write refused offline before advancing the queue", async () => {
     mocks.mutateAsync
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new SettingWriteOfflineError())
       .mockResolvedValueOnce({});
     const { result } = renderHook(() => useLibraryPageStatePreference());
 
-    onlineManager.setOnline(false);
-    try {
-      await act(async () => {
-        const offline = result.current.saveLibrarySearch(7, "tab=library&sort=year");
-        await offline.catch(() => undefined);
-      });
-    } finally {
-      onlineManager.setOnline(true);
-    }
+    await act(async () => {
+      const offline = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+      await offline.catch(() => undefined);
+    });
     await act(async () => {
       await result.current.saveLibrarySearch(9, "tab=collections");
     });
@@ -649,12 +644,7 @@ describe("useLibraryPageStatePreference", () => {
   });
 
   // A retry after reconnect could replace a view another tab saved meanwhile.
-  it("does not retry a write that failed offline", () => {
-    onlineManager.setOnline(false);
-    try {
-      expect(libraryPageStateWriteRetryDelay(new TypeError("Failed to fetch"), 2_000)).toBeNull();
-    } finally {
-      onlineManager.setOnline(true);
-    }
+  it("does not retry a write refused offline", () => {
+    expect(libraryPageStateWriteRetryDelay(new SettingWriteOfflineError(), 2_000)).toBeNull();
   });
 });

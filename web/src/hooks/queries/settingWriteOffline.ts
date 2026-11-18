@@ -1,40 +1,50 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { onlineManager } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
 import { appearanceCache, type StorageKey } from "@/utils/storage";
 
-/**
- * Setting writes are sent even offline, so they fail at once: replayed on
- * reconnect, a write would replace whatever another device saved at its key
- * in the meantime.
- */
-export const SETTING_WRITE_NETWORK_MODE = "always";
-
-/**
- * Tells the user an offline preference change wasn't saved. For callers that
- * show the change at once and report no save error of their own; failures
- * while online stay with the caller's existing handling.
- *
- * Returns whether the failure happened offline. Only then is it certain the
- * write never reached the server and no settings re-read ran first, so only
- * then may a caller put back the value it showed before the change.
- */
-export function reportOfflineSettingFailure(): boolean {
-  if (onlineManager.isOnline()) return false;
-  // One toast for a burst of offline changes, not one per click.
-  toast.error(t("web.settings.offlineChangeNotSaved"), { id: "setting-write-offline" });
-  return true;
+/** A setting write refused unsent because the browser was offline. */
+export class SettingWriteOfflineError extends Error {
+  constructor() {
+    super("The browser is offline, so the setting was not sent");
+    this.name = "SettingWriteOfflineError";
+  }
 }
 
 /**
- * The reads a failed write refreshes wait for reconnect while offline, and an
- * in-flight one can pause on its retry, so a caller awaiting them would show
- * the failure only after reconnect. Offline, refresh without waiting.
+ * Options for every setting write. It runs whatever the reported network
+ * state, so an offline write is refused at once instead of pausing: queued and
+ * replayed on reconnect, it would replace whatever another device saved at its
+ * key in the meantime. It is refused before dispatch, which is what makes the
+ * failure certain: a sent request can still land after the connection drops,
+ * and one held for a session refresh could go out after it returns. A throwing
+ * onMutate fails the mutation without running mutationFn.
  */
-export function awaitUnlessOffline(reconcile: Promise<void>): Promise<void> | undefined {
-  return onlineManager.isOnline() ? reconcile : undefined;
+export const settingWriteOptions = {
+  networkMode: "always",
+  onMutate: (): undefined => {
+    if (!onlineManager.isOnline()) throw new SettingWriteOfflineError();
+  },
+} as const;
+
+/** Whether a setting write was refused unsent because the browser was offline. */
+export function refusedOffline(error: unknown): boolean {
+  return error instanceof SettingWriteOfflineError;
+}
+
+/**
+ * Tells the user a preference change made offline wasn't saved, for callers
+ * that show the change at once and report no save error of their own. Other
+ * failures stay with the caller's existing handling. Returns whether the
+ * write was refused offline, so it is certain nothing was stored.
+ */
+export function reportOfflineSettingFailure(error: unknown): boolean {
+  if (!refusedOffline(error)) return false;
+  // One toast for a burst of offline changes, not one per click.
+  toast.error(t("web.settings.offlineChangeNotSaved"), { id: "setting-write-offline" });
+  return true;
 }
 
 interface ShownChange<T> {
@@ -43,7 +53,7 @@ interface ShownChange<T> {
   /** The browser cache entry that warms the next load with this preference. */
   cacheKey: StorageKey;
   value: T;
-  /** What is shown now, put back if the change fails offline. */
+  /** What is shown now, put back if the change is refused offline. */
   previous: T;
   show: (value: T) => void;
   save: (value: T) => Promise<unknown>;
@@ -57,41 +67,19 @@ interface UnsettledPreference {
 }
 
 /**
- * Whether a write about to be sent will fail without reaching the server.
- * Read it before sending: a write sent online can still land when the
- * connection drops before its answer, so being offline when it fails proves
- * nothing.
- */
-export function sendingOffline(): boolean {
-  return !onlineManager.isOnline();
-}
-
-/**
- * Sends a background preference write and reports it as not saved when it was
- * sent offline and fails. Other failures stay with the shared mutation's
- * handling. Reads the connection state before sending, like sendingOffline.
- */
-export function saveReportingOffline(send: () => Promise<unknown>): void {
-  const offline = sendingOffline();
-  send().catch(() => {
-    if (offline) reportOfflineSettingFailure();
-  });
-}
-
-/**
  * For appearance preferences applied before they are saved: shows the change
- * and caches it, then saves it. When the newest change to a preference was
- * sent offline and fails, it puts back the last value known stored, with its
- * cache entry: the one from before the first unsettled change, or a later
- * change that has since landed. Their sync effects re-run only when the stored
- * value changes, which a failed save never does.
+ * and caches it, then saves it. When the newest change to a preference is
+ * refused offline, it puts back the last value known stored, with its cache
+ * entry: the one from before the first unsettled change, or a later change
+ * that has since landed. Their sync effects re-run only when the stored value
+ * changes, which a refused save never does.
  */
 export function useShowThenSave(cacheOwner: string | null) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
   // A restore shows the value through the provider's current state, so it is
   // skipped once another account or profile owns the appearance.
   const currentOwner = useRef(cacheOwner);
-  useEffect(() => {
+  useLayoutEffect(() => {
     currentOwner.current = cacheOwner;
   }, [cacheOwner]);
   return useCallback(
@@ -105,7 +93,6 @@ export function useShowThenSave(cacheOwner: string | null) {
       };
       pending.latest = token;
       unsettled.current.set(entryKey, pending);
-      const offline = sendingOffline();
       show(value);
       appearanceCache.set(cacheKey, String(value), cacheOwner);
       save(value).then(
@@ -114,11 +101,11 @@ export function useShowThenSave(cacheOwner: string | null) {
           pending.stored = { value, cached: String(value) };
           if (pending.latest === token) unsettled.current.delete(entryKey);
         },
-        () => {
+        (error: unknown) => {
           // A newer change to this preference settles it instead.
           if (pending.latest !== token) return;
           unsettled.current.delete(entryKey);
-          if (!offline || !reportOfflineSettingFailure()) return;
+          if (!reportOfflineSettingFailure(error)) return;
           if (currentOwner.current === cacheOwner) show(pending.stored.value as T);
           // The cache is the original owner's either way, read on its next load.
           if (pending.stored.cached === null) appearanceCache.remove(cacheKey, cacheOwner);

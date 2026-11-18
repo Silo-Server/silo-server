@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { onlineManager } from "@tanstack/react-query";
 import { V2ProblemError } from "@/api/v2/request";
 import {
   isDefinitiveSettingMutationRejection,
@@ -9,7 +8,7 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure, sendingOffline } from "@/hooks/queries/settingWriteOffline";
+import { refusedOffline, reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
 
@@ -266,9 +265,9 @@ export function libraryPageStateWriteRetryDelay(
   error: unknown,
   fallbackDelayMs: number,
 ): number | null {
-  // A write that failed offline is not retried: by the time a retry runs, the
-  // view it was built from may be older than one another tab saved meanwhile.
-  if (!shouldRetryLibraryPageStateWrite(error) || !onlineManager.isOnline()) {
+  // A write refused offline is not retried: by the time a retry runs, the view
+  // it was built from may be older than one another tab saved meanwhile.
+  if (!shouldRetryLibraryPageStateWrite(error) || refusedOffline(error)) {
     return null;
   }
   if (error instanceof LibraryPreferenceWriteCancelledError) {
@@ -385,7 +384,6 @@ export function useLibraryPageStatePreference() {
       let attemptedPreference: LibraryPageStatePreference | undefined;
       let attemptedWrites: PendingPreferenceWrite[] = [];
       let mutationStarted = false;
-      let sentOffline = false;
       const write = queue.writeChain
         .catch(() => undefined)
         .then(() => {
@@ -399,7 +397,6 @@ export function useLibraryPageStatePreference() {
           );
           attemptedWrites = appendPreferenceWrite(queue.unconfirmedWrites, pendingWrite);
           mutationStarted = true;
-          sentOffline = sendingOffline();
           return mutateAsync({
             key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
             value: attemptedPreference,
@@ -419,15 +416,13 @@ export function useLibraryPageStatePreference() {
           return result;
         },
         (error: unknown) => {
-          // A write sent offline never reached the server and isn't retried, so
-          // drop it: kept, it would ride along in the next save. One sent online
-          // may have landed before the connection dropped, so it stays ambiguous.
-          const failedOffline = mutationStarted && sentOffline;
-          if (failedOffline) reportOfflineSettingFailure();
+          // A write refused offline was never sent and isn't retried; settling it
+          // as definitive drops it, so it can't ride along in the next save.
+          if (mutationStarted) reportOfflineSettingFailure(error);
           settlePreferenceWrite(
             queue,
             pendingWrite,
-            !mutationStarted || failedOffline || isDefinitiveSettingMutationRejection(error)
+            !mutationStarted || isDefinitiveSettingMutationRejection(error)
               ? "definitive_failure"
               : "ambiguous_failure",
             attemptedPreference,
