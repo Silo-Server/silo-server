@@ -127,6 +127,13 @@ func (w *Watcher) rememberNodeRegistration(id int, registeredURL string) {
 	w.mu.Unlock()
 }
 
+// PinNodeRow tells the watcher which row is this node's before Start, when
+// the node has already resolved it (a proxy that registered itself). The
+// watcher then reads that row by id, as it does after its own first lookup.
+func (w *Watcher) PinNodeRow(id int, registeredURL string) {
+	w.rememberNodeRegistration(id, registeredURL)
+}
+
 // rememberedNodeRowID returns the row this worker previously resolved to.
 func (w *Watcher) rememberedNodeRowID() (int, bool) {
 	w.mu.RLock()

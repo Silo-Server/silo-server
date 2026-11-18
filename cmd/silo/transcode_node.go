@@ -21,6 +21,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netadmin"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodecontrol"
+	"github.com/Silo-Server/silo-server/internal/nodedeclare"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -41,7 +43,10 @@ const envCoreURL = "SILO_CORE_URL"
 // takes from the core or no longer needs: the database and Redis it read
 // settings, recipes and deny markers from, the data cipher's key, and the URL
 // and name it matched its row by. Shared env files still set them, so they
-// are warned about rather than refused.
+// are warned about rather than refused. NODE_URL and NODE_NAME stay ignored
+// although a transcode node now declares its URL and name: an env file shared
+// with a proxy sets them, and honoring them on upgrade would rewrite rows. A
+// node declares them with SILO_NODE_URL and SILO_NODE_NAME (nodedeclare).
 var transcodeNodeIgnoredEnv = []string{envDatabaseURL, envRedisURL, envSecretKey, envNodeURL, envNodeName}
 
 // The variables a transcode node once read; see transcodeNodeIgnoredEnv.
@@ -79,6 +84,9 @@ type transcodeNodeEnv struct {
 	ignored []string
 	// insecureCoreURL reports a plain-HTTP core URL off this host.
 	insecureCoreURL bool
+	// declaration is the configuration the node declares from its
+	// environment; see nodedeclare.
+	declaration nodepool.UpdateNodeInput
 }
 
 // loadTranscodeNodeEnv reads and checks the node's environment. A missing core
@@ -104,6 +112,9 @@ func loadTranscodeNodeEnv(getenv func(string) string) (transcodeNodeEnv, error) 
 		port = "8080"
 	}
 	env.listen = ":" + port
+	if env.declaration, err = nodedeclare.FromEnv(nodepool.NodeTypeTranscode, getenv); err != nil {
+		return transcodeNodeEnv{}, err
+	}
 	for _, name := range transcodeNodeIgnoredEnv {
 		if getenv(name) != "" {
 			env.ignored = append(env.ignored, name)
@@ -160,10 +171,17 @@ func runTranscodeNode() {
 	// health says so, which takes the node out of placement, until a
 	// configuration read succeeds again.
 	client.SetOnUnauthorized(remote.ReportUnauthorized)
-	slog.Info("reading this node's configuration from the main server", "core_url", env.coreURL, "node_id", client.NodeID())
 	// The listener starts only once the configuration is read; a signal that
 	// arrives while the node waits for the core stops it cleanly.
 	loadCtx, stopLoadSignals := signal.NotifyContext(appCtx, syscall.SIGTERM, syscall.SIGINT)
+	// Declared before the first configuration read, so the configuration the
+	// node loads already reflects what it declares.
+	if !declareTranscodeNode(loadCtx, appCtx, client, remote, env.declaration) {
+		stopLoadSignals()
+		slog.Info("transcode node stopped before it declared its configuration", "reason", context.Cause(loadCtx))
+		return
+	}
+	slog.Info("reading this node's configuration from the main server", "core_url", env.coreURL, "node_id", client.NodeID())
 	err = remote.Load(loadCtx)
 	stopLoadSignals()
 	if err != nil {
@@ -245,6 +263,55 @@ func runTranscodeNode() {
 	}
 	startStandaloneServer(serverModeTranscode, cfg.Server.Listen, srv.Handler(), appCancel, shutdown,
 		standaloneServerHooks{drain: newTranscodeNodeDrain(srv, remote.KeyRejected)}, opts)
+}
+
+// declareTranscodeNode sends the node's declaration to the core, retrying
+// while the core cannot take it. A declaration the core refuses stops the
+// process, naming the variable. Against a core that predates declarations the
+// node starts anyway: with something declared it warns once and keeps
+// offering it at the configuration poll interval, rereading its configuration
+// once it lands; with nothing declared there is nothing to unlock, and it says
+// nothing. It reports false when ctx ended first.
+func declareTranscodeNode(ctx, appCtx context.Context, client *nodecontrol.Client, remote *nodeconfig.Remote, declaration nodepool.UpdateNodeInput) bool {
+	registration := nodecontrol.RegistrationFrom(declaration)
+	declares := len(declaration.SetFields()) > 0
+	result, err := nodeconfig.Declare(ctx, client, registration)
+	switch {
+	case err == nil:
+		if declares || len(result.EnvManaged) > 0 {
+			slog.InfoContext(ctx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
+		}
+		return true
+	case errors.Is(err, nodeconfig.ErrRegistrationUnsupported):
+		if declares {
+			slog.WarnContext(ctx, "the main server predates node declarations; starting without them and offering them again every poll. Upgrade the main server to apply them",
+				"variables", declaredVariables(declaration))
+			go nodeconfig.RetryDeclaration(appCtx, client, registration, func(result *nodecontrol.RegistrationResult) {
+				slog.InfoContext(appCtx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
+				remote.RequestReload()
+			})
+		}
+		return true
+	}
+	if refused, ok := errors.AsType[*nodecontrol.RegistrationError](err); ok {
+		variable := nodedeclare.VariableFor(nodepool.NodeTypeTranscode, refused.Field)
+		if variable == "" {
+			variable = refused.Field
+		}
+		slog.ErrorContext(ctx, "transcode node cannot start: the main server refused its declaration", "variable", variable, "reason", refused.Reason, "detail", refused.Detail)
+		os.Exit(1)
+	}
+	return false
+}
+
+// declaredVariables names the variables a declaration came from.
+func declaredVariables(declaration nodepool.UpdateNodeInput) []string {
+	fields := declaration.SetFields()
+	names := make([]string, 0, len(fields))
+	for _, field := range fields {
+		names = append(names, nodedeclare.VariableFor(nodepool.NodeTypeTranscode, field))
+	}
+	return names
 }
 
 // configureTranscodeNodeLogging installs the node's slog default: stderr as on
