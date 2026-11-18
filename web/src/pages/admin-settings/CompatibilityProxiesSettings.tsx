@@ -245,6 +245,7 @@ export default function CompatibilityProxiesSettings() {
             onChange={setJellyfinAPIEnabled}
             disabled={form.isSaving}
             restartRequired={restartKeys.has("jellyfin_compat.enabled")}
+            managedByEnv={form.envVar("jellyfin_compat.enabled")}
           />
 
           <SettingField
@@ -260,6 +261,7 @@ export default function CompatibilityProxiesSettings() {
               ) : undefined
             }
             restartRequired={restartKeys.has("jellyfin_compat.public_url")}
+            managedByEnv={form.envVar("jellyfin_compat.public_url")}
           />
 
           {status?.last_error && (
@@ -510,6 +512,7 @@ export default function CompatibilityProxiesSettings() {
               value={form.getValue("jellyfin_compat.server_name")}
               onChange={(v) => form.setValue("jellyfin_compat.server_name", v)}
               restartRequired={restartKeys.has("jellyfin_compat.server_name")}
+              managedByEnv={form.envVar("jellyfin_compat.server_name")}
             />
             <SettingFieldRow
               label={t("web.admin.settings.compatibilityProxies.advanced.serverId")}
@@ -595,6 +598,7 @@ export default function CompatibilityProxiesSettings() {
             value={form.getValue("audiobookshelf_compat.enabled")}
             onChange={(v) => form.setValue("audiobookshelf_compat.enabled", v)}
             restartRequired={restartKeys.has("audiobookshelf_compat.enabled")}
+            managedByEnv={form.envVar("audiobookshelf_compat.enabled")}
           />
         </FieldGroup>
       </div>

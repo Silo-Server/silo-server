@@ -146,6 +146,7 @@ type Dependencies struct {
 	OnConfigChange               func(fn func(old, updated *config.Config))
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
+	BootstrapEnvVars             map[string]string
 	RedisBootstrapAvailable      bool
 	AppContext                   context.Context
 	// RegisterShutdownWork retains asynchronous cleanup completion until main's
@@ -1824,6 +1825,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.AccessGroups = accessGroupStore
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
 		adminHandler.BootstrapSensitiveValues = deps.BootstrapSensitiveValues
+		adminHandler.BootstrapEnvVars = deps.BootstrapEnvVars
 		adminHandler.RedisBootstrapAvailable = deps.RedisBootstrapAvailable
 		adminHandler.RestartStatus = restartStatus
 		adminHandler.CatalogSearchStatus = catalogSearchService

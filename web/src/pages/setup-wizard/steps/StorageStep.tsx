@@ -206,6 +206,7 @@ function S3Fields({
         hint="https://s3.amazonaws.com"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
+        managedByEnv={form.envVar(key("endpoint"))}
         disabled={locationLocked}
         description={
           locationLocked
@@ -219,6 +220,7 @@ function S3Fields({
         label={t("web.setup.storage.bucketLabel")}
         value={form.getValue(key("bucket"))}
         onChange={(v) => form.setValue(key("bucket"), v)}
+        managedByEnv={form.envVar(key("bucket"))}
         disabled={locationLocked}
       />
       <SettingField
@@ -226,6 +228,7 @@ function S3Fields({
         type="password"
         value={form.getValue(key("access_key"))}
         onChange={(v) => form.setValue(key("access_key"), v)}
+        managedByEnv={form.envVar(key("access_key"))}
         sensitiveConfigured={form.sensitiveConfigured.includes(key("access_key"))}
       />
       <SettingField
@@ -233,6 +236,7 @@ function S3Fields({
         type="password"
         value={form.getValue(key("secret_key"))}
         onChange={(v) => form.setValue(key("secret_key"), v)}
+        managedByEnv={form.envVar(key("secret_key"))}
         sensitiveConfigured={form.sensitiveConfigured.includes(key("secret_key"))}
       />
       <SettingField
@@ -242,6 +246,7 @@ function S3Fields({
         hint="silo"
         value={form.getValue(key("key_prefix"))}
         onChange={(v) => form.setValue(key("key_prefix"), v)}
+        managedByEnv={form.envVar(key("key_prefix"))}
         disabled={locationLocked}
       />
       <SettingField
@@ -249,6 +254,7 @@ function S3Fields({
         description={t("web.admin.settings.storage.s3.regionDescription")}
         value={form.getValue(key("region"))}
         onChange={(v) => form.setValue(key("region"), v)}
+        managedByEnv={form.envVar(key("region"))}
       />
       <SettingField
         label={t("web.admin.settings.storage.s3.pathStyle")}
@@ -256,6 +262,7 @@ function S3Fields({
         description={t("web.admin.settings.storage.s3.pathStyleDescription")}
         value={form.getValue(key("path_style"))}
         onChange={(v) => form.setValue(key("path_style"), v)}
+        managedByEnv={form.envVar(key("path_style"))}
       />
       {prefix === "public" ? (
         <>
@@ -267,6 +274,7 @@ function S3Fields({
             options={S3_URL_AUTH_OPTIONS.map((o) => ({ value: o.value, label: t(o.label) }))}
             // A disabled fieldset does not stop a Radix select from opening.
             disabled={disabled}
+            managedByEnv={form.envVar("s3.public_url_auth")}
           />
           {urlAuth !== "presigned" ? (
             <SettingField
@@ -275,6 +283,7 @@ function S3Fields({
               hint="https://cdn.example.com"
               value={form.getValue("s3.public_read_endpoint")}
               onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
+              managedByEnv={form.envVar("s3.public_read_endpoint")}
             />
           ) : null}
           {urlAuth === "cloudflare_token" ? (
@@ -286,12 +295,14 @@ function S3Fields({
                 value={form.getValue("s3.public_token_secret")}
                 onChange={(v) => form.setValue("s3.public_token_secret", v)}
                 sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+                managedByEnv={form.envVar("s3.public_token_secret")}
               />
               <SettingField
                 label={t("web.setup.storage.tokenParamLabel")}
                 description={t("web.setup.storage.tokenParamDescription")}
                 value={form.getValue("s3.public_token_param") || "verify"}
                 onChange={(v) => form.setValue("s3.public_token_param", v)}
+                managedByEnv={form.envVar("s3.public_token_param")}
               />
               <SettingField
                 label={t("web.setup.storage.tokenTtlLabel")}
@@ -299,6 +310,7 @@ function S3Fields({
                 unit={t("web.setup.storage.seconds")}
                 value={form.getValue("s3.public_token_ttl") || "10800"}
                 onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+                managedByEnv={form.envVar("s3.public_token_ttl")}
               />
             </>
           ) : null}
@@ -492,6 +504,7 @@ export function StorageStep() {
               form.setValue("artwork.storage_backend", value);
               if (value === "s3") setOpen((o) => ({ ...o, public: true }));
             }}
+            managedByEnv={form.envVar("artwork.storage_backend")}
           />
           <SettingField
             label={t("web.setup.storage.localPathLabel")}
@@ -505,6 +518,7 @@ export function StorageStep() {
                 ? t("web.setup.storage.lockUnknownPath")
                 : t("web.setup.storage.localPathDescription")
             }
+            managedByEnv={form.envVar("artwork.local_path")}
           />
           <SettingFieldRow
             label={t("web.setup.storage.keepArtworkLabel")}
@@ -542,19 +556,15 @@ export function StorageStep() {
               value={form.getValue("redis.url")}
               onChange={(v) => stageRedisUrl(form, v)}
               sensitiveConfigured={redisSaved && form.getValue("redis.url") === ""}
-              disabled={redisManaged}
+              managedByEnv={form.envVar("redis.url")}
             />
             <SettingField
               label={t("web.setup.storage.redisDbLabel")}
               type="number"
-              description={
-                redisManaged
-                  ? t("web.setup.storage.redisDbManaged")
-                  : t("web.setup.storage.redisDbDescription")
-              }
+              description={t("web.setup.storage.redisDbDescription")}
               value={form.getValue("redis.db")}
               onChange={(v) => form.setValue("redis.db", v)}
-              disabled={redisManaged}
+              managedByEnv={form.envVar("redis.db")}
             />
             <ConnectionCheckAction
               onClick={redisCheck.run}

@@ -39,7 +39,7 @@ func TestApplyBootstrapOverridesTakesRedisFromTheEnvironment(t *testing.T) {
 
 func TestAddRedisBootstrapSettings(t *testing.T) {
 	configured, values := map[string]bool{}, map[string]string{}
-	addRedisBootstrapSettings("", configured, values)
+	addRedisBootstrapSettings("", configured, values, map[string]string{})
 	if len(configured) != 0 || len(values) != 0 {
 		t.Errorf("without REDIS_URL: configured = %v, values = %v; want nothing managed by the environment", configured, values)
 	}
@@ -52,7 +52,7 @@ func TestAddRedisBootstrapSettings(t *testing.T) {
 		"env.example.invalid:6379": "0",
 	} {
 		configured, values := map[string]bool{}, map[string]string{}
-		addRedisBootstrapSettings(redisURL, configured, values)
+		addRedisBootstrapSettings(redisURL, configured, values, map[string]string{})
 		wantConfigured := map[string]bool{"redis.url": true, config.RedisDBSettingKey: true}
 		wantValues := map[string]string{"redis.url": redisURL, config.RedisDBSettingKey: wantDB}
 		if !maps.Equal(configured, wantConfigured) || !maps.Equal(values, wantValues) {

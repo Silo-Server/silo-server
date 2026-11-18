@@ -21,6 +21,8 @@ export interface PathSettingFieldProps {
   onChange: (value: string) => void;
   /** Marks the field with a restart badge; drive it from `useRestartKeys`. */
   restartRequired?: boolean;
+  /** The environment variable that sets this path; disables the control. */
+  managedByEnv?: string;
 }
 
 /**
@@ -40,6 +42,7 @@ export function PathSettingField({
   value,
   onChange,
   restartRequired,
+  managedByEnv,
 }: PathSettingFieldProps) {
   const t = useT();
   const controlId = useId();
@@ -47,7 +50,7 @@ export function PathSettingField({
   // Nothing to reset while the field already runs the default, whether it is
   // blank or holds the default path verbatim: clearing it would save a row
   // nobody could see the effect of.
-  const overridden = value !== "" && value !== defaultValue;
+  const overridden = value !== "" && value !== defaultValue && managedByEnv == null;
 
   return (
     <SettingFieldRow
@@ -56,6 +59,7 @@ export function PathSettingField({
       description={description}
       descriptionId={descriptionId}
       restartRequired={restartRequired}
+      managedByEnv={managedByEnv}
     >
       {/* The action sits under the control rather than beside it: the row
           reserves a unit slot to the right of every control, so anything
@@ -68,6 +72,7 @@ export function PathSettingField({
           value={value}
           placeholder={defaultValue}
           onChange={(e) => onChange(e.target.value)}
+          disabled={managedByEnv != null}
           className={cn("border-muted-foreground/25", SETTINGS_CONTROL_WIDTH)}
           aria-describedby={description ? descriptionId : undefined}
         />

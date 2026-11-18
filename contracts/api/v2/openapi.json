@@ -21167,11 +21167,19 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "managed_by_env_vars": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The environment variable that sets each key in managed_by_env, keyed by setting key.",
+            "type": "object"
           }
         },
         "required": [
           "configured",
-          "managed_by_env"
+          "managed_by_env",
+          "managed_by_env_vars"
         ],
         "type": "object"
       },

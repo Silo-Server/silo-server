@@ -13,7 +13,6 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -785,13 +784,15 @@ func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
 // redis.db is one of them and reports the number in use. With a value the
 // parser cannot read, a server that stays up has only the event bus connected,
 // to a bare address and on database 0.
-func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values map[string]string) {
+func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values, vars map[string]string) {
 	if redisURL == "" {
 		return
 	}
 	configured["redis.url"] = true
 	values["redis.url"] = redisURL
+	vars["redis.url"] = "REDIS_URL"
 	configured[config.RedisDBSettingKey] = true
+	vars[config.RedisDBSettingKey] = "REDIS_URL"
 	db, _ := (config.RedisConfig{URL: redisURL}).Database()
 	values[config.RedisDBSettingKey] = strconv.Itoa(db)
 }
@@ -916,8 +917,22 @@ func main() {
 		log.Fatalf("local network TLS: %v", err)
 	}
 
-	// Step 2: Connect to PostgreSQL (bootstrap pool with default max connections)
-	bootstrapDBCfg := config.DatabaseConfig{URL: bc.DatabaseURL, MaxConnections: 20}
+	// The settings the environment sets (config.ReadEnvSettings). Only API
+	// servers read them, and maintenance commands skip them so a bad value
+	// cannot block a migration. Read before the pool opens, because
+	// SILO_DB_MAX_CONNECTIONS sizes it.
+	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
+	var envSettings config.EnvSettings
+	if isPrimaryNode && !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 {
+		envSettings, err = config.ReadEnvSettings(os.Getenv)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+	}
+
+	// Step 2: Connect to PostgreSQL (bootstrap pool sized by
+	// SILO_DB_MAX_CONNECTIONS, or the default until settings are read)
+	bootstrapDBCfg := config.DatabaseConfig{URL: bc.DatabaseURL, MaxConnections: bootstrapPoolSize(envSettings)}
 	pool, err := database.NewPoolForRole(ctx, bootstrapDBCfg, "application")
 	if err != nil {
 		log.Fatalf("database pool: %v", err)
@@ -973,7 +988,6 @@ func main() {
 	// The same gate decides whether this node runs the credential-encryption
 	// backfills: only the primary (migration-running) node sweeps plaintext to
 	// ciphertext; secondary nodes read whatever the primary encrypted.
-	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
 		if migErr := database.MigrateAtStartup(ctx, pool, migrations.FS, "sql", startupMigrations); migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
@@ -1023,19 +1037,12 @@ func main() {
 		}
 	}
 
-	// SILO_SEARCH_PROVIDER and the Meilisearch variables win over the stored
-	// search settings. They are stored so the admin UI shows the values in
-	// effect. Only API servers build search, so only they read them.
-	var searchEnv map[string]string
-	if isPrimaryNode {
-		searchEnv, err = catalog.SearchSettingsFromEnv(os.Getenv)
-		if err != nil {
-			log.Fatalf("%v", err)
-		}
-		if err := catalog.StoreSearchSettings(ctx, settingsRepo, settings, searchEnv); err != nil {
-			log.Fatalf("storing search settings from the environment: %v", err)
-		}
-		maps.Copy(settings, searchEnv)
+	// The settings the environment sets win over the stored ones. Cluster-wide
+	// ones are stored so the admin UI and the other servers see the values in
+	// effect; per-process ones only overlay this process's settings.
+	envSettings, envChangedKeys, err := applyEnvSettings(ctx, settingsRepo, settings, envSettings, bc.RedisURL)
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 
 	// Step 5: Auto-generate secrets
@@ -1203,6 +1210,12 @@ func main() {
 	// The plugin event dispatcher observes what this process publishes, so
 	// each event reaches plugins once however many nodes receive it.
 	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
+	// Tell the servers already running that the environment changed stored
+	// settings, as an admin save does, so they reload now rather than at the
+	// next poll.
+	for _, key := range envChangedKeys {
+		_ = eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+	}
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
 		switch event.Type {
 		case cache.EventScanComplete:
@@ -1389,6 +1402,7 @@ func main() {
 		JFListen:    bc.JFListen,
 		ABSListen:   bc.ABSListen,
 		RedisURL:    bc.RedisURL,
+		Settings:    envSettings.Values(config.EnvScopeProcess),
 	})
 	configWatcher.OnLoad(normalizeLoadedConfig)
 	if err := configWatcher.Start(appCtx); err != nil {
@@ -1411,19 +1425,9 @@ func main() {
 
 	bootstrapSensitiveConfigured := map[string]bool{}
 	bootstrapSensitiveValues := map[string]string{}
-	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues)
-	if rawTrustedProxies := strings.TrimSpace(os.Getenv(clientip.EnvTrustedProxies)); rawTrustedProxies != "" {
-		normalizedTrustedProxies, normalizeErr := clientip.NormalizeCIDRList(rawTrustedProxies)
-		if normalizeErr != nil {
-			log.Fatalf("invalid %s: %v", clientip.EnvTrustedProxies, normalizeErr)
-		}
-		bootstrapSensitiveConfigured[clientip.SettingTrustedProxies] = true
-		bootstrapSensitiveValues[clientip.SettingTrustedProxies] = normalizedTrustedProxies
-	}
-	for key, value := range searchEnv {
-		bootstrapSensitiveConfigured[key] = true
-		bootstrapSensitiveValues[key] = value
-	}
+	bootstrapEnvVars := map[string]string{}
+	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
+	addEnvSettingLocks(envSettings, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
 
 	// Shared Redis client for components needing raw Redis beyond the event
 	// bus (websocket handshake tickets, session listing). Nil on Redis-less
@@ -1513,6 +1517,7 @@ func main() {
 		OnConfigChange:               configWatcher.OnChange,
 		BootstrapSensitiveConfigured: bootstrapSensitiveConfigured,
 		BootstrapSensitiveValues:     bootstrapSensitiveValues,
+		BootstrapEnvVars:             bootstrapEnvVars,
 		RedisBootstrapAvailable:      redisBootstrapAvailable,
 		AppContext:                   appCtx,
 		RegisterShutdownWork:         registerShutdownWork,
@@ -3936,6 +3941,7 @@ func main() {
 	}
 	storageTransitionSvc := storagetransition.New(deps.DB, settingsRepo, adminjob.NewRepository(deps.DB), deps.Blobs.Assets, transitionPrivate)
 	storageTransitionSvc.SetNodeAdmission(storageAdmission)
+	storageTransitionSvc.SetEnvironmentManaged(envSettings.Vars())
 	if brandingSvc != nil {
 		storageTransitionSvc.SetBrandingReconciler(brandingSvc.ReconcileMissingAssets)
 	}
