@@ -115342,6 +115342,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "⟦Åļšö îñ~~~⟧"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

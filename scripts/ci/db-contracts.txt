@@ -642,6 +642,7 @@
 ./internal/downloads TestStaleAbandonedPreparationsAreRetiredNotClaimedDB
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresCollectionsHolding
 ./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
 ./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
@@ -1065,6 +1066,8 @@
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
 ./internal/api/handlers TestCollectionRowCardsFollowTheViewerDB
 ./internal/api/handlers TestCollectionRowCardsShowVisiblePersonalCollectionsDB
+./internal/api/handlers TestItemCollectionsDB
+./internal/api/handlers TestItemCollectionsPreviewDB
 ./internal/sections TestRowOfCollectionsReferencesItsCollectionsPostgres
 
 # A scan that adds or removes titles refreshes the stored counts of the smart

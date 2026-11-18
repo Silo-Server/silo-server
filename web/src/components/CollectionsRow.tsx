@@ -18,6 +18,23 @@ import { carouselCardWidthClasses } from "@/lib/uiCustomization";
  */
 export function CollectionsRow({ section }: { section: ResolvedSection }) {
   const sectionTitle = useSectionTitle();
+  return <CollectionCardsRow title={sectionTitle(section)} cards={section.collections ?? []} />;
+}
+
+/**
+ * A titled row of collection poster cards, each opening its collection;
+ * nothing when there are no cards. Another profile's shared collection
+ * carries its owner's name.
+ */
+export function CollectionCardsRow({
+  title,
+  cards,
+  edgePadding,
+}: {
+  title: string;
+  cards: SectionCollectionCard[];
+  edgePadding?: boolean;
+}) {
   const { cardPresentation } = useUICustomization();
   const widthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
   const windowing = useMemo<MediaCarouselWindowing>(
@@ -29,10 +46,8 @@ export function CollectionsRow({ section }: { section: ResolvedSection }) {
   );
   const { data: profiles = [] } = useProfiles();
   const { profile } = useCurrentProfile();
-  const cards = section.collections ?? [];
   if (cards.length === 0) return null;
 
-  // Another profile's shared collection carries its owner's name.
   const byline = (card: SectionCollectionCard) =>
     card.source === "user" &&
     profile &&
@@ -42,7 +57,7 @@ export function CollectionsRow({ section }: { section: ResolvedSection }) {
       : undefined;
 
   return (
-    <MediaCarousel title={sectionTitle(section)} windowing={windowing}>
+    <MediaCarousel title={title} windowing={windowing} edgePadding={edgePadding}>
       {cards.map((card) => (
         <div key={`${card.source}:${card.id}`} className={widthClasses} role="listitem">
           <CollectionPosterCard
