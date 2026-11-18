@@ -66141,12 +66141,6 @@
       "value": "Proxy attendibili"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Gestito da SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -72343,12 +72337,6 @@
       "value": "Usa Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Impostato da REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -72365,12 +72353,6 @@
     {
       "type": 0,
       "value": "URL di connessione"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Valore fornito da REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -77284,20 +77266,6 @@
     {
       "type": 0,
       "value": "Log del server"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Gestito da "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -143536,6 +143504,12 @@
       "value": "È necessario un URL del webhook"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Sei offline, quindi questa modifica non è stata salvata"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -150751,12 +150725,6 @@
       "value": "Proxy attendibili"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Impostato da SILO_TRUSTED_PROXIES nell’ambiente."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -151007,12 +150975,6 @@
     {
       "type": 0,
       "value": "Numero del database"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Impostato da REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

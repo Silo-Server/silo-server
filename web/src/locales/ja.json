@@ -53424,12 +53424,6 @@
       "value": "信頼するプロキシ"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIESで管理されています。"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -59362,12 +59356,6 @@
       "value": "Redisを使用"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URLで設定済み"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59384,12 +59372,6 @@
     {
       "type": 0,
       "value": "接続URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "REDIS_URLで指定された値"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64233,16 +64215,6 @@
     {
       "type": 0,
       "value": "サーバーログ"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "で管理されています。"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -120732,6 +120704,12 @@
       "value": "Webhook URLは必須です"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "オフラインのため、この変更は保存されませんでした"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -127381,12 +127359,6 @@
       "value": "信頼するプロキシ"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "環境変数SILO_TRUSTED_PROXIESで設定されています。"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -127637,12 +127609,6 @@
     {
       "type": 0,
       "value": "データベース番号"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URLで設定"
     }
   ],
   "web.setup.storage.redisDescription": [

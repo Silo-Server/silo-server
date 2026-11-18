@@ -12,6 +12,7 @@ import {
   type EffectiveSettingsMap,
 } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS, SETTINGS_API_VERSION, type SettingKey } from "@/lib/settingsContract";
 import { catalogKeys, sectionKeys, settingsKeys } from "@/hooks/queries/keys";
 import { storage } from "@/utils/storage";
@@ -122,6 +123,8 @@ export function useOverlayPrefs() {
           // unpersisted optimistic value, while a refetch reconciles the cache
           // with what the server actually stored.
           onError: (error) => {
+            // Offline, that refetch waits for reconnect: say the change is lost.
+            reportOfflineSettingFailure();
             if (isDefinitiveSettingMutationRejection(error)) {
               void queryClient.invalidateQueries({ queryKey: effectiveQueryKey });
             }

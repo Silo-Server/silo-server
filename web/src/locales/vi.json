@@ -59963,12 +59963,6 @@
       "value": "Proxy tin cậy"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Được quản lý bởi SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -66041,12 +66035,6 @@
       "value": "Dùng Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Được đặt bởi REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -66063,12 +66051,6 @@
     {
       "type": 0,
       "value": "URL kết nối"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Giá trị do REDIS_URL cung cấp"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70971,20 +70953,6 @@
     {
       "type": 0,
       "value": "Nhật ký máy chủ"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Được quản lý bởi "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -132849,6 +132817,12 @@
       "value": "Cần có URL webhook"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Bạn đang ngoại tuyến nên thay đổi này chưa được lưu"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -139833,12 +139807,6 @@
       "value": "Proxy tin cậy"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Được đặt bằng SILO_TRUSTED_PROXIES trong môi trường."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -140089,12 +140057,6 @@
     {
       "type": 0,
       "value": "Số cơ sở dữ liệu"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Do REDIS_URL thiết lập"
     }
   ],
   "web.setup.storage.redisDescription": [

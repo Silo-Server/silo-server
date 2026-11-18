@@ -73868,12 +73868,6 @@
       "value": "Доверенные прокси"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Управляется переменной SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -80206,12 +80200,6 @@
       "value": "Использовать Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Задано через REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -80228,12 +80216,6 @@
     {
       "type": 0,
       "value": "URL подключения"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Значение задано через REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -85258,20 +85240,6 @@
     {
       "type": 0,
       "value": "Журнал сервера"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Управляется переменной "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -156639,6 +156607,12 @@
       "value": "Укажите URL вебхука"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Вы не в сети, поэтому изменение не сохранено"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -164165,12 +164139,6 @@
       "value": "Доверенные прокси"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Задаётся переменной окружения SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -164421,12 +164389,6 @@
     {
       "type": 0,
       "value": "Номер базы данных"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Задаётся через REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

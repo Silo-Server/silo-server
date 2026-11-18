@@ -63067,12 +63067,6 @@
       "value": "\u200F\u202ETrusted proxies\u202C"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManaged by SILO_TRUSTED_PROXIES.\u202C"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -69265,12 +69259,6 @@
       "value": "\u200F\u202EUse Redis\u202C"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by REDIS_URL\u202C"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -69287,12 +69275,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EConnection URL\u202C"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EValue supplied by REDIS_URL\u202C"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -74427,20 +74409,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EServer log\u202C"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManaged by \u202C"
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "\u202E.\u202C"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -138911,6 +138879,12 @@
       "value": "\u200F\u202EA webhook URL is required\u202C"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYou're offline, so this change wasn't saved\u202C"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -146123,12 +146097,6 @@
       "value": "\u200F\u202ETrusted proxies\u202C"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by SILO_TRUSTED_PROXIES in the environment.\u202C"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -146379,12 +146347,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EDatabase number\u202C"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by REDIS_URL\u202C"
     }
   ],
   "web.setup.storage.redisDescription": [

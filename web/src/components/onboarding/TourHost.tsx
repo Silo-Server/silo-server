@@ -23,6 +23,7 @@ import { useOnboardingProgress } from "@/hooks/queries/onboarding";
 import { useUpdateProfile } from "@/hooks/queries/profiles";
 import { settingValueFromString } from "@/hooks/queries/admin/users";
 import { useSetSettingValue, type SettingIdentity } from "@/hooks/queries/settingValues";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
@@ -343,6 +344,7 @@ function SettingControl({ step }: { step: OnboardingStep }) {
   const [value, setValue] = useState<string>(currentValue || spec.default || "");
 
   function save(next: string) {
+    const previous = value;
     setValue(next);
     if (spec.target === "profile_field") {
       if (!profile) return;
@@ -358,11 +360,16 @@ function SettingControl({ step }: { step: OnboardingStep }) {
     // differ only in the scope the value is stored at.
     const identity: SettingIdentity =
       spec.target === "device_setting" ? { scope: "profile_device" } : { scope: "profile" };
-    setSettingValue.mutate({
-      key: spec.key as SettingKey,
-      value: settingValueFromString(spec.key, next),
-      identity,
-    });
+    setSettingValue.mutate(
+      { key: spec.key as SettingKey, value: settingValueFromString(spec.key, next), identity },
+      {
+        // Nothing was stored, so show the previous choice again.
+        onError: () => {
+          reportOfflineSettingFailure();
+          setValue(previous);
+        },
+      },
+    );
   }
 
   if (spec.control === "segmented") {

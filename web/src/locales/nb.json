@@ -59763,12 +59763,6 @@
       "value": "Klarerte proxyer"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Styres av SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65837,12 +65831,6 @@
       "value": "Bruk Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Angitt av REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65859,12 +65847,6 @@
     {
       "type": 0,
       "value": "Tilkoblings-URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Verdien angis av REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70723,20 +70705,6 @@
     {
       "type": 0,
       "value": "Serverlogg"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Administreres av "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -132459,6 +132427,12 @@
       "value": "En webhook-URL er påkrevd"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Du er frakoblet, så endringen ble ikke lagret"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -139467,12 +139441,6 @@
       "value": "Klarerte proxyer"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Angitt av SILO_TRUSTED_PROXIES i miljøet."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -139723,12 +139691,6 @@
     {
       "type": 0,
       "value": "Databasenummer"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Angitt av REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

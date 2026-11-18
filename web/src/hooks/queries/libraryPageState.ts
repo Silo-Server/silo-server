@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { onlineManager } from "@tanstack/react-query";
 import { V2ProblemError } from "@/api/v2/request";
 import {
   isDefinitiveSettingMutationRejection,
@@ -264,7 +265,9 @@ export function libraryPageStateWriteRetryDelay(
   error: unknown,
   fallbackDelayMs: number,
 ): number | null {
-  if (!shouldRetryLibraryPageStateWrite(error)) {
+  // A write that failed offline is not retried: by the time a retry runs, the
+  // view it was built from may be older than one another tab saved meanwhile.
+  if (!shouldRetryLibraryPageStateWrite(error) || !onlineManager.isOnline()) {
     return null;
   }
   if (error instanceof LibraryPreferenceWriteCancelledError) {

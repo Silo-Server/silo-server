@@ -15,6 +15,7 @@ import type {
 } from "@/lib/datetime";
 import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import { appearanceCache, storage } from "@/utils/storage";
@@ -95,30 +96,39 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
     }
   }, [dateFormat, timeFormat, apiLoaded, cacheOwner]);
 
+  // The shown format was applied before the save. When the save fails, the
+  // stored values are unchanged, so the effect above never re-runs: put them
+  // back here.
+  const restoreStoredFormats = useCallback(() => {
+    reportOfflineSettingFailure();
+    if (!apiLoaded) return;
+    setDateTimeFormatPreferences({ dateFormat, timeFormat });
+    appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, dateFormat, cacheOwner);
+    appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, timeFormat, cacheOwner);
+  }, [apiLoaded, dateFormat, timeFormat, cacheOwner]);
+
   const setDateFormat = useCallback(
     (value: DateFormatPreference) => {
       setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), dateFormat: value });
       appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, value, cacheOwner);
-      settingMutation.mutate({
-        key: SETTING_KEYS.UI_DATE_FORMAT,
-        value,
-        identity: PROFILE_SCOPE,
-      });
+      settingMutation.mutate(
+        { key: SETTING_KEYS.UI_DATE_FORMAT, value, identity: PROFILE_SCOPE },
+        { onError: restoreStoredFormats },
+      );
     },
-    [settingMutation, cacheOwner],
+    [settingMutation, cacheOwner, restoreStoredFormats],
   );
 
   const setTimeFormat = useCallback(
     (value: TimeFormatPreference) => {
       setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), timeFormat: value });
       appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, value, cacheOwner);
-      settingMutation.mutate({
-        key: SETTING_KEYS.UI_TIME_FORMAT,
-        value,
-        identity: PROFILE_SCOPE,
-      });
+      settingMutation.mutate(
+        { key: SETTING_KEYS.UI_TIME_FORMAT, value, identity: PROFILE_SCOPE },
+        { onError: restoreStoredFormats },
+      );
     },
-    [settingMutation, cacheOwner],
+    [settingMutation, cacheOwner, restoreStoredFormats],
   );
 
   return (

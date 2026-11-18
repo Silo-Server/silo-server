@@ -73163,12 +73163,6 @@
       "value": "Dôveryhodné proxy"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Spravované premennou SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -79489,12 +79483,6 @@
       "value": "Použiť Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Nastavené premennou REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -79511,12 +79499,6 @@
     {
       "type": 0,
       "value": "URL pripojenia"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Hodnotu poskytuje premenná REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -84513,20 +84495,6 @@
     {
       "type": 0,
       "value": "Denník servera"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Spravuje premenná "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -156021,6 +155989,12 @@
       "value": "Vyžaduje sa URL webhooku"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Ste offline, preto sa táto zmena neuložila"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -163563,12 +163537,6 @@
       "value": "Dôveryhodné proxy"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Nastavené premennou SILO_TRUSTED_PROXIES v prostredí."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -163819,12 +163787,6 @@
     {
       "type": 0,
       "value": "Číslo databázy"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Nastavené cez REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

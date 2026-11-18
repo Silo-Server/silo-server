@@ -15,6 +15,7 @@ import type { ShortcutTarget } from "@/lib/uiCustomization";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { deviceKeys, libraryKeys, sectionKeys, settingsKeys } from "./keys";
 import { refreshLocalizedMediaQueries } from "./mediaSurfaceRefresh";
+import { awaitUnlessOffline, SETTING_WRITE_NETWORK_MODE } from "./settingWriteOffline";
 
 /**
  * Typed access to the canonical settings API.
@@ -537,12 +538,6 @@ export function invalidateSettingValueQueries(
   return Promise.all(invalidations).then(() => undefined);
 }
 
-/**
- * Sent even offline, so it fails at once: replayed on reconnect, a write would
- * replace whatever another device saved at its key in the meantime.
- */
-const SETTING_WRITE_NETWORK_MODE = "always";
-
 /** Write one value at one scope. */
 export function useSetSettingValue() {
   const qc = useQueryClient();
@@ -580,7 +575,9 @@ export function useSetSettingValue() {
     onError: (error, variables) => {
       if (variables.invalidateOnSettled === false) return;
       if (shouldReconcileAfterMutationError(error)) {
-        return invalidateSettingValueQueries(qc, variables.identity, variables.key);
+        return awaitUnlessOffline(
+          invalidateSettingValueQueries(qc, variables.identity, variables.key),
+        );
       }
     },
   });
@@ -647,7 +644,9 @@ export function useClearSettingValue() {
       // DELETE is idempotent for reset callers: a 404 means another client
       // already cleared the value, so stale effective caches must catch up.
       if (shouldReconcileAfterMutationError(error) || isSettingValueMissing(error)) {
-        return invalidateSettingValueQueries(qc, variables.identity, variables.key);
+        return awaitUnlessOffline(
+          invalidateSettingValueQueries(qc, variables.identity, variables.key),
+        );
       }
     },
   });

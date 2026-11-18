@@ -53788,12 +53788,6 @@
       "value": "受信任的代理"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "由SILO_TRUSTED_PROXIES管理。"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -59750,12 +59744,6 @@
       "value": "使用Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "由REDIS_URL设置"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59772,12 +59760,6 @@
     {
       "type": 0,
       "value": "连接URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "值由REDIS_URL提供"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64653,20 +64635,6 @@
     {
       "type": 0,
       "value": "服务器日志"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "由"
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "管理。"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -121988,6 +121956,12 @@
       "value": "必须填写Webhook URL"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "你已离线，此更改未保存"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -128741,12 +128715,6 @@
       "value": "受信任的代理"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "由环境变量SILO_TRUSTED_PROXIES设置。"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -128997,12 +128965,6 @@
     {
       "type": 0,
       "value": "数据库编号"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "由REDIS_URL设置"
     }
   ],
   "web.setup.storage.redisDescription": [

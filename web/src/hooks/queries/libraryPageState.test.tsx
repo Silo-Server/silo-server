@@ -1,3 +1,4 @@
+import { onlineManager } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -615,5 +616,15 @@ describe("useLibraryPageStatePreference", () => {
         2_000,
       ),
     ).toBeNull();
+  });
+
+  // A retry after reconnect could replace a view another tab saved meanwhile.
+  it("does not retry a write that failed offline", () => {
+    onlineManager.setOnline(false);
+    try {
+      expect(libraryPageStateWriteRetryDelay(new TypeError("Failed to fetch"), 2_000)).toBeNull();
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 });

@@ -59563,12 +59563,6 @@
       "value": "Megbízható proxyk"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Kezelője: SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65629,12 +65623,6 @@
       "value": "Redis használata"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Beállítva: REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65651,12 +65639,6 @@
     {
       "type": 0,
       "value": "Kapcsolati URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Az értéket a REDIS_URL adja meg"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70543,20 +70525,6 @@
     {
       "type": 0,
       "value": "Szervernapló"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Környezeti változó kezeli: "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -131973,6 +131941,12 @@
       "value": "Meg kell adni a webhook URL-jét"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Nincs internetkapcsolat, ezért nem sikerült menteni ezt a módosítást"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -138957,12 +138931,6 @@
       "value": "Megbízható proxyk"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "A SILO_TRUSTED_PROXIES környezeti változó állítja be."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -139213,12 +139181,6 @@
     {
       "type": 0,
       "value": "Adatbázisszám"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "A REDIS_URL határozza meg"
     }
   ],
   "web.setup.storage.redisDescription": [

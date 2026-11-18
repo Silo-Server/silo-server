@@ -72858,12 +72858,6 @@
       "value": "Zaupanja vredni posredniški strežniki"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Upravlja SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -79196,12 +79190,6 @@
       "value": "Uporabi Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Nastavljeno z REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -79218,12 +79206,6 @@
     {
       "type": 0,
       "value": "URL povezave"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Vrednost podaja REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -84220,20 +84202,6 @@
     {
       "type": 0,
       "value": "Dnevnik strežnika"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Upravlja spremenljivka "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -155325,6 +155293,12 @@
       "value": "URL webhooka je obvezen"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Brez povezave ste, zato ta sprememba ni bila shranjena"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -162875,12 +162849,6 @@
       "value": "Zaupanja vredni posredniški strežniki"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Nastavljeno s spremenljivko okolja SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -163131,12 +163099,6 @@
     {
       "type": 0,
       "value": "Številka baze podatkov"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Nastavljeno z REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

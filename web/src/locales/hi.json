@@ -59435,12 +59435,6 @@
       "value": "भरोसेमंद प्रॉक्सी"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIES से मैनेज किया जाता है।"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65489,12 +65483,6 @@
       "value": "Redis इस्तेमाल करें"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URL से सेट है"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65511,12 +65499,6 @@
     {
       "type": 0,
       "value": "कनेक्शन URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "वैल्यू REDIS_URL से मिली है"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70427,16 +70409,6 @@
     {
       "type": 0,
       "value": "सर्वर लॉग"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": " से मैनेज किया जाता है।"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -131659,6 +131631,12 @@
       "value": "वेबहुक URL ज़रूरी है"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "आप ऑफ़लाइन हैं, इसलिए यह बदलाव सेव नहीं हुआ"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -138559,12 +138537,6 @@
       "value": "भरोसेमंद प्रॉक्सी"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "एनवायरनमेंट में SILO_TRUSTED_PROXIES से सेट किया गया है।"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -138815,12 +138787,6 @@
     {
       "type": 0,
       "value": "डेटाबेस नंबर"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URL से सेट किया गया"
     }
   ],
   "web.setup.storage.redisDescription": [

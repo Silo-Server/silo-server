@@ -53696,12 +53696,6 @@
       "value": "신뢰할 수 있는 프록시"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIES에서 관리해요."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -59614,12 +59608,6 @@
       "value": "Redis 사용"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URL에서 설정됨"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59636,12 +59624,6 @@
     {
       "type": 0,
       "value": "연결 URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "REDIS_URL에서 제공된 값"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64517,16 +64499,6 @@
     {
       "type": 0,
       "value": "서버 로그"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "에서 관리해요."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -121652,6 +121624,12 @@
       "value": "웹훅 URL이 필요해요."
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "오프라인 상태라 변경 사항을 저장하지 못했어요."
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -128305,12 +128283,6 @@
       "value": "신뢰할 수 있는 프록시"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "환경 변수 SILO_TRUSTED_PROXIES로 설정됐어요."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -128561,12 +128533,6 @@
     {
       "type": 0,
       "value": "데이터베이스 번호"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URL에서 설정됨"
     }
   ],
   "web.setup.storage.redisDescription": [

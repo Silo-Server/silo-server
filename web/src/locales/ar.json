@@ -84676,12 +84676,6 @@
       "value": "الوكلاء الموثوقون"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "تتم إدارته عبر SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -91186,12 +91180,6 @@
       "value": "استخدام Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "مضبوط بواسطة REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -91208,12 +91196,6 @@
     {
       "type": 0,
       "value": "عنوان URL للاتصال"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "القيمة مقدَّمة من REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -96267,20 +96249,6 @@
     {
       "type": 0,
       "value": "سجل الخادم"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "يُدار بواسطة "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -175259,6 +175227,12 @@
       "value": "عنوان URL الخاص بـ webhook مطلوب"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "أنت غير متصل بالإنترنت، لذا لم يُحفظ هذا التغيير"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -183246,12 +183220,6 @@
       "value": "الوكلاء الموثوقون"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "يحدّده SILO_TRUSTED_PROXIES في البيئة."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -183502,12 +183470,6 @@
     {
       "type": 0,
       "value": "رقم قاعدة البيانات"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "محدد بواسطة REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

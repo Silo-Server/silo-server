@@ -73754,12 +73754,6 @@
       "value": "Patikimi tarpiniai serveriai"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Valdoma per SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -80088,12 +80082,6 @@
       "value": "Naudoti „Redis“"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Nustatyta per REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -80110,12 +80098,6 @@
     {
       "type": 0,
       "value": "Ryšio URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Reikšmę pateikia REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -85144,20 +85126,6 @@
     {
       "type": 0,
       "value": "Serverio žurnalas"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Valdoma kintamuoju "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -157245,6 +157213,12 @@
       "value": "Būtinas webhook URL"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Nėra interneto ryšio, todėl šis pakeitimas neišsaugotas"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -164835,12 +164809,6 @@
       "value": "Patikimi tarpiniai serveriai"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Nustatyta aplinkos kintamuoju SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -165091,12 +165059,6 @@
     {
       "type": 0,
       "value": "Duomenų bazės numeris"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Nustatyta REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

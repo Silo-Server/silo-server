@@ -59531,12 +59531,6 @@
       "value": "Vertrauenswürdige Proxys"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Wird über SILO_TRUSTED_PROXIES verwaltet."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65613,12 +65607,6 @@
       "value": "Redis verwenden"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Durch REDIS_URL festgelegt"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65635,12 +65623,6 @@
     {
       "type": 0,
       "value": "Verbindungs-URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Wert aus REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70551,20 +70533,6 @@
     {
       "type": 0,
       "value": "Serverprotokoll"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Verwaltet durch "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -131898,6 +131866,12 @@
       "value": "Eine Webhook-URL ist erforderlich"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Du bist offline, daher wurde diese Änderung nicht gespeichert"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -138910,12 +138884,6 @@
       "value": "Vertrauenswürdige Proxys"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Durch SILO_TRUSTED_PROXIES in der Umgebung festgelegt."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -139166,12 +139134,6 @@
     {
       "type": 0,
       "value": "Datenbanknummer"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Durch REDIS_URL festgelegt"
     }
   ],
   "web.setup.storage.redisDescription": [

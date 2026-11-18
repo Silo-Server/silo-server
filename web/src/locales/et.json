@@ -60327,12 +60327,6 @@
       "value": "Usaldusväärsed puhverserverid"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Seda haldab muutuja SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -66405,12 +66399,6 @@
       "value": "Kasuta Redist"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Määratud muutujaga REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -66427,12 +66415,6 @@
     {
       "type": 0,
       "value": "Ühenduse URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Väärtus pärineb muutujast REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -71343,20 +71325,6 @@
     {
       "type": 0,
       "value": "Serveri logi"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Haldab keskkonnamuutuja "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -133343,6 +133311,12 @@
       "value": "Webhooki URL on kohustuslik"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Olete võrguühenduseta, seega seda muudatust ei salvestatud"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -140359,12 +140333,6 @@
       "value": "Usaldusväärsed puhverserverid"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Määratud keskkonnamuutujaga SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -140615,12 +140583,6 @@
     {
       "type": 0,
       "value": "Andmebaasi number"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Määratud muutujaga REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

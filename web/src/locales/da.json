@@ -59703,12 +59703,6 @@
       "value": "Betroede proxyer"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Styres af SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65773,12 +65767,6 @@
       "value": "Brug Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Angivet af REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65795,12 +65783,6 @@
     {
       "type": 0,
       "value": "Forbindelses-URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Værdien leveres af REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70651,20 +70633,6 @@
     {
       "type": 0,
       "value": "Serverlog"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Administreres af "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -132285,6 +132253,12 @@
       "value": "En webhook-URL er påkrævet"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Du er offline, så ændringen blev ikke gemt"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -139285,12 +139259,6 @@
       "value": "Betroede proxyer"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Angivet af SILO_TRUSTED_PROXIES i miljøet."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -139541,12 +139509,6 @@
     {
       "type": 0,
       "value": "Databasenummer"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Angivet af REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

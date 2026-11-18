@@ -59647,12 +59647,6 @@
       "value": "Betrodda proxyer"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Hanteras av SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65721,12 +65715,6 @@
       "value": "Använd Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Anges av REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65743,12 +65731,6 @@
     {
       "type": 0,
       "value": "Anslutnings-URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Värdet kommer från REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70607,20 +70589,6 @@
     {
       "type": 0,
       "value": "Serverlogg"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Hanteras av "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -132367,6 +132335,12 @@
       "value": "En webhook-URL krävs"
     }
   ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Du är offline, så ändringen sparades inte"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -139367,12 +139341,6 @@
       "value": "Betrodda proxyservrar"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Anges av SILO_TRUSTED_PROXIES i miljön."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -139623,12 +139591,6 @@
     {
       "type": 0,
       "value": "Databasnummer"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Anges av REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [
