@@ -52,6 +52,10 @@ type System struct {
 	// Webhooks is nil when no at-rest cipher is configured (webhook URLs are
 	// credentials and must not be stored in plaintext).
 	Webhooks *WebhookService
+	// PluginDestinations is nil when no at-rest cipher is configured:
+	// destination settings hold credentials. It delivers nothing until
+	// SetPluginChannelHost wires the plugin runtime.
+	PluginDestinations *PluginDestinationService
 	// ServerChannels is nil when no at-rest cipher is configured (channel
 	// URLs are credentials, same rule as webhooks).
 	ServerChannels *ServerChannelService
@@ -84,11 +88,14 @@ type System struct {
 	webhookRepo       *WebhookRepository
 	webhookDispatcher *WebhookDispatcher
 	webhookRetry      *WebhookRetryWorker
-	webPushRepo       *WebPushRepository
-	webPushDispatcher *WebPushDispatcher
-	pushDeviceRepo    *PushDeviceRepository
-	pushDispatcher    *PushDispatcher
-	pushSender        *pushSender
+
+	pluginDestinationSender     *pluginDestinationSender
+	pluginDestinationDispatcher *PluginDestinationDispatcher
+	webPushRepo                 *WebPushRepository
+	webPushDispatcher           *WebPushDispatcher
+	pushDeviceRepo              *PushDeviceRepository
+	pushDispatcher              *PushDispatcher
+	pushSender                  *pushSender
 	// serverChannelWorker sweeps release_events into admin broadcast posts;
 	// nil without the at-rest cipher.
 	serverChannelWorker *serverChannelWorker
@@ -164,6 +171,16 @@ func NewSystem(
 
 	// Admin server channels (broadcast destinations) share the cipher
 	// requirement: their URLs are credentials too.
+	var pluginDestinationService *PluginDestinationService
+	var pluginDestinationSenderInst *pluginDestinationSender
+	var pluginDestinationDispatcher *PluginDestinationDispatcher
+	if cipher != nil {
+		pluginDestinationSenderInst = newPluginDestinationSender(NewPluginDestinationRepository(pool), deliveries, cipher)
+		pluginDestinationService = newPluginDestinationService(pluginDestinationSenderInst.repo, pluginDestinationSenderInst)
+		pluginDestinationDispatcher = newPluginDestinationDispatcher(pluginDestinationSenderInst)
+		dispatchers = append(dispatchers, pluginDestinationDispatcher)
+	}
+
 	var serverChannelService *ServerChannelService
 	var serverChannelSweep *serverChannelWorker
 	if cipher != nil {
@@ -219,6 +236,9 @@ func NewSystem(
 	if webhookRepo != nil {
 		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
 	}
+	if pluginDestinationSenderInst != nil {
+		fanout.setPluginDestinationOutbox(pluginDestinationSenderInst, newProfileRateLimiter())
+	}
 	if webPushRepo != nil {
 		fanout.SetWebPushOutbox(webPushRepo)
 	}
@@ -241,41 +261,44 @@ func NewSystem(
 	}
 
 	system = &System{
-		Settings:            settings,
-		Releases:            releases,
-		Interests:           interests,
-		Deliveries:          deliveries,
-		Preferences:         preferences,
-		Detector:            detector,
-		Interest:            interest,
-		Fanout:              fanout,
-		Tickets:             NewTicketStore(redisClient),
-		Webhooks:            webhookService,
-		ServerChannels:      serverChannelService,
-		WebPush:             webPushService,
-		PushDevices:         pushDeviceService,
-		EmailPrefs:          emailPrefs,
-		DiscordPrefs:        discordPrefs,
-		mailSender:          mailSender,
-		emailBrand:          emailBrand,
-		emailWorker:         emailWorker,
-		discordWorker:       discordWorker,
-		discordClient:       discordClient,
-		webhookRepo:         webhookRepo,
-		webhookDispatcher:   webhookDispatcher,
-		webhookRetry:        webhookRetry,
-		webPushRepo:         webPushRepo,
-		webPushDispatcher:   webPushDispatcher,
-		pushDeviceRepo:      pushDeviceRepo,
-		pushDispatcher:      pushDispatcher,
-		pushSender:          pushSenderInst,
-		serverChannelWorker: serverChannelSweep,
-		dispatcher:          multiDispatcher,
-		pool:                pool,
-		stores:              stores,
-		scopes:              scopes,
-		users:               users,
-		logger:              slog.Default().With("component", "notifications.system"),
+		Settings:                    settings,
+		Releases:                    releases,
+		Interests:                   interests,
+		Deliveries:                  deliveries,
+		Preferences:                 preferences,
+		Detector:                    detector,
+		Interest:                    interest,
+		Fanout:                      fanout,
+		Tickets:                     NewTicketStore(redisClient),
+		Webhooks:                    webhookService,
+		PluginDestinations:          pluginDestinationService,
+		ServerChannels:              serverChannelService,
+		WebPush:                     webPushService,
+		PushDevices:                 pushDeviceService,
+		EmailPrefs:                  emailPrefs,
+		DiscordPrefs:                discordPrefs,
+		mailSender:                  mailSender,
+		emailBrand:                  emailBrand,
+		emailWorker:                 emailWorker,
+		discordWorker:               discordWorker,
+		discordClient:               discordClient,
+		webhookRepo:                 webhookRepo,
+		webhookDispatcher:           webhookDispatcher,
+		webhookRetry:                webhookRetry,
+		pluginDestinationSender:     pluginDestinationSenderInst,
+		pluginDestinationDispatcher: pluginDestinationDispatcher,
+		webPushRepo:                 webPushRepo,
+		webPushDispatcher:           webPushDispatcher,
+		pushDeviceRepo:              pushDeviceRepo,
+		pushDispatcher:              pushDispatcher,
+		pushSender:                  pushSenderInst,
+		serverChannelWorker:         serverChannelSweep,
+		dispatcher:                  multiDispatcher,
+		pool:                        pool,
+		stores:                      stores,
+		scopes:                      scopes,
+		users:                       users,
+		logger:                      slog.Default().With("component", "notifications.system"),
 	}
 	if emailPrefs != nil && cipher != nil {
 		// emailPrefs is only built with a mail sender, so the dispatcher
@@ -291,6 +314,7 @@ func NewSystem(
 		sender.operational = system.DispatchOperational
 		sender.posterURL = system.discordPosterURL
 	}
+	system.wirePluginDestinationSender()
 	discordChannelInst.posterURL = system.discordPosterURL
 	if serverChannelSweep != nil {
 		serverChannelSweep.posterURL = system.discordPosterURL
@@ -393,6 +417,13 @@ func (s *System) Start(ctx context.Context) {
 			s.webhookRetry.Run(ctx)
 		}()
 	}
+	if s.pluginDestinationDispatcher != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.pluginDestinationDispatcher.Run(ctx)
+		}()
+	}
 	if s.serverChannelWorker != nil {
 		s.wg.Add(1)
 		go func() {
@@ -479,6 +510,11 @@ func (s *System) PurgeProfile(ctx context.Context, userID int, profileID string)
 	if s.webhookRepo != nil {
 		if err := s.webhookRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge webhooks: %w", err)
+		}
+	}
+	if s.pluginDestinationSender != nil {
+		if err := s.pluginDestinationSender.repo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
+			return fmt.Errorf("purge plugin destinations: %w", err)
 		}
 	}
 	if s.webPushRepo != nil {
@@ -778,8 +814,11 @@ type RetentionStats struct {
 	// staleness horizon.
 	WatchlistPromotionsDeleted int64
 	WebhookAttemptsDeleted     int64
-	WebPushAttemptsDeleted     int64
-	WebPushSubsDeleted         int64
+	// PluginDestinationAttemptsDeleted counts plugin destination attempts
+	// past their retention.
+	PluginDestinationAttemptsDeleted int64
+	WebPushAttemptsDeleted           int64
+	WebPushSubsDeleted               int64
 	// UnboundWebPushSubsDeleted counts subscriptions with no recorded login
 	// whose account has no live login and no API key.
 	UnboundWebPushSubsDeleted int64
@@ -851,6 +890,13 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 			return stats, fmt.Errorf("prune webhook attempts: %w", err)
 		}
 		stats.WebhookAttemptsDeleted = attempts
+	}
+	if s.pluginDestinationSender != nil {
+		attempts, err := s.pluginDestinationSender.repo.DeleteOldAttempts(ctx, now)
+		if err != nil {
+			return stats, fmt.Errorf("prune plugin destination attempts: %w", err)
+		}
+		stats.PluginDestinationAttemptsDeleted = attempts
 	}
 	if s.webPushRepo != nil {
 		attempts, err := s.webPushRepo.DeleteOldAttempts(ctx, now)

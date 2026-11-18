@@ -256,10 +256,15 @@ func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 	if err != nil || len(inserted) == 0 {
 		return nil, err
 	}
-	// Webhooks carry it under their request switch: both say a wanted title
-	// arrived.
+	// Webhooks and plugin destinations carry it under their request switch:
+	// both say a wanted title arrived.
 	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, func(_ InsertedDelivery, hook Webhook) bool {
 		return hook.NotifyRequests
+	}); err != nil {
+		return nil, err
+	}
+	if err := w.enqueuePluginDestinationOutbox(ctx, tx, inserted, func(_ InsertedDelivery, destination PluginDestination) bool {
+		return destination.NotifyRequests
 	}); err != nil {
 		return nil, err
 	}

@@ -45,8 +45,12 @@ type FanoutWorker struct {
 	// subscription.
 	webhooks    *WebhookRepository
 	rateLimiter *profileRateLimiter
-	webPush     *WebPushRepository
-	pushDevices *PushDeviceRepository
+	// pluginSender picks and enqueues plugin destination attempts;
+	// pluginLimiter bounds them per profile like rateLimiter does webhooks.
+	pluginSender  *pluginDestinationSender
+	pluginLimiter *profileRateLimiter
+	webPush       *WebPushRepository
+	pushDevices   *PushDeviceRepository
 
 	// Watchlist arrivals (SetWatchlistArrivals): who waits for an arriving
 	// title, and whether a request of it tells them instead.
@@ -59,6 +63,13 @@ type FanoutWorker struct {
 func (w *FanoutWorker) SetWebhookOutbox(webhooks *WebhookRepository, limiter *profileRateLimiter) {
 	w.webhooks = webhooks
 	w.rateLimiter = limiter
+}
+
+// setPluginDestinationOutbox wires plugin destination attempt enqueueing into
+// the fanout transaction.
+func (w *FanoutWorker) setPluginDestinationOutbox(sender *pluginDestinationSender, limiter *profileRateLimiter) {
+	w.pluginSender = sender
+	w.pluginLimiter = limiter
 }
 
 // SetWebPushOutbox wires durable web push attempt enqueueing into the fanout
@@ -423,6 +434,9 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, pendingReasonsMatch(pending)); err != nil {
 		return nil, 0, err
 	}
+	if err := w.enqueuePluginDestinationOutbox(ctx, tx, inserted, pendingReasonsMatchDestination(pending)); err != nil {
+		return nil, 0, err
+	}
 	if err := w.enqueueWebPushOutbox(ctx, tx, inserted); err != nil {
 		return nil, 0, err
 	}
@@ -472,6 +486,15 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 type pendingDelivery struct {
 	delivery Delivery
 	flags    ReasonFlags
+}
+
+// pendingReasonsMatchDestination is pendingReasonsMatch for plugin
+// destinations.
+func pendingReasonsMatchDestination(pending map[profileKey]pendingDelivery) func(InsertedDelivery, PluginDestination) bool {
+	return func(row InsertedDelivery, destination PluginDestination) bool {
+		entry, ok := pending[row.key()]
+		return ok && destination.MatchesReasons(entry.flags)
+	}
 }
 
 // pendingReasonsMatch is the webhook switch for episode deliveries: a webhook
@@ -585,6 +608,44 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 		w.logger.WarnContext(ctx, "webhook deliveries rate limited", "skipped", rateLimited)
 	}
 	return w.webhooks.EnqueueAttempts(ctx, tx, attempts)
+}
+
+// enqueuePluginDestinationOutbox inserts pending plugin destination attempts
+// for each newly inserted delivery, inside the fanout transaction, with the
+// same two filters as webhooks: wants, the destination's switch for the
+// delivery, and a per-profile rate limit. Nothing is queued until the plugin
+// runtime is wired, or for a destination whose plugin is off or removed.
+func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, wants func(InsertedDelivery, PluginDestination) bool) error {
+	if w.pluginSender == nil || len(inserted) == 0 {
+		return nil
+	}
+	byProfile, err := w.pluginSender.enqueueable(ctx, tx, insertedProfileKeys(inserted))
+	if err != nil {
+		return err
+	}
+	attempts := make([]DeliveryAttempt, 0, len(inserted))
+	rateLimited := 0
+	for _, row := range inserted {
+		key := row.key()
+		for _, destination := range byProfile[key] {
+			if !wants(row, destination) {
+				continue
+			}
+			if !w.pluginLimiter.Allow(key, pluginDestinationDeliveriesPerMinute) {
+				rateLimited++
+				continue
+			}
+			attempts = append(attempts, DeliveryAttempt{
+				ID:                     ulid.Make().String(),
+				NotificationDeliveryID: row.ID,
+				TargetID:               destination.ID,
+			})
+		}
+	}
+	if rateLimited > 0 {
+		w.logger.WarnContext(ctx, "plugin destination deliveries rate limited", "skipped", rateLimited)
+	}
+	return w.pluginSender.repo.EnqueueAttempts(ctx, tx, attempts)
 }
 
 type eventDisplay struct {
