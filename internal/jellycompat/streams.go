@@ -4160,12 +4160,16 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	// lookup below may still find the session cached, and only when it doesn't
 	// is the request answered as unreadable rather than absent.
 	var readErr error
-	// A request authorized by a per-play tag carries no PlaySessionId, but
-	// its tag named one play: serve that play, not whichever started play
-	// the ID-less fallback below would pick. A play that can't be read
-	// falls through to that fallback.
-	if grant := playbackGrantFromContext(r.Context()); clientPlaySessionID == "" && grant != nil {
-		playSession, ok, _ := h.playbackStore.Lookup(grant.ID)
+	// A request authorized by a play's PlaySessionId or per-play tag is
+	// served as that play, whatever PlaySessionId it also carries: a tag
+	// request carries none, and the ID-less fallback below would pick
+	// whichever started play matches. A play that can't be read answers as
+	// retryable; one that is gone falls through.
+	if grant := playbackGrantFromContext(r.Context()); grant != nil {
+		playSession, ok, err := h.playbackStore.Lookup(grant.ID)
+		if err != nil {
+			return nil, nil, &playSessionReadError{playSessionID: grant.ID, err: err}
+		}
 		if ok && playSession.CompatToken == compatSession.Token && mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
 			return playSession, playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest), nil
 		}
