@@ -232,23 +232,20 @@ func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclus
 	if err = check(root, key); err != nil {
 		return err
 	}
-	budget, reserve, err := f.writeBudget()
+	budget, err := f.writeBudget()
 	if err != nil {
 		return err
 	}
 	// A write of known size claims its bytes before creating anything; a
 	// stream claims them as it writes.
-	writer := &budgetWriter{f: f, budget: budget, reserve: reserve}
+	writer := &budgetWriter{f: f, budget: budget}
 	if size >= 0 {
-		if err = f.claim(size, budget, reserve); err != nil {
+		if err = f.claim(size, budget); err != nil {
 			return err
 		}
-		if budget >= 0 {
-			defer f.release(size)
-		}
-		writer.budget = -1
+		defer f.settle(size, budget)
+		writer.budget = spaceBudget{limit: -1}
 	}
-	defer func() { f.release(writer.claimed) }()
 	created, err := mkdirAllTracked(root, path.Dir(key))
 	if err != nil {
 		return err

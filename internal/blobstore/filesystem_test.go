@@ -435,10 +435,24 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 	if err = s.Put(ctx, "kept/poster.jpg", []byte("image")); err != nil {
 		t.Fatal(err)
 	}
+	// A 100 GiB filesystem with 10 bytes above the reserve, less whatever is
+	// written to the store from here on, temporary files included.
 	const total = 100 << 30
-	available := reserveFor(total) + 10
+	stored := func() int64 {
+		var n int64
+		_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+			if err == nil && d.Type().IsRegular() {
+				if info, err := d.Info(); err == nil {
+					n += info.Size()
+				}
+			}
+			return nil
+		})
+		return n
+	}
+	start := stored()
 	realStat := statSpace
-	statSpace = func(string) (int64, int64, error) { return available, total, nil }
+	statSpace = func(string) (int64, int64, error) { return reserveFor(total) + 10 - (stored() - start), total, nil }
 	t.Cleanup(func() { statSpace = realStat })
 
 	// A write that would cut into the reserve is refused before it creates
@@ -459,31 +473,35 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("refused stream left files behind: %v %v", entries, err)
 	}
-	// Writes in flight share the budget: a stream that has written 8 of the
-	// 10 bytes leaves no room for a 5-byte write that statfs alone allows.
+
+	// Writes in flight share the budget. A stream that has written 2 bytes
+	// leaves room for an 8-byte put, which statfs already counts it against
+	// once written, and none for the stream's next byte, which its own
+	// earlier reading alone would allow.
+	settledBefore := s.space.settled.Load()
 	pr, pw := io.Pipe()
 	streamed := make(chan error, 1)
 	go func() { streamed <- s.PutStream(ctx, "kept/stream.jpg", pr, "") }()
-	if _, err = pw.Write(make([]byte, 8)); err != nil {
+	if _, err = pw.Write(make([]byte, 2)); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(5 * time.Second); s.space.pending.Load() != 8; {
+	for deadline := time.Now().Add(5 * time.Second); s.space.settled.Load() != settledBefore+2; {
 		if time.Now().After(deadline) {
-			t.Fatalf("stream never claimed its bytes: %d", s.space.pending.Load())
+			t.Fatalf("stream never wrote its bytes: %d settled", s.space.settled.Load()-settledBefore)
 		}
 		runtime.Gosched()
 	}
-	if err = s.Put(ctx, "kept/during.jpg", make([]byte, 5)); !errors.Is(err, ErrStorageFull) {
-		t.Fatalf("put while a stream holds the budget: %v", err)
+	if err = s.Put(ctx, "kept/during.jpg", make([]byte, 8)); err != nil {
+		t.Fatalf("put that fits beside a stream: %v", err)
+	}
+	if _, err = pw.Write(make([]byte, 1)); err != nil {
+		t.Fatal(err)
 	}
 	_ = pw.Close()
-	if err = <-streamed; err != nil || s.space.pending.Load() != 0 {
-		t.Fatalf("stream within the budget: %v, %d bytes still claimed", err, s.space.pending.Load())
+	if err = <-streamed; !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream past the budget another write took: %v", err)
 	}
-	if err = s.Put(ctx, "kept/small.jpg", make([]byte, 10)); err != nil {
-		t.Fatalf("put within the budget: %v", err)
-	}
-	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/stream.jpg", "kept/small.jpg"}); err != nil || n != 3 {
+	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/during.jpg"}); err != nil || n != 2 {
 		t.Fatalf("delete while full: %d %v", n, err)
 	}
 }

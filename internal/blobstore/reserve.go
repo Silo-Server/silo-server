@@ -58,36 +58,51 @@ func reserveFor(total int64) int64 {
 
 // lowSpaceState records whether a store is refusing writes, so the warning is
 // logged when that starts (and hourly while it lasts), and the recovery once
-// space is back. pending counts the bytes of writes in flight, which share one
-// budget: each write's statfs reading misses what the others have yet to
-// write.
+// space is back.
+//
+// claimed and settled share one budget among the writes in flight. claimed
+// totals every byte a write has been allowed to add; settled totals those
+// since written to disk, or abandoned. Both only grow. A statfs reading
+// already counts the bytes settled before it, so a write remembers settled
+// when it reads statfs and counts against its budget only what has been
+// claimed beyond that: its own later bytes and every other write's. That
+// keeps a write's reading from going stale while others write, without
+// counting a byte twice.
 type lowSpaceState struct {
 	low      atomic.Bool
 	lastWarn atomic.Int64
-	pending  atomic.Int64
+	claimed  atomic.Int64
+	settled  atomic.Int64
 }
 
-// writeBudget returns how many bytes a write may add before it would cut into
-// the reserve, and the reserve. It returns ErrStorageFull when nothing may be
-// written. A filesystem that cannot report its size is not limited: the
-// budget is -1.
-func (f *Filesystem) writeBudget() (budget, reserve int64, err error) {
+// spaceBudget is what a write may add before it would cut into the reserve:
+// limit bytes beyond base, the settled total when free space was read. A
+// negative limit (a filesystem that reports no size) does not limit writes.
+type spaceBudget struct {
+	limit, reserve, base int64
+}
+
+// writeBudget reads the space a write may use. It returns ErrStorageFull when
+// nothing may be written.
+func (f *Filesystem) writeBudget() (spaceBudget, error) {
+	// Read settled first: a byte settled between the two reads is then
+	// counted twice, which errs towards refusing.
+	base := f.space.settled.Load()
 	available, total, statErr := statSpace(f.root)
 	if statErr != nil || total <= 0 {
 		// Some network and FUSE filesystems report no sizes; the write
 		// itself still fails with ENOSPC when they are full.
-		return -1, 0, nil //nolint:nilerr // an unknown size does not limit writes
+		return spaceBudget{limit: -1}, nil //nolint:nilerr // an unknown size does not limit writes
 	}
-	reserve = reserveFor(total)
-	budget = available - reserve
-	if budget <= 0 {
-		return 0, reserve, f.refuse(available, reserve)
+	b := spaceBudget{limit: available - reserveFor(total), reserve: reserveFor(total), base: base}
+	if b.limit-(f.space.claimed.Load()-base) <= 0 {
+		return b, f.refuse(available, b.reserve)
 	}
-	if budget >= lowSpaceRecoveryMargin && f.space.low.CompareAndSwap(true, false) {
+	if b.limit >= lowSpaceRecoveryMargin && f.space.low.CompareAndSwap(true, false) {
 		slog.Info("local storage has free space again; resuming writes",
-			"component", "blobstore", "path", f.root, "available_bytes", available, "reserve_bytes", reserve)
+			"component", "blobstore", "path", f.root, "available_bytes", available, "reserve_bytes", b.reserve)
 	}
-	return budget, reserve, nil
+	return b, nil
 }
 
 // refuse logs that the store is pausing writes and returns ErrStorageFull.
@@ -122,45 +137,46 @@ func (f *Filesystem) noteWriteError(err error) {
 	f.warnFull(available, reserveFor(total))
 }
 
-// claim takes n bytes of budget for a write in flight, or returns
-// ErrStorageFull when the writes in flight would together cut into the
-// reserve. The caller gives the bytes back with release once the write is
-// published or discarded; by then statfs counts what was published. A
-// negative budget (an unknown size) claims nothing.
-func (f *Filesystem) claim(n, budget, reserve int64) error {
-	if budget < 0 {
+// claim lets a write add n more bytes, or returns ErrStorageFull when the
+// writes in flight would together cut into the reserve. The caller settles
+// the bytes once they are written or abandoned. A refused claim takes nothing,
+// so it never holds back another write.
+func (f *Filesystem) claim(n int64, b spaceBudget) error {
+	if b.limit < 0 {
 		return nil
 	}
-	if pending := f.space.pending.Add(n); pending > budget {
-		f.space.pending.Add(-n)
-		return f.refuse(budget+reserve-(pending-n), reserve)
-	}
-	return nil
-}
-
-func (f *Filesystem) release(n int64) {
-	if n != 0 {
-		f.space.pending.Add(-n)
+	for {
+		claimed := f.space.claimed.Load()
+		if used := claimed - b.base; used+n > b.limit {
+			return f.refuse(b.limit+b.reserve-used, b.reserve)
+		}
+		if f.space.claimed.CompareAndSwap(claimed, claimed+n) {
+			return nil
+		}
 	}
 }
 
-// budgetWriter claims budget for each chunk of a stream before writing it, so
-// a stream stops at the reserve. The temporary file is discarded on error, so
-// nothing partial is published.
+// settle records that n claimed bytes are written to disk or abandoned.
+func (f *Filesystem) settle(n int64, b spaceBudget) {
+	if b.limit >= 0 && n != 0 {
+		f.space.settled.Add(n)
+	}
+}
+
+// budgetWriter claims budget for each chunk of a stream before writing it and
+// settles it after, so a stream stops at the reserve. The temporary file is
+// discarded on error, so nothing partial is published.
 type budgetWriter struct {
-	f       *Filesystem
-	w       io.Writer
-	budget  int64
-	reserve int64
-	claimed int64
+	f      *Filesystem
+	w      io.Writer
+	budget spaceBudget
 }
 
 func (b *budgetWriter) Write(p []byte) (int, error) {
-	if err := b.f.claim(int64(len(p)), b.budget, b.reserve); err != nil {
+	n := int64(len(p))
+	if err := b.f.claim(n, b.budget); err != nil {
 		return 0, err
 	}
-	if b.budget >= 0 {
-		b.claimed += int64(len(p))
-	}
+	defer b.f.settle(n, b.budget)
 	return b.w.Write(p)
 }
