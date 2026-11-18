@@ -359,17 +359,17 @@ func (s *MetadataService) fetchFallbackText(
 	defer cancel()
 	var err error
 	if itemGap {
-		if fetched.item, err = fetchFallbackItem(fetchCtx, sources.item, providerIDs, contentType, language, req.resetToProvider); err != nil {
+		if fetched.item, err = fetchFallbackItem(fetchCtx, sources.item, providerIDs, contentType, language, req.clearsUnsentValues()); err != nil {
 			return nil, err
 		}
 	}
 	if seasonGap {
-		if fetched.seasons, err = fetchFallbackSeasons(fetchCtx, sources.season, providerIDs, contentType, language, req.resetToProvider); err != nil {
+		if fetched.seasons, err = fetchFallbackSeasons(fetchCtx, sources.season, providerIDs, contentType, language, req.clearsUnsentValues()); err != nil {
 			return nil, err
 		}
 	}
 	if len(episodeSeasons) > 0 {
-		if fetched.episodes, err = fetchFallbackEpisodes(fetchCtx, sources.episode, providerIDs, language, episodeSeasons, req.resetToProvider); err != nil {
+		if fetched.episodes, err = fetchFallbackEpisodes(fetchCtx, sources.episode, providerIDs, language, episodeSeasons, req.clearsUnsentValues()); err != nil {
 			return nil, err
 		}
 	}

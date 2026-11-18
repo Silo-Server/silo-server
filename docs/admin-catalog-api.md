@@ -367,6 +367,18 @@ finds a show through them and rewrites the show and its episodes from their tags
 on every scan, so clearing them would replace the show and episode IDs that
 favorites and progress refer to.
 
+The match can merge the rebuilt movie or series onto the existing item that
+holds one of its provider IDs, which keeps that item's content ID, files and
+history. That item's values may come from a match the admin has since removed,
+so a `complete` refresh of a movie or series ends like `reset` does: every
+unlocked field other than the title and artwork, the credits and the rating
+sources get the providers' values, empty when no provider has one. Unlike
+`reset`, it keeps `locked_fields` and the values they hold. When a provider in
+the chain fails to answer (the failures that fail a reset, and also an
+enrichment provider whose key is rejected), it ends with a quick refresh instead
+and keeps the values the providers leave empty. A season
+or episode target ends with a quick refresh of that season or episode.
+
 `reset` is Reset to Provider: a quick refresh of the movie, series, season or
 episode that also removes its `locked_fields` and gives every lockable field,
 the credits and the rating sources the providers' values, empty when no

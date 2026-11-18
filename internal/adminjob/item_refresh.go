@@ -463,13 +463,14 @@ type ItemRefreshArtworkCacher interface {
 	CacheTargetArtwork(ctx context.Context, targetContentID string) error
 }
 
-// ItemRefreshMetadataRefresher refreshes or resets an item's metadata
-// (metadata.MetadataService).
+// ItemRefreshMetadataRefresher refreshes, resets or rebuilds an item's
+// metadata (metadata.MetadataService).
 type ItemRefreshMetadataRefresher interface {
 	RefreshItem(ctx context.Context, contentID string) error
 	RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
 	RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
 	ResetTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
+	RebuildItemForLibrary(ctx context.Context, contentID string, folderID int) error
 }
 
 // ItemRefreshAudiobookEnricher refreshes and resets an audiobook's provider
@@ -744,8 +745,17 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		audiobookErr = e.audiobooks.Refresh(refreshCtx, refreshContentID, audiobookToken)
 	case !audiobook:
 		refreshTarget := e.refresher.RefreshTargetForLibrary
-		if req.Mode == ItemRefreshModeReset {
+		switch {
+		case req.Mode == ItemRefreshModeReset:
 			refreshTarget = e.refresher.ResetTargetForLibrary
+		case req.Mode == ItemRefreshModeComplete && refreshTargetType == "item" &&
+			(req.RequestedType == "movie" || req.RequestedType == "series"):
+			// The rebuilt item may be an existing one the scan's match merged
+			// onto, holding values from a match the admin has since removed.
+			// The rebuild leaves only what the providers send now.
+			refreshTarget = func(ctx context.Context, _, contentID string, folderID int) error {
+				return e.refresher.RebuildItemForLibrary(ctx, contentID, folderID)
+			}
 		}
 		if err := refreshTarget(refreshCtx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
 			return nil, fmt.Errorf("refresh metadata: %w", err)
