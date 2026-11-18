@@ -439,3 +439,23 @@ func TestPlaybackMediaCORSV2(t *testing.T) {
 		t.Fatalf("CORS reached a sibling route: %d %v", sibling.Code, sibling.Header())
 	}
 }
+
+// The middleware answers OPTIONS on the media path, so the 405 for any other
+// method must list it in Allow; a sibling route, which gets no such answer,
+// must not.
+func TestPlaybackMediaMethodNotAllowedListsOptionsV2(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.PlaybackMedia = &PlaybackMediaHandlers{Original: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})}
+	h := newTestHandler(t, deps)
+	stream := Prefix + "/stream/" + deliveryTestSession
+
+	denied := do(t, h, http.MethodPost, stream, "", nil)
+	if denied.Code != http.StatusMethodNotAllowed || denied.Header().Get("Allow") != "GET, HEAD, OPTIONS" {
+		t.Fatalf("POST on the media path: %d Allow=%q, want 405 and %q", denied.Code, denied.Header().Get("Allow"), "GET, HEAD, OPTIONS")
+	}
+
+	sibling := do(t, h, http.MethodPost, stream+"/subtitles/0.vtt", "", nil)
+	if sibling.Code != http.StatusMethodNotAllowed || strings.Contains(sibling.Header().Get("Allow"), http.MethodOptions) {
+		t.Fatalf("POST on a sibling route: %d Allow=%q, want 405 without OPTIONS", sibling.Code, sibling.Header().Get("Allow"))
+	}
+}

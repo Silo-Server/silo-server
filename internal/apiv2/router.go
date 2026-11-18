@@ -845,6 +845,11 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	if len(methods) == 0 {
 		methods = pluginContentAllowedMethods(r.URL.Path)
 	}
+	// playbackMediaCORS answers OPTIONS on the media path before routing, so the
+	// registry does not declare it.
+	if isPlaybackMediaPath(r.URL.Path) {
+		methods = append(methods, http.MethodOptions)
+	}
 	if allow := strings.Join(methods, ", "); allow != "" {
 		p = p.WithHeader("Allow", allow)
 	}
