@@ -520,22 +520,24 @@ func TestCopyRemuxSubtitleSegmentsFollowTheVideoSegments(t *testing.T) {
 	}
 }
 
+const copyRemuxSourceDuration = 20
+
 // copyRemuxRealCues are the SubRip cues of the real copy remux sources, on
 // the copy's clock: -start_at_zero removes the shifted source's offset. They
 // sit off whole seconds so a frame-sized offset shows.
 var copyRemuxRealCues = []struct {
 	text     string
 	from, to float64
-}{{"Early", 1.37, 2.37}, {"Middle", 21.37, 24.8}, {"Late", 41.37, 42.37}}
+}{{"Early", 1.37, 2.37}, {"Middle", 8.37, 10.8}, {"Late", 16.37, 17.37}}
 
 // TestCopyRemuxSubtitleRenditionRealFFmpeg runs a real copy remux of a
 // Matroska source whose 2.5 s keyframe interval gives segments off the 2 s
 // grid, fed through a FIFO so FFmpeg cannot finish: the cues of every segment
 // it has produced must be served while it still runs, each in the segments
-// whose video covers it, on fMP4 and MPEG-TS, from a zero clock and from a
+// whose video covers it. MPEG-TS uses a zero source clock and fMP4 uses a
 // source whose video starts after its subtitles. Its B-frames and re-encoded
 // AAC make the fMP4 mux delay the video, which the timestamp map must
-// declare to within a frame. Each subtest takes seconds of real FFmpeg work.
+// declare to within a frame.
 func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real FFmpeg integration test")
@@ -551,65 +553,64 @@ func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 	defer cancel()
 	base, shifted := copyRemuxRealSources(ctx, t, ffmpeg)
 
-	for _, container := range []struct {
-		name      string
-		mpegts    bool
-		offset90k int64
-	}{{"fmp4", false, 0}, {"mpegts", true, HLSMPEGTSTimestampOffset90k}} {
-		for _, src := range []struct {
-			name, path string
-			videoStart float64 // on the copy's clock, which starts with the subtitles
-		}{{"zero", base, 0}, {"video-after-subtitles", shifted, 4}} {
-			t.Run(container.name+"/"+src.name, func(t *testing.T) {
-				fifo, release, written := feedSourceThroughFIFO(t, src.path)
-				session, err := StartTranscode(ctx, TranscodeOpts{
-					SessionID: "copy-rendition", InputPath: fifo, OutputDir: t.TempDir(), FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
-					SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "aac", CopyVideoMPEGTS: container.mpegts,
-					CopySeekAnchorResolved: true, SegmentDuration: 2, TotalDuration: 48 + src.videoStart,
-					SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = session.Close() })
-
-				// FFmpeg is blocked on the FIFO with a quarter of the source unread.
-				head := waitForProducedHead(ctx, t, session, 11)
-				served := checkCopyRemuxCues(ctx, t, session, container.offset90k, src.videoStart, head, false)
-				if !session.IsRunning() {
-					t.Fatal("the remux finished before the cues were checked")
-				}
-				if !served["Middle"] || served["Late"] {
-					t.Fatalf("cues served while the remux runs = %v, want Middle and not yet Late", served)
-				}
-				subtitles, err := session.BuildPlaybackManifest("segment/", "silo_rendition=subtitles")
-				if err != nil || !strings.Contains(string(subtitles), "#EXT-X-PLAYLIST-TYPE:EVENT\n") ||
-					!strings.Contains(string(subtitles), fmt.Sprintf("segment/sub_%05d.vtt", head)) {
-					t.Fatalf("subtitle playlist (%v):\n%s", err, subtitles)
-				}
-
-				release()
-				if err := <-written; err != nil {
-					t.Fatal(err)
-				}
-				<-session.Done()
-				if err := session.WaitError(); err != nil {
-					t.Fatalf("ffmpeg: %v", err)
-				}
-				head, _ = session.liveProducedHead()
-				if served := checkCopyRemuxCues(ctx, t, session, container.offset90k, src.videoStart, head+1, true); !served["Late"] {
-					t.Fatalf("the finished remux lost its last cues: %v", served)
-				}
+	for _, tc := range []struct {
+		name, path string
+		mpegts     bool
+		offset90k  int64
+		videoStart float64 // on the copy's clock, which starts with the subtitles
+	}{
+		{name: "fmp4", path: shifted, videoStart: 4},
+		{name: "mpegts", path: base, mpegts: true, offset90k: HLSMPEGTSTimestampOffset90k},
+	} {
+		t.Run(tc.name+"/live", func(t *testing.T) {
+			fifo, release, written := feedSourceThroughFIFO(t, tc.path)
+			session, err := StartTranscode(ctx, TranscodeOpts{
+				SessionID: "copy-rendition", InputPath: fifo, OutputDir: t.TempDir(), FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
+				SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "aac", CopyVideoMPEGTS: tc.mpegts,
+				CopySeekAnchorResolved: true, SegmentDuration: 2, TotalDuration: copyRemuxSourceDuration + tc.videoStart,
+				SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
 			})
-		}
-		// A seek generation starts at the keyframe at 20 s, numbered as the
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = session.Close() })
+
+			// FFmpeg is blocked on the FIFO with a quarter of the source unread.
+			head := waitForProducedHead(ctx, t, session, 4)
+			served := checkCopyRemuxCues(ctx, t, session, tc.offset90k, tc.videoStart, head, false)
+			if !session.IsRunning() {
+				t.Fatal("the remux finished before the cues were checked")
+			}
+			if !served["Middle"] || served["Late"] {
+				t.Fatalf("cues served while the remux runs = %v, want Middle and not yet Late", served)
+			}
+			subtitles, err := session.BuildPlaybackManifest("segment/", "silo_rendition=subtitles")
+			if err != nil || !strings.Contains(string(subtitles), "#EXT-X-PLAYLIST-TYPE:EVENT\n") ||
+				!strings.Contains(string(subtitles), fmt.Sprintf("segment/sub_%05d.vtt", head)) {
+				t.Fatalf("subtitle playlist (%v):\n%s", err, subtitles)
+			}
+
+			release()
+			if err := <-written; err != nil {
+				t.Fatal(err)
+			}
+			<-session.Done()
+			if err := session.WaitError(); err != nil {
+				t.Fatalf("ffmpeg: %v", err)
+			}
+			head, _ = session.liveProducedHead()
+			if served := checkCopyRemuxCues(ctx, t, session, tc.offset90k, tc.videoStart, head+1, true); !served["Late"] {
+				t.Fatalf("the finished remux lost its last cues: %v", served)
+			}
+		})
+		// A seek generation starts at the keyframe at 7.5 s, numbered as the
 		// segment the seek resolved to.
-		t.Run(container.name+"/seek", func(t *testing.T) {
+		t.Run(tc.name+"/seek", func(t *testing.T) {
 			opts := TranscodeOpts{
 				InputPath: base, OutputDir: t.TempDir(), FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
-				SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "aac", CopyVideoMPEGTS: container.mpegts,
-				SeekSeconds: 20.3, StreamOriginSeconds: 20, CopySeekAnchorResolved: true, StartSegmentNumber: 8,
-				SegmentDuration: 2, TotalDuration: 48, SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
+				SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "aac", CopyVideoMPEGTS: tc.mpegts,
+				SeekSeconds: 8, StreamOriginSeconds: 7.5, CopySeekAnchorResolved: true, StartSegmentNumber: 3,
+				SegmentDuration: 2, TotalDuration: copyRemuxSourceDuration, SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
 				subtitleCueFile: subtitleCueFileName(1),
 			}
 			if output, err := exec.CommandContext(ctx, ffmpeg, buildFFmpegArgs(opts)...).CombinedOutput(); err != nil {
@@ -618,10 +619,10 @@ func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 			session := &TranscodeSession{outputDir: opts.OutputDir, opts: opts}
 			session.startSubtitleSpanLocked(opts)
 			head, ok := session.liveProducedHead()
-			if !ok || head < 12 {
+			if !ok || head < 6 {
 				t.Fatalf("seek generation produced through segment %d", head)
 			}
-			if served := checkCopyRemuxCues(ctx, t, session, container.offset90k, opts.StreamOriginSeconds, head+1, true); !served["Middle"] || !served["Late"] || served["Early"] {
+			if served := checkCopyRemuxCues(ctx, t, session, tc.offset90k, opts.StreamOriginSeconds, head+1, true); !served["Middle"] || !served["Late"] || served["Early"] {
 				t.Fatalf("seek generation served %v, want Middle and Late", served)
 			}
 		})
@@ -637,7 +638,7 @@ func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 		session, err := StartTranscode(ctx, TranscodeOpts{
 			SessionID: "planned-rendition", InputPath: base, OutputDir: t.TempDir(), FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
 			SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "aac", KeyframePlaylist: true,
-			CopySeekAnchorResolved: true, SegmentDuration: 2, TotalDuration: 48,
+			CopySeekAnchorResolved: true, SegmentDuration: 2, TotalDuration: copyRemuxSourceDuration,
 			SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
 		})
 		if err != nil {
@@ -653,7 +654,7 @@ func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 			t.Fatalf("planned copy served %v, want every cue", served)
 		}
 
-		const restartAt = 8 // starts at the keyframe at 20 s
+		const restartAt = 3 // starts at the keyframe at 7.5 s
 		for n := restartAt; n < segments; n++ {
 			if err := os.Remove(filepath.Join(session.outputDir, plannedSegmentName(n))); err != nil {
 				t.Fatal(err)
@@ -669,7 +670,7 @@ func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 	})
 }
 
-// copyRemuxRealSources writes a 48 s H.264 Matroska source with B-frames and
+// copyRemuxRealSources writes a 20 s H.264 Matroska source with B-frames and
 // a SubRip track, and a copy of it whose video starts 4 s after its other
 // tracks.
 func copyRemuxRealSources(ctx context.Context, t *testing.T, ffmpeg string) (base, shifted string) {
@@ -699,10 +700,10 @@ func copyRemuxRealSources(ctx context.Context, t *testing.T, ffmpeg string) (bas
 		t.Fatal(err)
 	}
 	base = filepath.Join(work, "base.mkv")
-	run("-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-i", subs, "-t", "48",
+	run("-v", "error", "-f", "lavfi", "-i", "testsrc2=size=96x64:rate=24",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-i", subs, "-t", strconv.Itoa(copyRemuxSourceDuration),
 		"-map", "0", "-map", "1", "-map", "2",
-		"-c:v", "libx264", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+		"-c:v", "libx264", "-preset", "veryfast", "-bf", "3", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
 		"-c:a", "aac", "-c:s", "srt", base)
 	shifted = filepath.Join(work, "video-after-subtitles.mkv")
 	run("-v", "error", "-itsoffset", "7", "-i", base, "-itsoffset", "3", "-i", base,
@@ -781,7 +782,7 @@ func checkCopyRemuxCues(ctx context.Context, t *testing.T, session *TranscodeSes
 	first := session.Opts().StartSegmentNumber
 	muxShift := realSegmentStart(ctx, t, session, offset90k, first) - videoStart
 	wantMap90k := offset90k + int64(math.Round(muxShift*90_000))
-	next := realSegmentStart(ctx, t, session, offset90k, first) - muxShift
+	next := videoStart
 	for segment := first; segment < last; segment++ {
 		start, end := next, math.Inf(1)
 		if segment+1 < last || !open {

@@ -22,7 +22,12 @@ import (
 // without a Redis in the test environment.
 func unreachableStreamDeny(t *testing.T) *playback.StreamDeny {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:0", DialTimeout: 50 * time.Millisecond, MaxRetries: -1})
+	client := redis.NewClient(&redis.Options{
+		Addr:          "127.0.0.1:0",
+		DialTimeout:   50 * time.Millisecond,
+		DialerRetries: 1, // The address cannot accept a connection.
+		MaxRetries:    -1,
+	})
 	t.Cleanup(func() { _ = client.Close() })
 	return playback.NewStreamDeny(client)
 }

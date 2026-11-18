@@ -26,7 +26,9 @@ case you could not exercise. Include the relevant capture or trimmed response.
   Check that cues follow the selected track and a late result cannot replace
   the next title's subtitles. For marker changes, load a provider suggestion
   and make a manual correction, then refresh and verify the visible range and
-  the stored correction.
+  the stored correction. When changing subtitle timestamp mapping, verify
+  live fMP4 with video starting at zero and live MPEG-TS with video starting
+  after zero. Compare subtitle cues with the same dialogue before and after a seek.
 - **Watch Party and external watch sync.** Join a party in two client
   sessions, start, pause and seek as host, then disconnect and rejoin the
   guest. Verify room phase, position and title on both clients. For watch
@@ -77,9 +79,14 @@ case you could not exercise. Include the relevant capture or trimmed response.
   profile, or device when that scope can change.
 - **History imports, requests, and notifications.** Import fixture history
   with a played episode, a resume point and an unmatched episode, then repeat
-  it. Check the target profile, counts, dates and unmatched report. For
-  requests, submit a season from a scoped profile, approve it with a sandbox
-  router, and compare the queue and catalog after polling. Simulate a refusal
+  it. Check the target profile, counts, dates and unmatched report. When
+  changing Plex or Emby pagination, have a disposable provider stub report
+  a large total and return one item per request. Check that the importer
+  stops at the page cap, reports the limit, and sends no further request.
+  For Jellyfin, verify that a listing of full pages with no reported total
+  stops at the item cap. For requests, submit a season from a scoped profile,
+  approve it with a sandbox router, and compare the queue and catalog after
+  polling. Simulate a refusal
   if error handling changed. For notifications, deliver to a test destination,
   verify the addressed profile's inbox and unread count, then check that
   another profile does not receive it.

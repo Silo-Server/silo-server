@@ -1,7 +1,7 @@
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -178,8 +178,7 @@ describe("AdminAccessGroups", () => {
     await user.click(screen.getByRole("option", { name: "Custom limit" }));
     const max = screen.getByRole("spinbutton", { name: "Requests allowed" });
     expect(max).toHaveValue(12);
-    await user.clear(max);
-    await user.type(max, "3");
+    fireEvent.change(max, { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
@@ -347,6 +346,7 @@ describe("AdminAccessGroups", () => {
     const deleted = new Promise<void>((resolve) => {
       finish = resolve;
     });
+    const deleteStarted = vi.fn();
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
@@ -357,6 +357,7 @@ describe("AdminAccessGroups", () => {
           });
         }
         if (method === "DELETE") {
+          deleteStarted();
           await deleted;
           return new Response(null, { status: 204 });
         }
@@ -366,14 +367,13 @@ describe("AdminAccessGroups", () => {
     const router = renderPage("/admin/access-groups/1");
     fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    await router.navigate("/admin/access-groups");
+    await waitFor(() => expect(deleteStarted).toHaveBeenCalledOnce());
+    await act(() => router.navigate("/admin/access-groups"));
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
     expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
     const reopened = router.state.location.key;
 
-    finish();
-    await deleted;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => finish());
     expect(router.state.location.key).toBe(reopened);
     expect(router.state.location.pathname).toBe("/admin/access-groups/1");
   });
@@ -419,16 +419,13 @@ describe("AdminAccessGroups", () => {
   });
 
   it("saves the group's profile limit and won't save one below 1", async () => {
-    const user = userEvent.setup();
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
     const limit = await screen.findByRole("spinbutton", { name: "Max profiles" });
     expect(limit).toHaveValue(5);
-    await user.clear(limit);
-    await user.type(limit, "0");
+    fireEvent.change(limit, { target: { value: "0" } });
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
-    await user.clear(limit);
-    await user.type(limit, "3");
+    fireEvent.change(limit, { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
       expect(putBody).toMatchObject({ max_profiles: 3 });
@@ -436,7 +433,6 @@ describe("AdminAccessGroups", () => {
   });
 
   it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {
-    const user = userEvent.setup();
     group = { ...GROUP, max_remote_stream_bitrate_kbps: 4500 };
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
@@ -451,20 +447,19 @@ describe("AdminAccessGroups", () => {
     const save = screen.getByRole("button", { name: "Save changes" });
 
     // A cleared box is an unsaved edit, never a silent 0 (unlimited).
-    await user.clear(limit);
+    fireEvent.change(limit, { target: { value: "" } });
     expect(save).toBeDisabled();
     expect(screen.getByText(/Enter a value above 0 Mbps/)).toBeInTheDocument();
 
     // 0 means unlimited and has its own choice, so a half-typed "0." is not a cap.
-    await user.type(limit, "0.");
+    fireEvent.change(limit, { target: { value: "0." } });
     expect(save).toBeDisabled();
     // kbps resolution is the floor; finer values are rejected, not rounded.
-    await user.type(limit, "0005");
+    fireEvent.change(limit, { target: { value: "0.0005" } });
     expect(limit).toHaveValue("0.0005");
     expect(save).toBeDisabled();
 
-    await user.clear(limit);
-    await user.type(limit, "0.5");
+    fireEvent.change(limit, { target: { value: "0.5" } });
     expect(save).toBeEnabled();
     expect(screen.getByText(/Below 1 Mbps/)).toBeInTheDocument();
     fireEvent.click(save);

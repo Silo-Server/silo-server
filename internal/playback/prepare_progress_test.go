@@ -63,14 +63,14 @@ func (s *recordingFFmpegLogSink) WriteEvent(_ context.Context, sessionID string,
 // out_time ahead of the video for this source, and the test passes either way.
 func TestPrepareFileProgressRisesBeforeASparseSubtitleCue(t *testing.T) {
 	if testing.Short() {
-		t.Skip("encodes a two-and-a-half-minute source")
+		t.Skip("real FFmpeg integration test")
 	}
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("ffmpeg not found")
 	}
 	dir := t.TempDir()
-	const duration, sparseCue = 150, 140
+	const duration, sparseCue = 30, 26
 	cue := func(n, at int, text string) string {
 		stamp := func(s int) string { return fmt.Sprintf("00:%02d:%02d,000", s/60, s%60) }
 		return fmt.Sprintf("%d\n%s --> %s\n%s\n\n", n, stamp(at), stamp(at+2), text)
@@ -85,7 +85,7 @@ func TestPrepareFileProgressRisesBeforeASparseSubtitleCue(t *testing.T) {
 		}
 	}
 	source := filepath.Join(dir, "source.mkv")
-	build := exec.Command(ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
+	build := exec.CommandContext(t.Context(), ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24", "-f", "lavfi", "-i", "sine=frequency=440",
 		"-i", filepath.Join(dir, "dense.srt"), "-i", filepath.Join(dir, "sparse.srt"),
 		"-t", strconv.Itoa(duration), "-map", "0", "-map", "1", "-map", "2", "-map", "3",
@@ -94,12 +94,18 @@ func TestPrepareFileProgressRisesBeforeASparseSubtitleCue(t *testing.T) {
 		t.Fatalf("make source: %v\n%s", err, out)
 	}
 
+	// Increase the progress report frequency so a small fixture still gives
+	// intermediate readings on fast hosts.
+	wrapper := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec ffmpeg -stats_period 0.001 \"$@\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	progress := &recordedPrepareProgress{}
 	err = PrepareFile(t.Context(), TranscodeOpts{
 		InputPath:        source,
 		TargetCodecVideo: "h264",
 		TargetCodecAudio: "aac",
-		FFmpegPath:       ffmpeg,
+		FFmpegPath:       wrapper,
 		HWAccel:          HWAccelNone,
 		TotalDuration:    duration,
 		SourceFrameRate:  24,
@@ -114,7 +120,7 @@ func TestPrepareFileProgressRisesBeforeASparseSubtitleCue(t *testing.T) {
 	}
 	readings := progress.all()
 	if len(readings) < 3 {
-		t.Skipf("the encode finished in %d readings, too fast to watch", len(readings))
+		t.Fatalf("the encode emitted %d progress readings, want at least three", len(readings))
 	}
 	firstHalf := 0
 	for i, reading := range readings {
