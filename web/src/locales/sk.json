@@ -126558,6 +126558,12 @@
       "value": "Kolekcia"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Knižnica"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -126602,6 +126608,12 @@
     {
       "type": 0,
       "value": "Zatiaľ nemáte žiadne kolekcie. Najprv nejakú vytvorte na stránke Kolekcie."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "V tejto knižnici nie sú žiadne kolekcie tohto typu."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

@@ -106876,6 +106876,12 @@
       "value": "Συλλογή"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Βιβλιοθήκη"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106920,6 +106926,12 @@
     {
       "type": 0,
       "value": "Δεν υπάρχουν ακόμη συλλογές. Δημιουργήστε πρώτα μία στις Συλλογές."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν συλλογές αυτού του τύπου σε αυτή τη βιβλιοθήκη."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

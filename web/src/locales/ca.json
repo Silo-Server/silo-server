@@ -116423,6 +116423,12 @@
       "value": "Col·lecció"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Biblioteca"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -116467,6 +116473,12 @@
     {
       "type": 0,
       "value": "Encara no hi ha col·leccions. Primer crea’n una a Col·leccions."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "No hi ha col·leccions d’aquest tipus en aquesta biblioteca."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

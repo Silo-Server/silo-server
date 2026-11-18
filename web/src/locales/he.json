@@ -115241,6 +115241,12 @@
       "value": "אוסף"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "ספרייה"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -115285,6 +115291,12 @@
     {
       "type": 0,
       "value": "אין עדיין אוספים. יש ליצור קודם אוסף בדף האוספים."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "אין אוספים מהסוג הזה בספרייה הזו."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

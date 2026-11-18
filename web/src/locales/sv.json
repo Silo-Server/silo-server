@@ -106326,6 +106326,12 @@
       "value": "Samling"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Bibliotek"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106370,6 +106376,12 @@
     {
       "type": 0,
       "value": "Inga samlingar än. Skapa en i Samlingar först."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Inga samlingar av den här typen i det här biblioteket."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

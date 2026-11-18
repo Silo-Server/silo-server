@@ -107102,6 +107102,12 @@
       "value": "Kollektsioon"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Meediakogu"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -107146,6 +107152,12 @@
     {
       "type": 0,
       "value": "Kollektsioone veel pole. Looge esmalt üks lehel „Kollektsioonid“."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Selles meediakogus pole seda tüüpi kollektsioone."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

@@ -105978,6 +105978,12 @@
       "value": "Gyűjtemény"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Könyvtár"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106022,6 +106028,12 @@
     {
       "type": 0,
       "value": "Még nincsenek gyűjtemények. Először hozzon létre egyet a Gyűjtemények oldalon."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Ebben a könyvtárban nincs ilyen típusú gyűjtemény."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

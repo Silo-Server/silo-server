@@ -105690,6 +105690,12 @@
       "value": "Collectie"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Bibliotheek"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -105734,6 +105740,12 @@
     {
       "type": 0,
       "value": "Nog geen collecties. Maak er eerst een in Collecties."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Geen collecties van dit type in deze bibliotheek."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

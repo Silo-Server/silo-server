@@ -127322,6 +127322,12 @@
       "value": "Коллекция"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Медиатека"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -127370,6 +127376,12 @@
     {
       "type": 0,
       "value": "Коллекций пока нет. Сначала создайте коллекцию в разделе «Коллекции»."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "В этой медиатеке нет коллекций этого типа."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

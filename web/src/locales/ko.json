@@ -97015,6 +97015,12 @@
       "value": "컬렉션"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "라이브러리"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -97063,6 +97069,12 @@
     {
       "type": 0,
       "value": "아직 컬렉션이 없어요. 먼저 컬렉션에서 하나 만드세요."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "이 라이브러리에 이 유형의 컬렉션이 없어요."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

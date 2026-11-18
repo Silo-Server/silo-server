@@ -126004,6 +126004,12 @@
       "value": "Колекція"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Бібліотека"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -126052,6 +126058,12 @@
     {
       "type": 0,
       "value": "Колекцій ще немає. Спершу створіть колекцію в розділі «Колекції»."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "У цій бібліотеці немає колекцій цього типу."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

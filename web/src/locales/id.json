@@ -96685,6 +96685,12 @@
       "value": "Koleksi"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Perpustakaan"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -96729,6 +96735,12 @@
     {
       "type": 0,
       "value": "Belum ada koleksi. Buat dulu di Koleksi."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Tidak ada koleksi jenis ini di perpustakaan ini."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

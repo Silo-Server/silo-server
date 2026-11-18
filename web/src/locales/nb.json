@@ -106450,6 +106450,12 @@
       "value": "Samling"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Bibliotek"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106494,6 +106500,12 @@
     {
       "type": 0,
       "value": "Ingen samlinger ennå. Lag en i Samlinger først."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Ingen samlinger av denne typen i dette biblioteket."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

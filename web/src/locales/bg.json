@@ -106784,6 +106784,12 @@
       "value": "Колекция"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Библиотека"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106828,6 +106834,12 @@
     {
       "type": 0,
       "value": "Все още няма колекции. Първо създайте такава в страницата „Колекции“."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Няма колекции от този тип в тази библиотека."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
