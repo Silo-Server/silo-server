@@ -319,8 +319,9 @@ type ProxyIdentity struct {
 	// URL is the proxy's own address.
 	URL string
 	// Name finds the row when no row has URL: the proxy's name variable, or
-	// the configuration watcher's fallback name when none is set, so the
-	// declaration lands on the row the watcher binds the proxy to.
+	// for an unnamed proxy that does not register itself the configuration
+	// watcher's fallback name, so the declaration lands on the row the
+	// watcher binds the proxy to. Empty skips the lookup by name.
 	Name string
 	// NewRowName names a row the proxy creates. Empty uses the URL's host.
 	NewRowName string

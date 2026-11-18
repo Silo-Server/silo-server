@@ -40,6 +40,22 @@ func proxyNodeIdentity(getenv func(string) string) (nodeURL, name string) {
 // own. It is opt-in; see nodepool.DeclareProxy.
 const envNodeRegister = "SILO_NODE_REGISTER"
 
+// proxyRegistersItself reports SILO_NODE_REGISTER.
+func proxyRegistersItself() bool { return envutil.Bool(envNodeRegister) }
+
+// proxyDeclarationIdentity is how a proxy finds or creates its row when it
+// declares. A proxy with no name variable is found by the watcher's fallback
+// name, so its declaration lands on the row the watcher binds it to, except
+// when it registers itself: one of several unnamed proxies must create its
+// own row then, not take over the one row that happens to carry that name.
+func proxyDeclarationIdentity(nodeURL, givenName, fallbackName string, register bool) nodepool.ProxyIdentity {
+	identity := nodepool.ProxyIdentity{URL: nodeURL, Name: givenName, NewRowName: givenName}
+	if givenName == "" && !register {
+		identity.Name = fallbackName
+	}
+	return identity
+}
+
 // proxyDeclarationRetryInterval spaces a proxy's retries while the database
 // predates node declarations: the main server is usually still migrating.
 const proxyDeclarationRetryInterval = 30 * time.Second
@@ -136,7 +152,7 @@ func predatesDeclarations(err error) bool {
 func applyProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, identity nodepool.ProxyIdentity, input nodepool.UpdateNodeInput) (*nodepool.Node, error) {
 	callCtx, cancel := context.WithTimeout(ctx, proxyDeclarationTimeout)
 	defer cancel()
-	node, created, err := nodepool.NewAdminConfigurationStore(pool).DeclareProxy(callCtx, identity, input, envutil.Bool(envNodeRegister))
+	node, created, err := nodepool.NewAdminConfigurationStore(pool).DeclareProxy(callCtx, identity, input, proxyRegistersItself())
 	if declErr, ok := errors.AsType[*nodepool.DeclarationError](err); ok {
 		variable := nodedeclare.VariableFor(nodepool.NodeTypeProxy, declErr.Field)
 		if variable == "" {

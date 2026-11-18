@@ -1273,7 +1273,7 @@ func main() {
 		// The proxy writes what it declares from its environment, and with
 		// SILO_NODE_REGISTER adds its own row, before the watcher first
 		// reads that row.
-		declaredRow, declareErr := declareProxyNode(appCtx, pool, eventBus, nodepool.ProxyIdentity{URL: nodeURL, Name: nodeName, NewRowName: givenName})
+		declaredRow, declareErr := declareProxyNode(appCtx, pool, eventBus, proxyDeclarationIdentity(nodeURL, givenName, nodeName, proxyRegistersItself()))
 		if declareErr != nil {
 			slog.Error("proxy cannot start: its node declaration was not applied", "error", declareErr)
 			os.Exit(1)

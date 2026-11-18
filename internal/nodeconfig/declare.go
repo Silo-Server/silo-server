@@ -70,11 +70,12 @@ func registrationUnsupported(err error) bool {
 // Release sends an empty declaration once, which releases the fields the
 // node declared at an earlier start. It never holds startup up: when the core
 // cannot take it now, it is offered again every RemotePollInterval in the
-// background, unless the core does not serve the route at all, where there is
-// nothing to release.
+// background. That includes a core that does not serve the route, because
+// from here it looks the same as a gateway that briefly refused it, and a
+// node that gave up there would leave its earlier fields locked.
 func Release(ctx, background context.Context, registrar Registrar) {
 	_, err := registrar.Register(ctx, nodecontrol.Registration{})
-	if err == nil || registrationUnsupported(err) || ctx.Err() != nil {
+	if err == nil || ctx.Err() != nil {
 		return
 	}
 	if _, refused := errors.AsType[*nodecontrol.RegistrationError](err); refused {

@@ -244,8 +244,9 @@ A body with a field the core does not know is refused whole, so a misspelled
 field cannot read as an empty declaration.
 
 The table is for a node that declares something. A node that declares nothing
-sends its empty body once and starts whatever the answer: a failure other than
-a missing route is tried again every 30 seconds in the background.
+sends its empty body once and starts whatever the answer: a failure is tried
+again every 30 seconds in the background, a missing route included, since a
+gateway that briefly refused the route looks the same.
 
 | Answer | Body | Node |
 |---|---|---|
