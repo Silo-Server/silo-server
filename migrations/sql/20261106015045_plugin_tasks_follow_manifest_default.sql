@@ -18,8 +18,9 @@ WHERE trigger = '{"type": "startup"}'::jsonb;
 -- would have seeded its own trigger, so a startup schedule there is an edit).
 -- A seed leaves the schedule at revision 2 (1 if it predates revisions), and
 -- every later save raises it, so a higher revision is an administrator's edit
--- and stays. An administrator who saved exactly "at startup" before revisions
--- existed cannot be told apart from a seed; that task now follows its binding
+-- and stays. Two edits cannot be told apart from a seed: exactly "at startup"
+-- saved before revisions existed, and the first save since then on a schedule
+-- that predates revisions (revision 1 to 2). That task now follows its binding
 -- and manifest default, which before a plugin declares a default is still one
 -- startup run.
 CREATE TEMPORARY TABLE seeded_plugin_task_schedules ON COMMIT DROP AS
