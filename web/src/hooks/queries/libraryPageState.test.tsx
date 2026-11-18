@@ -153,33 +153,22 @@ describe("useLibraryPageStatePreference", () => {
   // The offline write never reached the server, so carrying it into the next
   // whole-document save would replace a view another tab saved meanwhile.
   it("drops a write that failed offline before advancing the queue", async () => {
-    let rejectFirst: ((reason?: unknown) => void) | undefined;
     mocks.mutateAsync
-      .mockImplementationOnce(
-        () =>
-          new Promise((_, reject) => {
-            rejectFirst = reject;
-          }),
-      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
       .mockResolvedValueOnce({});
     const { result } = renderHook(() => useLibraryPageStatePreference());
 
-    const offline = result.current.saveLibrarySearch(7, "tab=library&sort=year");
-    const offlineError = offline.catch((error: unknown) => error);
-    const queued = result.current.saveLibrarySearch(9, "tab=collections");
-
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
     onlineManager.setOnline(false);
     try {
       await act(async () => {
-        rejectFirst?.(new TypeError("Failed to fetch"));
-        await offlineError;
+        const offline = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+        await offline.catch(() => undefined);
       });
     } finally {
       onlineManager.setOnline(true);
     }
     await act(async () => {
-      await queued;
+      await result.current.saveLibrarySearch(9, "tab=collections");
     });
 
     expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({

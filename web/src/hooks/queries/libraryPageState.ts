@@ -9,7 +9,7 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
+import { reportOfflineSettingFailure, sendingOffline } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
 
@@ -385,6 +385,7 @@ export function useLibraryPageStatePreference() {
       let attemptedPreference: LibraryPageStatePreference | undefined;
       let attemptedWrites: PendingPreferenceWrite[] = [];
       let mutationStarted = false;
+      let sentOffline = false;
       const write = queue.writeChain
         .catch(() => undefined)
         .then(() => {
@@ -398,6 +399,7 @@ export function useLibraryPageStatePreference() {
           );
           attemptedWrites = appendPreferenceWrite(queue.unconfirmedWrites, pendingWrite);
           mutationStarted = true;
+          sentOffline = sendingOffline();
           return mutateAsync({
             key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
             value: attemptedPreference,
@@ -417,9 +419,11 @@ export function useLibraryPageStatePreference() {
           return result;
         },
         (error: unknown) => {
-          // A sent write that failed offline never reached the server and isn't
-          // retried, so drop it: kept, it would ride along in the next save.
-          const failedOffline = mutationStarted && reportOfflineSettingFailure();
+          // A write sent offline never reached the server and isn't retried, so
+          // drop it: kept, it would ride along in the next save. One sent online
+          // may have landed before the connection dropped, so it stays ambiguous.
+          const failedOffline = mutationStarted && sentOffline;
+          if (failedOffline) reportOfflineSettingFailure();
           settlePreferenceWrite(
             queue,
             pendingWrite,

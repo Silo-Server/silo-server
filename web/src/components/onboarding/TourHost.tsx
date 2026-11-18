@@ -23,7 +23,7 @@ import { useOnboardingProgress } from "@/hooks/queries/onboarding";
 import { useUpdateProfile } from "@/hooks/queries/profiles";
 import { settingValueFromString } from "@/hooks/queries/admin/users";
 import { useSetSettingValue, type SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
+import { reportOfflineSettingFailure, sendingOffline } from "@/hooks/queries/settingWriteOffline";
 import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
@@ -345,6 +345,7 @@ function SettingControl({ step }: { step: OnboardingStep }) {
 
   function save(next: string) {
     const previous = value;
+    const offline = sendingOffline();
     setValue(next);
     if (spec.target === "profile_field") {
       if (!profile) return;
@@ -363,9 +364,9 @@ function SettingControl({ step }: { step: OnboardingStep }) {
     setSettingValue.mutate(
       { key: spec.key as SettingKey, value: settingValueFromString(spec.key, next), identity },
       {
-        // Offline, nothing was stored, so show the previous choice again.
+        // Sent offline, nothing was stored, so show the previous choice again.
         onError: () => {
-          if (reportOfflineSettingFailure()) setValue(previous);
+          if (offline && reportOfflineSettingFailure()) setValue(previous);
         },
       },
     );
