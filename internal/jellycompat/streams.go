@@ -4426,7 +4426,8 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 		fmt.Sprintf("BANDWIDTH=%d", bandwidth),
 		fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
 	}
-	if videoRange := compatMasterVideoRange(video, source.Version.HDR); videoRange != "" {
+	videoRange := compatMasterVideoRange(video, source.Version.HDR)
+	if videoRange != "" {
 		attributes = append(attributes, "VIDEO-RANGE="+videoRange)
 	}
 	if codecs := compatMasterCodecs(compatMasterVideoCodec(video), source, audio); codecs != "" {
@@ -4444,10 +4445,16 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 		// DV-capable players pick it over the hvc1 fallback at equal bandwidth.
 		// Only its CODECS sets it apart, so it needs a complete list.
 		if codecs := compatMasterCodecs(compatDOVICodecString(video), source, audio); codecs != "" {
+			// Dolby Vision keeps its base layer's range: HLG for AV1 10.4, SDR
+			// for 10.2, and PQ for the rest.
+			doviRange := videoRange
+			if doviRange == "" {
+				doviRange = "PQ"
+			}
 			dovi := []string{
 				fmt.Sprintf("BANDWIDTH=%d", bandwidth),
 				fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
-				"VIDEO-RANGE=PQ",
+				"VIDEO-RANGE=" + doviRange,
 				fmt.Sprintf("CODECS=%q", codecs),
 			}
 			dovi = append(dovi, shape...)
