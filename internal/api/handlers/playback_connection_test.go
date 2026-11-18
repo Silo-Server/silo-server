@@ -134,6 +134,82 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	requireSeekRecoveryKeepsLimitV3(t, pool, user, stored)
 }
 
+// TestContradictedLoweringIsNotLearnedDB: a lowering far below the
+// connection's current reading still plans at its own figure but is not kept
+// as a learned limit, so the next title plans with the reading (issue #4468:
+// a disk spinning up stalled a start at 2174 kbps on a link measured at 114 and
+// 174 Mbps). Readings older than the 24-hour limit lifetime still count while
+// they are within the reading lifetime; once past it, the lowering is learned.
+// A lowering the reading does not contradict is learned as before.
+func TestContradictedLoweringIsNotLearnedDB(t *testing.T) {
+	pool := connectionTestPool(t)
+	ctx := t.Context()
+	var user int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-contradicted-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
+
+	store := &connectionstore.Store{Pool: pool}
+	h := &PlaybackHandler{Connections: store}
+	requestCtx := apimw.SetClaims(WithNativeAPIV2(ctx), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess})
+	requestCtx = context.WithValue(clientip.SetContext(requestCtx, "192.168.1.10"), playbackConnectionDeviceContextKey{}, "tv-1")
+	r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(requestCtx)
+	stored := func() int {
+		var kbps *int
+		if err := pool.QueryRow(ctx, `SELECT limit_kbps FROM playback_connections WHERE user_id = $1`, user).Scan(&kbps); err != nil {
+			t.Fatal(err)
+		}
+		if kbps == nil {
+			return 0
+		}
+		return *kbps
+	}
+	age := func(interval string) {
+		if _, err := pool.Exec(ctx, `UPDATE playback_connections SET measured_at = now() - $2::interval, sample_at = now() - $2::interval WHERE user_id = $1`, user, interval); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lowering := func(estimate, observed int) playback.StartRequestV3 {
+		return playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1},
+			BandwidthEstimateKbps: new(estimate), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3, ObservedThroughputKbps: new(observed)}
+	}
+
+	if err := store.ReportProbe(ctx, user, "tv-1", "local", connectionstore.ProbeResult{Kbps: 114028, Bytes: 7126750, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReportSample(ctx, user, "tv-1", "local", 174593, 7*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	age("25 hours")
+
+	stalled := lowering(15484, 2174)
+	if limit, err := h.applyLearnedLimit(r, &stalled, true); err != nil || limit != nil || *stalled.BandwidthEstimateKbps != 2174 {
+		t.Fatalf("contradicted lowering: limit=%+v planned=%d err=%v, want no limit and 2174", limit, *stalled.BandwidthEstimateKbps, err)
+	}
+	if kbps := stored(); kbps != 0 {
+		t.Fatalf("contradicted lowering stored a %d kbps limit", kbps)
+	}
+	next := playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1}}
+	if err := h.applyConnectionReading(r, &next); err != nil {
+		t.Fatal(err)
+	}
+	if limit, err := h.applyLearnedLimit(r, &next, true); err != nil || limit != nil || next.BandwidthEstimateKbps == nil || *next.BandwidthEstimateKbps != 174593 {
+		t.Fatalf("next title: limit=%+v estimate=%v err=%v, want the 174593 kbps reading", limit, next.BandwidthEstimateKbps, err)
+	}
+
+	congested := lowering(44100, 44100)
+	if limit, err := h.applyLearnedLimit(r, &congested, true); err != nil || limit == nil || limit.Kbps != 44100 || stored() != 44100 {
+		t.Fatalf("uncontradicted lowering: limit=%+v stored=%d err=%v, want 44100 stored", limit, stored(), err)
+	}
+
+	age("8 days")
+	stale := lowering(15484, 2174)
+	if _, err := h.applyLearnedLimit(r, &stale, true); err != nil || stored() != 2174 {
+		t.Fatalf("lowering against expired readings stored %d (err %v), want 2174", stored(), err)
+	}
+}
+
 // requireSeekRecoveryKeepsLimitV3 sends a seek_failure_recovery through the
 // native v2 replan dispatch and fails unless it leaves the learned limit as it
 // was. A stall on the same device and connection records the limit first, and

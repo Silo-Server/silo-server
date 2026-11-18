@@ -31,7 +31,20 @@ const (
 	TTL = 24 * time.Hour
 	// Retention is how long a row survives without an update.
 	Retention = 30 * 24 * time.Hour
+	// ReadingContradictsRatio is how many times faster than a lowering the
+	// connection's current reading must be to contradict it. Wi-Fi congestion
+	// or a probe that overstated the link stays well within this; a link 50
+	// times faster than its lowering did not carry the stall, the server's
+	// storage or a failing route did.
+	ReadingContradictsRatio = 10
 )
+
+// Contradicts reports whether reading, the connection's current measured
+// speed, is more than ReadingContradictsRatio times kbps. A missing reading
+// contradicts nothing.
+func Contradicts(reading, kbps int) bool {
+	return reading > 0 && kbps > 0 && reading > kbps*ReadingContradictsRatio
+}
 
 // Limit is a learned limit: the step-down estimate a buffering client last
 // reported for one device on one connection.
