@@ -505,11 +505,12 @@ export default function PlaybackSettings() {
    * server's mirror would turn a deliberate `never` into `ask` or `always`
    * with no way back. So the fallback is only reached once a successful
    * capabilities response has proved the enum is genuinely unavailable — a
-   * failed request means unknown, not old.
+   * failed request means unknown, not old. A failed refetch keeps the last
+   * successful answer, so that answer still decides.
    */
   const introSkipControl: "mode" | "legacy" | "unknown" = supportsIntroSkipMode
     ? "mode"
-    : capabilities.isSuccess
+    : capabilities.data !== undefined
       ? "legacy"
       : "unknown";
   const supportsBuffering = settingsCapabilitiesSupportKey(
