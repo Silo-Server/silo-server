@@ -37,8 +37,9 @@ const (
 	localArtworkCopyBacklog = 4096
 )
 
-// imageCacheOutcomeDeferred is the outcome of a local job left for a server
-// that can see its library root.
+// imageCacheOutcomeDeferred is the outcome of a job released without an
+// attempt: a local job left for a server that can see its library root, or a
+// job waiting for the artwork store to have room.
 const imageCacheOutcomeDeferred = "deferred"
 
 // LocalArtworkCopier copies discovered local artwork into the artwork store

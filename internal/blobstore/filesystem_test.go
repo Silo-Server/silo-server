@@ -1,12 +1,14 @@
 package blobstore
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -417,5 +419,49 @@ func TestFilesystemCanceledStreamIsNeverPublished(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join(root, "uploads"))
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("left behind %v (%v)", entries, err)
+	}
+}
+
+// A local store stops at its free-space reserve instead of filling the disk,
+// and still deletes, which is how an admin makes room again.
+func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
+	root := t.TempDir()
+	s, err := NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err = s.Put(ctx, "kept/poster.jpg", []byte("image")); err != nil {
+		t.Fatal(err)
+	}
+	const total = 100 << 30
+	available := reserveFor(total) + 10
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) { return available, total, nil }
+	t.Cleanup(func() { statSpace = realStat })
+
+	// A write that would cut into the reserve is refused before it creates
+	// anything, and one whose length is unknown stops when it reaches it.
+	if err = s.Put(ctx, "new/poster.jpg", make([]byte, 11)); !errors.Is(err, ErrStorageFull) || !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("put past the reserve: %v", err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "new")); !os.IsNotExist(err) {
+		t.Fatalf("refused put left a directory: %v", err)
+	}
+	if err = s.PutStream(ctx, "kept/sheet.jpg", bytes.NewReader(make([]byte, 64<<10)), ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream past the reserve: %v", err)
+	}
+	if _, err = s.Stat(ctx, "kept/sheet.jpg"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("refused stream was published: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "kept"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("refused stream left files behind: %v %v", entries, err)
+	}
+	if err = s.Put(ctx, "kept/small.jpg", make([]byte, 10)); err != nil {
+		t.Fatalf("put within the budget: %v", err)
+	}
+	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/small.jpg"}); err != nil || n != 2 {
+		t.Fatalf("delete while full: %d %v", n, err)
 	}
 }

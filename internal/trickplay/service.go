@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -339,6 +340,11 @@ func (s *Service) classify(ctx context.Context, err error) (Outcome, time.Durati
 		return Released, releaseDelay
 	case errors.Is(err, errNoNode), errors.Is(err, errSettingsUnreadable):
 		return Released, time.Minute
+	case errors.Is(err, syscall.ENOSPC):
+		// The artwork store is full (blobstore.ErrStorageFull). Counting it
+		// against the file would back the file off for up to a week, long
+		// after an admin frees space.
+		return Released, releaseDelay
 	case mediasample.Classify(err).Permanent():
 		return Unusable, 0
 	}
