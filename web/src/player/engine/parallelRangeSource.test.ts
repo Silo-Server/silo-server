@@ -550,6 +550,36 @@ describe("ParallelRangeSource failures", () => {
     expect(getRetryDelay).not.toHaveBeenCalled();
   });
 
+  // A server can reset the connection after the last byte of the file. The range already holds
+  // every byte it will get, so the error is the end of the response, not a transport failure.
+  it("completes a read past the end of the file whose body errors after its last byte", async () => {
+    const size = 5 * MIB + 100;
+    const server = new FakeServer(pattern(size));
+    server.fault = (request): Fault | undefined => {
+      if (request.start >= size) return { kind: "status", status: 416 };
+      return request.start === 0 && request.url === HEAD_URL
+        ? { kind: "bodyError", afterBytes: size }
+        : undefined;
+    };
+    const getRetryDelay = vi.fn(() => 0);
+    const handleUnhandledError = vi.fn();
+    const { source } = makeSource(server, { getRetryDelay, handleUnhandledError });
+    expect(same(await read(source, 0, size), server.bytes)).toBe(true);
+
+    // The read resolves with its bytes, before the server's terminal error: wait for the worker's
+    // run to end, which is when a wrong retry would have shown.
+    const { _orchestrator } = source as unknown as {
+      _orchestrator: { workers: { running: boolean }[] };
+    };
+    await vi.waitFor(() => {
+      expect(_orchestrator.workers.every((worker) => !worker.running)).toBe(true);
+      expect(server.inFlight).toBe(0);
+    });
+    expect(server.requests.some((request) => request.start >= size)).toBe(false);
+    expect(getRetryDelay).not.toHaveBeenCalled();
+    expect(handleUnhandledError).not.toHaveBeenCalled();
+  });
+
   it("fails a range at its fourth failure in a row that delivered nothing", async () => {
     const server = new FakeServer(pattern(SIZE));
     const failures: Fault[] = [

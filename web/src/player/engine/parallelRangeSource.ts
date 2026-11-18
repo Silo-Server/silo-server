@@ -339,7 +339,8 @@ export class ParallelRangeSource extends InternalUrlSource {
    * of the range through `getRetryDelay`, counted from 1 since the range last
    * received bytes, and fails the range when the delay is null. A body from the
    * plan's URL that ends early after sending bytes is asked for again with no
-   * retry counted. An answer that is not a readable 206 matching the request, a
+   * retry counted. A body-read error after the response's last expected byte ends the
+   * response as complete, with no retry. An answer that is not a readable 206 matching the request, a
    * transport failure, or a stripe request silent for `STRIPE_INACTIVITY_MS`, from
    * the stripe URL is no retry: it switches the source to the plan's URL, which
    * then serves the rest of the range. A response from the plan's URL that breaks
@@ -405,6 +406,9 @@ export class ParallelRangeSource extends InternalUrlSource {
             try {
               result = await reader.read();
             } catch (error) {
+              // Every byte of this response arrived: an error after the last one ends the
+              // response, and the range, instead of failing a transport that finished its work.
+              if (position >= responseEnd) break;
               failures = await this.failed(
                 received > 0 ? 0 : failures,
                 error,
