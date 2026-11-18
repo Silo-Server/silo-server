@@ -74,13 +74,16 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
 
 const TIME_OF_DAY = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
+/** The longest interval the server's timer holds; it refuses a longer one. */
+const MAX_INTERVAL_MS = 9_223_372_036_854;
+
 /** Whether the server's task manager can schedule this trigger. */
 function runnable(t: TriggerConfig): boolean {
   switch (t.type) {
     case "startup":
       return true;
     case "interval":
-      return (t.interval_ms ?? 0) > 0;
+      return (t.interval_ms ?? 0) > 0 && (t.interval_ms ?? 0) <= MAX_INTERVAL_MS;
     case "daily":
       return TIME_OF_DAY.test(t.time_of_day ?? "");
     case "weekly": {

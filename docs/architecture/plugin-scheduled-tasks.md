@@ -45,9 +45,12 @@ Migration `20261106015045_plugin_tasks_follow_manifest_default` cleared the
 two kinds of stored row that predate this rule and would otherwise outrank the
 manifest default: binding triggers equal to `{"type":"startup"}`, which the
 admin plugin page's switch stored, and saved plugin task schedules of exactly
-one startup trigger, which the task manager seeded. A seeded row cannot be
-told apart from an administrator who saved exactly "at startup", so the
-migration cleared those too: such a task now follows its binding and manifest
+one startup trigger, which the task manager seeded. It cleared a schedule only
+when the schedule was never edited (revision 2 or lower, where a seed leaves
+it) and its binding set no interval, daily or weekly trigger; a startup
+schedule an administrator saved after the seed stayed. A startup schedule
+saved before schedule revisions existed cannot be told apart from a seed, so
+the migration cleared it too: such a task now follows its binding and manifest
 default, and still runs once at startup unless the plugin declares a default.
 The page's switch now resends only a trigger set through the API.
 
