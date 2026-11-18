@@ -149,7 +149,10 @@ UPDATE public.media_items
 			return total, fmt.Errorf("re-deriving the age of content rating %q: %w", raw, err)
 		}
 		total += n
-		if n < contentRatingAgeRederiveBatchSize {
+		// Only an empty batch ends the loop: a row a concurrent write
+		// changed under a full batch is skipped, so a short batch can leave
+		// rows it never selected.
+		if n == 0 {
 			return total, nil
 		}
 	}
