@@ -152,65 +152,36 @@ func TestContradictedLoweringIsNotLearnedDB(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
 
-	store := &connectionstore.Store{Pool: pool}
-	h := &PlaybackHandler{Connections: store, PlaybackConfig: func() config.PlaybackConfig { return config.PlaybackConfig{BandwidthProbeMaxAgeDays: 7} }}
+	f := learnedLimitFixture{t: t, pool: pool, user: user, store: &connectionstore.Store{Pool: pool}}
+	f.h = &PlaybackHandler{Connections: f.store, PlaybackConfig: func() config.PlaybackConfig { return config.PlaybackConfig{BandwidthProbeMaxAgeDays: 7} }}
 	requestCtx := apimw.SetClaims(WithNativeAPIV2(ctx), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess})
 	requestCtx = context.WithValue(clientip.SetContext(requestCtx, "192.168.1.10"), playbackConnectionDeviceContextKey{}, "tv-1")
 	r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(requestCtx)
-	stored := func() int {
-		var kbps *int
-		if err := pool.QueryRow(ctx, `SELECT limit_kbps FROM playback_connections WHERE user_id = $1`, user).Scan(&kbps); err != nil {
-			t.Fatal(err)
-		}
-		if kbps == nil {
-			return 0
-		}
-		return *kbps
-	}
-	age := func(interval string) {
-		if _, err := pool.Exec(ctx, `UPDATE playback_connections SET measured_at = now() - $2::interval, sample_at = now() - $2::interval WHERE user_id = $1`, user, interval); err != nil {
-			t.Fatal(err)
-		}
-	}
-	lowering := func(estimate, observed int) playback.StartRequestV3 {
-		return playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1},
-			BandwidthEstimateKbps: new(estimate), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3, ObservedThroughputKbps: new(observed)}
-	}
 
-	if err := store.ReportProbe(ctx, user, "tv-1", "local", connectionstore.ProbeResult{Kbps: 114028, Bytes: 7126750, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
+	f.probe("local")
+	if err := f.store.ReportSample(ctx, user, "tv-1", "local", 174593, 7*24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ReportSample(ctx, user, "tv-1", "local", 174593, 7*24*time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	age("25 hours")
+	f.exec(`UPDATE playback_connections SET measured_at = now() - interval '25 hours', sample_at = now() - interval '25 hours' WHERE user_id = $1`)
 
-	stalled := lowering(15484, 2174)
-	if limit, err := h.applyLearnedLimit(r, &stalled, true); err != nil || limit != nil || *stalled.BandwidthEstimateKbps != 2174 {
-		t.Fatalf("contradicted lowering: limit=%+v planned=%d err=%v, want no limit and 2174", limit, *stalled.BandwidthEstimateKbps, err)
-	}
-	if kbps := stored(); kbps != 0 {
-		t.Fatalf("contradicted lowering stored a %d kbps limit", kbps)
+	if limit, planned := f.lower(r, 15484, 2174); limit != nil || planned != 2174 || f.stored() != 0 {
+		t.Fatalf("contradicted lowering: limit=%+v planned=%d stored=%d, want no limit, 2174 planned and nothing stored", limit, planned, f.stored())
 	}
 	next := playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1}}
-	if err := h.applyConnectionReading(r, &next); err != nil {
+	if err := f.h.applyConnectionReading(r, &next); err != nil {
 		t.Fatal(err)
 	}
-	if limit, err := h.applyLearnedLimit(r, &next, true); err != nil || limit != nil || next.BandwidthEstimateKbps == nil || *next.BandwidthEstimateKbps != 174593 {
+	if limit, err := f.h.applyLearnedLimit(r, &next, true); err != nil || limit != nil || next.BandwidthEstimateKbps == nil || *next.BandwidthEstimateKbps != 174593 {
 		t.Fatalf("next title: limit=%+v estimate=%v err=%v, want the 174593 kbps reading", limit, next.BandwidthEstimateKbps, err)
 	}
 
-	congested := lowering(44100, 44100)
-	if limit, err := h.applyLearnedLimit(r, &congested, true); err != nil || limit == nil || limit.Kbps != 44100 || stored() != 44100 {
-		t.Fatalf("uncontradicted lowering: limit=%+v stored=%d err=%v, want 44100 stored", limit, stored(), err)
+	if limit, _ := f.lower(r, 44100, 44100); limit == nil || limit.Kbps != 44100 || f.stored() != 44100 {
+		t.Fatalf("uncontradicted lowering: limit=%+v stored=%d, want 44100 stored", limit, f.stored())
 	}
 	// A contradicted lowering neither replaces nor renews an earlier limit.
-	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`, user); err != nil {
-		t.Fatal(err)
-	}
-	again := lowering(15484, 2174)
-	if limit, err := h.applyLearnedLimit(r, &again, true); err != nil || limit != nil || *again.BandwidthEstimateKbps != 2174 || stored() != 44100 {
-		t.Fatalf("contradicted lowering over a limit: limit=%+v planned=%d stored=%d err=%v", limit, *again.BandwidthEstimateKbps, stored(), err)
+	f.exec(`UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`)
+	if limit, planned := f.lower(r, 15484, 2174); limit != nil || planned != 2174 || f.stored() != 44100 {
+		t.Fatalf("contradicted lowering over a limit: limit=%+v planned=%d stored=%d", limit, planned, f.stored())
 	}
 	var renewed bool
 	if err := pool.QueryRow(ctx, `SELECT observed_at > now() - interval '30 minutes' FROM playback_connections WHERE user_id = $1`, user).Scan(&renewed); err != nil || renewed {
@@ -219,23 +190,69 @@ func TestContradictedLoweringIsNotLearnedDB(t *testing.T) {
 
 	// A provider path follows the device across networks: its reading does
 	// not speak for the network that stalled, so the lowering is learned.
-	providerReq := r.WithContext(netaccess.WithPath(requestCtx, netaccess.Path{Provider: "tailscale"}))
-	if err := store.ReportProbe(ctx, user, "tv-1", "provider:tailscale", connectionstore.ProbeResult{Kbps: 114028, Bytes: 7126750, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
-		t.Fatal(err)
+	f.probe("provider:tailscale")
+	if limit, _ := f.lower(r.WithContext(netaccess.WithPath(requestCtx, netaccess.Path{Provider: "tailscale"})), 15484, 2174); limit == nil || limit.Kbps != 2174 {
+		t.Fatalf("provider lowering: limit=%+v, want 2174 learned", limit)
 	}
-	roaming := lowering(15484, 2174)
-	if limit, err := h.applyLearnedLimit(providerReq, &roaming, true); err != nil || limit == nil || limit.Kbps != 2174 {
-		t.Fatalf("provider lowering: limit=%+v err=%v, want 2174 learned", limit, err)
-	}
-	if _, err := pool.Exec(ctx, `DELETE FROM playback_connections WHERE user_id = $1 AND connection_key <> 'local'`, user); err != nil {
-		t.Fatal(err)
-	}
+	f.exec(`DELETE FROM playback_connections WHERE user_id = $1 AND connection_key <> 'local'`)
 
-	age("8 days")
-	stale := lowering(15484, 2174)
-	if _, err := h.applyLearnedLimit(r, &stale, true); err != nil || stored() != 2174 {
-		t.Fatalf("lowering against expired readings stored %d (err %v), want 2174", stored(), err)
+	f.exec(`UPDATE playback_connections SET measured_at = now() - interval '8 days', sample_at = now() - interval '8 days' WHERE user_id = $1`)
+	f.lower(r, 15484, 2174)
+	if f.stored() != 2174 {
+		t.Fatalf("lowering against expired readings stored %d, want 2174", f.stored())
 	}
+}
+
+// learnedLimitFixture drives applyLearnedLimit for one user and device against
+// the DB contract database.
+type learnedLimitFixture struct {
+	t     *testing.T
+	pool  *pgxpool.Pool
+	user  int
+	store *connectionstore.Store
+	h     *PlaybackHandler
+}
+
+// exec runs statement with the fixture's user as $1.
+func (f learnedLimitFixture) exec(statement string) {
+	f.t.Helper()
+	if _, err := f.pool.Exec(f.t.Context(), statement, f.user); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// probe stores an automatic 114028 kbps lower-bound probe on key.
+func (f learnedLimitFixture) probe(key string) {
+	f.t.Helper()
+	if err := f.store.ReportProbe(f.t.Context(), f.user, "tv-1", key, connectionstore.ProbeResult{Kbps: 114028, Bytes: 7126750, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// stored is the local connection's stored learned limit, or 0.
+func (f learnedLimitFixture) stored() int {
+	f.t.Helper()
+	var kbps *int
+	if err := f.pool.QueryRow(f.t.Context(), `SELECT limit_kbps FROM playback_connections WHERE user_id = $1 AND connection_key = 'local'`, f.user).Scan(&kbps); err != nil {
+		f.t.Fatal(err)
+	}
+	if kbps == nil {
+		return 0
+	}
+	return *kbps
+}
+
+// lower sends the client's observed_rebuffer lowering and returns the limit
+// applyLearnedLimit reports and the estimate the request then plans with.
+func (f learnedLimitFixture) lower(r *http.Request, estimate, observed int) (*playback.BandwidthLimitV3, int) {
+	f.t.Helper()
+	req := playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1},
+		BandwidthEstimateKbps: new(estimate), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3, ObservedThroughputKbps: new(observed)}
+	limit, err := f.h.applyLearnedLimit(r, &req, true)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return limit, *req.BandwidthEstimateKbps
 }
 
 // requireSeekRecoveryKeepsLimitV3 sends a seek_failure_recovery through the
