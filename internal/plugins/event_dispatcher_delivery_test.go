@@ -19,7 +19,6 @@ import (
 // hub, dispatcher and plugin process, over the cluster's shared bus and
 // outbox.
 type apiServer struct {
-	bus        *cache.ObservedEventBus
 	hub        *events.Hub
 	dispatcher *EventDispatcher
 }
@@ -27,8 +26,7 @@ type apiServer struct {
 func startAPIServer(t *testing.T, name string, shared cache.EventBus, deliveries eventDeliveryStore, client eventConsumerClient, subscriptions ...string) apiServer {
 	t.Helper()
 	ctx := t.Context()
-	bus := cache.NewObservedEventBus(shared)
-	hub := events.NewHub(name, bus)
+	hub := events.NewHub(name, shared)
 	if err := hub.Start(ctx); err != nil {
 		t.Fatalf("start %s hub: %v", name, err)
 	}
@@ -36,13 +34,12 @@ func startAPIServer(t *testing.T, name string, shared cache.EventBus, deliveries
 		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
 		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", subscriptions...)}},
 	}
-	d := NewEventDispatcher(bus, hub, store, staticResolver{client: client}, deliveries, 4)
+	d := NewEventDispatcher(shared, hub, store, staticResolver{client: client}, deliveries, 4)
 	if err := d.Start(ctx); err != nil {
 		t.Fatalf("start %s dispatcher: %v", name, err)
 	}
-	bus.ObservePublishes(d.ObservePublish)
 	t.Cleanup(d.Stop)
-	return apiServer{bus: bus, hub: hub, dispatcher: d}
+	return apiServer{hub: hub, dispatcher: d}
 }
 
 type staticResolver struct{ client eventConsumerClient }
@@ -52,19 +49,19 @@ func (r staticResolver) EventConsumerClient(context.Context, int, string) (event
 }
 
 // TestClusterDeliversEachEventOnce runs two API servers on one bus and one
-// outbox. Redis hands every bus event, and every hub envelope, to both
-// servers; each event must still reach the installation once.
+// outbox. Redis hands every hub envelope to both servers; each event must
+// still reach the installation once.
 func TestClusterDeliversEachEventOnce(t *testing.T) {
 	ctx := t.Context()
 	shared := newFakeBus()
 	deliveries := newMemoryDeliveryStore()
 	client := &recordingClient{done: make(chan struct{}), want: 3}
-	subscriptions := []string{cache.EventScanComplete, "plugin.silo.other.ping", "plugin.silo.other.pong"}
+	subscriptions := []string{"scan.completed", "plugin.silo.other.ping", "plugin.silo.other.pong"}
 	a := startAPIServer(t, "api-a", shared, deliveries, client, subscriptions...)
 	b := startAPIServer(t, "api-b", shared, deliveries, client, subscriptions...)
 
-	if err := a.bus.Publish(ctx, cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete, Payload: "7"}); err != nil {
-		t.Fatalf("publish bus event: %v", err)
+	if err := a.hub.Publish(ctx, events.Envelope{Channel: events.ChannelScans, Event: "scan.completed", Data: json.RawMessage(`{"id":"scan-1","library_id":7}`)}); err != nil {
+		t.Fatalf("publish catalog event: %v", err)
 	}
 	if err := a.hub.Publish(ctx, events.Envelope{Channel: events.ChannelPlugins, Event: "plugin.silo.other.ping", Data: json.RawMessage(`{"n":1}`)}); err != nil {
 		t.Fatalf("publish envelope on api-a: %v", err)
@@ -96,18 +93,18 @@ func TestClusterDeliversEachEventOnce(t *testing.T) {
 	}
 }
 
-// TestServerWithoutRedisDeliversBusEvents covers a single server without a
+// TestServerWithoutRedisDeliversEvents covers a single server without a
 // Redis URL, whose bus delivers nothing to subscribers.
-func TestServerWithoutRedisDeliversBusEvents(t *testing.T) {
+func TestServerWithoutRedisDeliversEvents(t *testing.T) {
 	client := &recordingClient{done: make(chan struct{}), want: 1}
-	server := startAPIServer(t, "api", &cache.NoopEventBus{}, newMemoryDeliveryStore(), client, cache.EventScanComplete)
+	server := startAPIServer(t, "api", &cache.NoopEventBus{}, newMemoryDeliveryStore(), client, "scan.completed")
 
-	if err := server.bus.Publish(t.Context(), cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete, Payload: `{"libraryId":"lib-1"}`}); err != nil {
+	if err := server.hub.Publish(t.Context(), events.Envelope{Channel: events.ChannelScans, Event: "scan.completed", Data: json.RawMessage(`{"id":"scan-1","library_id":7}`)}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	waitFor(t, client)
-	if got := client.get()[0].GetPayload().AsMap()["libraryId"]; got != "lib-1" {
-		t.Fatalf("payload libraryId = %v, want lib-1", got)
+	if got := client.get()[0].GetPayload().AsMap()["library_id"]; got != "7" {
+		t.Fatalf("payload library_id = %v, want \"7\"", got)
 	}
 }
 
@@ -139,7 +136,7 @@ func newDeliveryFixture(client eventConsumerClient) (*EventDispatcher, *memoryDe
 	deliveries := newMemoryDeliveryStore()
 	store := &fakeInstallationStore{
 		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
-		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete)}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", "scan.completed")}},
 	}
 	return NewEventDispatcher(newFakeBus(), nil, store, staticResolver{client: client}, deliveries, 4), deliveries
 }
@@ -149,7 +146,7 @@ func TestFailedDeliveryIsRetriedWithTheSameEventID(t *testing.T) {
 	client := &flakyClient{failures: 2, err: errors.New("plugin restarting")}
 	d, deliveries := newDeliveryFixture(client)
 
-	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete, Payload: "7"})
+	d.dispatchEnvelope(ctx, scanCompleted())
 	for _, delay := range eventRetryDelays[:2] {
 		pending := deliveries.pending()
 		if len(pending) != 1 || pending[0].lastError != "plugin restarting" {
@@ -186,7 +183,7 @@ func TestDeliveryGivesUpAfterTheLastRetry(t *testing.T) {
 	client := &flakyClient{failures: 1 << 30, err: errors.New("broken")}
 	d, deliveries := newDeliveryFixture(client)
 
-	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete})
+	d.dispatchEnvelope(ctx, scanCompleted())
 	for _, delay := range eventRetryDelays {
 		deliveries.advance(delay)
 		d.deliverDue(ctx)
@@ -207,7 +204,7 @@ func TestDeliveryToDisabledInstallationIsRetried(t *testing.T) {
 	deliveries := newMemoryDeliveryStore()
 	store := &fakeInstallationStore{
 		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
-		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete)}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", "scan.completed")}},
 	}
 	client := &flakyClient{}
 	disabled := true
@@ -219,7 +216,7 @@ func TestDeliveryToDisabledInstallationIsRetried(t *testing.T) {
 	})
 	d := NewEventDispatcher(newFakeBus(), nil, store, resolver, deliveries, 4)
 
-	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete})
+	d.dispatchEnvelope(ctx, scanCompleted())
 	if pending := deliveries.pending(); len(pending) != 1 || len(pending[0].delays) != 1 {
 		t.Fatalf("outbox after delivering to a disabled installation = %+v, want the delivery waiting to retry", pending)
 	}
@@ -238,7 +235,7 @@ func TestUndeliverablePayloadIsDropped(t *testing.T) {
 	ctx := t.Context()
 	client := &flakyClient{}
 	d, deliveries := newDeliveryFixture(client)
-	if err := deliveries.Enqueue(ctx, []EventDelivery{{EventID: "e", EventName: cache.EventScanComplete, Payload: []byte(`[1]`), InstallationID: 1, CapabilityID: "events"}}); err != nil {
+	if err := deliveries.Enqueue(ctx, []EventDelivery{{EventID: "e", EventName: "scan.completed", Payload: []byte(`[1]`), InstallationID: 1, CapabilityID: "events"}}); err != nil {
 		t.Fatal(err)
 	}
 	d.deliverDue(ctx)
@@ -250,31 +247,49 @@ func TestUndeliverablePayloadIsDropped(t *testing.T) {
 	}
 }
 
-// TestUnsubscribedEventsAreNotQueued: once the index is built, events no
-// installation subscribes to never take a place in the intake.
-func TestUnsubscribedEventsAreNotQueued(t *testing.T) {
+// TestPayloadOffTheCatalogIsNotQueued: a payload that doesn't fit its
+// catalog type is dropped, not queued without its data.
+func TestPayloadOffTheCatalogIsNotQueued(t *testing.T) {
 	ctx := t.Context()
-	d, _ := newDeliveryFixture(&flakyClient{})
-	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete})
-
-	d.ObservePublish(cache.ChannelPlayback, cache.Event{Type: cache.EventPlaybackSessionsChanged})
-	if got := len(d.intake); got != 0 {
-		t.Fatalf("intake after an unsubscribed event = %d, want 0", got)
+	d, deliveries := newDeliveryFixture(&flakyClient{})
+	d.store(ctx, hubEvent(catalogEnvelope("scan.completed", `{"id":"scan-1","library_id":true}`)))
+	if pending := deliveries.pending(); len(pending) != 0 {
+		t.Fatalf("outbox = %+v, want empty", pending)
 	}
-	d.ObservePublish(cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete})
-	if got := len(d.intake); got != 1 {
-		t.Fatalf("intake after a subscribed event = %d, want 1", got)
+}
+
+// TestOnlyCatalogEventsAreQueued: once the index is built, an event no
+// installation subscribes to never takes a place in the intake, and neither
+// does an internal event a plugin subscribed to anyway.
+func TestOnlyCatalogEventsAreQueued(t *testing.T) {
+	ctx := t.Context()
+	store := &fakeInstallationStore{
+		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", "scan.completed", "user_state.changed", "plugin.silo.other.ping")}},
+	}
+	d := NewEventDispatcher(newFakeBus(), nil, store, staticResolver{client: &flakyClient{}}, newMemoryDeliveryStore(), 4)
+	d.dispatchEnvelope(ctx, scanCompleted()) // builds the index
+
+	for name, want := range map[string]bool{
+		"scan.completed":         true,
+		"plugin.silo.other.ping": true,
+		"session.started":        false, // in the catalog, not subscribed
+		"user_state.changed":     false, // subscribed, not in the catalog
+	} {
+		if got := d.mayHaveSubscribers(name); got != want {
+			t.Errorf("mayHaveSubscribers(%q) = %v, want %v", name, got, want)
+		}
 	}
 }
 
 // TestStopStoresEventsPublishedWhileDraining: the server's context ends
-// before it drains its requests, and the bus events and hub envelopes those
-// requests publish must still reach the outbox.
+// before it drains its requests, and the events those requests publish must
+// still reach the outbox.
 func TestStopStoresEventsPublishedWhileDraining(t *testing.T) {
 	deliveries := newMemoryDeliveryStore()
 	store := &fakeInstallationStore{
 		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
-		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete, "plugin.silo.other.ping")}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", "scan.completed", "plugin.silo.other.ping")}},
 	}
 	bus := newFakeBus()
 	hub := events.NewHub("api", bus)
@@ -285,7 +300,9 @@ func TestStopStoresEventsPublishedWhileDraining(t *testing.T) {
 	}
 	cancel()
 
-	d.ObservePublish(cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete, Payload: "7"})
+	if err := hub.Publish(context.Background(), events.Envelope{Channel: events.ChannelScans, Event: "scan.completed", Data: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
 	if err := hub.Publish(context.Background(), events.Envelope{Channel: events.ChannelPlugins, Event: "plugin.silo.other.ping"}); err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +312,7 @@ func TestStopStoresEventsPublishedWhileDraining(t *testing.T) {
 		names = append(names, pending.EventName)
 	}
 	slices.Sort(names)
-	if want := []string{"plugin.silo.other.ping", cache.EventScanComplete}; !slices.Equal(names, want) {
+	if want := []string{"plugin.silo.other.ping", "scan.completed"}; !slices.Equal(names, want) {
 		t.Fatalf("outbox after Stop = %v, want %v", names, want)
 	}
 }
@@ -323,7 +340,7 @@ func TestShutdownDuringStoreKeepsTheEvent(t *testing.T) {
 	deliveries := &cancelAwareStore{memoryDeliveryStore: newMemoryDeliveryStore(), entered: make(chan struct{}), release: make(chan struct{})}
 	store := &fakeInstallationStore{
 		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
-		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete)}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", "scan.completed")}},
 	}
 	d := NewEventDispatcher(newFakeBus(), nil, store, staticResolver{client: &flakyClient{}}, deliveries, 4)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -331,7 +348,7 @@ func TestShutdownDuringStoreKeepsTheEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.ObservePublish(cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete})
+	d.offer(hubEvent(scanCompleted()))
 	<-deliveries.entered
 	cancel()
 	close(deliveries.release)
@@ -349,7 +366,7 @@ func TestDeliveryClaimedByDeadServerIsDeliveredByAnother(t *testing.T) {
 	ctx := t.Context()
 	client := &flakyClient{}
 	d, deliveries := newDeliveryFixture(client)
-	d.store(ctx, busEvent(cache.Event{Type: cache.EventScanComplete}))
+	d.store(ctx, hubEvent(scanCompleted()))
 
 	dead, err := deliveries.Claim(ctx, 10, eventDeliveryLease)
 	if err != nil || len(dead) != 1 {
@@ -382,7 +399,7 @@ func TestDeliveryErrorIsSanitized(t *testing.T) {
 	client := &flakyClient{failures: 1, err: errors.New("rpc error: desc = api_key=SECRET rejected")}
 	d, deliveries := newDeliveryFixture(client)
 
-	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete})
+	d.dispatchEnvelope(ctx, scanCompleted())
 	pending := deliveries.pending()
 	if len(pending) != 1 || strings.Contains(pending[0].lastError, "SECRET") || !strings.Contains(pending[0].lastError, "api_key=") {
 		t.Fatalf("stored error = %+v, want the message with the key's value masked", pending)
