@@ -599,9 +599,10 @@ answers still holds the play session. HLS master playlist, playlist and
 segment requests that carry a token answer the same retryable `503` when their
 play session cannot be read, and so do progressive stream, subtitle and
 attachment requests; a play session that is absent or belongs to another token
-answers `404`. The same media requests answer a retryable `503` when the media
-file lookup fails, and keep the play session for the retry; they answer `404`
-only when the file is gone. `PlaybackInfo` answers `503` instead of
+answers `404`. When this API server looks up the media file for one of these
+requests or for a local transcode start, a failed lookup answers a retryable
+`503` and keeps the play session for the retry, and `404` means the file is
+gone. A remote transcode's failover answers `502` as before. `PlaybackInfo` answers `503` instead of
 returning a `PlaySessionId` it could not store, since other API servers could
 not resolve it.
 
