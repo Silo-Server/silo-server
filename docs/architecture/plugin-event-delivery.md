@@ -133,9 +133,10 @@ published while the server drains its requests after its context ended.
   cannot use events to keep every process's copy current.
 - During a rolling upgrade, servers on older builds still deliver internal
   event names, unprojected payloads and numeric IDs until they are replaced.
-  A row an older build stored and a newer server claims is dropped when its
-  name is outside the catalog; a catalog event stored by an older build is
-  delivered in the shape it was stored in.
+  A row an older build stored and a newer server claims goes through the
+  catalog check and the conversion again at delivery: a name outside the
+  catalog is dropped, a catalog event is delivered in its public shape, and a
+  notification, which the older build stored without its account, is dropped.
 
 ## Plugin contract
 

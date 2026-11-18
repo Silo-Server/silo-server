@@ -265,6 +265,33 @@ func TestStoredEventOutsideTheCatalogIsDropped(t *testing.T) {
 	}
 }
 
+// A catalog event stored by a build from before the catalog holds the host's
+// internal payload. It reaches the plugin in the public shape, and a
+// notification that names no account is dropped.
+func TestStoredInternalPayloadIsConvertedAtDelivery(t *testing.T) {
+	ctx := t.Context()
+	client := &flakyClient{}
+	d, deliveries := newDeliveryFixture(client)
+	if err := deliveries.Enqueue(ctx, []EventDelivery{
+		{EventID: "item", EventName: "catalog.item.changed", Payload: []byte(`{"change":"metadata_updated","content_id":"c1","library_id":1,"internal":true}`), InstallationID: 1, CapabilityID: "events"},
+		{EventID: "note", EventName: "notification.created", Payload: []byte(`{"id":"d1","type":"episode.available","profile_id":"p1","created_at":"2026-11-04T10:00:00Z"}`), InstallationID: 1, CapabilityID: "events"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d.deliverDue(ctx)
+	got := client.get()
+	if len(got) != 1 || got[0].GetEventName() != "catalog.item.changed" {
+		t.Fatalf("delivered %v, want only the catalog item event", got)
+	}
+	payload := got[0].GetPayload().AsMap()
+	if _, leaked := payload["internal"]; payload["library_id"] != "1" || leaked {
+		t.Fatalf("payload = %v, want library_id as a string and no internal field", payload)
+	}
+	if pending := deliveries.pending(); len(pending) != 0 {
+		t.Fatalf("outbox = %+v, want empty", pending)
+	}
+}
+
 // TestPayloadOffTheCatalogIsNotQueued: a payload that doesn't fit its
 // catalog type is dropped, not queued without its data.
 func TestPayloadOffTheCatalogIsNotQueued(t *testing.T) {
