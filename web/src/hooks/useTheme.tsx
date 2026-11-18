@@ -228,16 +228,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, [cacheOwner]);
 
-  // Shows a choice at once, then saves it. A failed save leaves the stored
-  // choice unchanged, and the effects above only re-run when that changes, so
-  // the previous choice and cache entry are put back here.
+  // Shows a choice at once, then saves it. A save that failed offline leaves
+  // the stored choice unchanged, and the effects above only re-run when that
+  // changes, so the previous choice and cache entry are put back here. An
+  // offline failure is immediate, so the profile can't have changed since.
   const showAndSave = useCallback(
     <T,>(key: SettingKey, cacheKey: StorageKey, value: T, previous: T, show: (v: T) => void) => {
       const cached = appearanceCache.get(cacheKey, cacheOwner);
       show(value);
       appearanceCache.set(cacheKey, String(value), cacheOwner);
       saveProfileDefault(key, value).catch(() => {
-        reportOfflineSettingFailure();
+        if (!reportOfflineSettingFailure()) return;
         show(previous);
         if (cached === null) appearanceCache.remove(cacheKey, cacheOwner);
         else appearanceCache.set(cacheKey, cached, cacheOwner);

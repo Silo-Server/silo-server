@@ -96,12 +96,11 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
     }
   }, [dateFormat, timeFormat, apiLoaded, cacheOwner]);
 
-  // The shown format was applied before the save. When the save fails, the
-  // stored values are unchanged, so the effect above never re-runs: put them
-  // back here.
+  // The shown format was applied before the save. When an offline save fails,
+  // the stored values are unchanged, so the effect above never re-runs: put
+  // them back here. An online failure may have saved, and its re-read decides.
   const restoreStoredFormats = useCallback(() => {
-    reportOfflineSettingFailure();
-    if (!apiLoaded) return;
+    if (!reportOfflineSettingFailure() || !apiLoaded) return;
     setDateTimeFormatPreferences({ dateFormat, timeFormat });
     appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, dateFormat, cacheOwner);
     appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, timeFormat, cacheOwner);

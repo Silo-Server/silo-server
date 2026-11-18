@@ -363,10 +363,9 @@ function SettingControl({ step }: { step: OnboardingStep }) {
     setSettingValue.mutate(
       { key: spec.key as SettingKey, value: settingValueFromString(spec.key, next), identity },
       {
-        // Nothing was stored, so show the previous choice again.
+        // Offline, nothing was stored, so show the previous choice again.
         onError: () => {
-          reportOfflineSettingFailure();
-          setValue(previous);
+          if (reportOfflineSettingFailure()) setValue(previous);
         },
       },
     );

@@ -14,11 +14,16 @@ export const SETTING_WRITE_NETWORK_MODE = "always";
  * Tells the user an offline preference change wasn't saved. For callers that
  * show the change at once and report no save error of their own; failures
  * while online stay with the caller's existing handling.
+ *
+ * Returns whether the failure happened offline. Only then is it certain the
+ * write never reached the server and no settings re-read ran first, so only
+ * then may a caller put back the value it showed before the change.
  */
-export function reportOfflineSettingFailure(): void {
-  if (onlineManager.isOnline()) return;
+export function reportOfflineSettingFailure(): boolean {
+  if (onlineManager.isOnline()) return false;
   // One toast for a burst of offline changes, not one per click.
   toast.error(t("web.settings.offlineChangeNotSaved"), { id: "setting-write-offline" });
+  return true;
 }
 
 /**
