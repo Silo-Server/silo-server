@@ -284,6 +284,15 @@ func HasHDR10Plus(sideData []SideData) bool {
 	return hasHDR10Plus(sideData)
 }
 
+// Dolby Vision range types. DOVI has no compatible base layer; the others
+// name the base layer a display without Dolby Vision shows.
+const (
+	rangeTypeDOVI          = "DOVI"
+	rangeTypeDOVIWithHDR10 = "DOVIWithHDR10"
+	rangeTypeDOVIWithSDR   = "DOVIWithSDR"
+	rangeTypeDOVIWithHLG   = "DOVIWithHLG"
+)
+
 // Dolby Vision range types whose base layer also carries HDR10+ metadata.
 const (
 	rangeTypeDOVIWithHDR10Plus   = "DOVIWithHDR10Plus"
@@ -297,7 +306,7 @@ const (
 func RangeTypeWithHDR10Plus(track models.VideoTrack) string {
 	if track.DVProfile <= 0 {
 		switch rangeType := strings.TrimSpace(track.VideoRangeType); {
-		case strings.EqualFold(rangeType, "DOVIWithHDR10"), strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10Plus):
+		case strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10), strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10Plus):
 			return rangeTypeDOVIWithHDR10Plus
 		case strings.EqualFold(rangeType, "DOVIWithEL"), strings.EqualFold(rangeType, rangeTypeDOVIWithELHDR10Plus):
 			return rangeTypeDOVIWithELHDR10Plus
@@ -341,13 +350,13 @@ func Profile10RangeType(compatID int, hdr10Plus bool) string {
 		if hdr10Plus {
 			return rangeTypeDOVIWithHDR10Plus
 		}
-		return "DOVIWithHDR10"
+		return rangeTypeDOVIWithHDR10
 	case 2:
-		return "DOVIWithSDR"
+		return rangeTypeDOVIWithSDR
 	case 4:
-		return "DOVIWithHLG"
+		return rangeTypeDOVIWithHLG
 	default:
-		return "DOVI"
+		return rangeTypeDOVI
 	}
 }
 
@@ -355,7 +364,7 @@ func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) stri
 	if dvProfile > 0 {
 		switch dvProfile {
 		case 5:
-			return "DOVI"
+			return rangeTypeDOVI
 		case 7:
 			if hdr10Plus {
 				return rangeTypeDOVIWithELHDR10Plus
@@ -367,24 +376,24 @@ func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) stri
 			}
 			switch compatID {
 			case 1:
-				return "DOVIWithHDR10"
+				return rangeTypeDOVIWithHDR10
 			case 2:
-				return "DOVIWithSDR"
+				return rangeTypeDOVIWithSDR
 			case 4:
-				return "DOVIWithHLG"
+				return rangeTypeDOVIWithHLG
 			default:
 				if isHLG(stream.ColorTransfer) {
-					return "DOVIWithHLG"
+					return rangeTypeDOVIWithHLG
 				}
 				if isHDR(stream.ColorTransfer) {
-					return "DOVIWithHDR10"
+					return rangeTypeDOVIWithHDR10
 				}
-				return "DOVIWithSDR"
+				return rangeTypeDOVIWithSDR
 			}
 		case 10:
 			return Profile10RangeType(compatID, hdr10Plus)
 		default:
-			return "DOVI"
+			return rangeTypeDOVI
 		}
 	}
 	if hdr10Plus {
