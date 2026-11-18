@@ -4752,6 +4752,38 @@ func virtualConcreteReleaseKey(f *models.MediaFile) string {
 		f.PresentationGroupKey + "\x00" + strconv.Itoa(f.PresentationPartIndex)
 }
 
+// virtualRowFailed reports whether the catalog stamped this row failed_at: the
+// release was tried and produced no bytes. It is the durable liveness signal for
+// a virtual candidate (see virtualVersionAvailability), so a duplicate collapse
+// must never let a failed row stand in for a live one of the same bytes.
+func virtualRowFailed(f *models.MediaFile) bool {
+	return f != nil && f.FailedAt != nil
+}
+
+// forgetKeptProbedRelease drops a row the liveness rule displaced from the
+// probed-release index the neutral-key path consults, so a row the item no
+// longer lists cannot collapse a later one against it.
+func forgetKeptProbedRelease(byNeutral map[string][]*models.MediaFile, kept *models.MediaFile) {
+	if kept == nil || kept.ProbeUpdatedAt == nil {
+		return
+	}
+	key := virtualNeutralReleaseKey(kept)
+	if key == "" {
+		return
+	}
+	rows := byNeutral[key]
+	for i, row := range rows {
+		if row != kept {
+			continue
+		}
+		byNeutral[key] = append(rows[:i], rows[i+1:]...)
+		if len(byNeutral[key]) == 0 {
+			delete(byNeutral, key)
+		}
+		return
+	}
+}
+
 // collapseDuplicateVirtualVersionFiles drops duplicate virtual catalog rows so
 // one release lists once. Duplicate rows for a release share a candidate URI
 // (and, for a neutral row, its provider-neutral key) and differ only by the
@@ -4763,7 +4795,10 @@ func collapseDuplicateVirtualVersionFiles(files []*models.MediaFile) []*models.M
 	}
 	probedNeutral := make(map[string][]*models.MediaFile)
 	for _, f := range files {
-		if f == nil || f.ProbeUpdatedAt == nil {
+		// A failed row is not a probed copy an unprobed duplicate may be hidden
+		// behind: the whole point of the collapse is to list a release once, and
+		// the row that survives has to be the one that can play.
+		if f == nil || f.ProbeUpdatedAt == nil || virtualRowFailed(f) {
 			continue
 		}
 		if key := virtualNeutralReleaseKey(f); key != "" {
@@ -4790,6 +4825,23 @@ func collapseDuplicateVirtualVersionFiles(files []*models.MediaFile) []*models.M
 			case conflict:
 				// A contradictory durable identity: the candidate id alone is not
 				// proof enough, so the row takes the ordinary path below.
+			case virtualRowFailed(kept) && !virtualRowFailed(f):
+				// The listed survivor is the failed copy of these bytes. A live
+				// duplicate takes the slot whatever its probe evidence: a dead row
+				// must never keep a playable one off the list, and the compat
+				// filter drops a candidate whose only surviving row is failed.
+				forgetKeptProbedRelease(keptProbedByNeutral, kept)
+				out[slot] = f
+				if f.ProbeUpdatedAt != nil {
+					if key := virtualNeutralReleaseKey(f); key != "" {
+						keptProbedByNeutral[key] = append(keptProbedByNeutral[key], f)
+					}
+				}
+				continue
+			case virtualRowFailed(f) && !virtualRowFailed(kept):
+				// A failed duplicate never displaces a live survivor: same candidate,
+				// same bytes, and the survivor is the one that can play.
+				continue
 			case f.ProbeUpdatedAt != nil && kept.ProbeUpdatedAt == nil:
 				// The duplicate carries probe evidence: it is the authoritative row for
 				// these bytes and replaces the unprobed survivor.

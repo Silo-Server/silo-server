@@ -272,3 +272,45 @@ func TestBuildPlaybackInfoKeepsDistinctUnprobedCandidateBeneathProbedCopy(t *tes
 		t.Fatalf("size-0 placeholder beside a probed copy projected %d versions, want 1", len(versions))
 	}
 }
+
+// TestBuildPlaybackInfoPrefersALiveDuplicateOverAFailedCopy pins the liveness
+// rule: two rows for one candidate are the same bytes, and the one that can play
+// must be the one listed. A failed row carrying probe evidence used to displace
+// the live unprobed row (and the compat filter then dropped the candidate
+// entirely because the surviving row was dead).
+func TestBuildPlaybackInfoPrefersALiveDuplicateOverAFailedCopy(t *testing.T) {
+	const uri = "virtual://movie/dup?result=live-vs-dead"
+	failedProbed := virtualDupRow(81, 1000, uri, "eng", true)
+	failedAt := time.Now()
+	failedProbed.FailedAt = &failedAt
+	liveUnprobed := virtualDupRow(82, 1000, uri, "eng", false)
+
+	for _, tc := range []struct {
+		name  string
+		files []*models.MediaFile
+		want  int
+	}{
+		{name: "failed row first", files: []*models.MediaFile{failedProbed, liveUnprobed}, want: 82},
+		{name: "live row first", files: []*models.MediaFile{liveUnprobed, failedProbed}, want: 82},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			versions := buildDupVersions(t, tc.files)
+			if len(versions) != 1 {
+				t.Fatalf("one candidate projected %d versions, want 1", len(versions))
+			}
+			if versions[0].FileID != tc.want {
+				t.Fatalf("collapsed to file %d, want the live row %d", versions[0].FileID, tc.want)
+			}
+			if versions[0].Failed {
+				t.Fatal("the listed row is the failed copy")
+			}
+		})
+	}
+
+	// Between two live rows the existing probe-evidence preference stands.
+	liveProbed := virtualDupRow(83, 1000, uri, "eng", true)
+	versions := buildDupVersions(t, []*models.MediaFile{liveUnprobed, liveProbed})
+	if len(versions) != 1 || versions[0].FileID != 83 {
+		t.Fatalf("two live duplicates collapsed to %+v, want the probed row 83", versions)
+	}
+}
