@@ -54256,12 +54256,6 @@
       "value": "พร็อกซีที่เชื่อถือได้"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "จัดการโดย SILO_TRUSTED_PROXIES"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -60198,12 +60192,6 @@
       "value": "ใช้ Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "ตั้งค่าโดย REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -60220,12 +60208,6 @@
     {
       "type": 0,
       "value": "URL การเชื่อมต่อ"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "ค่าที่กำหนดโดย REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -65049,16 +65031,6 @@
     {
       "type": 0,
       "value": "ล็อกเซิร์ฟเวอร์"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "จัดการโดย "
-    },
-    {
-      "type": 1,
-      "value": "env"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -108702,6 +108674,12 @@
       "value": " วันที่แล้ว"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "ปลายทางการแจ้งเตือนหยุดทำงานแล้ว"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -108836,6 +108814,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "เปิดการตั้งค่าการแจ้งเตือนเพื่อแก้ไข"
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -109102,6 +109086,12 @@
     {
       "type": 0,
       "value": "เรื่องในรายการที่อยากดูพร้อมให้ดูแล้ว"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "เว็บฮุกหยุดทำงานแล้ว"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -121614,6 +121604,270 @@
       "value": "ไม่สนใจ"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "เพิ่มปลายทาง"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "เพิ่ม"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "เพิ่มปลายทางการแจ้งเตือน"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "เพิ่ม “"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” แล้ว"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "กำลังสร้างปลายทางอยู่แล้ว"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "การแจ้งเตือนจะหยุดส่งไปยังปลายทางนี้ เลิกทำไม่ได้"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "ลบปลายทางไม่ได้"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "ลบปลายทางแล้ว"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "ส่งการแจ้งเตือนของโปรไฟล์นี้ไปยังบริการที่ปลั๊กอินของเซิร์ฟเวอร์รองรับ"
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "เลือกว่าจะส่งการแจ้งเตือนของโปรไฟล์นี้ไปที่ใด"
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "ยังไม่มีปลายทาง"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "ประเภท"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "ส่งครั้งล่าสุดไม่สำเร็จ: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "ส่งครั้งล่าสุดไม่สำเร็จ "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "ส่งครั้งล่าสุดไม่สำเร็จ "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": ปลั๊กอินส่งไม่ได้"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "ส่งครั้งล่าสุดไม่สำเร็จ: ปลั๊กอินส่งไม่ได้"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ถึงขีดจำกัดปลายทาง "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการแล้ว"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "โหลดรายการปลายทางซ้ำก่อนลบปลายทางนี้"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "โหลดรายการปลายทางซ้ำก่อนแก้ไขปลายทางนี้"
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "บันทึกปลายทางไม่ได้"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "ช่องข้อมูลลับที่เว้นว่างไว้จะใช้ค่าที่บันทึกไว้เดิม"
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "กำลังส่งข้อความทดสอบอยู่แล้ว"
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ส่งข้อความทดสอบแล้ว"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ทดสอบไม่สำเร็จ"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ส่งข้อความทดสอบแล้ว: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ทดสอบไม่สำเร็จ: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "ปลายทางอื่น"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "ไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "ปลั๊กอินที่ให้ปลายทางนี้ปิดอยู่หรือนำออกไปแล้ว จึงไม่มีการส่งใด ๆ"
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "อัปเดตไม่ได้"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -122550,6 +122804,12 @@
     {
       "type": 0,
       "value": "ต้องระบุ URL ของเว็บฮุก"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "คุณออฟไลน์อยู่ จึงไม่ได้บันทึกการเปลี่ยนแปลงนี้"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -129273,12 +129533,6 @@
       "value": "พร็อกซีที่เชื่อถือได้"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "ตั้งค่าโดย SILO_TRUSTED_PROXIES ในสภาพแวดล้อม"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -129529,12 +129783,6 @@
     {
       "type": 0,
       "value": "หมายเลขฐานข้อมูล"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "กำหนดโดย REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

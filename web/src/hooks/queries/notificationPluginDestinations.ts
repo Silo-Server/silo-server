@@ -10,6 +10,7 @@ import {
   requireNotificationAuthority,
 } from "@/api/v2/notifications";
 import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
+import { t } from "@/i18n";
 import type { PluginConfigSchema } from "@/api/types";
 import { notificationKeys } from "./keys";
 
@@ -98,7 +99,8 @@ export function useCreateNotificationPluginDestination() {
     ) => {
       if (!context) throw new StaleApiRequestContextError();
       requireNotificationAuthority(context);
-      if (inFlight.current) throw new Error("Destination creation is already in progress.");
+      if (inFlight.current)
+        throw new Error(t("web.settings.notifications.destinations.createInProgress"));
       inFlight.current = true;
       try {
         const result = await v2("POST /api/v2/notifications/plugin-destinations", {
@@ -128,7 +130,7 @@ export function useUpdateNotificationPluginDestination() {
     }: NotificationPluginDestinationWrite & { id: string; etag: string }) => {
       if (!context) throw new StaleApiRequestContextError();
       if (!etag || etag === "*")
-        throw new Error("Reload the destination list before editing this destination.");
+        throw new Error(t("web.settings.notifications.destinations.reloadBeforeEdit"));
       requireNotificationAuthority(context);
       const result = await v2("PUT /api/v2/notifications/plugin-destinations/{id}", {
         path: { id },
@@ -152,7 +154,7 @@ export function useDeleteNotificationPluginDestination() {
     mutationFn: async ({ id, etag }: { id: string; etag: string }) => {
       if (!context) throw new StaleApiRequestContextError();
       if (!etag || etag === "*")
-        throw new Error("Reload the destination list before deleting this destination.");
+        throw new Error(t("web.settings.notifications.destinations.reloadBeforeDelete"));
       requireNotificationAuthority(context);
       await v2("DELETE /api/v2/notifications/plugin-destinations/{id}", {
         path: { id },
@@ -163,11 +165,16 @@ export function useDeleteNotificationPluginDestination() {
       requireNotificationAuthority(context);
     },
     onSuccess: () => {
-      toast.success("Destination deleted");
+      toast.success(t("web.settings.notifications.destinations.deleted"));
       invalidate(context);
     },
     onError: (error) =>
-      toast.error(pluginDestinationErrorMessage(error, "Failed to delete destination")),
+      toast.error(
+        pluginDestinationErrorMessage(
+          error,
+          t("web.settings.notifications.destinations.deleteFailed"),
+        ),
+      ),
   });
 }
 
@@ -178,7 +185,8 @@ export function useTestNotificationPluginDestination() {
     retry: false,
     mutationFn: async (id: string) => {
       if (!context) throw new StaleApiRequestContextError();
-      if (inFlight.current) throw new Error("A test message is already being sent.");
+      if (inFlight.current)
+        throw new Error(t("web.settings.notifications.destinations.testInProgress"));
       inFlight.current = true;
       try {
         requireNotificationAuthority(context);

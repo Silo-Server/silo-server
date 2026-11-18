@@ -63067,12 +63067,6 @@
       "value": "\u200F\u202ETrusted proxies\u202C"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManaged by SILO_TRUSTED_PROXIES.\u202C"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -69265,12 +69259,6 @@
       "value": "\u200F\u202EUse Redis\u202C"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by REDIS_URL\u202C"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -69287,12 +69275,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EConnection URL\u202C"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EValue supplied by REDIS_URL\u202C"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -74427,20 +74409,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EServer log\u202C"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManaged by \u202C"
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "\u202E.\u202C"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -123715,6 +123683,12 @@
       "value": "\u202Ed ago\u202C"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA notification destination stopped working\u202C"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -123877,6 +123851,12 @@
     {
       "type": 0,
       "value": "\u202E)\u202C"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen notification settings to fix it.\u202C"
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -124191,6 +124171,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EA title on your watchlist is now available\u202C"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA webhook stopped working\u202C"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -137945,6 +137931,294 @@
       "value": "\u200F\u202ENot interested\u202C"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd destination\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd a notification destination\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E\"\u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E\" added\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDestination creation is already in progress.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENotifications will stop going to this destination. This cannot be undone.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to delete destination\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDestination deleted\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESend this profile's notifications to services your server's plugins support.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChoose where this profile's notifications go.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo destinations yet.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKind\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure \u202C"
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "\u202E: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure \u202C"
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "\u202E: the plugin couldn't send\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure: the plugin couldn't send\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ELimit of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E destination reached\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ELimit of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E destinations reached\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload the destination list before deleting this destination.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload the destination list before editing this destination.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe destination couldn't be saved\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESecret fields you leave blank keep their saved values.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA test message is already being sent.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest sent\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest failed\u202C"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest sent: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest failed: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther destinations\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnavailable\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe plugin that provides this destination is turned off or removed, so nothing is sent.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to update\u202C"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -138909,6 +139183,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EA webhook URL is required\u202C"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYou're offline, so this change wasn't saved\u202C"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -146123,12 +146403,6 @@
       "value": "\u200F\u202ETrusted proxies\u202C"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by SILO_TRUSTED_PROXIES in the environment.\u202C"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -146379,12 +146653,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EDatabase number\u202C"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by REDIS_URL\u202C"
     }
   ],
   "web.setup.storage.redisDescription": [

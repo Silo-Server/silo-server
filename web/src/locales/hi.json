@@ -59435,12 +59435,6 @@
       "value": "भरोसेमंद प्रॉक्सी"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIES से मैनेज किया जाता है।"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65489,12 +65483,6 @@
       "value": "Redis इस्तेमाल करें"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URL से सेट है"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65511,12 +65499,6 @@
     {
       "type": 0,
       "value": "कनेक्शन URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "वैल्यू REDIS_URL से मिली है"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70427,16 +70409,6 @@
     {
       "type": 0,
       "value": "सर्वर लॉग"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": " से मैनेज किया जाता है।"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -117159,6 +117131,12 @@
       "value": " दिन पहले"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "एक सूचना डेस्टिनेशन ने काम करना बंद कर दिया"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -117301,6 +117279,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "इसे ठीक करने के लिए सूचना सेटिंग खोलें।"
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -117591,6 +117575,12 @@
     {
       "type": 0,
       "value": "आपकी वॉचलिस्ट का एक टाइटल अब उपलब्ध है"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "एक वेबहुक ने काम करना बंद कर दिया"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -130717,6 +130707,278 @@
       "value": "दिलचस्पी नहीं"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन जोड़ें"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "जोड़ें"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "सूचना डेस्टिनेशन जोड़ें"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” को जोड़ दिया गया"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन जोड़ने का काम पहले से जारी है।"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "इस डेस्टिनेशन पर सूचनाएँ भेजना बंद हो जाएगा। इसे पहले जैसा नहीं किया जा सकता।"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन को मिटाया नहीं जा सका"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन को मिटा दिया गया"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "इस प्रोफ़ाइल की सूचनाएँ उन सेवाओं पर भेजें जिन्हें आपके सर्वर के प्लगइन सपोर्ट करते हैं।"
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "चुनें कि इस प्रोफ़ाइल की सूचनाएँ कहाँ भेजी जाएँ।"
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "अभी तक कोई डेस्टिनेशन नहीं है।"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "प्रकार"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": प्लगइन सूचना नहीं भेज सका"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता: प्लगइन सूचना नहीं भेज सका"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डेस्टिनेशन की सीमा पूरी हो गई"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डेस्टिनेशन की सीमा पूरी हो गई"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "इस डेस्टिनेशन को मिटाने से पहले डेस्टिनेशन की सूची फिर से लोड करें।"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "इस डेस्टिनेशन को बदलने से पहले डेस्टिनेशन की सूची फिर से लोड करें।"
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन को सेव नहीं किया जा सका"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "खाली छोड़ी गई गुप्त फ़ील्ड में पहले से सेव की गई वैल्यू बनी रहेगी।"
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "टेस्ट मैसेज पहले से भेजा जा रहा है।"
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट भेजा गया"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट विफल रहा"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट भेजा गया: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट विफल रहा: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "दूसरे डेस्टिनेशन"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "उपलब्ध नहीं"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "यह डेस्टिनेशन देने वाला प्लगइन बंद है या हटा दिया गया है, इसलिए कुछ नहीं भेजा जाता।"
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "अपडेट नहीं किया जा सका"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -131657,6 +131919,12 @@
     {
       "type": 0,
       "value": "वेबहुक URL ज़रूरी है"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "आप ऑफ़लाइन हैं, इसलिए यह बदलाव सेव नहीं हुआ"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -138559,12 +138827,6 @@
       "value": "भरोसेमंद प्रॉक्सी"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "एनवायरनमेंट में SILO_TRUSTED_PROXIES से सेट किया गया है।"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -138815,12 +139077,6 @@
     {
       "type": 0,
       "value": "डेटाबेस नंबर"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URL से सेट किया गया"
     }
   ],
   "web.setup.storage.redisDescription": [

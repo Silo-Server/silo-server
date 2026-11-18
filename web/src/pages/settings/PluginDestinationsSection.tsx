@@ -66,7 +66,7 @@ function ReasonToggles({
   const t = useT();
   return (
     <div className="space-y-2">
-      <Label>Send notifications for</Label>
+      <Label>{t("web.settings.notifications.webhooks.sendFor")}</Label>
       {DESTINATION_NOTIFY_FIELDS.map((field) => {
         // Requests have no per-profile reason toggle; only the master switch
         // suppresses them.
@@ -80,8 +80,8 @@ function ReasonToggles({
             <div className="text-sm">
               {t(field.labelKey)}
               {globallyDisabled && (
-                <span className="text-muted-foreground ml-2 text-xs">
-                  disabled in profile preferences
+                <span className="text-muted-foreground ms-2 text-xs">
+                  {t("web.settings.notifications.webhooks.disabledInProfile")}
                 </span>
               )}
             </div>
@@ -110,6 +110,7 @@ function DestinationFormDialog({
   destination: NotificationPluginDestination | null;
   globalPrefs: NotificationPreferences | undefined;
 }) {
+  const t = useT();
   const create = useCreateNotificationPluginDestination();
   const update = useUpdateNotificationPluginDestination();
   const editing = destination != null;
@@ -171,7 +172,13 @@ function DestinationFormDialog({
       // form has none, so it falls back to a toast.
       const rejection = pluginSettingsRejection(error);
       if (rejection && form) setSettingsRejection(rejection);
-      else toast.error(pluginDestinationErrorMessage(error, "The destination couldn't be saved"));
+      else
+        toast.error(
+          pluginDestinationErrorMessage(
+            error,
+            t("web.settings.notifications.destinations.saveFailed"),
+          ),
+        );
     };
     if (editing) {
       update.mutate(
@@ -198,7 +205,7 @@ function DestinationFormDialog({
       {
         onSuccess: (created) => {
           onOpenChange(false);
-          toast.success(`"${created.name}" added`);
+          toast.success(t("web.settings.notifications.destinations.added", { name: created.name }));
         },
         onError,
       },
@@ -210,16 +217,20 @@ function DestinationFormDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {editing ? `Edit "${destination.name}"` : "Add a notification destination"}
+            {editing
+              ? t("web.settings.notifications.webhooks.editTitle", { name: destination.name })
+              : t("web.settings.notifications.destinations.addTitle")}
           </DialogTitle>
           <DialogDescription>
-            {channel?.description || "Choose where this profile's notifications go."}
+            {channel?.description || t("web.settings.notifications.destinations.dialogDescription")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           {!editing && channels.length > 1 && (
             <div className="space-y-1.5">
-              <Label htmlFor="plugin-destination-kind">Kind</Label>
+              <Label htmlFor="plugin-destination-kind">
+                {t("web.settings.notifications.destinations.kind")}
+              </Label>
               <Select
                 value={kind}
                 onValueChange={(next) => {
@@ -244,7 +255,9 @@ function DestinationFormDialog({
             </div>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="plugin-destination-name">Name</Label>
+            <Label htmlFor="plugin-destination-name">
+              {t("web.settings.notifications.webhooks.name")}
+            </Label>
             <Input
               id="plugin-destination-name"
               value={name}
@@ -271,7 +284,7 @@ function DestinationFormDialog({
               )}
               {secretsSet.length > 0 && (
                 <p className="text-muted-foreground text-xs">
-                  Secret fields you leave blank keep their saved values.
+                  {t("web.settings.notifications.destinations.secretsKept")}
                 </p>
               )}
             </div>
@@ -280,11 +293,11 @@ function DestinationFormDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={submit} disabled={pending || !name.trim() || !channel || !settingsValid}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {editing ? "Save" : "Add"}
+            {pending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+            {editing ? t("common.save") : t("web.settings.notifications.destinations.addSubmit")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -318,17 +331,32 @@ function DestinationCard({
   const enabledReasons = DESTINATION_NOTIFY_FIELDS.filter(
     (field) => destination[field.key as keyof NotificationPluginDestination] as boolean,
   ).map((field) => t(field.labelKey));
+  const failureMessage = destination.last_failure_message;
+  const failureText = failureMessage
+    ? lastFailure
+      ? t("web.settings.notifications.destinations.lastFailureAt", {
+          when: lastFailure,
+          message: failureMessage,
+        })
+      : t("web.settings.notifications.destinations.lastFailure", { message: failureMessage })
+    : lastFailure
+      ? t("web.settings.notifications.destinations.lastFailureAtUnknown", { when: lastFailure })
+      : t("web.settings.notifications.destinations.lastFailureUnknown");
 
   return (
     <div className="border-border/60 space-y-2 rounded-xl border p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium">{destination.name}</span>
         <Badge variant="secondary">
-          {destination.available ? destination.channel_name : "Unavailable"}
+          {destination.available
+            ? destination.channel_name
+            : t("web.settings.notifications.destinations.unavailable")}
         </Badge>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ms-auto flex items-center gap-1.5">
           <span className="text-muted-foreground text-xs">
-            {destination.enabled ? "Enabled" : "Disabled"}
+            {destination.enabled
+              ? t("web.settings.value.enabled")
+              : t("web.settings.value.disabled")}
           </span>
           <Switch
             checked={destination.enabled}
@@ -337,7 +365,12 @@ function DestinationCard({
                 { id: destination.id, etag: destination.etag, enabled: checked },
                 {
                   onError: (error) =>
-                    toast.error(pluginDestinationErrorMessage(error, "Failed to update")),
+                    toast.error(
+                      pluginDestinationErrorMessage(
+                        error,
+                        t("web.settings.notifications.destinations.updateFailed"),
+                      ),
+                    ),
                 },
               )
             }
@@ -347,35 +380,43 @@ function DestinationCard({
 
       {!destination.available && (
         <div className="text-muted-foreground text-xs">
-          The plugin that provides this destination is turned off or removed, so nothing is sent.
+          {t("web.settings.notifications.destinations.unavailableNote")}
         </div>
       )}
       <div className="text-muted-foreground text-xs">
         {enabledReasons.length === DESTINATION_NOTIFY_FIELDS.length
-          ? "All reasons"
+          ? t("web.settings.notifications.webhooks.allReasons")
           : enabledReasons.length > 0
             ? enabledReasons.join(" · ")
-            : "No reasons selected"}
+            : t("web.settings.notifications.webhooks.noReasons")}
       </div>
       {lastSuccess && !failing && (
-        <div className="text-muted-foreground text-xs">Last success: {lastSuccess}</div>
+        <div className="text-muted-foreground text-xs">
+          {t("web.settings.notifications.webhooks.lastSuccess", { when: lastSuccess })}
+        </div>
       )}
       {(failing || destination.disabled_reason) && (
         <div className="flex items-start gap-1.5 text-xs text-amber-500">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             {destination.disabled_reason
-              ? `Disabled: ${destination.disabled_reason}`
-              : `Last failure${lastFailure ? ` ${lastFailure}` : ""}: ${
-                  destination.last_failure_message || "the plugin couldn't send"
-                }`}
+              ? t("web.settings.notifications.webhooks.disabledReason", {
+                  reason: destination.disabled_reason,
+                })
+              : failureText}
           </span>
         </div>
       )}
       {testResult && (
         <div className={`text-xs ${testResult.ok ? "text-emerald-500" : "text-amber-500"}`}>
-          Test {testResult.ok ? "sent" : "failed"}
-          {testResult.message ? `: ${testResult.message}` : ""}
+          {testResult.message
+            ? t("web.settings.notifications.destinations.testResultDetail", {
+                outcome: testResult.ok ? "ok" : "failed",
+                message: testResult.message,
+              })
+            : t("web.settings.notifications.destinations.testResult", {
+                outcome: testResult.ok ? "ok" : "failed",
+              })}
         </div>
       )}
 
@@ -388,20 +429,25 @@ function DestinationCard({
             test.mutate(destination.id, {
               onSuccess: (result) => setTestResult(result),
               onError: (error) =>
-                toast.error(pluginDestinationErrorMessage(error, "Test request failed")),
+                toast.error(
+                  pluginDestinationErrorMessage(
+                    error,
+                    t("web.settings.notifications.webhooks.testFailed"),
+                  ),
+                ),
             })
           }
         >
           {test.isPending ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Send className="mr-1.5 h-3.5 w-3.5" />
+            <Send className="me-1.5 h-3.5 w-3.5" />
           )}
-          Test
+          {t("web.settings.notifications.webhooks.test")}
         </Button>
         <Button variant="outline" size="sm" onClick={onEdit} disabled={!destination.available}>
-          <Pencil className="mr-1.5 h-3.5 w-3.5" />
-          Edit
+          <Pencil className="me-1.5 h-3.5 w-3.5" />
+          {t("web.settings.notifications.webhooks.edit")}
         </Button>
         <Button
           variant="outline"
@@ -412,17 +458,17 @@ function DestinationCard({
             setConfirmDelete(true);
           }}
         >
-          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-          Delete
+          <Trash2 className="me-1.5 h-3.5 w-3.5" />
+          {t("web.settings.notifications.webhooks.delete")}
         </Button>
       </div>
 
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={`Delete "${destination.name}"?`}
-        description="Notifications will stop going to this destination. This cannot be undone."
-        confirmLabel="Delete"
+        title={t("web.settings.notifications.webhooks.deleteTitle", { name: destination.name })}
+        description={t("web.settings.notifications.destinations.deleteDescription")}
+        confirmLabel={t("web.settings.notifications.webhooks.delete")}
         variant="destructive"
         isPending={remove.isPending}
         onConfirm={() => {
@@ -440,6 +486,7 @@ function DestinationCard({
  * from one that was removed.
  */
 export function PluginDestinationsSection() {
+  const t = useT();
   const capability = useNotificationCapability();
   const available = capability.data?.plugin_destinations?.available ?? false;
   const channels = useNotificationPluginChannels(available);
@@ -457,8 +504,8 @@ export function PluginDestinationsSection() {
   return (
     <>
       <SettingsGroup
-        title="Other destinations"
-        description="Send this profile's notifications to services your server's plugins support."
+        title={t("web.settings.notifications.destinations.title")}
+        description={t("web.settings.notifications.destinations.description")}
       >
         {destinations.isLoading ? (
           <Skeleton className="h-24 w-full" />
@@ -477,7 +524,7 @@ export function PluginDestinationsSection() {
             {rows.length === 0 && (
               <div className="text-muted-foreground flex items-center gap-2 text-sm">
                 <BellPlus className="h-4 w-4" />
-                No destinations yet.
+                {t("web.settings.notifications.destinations.empty")}
               </div>
             )}
             {kinds.length > 0 && (
@@ -491,12 +538,15 @@ export function PluginDestinationsSection() {
                     setFormOpen(true);
                   }}
                 >
-                  <Plus className="mr-1.5 h-4 w-4" />
-                  Add destination
+                  <Plus className="me-1.5 h-4 w-4" />
+                  {t("web.settings.notifications.destinations.add")}
                 </Button>
                 {atLimit && (
-                  <span className="text-muted-foreground ml-2 text-xs">
-                    Limit of {maxPerProfile} destinations reached
+                  <span className="text-muted-foreground ms-2 text-xs">
+                    {t("web.settings.notifications.destinations.limit", {
+                      count: maxPerProfile,
+                      count_text: String(maxPerProfile),
+                    })}
                   </span>
                 )}
               </div>
