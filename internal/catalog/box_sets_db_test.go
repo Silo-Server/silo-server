@@ -345,14 +345,19 @@ func TestBoxSetCollectionLanguageDB(t *testing.T) {
 		t.Fatalf("stored collection = %+v, %v; want language de", stored[f.franchise], err)
 	}
 
-	// Another library ahead of it in the library order holds one of the
-	// collection's movies: its language wins, so every run asks for the same.
+	// Another library ahead of it in the library order holds the
+	// collection's movies: its language wins once it holds enough of them to
+	// show the box set, and every run asks for the same.
 	var first int
 	if err := f.pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled,box_sets_enabled,metadata_language,sort_order) VALUES('movies',$1,true,true,'fr',-1) RETURNING id`, f.prefix+"-fr").Scan(&first); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, first) })
 	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, f.id("first"), first)
+	if language, ok := due(); ok {
+		t.Fatalf("a French library below its box set minimum made the collection due in %q", language)
+	}
+	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, f.id("second"), first)
 	if language, ok := due(); !ok || language != "fr" {
 		t.Fatalf("with a French library first, due = %q, %v; want a fetch in fr", language, ok)
 	}

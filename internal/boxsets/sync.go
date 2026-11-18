@@ -226,8 +226,8 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 // leaves the overview empty where its translation lacks one (and may do the
 // same for the name), so those come from its answer in the fallback language,
 // the way item metadata falls back. TMDB falls back for artwork itself. When
-// that answer fails, the translation is kept as it is unless it has no name to
-// show.
+// that answer fails, the fetch fails: the stored copy keeps its text and the
+// collection stays due for the next run.
 func (s *Syncer) fetchCollection(ctx context.Context, fetch catalog.CollectionFetch) (*tmdb.Collection, error) {
 	c, err := s.tmdb.GetCollection(ctx, int(fetch.ID), fetch.Language)
 	fallback := s.fallbackLanguage()
@@ -236,11 +236,7 @@ func (s *Syncer) fetchCollection(ctx context.Context, fetch catalog.CollectionFe
 	}
 	other, err := s.tmdb.GetCollection(ctx, int(fetch.ID), fallback)
 	if err != nil {
-		if c.Name != "" {
-			slog.WarnContext(ctx, "box sets: fallback language collection fetch failed; storing the translation as it is", "component", "boxsets", "tmdb_collection_id", fetch.ID, "fallback_language", fallback, "error", err)
-			return c, nil
-		}
-		return nil, err
+		return nil, fmt.Errorf("fetching in fallback language %s: %v", fallback, err) //nolint:errorlint // not ErrNotFound: a collection TMDB serves in one language is not gone
 	}
 	localized := *c
 	localized.Name = cmp.Or(c.Name, other.Name)

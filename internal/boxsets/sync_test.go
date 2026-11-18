@@ -218,9 +218,9 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 	}
 }
 
-// A translation is stored as it is when the English answer that would fill
-// its missing overview fails, rather than holding the box set back.
-func TestRunKeepsTheTranslationWhenTheEnglishFallbackFails(t *testing.T) {
+// A failed fallback answer fails the fetch rather than storing the
+// translation without its overview, so the collection is tried again.
+func TestRunRetriesWhenTheFallbackFails(t *testing.T) {
 	store := newFakeStore(catalog.MovieCollectionLookup{ContentID: "hp1", TMDBID: 671})
 	store.language = "de"
 	client := &fakeTMDB{
@@ -232,8 +232,8 @@ func TestRunKeepsTheTranslationWhenTheEnglishFallbackFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored, ok := store.collections[1241]; !ok || stored.Name != "Harry Potter Filmreihe" || res.Failures != 0 {
-		t.Fatalf("stored = %+v, %v; failures = %d; want the German collection stored without a failure", stored, ok, res.Failures)
+	if _, stored := store.collections[1241]; stored || res.Failures != 1 {
+		t.Fatalf("stored = %v, failures = %d; want nothing stored and one failure", stored, res.Failures)
 	}
 }
 

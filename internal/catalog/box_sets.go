@@ -213,9 +213,10 @@ type CollectionFetch struct {
 // set library belongs to that are not stored yet, were fetched before
 // staleBefore, or were fetched in another language than the one they are
 // due in. A collection is due in the metadata language of the first library,
-// in library order, that holds one of its movies with box sets on: one
-// collection serves every library, so a deployment whose box set libraries
-// differ in language shows it in one of them.
+// in library order, that shows it: one with box sets on holding at least its
+// box set minimum of the collection's movies, or failing that any library
+// holding one of them. One collection serves every library, so a deployment
+// whose box set libraries differ in language shows it in one of them.
 func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]CollectionFetch, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT due.tmdb_collection_id, due.language
@@ -223,17 +224,19 @@ func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBef
 			SELECT DISTINCT ON (m.tmdb_collection_id) m.tmdb_collection_id, lib.language
 			FROM media_item_tmdb_collections m
 			CROSS JOIN LATERAL (
-				SELECT COALESCE(NULLIF(BTRIM(cf.metadata_language), ''), 'en') AS language, cf.sort_order, cf.id
+				SELECT cf.id, cf.sort_order, cf.box_set_min_movies,
+					COALESCE(NULLIF(BTRIM(cf.metadata_language), ''), 'en') AS language
 				`+currentBoxSetMemberLibraries+`
 			) lib
 			WHERE m.tmdb_collection_id IS NOT NULL
 			  AND NOT (m.tmdb_collection_id = ANY($3::bigint[]))
-			ORDER BY m.tmdb_collection_id, lib.sort_order, lib.id
+			GROUP BY m.tmdb_collection_id, lib.id, lib.sort_order, lib.box_set_min_movies, lib.language
+			ORDER BY m.tmdb_collection_id, count(*) >= GREATEST(lib.box_set_min_movies, $4) DESC, lib.sort_order, lib.id
 		) due
 		LEFT JOIN tmdb_movie_collections c ON c.tmdb_collection_id = due.tmdb_collection_id
 		WHERE c.tmdb_collection_id IS NULL OR c.fetched_at < $1 OR c.language <> due.language
 		ORDER BY c.fetched_at NULLS FIRST, due.tmdb_collection_id
-		LIMIT $2`, staleBefore, limit, nonNilSlice(skip))
+		LIMIT $2`, staleBefore, limit, nonNilSlice(skip), MinBoxSetMinMovies)
 	if err != nil {
 		return nil, fmt.Errorf("querying collections needing a fetch: %w", err)
 	}
