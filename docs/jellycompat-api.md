@@ -602,7 +602,8 @@ attachment requests; a play session that is absent or belongs to another token
 answers `404`. When this API server looks up the media file for one of these
 requests or for a local transcode start, a failed lookup answers a retryable
 `503` and keeps the play session for the retry, and `404` means the file is
-gone; a progressive stream or master playlist that answers it ends the play. A remote transcode's failover answers `502` as before. `PlaybackInfo` answers `503` instead of
+gone; a progressive stream or a master playlist GET that answers it ends the play,
+while a master playlist HEAD keeps it. A remote transcode's failover answers `502` as before. `PlaybackInfo` answers `503` instead of
 returning a `PlaySessionId` it could not store, since other API servers could
 not resolve it.
 
