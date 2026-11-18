@@ -342,9 +342,11 @@ function SettingControl({ step }: { step: OnboardingStep }) {
       ? ((profile as unknown as Record<string, unknown>)[spec.key] as string | undefined)
       : undefined;
   const [value, setValue] = useState<string>(currentValue || spec.default || "");
+  // The last choice known stored, which a failed offline save puts back; a
+  // choice still being saved is not one.
+  const stored = useRef(value);
 
   function save(next: string) {
-    const previous = value;
     const offline = sendingOffline();
     setValue(next);
     if (spec.target === "profile_field") {
@@ -364,9 +366,12 @@ function SettingControl({ step }: { step: OnboardingStep }) {
     setSettingValue.mutate(
       { key: spec.key as SettingKey, value: settingValueFromString(spec.key, next), identity },
       {
-        // Sent offline, nothing was stored, so show the previous choice again.
+        onSuccess: () => {
+          stored.current = next;
+        },
+        // Sent offline, nothing was stored, so show the stored choice again.
         onError: () => {
-          if (offline && reportOfflineSettingFailure()) setValue(previous);
+          if (offline && reportOfflineSettingFailure()) setValue(stored.current);
         },
       },
     );

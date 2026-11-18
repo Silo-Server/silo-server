@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { onlineManager } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -76,15 +76,23 @@ export function sendingOffline(): boolean {
  */
 export function useShowThenSave(cacheOwner: string | null) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
+  // A restore shows the value through the provider's current state, so it is
+  // skipped once another account or profile owns the appearance.
+  const currentOwner = useRef(cacheOwner);
+  useEffect(() => {
+    currentOwner.current = cacheOwner;
+  }, [cacheOwner]);
   return useCallback(
     <T>({ key, cacheKey, value, previous, show, save }: ShownChange<T>) => {
       const token = {};
-      const pending = unsettled.current.get(key) ?? {
+      // Per owner: another profile's unsettled change says nothing about this one's.
+      const entryKey = `${cacheOwner ?? ""}\u0000${key}`;
+      const pending = unsettled.current.get(entryKey) ?? {
         latest: token,
         stored: { value: previous, cached: appearanceCache.get(cacheKey, cacheOwner) },
       };
       pending.latest = token;
-      unsettled.current.set(key, pending);
+      unsettled.current.set(entryKey, pending);
       const offline = sendingOffline();
       show(value);
       appearanceCache.set(cacheKey, String(value), cacheOwner);
@@ -92,13 +100,14 @@ export function useShowThenSave(cacheOwner: string | null) {
         () => {
           // Even an older change that lands moves the value a failure restores.
           pending.stored = { value, cached: String(value) };
-          if (pending.latest === token) unsettled.current.delete(key);
+          if (pending.latest === token) unsettled.current.delete(entryKey);
         },
         () => {
           // A newer change to this preference settles it instead.
           if (pending.latest !== token) return;
-          unsettled.current.delete(key);
+          unsettled.current.delete(entryKey);
           if (!offline || !reportOfflineSettingFailure()) return;
+          if (currentOwner.current !== cacheOwner) return;
           show(pending.stored.value as T);
           if (pending.stored.cached === null) appearanceCache.remove(cacheKey, cacheOwner);
           else appearanceCache.set(cacheKey, pending.stored.cached, cacheOwner);

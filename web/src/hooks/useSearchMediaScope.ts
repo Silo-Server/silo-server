@@ -32,10 +32,11 @@ export function useSearchMediaScope() {
 
   const setScope = useCallback(
     (next: SearchMediaScope) => {
-      setSetting.mutate(
-        { key: SETTING_KEYS.SEARCH_MEDIA_SCOPE, value: next, identity: PROFILE_SCOPE },
-        { onError: reportOfflineSettingFailure },
-      );
+      // Attached to the request, so the failure is still reported if the page
+      // unmounts first; a per-call mutate callback would not run then.
+      setSetting
+        .mutateAsync({ key: SETTING_KEYS.SEARCH_MEDIA_SCOPE, value: next, identity: PROFILE_SCOPE })
+        .catch(reportOfflineSettingFailure);
     },
     [setSetting],
   );
