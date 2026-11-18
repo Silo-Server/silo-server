@@ -314,6 +314,12 @@ interface VideoPlayerProps {
    * verdict on the terminal). The error overlay offers Try again only then.
    */
   replanErrorRetryable?: boolean;
+  /**
+   * The session's machine-readable reason for `replanError`. A stalled replan
+   * (`replan_timeout`) armed no transport guard, so it is surfaced even though
+   * the previous plan's transport never reported a failure.
+   */
+  replanErrorReason?: string | null;
   sessionId: string;
   bufferingTitleId?: string;
   selectedVersion?: PlayerFileVersion;
@@ -679,6 +685,7 @@ export function VideoPlayer({
   replanError = null,
   replanErrorTitle = null,
   replanErrorRetryable = false,
+  replanErrorReason = null,
   initialSubtitleError = null,
   sessionId,
   selectedVersion,
@@ -1918,7 +1925,11 @@ export function VideoPlayer({
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
     }
-    if (transportFailedForPlanRevisionRef.current === planRevision || !isPlayerReady) {
+    if (
+      transportFailedForPlanRevisionRef.current === planRevision ||
+      !isPlayerReady ||
+      replanErrorReason === "replan_timeout"
+    ) {
       setPlayerError(replanError, replanErrorRetryable);
     }
   }, [
@@ -1926,6 +1937,7 @@ export function VideoPlayer({
     plan.plan_attempt_key,
     planRevision,
     replanError,
+    replanErrorReason,
     replanErrorRetryable,
     replanning,
     sessionId,

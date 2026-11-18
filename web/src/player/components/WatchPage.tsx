@@ -1677,6 +1677,7 @@ function WatchPagePlayer({
         replanError={fallingBack ? null : session.error}
         replanErrorTitle={session.errorTitle}
         replanErrorRetryable={session.errorRetryable}
+        replanErrorReason={session.errorReason}
         initialSubtitleError={session.initialSubtitleError}
         sessionId={session.sessionId}
         selectedVersion={selectedVersion}

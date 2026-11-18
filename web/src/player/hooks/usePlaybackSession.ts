@@ -267,6 +267,17 @@ export const RECONNECT_MAX_DELAY_MS = 15_000;
 export const RECONNECT_MAX_ATTEMPTS = 12;
 const RECONNECT_STABLE_MS = 30_000;
 
+/**
+ * How long a replan may stay on the wire before the player names it as a
+ * failure. A replan that has not adopted a new plan yet armed no transport
+ * startup guard (the guard is armed per adopted plan), so a server that holds
+ * the request left a bare spinner with only Exit. This deadline sits inside the
+ * player's own per-attempt replan budget, so a slow but working replan still
+ * lands; the value is deliberately separate from the 60 s transport startup
+ * guard, which covers a plan that did arrive.
+ */
+export const REPLAN_DEADLINE_MS = 45_000;
+
 /** Delay before reconnect attempt `attempt` (0-based). */
 export function reconnectDelayMs(attempt: number): number {
   return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
@@ -1783,6 +1794,10 @@ export function usePlaybackSession(
   const attemptedPlanKeysRef = useRef<string[]>([]);
   const attemptCountRef = useRef(1);
   const replanInFlightRef = useRef(false);
+  // The deadline armed for the replan on the wire, cleared when it answers or
+  // fails. It is what turns a replan that never returns into the same retryable
+  // failure overlay a failed start already offers.
+  const replanDeadlineRef = useRef<number | null>(null);
   // The attempt whose first frame is still to be reported. `intentAt` is the
   // `performance.now()` of the viewer's request that started it, or null when
   // nothing timed it; the event is still sent, just without a duration.
@@ -2918,6 +2933,10 @@ export function usePlaybackSession(
       // instead of adopting it into an abandoned player.
       loadSequenceRef.current += 1;
       pendingSeekRef.current = null;
+      if (replanDeadlineRef.current !== null) {
+        window.clearTimeout(replanDeadlineRef.current);
+        replanDeadlineRef.current = null;
+      }
       // A held pick dies with the player: nothing will fold its plan.
       pendingTrackPicksRef.current = [];
       // A viewer who leaves while the player reconnects stops the retries.
@@ -3114,6 +3133,31 @@ export function usePlaybackSession(
         errorReason: null,
         errorRetryable: false,
       }));
+      // No plan has been adopted yet, so no transport startup guard is armed
+      // (that guard is armed per adopted plan). A replan that never answers
+      // would otherwise leave the player on a bare spinner with no failure and
+      // no retry; name it once the deadline passes. The request stays on the
+      // wire: a late decision still adopts and replaces the error.
+      if (replanDeadlineRef.current !== null) window.clearTimeout(replanDeadlineRef.current);
+      replanDeadlineRef.current = window.setTimeout(() => {
+        replanDeadlineRef.current = null;
+        if (loadSequence !== loadSequenceRef.current) return;
+        if (!replanInFlightRef.current) return;
+        setState((current) =>
+          current.replanning || current.replanningQuality
+            ? {
+                ...current,
+                replanning: false,
+                replanningQuality: false,
+                errorTitle: "Playback update timed out",
+                error:
+                  "The server didn't answer the playback update in time. Please try again.",
+                errorReason: "replan_timeout",
+                errorRetryable: true,
+              }
+            : current,
+        );
+      }, REPLAN_DEADLINE_MS);
 
       try {
         const decision = await replanV2(config, sessionId, body);
@@ -3352,6 +3396,10 @@ export function usePlaybackSession(
         }));
         return false;
       } finally {
+        if (replanDeadlineRef.current !== null) {
+          window.clearTimeout(replanDeadlineRef.current);
+          replanDeadlineRef.current = null;
+        }
         replanInFlightRef.current = false;
         setState((current) =>
           current.replanning || current.replanningQuality

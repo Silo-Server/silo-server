@@ -26,6 +26,7 @@ import {
   RECONNECT_BASE_DELAY_MS,
   RECONNECT_MAX_ATTEMPTS,
   RECONNECT_MAX_DELAY_MS,
+  REPLAN_DEADLINE_MS,
   reconnectDelayMs,
   usePlaybackSession,
 } from "./usePlaybackSession";
@@ -13275,6 +13276,43 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     // The replacement is adopted, not left as an error: the viewer gets the
     // packaged route instead of an ended session.
     await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:2222222222222222"));
+
+    unmount();
+  });
+
+  // A replan that never answers arms no transport startup guard: the guard is
+  // created per adopted plan, and no plan arrived. Without its own deadline the
+  // player sat on a bare spinner with only Exit after a 201 playable start. The
+  // deadline turns that into the same retryable failure overlay a failed start
+  // already offers.
+  it("fails a replan that never answers with a retryable error after its deadline", async () => {
+    const harness = reconnectHarness({
+      replan: () => new Promise<Response>(() => {}),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() =>
+      result.current.recoverFromFailure(
+        { classification: "decoder_error", message: "MEDIA_ELEMENT_ERROR: Format error" },
+        40,
+      ),
+    );
+    await advance(0);
+    expect(harness.replanBodies).toHaveLength(1);
+    expect(result.current.replanning).toBe(true);
+
+    // Just before the deadline the spinner is still the honest state.
+    await advance(REPLAN_DEADLINE_MS - 1);
+    expect(result.current.replanning).toBe(true);
+    expect(result.current.error).toBeNull();
+
+    await advance(1);
+    expect(result.current.replanning).toBe(false);
+    expect(result.current.errorReason).toBe("replan_timeout");
+    expect(result.current.errorRetryable).toBe(true);
+    expect(result.current.error).toBe(
+      "The server didn't answer the playback update in time. Please try again.",
+    );
 
     unmount();
   });
