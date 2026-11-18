@@ -111,7 +111,7 @@ func (s *System) insertOperational(ctx context.Context, tx pgx.Tx, delivery Deli
 			return nil, err
 		}
 	}
-	if err := s.enqueueOperationalPluginDestinations(ctx, tx, row, opts.PluginDestinationFilter); err != nil {
+	if err := s.enqueueOperationalPluginDestinations(ctx, tx, &row, opts.PluginDestinationFilter); err != nil {
 		return nil, err
 	}
 	if s.webPushRepo != nil && s.Settings.WebPushEnabled(ctx) {
@@ -148,8 +148,8 @@ func (s *System) insertOperational(ctx context.Context, tx pgx.Tx, delivery Deli
 
 // enqueueOperationalPluginDestinations queues an operational delivery for
 // the owner's plugin destinations that filter selects; a nil filter keeps
-// it off them.
-func (s *System) enqueueOperationalPluginDestinations(ctx context.Context, tx pgx.Tx, row InsertedDelivery, filter func(PluginDestination) bool) error {
+// it off them. It marks row when it queued an attempt.
+func (s *System) enqueueOperationalPluginDestinations(ctx context.Context, tx pgx.Tx, row *InsertedDelivery, filter func(PluginDestination) bool) error {
 	if filter == nil || s.pluginDestinationSender == nil {
 		return nil
 	}
@@ -169,6 +169,7 @@ func (s *System) enqueueOperationalPluginDestinations(ctx context.Context, tx pg
 			TargetID:               destination.ID,
 		})
 	}
+	row.pluginAttempts = len(attempts) > 0
 	return s.pluginDestinationSender.repo.EnqueueAttempts(ctx, tx, attempts)
 }
 
@@ -182,6 +183,7 @@ func (s *System) dispatchOperationalRow(ctx context.Context, row InsertedDeliver
 			"delivery_id", row.ID, "error", err)
 		return
 	}
+	full.pluginAttempts = row.pluginAttempts
 	if err := s.dispatcher.Dispatch(ctx, *full); err != nil {
 		s.logger.WarnContext(ctx, "operational delivery dispatch failed",
 			"delivery_id", row.ID, "error", err)

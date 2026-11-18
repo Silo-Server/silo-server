@@ -561,6 +561,7 @@
 ./internal/notifications TestPluginDestinationTextNeverCarriesSecretsDB
 ./internal/notifications TestPluginDestinationExhaustedScheduleDB
 ./internal/notifications TestPluginDestinationRetryOutlivesInboxRetentionDB
+./internal/notifications TestFanoutQueuesPluginDestinationAttemptsDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess

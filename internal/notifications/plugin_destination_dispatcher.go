@@ -27,10 +27,12 @@ func newPluginDestinationDispatcher(sender *pluginDestinationSender) *PluginDest
 	}}
 }
 
-// Dispatch queues the delivery's plugin destination attempts. Auto-disable
-// notices never get attempts, so they never arrive here with any to send.
+// Dispatch queues the delivery's plugin destination attempts, for a
+// delivery whose transaction queued any: most deliveries have none, and a
+// claim for each would cost a write on every server. Auto-disable notices
+// never get attempts. A missed hand-off waits for the retry sweep.
 func (d *PluginDestinationDispatcher) Dispatch(_ context.Context, delivery DeliveryRow) error {
-	if d == nil || delivery.Type == DeliveryTypePluginDestinationAutoDisabled || delivery.Type == DeliveryTypeWebhookAutoDisabled {
+	if d == nil || !delivery.pluginAttempts {
 		return nil
 	}
 	d.core.dispatch(delivery.ID)

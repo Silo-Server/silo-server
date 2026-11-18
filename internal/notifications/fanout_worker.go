@@ -331,7 +331,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		totalInserted += len(rows)
 		dispatchRows = append(dispatchRows, rows...)
 	}
-	arrivalIDs, err := w.deliverWatchlistArrivals(ctx, tx, arrivals)
+	arrivalRows, err := w.deliverWatchlistArrivals(ctx, tx, arrivals)
 	if err != nil {
 		return 0, fmt.Errorf("deliver watchlist arrivals: %w", err)
 	}
@@ -350,7 +350,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 				"delivery_id", row.ID, "profile_id", row.ProfileID, "error", err)
 		}
 	}
-	w.dispatchInserted(ctx, arrivalIDs)
+	w.dispatchInserted(ctx, arrivalRows)
 
 	w.logger.InfoContext(ctx, "fanout batch processed",
 		"claimed", len(claimed),
@@ -360,7 +360,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		"recipient_count", totalRecipients,
 		"inserted_count", totalInserted,
 		"deduped_count", totalRecipients-totalInserted,
-		"watchlist_arrivals", len(arrivalIDs),
+		"watchlist_arrivals", len(arrivalRows),
 		"duration_ms", time.Since(started).Milliseconds(),
 	)
 	return len(claimed), nil
@@ -469,6 +469,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		episodeNumber := event.EpisodeNumber
 		dispatchRows = append(dispatchRows, DeliveryRow{
 			Delivery:         delivery,
+			pluginAttempts:   row.pluginAttempts,
 			SeriesTitle:      display.seriesTitle,
 			EpisodeTitle:     display.episodeTitle,
 			SeasonNumber:     &seasonNumber,
@@ -614,7 +615,8 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 // for each newly inserted delivery, inside the fanout transaction, with the
 // same two filters as webhooks: wants, the destination's switch for the
 // delivery, and a per-profile rate limit. Nothing is queued until the plugin
-// runtime is wired, or for a destination whose plugin is off or removed.
+// runtime is wired, or for a destination whose plugin is off or removed. It
+// marks the rows it queued attempts for, which alone reach the dispatcher.
 func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, wants func(InsertedDelivery, PluginDestination) bool) error {
 	if w.pluginSender == nil || len(inserted) == 0 {
 		return nil
@@ -625,7 +627,7 @@ func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pg
 	}
 	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	rateLimited := 0
-	for _, row := range inserted {
+	for i, row := range inserted {
 		key := row.key()
 		for _, destination := range byProfile[key] {
 			if !wants(row, destination) {
@@ -640,6 +642,7 @@ func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pg
 				NotificationDeliveryID: row.ID,
 				TargetID:               destination.ID,
 			})
+			inserted[i].pluginAttempts = true
 		}
 	}
 	if rateLimited > 0 {

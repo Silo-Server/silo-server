@@ -818,3 +818,54 @@ func TestPluginDestinationRetryOutlivesInboxRetentionDB(t *testing.T) {
 		t.Fatalf("delivery whose attempt resolved = %v, %v; want it pruned", row, err)
 	}
 }
+
+// dispatchRecorder records the rows a fanout hands its dispatchers.
+type dispatchRecorder struct{ rows []DeliveryRow }
+
+func (r *dispatchRecorder) Dispatch(_ context.Context, row DeliveryRow) error {
+	r.rows = append(r.rows, row)
+	return nil
+}
+
+// A new episode fanned out by the worker queues an attempt for the profile's
+// destination in the fanout transaction, and only the delivery that got one
+// is handed to the plugin destination dispatcher.
+func TestFanoutQueuesPluginDestinationAttemptsDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	c := seedAccessCatalog(t, pool)
+	seedFanoutEvent(t, pool, c, []string{sharedID, "kids"})
+	service, sender := newTestPluginDestinationService(t, pool, &scriptedChannelHost{})
+	name := "Phone"
+	d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
+		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
+		Settings: map[string]any{"topic": "alerts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	worker := newAccessFanoutWorker(pool, scopeByProfile{sharedID: {}, "kids": {}})
+	recorder := &dispatchRecorder{}
+	worker.dispatcher = recorder
+	worker.setPluginDestinationOutbox(sender, newProfileRateLimiter())
+	if processed, err := worker.processBatch(ctx); err != nil || processed != 1 {
+		t.Fatalf("processBatch = %d, %v; want 1 event", processed, err)
+	}
+
+	var deliveryID, outcome string
+	if err := pool.QueryRow(ctx, `SELECT notification_delivery_id, outcome FROM plugin_destination_delivery_attempts WHERE destination_id = $1`, d.ID).
+		Scan(&deliveryID, &outcome); err != nil || outcome != WebhookOutcomePending {
+		t.Fatalf("queued attempt = %q %q, %v; want one pending attempt", deliveryID, outcome, err)
+	}
+	handed := map[string]bool{}
+	for _, row := range recorder.rows {
+		handed[row.ProfileID] = row.pluginAttempts
+		if row.ProfileID == sharedID && row.ID != deliveryID {
+			t.Fatalf("dispatched delivery %s, the attempt is for %s", row.ID, deliveryID)
+		}
+	}
+	if len(recorder.rows) != 2 || !handed[sharedID] || handed["kids"] {
+		t.Fatalf("dispatched %+v; want both deliveries, only the destination's marked for plugin dispatch", handed)
+	}
+}
