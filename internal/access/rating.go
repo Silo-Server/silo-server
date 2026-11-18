@@ -619,8 +619,9 @@ const UnrecognizedRatingAge = 99
 
 // StoredRating resolves a raw content rating to the value stored beside it in
 // media_items.content_rating_age, which the backfill migration mirrors (the
-// frozen backfill predates the dashed country form, so a "SE-7" row it wrote
-// keeps UnrecognizedRatingAge until the item is next written):
+// frozen backfill predates the dashed country form; the Go migration in
+// internal/database/content_rating_age_rederive.go re-derives the rows it left
+// at UnrecognizedRatingAge):
 //
 //   - a recognized rating stores its minimum age;
 //   - no rating at all (empty, or an explicit marker such as NR or Unrated)
