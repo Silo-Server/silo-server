@@ -1200,8 +1200,8 @@ func main() {
 		}()
 	}
 
-	// The plugin event dispatcher observes what this process publishes, so
-	// each event reaches plugins once however many nodes receive it.
+	// Observers see what this process publishes, so work that must happen once
+	// per event runs on the node that produced it, with or without Redis.
 	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
 		switch event.Type {
@@ -2179,7 +2179,6 @@ func main() {
 		if err := dispatcher.Start(appCtx); err != nil {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
-		eventBus.ObservePublishes(dispatcher.ObservePublish)
 		defer dispatcher.Stop()
 		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
 		// before PublishLifecycleChanges was registered, so this call is the

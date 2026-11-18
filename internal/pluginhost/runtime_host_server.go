@@ -23,6 +23,20 @@ type EventPublisher interface {
 	Publish(ctx context.Context, env events.Envelope) error
 }
 
+// pluginEventGate is implemented by an EventPublisher that knows whether a
+// plugin event has subscribers (*events.Hub does), so an event nobody
+// subscribes to is not built or published.
+type pluginEventGate interface {
+	PluginEventWanted(event string) bool
+}
+
+// wantsEvent reports whether the publisher could deliver eventName to a
+// subscriber.
+func (s *RuntimeHostServer) wantsEvent(eventName string) bool {
+	gate, ok := s.publisher.(pluginEventGate)
+	return !ok || gate.PluginEventWanted(eventName)
+}
+
 // LibraryRecord is the wire shape for libraries returned to plugins. Mirrors
 // the proto Library message.
 type LibraryRecord struct {
@@ -237,6 +251,10 @@ func (s *RuntimeHostServer) PublishEvent(ctx context.Context, req *pluginv1.Publ
 		return nil, fmt.Errorf("server: event publisher not configured")
 	}
 
+	prefixed := "plugin." + s.pluginID + "." + name
+	if !s.wantsEvent(prefixed) {
+		return &pluginv1.PublishEventResponse{}, nil
+	}
 	var payload json.RawMessage
 	if p := req.GetPayload(); p != nil {
 		raw, err := p.MarshalJSON()
@@ -246,7 +264,6 @@ func (s *RuntimeHostServer) PublishEvent(ctx context.Context, req *pluginv1.Publ
 		payload = raw
 	}
 
-	prefixed := "plugin." + s.pluginID + "." + name
 	env := events.Envelope{
 		Channel: events.ChannelPlugins,
 		Event:   prefixed,
@@ -279,6 +296,10 @@ func (s *RuntimeHostServer) PublishEventTo(ctx context.Context, req *pluginv1.Pu
 		return nil, fmt.Errorf("server: event publisher not configured")
 	}
 
+	prefixed := "plugin." + s.pluginID + "." + name
+	if !s.wantsEvent(prefixed) {
+		return &pluginv1.PublishEventToResponse{}, nil
+	}
 	var payload json.RawMessage
 	if p := req.GetPayload(); p != nil {
 		raw, err := p.MarshalJSON()
@@ -290,7 +311,7 @@ func (s *RuntimeHostServer) PublishEventTo(ctx context.Context, req *pluginv1.Pu
 
 	env := events.Envelope{
 		Channel:        events.ChannelPlugins,
-		Event:          "plugin." + s.pluginID + "." + name,
+		Event:          prefixed,
 		Data:           payload,
 		TargetPluginID: targetPluginID,
 	}
