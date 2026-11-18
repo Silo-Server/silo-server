@@ -877,26 +877,16 @@ func (c *Client) GetCollection(ctx context.Context, id int, language string) (*C
 	}, nil
 }
 
-// apiLanguage converts a Silo metadata language into TMDB's language
-// parameter the way the TMDB metadata plugin does: English becomes en-US,
-// which TMDB prefers, and any other tag passes through normalized (pt-br →
-// pt-BR). An empty language stays empty.
+// apiLanguage converts a Silo metadata language (an ISO 639-1 code) into
+// TMDB's language parameter the way the TMDB metadata plugin does: English
+// becomes en-US, which TMDB prefers, and any other code passes through. An
+// empty language stays empty.
 func apiLanguage(language string) string {
-	parts := strings.Split(strings.ReplaceAll(strings.TrimSpace(language), "_", "-"), "-")
-	if parts[0] == "" {
-		return ""
-	}
-	for i, part := range parts {
-		if i == 0 {
-			parts[i] = strings.ToLower(part)
-		} else {
-			parts[i] = strings.ToUpper(part)
-		}
-	}
-	if parts[0] == "en" {
+	language = strings.ToLower(strings.TrimSpace(language))
+	if language == "en" {
 		return "en-US"
 	}
-	return strings.Join(parts, "-")
+	return language
 }
 
 // GetMovieCollection returns the collection a movie belongs to, or nil when

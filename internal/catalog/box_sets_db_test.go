@@ -95,8 +95,8 @@ func seedBoxSets(t *testing.T) boxSetFixture {
 		exec(`INSERT INTO media_item_tmdb_collections(content_id,checked_tmdb_id,tmdb_collection_id) VALUES($1,$2,$3)`, f.id(m.id), m.checked, collection)
 	}
 	for _, c := range []TMDBMovieCollection{
-		{ID: f.franchise, Name: f.prefix + " Saga Collection", MemberTMDBIDs: []int64{101, 102, 103, 104, 105}},
-		{ID: f.single, Name: f.prefix + " Lonely Collection", MemberTMDBIDs: []int64{200, 201}},
+		{ID: f.franchise, Name: f.prefix + " Saga Collection", MemberTMDBIDs: []int64{101, 102, 103, 104, 105}, Language: "en"},
+		{ID: f.single, Name: f.prefix + " Lonely Collection", MemberTMDBIDs: []int64{200, 201}, Language: "en"},
 	} {
 		if err := f.repo.UpsertCollection(ctx, c); err != nil {
 			t.Fatal(err)
@@ -260,9 +260,6 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 func TestBoxSetCollectionsOfDisabledLibraryDB(t *testing.T) {
 	f := seedBoxSets(t)
 	ctx := t.Context()
-	if _, err := f.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET fetched_at = now() - interval '30 days' WHERE tmdb_collection_id = $1`, f.franchise); err != nil {
-		t.Fatal(err)
-	}
 	refetch := func() bool {
 		t.Helper()
 		fetches, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
@@ -270,6 +267,12 @@ func TestBoxSetCollectionsOfDisabledLibraryDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		return slices.ContainsFunc(fetches, func(c CollectionFetch) bool { return c.ID == f.franchise })
+	}
+	if refetch() {
+		t.Fatal("a fresh collection is due for a fetch")
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET fetched_at = now() - interval '30 days' WHERE tmdb_collection_id = $1`, f.franchise); err != nil {
+		t.Fatal(err)
 	}
 	if !refetch() {
 		t.Fatal("a stale collection of a box set library is not due for a fetch")
@@ -337,6 +340,9 @@ func TestBoxSetCollectionLanguageDB(t *testing.T) {
 	store("de")
 	if language, ok := due(); ok {
 		t.Fatalf("a collection stored in de is still due for a fetch in %q", language)
+	}
+	if stored, err := f.repo.Collections(ctx, []int64{f.franchise}); err != nil || stored[f.franchise].Language != "de" {
+		t.Fatalf("stored collection = %+v, %v; want language de", stored[f.franchise], err)
 	}
 
 	// Another library ahead of it in the library order holds one of the

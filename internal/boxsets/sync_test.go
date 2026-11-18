@@ -109,8 +109,11 @@ type fakeTMDB struct {
 	lookups map[int]int
 	// onCollection runs on each collection fetch.
 	onCollection func()
-	// languages records the language each collection was asked for in.
-	languages map[int]string
+	// translated answers collection requests that ask for a language;
+	// collections answers the others, as TMDB answers in English.
+	translated map[int]*tmdb.Collection
+	// languages records the languages each collection was asked for in.
+	languages map[int][]string
 }
 
 func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.CollectionRef, error) {
@@ -129,12 +132,15 @@ func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.Collecti
 
 func (f *fakeTMDB) GetCollection(_ context.Context, id int, language string) (*tmdb.Collection, error) {
 	if f.languages != nil {
-		f.languages[id] = language
+		f.languages[id] = append(f.languages[id], language)
 	}
 	if f.onCollection != nil {
 		f.onCollection()
 	}
 	c, ok := f.collections[id]
+	if t, translated := f.translated[id]; translated && language != "" {
+		c, ok = t, true
+	}
 	if !ok {
 		return nil, tmdb.ErrNotFound
 	}
@@ -155,9 +161,16 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 	)
 	store.language = "de"
 	client := &fakeTMDB{
-		languages: map[int]string{},
-		movies:    map[int]*tmdb.CollectionRef{671: {ID: 1241, Name: "Harry Potter Collection"}, 949: nil},
-		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection", PosterPath: "/p.jpg", Parts: []tmdb.CollectionPart{
+		languages: map[int][]string{},
+		// TMDB leaves the fields a translation lacks empty.
+		translated: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Filmreihe", PosterPath: "/de.jpg", Parts: []tmdb.CollectionPart{
+			{ID: 674, ReleaseDate: "2005-11-16"},
+			{ID: 999, ReleaseDate: ""},
+			{ID: 671, ReleaseDate: "2001-11-16"},
+			{ID: 673, ReleaseDate: "2004-05-31"},
+		}}},
+		movies: map[int]*tmdb.CollectionRef{671: {ID: 1241, Name: "Harry Potter Collection"}, 949: nil},
+		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection", Overview: "The wizarding saga.", PosterPath: "/p.jpg", Parts: []tmdb.CollectionPart{
 			{ID: 674, ReleaseDate: "2005-11-16"},
 			{ID: 999, ReleaseDate: ""},
 			{ID: 671, ReleaseDate: "2001-11-16"},
@@ -182,14 +195,18 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 		}
 	}
 	stored := store.collections[1241]
-	// The collection is asked for and stored in the language it is due in.
-	if client.languages[1241] != "de" || stored.Language != "de" {
-		t.Fatalf("fetched in %q, stored as %q; want de", client.languages[1241], stored.Language)
+	// The collection is stored in the language it is due in, and the
+	// overview the translation lacks comes from TMDB's English answer.
+	if !slices.Equal(client.languages[1241], []string{"de", ""}) || stored.Language != "de" {
+		t.Fatalf("fetched in %q, stored as %q; want de, then the English fallback", client.languages[1241], stored.Language)
+	}
+	if stored.Name != "Harry Potter Filmreihe" || stored.Overview != "The wizarding saga." {
+		t.Fatalf("name, overview = %q, %q; want the German name and the English overview", stored.Name, stored.Overview)
 	}
 	if want := []int64{671, 673, 674, 999}; !slices.Equal(stored.MemberTMDBIDs, want) {
 		t.Fatalf("members = %v, want release order %v with the undated part last", stored.MemberTMDBIDs, want)
 	}
-	if stored.PosterSourcePath != "https://image.tmdb.org/t/p/original/p.jpg" || stored.BackdropSourcePath != "" {
+	if stored.PosterSourcePath != "https://image.tmdb.org/t/p/original/de.jpg" || stored.BackdropSourcePath != "" {
 		t.Fatalf("artwork sources = %q, %q", stored.PosterSourcePath, stored.BackdropSourcePath)
 	}
 }

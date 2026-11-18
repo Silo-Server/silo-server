@@ -431,7 +431,6 @@ func TestGetMediaDetailFollowerStopsWaitingOnCancel(t *testing.T) {
 func TestGetCollectionLanguage(t *testing.T) {
 	for _, tc := range []struct{ language, sent string }{
 		{"de", "de"},
-		{"pt-br", "pt-BR"},
 		{"en", "en-US"},
 		{"", ""},
 	} {

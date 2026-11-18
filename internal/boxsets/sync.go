@@ -6,6 +6,7 @@
 package boxsets
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -181,7 +182,7 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 				return err
 			}
 			id := fetch.ID
-			c, err := s.tmdb.GetCollection(ctx, int(id), fetch.Language)
+			c, err := s.fetchCollection(ctx, fetch)
 			if errors.Is(err, tmdb.ErrNotFound) {
 				// Keep a stored copy rather than refetching a collection TMDB
 				// no longer serves on every run. One never stored stays due
@@ -208,6 +209,25 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 		}
 		report(75, fmt.Sprintf("Fetched %d collections", res.CollectionsFetched))
 	}
+}
+
+// fetchCollection fetches a collection in the language it is due in. TMDB
+// leaves the name or overview empty where its translation lacks them, so
+// those come from its English answer, the way item metadata falls back.
+// TMDB falls back for artwork itself.
+func (s *Syncer) fetchCollection(ctx context.Context, fetch catalog.CollectionFetch) (*tmdb.Collection, error) {
+	c, err := s.tmdb.GetCollection(ctx, int(fetch.ID), fetch.Language)
+	if err != nil || fetch.Language == "en" || (c.Name != "" && c.Overview != "") {
+		return c, err
+	}
+	english, err := s.tmdb.GetCollection(ctx, int(fetch.ID), "")
+	if err != nil {
+		return nil, err
+	}
+	localized := *c
+	localized.Name = cmp.Or(c.Name, english.Name)
+	localized.Overview = cmp.Or(c.Overview, english.Overview)
+	return &localized, nil
 }
 
 // cacheArtwork stores a copy of each collection image still served from

@@ -111,7 +111,7 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 		return out, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT tmdb_collection_id, name, overview, poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, member_tmdb_ids, fetched_at
+		SELECT tmdb_collection_id, name, overview, poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, member_tmdb_ids, language, fetched_at
 		FROM tmdb_movie_collections WHERE tmdb_collection_id = ANY($1)`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("querying tmdb collections: %w", err)
@@ -119,7 +119,7 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 	defer rows.Close()
 	for rows.Next() {
 		var c TMDBMovieCollection
-		if err := rows.Scan(&c.ID, &c.Name, &c.Overview, &c.PosterPath, &c.PosterThumbhash, &c.BackdropPath, &c.BackdropThumbhash, &c.MemberTMDBIDs, &c.FetchedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Overview, &c.PosterPath, &c.PosterThumbhash, &c.BackdropPath, &c.BackdropThumbhash, &c.MemberTMDBIDs, &c.Language, &c.FetchedAt); err != nil {
 			return nil, fmt.Errorf("scanning tmdb collection: %w", err)
 		}
 		out[c.ID] = c
@@ -187,17 +187,20 @@ func (r *BoxSetRepository) RecordMovieCollection(ctx context.Context, contentID 
 	return nil
 }
 
-// currentBoxSetMember holds when the collection lookup row m is current (its
-// movie still has the TMDB ID it was looked up under) and its movie is in an
-// enabled library with box sets on. Only such rows keep a collection stored
-// and refreshed: a library that turns box sets off, or a rematched movie,
-// leaves its lookup rows behind.
-const currentBoxSetMember = `EXISTS (
-			SELECT 1 FROM media_items cmi
+// currentBoxSetMemberLibraries selects, as cf, the libraries that make the
+// collection lookup row m current: its movie still has the TMDB ID it was
+// looked up under, and they are enabled libraries with box sets on holding
+// it. Only such rows keep a collection stored and refreshed: a library that
+// turns box sets off, or a rematched movie, leaves its lookup rows behind.
+const currentBoxSetMemberLibraries = `
+			FROM media_items cmi
 			JOIN media_item_libraries cmil ON cmil.content_id = cmi.content_id
 			JOIN media_folders cf ON cf.id = cmil.media_folder_id
 			WHERE cmi.content_id = m.content_id AND cmi.tmdb_id = m.checked_tmdb_id::text
-			  AND cf.box_sets_enabled AND cf.enabled IS NOT FALSE)`
+			  AND cf.box_sets_enabled AND cf.enabled IS NOT FALSE`
+
+// currentBoxSetMember holds when the collection lookup row m is current.
+const currentBoxSetMember = `EXISTS (SELECT 1 ` + currentBoxSetMemberLibraries + `)`
 
 // CollectionFetch is a collection due for a fetch and the metadata language
 // to fetch it in.
@@ -217,15 +220,15 @@ func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBef
 	rows, err := r.pool.Query(ctx, `
 		SELECT due.tmdb_collection_id, due.language
 		FROM (
-			SELECT DISTINCT ON (m.tmdb_collection_id) m.tmdb_collection_id,
-				COALESCE(NULLIF(BTRIM(cf.metadata_language), ''), 'en') AS language
+			SELECT DISTINCT ON (m.tmdb_collection_id) m.tmdb_collection_id, lib.language
 			FROM media_item_tmdb_collections m
-			JOIN media_items cmi ON cmi.content_id = m.content_id AND cmi.tmdb_id = m.checked_tmdb_id::text
-			JOIN media_item_libraries cmil ON cmil.content_id = cmi.content_id
-			JOIN media_folders cf ON cf.id = cmil.media_folder_id AND cf.box_sets_enabled AND cf.enabled IS NOT FALSE
+			CROSS JOIN LATERAL (
+				SELECT COALESCE(NULLIF(BTRIM(cf.metadata_language), ''), 'en') AS language, cf.sort_order, cf.id
+				`+currentBoxSetMemberLibraries+`
+			) lib
 			WHERE m.tmdb_collection_id IS NOT NULL
 			  AND NOT (m.tmdb_collection_id = ANY($3::bigint[]))
-			ORDER BY m.tmdb_collection_id, cf.sort_order, cf.id
+			ORDER BY m.tmdb_collection_id, lib.sort_order, lib.id
 		) due
 		LEFT JOIN tmdb_movie_collections c ON c.tmdb_collection_id = due.tmdb_collection_id
 		WHERE c.tmdb_collection_id IS NULL OR c.fetched_at < $1 OR c.language <> due.language
