@@ -31,14 +31,19 @@ export type CollectionLibraryFilter = "all" | number;
  * The search text, type filter and library filter, and the options that pass
  * all three. `libraries` lists the libraries that show any option, by name;
  * the library filter falls back to every library once its library has no
- * option left.
+ * option left or fewer than two libraries remain.
  */
 export function useCollectionSearch(options: readonly CollectionOption[]) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<CollectionFilter>("all");
   const [pickedLibrary, setLibrary] = useState<CollectionLibraryFilter>("all");
   const libraries = useMemo(() => librariesOf(options), [options]);
-  const library = libraries.some((entry) => entry.id === pickedLibrary) ? pickedLibrary : "all";
+  // The bar offers the library filter only for two or more libraries; with
+  // fewer, a pick made earlier must not keep hiding collections.
+  const library =
+    libraries.length > 1 && libraries.some((entry) => entry.id === pickedLibrary)
+      ? pickedLibrary
+      : "all";
   const needle = query.trim().toLowerCase();
   const shown = useMemo(
     () =>
