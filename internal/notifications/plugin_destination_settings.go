@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -80,21 +81,73 @@ func collectPluginSettingErrors(e *jsonschema.ValidationError, out *[]PluginSett
 	}
 }
 
+// pluginSettings is a destination's stored settings: the values, and the
+// keys that were saved as secret.
+type pluginSettings struct {
+	Values map[string]any `json:"settings"`
+	// Secret names the keys saved as secret. They stay write-only whatever a
+	// later manifest says, until the owner replaces or clears them, so a
+	// plugin upgrade that drops a field's secret marking can't expose a
+	// saved credential. nil for settings stored before the record existed,
+	// which follow the current schema alone.
+	Secret []string `json:"secret_keys"`
+}
+
+// isSecret reports whether key is write-only: the channel marks it secret,
+// or it was saved as secret.
+func (p pluginSettings) isSecret(channel PluginChannel, key string) bool {
+	return slices.Contains(channel.SecretFields, key) || slices.Contains(p.Secret, key)
+}
+
+// isPublic reports whether key may be returned: the channel declares it
+// public and it wasn't saved as secret. A nil channel has no public keys.
+func (p pluginSettings) isPublic(channel *PluginChannel, key string) bool {
+	return channel != nil && slices.Contains(channel.PublicFields, key) && !slices.Contains(p.Secret, key)
+}
+
+// decodePluginSettings reads a decrypted settings envelope. One written
+// before the secret record is the bare settings object; its fields are flat
+// scalars, so a top-level "settings" object marks the current shape.
+func decodePluginSettings(raw []byte) (pluginSettings, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return pluginSettings{}, err
+	}
+	if inner, ok := envelope["settings"]; ok && len(inner) > 0 && inner[0] == '{' {
+		var out pluginSettings
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return pluginSettings{}, err
+		}
+		if out.Values == nil {
+			out.Values = map[string]any{}
+		}
+		if out.Secret == nil {
+			out.Secret = []string{}
+		}
+		return out, nil
+	}
+	values := map[string]any{}
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return pluginSettings{}, err
+	}
+	return pluginSettings{Values: values}, nil
+}
+
 // redactPluginText masks text a plugin wrote (an error, a refusal, a send
 // result) before it is stored, returned or logged. A plugin or its provider
 // may quote a rejected credential, so every value of each settings map that
-// the channel doesn't declare public is masked, which covers secret fields
-// and stored secrets the current schema no longer declares; then credential
-// assignments and URL userinfo are masked as everywhere else. A nil channel
-// masks every value.
-func redactPluginText(text string, channel *PluginChannel, settings ...map[string]any) string {
+// may not be returned is masked, which covers secret fields, fields saved as
+// secret, and stored fields the current schema no longer declares; then
+// credential assignments and URL userinfo are masked as everywhere else. A
+// nil channel masks every value.
+func redactPluginText(text string, channel *PluginChannel, settings ...pluginSettings) string {
 	if text == "" {
 		return text
 	}
 	var secrets []string
-	for _, values := range settings {
-		for key, value := range values {
-			if channel != nil && slices.Contains(channel.PublicFields, key) {
+	for _, stored := range settings {
+		for key, value := range stored.Values {
+			if stored.isPublic(channel, key) {
 				continue
 			}
 			if secret := pluginSecretText(value); secret != "" {

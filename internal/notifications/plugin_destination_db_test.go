@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
@@ -31,6 +33,8 @@ type scriptedChannelHost struct {
 	unavailable bool
 	// reject makes settings checks refuse with this message.
 	reject string
+	// sendErr makes the next send fail with this error instead of answering.
+	sendErr error
 }
 
 func (h *scriptedChannelHost) AvailableChannels(ctx context.Context, _ pgx.Tx) ([]PluginChannelRef, error) {
@@ -97,6 +101,10 @@ func (h *scriptedChannelHost) SendNotification(_ context.Context, req *pluginv1.
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sent = append(h.sent, req)
+	if err := h.sendErr; err != nil {
+		h.sendErr = nil
+		return nil, err
+	}
 	if len(h.outcomes) == 0 {
 		return &pluginv1.SendNotificationResponse{}, nil
 	}
@@ -361,6 +369,100 @@ func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 	}
 }
 
+// When a message's retry schedule runs out, the destination is disabled
+// only if nothing reached it and its owner didn't edit it since the message
+// was queued, and only when the plugin answered: one stuck message, or a
+// plugin process that died mid-call, doesn't turn off a working destination.
+func TestPluginDestinationExhaustedScheduleDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	host := &scriptedChannelHost{}
+	service, sender := newTestPluginDestinationService(t, pool, host)
+	notices := recordNotices(pool, sender)
+	name := "Phone"
+	d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
+		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
+		Settings: map[string]any{"topic": "alerts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry := &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_RETRY, Message: "busy"}
+	queue := func() string {
+		t.Helper()
+		deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
+		enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
+		return deliveryID
+	}
+	// lastTry sends a queued message's final attempt.
+	lastTry := func(deliveryID string) string {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET attempt_number = $2 WHERE notification_delivery_id = $1`,
+			deliveryID, webhookMaxAttempts-1); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := sender.repo.ClaimPendingForDelivery(ctx, deliveryID)
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("claim = %d attempts, %v", len(claimed), err)
+		}
+		sender.processAttempt(ctx, claimed[0])
+		var outcome string
+		if err := pool.QueryRow(ctx, `SELECT outcome FROM plugin_destination_delivery_attempts WHERE id = $1`, claimed[0].ID).Scan(&outcome); err != nil {
+			t.Fatal(err)
+		}
+		return outcome
+	}
+	requireEnabled := func(step string) {
+		t.Helper()
+		if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || len(*notices) != 0 {
+			t.Fatalf("%s: destination %+v with %d notices, want it enabled", step, got, len(*notices))
+		}
+	}
+
+	// Another message got through after this one was queued.
+	stuck := queue()
+	if delivered := processTestAttempt(t, pool, sender, d.ID, 1); delivered.Outcome != WebhookOutcomeDelivered {
+		t.Fatalf("other message = %s, want delivered", delivered.Outcome)
+	}
+	host.outcomes = append(host.outcomes, retry)
+	if outcome := lastTry(stuck); outcome != WebhookOutcomeFailed {
+		t.Fatalf("stuck message after a later success = %s, want failed", outcome)
+	}
+	requireEnabled("after a later success")
+
+	// The owner fixed the settings after the message was queued.
+	queued := queue()
+	topic := "fixed"
+	if _, err := service.UpdateGuarded(ctx, accountA, sharedID, d.ID, PluginDestinationInput{Settings: map[string]any{"topic": topic}}, anyRevision); err != nil {
+		t.Fatal(err)
+	}
+	if d, err = sender.repo.GetByID(ctx, accountA, sharedID, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	host.outcomes = append(host.outcomes, retry)
+	if outcome := lastTry(queued); outcome != WebhookOutcomeFailed {
+		t.Fatalf("message queued before an edit = %s, want failed", outcome)
+	}
+	requireEnabled("after an edit")
+
+	// The plugin process exited during the last call.
+	host.sendErr = status.Error(codes.Unavailable, "error reading from server: EOF")
+	if outcome := lastTry(queue()); outcome != WebhookOutcomeFailed {
+		t.Fatalf("message whose plugin died = %s, want failed", outcome)
+	}
+	requireEnabled("after the plugin died")
+
+	// Nothing got through since the message was queued: disabled, with a notice.
+	host.outcomes = append(host.outcomes, retry)
+	if outcome := lastTry(queue()); outcome != WebhookOutcomeAutoDisabled {
+		t.Fatalf("message on a failing destination = %s, want auto_disabled", outcome)
+	}
+	got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID)
+	if got.Enabled || got.DisabledReason == nil || len(*notices) != 1 {
+		t.Fatalf("failing destination is %+v with %d notices, want disabled with one notice", got, len(*notices))
+	}
+}
+
 // A send can outlive its lease, or race its owner's edit. Neither may let
 // the stale send win: a lease another server took over keeps that server's
 // result, and settings repaired during a failing send stay enabled.
@@ -466,9 +568,9 @@ func TestPluginDestinationValidationHoldsNoRowLockDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != renamed || conflict.Revision != got.Revision || stored["topic"] != "alerts" {
+	if got.Name != renamed || conflict.Revision != got.Revision || stored.Values["topic"] != "alerts" {
 		t.Fatalf("after the conflict: name %q, revision %d (conflict names %d), topic %v; want the rename kept and the settings unchanged",
-			got.Name, got.Revision, conflict.Revision, stored["topic"])
+			got.Name, got.Revision, conflict.Revision, stored.Values["topic"])
 	}
 }
 
@@ -677,5 +779,42 @@ func TestPluginDestinationTextNeverCarriesSecretsDB(t *testing.T) {
 	rejected, ok := errors.AsType[*PluginDestinationRejectedError](err)
 	if !ok || strings.Contains(rejected.Message, token) {
 		t.Fatalf("validation refusal = %v, want one without the secret", err)
+	}
+}
+
+// Inbox retention keeps a delivery while its destination attempt is still
+// on the retry schedule: deleting it would cascade to the attempt.
+func TestPluginDestinationRetryOutlivesInboxRetentionDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	service, sender := newTestPluginDestinationService(t, pool, &scriptedChannelHost{})
+	name := "Phone"
+	d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
+		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
+		Settings: map[string]any{"topic": "alerts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
+	enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
+	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET outcome = 'retrying', next_retry_at = now() + interval '6 hours'`); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	if _, err := sender.deliveries.DeleteOld(ctx, future, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if row, err := sender.deliveries.GetRowByID(ctx, deliveryID); err != nil || row == nil {
+		t.Fatalf("delivery with a retry still due = %v, %v; want it kept", row, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET outcome = 'failed'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sender.deliveries.DeleteOld(ctx, future, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if row, err := sender.deliveries.GetRowByID(ctx, deliveryID); err != nil || row != nil {
+		t.Fatalf("delivery whose attempt resolved = %v, %v; want it pruned", row, err)
 	}
 }

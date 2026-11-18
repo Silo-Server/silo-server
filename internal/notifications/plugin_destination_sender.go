@@ -13,6 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -55,8 +57,9 @@ type pluginSendResult struct {
 	message    string
 	retryAfter time.Duration
 	duration   time.Duration
-	// unavailable marks a send no plugin took: the channel's plugin is off,
-	// removed, or couldn't be reached. The destination isn't at fault.
+	// unavailable marks a send no plugin answered: the channel's plugin is
+	// off, removed or unreachable, its process exited during the call, or
+	// the call ran out of time. The destination isn't at fault.
 	unavailable bool
 	// claimLost marks a send skipped because this server's claim on the
 	// attempt ran out (or nearly) before it started: another server may own
@@ -65,7 +68,8 @@ type pluginSendResult struct {
 }
 
 // pluginSendResultOf maps a plugin's answer onto what the sender does. A
-// gRPC error, a timeout, or an unreachable plugin is temporary. An empty
+// gRPC error, a timeout, or an unreachable plugin is temporary; a transport
+// failure also marks the plugin unavailable (pluginTransportFailure). An empty
 // response acknowledges the message. An outcome from a newer SDK that this
 // host doesn't know drops the message without touching the destination,
 // which can neither loop nor lose a working destination. The plugin's
@@ -73,10 +77,13 @@ type pluginSendResult struct {
 // or logged.
 func pluginSendResultOf(resp *pluginv1.SendNotificationResponse, err error) pluginSendResult {
 	if err != nil {
-		if errors.Is(err, ErrPluginChannelUnavailable) {
+		switch {
+		case errors.Is(err, ErrPluginChannelUnavailable):
 			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin that provides this destination isn't available.", unavailable: true}
+		case pluginTransportFailure(err):
+			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin didn't answer.", unavailable: true}
 		}
-		return pluginSendResult{outcome: pluginSendRetry, message: "The plugin didn't answer."}
+		return pluginSendResult{outcome: pluginSendRetry, message: "The plugin couldn't send the message."}
 	}
 	result := pluginSendResult{message: resp.GetMessage()}
 	switch resp.GetOutcome() {
@@ -94,6 +101,25 @@ func pluginSendResultOf(resp *pluginv1.SendNotificationResponse, err error) plug
 		result.outcome = pluginSendFailed
 	}
 	return result
+}
+
+// pluginTransportFailure reports whether a call's error means no plugin
+// answered it: the connection failed or closed (the process exited), the
+// plugin was unavailable, or the call ran out of time or was canceled. An
+// error status the plugin itself returned is not one.
+func pluginTransportFailure(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		return true
+	}
+	switch st.Code() {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
+		return true
+	}
+	return false
 }
 
 // pluginChannelHostBox lets the host be wired after NewSystem.
@@ -138,19 +164,21 @@ func pluginDestinationConfigAAD(id string) string {
 	return "notification_plugin_destination:" + id + ":config"
 }
 
-func (s *pluginDestinationSender) decryptConfig(d *PluginDestination) (map[string]any, error) {
+func (s *pluginDestinationSender) decryptConfig(d *PluginDestination) (pluginSettings, error) {
 	plaintext, err := s.cipher.Decrypt(d.ConfigCiphertext, pluginDestinationConfigAAD(d.ID))
 	if err != nil {
-		return nil, err
+		return pluginSettings{}, err
 	}
-	config := map[string]any{}
-	if err := json.Unmarshal([]byte(plaintext), &config); err != nil {
-		return nil, err
-	}
-	return config, nil
+	return decodePluginSettings([]byte(plaintext))
 }
 
-func (s *pluginDestinationSender) encryptConfig(id string, config map[string]any) (string, error) {
+func (s *pluginDestinationSender) encryptConfig(id string, config pluginSettings) (string, error) {
+	if config.Values == nil {
+		config.Values = map[string]any{}
+	}
+	if config.Secret == nil {
+		config.Secret = []string{}
+	}
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return "", err
@@ -207,6 +235,11 @@ type pluginAttemptFinish struct {
 	failure bool
 	// disableReason, when set, turns the destination off and posts a notice.
 	disableReason string
+	// quietSince, when set, disables only a destination that had no
+	// successful send and no owner edit since then, when the failing
+	// message was queued: the retry schedule ran out. The attempt's outcome
+	// is auto_disabled when it disabled the destination and failed when not.
+	quietSince *time.Time
 }
 
 // processAttempt delivers one claimed attempt and records the outcome.
@@ -264,12 +297,16 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 		s.finish(ctx, attempt, d, pluginAttemptFinish{outcome: WebhookOutcomeRetrying, message: result.message, next: &next, failure: true})
 		return
 	}
-	// The retry schedule ran out: about a day of failures in a row. When no
-	// plugin took the last send, the message is dropped but the destination
-	// stays enabled, so it resumes once its plugin is back.
+	// The retry schedule ran out: about a day of failures for this message.
+	// The destination is disabled only when nothing reached it since the
+	// message was queued and its owner hasn't edited it since; otherwise
+	// this one message is dropped. When no plugin answered the last send,
+	// the message is dropped and the destination stays enabled, so it
+	// resumes once its plugin is back.
 	if !result.unavailable {
-		failed.outcome = WebhookOutcomeAutoDisabled
+		queued := row.CreatedAt
 		failed.disableReason = "Deliveries failed for 24 hours"
+		failed.quietSince = &queued
 	}
 	s.finish(ctx, attempt, d, failed)
 }
@@ -308,6 +345,18 @@ func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt Deli
 			return nil, false, err
 		}
 	}
+	// Disabling applies only while the destination still has the settings
+	// the send used. It runs first so the attempt records whether it did;
+	// a finalize that no longer holds the claim rolls it back.
+	disabled := false
+	if d != nil && f.disableReason != "" {
+		if disabled, err = s.repo.Disable(ctx, tx, d.ID, disableText(f), d.ConfigCiphertext, f.quietSince); err != nil {
+			return nil, false, err
+		}
+		if f.quietSince != nil && disabled {
+			f.outcome = WebhookOutcomeAutoDisabled
+		}
+	}
 	applied, err := s.repo.FinalizeAttempt(ctx, tx, attempt, f.outcome, attempt.AttemptNumber+1, f.message, f.next)
 	if err != nil || !applied {
 		return nil, false, err
@@ -320,18 +369,17 @@ func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt Deli
 			return nil, false, err
 		}
 	}
-	// Failure bookkeeping and disabling apply only while the destination
-	// still has the settings the send used: an owner who saved new ones
-	// during the send starts clean.
+	// Failure bookkeeping applies only while the destination still has the
+	// settings the send used: an owner who saved new ones during the send
+	// starts clean.
 	if f.failure {
 		if err := s.repo.RecordFailure(ctx, tx, d.ID, f.message, d.ConfigCiphertext); err != nil {
 			return nil, false, err
 		}
 	}
 	var notice *InsertedDelivery
-	disabled := false
-	if f.disableReason != "" {
-		if notice, disabled, err = s.disableInTx(ctx, tx, d, disableText(f)); err != nil {
+	if disabled && s.insertNotice != nil {
+		if notice, err = s.insertNotice(ctx, tx, autoDisableNotice(d)); err != nil {
 			return nil, false, err
 		}
 	}
@@ -339,18 +387,6 @@ func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt Deli
 		return nil, false, err
 	}
 	return notice, disabled, nil
-}
-
-// disableInTx turns the destination off and writes its notice through tx.
-// It reports false when the owner changed the settings, or turned it off,
-// during the send.
-func (s *pluginDestinationSender) disableInTx(ctx context.Context, tx pgx.Tx, d *PluginDestination, reason string) (*InsertedDelivery, bool, error) {
-	disabled, err := s.repo.Disable(ctx, tx, d.ID, reason, d.ConfigCiphertext)
-	if err != nil || !disabled || s.insertNotice == nil {
-		return nil, disabled, err
-	}
-	notice, err := s.insertNotice(ctx, tx, autoDisableNotice(d))
-	return notice, err == nil, err
 }
 
 func disableText(f pluginAttemptFinish) string {
@@ -380,13 +416,13 @@ func autoDisableNotice(d *PluginDestination) Delivery {
 // destination's secret settings.
 func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHost, d *PluginDestination, row DeliveryRow, claimed *DeliveryAttempt) pluginSendResult {
 	started := time.Now()
-	configMap, err := s.decryptConfig(d)
+	stored, err := s.decryptConfig(d)
 	if err != nil {
 		// Like a webhook URL this server can't decrypt: a temporary
 		// failure, since a server with the right key can still send.
 		return pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server."}
 	}
-	config, err := structpb.NewStruct(configMap)
+	config, err := structpb.NewStruct(stored.Values)
 	if err != nil {
 		return pluginSendResult{outcome: pluginSendInvalid, message: "The stored settings can't be sent to the plugin."}
 	}
@@ -403,7 +439,7 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 	if err != nil {
 		result := pluginSendResultOf(nil, err)
 		result.duration = time.Since(started)
-		s.logSendError(ctx, d, nil, configMap, err)
+		s.logSendError(ctx, d, nil, stored, err)
 		return result
 	}
 	if claimed != nil {
@@ -424,17 +460,17 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 		CapabilityId:  d.CapabilityID,
 	})
 	result := pluginSendResultOf(resp, err)
-	result.message = redactPluginText(result.message, channel, configMap)
+	result.message = redactPluginText(result.message, channel, stored)
 	result.duration = time.Since(started)
 	if err != nil {
-		s.logSendError(ctx, d, channel, configMap, err)
+		s.logSendError(ctx, d, channel, stored, err)
 	}
 	return result
 }
 
 // logSendError logs a failed call, masked like a stored message. An
 // unavailable plugin and a canceled caller aren't worth a warning.
-func (s *pluginDestinationSender) logSendError(ctx context.Context, d *PluginDestination, channel *PluginChannel, config map[string]any, err error) {
+func (s *pluginDestinationSender) logSendError(ctx context.Context, d *PluginDestination, channel *PluginChannel, config pluginSettings, err error) {
 	if errors.Is(err, ErrPluginChannelUnavailable) || ctx.Err() != nil {
 		return
 	}

@@ -330,14 +330,18 @@ func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, q plugi
 //
 // It applies only while the destination still has the settings a failed send
 // used (sentConfig) and is enabled, and reports whether it did: an owner who
-// saved new settings during that send keeps them working. Unlike the other
-// bookkeeping it bumps revision: it changes enabled, which the owner edits,
-// so an editor that hasn't seen the disable must reload first.
-func (r *PluginDestinationRepository) Disable(ctx context.Context, q pluginDestinationExec, id, reason, sentConfig string) (bool, error) {
+// saved new settings during that send keeps them working. With quietSince,
+// it applies only when the destination had no successful send and no owner
+// edit since then (updated_at moves on every edit, and on a disable). Unlike
+// the other bookkeeping it bumps revision: it changes enabled, which the
+// owner edits, so an editor that hasn't seen the disable must reload first.
+func (r *PluginDestinationRepository) Disable(ctx context.Context, q pluginDestinationExec, id, reason, sentConfig string, quietSince *time.Time) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET enabled = false, disabled_reason = left($2, 256), revision = revision + 1, updated_at = now()
-		WHERE id = $1 AND config_ciphertext = $3 AND enabled`, id, reason, sentConfig)
+		WHERE id = $1 AND config_ciphertext = $3 AND enabled
+		  AND ($4::timestamptz IS NULL
+		       OR ((last_success_at IS NULL OR last_success_at < $4) AND updated_at < $4))`, id, reason, sentConfig, quietSince)
 	if err != nil {
 		return false, err
 	}

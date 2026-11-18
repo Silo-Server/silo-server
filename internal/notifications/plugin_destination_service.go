@@ -104,11 +104,11 @@ func (s *PluginDestinationService) Create(ctx context.Context, userID int, profi
 	if err != nil {
 		return nil, err
 	}
-	settings, err := mergePluginSettings(*channel, nil, in.Settings, nil)
+	settings, err := mergePluginSettings(*channel, pluginSettings{}, in.Settings, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validate(ctx, *channel, client, settings, nil); err != nil {
+	if err := s.validate(ctx, *channel, client, settings, pluginSettings{}); err != nil {
 		return nil, err
 	}
 	d := PluginDestination{
@@ -292,11 +292,11 @@ func (s *PluginDestinationService) Test(ctx context.Context, userID int, profile
 
 // validate checks settings against the channel's schema, then asks the
 // plugin whether they work. stored is what the settings replace, if anything.
-func (s *PluginDestinationService) validate(ctx context.Context, channel PluginChannel, client PluginChannelClient, settings, stored map[string]any) error {
-	if err := checkPluginSettings(channel, settings); err != nil {
+func (s *PluginDestinationService) validate(ctx context.Context, channel PluginChannel, client PluginChannelClient, settings, stored pluginSettings) error {
+	if err := checkPluginSettings(channel, settings.Values); err != nil {
 		return err
 	}
-	config, err := structpb.NewStruct(settings)
+	config, err := structpb.NewStruct(settings.Values)
 	if err != nil {
 		return fmt.Errorf("%w: settings must be JSON values", ErrPluginDestinationInvalid)
 	}
@@ -323,15 +323,17 @@ func (s *PluginDestinationService) validate(ctx context.Context, channel PluginC
 // mergePluginSettings applies a settings write over stored settings: a
 // non-secret field is set, or removed when sent as null; a secret field is
 // set only when sent non-empty, so leaving it blank keeps the stored value;
-// clearSecrets removes secrets. Fields the schema doesn't declare are
-// refused in the write and dropped from the stored settings: a plugin update
-// that removed or renamed a setting would otherwise keep sending the old key
-// to validation, which the owner can't see or remove.
-func mergePluginSettings(channel PluginChannel, stored, write map[string]any, clearSecrets []string) (map[string]any, error) {
-	secrets := channel.SecretFields
+// clearSecrets removes secrets. A field saved as secret counts as secret
+// even when the current schema no longer marks it, until a write replaces
+// it, which then takes the current schema's classification. Fields the
+// schema doesn't declare are refused in the write and dropped from the
+// stored settings: a plugin update that removed or renamed a setting would
+// otherwise keep sending the old key to validation, which the owner can't
+// see or remove.
+func mergePluginSettings(channel PluginChannel, stored pluginSettings, write map[string]any, clearSecrets []string) (pluginSettings, error) {
 	declared := channel.declaredFields()
-	merged := make(map[string]any, len(stored)+len(write))
-	for key, value := range stored {
+	merged := make(map[string]any, len(stored.Values)+len(write))
+	for key, value := range stored.Values {
 		if _, ok := declared[key]; ok {
 			merged[key] = value
 		}
@@ -344,14 +346,16 @@ func mergePluginSettings(channel PluginChannel, stored, write map[string]any, cl
 	}
 	if len(unknown) > 0 {
 		slices.SortFunc(unknown, func(a, b PluginSettingError) int { return strings.Compare(a.Field, b.Field) })
-		return nil, &PluginDestinationSettingsError{Fields: unknown}
+		return pluginSettings{}, &PluginDestinationSettingsError{Fields: unknown}
 	}
+	replaced := make(map[string]bool, len(write))
 	for key, value := range write {
-		if slices.Contains(secrets, key) {
+		if stored.isSecret(channel, key) {
 			if text, isString := value.(string); value == nil || (isString && text == "") {
 				continue
 			}
 		}
+		replaced[key] = true
 		if value == nil {
 			delete(merged, key)
 			continue
@@ -359,26 +363,36 @@ func mergePluginSettings(channel PluginChannel, stored, write map[string]any, cl
 		merged[key] = value
 	}
 	for _, key := range clearSecrets {
-		if !slices.Contains(secrets, key) {
-			return nil, fmt.Errorf("%w: %q is not a secret setting", ErrPluginDestinationInvalid, key)
+		if !stored.isSecret(channel, key) {
+			return pluginSettings{}, fmt.Errorf("%w: %q is not a secret setting", ErrPluginDestinationInvalid, key)
 		}
 		delete(merged, key)
 	}
-	return merged, nil
+	secret := []string{}
+	for key := range merged {
+		if slices.Contains(channel.SecretFields, key) || (slices.Contains(stored.Secret, key) && !replaced[key]) {
+			secret = append(secret, key)
+		}
+	}
+	slices.Sort(secret)
+	return pluginSettings{Values: merged, Secret: secret}, nil
 }
 
 // publicPluginSettings returns the stored settings the owner may read (the
-// fields the current schema declares public) and the names of the secret
-// fields that hold a value. A stored field the schema no longer declares is
-// neither returned nor named.
-func publicPluginSettings(channel PluginChannel, stored map[string]any) (map[string]any, []string) {
-	public := make(map[string]any, len(stored))
+// fields the current schema declares public and that weren't saved as
+// secret) and the names of the secret fields that hold a value. A stored
+// field the schema no longer declares is neither returned nor named.
+func publicPluginSettings(channel PluginChannel, stored pluginSettings) (map[string]any, []string) {
+	declared := channel.declaredFields()
+	public := make(map[string]any, len(stored.Values))
 	var set []string
-	for key, value := range stored {
-		switch {
-		case slices.Contains(channel.PublicFields, key):
+	for key, value := range stored.Values {
+		if _, ok := declared[key]; !ok {
+			continue
+		}
+		if stored.isPublic(&channel, key) {
 			public[key] = value
-		case slices.Contains(channel.SecretFields, key):
+		} else {
 			set = append(set, key)
 		}
 	}

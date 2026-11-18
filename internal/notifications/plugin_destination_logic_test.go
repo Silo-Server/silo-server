@@ -2,12 +2,16 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
@@ -22,6 +26,9 @@ func TestPluginSendResultOf(t *testing.T) {
 		err        error
 		want       pluginSendOutcome
 		retryAfter time.Duration
+		// unavailable: no plugin answered, so an exhausted schedule
+		// drops the message without disabling the destination.
+		unavailable bool
 	}{
 		// An empty response acknowledges, as the SDK documents.
 		{name: "empty response", resp: &pluginv1.SendNotificationResponse{}, want: pluginSendDelivered},
@@ -32,13 +39,18 @@ func TestPluginSendResultOf(t *testing.T) {
 		{name: "destination invalid", resp: outcome(pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, 0), want: pluginSendInvalid},
 		// An outcome from a newer SDK drops the message and keeps the destination.
 		{name: "unknown outcome", resp: outcome(pluginv1.NotificationSendOutcome(99), 0), want: pluginSendFailed},
-		{name: "rpc error", err: errors.New("rpc error: deadline exceeded"), want: pluginSendRetry},
-		{name: "plugin gone", err: fmt.Errorf("%w: not installed", ErrPluginChannelUnavailable), want: pluginSendRetry},
+		{name: "plugin gone", err: fmt.Errorf("%w: not installed", ErrPluginChannelUnavailable), want: pluginSendRetry, unavailable: true},
+		// The plugin process exited mid-call, or the call ran out of time.
+		{name: "connection closed", err: status.Error(codes.Unavailable, "error reading from server: EOF"), want: pluginSendRetry, unavailable: true},
+		{name: "call deadline", err: status.Error(codes.DeadlineExceeded, "context deadline exceeded"), want: pluginSendRetry, unavailable: true},
+		{name: "not a status", err: context.DeadlineExceeded, want: pluginSendRetry, unavailable: true},
+		// An error the plugin returned is its answer.
+		{name: "plugin error status", err: status.Error(codes.Internal, "boom"), want: pluginSendRetry},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := pluginSendResultOf(tc.resp, tc.err)
-			if got.outcome != tc.want || got.retryAfter != tc.retryAfter {
-				t.Fatalf("pluginSendResultOf() = %+v, want outcome %v retryAfter %v", got, tc.want, tc.retryAfter)
+			if got.outcome != tc.want || got.retryAfter != tc.retryAfter || got.unavailable != tc.unavailable {
+				t.Fatalf("pluginSendResultOf() = %+v, want outcome %v retryAfter %v unavailable %v", got, tc.want, tc.retryAfter, tc.unavailable)
 			}
 		})
 	}
@@ -80,14 +92,14 @@ func TestMergePluginSettings(t *testing.T) {
 		{name: "clearing a plain field", stored: stored, clear: []string{"topic"}, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := mergePluginSettings(channel, tc.stored, tc.write, tc.clear)
+			got, err := mergePluginSettings(channel, pluginSettings{Values: tc.stored}, tc.write, tc.clear)
 			if tc.wantErr {
 				if !errors.Is(err, ErrPluginDestinationInvalid) {
 					t.Fatalf("mergePluginSettings() error = %v, want ErrPluginDestinationInvalid", err)
 				}
 				return
 			}
-			if err != nil || !reflect.DeepEqual(got, tc.want) {
+			if err != nil || !reflect.DeepEqual(got.Values, tc.want) {
 				t.Fatalf("mergePluginSettings() = %v, %v; want %v", got, err, tc.want)
 			}
 		})
@@ -95,9 +107,54 @@ func TestMergePluginSettings(t *testing.T) {
 
 	// "api_key" was a secret before a plugin upgrade renamed it; the current
 	// schema doesn't declare it, so it stays as hidden as it was.
-	public, set := publicPluginSettings(channel, map[string]any{"topic": "alerts", "token": "s3cret", "api_key": "old"})
+	public, set := publicPluginSettings(channel, pluginSettings{Values: map[string]any{"topic": "alerts", "token": "s3cret", "api_key": "old"}})
 	if !reflect.DeepEqual(public, map[string]any{"topic": "alerts"}) || !reflect.DeepEqual(set, []string{"token"}) {
 		t.Fatalf("publicPluginSettings() = %v, %v; want only the declared public field, and the secret named", public, set)
+	}
+}
+
+// A secret saved under one manifest stays write-only when a plugin upgrade
+// keeps the key but drops its secret marking, until the owner replaces it.
+func TestPluginSettingsSavedSecretOutlivesItsMarking(t *testing.T) {
+	schema := `{"type":"object","properties":{"topic":{"type":"string"},"token":{"type":"string"}}}`
+	v1 := PluginChannel{Schema: &pluginv1.ConfigSchema{JsonSchema: schema}, PublicFields: []string{"topic"}, SecretFields: []string{"token"}}
+	v2 := PluginChannel{Schema: &pluginv1.ConfigSchema{JsonSchema: schema}, PublicFields: []string{"token", "topic"}}
+
+	saved, err := mergePluginSettings(v1, pluginSettings{}, map[string]any{"topic": "alerts", "token": "s3cret"}, nil)
+	if err != nil || !reflect.DeepEqual(saved.Secret, []string{"token"}) {
+		t.Fatalf("saved under v1 = %+v, %v; want token recorded as secret", saved, err)
+	}
+	raw, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := decodePluginSettings(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	public, set := publicPluginSettings(v2, stored)
+	if _, leaked := public["token"]; leaked || !reflect.DeepEqual(set, []string{"token"}) {
+		t.Fatalf("under v2: settings %v, set %v; want the token kept write-only and shown as set", public, set)
+	}
+	if got := redactPluginText("bad token s3cret", &v2, stored); strings.Contains(got, "s3cret") {
+		t.Fatalf("redactPluginText() = %q, leaks the saved secret", got)
+	}
+	// An editor that sends the field blank keeps it, still secret.
+	kept, err := mergePluginSettings(v2, stored, map[string]any{"token": "", "topic": "news"}, nil)
+	if err != nil || kept.Values["token"] != "s3cret" || !reflect.DeepEqual(kept.Secret, []string{"token"}) {
+		t.Fatalf("blank edit under v2 = %+v, %v; want the secret kept and still secret", kept, err)
+	}
+	// Replacing it takes v2's classification.
+	replaced, err := mergePluginSettings(v2, kept, map[string]any{"token": "visible"}, nil)
+	if err != nil || len(replaced.Secret) != 0 {
+		t.Fatalf("replaced under v2 = %+v, %v; want nothing secret", replaced, err)
+	}
+
+	// Settings stored before the record follow the current schema.
+	legacy, err := decodePluginSettings([]byte(`{"topic":"alerts","token":"s3cret"}`))
+	if err != nil || legacy.Secret != nil || legacy.Values["token"] != "s3cret" {
+		t.Fatalf("legacy envelope = %+v, %v", legacy, err)
 	}
 }
 
@@ -178,7 +235,7 @@ func TestCheckPluginSettings(t *testing.T) {
 // current schema no longer declares; public values stay readable.
 func TestRedactPluginText(t *testing.T) {
 	channel := &PluginChannel{PublicFields: []string{"topic"}, SecretFields: []string{"token"}}
-	stored := map[string]any{"topic": "alerts", "token": "tk_live_123", "old_key": "legacy-key-9", "pin": float64(4321), "loud": true}
+	stored := pluginSettings{Values: map[string]any{"topic": "alerts", "token": "tk_live_123", "old_key": "legacy-key-9", "pin": float64(4321), "loud": true}}
 	got := redactPluginText("token tk_live_123 rejected for alerts; legacy-key-9 expired; pin 4321; loud true; https://user:pw@example.com", channel, stored)
 	for _, leaked := range []string{"tk_live_123", "legacy-key-9", "4321", "user:pw"} {
 		if strings.Contains(got, leaked) {

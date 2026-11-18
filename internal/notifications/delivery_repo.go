@@ -425,12 +425,23 @@ func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int
 // A watchlist.available row created at or after arrivalCutoff, the fanout
 // staleness horizon, is kept whatever the retention settings: it is what
 // stops a later episode inside the horizon from telling the profile again.
+// A row with a webhook or plugin destination attempt still pending or
+// retrying is kept while the attempt was last touched within a week, well
+// past the retry schedule's end: its deletion would cascade to the attempt
+// and cancel a retry still on schedule. The bound lets the row go when an
+// attempt is stranded, such as while webhooks are turned off.
 func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff, arrivalCutoff time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM notification_deliveries
-		WHERE ((read_at IS NOT NULL AND read_at < $1)
-		       OR (read_at IS NULL AND created_at < $2))
-		  AND NOT (type = '`+DeliveryTypeWatchlistAvailable+`' AND created_at >= $3)`,
+		DELETE FROM notification_deliveries d
+		WHERE ((d.read_at IS NOT NULL AND d.read_at < $1)
+		       OR (d.read_at IS NULL AND d.created_at < $2))
+		  AND NOT (d.type = '`+DeliveryTypeWatchlistAvailable+`' AND d.created_at >= $3)
+		  AND NOT EXISTS (SELECT 1 FROM webhook_delivery_attempts a
+		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
+		                    AND a.attempted_at > now() - interval '7 days')
+		  AND NOT EXISTS (SELECT 1 FROM plugin_destination_delivery_attempts a
+		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
+		                    AND a.attempted_at > now() - interval '7 days')`,
 		readCutoff, unreadCutoff, arrivalCutoff)
 	if err != nil {
 		return 0, err
