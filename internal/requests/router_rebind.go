@@ -13,15 +13,16 @@ import (
 const unboundTargetError = "request server deleted while its plugin was not installed"
 
 // RebindOrphanedIntegrations points every server whose plugin installation no
-// longer exists at the installation that now provides the same request router
-// capability. Uninstalling a plugin and installing it again gives it a new
-// installation id, and request_integrations.installation_id has no foreign
-// key, so without this the servers keep the old id: the editor finds no
-// settings, status checks fail, and their live requests never settle.
+// longer exists at the current installation of the same plugin, when that
+// installation provides the server's request router capability. Uninstalling
+// a plugin and installing it again gives it a new installation id, and
+// request_integrations.installation_id has no foreign key, so without this
+// the servers keep the old id: the editor finds no settings, status checks
+// fail, and their live requests never settle.
 //
-// A server is rebound only when exactly one installation provides its
-// capability; with two candidates the admin has to pick. The rebind advances
-// the row's revision, so an editor opened on the old id saves as stale. It is
+// Servers follow their own plugin_id only: another plugin offering the same
+// capability never receives a server, or its API key. The rebind advances the
+// row's revision, so an editor opened on the old id saves as stale. It is
 // idempotent and returns the ids of the servers it rebound.
 func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -35,13 +36,14 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 	}
 	rows, err := tx.Query(ctx, `
 		WITH candidates AS (
-			SELECT i.id, min(pc.plugin_installation_id) AS installation_id,
-				count(DISTINCT pc.plugin_installation_id) AS matches
+			SELECT i.id, min(p.id) AS installation_id, count(DISTINCT p.id) AS matches
 			FROM request_integrations i
+			JOIN plugin_installations p ON p.plugin_id = i.plugin_id
 			JOIN plugin_capabilities pc
-				ON pc.capability_type = 'request_router.v1'
+				ON pc.plugin_installation_id = p.id
+				AND pc.capability_type = 'request_router.v1'
 				AND pc.capability_id = i.capability_id
-			WHERE i.installation_id IS NOT NULL
+			WHERE i.plugin_id <> '' AND i.installation_id IS NOT NULL
 				AND NOT EXISTS (SELECT 1 FROM plugin_installations p WHERE p.id = i.installation_id)
 			GROUP BY i.id
 		)

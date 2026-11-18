@@ -35,35 +35,55 @@ func installRouterPlugin(t *testing.T, pool *pgxpool.Pool, id int, pluginID, cap
 	}
 }
 
-func insertRouterServer(t *testing.T, pool *pgxpool.Pool, id, capabilityID string, installationID int) {
+// uninstallRouterPlugin deletes the installation as the plugin store does; the
+// copied tables have no foreign keys, so its capabilities go explicitly.
+func uninstallRouterPlugin(t *testing.T, pool *pgxpool.Pool, id int) {
 	t.Helper()
-	if _, err := pool.Exec(t.Context(), `
-		INSERT INTO request_integrations (id, name, enabled, base_url, capability_id, installation_id)
-		VALUES ($1, $1, true, 'http://router.invalid', $2, $3)`, id, capabilityID, installationID); err != nil {
+	if _, err := pool.Exec(t.Context(), `DELETE FROM plugin_capabilities WHERE plugin_installation_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `DELETE FROM plugin_installations WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
 }
 
+// insertRouterServer saves a server through the repository, which records the
+// plugin of the installation it names.
+func insertRouterServer(t *testing.T, repo *Repository, id, capabilityID string, installationID int) {
+	t.Helper()
+	if _, err := repo.CreateIntegration(t.Context(), Integration{
+		ID: id, Name: id, Enabled: true, BaseURL: "http://router.invalid",
+		CapabilityID: capabilityID, InstallationID: new(installationID),
+	}); err != nil {
+		t.Fatalf("create %s: %v", id, err)
+	}
+}
+
 // Reinstalling a request router plugin gives it a new installation id; its
-// servers follow it unless two installations offer the same capability.
+// servers follow it. Another plugin offering the same capability never gets
+// them, and a server with no recorded plugin is left for the admin.
 func TestRebindOrphanedRouterServersDatabase(t *testing.T) {
 	repo, pool := routerRebindRepository(t)
 	ctx := t.Context()
-	installRouterPlugin(t, pool, 20, "silo.requests.seerr", "seerr")
+	installRouterPlugin(t, pool, 10, "silo.requests.seerr", "seerr")
 	installRouterPlugin(t, pool, 30, "silo.requests.arr", "arr")
 	installRouterPlugin(t, pool, 31, "example.requests.arr", "arr")
-	insertRouterServer(t, pool, "orphaned", "seerr", 10)
-	insertRouterServer(t, pool, "ambiguous", "arr", 11)
-	insertRouterServer(t, pool, "bound", "arr", 30)
+	insertRouterServer(t, repo, "seerr", "seerr", 10)
+	insertRouterServer(t, repo, "arr", "arr", 30)
+	insertRouterServer(t, repo, "unrecorded", "seerr", 11)
+
+	uninstallRouterPlugin(t, pool, 10)
+	uninstallRouterPlugin(t, pool, 30)
+	installRouterPlugin(t, pool, 20, "silo.requests.seerr", "seerr")
 
 	rebound, err := repo.RebindOrphanedIntegrations(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(rebound, []string{"orphaned"}) {
-		t.Fatalf("rebound = %v, want [orphaned]", rebound)
+	if !slices.Equal(rebound, []string{"seerr"}) {
+		t.Fatalf("rebound = %v, want [seerr]", rebound)
 	}
-	for id, want := range map[string]int{"orphaned": 20, "ambiguous": 11, "bound": 30} {
+	for id, want := range map[string]int{"seerr": 20, "arr": 30, "unrecorded": 11} {
 		got, err := repo.GetIntegration(ctx, id)
 		if err != nil {
 			t.Fatal(err)
@@ -84,8 +104,8 @@ func TestDeleteUnboundRouterServerFailsItsTargetsDatabase(t *testing.T) {
 	repo, pool := routerRebindRepository(t)
 	ctx := t.Context()
 	installRouterPlugin(t, pool, 20, "silo.requests.seerr", "seerr")
-	insertRouterServer(t, pool, "unbound", "seerr", 10)
-	insertRouterServer(t, pool, "bound", "seerr", 20)
+	insertRouterServer(t, repo, "unbound", "seerr", 10)
+	insertRouterServer(t, repo, "bound", "seerr", 20)
 	insertLifecycleRequest(t, repo, "stuck", 1, 101, StatusQueued)
 	insertLifecycleRequest(t, repo, "tracked", 1, 102, StatusQueued)
 	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, integration_id, quality, status, download_phase)
