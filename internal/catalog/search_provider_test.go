@@ -425,29 +425,39 @@ func (fakeCatalogSearchStatusStateStore) DeadLetterCount(context.Context, string
 // index: searches fall back to Postgres until the sync task rebuilds it.
 func TestCatalogSearchStatusReportsMissingActiveIndex(t *testing.T) {
 	const uid = "silo_media_items_rebuild_1"
-	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"message":"Index ` + uid + ` not found.","code":"index_not_found"}`))
-	})
 	settings := DefaultCatalogSearchSettings()
 	settings.Provider = SearchProviderMeilisearch
 	settings.MeilisearchURL = "http://meilisearch.invalid"
-	store := fakeCatalogSearchStatusStateStore{fakeMeilisearchIndexStateStore{state: SearchIndexState{
-		ActiveIndexUID: uid,
-		SchemaVersion:  catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized),
-		DocumentCount:  1345309,
-	}}}
-	meili := &MeilisearchSearchProvider{stateRepo: store, client: client, config: MeilisearchProviderConfig{Embedder: settings.Embedder}}
-	service := &CatalogSearchService{settings: settings, provider: meili, meili: meili, state: store}
+	settings.SemanticEnabled = true
+	for name, indexSemantic := range map[string]bool{
+		"current index": true,
+		// An index built without vectors serves keyword search and already
+		// needs a rebuild; it can be missing all the same.
+		"keyword-only index": false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Index ` + uid + ` not found.","code":"index_not_found"}`))
+			})
+			store := fakeCatalogSearchStatusStateStore{fakeMeilisearchIndexStateStore{state: SearchIndexState{
+				ActiveIndexUID: uid,
+				SchemaVersion:  catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, indexSemantic, settings.BinaryQuantized),
+				DocumentCount:  1345309,
+			}}}
+			meili := &MeilisearchSearchProvider{stateRepo: store, client: client, config: MeilisearchProviderConfig{Embedder: settings.Embedder}}
+			service := &CatalogSearchService{settings: settings, provider: meili, meili: meili, state: store}
 
-	status := service.Status(t.Context())
-	if !status.Index.RebuildRequired || !status.Degraded || status.ActiveProvider != SearchProviderPostgres {
-		t.Fatalf("status = rebuild_required %t, degraded %t, active_provider %q; want true, true, postgres",
-			status.Index.RebuildRequired, status.Degraded, status.ActiveProvider)
-	}
-	if status.Index.DocumentCount != 0 {
-		t.Fatalf("document_count = %d for a missing index, want 0", status.Index.DocumentCount)
+			status := service.Status(t.Context())
+			if !status.Index.RebuildRequired || !status.Degraded || status.ActiveProvider != SearchProviderPostgres {
+				t.Fatalf("status = rebuild_required %t, degraded %t, active_provider %q; want true, true, postgres",
+					status.Index.RebuildRequired, status.Degraded, status.ActiveProvider)
+			}
+			if status.Index.DocumentCount != 0 {
+				t.Fatalf("document_count = %d for a missing index, want 0", status.Index.DocumentCount)
+			}
+		})
 	}
 }
 

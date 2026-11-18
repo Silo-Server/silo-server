@@ -271,7 +271,9 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 		} else {
 			status.Semantic = CatalogSearchSemanticStatus{Ready: false, DisabledReason: "semantic search disabled"}
 		}
-		if !status.Index.RebuildRequired && s.meili != nil {
+		// The probe also runs for a keyword-only index, which already needs a
+		// rebuild but still serves searches, so a missing one is reported too.
+		if s.meili != nil && (!status.Index.RebuildRequired || status.ActiveProvider == SearchProviderMeilisearch) {
 			status.Semantic.Capability = s.meili.SemanticCapability(ctx)
 			// The capability probe is the status read's only request to the
 			// active index. When Meilisearch says that index does not exist
