@@ -2920,6 +2920,19 @@ func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *mod
 	if s == nil || s.fileRepo == nil || folder == nil {
 		return true, fmt.Errorf("reconcile vanished file: scanner repositories not configured")
 	}
+	// The file can come back once it is checked, and a single-file scan can
+	// then see its row unchanged before this one marks it. That scan writes
+	// the row (confirmUnchangedFiles), so only a row written before the check
+	// below is marked.
+	checkedAt, err := s.scanInventoryTime(ctx)
+	if err != nil {
+		return true, fmt.Errorf("reconcile vanished file: %w", err)
+	}
+	if _, err := fspath.Stat(filePath); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return true, fmt.Errorf("stat media file %s: %w", filePath, err)
+	}
 
 	file, err := s.fileRepo.GetByPath(ctx, filePath)
 	if errors.Is(err, ErrFileNotFound) {
@@ -2932,7 +2945,7 @@ func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *mod
 		return true, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
 	}
 	if file.MissingSince == nil {
-		if err := s.fileRepo.MarkMissing(ctx, file.ID, file.FilePath, time.Now().UTC()); err != nil && !errors.Is(err, ErrFileNotFound) {
+		if err := s.fileRepo.MarkMissingWrittenBefore(ctx, file.ID, file.FilePath, time.Now().UTC(), checkedAt); err != nil && !errors.Is(err, ErrFileNotFound) {
 			return true, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
 		}
 	}
