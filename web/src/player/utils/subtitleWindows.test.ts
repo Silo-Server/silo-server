@@ -282,6 +282,40 @@ describe("createSubtitleWindowFetcher", () => {
     }
   });
 
+  // The server's final page answer: the track's artifact cannot reach this page.
+  // It must end the fetch loop at once — no backoff, no retry — so the overlay
+  // reports it once instead of spinning until the retry budget runs out.
+  it("ends the track when the server gives up on a page", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(() =>
+        respond([], false, {
+          status: 503,
+          json: {
+            type: "https://siloserver.org/docs/api/v2/problems/subtitle_page_unavailable",
+            status: 503,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const onTerminal = vi.fn();
+      const { fetcher, events } = makeFetcher(() => 100, { onTerminal });
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(onTerminal).toHaveBeenCalledTimes(1));
+      // The listener is told not to retry, and nothing is scheduled.
+      expect(events).toContain("hard");
+      expect(events).not.toContain("retryable");
+      fetcher.maybeFetch();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onTerminal).toHaveBeenCalledTimes(1);
+      fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("waits at least Retry-After before retrying a retryable failure", async () => {
     vi.useFakeTimers();
     try {

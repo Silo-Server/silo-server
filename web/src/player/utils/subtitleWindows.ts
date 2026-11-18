@@ -7,6 +7,7 @@
  */
 
 import { toMediaTime } from "./mediaTimeline";
+import { isSubtitlePageUnavailable } from "./subtitlePageUnavailable";
 import { isSubtitleSourceChanged } from "./subtitleSourceChanged";
 
 // The source-time range a bounded subtitle response produced. It is `<start>-<end>`
@@ -415,6 +416,7 @@ export function createSubtitleWindowFetcher(
     const url = options.windowUrl(seekStart, duration);
     let succeeded = false;
     let sourceChangedNow = false;
+    let pageUnavailableNow = false;
     let producedEnd = requestedEnd;
     let failure: { retryable: boolean; retryAfterMs: number } | null = null;
     try {
@@ -445,6 +447,16 @@ export function createSubtitleWindowFetcher(
           sourceChangedNotified = true;
           options.onSourceChanged?.();
         }
+        return;
+      }
+      // A page the server has given up on is final for this track: retrying it
+      // pays the same container prefix and produces the same answer. Report it
+      // once and stop instead of spending the retry budget on it.
+      if (await isSubtitlePageUnavailable(response)) {
+        pageUnavailableNow = true;
+        terminal = true;
+        options.onWindowFailed(false);
+        options.onTerminal?.();
         return;
       }
       if (!response.ok || !response.body) {
@@ -500,7 +512,7 @@ export function createSubtitleWindowFetcher(
         const mediaDuration = options.duration();
         if (mediaDuration > 0 && producedEnd >= mediaDuration) atEOF = true;
         options.onWindowCommitted(fresh);
-      } else if (!succeeded && !superseded && !disposed && !sourceChangedNow) {
+      } else if (!succeeded && !superseded && !disposed && !sourceChangedNow && !pageUnavailableNow) {
         // A real failure (error, stall, or non-ok response) rather than a seek
         // superseding this fetch: count it, then back off or give up.
         if (stalled) {
