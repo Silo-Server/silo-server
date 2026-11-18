@@ -997,14 +997,13 @@ function WatchPlaybackHostContent() {
   // on the detail page.
   const hasPostRollRef = useRef(false);
   const shuffledRef = useRef(false);
-  // A shuffled item with a later part plays that part before the shuffle
-  // moves on, so its post-roll waits for the last part.
+  // An item with a later part plays that part when this one ends, so its
+  // post-roll waits for the last part rather than offering to skip the rest.
   const awaitsLaterPartRef = useRef(false);
   useEffect(() => {
     hasPostRollRef.current = Boolean(episodeSeriesId || shuffleId);
     shuffledRef.current = Boolean(shuffleId);
-    awaitsLaterPartRef.current =
-      Boolean(shuffleId) && hasLaterPart(activeItem ?? undefined, activeRequest?.fileId);
+    awaitsLaterPartRef.current = hasLaterPart(activeItem ?? undefined, activeRequest?.fileId);
   }, [activeItem, activeRequest?.fileId, episodeSeriesId, shuffleId]);
 
   // Reset post-roll tracking when the playback session changes.
