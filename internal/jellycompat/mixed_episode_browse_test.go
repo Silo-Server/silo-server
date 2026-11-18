@@ -14,23 +14,31 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// mixedBrowseMovies is the media_items browse: it pages two movies and records
-// the types it was asked for.
+// mixedBrowseMovies is the media_items browse: it pages two movies, at most
+// pageCap per call when set, as a played filter's scan budget can end a page
+// short. It records the types and whether each call asked for a count.
 type mixedBrowseMovies struct {
 	countingContentService
-	types []string
+	pageCap int
+	types   []string
+	counted []bool
 }
 
 func (s *mixedBrowseMovies) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
 	s.types = append(s.types, params.Get("type"))
+	s.counted = append(s.counted, params.Get("include_total") == "true")
 	all := []upstreamListItem{{ContentID: "movie-1", Type: "movie", Title: "Movie 1"}, {ContentID: "movie-2", Type: "movie", Title: "Movie 2"}}
 	offset, _ := strconv.Atoi(params.Get("offset"))
 	limit, _ := strconv.Atoi(params.Get("limit"))
+	if s.pageCap > 0 {
+		limit = min(limit, s.pageCap)
+	}
+	page := slicePage(all, offset, limit)
 	total := 0
 	if params.Get("include_total") == "true" {
 		total = len(all)
 	}
-	return &upstreamBrowseResponse{Items: slicePage(all, offset, limit), Total: total}, nil
+	return &upstreamBrowseResponse{Items: page, Total: total, HasMore: offset+len(page) < len(all)}, nil
 }
 
 // mixedBrowseEpisodes is the episode browse over three episodes of one series.
@@ -64,25 +72,33 @@ func (r *mixedBrowseEpisodes) GetByIDs(_ context.Context, ids []string) ([]*mode
 
 // IncludeItemTypes=Episode,Movie is a union. The media_items browse holds no
 // episodes, so the episodes are paged after the other types and counted in
-// TotalRecordCount (#4257).
+// TotalRecordCount (#4257). The other types are counted only when the total or
+// the episodes' offset needs it, and episodes join a page only once the other
+// types have run out.
 func TestBrowseItemsWithEpisodeAndOtherTypesIncludesEpisodes(t *testing.T) {
+	type episodePage struct{ offset, limit int }
 	for _, tc := range []struct {
-		params            string
-		wantIDs           []string
-		wantTotal         int
-		wantEpisodeOffset int
-		wantEpisodeLimit  int
+		params       string
+		pageCap      int
+		wantIDs      []string
+		wantTotal    int
+		wantCounted  []bool
+		wantEpisodes []episodePage
 	}{
-		{"", []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, 5, 0, 22},
-		{"&StartIndex=1&Limit=2", []string{"movie-2", "ep-1"}, 5, 0, 1},
-		{"&StartIndex=3&Limit=10", []string{"ep-2", "ep-3"}, 5, 1, 10},
-		{"&Limit=2", []string{"movie-1", "movie-2"}, 5, 0, 0},
-		{"&Limit=0", nil, 5, 0, 0},
-		{"&StartIndex=3&Limit=1&EnableTotalRecordCount=false", []string{"ep-2"}, 0, 1, 1},
+		{"", 0, []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, 5, []bool{true}, []episodePage{{0, 22}}},
+		{"&StartIndex=1&Limit=2", 0, []string{"movie-2", "ep-1"}, 5, []bool{true}, []episodePage{{0, 1}}},
+		{"&StartIndex=3&Limit=10", 0, []string{"ep-2", "ep-3"}, 5, []bool{true}, []episodePage{{1, 10}}},
+		{"&Limit=2", 0, []string{"movie-1", "movie-2"}, 5, []bool{true}, []episodePage{{0, 0}}},
+		{"&Limit=0", 0, nil, 5, []bool{true}, []episodePage{{0, 0}}},
+		{"&Limit=2&EnableTotalRecordCount=false", 0, []string{"movie-1", "movie-2"}, 0, []bool{false}, nil},
+		{"&Limit=10&EnableTotalRecordCount=false", 0, []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, 0, []bool{false}, []episodePage{{0, 8}}},
+		{"&StartIndex=3&Limit=1&EnableTotalRecordCount=false", 0, []string{"ep-2"}, 0, []bool{false, true}, []episodePage{{1, 1}}},
+		{"&Limit=10", 1, []string{"movie-1"}, 5, []bool{true}, []episodePage{{0, 0}}},
+		{"&StartIndex=1&Limit=10", 1, []string{"movie-2", "ep-1", "ep-2", "ep-3"}, 5, []bool{true}, []episodePage{{0, 9}}},
 	} {
-		t.Run(tc.params, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s/cap=%d", tc.params, tc.pageCap), func(t *testing.T) {
 			codec := NewResourceIDCodec()
-			movies := &mixedBrowseMovies{}
+			movies := &mixedBrowseMovies{pageCap: tc.pageCap}
 			episodes := &mixedBrowseEpisodes{all: []*models.Episode{
 				{ContentID: "ep-1", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 1, Title: "One"},
 				{ContentID: "ep-2", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 2, Title: "Two"},
@@ -112,11 +128,18 @@ func TestBrowseItemsWithEpisodeAndOtherTypesIncludesEpisodes(t *testing.T) {
 			if !slices.Equal(gotIDs, tc.wantIDs) || result.TotalRecordCount != tc.wantTotal {
 				t.Fatalf("items = %v total = %d, want %v total %d", gotIDs, result.TotalRecordCount, tc.wantIDs, tc.wantTotal)
 			}
-			if !slices.Equal(movies.types, []string{"movie"}) {
-				t.Fatalf("media_items browse types = %v, want [movie]", movies.types)
+			if slices.ContainsFunc(movies.types, func(types string) bool { return types != "movie" }) {
+				t.Fatalf("media_items browse types = %v, want only movie", movies.types)
 			}
-			if len(episodes.pages) != 1 || episodes.pages[0].Offset != tc.wantEpisodeOffset || episodes.pages[0].Limit != tc.wantEpisodeLimit {
-				t.Fatalf("episode pages = %s, want one at offset %d limit %d", fmt.Sprint(episodes.pages), tc.wantEpisodeOffset, tc.wantEpisodeLimit)
+			if !slices.Equal(movies.counted, tc.wantCounted) {
+				t.Fatalf("media_items calls counted = %v, want %v", movies.counted, tc.wantCounted)
+			}
+			var gotEpisodes []episodePage
+			for _, page := range episodes.pages {
+				gotEpisodes = append(gotEpisodes, episodePage{page.Offset, page.Limit})
+			}
+			if !slices.Equal(gotEpisodes, tc.wantEpisodes) {
+				t.Fatalf("episode pages = %v, want %v", gotEpisodes, tc.wantEpisodes)
 			}
 		})
 	}

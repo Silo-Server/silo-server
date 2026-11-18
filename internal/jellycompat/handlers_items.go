@@ -2873,15 +2873,24 @@ func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Sessio
 
 // appendEpisodePage adds to result, the media_items page of the types beside
 // Episode, the episodes that follow them on query's page, and sets result.Total
-// to both parts. It returns the episodes' targets, keyed by content ID.
-func (h *ItemsHandler) appendEpisodePage(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, result *upstreamBrowseResponse) (map[string]compatEpisodeTarget, error) {
+// to both parts. Episodes join the page only once the other types run out: a
+// page that ends short while HasMore is set has more of them after it. It
+// returns the episodes' targets, keyed by content ID.
+func (h *ItemsHandler) appendEpisodePage(ctx context.Context, session *Session, query, browseQuery itemsQuery, repo episodeBrowser, result *upstreamBrowseResponse) (map[string]compatEpisodeTarget, error) {
 	episodeLimit := 0
 	if query.countOnly {
 		result.Items = nil
-	} else {
+	} else if !result.HasMore {
 		episodeLimit = max(query.limit-len(result.Items), 0)
 	}
-	otherTotal := result.Total
+	if episodeLimit == 0 && !query.enableTotalRecordCount {
+		result.Total = 0
+		return nil, nil
+	}
+	otherTotal, err := h.otherTypesTotal(ctx, session, query, browseQuery, result)
+	if err != nil {
+		return nil, err
+	}
 	episodeItems, targets, episodeTotal, _, err := h.browseEpisodeItems(ctx, session, query, repo, max(query.startIndex-otherTotal, 0), episodeLimit)
 	if err != nil {
 		return nil, err
@@ -2892,6 +2901,28 @@ func (h *ItemsHandler) appendEpisodePage(ctx context.Context, session *Session, 
 		result.Total = otherTotal + episodeTotal
 	}
 	return targets, nil
+}
+
+// otherTypesTotal returns how many items of the types beside Episode match
+// query. result is their page, which already carries the count when the
+// request asked for one. Otherwise a page that ran out of them ends at the
+// count, and only an empty page past StartIndex 0 needs a separate count.
+func (h *ItemsHandler) otherTypesTotal(ctx context.Context, session *Session, query, browseQuery itemsQuery, result *upstreamBrowseResponse) (int, error) {
+	if query.enableTotalRecordCount {
+		return result.Total, nil
+	}
+	if len(result.Items) > 0 || query.startIndex == 0 {
+		return query.startIndex + len(result.Items), nil
+	}
+	countQuery := browseQuery
+	countQuery.countOnly = true
+	countQuery.limit = 1
+	countQuery.enableTotalRecordCount = true
+	counted, err := h.content.BrowseItems(ctx, session, buildBrowseParams(countQuery))
+	if err != nil {
+		return 0, err
+	}
+	return counted.Total, nil
 }
 
 func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
@@ -2906,8 +2937,6 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 	if mixed {
 		browseQuery.itemTypes = slices.DeleteFunc(slices.Clone(query.itemTypes), func(t string) bool { return t == compatEpisodeType })
 		browseQuery.itemType = browseQuery.itemTypes[0]
-		// The episode page starts after the other types, so they are counted.
-		browseQuery.enableTotalRecordCount = true
 	}
 	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
 	// catalog treats a zero limit as its default page, so fetch one row.
@@ -2922,7 +2951,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 	}
 	var mixedTargets map[string]compatEpisodeTarget
 	if mixed {
-		if mixedTargets, err = h.appendEpisodePage(r.Context(), session, query, episodeRepo, result); err != nil {
+		if mixedTargets, err = h.appendEpisodePage(r.Context(), session, query, browseQuery, episodeRepo, result); err != nil {
 			writeCompatUpstreamError(w, err)
 			return
 		}
