@@ -25,7 +25,11 @@ import type {
 
 import { settingsKeys, subtitleKeys } from "./keys";
 import { isSettingValueMissing } from "./settingValues";
-import { invalidateItemDetails, runOrderedPreferenceWrite } from "./trackPreferences";
+import {
+  invalidateItemDetails,
+  runOrderedPreferenceWrite,
+  TRACK_PREFERENCE_WRITE_NETWORK_MODE,
+} from "./trackPreferences";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
 interface DownloadSubtitleResponse {
@@ -185,6 +189,7 @@ export function useDeleteSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    networkMode: TRACK_PREFERENCE_WRITE_NETWORK_MODE,
     mutationFn: (prefId: string) =>
       runOrderedPreferenceWrite("subtitle", prefId, async (profileContext) => {
         await v2("DELETE /api/v2/subtitle-prefs/{series_id}", {
@@ -236,6 +241,7 @@ export function useSetSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    networkMode: TRACK_PREFERENCE_WRITE_NETWORK_MODE,
     mutationFn: ({ prefId, selection }: SetSubtitlePreferenceInput) =>
       runOrderedPreferenceWrite("subtitle", prefId, (profileContext) =>
         v2("PUT /api/v2/subtitle-prefs/{series_id}", {

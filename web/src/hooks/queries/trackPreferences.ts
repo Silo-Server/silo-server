@@ -18,6 +18,12 @@ import {
 
 import { itemKeys } from "./keys";
 
+/**
+ * Sent even offline, so it fails at once: replayed on reconnect, a track
+ * choice would replace whatever another browser chose for the title meanwhile.
+ */
+export const TRACK_PREFERENCE_WRITE_NETWORK_MODE = "always";
+
 // Track preferences feed the effective defaults on item details; a
 // series-keyed preference feeds every episode's detail, so invalidate broadly.
 export function invalidateItemDetails(queryClient: QueryClient): Promise<unknown> {
@@ -63,6 +69,7 @@ export function useSetAudioPreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    networkMode: TRACK_PREFERENCE_WRITE_NETWORK_MODE,
     mutationFn: ({ prefId, trackIndex, track }: SetAudioPreferenceInput) =>
       runOrderedPreferenceWrite("audio", prefId, (profileContext) =>
         v2("PUT /api/v2/audio-prefs/{series_id}", {
@@ -87,6 +94,7 @@ export function useDeleteAudioPreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    networkMode: TRACK_PREFERENCE_WRITE_NETWORK_MODE,
     mutationFn: (prefId: string) =>
       runOrderedPreferenceWrite("audio", prefId, (profileContext) =>
         v2("DELETE /api/v2/audio-prefs/{series_id}", {
