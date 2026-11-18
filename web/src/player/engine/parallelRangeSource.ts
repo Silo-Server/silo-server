@@ -8,7 +8,7 @@
  * until the page seeks, while the stripes warm their connections. At most 3 other
  * ranges use the stripe URL at once; a fourth goes to the plan's own URL, whose
  * connection is already open, so no range waits on a cold fourth stripe connection. The first
- * 5xx answer or transport failure (fetch, body read, early end) from the stripe URL ends its use:
+ * answer other than a readable 206, or transport failure (fetch, body read, early end), from the stripe URL ends its use:
  * the rest of that range and every later range go to the plan's own URL, with no retry spent on the
  * stripe URL.
  *
@@ -128,7 +128,7 @@ export class ParallelRangeSource extends InternalUrlSource {
   private firstTotal: number | null = null;
   private firstModified: string | null = null;
   /**
-   * Set by the first 5xx answer or transport failure on the stripe URL; every range then uses the
+   * Set by the first refusal or transport failure on the stripe URL; every range then uses the
    * plan's URL.
    */
   private stripeFailed = false;
@@ -324,9 +324,11 @@ export class ParallelRangeSource extends InternalUrlSource {
   /**
    * Reads `[range.start, range.end)` into `range.chunks`. A transport failure
    * (a fetch error, a body-read error, a body that ends early) retries the rest
-   * of the range through `getRetryDelay`, counted per range from 1, and fails
-   * the range when the delay is null. A 5xx answer or a transport failure from
-   * the stripe URL is no retry: it switches the source to the plan's URL, which
+   * of the range through `getRetryDelay`, counted from 1 since the range last
+   * received bytes, and fails the range when the delay is null. A body from the
+   * plan's URL that ends early after sending bytes is asked for again with no
+   * retry counted. An answer other than a readable 206, or a transport failure,
+   * from the stripe URL is no retry: it switches the source to the plan's URL, which
    * then serves the rest of the range. A response that breaks the byte checks
    * fails it at once. Any failure ends up in `range.failure`; the range's slot
    * is freed at its end.
@@ -355,7 +357,9 @@ export class ParallelRangeSource extends InternalUrlSource {
           failures = await this.failed(failures, error, url, signal, onStripe);
           continue;
         }
-        if (onStripe && response.status >= 500) {
+        // Any answer from the stripe URL that is not a readable 206 is the stripe URL failing:
+        // a refusal there says nothing about the plan's URL.
+        if (onStripe && (response.status !== 206 || !response.headers.get("Content-Range"))) {
           void response.body?.cancel().catch(() => {});
           this.stripeFailed = true;
           continue;
@@ -367,13 +371,16 @@ export class ParallelRangeSource extends InternalUrlSource {
           );
         }
         const reader = response.body.getReader();
+        // A response that delivered bytes made progress: its failure starts the count again,
+        // as the stock source does, so a link that keeps dropping still finishes the range.
+        let received = 0;
         let bodyFailed = false;
         while (true) {
           let result: ReadableStreamReadResult<Uint8Array>;
           try {
             result = await reader.read();
           } catch (error) {
-            failures = await this.failed(failures, error, url, signal, onStripe);
+            failures = await this.failed(received > 0 ? 0 : failures, error, url, signal, onStripe);
             bodyFailed = true;
             break;
           }
@@ -386,10 +393,14 @@ export class ParallelRangeSource extends InternalUrlSource {
           }
           range.chunks.push(result.value);
           position += result.value.length;
+          received += result.value.length;
           notify();
         }
         if (bodyFailed) continue;
         if (position < responseEnd) {
+          // The plan's URL ended its answer early after sending bytes: ask for the rest, as the
+          // stock source does, without a retry or a stall report.
+          if (received > 0 && !onStripe) continue;
           failures = await this.failed(
             failures,
             new Error(`Response for bytes=${range.start}-${range.end - 1} ended early`),

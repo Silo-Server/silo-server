@@ -536,14 +536,14 @@ describe("ParallelRangeSource failures", () => {
     expect(getRetryDelay).not.toHaveBeenCalled();
   });
 
-  it("fails a range at its fourth failure, counting fetch, body and short-body failures together", async () => {
+  it("fails a range at its fourth failure in a row that delivered nothing", async () => {
     const server = new FakeServer(pattern(SIZE));
     const failures: Fault[] = [
       // The stripe URL's fetch error moves the range to the head URL and counts no failure.
       { kind: "fetchError" },
       { kind: "fetchError" },
-      { kind: "bodyError", afterBytes: 512 * KIB },
-      { kind: "short", bytes: 256 * KIB },
+      { kind: "bodyError", afterBytes: 0 },
+      { kind: "short", bytes: 0 },
       { kind: "fetchError" },
     ];
     let seen = 0;
@@ -557,8 +557,26 @@ describe("ParallelRangeSource failures", () => {
     expect(getRetryDelay.mock.calls.map(([attempts]) => attempts)).toEqual([1, 2, 3, 4]);
   });
 
+  // A lossy link drops a body again and again; each drop that delivered bytes is progress.
+  it("finishes a range whose every answer fails after delivering bytes", async () => {
+    const server = new FakeServer(pattern(SIZE));
+    let seen = 0;
+    server.fault = (request): Fault | undefined => {
+      if (request.url !== HEAD_URL || request.start >= FIRST_STRIPE || seen >= 8) return undefined;
+      return seen++ % 2 === 0
+        ? { kind: "bodyError", afterBytes: MIB }
+        : { kind: "short", bytes: MIB };
+    };
+    const getRetryDelay = vi.fn((attempts: number) => (attempts < 4 ? 0 : null));
+    const { source } = makeSource(server, { getRetryDelay });
+    expect(same(await read(source, 0, 20 * MIB), server.bytes.subarray(0, 20 * MIB))).toBe(true);
+    // A body error restarts the count; a short body is asked for again with no retry.
+    expect(getRetryDelay.mock.calls.map(([attempts]) => attempts)).toEqual([1, 1, 1, 1]);
+  });
+
   it.each([
     ["a 502", { kind: "status", status: 502 }],
+    ["a 404", { kind: "status", status: 404 }],
     ["a network error", { kind: "fetchError" }],
     ["a body-read error", { kind: "bodyError", afterBytes: 512 * KIB }],
     ["a short body", { kind: "short", bytes: 256 * KIB }],
