@@ -4488,6 +4488,12 @@ export interface StreamNode {
    * servers.
    */
   source_access?: NodeSourceAccess;
+  /**
+   * Update-body field names the node declares from its own environment. The
+   * server refuses a change to any of them, so the editor shows them
+   * read-only. Absent on servers that predate node declarations.
+   */
+  env_managed?: string[];
 }
 
 /** How a transcode node reads source media. */

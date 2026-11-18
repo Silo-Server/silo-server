@@ -2036,6 +2036,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusAccepted {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			// The caller tries the next candidate on any refused start; a
+			// node at its own job cap is also held back from the next one.
+			if nodepool.RefusedAtCapacity(resp) {
+				nodepool.ReportAtCapacity(h.NodePlanner, transcodeNodeURL)
+			}
 			if request.ToneMapMode != "" {
 				if validationErr := transcodenode.ToneMapExecutionErrorForResponse(
 					resp.StatusCode,

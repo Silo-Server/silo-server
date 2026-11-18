@@ -1274,14 +1274,22 @@ func main() {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, redisClient)
 		streamTelemetryRegistry.Start(appCtx)
 
-		// Resolved before the watcher starts: NODE_URL is this process's
-		// stream_nodes identity, and the watcher needs it on its very first
-		// load to overlay the node's own acceleration overrides.
-		// config.LoadBootstrap refuses a proxy without it.
-		nodeURL := os.Getenv("NODE_URL")
-		nodeName := os.Getenv("NODE_NAME")
+		// Resolved before the watcher starts: SILO_NODE_URL (or NODE_URL) is
+		// this process's stream_nodes identity, and the watcher needs it on
+		// its very first load to overlay the node's own acceleration
+		// overrides. config.LoadBootstrap refuses a proxy without it.
+		nodeURL, givenName := proxyNodeIdentity(os.Getenv)
+		nodeName := givenName
 		if nodeName == "" {
 			nodeName = mode
+		}
+		// The proxy writes what it declares from its environment, and with
+		// SILO_NODE_REGISTER adds its own row, before the watcher first
+		// reads that row.
+		declaredRow, declareErr := declareProxyNode(appCtx, pool, eventBus, proxyDeclarationIdentity(nodeURL, givenName, nodeName, proxyRegistersItself()))
+		if declareErr != nil {
+			slog.Error("proxy cannot start: its node declaration was not applied", "error", declareErr)
+			os.Exit(1)
 		}
 
 		bootstrap := nodeconfig.BootstrapOverrides{
@@ -1295,6 +1303,9 @@ func main() {
 		}
 		watcher := nodeconfig.NewWatcher(pool, dataCipher, eventBus, bootstrap)
 		watcher.OnLoad(normalizeLoadedConfig)
+		if declaredRow != nil {
+			watcher.PinNodeRow(declaredRow.ID, declaredRow.URL)
+		}
 		if err := watcher.Start(appCtx); err != nil {
 			slog.Error("config watcher start failed", "error", err)
 			os.Exit(1)

@@ -89,6 +89,9 @@ func ProtocolStreaming() []workerprotocol.Operation {
 					op.Responses[status].Headers = map[string]*huma.Param{ToneMapExecutionErrorHeader: {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Existing tone-map refusal code when available."}}
 				}
 			}
+			if mount.kind == kindRemux && method == http.MethodGet {
+				op = withJobCapRefusal(op, "a GET for a playback session the node runs a session or progressive remux for, or served a progressive remux for within the last ten minutes (a seek or a reconnect)")
+			}
 			if method == http.MethodHead {
 				for _, response := range op.Responses {
 					response.Content = nil

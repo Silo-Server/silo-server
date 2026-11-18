@@ -9,7 +9,7 @@ with its own PostgreSQL, and proxy and transcode nodes that use it (see
 [Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
 main server, a transcode node when `.env` sets `MODE`, `SILO_CORE_URL` and
 `SILO_NODE_KEY`, or a proxy node when it sets `MODE`, `DATABASE_URL`,
-`REDIS_URL`, and `NODE_URL`. Hardware transcoding and node access are commented
+`REDIS_URL`, and `SILO_NODE_URL` (or `NODE_URL`). Hardware transcoding and node access are commented
 out in it.
 `docker-compose.advanced.yml` is the earlier multi-container file, kept for
 installs that stay on that layout; it runs the same image, whose bundled
@@ -289,9 +289,11 @@ main server and what it needs from the network.
 With `MODE=proxy`, `init-config` requires `DATABASE_URL` and `REDIS_URL`. Silo
 already keeps migrations and `POSTGRES_TUNE` to the primary modes
 (`integrated`, `api`), so a proxy never changes the shared database's schema or
-settings. Silo itself refuses to start a proxy without `NODE_URL`, its
-identity. An administrator registers the proxy's URL on the main server, which
-checks its health at that registered URL; it can differ from `NODE_URL` (see
+settings. Silo itself refuses to start a proxy without `SILO_NODE_URL` (or
+`NODE_URL`), its identity. With `SILO_NODE_REGISTER=true`, a proxy that
+matches no row on the main server registers itself at that URL; an
+administrator can instead register it at another URL, which the main server checks its health at and which can differ
+from `SILO_NODE_URL` (see
 [Proxy origins by access path](../admin-api.md#proxy-origins-by-access-path)).
 
 A main server shares its bundled services with proxies when `.env` sets

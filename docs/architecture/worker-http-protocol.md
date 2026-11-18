@@ -73,6 +73,30 @@ their existing unavailable shapes. Reads, deletes, stops and the traffic of
 running sessions are unaffected. Its health `status` is `draining`, then
 `drained`.
 
+A transcode node that declares a job cap (`SILO_NODE_MAX_TRANSCODES`, see
+[transcode nodes](transcode-nodes.md#what-the-node-enforces)) refuses new work
+past it with `503`, `Retry-After: 5` and `X-Silo-Node-Refusal: at_capacity`
+(`nodepool.NodeRefusalHeader`). It counts what health reports as
+`active_jobs`, plus work it has admitted and not yet counted, under one lock,
+so two starts arriving at the cap less one cannot both pass. The routes that
+count a job refuse: `POST /transcode/start` (plain text, as when draining),
+`POST /downloads/prepare` (plain text), `POST /trickplay/extract` (reason
+`node_busy`) and a progressive remux `GET`. Work that continues a job the node
+holds is never refused: a start with a session id the node runs, a start or
+remux for a `playback_session_id` it runs exactly one session or remux for
+(the replacement overlaps what it replaces; a third transport for one
+playback session is new work), a remux `GET` for a playback session it runs
+nothing for now but served within ten minutes (a seek or a reconnect), a
+prepare whose artifact it is
+preparing or has prepared with the same recipe (one it has to encode again
+takes a slot), and the rebuild of a lost HLS session. Chapter-thumbnail extraction and media
+sampling count no job and are not capped. A node that declares a
+prepared-download budget (`SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES`) refuses a
+new preparation once its last measurement of the directory reaches it, with
+`X-Silo-Node-Refusal: storage_full`. Every other `503`, a draining refusal
+included, carries no `X-Silo-Node-Refusal`, and a core that does not read the
+header treats these refusals as it treats a draining one.
+
 `POST /chapter-thumbnails/extract` on the transcode listener takes the existing
 `chapterthumbs.RemoteExtractRequest` JSON shape and returns an `image/jpeg` frame.
 Only `source_grant` is required by the handler; omitted seek/tone-map options
@@ -464,6 +488,7 @@ serve them. The `x-silo-worker-protocols` extension lists them under listener
 | Route | Purpose |
 | --- | --- |
 | `GET config` | The calling node's configuration document, with a strong `ETag`. |
+| `PUT registration` | The configuration the node declares from its environment, sent at startup; the API writes it to the node's row and locks those fields. |
 | `POST report` | Session records and stream telemetry, every second, fenced on `(boot_id, seq)`. |
 | `POST logs` | A batch of up to 100 operational log entries. |
 | `POST health-changed` | The node's drain state changed; the API publishes `node_drain_changed`. |
@@ -481,9 +506,10 @@ budgets but under a per-node cap on concurrent responses (`429` with
 graceful shutdown.
 
 [Transcode nodes](transcode-nodes.md) is the authority for what each route
-checks, its statuses, the two per-node request budgets (one for config, report,
-logs, health-changed and revoke-recipes, one for resolve and sources/open, both
-answering `429` with `Retry-After`), and how the node calls them.
+checks, its statuses, the three per-node request budgets (one for config,
+report, logs, health-changed and revoke-recipes, one for resolve and
+sources/open, and a much smaller one for registration, all answering `429`
+with `Retry-After`), and how the node calls them.
 
 ### Source grants
 
