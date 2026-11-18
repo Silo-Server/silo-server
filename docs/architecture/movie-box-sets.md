@@ -23,10 +23,11 @@ its own card. This note records the invariants; the wire contract is in
   parts in no reliable order, so the sync sorts them by release date, with
   undated (announced) parts last.
 - One row serves every library. It is fetched in the metadata language of
-  the first library, in library order, that holds one of the collection's
-  movies with box sets on, and `language` records which. TMDB leaves the
-  name or overview empty where its translation lacks them; those come from
-  TMDB's English answer. TMDB picks the poster for the language itself.
+  the first enabled library, in library order, that holds one of the
+  collection's movies with box sets on, and `language` records which. TMDB
+  leaves the name or overview empty where its translation lacks them; those
+  come from TMDB's English answer. TMDB picks the poster for the language
+  itself.
 - The stored name is TMDB's. Reads show it through `catalog.BoxSetTitle`
   ("… Collection" becomes "… Box Set"). Search matches the name without that
   suffix (`boxSetStemSQL`, the same rule in SQL; change the two together),
