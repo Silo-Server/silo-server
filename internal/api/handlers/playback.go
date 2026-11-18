@@ -1961,7 +1961,8 @@ func alignedSeekSeconds(seekSeconds float64, segmentDuration int, targetVideoCod
 	return float64(computeStartSegment(seekSeconds, segmentDuration) * segmentDuration)
 }
 
-// HandleGetTranscodeManifest handles GET /playback/transcode/{session_id}/master.m3u8.
+// HandleGetTranscodeManifest handles GET /playback/transcode/{session_id}/master.m3u8,
+// and HEAD, whose body net/http drops.
 // Legacy transports allow the session UUID to act as the access capability.
 // Header-authenticated V3 transports require the live session owner on every
 // request; their UUID is only a route identifier.
