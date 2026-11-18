@@ -337,11 +337,43 @@ func TestCompleteRefreshDropsAClearedMatchsValuesDB(t *testing.T) {
 	}
 	nonce := time.Now().UnixNano() % 100_000_000
 	wrong := &stubWrongMatch{tvdb: strconv.FormatInt(710_000_000+nonce, 10), sportarr: fmt.Sprintf("lg-%d", nonce)}
-	specialist := &stubSpecialist{sportarr: wrong.sportarr}
-	h := newSeriesRefreshHarness(t, dsn, specialist, wrong)
+	h := newSeriesRefreshHarness(t, dsn, &stubSpecialist{sportarr: wrong.sportarr}, wrong)
 	h.refreshed.live = h.service
 	ctx := t.Context()
+	folderID, seriesID := seedWrongMatchSeries(t, h, nonce, wrong)
 
+	// The admin clears the wrong TVDB ID, sets and locks the genres, and takes
+	// TVDB off the library.
+	empty, genres := "", []string{"Admin Genre"}
+	locks := []int{int(metadata.FieldGenres)}
+	if err := h.items.UpdateMetadata(ctx, seriesID, &catalog.MetadataUpdate{TvdbID: &empty, Genres: &genres, LockedFields: &locks}); err != nil {
+		t.Fatalf("clear the wrong TVDB ID: %v", err)
+	}
+	wrong.off = true
+
+	req, err := h.resolver.ResolveWithMode(ctx, seriesID, adminjob.ItemRefreshModeComplete)
+	if err != nil {
+		t.Fatalf("resolve for complete refresh: %v", err)
+	}
+	if _, err := h.refresh.Execute(ctx, *req, nil); err != nil {
+		t.Fatalf("complete refresh: %v", err)
+	}
+
+	// The rebuilt series is still the item that holds the files and history.
+	for name, link := range h.links(t, folderID) {
+		if link[0] != seriesID {
+			t.Errorf("%s linked to %q after complete refresh, want %q", name, link[0], seriesID)
+		}
+	}
+	assertRebuiltSeries(t, h, seriesID, "sportarr="+wrong.sportarr)
+}
+
+// seedWrongMatchSeries scans and matches a two-episode series to the wrong
+// match, then stores the specialist's ID on it as well, as when its NFO
+// declares it. It returns the library and the series' content ID.
+func seedWrongMatchSeries(t *testing.T, h *seriesRefreshHarness, nonce int64, wrong *stubWrongMatch) (int, string) {
+	t.Helper()
+	ctx := t.Context()
 	root := filepath.Join(t.TempDir(), "sport")
 	seasonDir := filepath.Join(root, "Race Series (2019)", "Season 01")
 	if err := os.MkdirAll(seasonDir, 0o755); err != nil {
@@ -379,45 +411,22 @@ func TestCompleteRefreshDropsAClearedMatchsValuesDB(t *testing.T) {
 	if _, err := h.worker.ProcessAllByFolderAndPathPrefix(ctx, folder.ID, root, time.Time{}); err != nil {
 		t.Fatalf("match fixture: %v", err)
 	}
-	before, err := h.items.GetByID(ctx, seriesID)
-	if err != nil {
-		t.Fatalf("load wrong match: %v", err)
+	if before, err := h.items.GetByID(ctx, seriesID); err != nil || before.Tagline != "Watch your back." {
+		t.Fatalf("fixture series %+v, err %v; want the wrong match's tagline", before, err)
 	}
-	if before.Tagline != "Watch your back." {
-		t.Fatalf("fixture tagline = %q, want the wrong match's", before.Tagline)
-	}
-
-	// The series also holds the specialist's ID, as when its NFO declares it.
 	if _, err := h.pool.Exec(ctx, `
 		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
 		VALUES ($1, 'series', 'sportarr', $2)`, seriesID, wrong.sportarr); err != nil {
 		t.Fatalf("store the specialist's ID: %v", err)
 	}
+	return folder.ID, seriesID
+}
 
-	// The admin clears the wrong TVDB ID, sets and locks the genres, and takes
-	// TVDB off the library.
-	empty, genres := "", []string{"Admin Genre"}
-	locks := []int{int(metadata.FieldGenres)}
-	if err := h.items.UpdateMetadata(ctx, seriesID, &catalog.MetadataUpdate{TvdbID: &empty, Genres: &genres, LockedFields: &locks}); err != nil {
-		t.Fatalf("clear the wrong TVDB ID: %v", err)
-	}
-	wrong.off = true
-
-	req, err := h.resolver.ResolveWithMode(ctx, seriesID, adminjob.ItemRefreshModeComplete)
-	if err != nil {
-		t.Fatalf("resolve for complete refresh: %v", err)
-	}
-	if _, err := h.refresh.Execute(ctx, *req, nil); err != nil {
-		t.Fatalf("complete refresh: %v", err)
-	}
-
-	// The rebuilt series is still the item that holds the files and history.
-	for name, link := range h.links(t, folder.ID) {
-		if link[0] != seriesID {
-			t.Errorf("%s linked to %q after complete refresh, want %q", name, link[0], seriesID)
-		}
-	}
-	after, err := h.items.GetByID(ctx, seriesID)
+// assertRebuiltSeries checks that the rebuilt series holds only the
+// specialist's values, the admin's locked genres and wantIDs.
+func assertRebuiltSeries(t *testing.T, h *seriesRefreshHarness, seriesID, wantIDs string) {
+	t.Helper()
+	after, err := h.items.GetByID(t.Context(), seriesID)
 	if err != nil {
 		t.Fatalf("load rebuilt series: %v", err)
 	}
@@ -436,13 +445,13 @@ func TestCompleteRefreshDropsAClearedMatchsValuesDB(t *testing.T) {
 	if len(after.Genres) != 1 || after.Genres[0] != "Admin Genre" {
 		t.Errorf("rebuilt series genres = %v, want the admin's locked genres", after.Genres)
 	}
-	var sportarr string
-	if err := h.pool.QueryRow(ctx, `
+	var ids string
+	if err := h.pool.QueryRow(t.Context(), `
 		SELECT COALESCE(string_agg(provider || '=' || provider_id, ',' ORDER BY provider), '')
-		FROM media_item_provider_ids WHERE content_id = $1`, seriesID).Scan(&sportarr); err != nil {
+		FROM media_item_provider_ids WHERE content_id = $1`, seriesID).Scan(&ids); err != nil {
 		t.Fatal(err)
 	}
-	if want := "sportarr=" + wrong.sportarr; sportarr != want {
-		t.Errorf("rebuilt series provider IDs = %q, want %q", sportarr, want)
+	if ids != wantIDs {
+		t.Errorf("rebuilt series provider IDs = %q, want %q", ids, wantIDs)
 	}
 }
