@@ -246,14 +246,19 @@ field cannot read as an empty declaration.
 The table is for a node that declares something. A node that declares nothing
 sends its empty body once and starts whatever the answer: a failure is tried
 again every 30 seconds in the background, a missing route included, since a
-gateway that briefly refused the route looks the same.
+gateway that briefly refused the route looks the same. It logs once, at info
+level, that the fields stay read-only until the core takes it.
+
+The core also answers `404` when the node's row was deleted between
+authentication and the write. The node cannot tell that from a missing route
+and treats both alike; its next configuration read then gets `401`.
 
 | Answer | Body | Node |
 |---|---|---|
 | `200` | `{"node": {"id", "name", "url"}, "env_managed": [...]}` | Continues to the configuration read. |
 | `422` | `{"reason": "invalid", "field", "detail"}` | Exits, naming the variable for `field`; `field` is empty for a body the core could not read. |
 | `409` | `{"reason": "url_taken", "field": "url", "detail"}` | Exits, naming `SILO_NODE_URL`. |
-| `401`, `429`, `5xx`, no answer | text | Retries with the configuration read's backoff, 1 to 30 seconds. |
+| `401`, `429`, `5xx` other than `501`, no answer | text | Retries with the configuration read's backoff, 1 to 30 seconds. |
 | `403`, `404`, `405`, `501` (a core without the route, or a gateway in front of it that blocks the request) | text | Starts, warns once, and offers the declaration every 30 seconds until it is accepted, then rereads its configuration. |
 
 The route has its own per-node budget on each API replica, far below the

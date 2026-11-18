@@ -82,6 +82,11 @@ func Release(ctx, background context.Context, registrar Registrar) {
 		slog.WarnContext(ctx, "the core refused to release this node's earlier declaration", "component", "nodeconfig", "error", err)
 		return
 	}
+	// Info, not a warning: against a core that predates the route this is
+	// every start, and nothing here needs an operator. It is the explanation
+	// for a field that stays read-only in the node editor.
+	slog.InfoContext(ctx, "the core has not taken this node's empty declaration; fields it declared at an earlier start stay read-only until it does. Offering it again every poll",
+		"component", "nodeconfig", "route", "PUT "+nodecontrol.PathRegistration, "error", err)
 	go RetryDeclaration(background, registrar, nodecontrol.Registration{}, func(*nodecontrol.RegistrationResult) {})
 }
 
