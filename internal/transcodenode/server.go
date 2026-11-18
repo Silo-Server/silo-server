@@ -2459,17 +2459,25 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	// the source opens, so a refusal costs the core no open, and before the
 	// remux is registered, so a request the cap turns away is never what
 	// another request for the same playback session continues.
-	overlap, continues := s.claimContinuation(playbackSessionID, time.Now())
-	defer overlap.release()
-	var slot *jobSlot
-	if r.Method != http.MethodHead && !continues {
-		admitted, ok := s.admitJob()
-		if !ok {
-			writeAtCapacity(w)
-			return
+	// A HEAD starts and registers nothing, so it holds neither a slot nor
+	// the allowance a GET for the same playback session may need.
+	var (
+		slot      *jobSlot
+		overlap   *continuation
+		continues bool
+	)
+	if r.Method != http.MethodHead {
+		overlap, continues = s.claimContinuation(playbackSessionID, time.Now())
+		defer overlap.release()
+		if !continues {
+			admitted, ok := s.admitJob()
+			if !ok {
+				writeAtCapacity(w)
+				return
+			}
+			slot = admitted
+			defer slot.release()
 		}
-		slot = admitted
-		defer slot.release()
 	}
 	// A GET opens its source once, before admission, and holds it for the
 	// request; a source the core withdraws ends it. HEAD reads no media.

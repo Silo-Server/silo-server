@@ -85,8 +85,9 @@ count a job refuse: `POST /transcode/start` (plain text, as when draining),
 holds is never refused: a start with a session id the node runs, a start or
 remux for a `playback_session_id` it runs exactly one session or remux for
 (the replacement overlaps what it replaces; a third transport for one
-playback session is new work), a remux `GET` for a playback session it served
-within ten minutes (a seek or a reconnect), a prepare whose artifact it is
+playback session is new work), a remux `GET` for a playback session it runs
+nothing for now but served within ten minutes (a seek or a reconnect), a
+prepare whose artifact it is
 preparing or has prepared with the same recipe (one it has to encode again
 takes a slot), and the rebuild of a lost HLS session. Chapter-thumbnail extraction and media
 sampling count no job and are not capped. A node that declares a
