@@ -3150,8 +3150,7 @@ export function usePlaybackSession(
                 replanning: false,
                 replanningQuality: false,
                 errorTitle: "Playback update timed out",
-                error:
-                  "The server didn't answer the playback update in time. Please try again.",
+                error: "The server didn't answer the playback update in time. Please try again.",
                 errorReason: "replan_timeout",
                 errorRetryable: true,
               }

@@ -512,7 +512,13 @@ export function createSubtitleWindowFetcher(
         const mediaDuration = options.duration();
         if (mediaDuration > 0 && producedEnd >= mediaDuration) atEOF = true;
         options.onWindowCommitted(fresh);
-      } else if (!succeeded && !superseded && !disposed && !sourceChangedNow && !pageUnavailableNow) {
+      } else if (
+        !succeeded &&
+        !superseded &&
+        !disposed &&
+        !sourceChangedNow &&
+        !pageUnavailableNow
+      ) {
         // A real failure (error, stall, or non-ok response) rather than a seek
         // superseding this fetch: count it, then back off or give up.
         if (stalled) {
