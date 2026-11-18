@@ -55,19 +55,19 @@ const proxyDeclarationRetryInterval = 30 * time.Second
 // not start with: a value the store refuses, named by its variable, a
 // declaration with no row to hold it, or a database that cannot take the
 // write.
-func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string) (*nodepool.Node, error) {
+func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, identity nodepool.ProxyIdentity) (*nodepool.Node, error) {
 	input, err := nodedeclare.FromEnv(nodepool.NodeTypeProxy, os.Getenv)
 	if err != nil {
 		return nil, err
 	}
-	node, err := applyProxyDeclaration(ctx, pool, eventBus, nodeURL, name, input)
+	node, err := applyProxyDeclaration(ctx, pool, eventBus, identity, input)
 	if predatesDeclarations(err) {
 		// Compose starts a proxy beside the main server, so the migration
 		// adding env_managed is often still running; an older main server
 		// never adds it. Either way the proxy runs as before until it does.
 		slog.WarnContext(ctx, "the database predates node declarations; starting without this proxy's declaration and retrying until the main server has migrated it",
 			"component", "nodeconfig")
-		go retryProxyDeclaration(ctx, pool, eventBus, nodeURL, name, input)
+		go retryProxyDeclaration(ctx, pool, eventBus, identity, input)
 		return nil, nil
 	}
 	if errors.Is(err, nodepool.ErrProxyNotRegistered) {
@@ -75,7 +75,7 @@ func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.Ev
 			// As before declarations: the watcher reports the missing row.
 			return nil, nil
 		}
-		return nil, fmt.Errorf("this proxy declares configuration but matches no node on the main server by URL (%s) or name: add it there, or set %s=true to have it add itself", nodeURL, envNodeRegister)
+		return nil, fmt.Errorf("this proxy declares configuration but matches no node on the main server by URL (%s) or name: add it there, or set %s=true to have it add itself", identity.URL, envNodeRegister)
 	}
 	if errors.Is(err, nodepool.ErrNodeIdentityConflict) && len(input.SetFields()) == 0 {
 		slog.WarnContext(ctx, "this proxy's URL or name matches a row it cannot register as; starting without registering",
@@ -86,9 +86,11 @@ func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.Ev
 }
 
 // retryProxyDeclaration applies the declaration every
-// proxyDeclarationRetryInterval until the database has the column. The
-// configuration watcher finds the row by URL or name on its next reload.
-func retryProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string, input nodepool.UpdateNodeInput) {
+// proxyDeclarationRetryInterval until it lands or the store refuses it: a
+// database that still lacks the column, or one that briefly cannot be
+// reached, is tried again. The configuration watcher finds the row by URL or
+// name on its next reload.
+func retryProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, identity nodepool.ProxyIdentity, input nodepool.UpdateNodeInput) {
 	ticker := time.NewTicker(proxyDeclarationRetryInterval)
 	defer ticker.Stop()
 	for {
@@ -97,19 +99,29 @@ func retryProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cac
 			return
 		case <-ticker.C:
 		}
-		_, err := applyProxyDeclaration(ctx, pool, eventBus, nodeURL, name, input)
-		if predatesDeclarations(err) {
-			continue
-		}
-		if errors.Is(err, nodepool.ErrProxyNotRegistered) && len(input.SetFields()) == 0 {
+		_, err := applyProxyDeclaration(ctx, pool, eventBus, identity, input)
+		switch {
+		case err == nil:
 			return
-		}
-		if err != nil {
+		case predatesDeclarations(err):
+		case errors.Is(err, nodepool.ErrProxyNotRegistered) && len(input.SetFields()) == 0:
+			return
+		case proxyDeclarationRefused(err):
 			slog.ErrorContext(ctx, "this proxy's node declaration was not applied; fix it and restart the proxy",
 				"component", "nodeconfig", "error", err)
+			return
+		default:
+			slog.WarnContext(ctx, "this proxy's node declaration was not applied; retrying",
+				"component", "nodeconfig", "retry_in", proxyDeclarationRetryInterval, "error", err)
 		}
-		return
 	}
+}
+
+// proxyDeclarationRefused reports an answer another attempt cannot change: a
+// value the store refuses, or an identity the proxy cannot declare as.
+func proxyDeclarationRefused(err error) bool {
+	_, invalid := errors.AsType[*nodedeclare.Error](err)
+	return invalid || errors.Is(err, nodepool.ErrNodeIdentityConflict) || errors.Is(err, nodepool.ErrProxyNotRegistered)
 }
 
 // predatesDeclarations reports a database without stream_nodes.env_managed.
@@ -121,10 +133,10 @@ func predatesDeclarations(err error) bool {
 // applyProxyDeclaration writes the declaration once and tells the API
 // servers. A value the store refuses comes back as a *nodedeclare.Error
 // naming its variable.
-func applyProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string, input nodepool.UpdateNodeInput) (*nodepool.Node, error) {
+func applyProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, identity nodepool.ProxyIdentity, input nodepool.UpdateNodeInput) (*nodepool.Node, error) {
 	callCtx, cancel := context.WithTimeout(ctx, proxyDeclarationTimeout)
 	defer cancel()
-	node, created, err := nodepool.NewAdminConfigurationStore(pool).DeclareProxy(callCtx, nodeURL, name, input, envutil.Bool(envNodeRegister))
+	node, created, err := nodepool.NewAdminConfigurationStore(pool).DeclareProxy(callCtx, identity, input, envutil.Bool(envNodeRegister))
 	if declErr, ok := errors.AsType[*nodepool.DeclarationError](err); ok {
 		variable := nodedeclare.VariableFor(nodepool.NodeTypeProxy, declErr.Field)
 		if variable == "" {

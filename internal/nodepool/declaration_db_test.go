@@ -76,10 +76,10 @@ func TestNodeDeclarationsLockFieldsDB(t *testing.T) {
 
 	proxyURL := nodeKeyTestURL("declare-proxy")
 	public := proxyURL + "-public"
-	if _, _, err := store.DeclareProxy(ctx, proxyURL, "", UpdateNodeInput{PublicURL: &public}, false); !errors.Is(err, ErrProxyNotRegistered) {
+	if _, _, err := store.DeclareProxy(ctx, ProxyIdentity{URL: proxyURL}, UpdateNodeInput{PublicURL: &public}, false); !errors.Is(err, ErrProxyNotRegistered) {
 		t.Fatalf("unregistered proxy without registration: %v, want ErrProxyNotRegistered", err)
 	}
-	proxy, created, err := store.DeclareProxy(ctx, proxyURL, "", UpdateNodeInput{PublicURL: &public}, true)
+	proxy, created, err := store.DeclareProxy(ctx, ProxyIdentity{URL: proxyURL}, UpdateNodeInput{PublicURL: &public}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestNodeDeclarationsLockFieldsDB(t *testing.T) {
 	if !created || proxy.Type != NodeTypeProxy || !proxy.Enabled || proxy.URL != proxyURL || !slices.Equal(proxy.EnvManaged, []string{FieldPublicURL}) {
 		t.Fatalf("self-registered proxy: created %v, %+v", created, proxy)
 	}
-	again, created, err := store.DeclareProxy(ctx, proxyURL+"/", "", UpdateNodeInput{}, false)
+	again, created, err := store.DeclareProxy(ctx, ProxyIdentity{URL: proxyURL + "/"}, UpdateNodeInput{}, false)
 	if err != nil || created || again.ID != proxy.ID || len(again.EnvManaged) != 0 {
 		t.Fatalf("restarted proxy: created %v, id %d (want %d), env_managed %v, err %v", created, again.ID, proxy.ID, again.EnvManaged, err)
 	}

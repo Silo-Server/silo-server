@@ -314,18 +314,29 @@ var ErrNodeIdentityConflict = errors.New("this node's URL or name matches a row 
 // started at once with the same name cannot both find no row and create two.
 const proxyRegistrationLock = "nodepool.stream_nodes.proxy_registration"
 
-// DeclareProxy applies the declaration of the proxy at nodeURL to its row.
-// The row is found as the proxy's configuration watcher finds it: by URL with
-// trailing slashes ignored, then by nodeName when exactly one row has it. A
-// proxy with no row gets ErrProxyNotRegistered unless register is set; with
-// it, the proxy creates one, enabled, at nodeURL and named nodeName (the
-// URL's host when nodeName is empty). Registration is opt-in because a proxy
+// ProxyIdentity is how a proxy names itself when it declares.
+type ProxyIdentity struct {
+	// URL is the proxy's own address.
+	URL string
+	// Name finds the row when no row has URL: the proxy's name variable, or
+	// the configuration watcher's fallback name when none is set, so the
+	// declaration lands on the row the watcher binds the proxy to.
+	Name string
+	// NewRowName names a row the proxy creates. Empty uses the URL's host.
+	NewRowName string
+}
+
+// DeclareProxy applies a proxy's declaration to its row. The row is found as
+// the proxy's configuration watcher finds it: by URL with trailing slashes
+// ignored, then by name when exactly one row has it. A proxy with no row
+// gets ErrProxyNotRegistered unless register is set; with it, the proxy
+// creates one, enabled, at its URL. Registration is opt-in because a proxy
 // whose URL and name match nothing may still have a row, registered at an
 // address clients reach it by, and a second row at nodeURL would hand clients
 // an address they cannot reach. The row's url and name are its identity and
 // are never changed here. created reports a new row.
-func (s *AdminConfigurationStore) DeclareProxy(ctx context.Context, nodeURL, nodeName string, input UpdateNodeInput, register bool) (node *Node, created bool, err error) {
-	nodeURL, nodeName = strings.TrimSpace(nodeURL), strings.TrimSpace(nodeName)
+func (s *AdminConfigurationStore) DeclareProxy(ctx context.Context, identity ProxyIdentity, input UpdateNodeInput, register bool) (node *Node, created bool, err error) {
+	nodeURL, nodeName := strings.TrimSpace(identity.URL), strings.TrimSpace(identity.Name)
 	if !absoluteHTTPURL(nodeURL) {
 		return nil, false, &DeclarationError{Field: FieldURL, Detail: detailAbsoluteURL}
 	}
@@ -345,7 +356,7 @@ func (s *AdminConfigurationStore) DeclareProxy(ctx context.Context, nodeURL, nod
 		if !register {
 			return nil, false, ErrProxyNotRegistered
 		}
-		if id, err = createProxyRow(ctx, tx, nodeURL, nodeName); err != nil {
+		if id, err = createProxyRow(ctx, tx, nodeURL, strings.TrimSpace(identity.NewRowName)); err != nil {
 			return nil, false, err
 		}
 		created = true

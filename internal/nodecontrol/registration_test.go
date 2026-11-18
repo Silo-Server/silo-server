@@ -58,6 +58,14 @@ func TestRegistrationOverTheWire(t *testing.T) {
 	if result.Node.ID != 7 || len(result.EnvManaged) != 1 || result.EnvManaged[0] != nodepool.FieldGroup {
 		t.Fatalf("result %+v", result)
 	}
+	// A field the core does not know must not read as an empty declaration,
+	// which would release the node's locks.
+	if got := f.serve(7, key, http.MethodPut, PathRegistration, map[string]int{"max_job": 3}, nil); got.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown field: %d, want 422", got.Code)
+	}
+	if declared := registrar.declared[7]; declared.Group == nil {
+		t.Fatal("an unknown field replaced node 7's declaration")
+	}
 
 	for _, tc := range []struct {
 		name       string

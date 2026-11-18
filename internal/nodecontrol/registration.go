@@ -34,8 +34,13 @@ func (s *Server) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var registration Registration
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxBodyBytes)).Decode(&registration); err != nil {
-		http.Error(w, "invalid registration", http.StatusBadRequest)
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+	// A field this core does not know would otherwise read as "not declared"
+	// and release that field's lock.
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&registration); err != nil {
+		refuseRegistration(w, r, id, http.StatusUnprocessableEntity,
+			RegistrationRefusal{Reason: RegistrationInvalid, Detail: "the registration body is not one this main server reads"})
 		return
 	}
 	node, err := s.opts.Registrar.DeclareNode(r.Context(), id, registration.Input())
@@ -57,14 +62,17 @@ func (s *Server) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) registrationFailed(w http.ResponseWriter, r *http.Request, id int, err error) {
-	refuse := func(status int, refusal RegistrationRefusal) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		if err := json.NewEncoder(w).Encode(refusal); err != nil {
-			slog.DebugContext(r.Context(), "write node registration refusal", "component", "nodecontrol", "node_id", id, "error", err)
-		}
+// refuseRegistration answers a registration the core will not apply.
+func refuseRegistration(w http.ResponseWriter, r *http.Request, id, status int, refusal RegistrationRefusal) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(refusal); err != nil {
+		slog.DebugContext(r.Context(), "write node registration refusal", "component", "nodecontrol", "node_id", id, "error", err)
 	}
+}
+
+func (s *Server) registrationFailed(w http.ResponseWriter, r *http.Request, id int, err error) {
+	refuse := func(status int, refusal RegistrationRefusal) { refuseRegistration(w, r, id, status, refusal) }
 	if declErr, ok := errors.AsType[*nodepool.DeclarationError](err); ok {
 		refuse(http.StatusUnprocessableEntity, RegistrationRefusal{Reason: RegistrationInvalid, Field: declErr.Field, Detail: declErr.Detail})
 		return

@@ -178,7 +178,10 @@ node cannot work with an earlier main server. Proxy nodes keep their current set
    Optionally, the node can declare its own name, URL, group, transcode limit, source access,
    acceleration and download storage with `SILO_NODE_*` variables; the nodes page then shows those
    fields read-only. See
-   [node-declared configuration](admin-api.md#node-declared-configuration).
+   [node-declared configuration](admin-api.md#node-declared-configuration). Set
+   `SILO_NODE_URL` and `SILO_NODE_NAME` for each node separately: unlike `NODE_URL` and
+   `NODE_NAME` below, a transcode node acts on them, so a value copied from a proxy's `.env`
+   would point the transcode node's entry at the proxy.
 
    The node ignores `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, and `NODE_NAME`, with
    one warning at startup, so they can stay in a shared `.env`. The shipped `docker-compose.yml`

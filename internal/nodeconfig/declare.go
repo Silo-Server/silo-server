@@ -55,14 +55,33 @@ func Declare(ctx context.Context, registrar Registrar, registration nodecontrol.
 	}
 }
 
-// registrationUnsupported reports an answer a core without the route gives:
-// its router knows neither the path nor the method.
+// registrationUnsupported reports an answer that means the route is not
+// served: a core without it, whose router knows neither the path nor the
+// method, or a gateway in front of the core that does not pass it (403). The
+// core itself answers a refused key with 401, never 403.
 func registrationUnsupported(err error) bool {
 	switch nodecontrol.Status(err) {
-	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented, http.StatusForbidden:
 		return true
 	}
 	return false
+}
+
+// Release sends an empty declaration once, which releases the fields the
+// node declared at an earlier start. It never holds startup up: when the core
+// cannot take it now, it is offered again every RemotePollInterval in the
+// background, unless the core does not serve the route at all, where there is
+// nothing to release.
+func Release(ctx, background context.Context, registrar Registrar) {
+	_, err := registrar.Register(ctx, nodecontrol.Registration{})
+	if err == nil || registrationUnsupported(err) || ctx.Err() != nil {
+		return
+	}
+	if _, refused := errors.AsType[*nodecontrol.RegistrationError](err); refused {
+		slog.WarnContext(ctx, "the core refused to release this node's earlier declaration", "component", "nodeconfig", "error", err)
+		return
+	}
+	go RetryDeclaration(background, registrar, nodecontrol.Registration{}, func(*nodecontrol.RegistrationResult) {})
 }
 
 // RetryDeclaration sends the declaration every RemotePollInterval until the

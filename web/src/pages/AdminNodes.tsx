@@ -1042,7 +1042,11 @@ function NodeForm({
   // the first render, and an effect would read that as a change and erase a
   // valid override on a dialog nobody had touched yet.
   function selectHWAccelOverride(next: string) {
-    if (hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)) {
+    // A device the node declares is saved as stored, so it stays on screen.
+    if (
+      !isLocked("hw_device_override") &&
+      hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)
+    ) {
       setHwDeviceOverride("");
     }
     setHwAccelOverride(next);

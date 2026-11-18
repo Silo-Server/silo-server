@@ -240,14 +240,20 @@ then reaches every API server's registry and pools and every proxy's registry
 as an administrator's edit does; the core does not ask the node to reload,
 since it reads its configuration next. An empty body unlocks every field and
 changes nothing else, which is what a node with no declaration variables sends.
+A body with a field the core does not know is refused whole, so a misspelled
+field cannot read as an empty declaration.
+
+The table is for a node that declares something. A node that declares nothing
+sends its empty body once and starts whatever the answer: a failure other than
+a missing route is tried again every 30 seconds in the background.
 
 | Answer | Body | Node |
 |---|---|---|
 | `200` | `{"node": {"id", "name", "url"}, "env_managed": [...]}` | Continues to the configuration read. |
-| `422` | `{"reason": "invalid", "field", "detail"}` | Exits, naming the variable for `field`. |
+| `422` | `{"reason": "invalid", "field", "detail"}` | Exits, naming the variable for `field`; `field` is empty for a body the core could not read. |
 | `409` | `{"reason": "url_taken", "field": "url", "detail"}` | Exits, naming `SILO_NODE_URL`. |
 | `401`, `429`, `5xx`, no answer | text | Retries with the configuration read's backoff, 1 to 30 seconds. |
-| `404`, `405`, `501` (a core without the route) | text | Starts. With something declared it warns once and offers the declaration every 30 seconds until it is accepted, then rereads its configuration; with nothing declared it says nothing. |
+| `403`, `404`, `405`, `501` (a core without the route, or a gateway in front of it that blocks the request) | text | Starts, warns once, and offers the declaration every 30 seconds until it is accepted, then rereads its configuration. |
 
 The route sits in the per-node budget of the background routes. A declaration
 is made at startup only; changing a variable takes a restart.

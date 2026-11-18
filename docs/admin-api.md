@@ -524,8 +524,9 @@ refuses to start on a bad one, naming the variable.
 A proxy writes its declaration to the database before its configuration
 watcher first reads its row (`declareProxyNode` in `cmd/silo`), then publishes
 `node_pool_changed`. It finds its row as the watcher does, by
-`SILO_NODE_URL` (or `NODE_URL`) and then by `SILO_NODE_NAME` (or `NODE_NAME`)
-when exactly one row has that name. A proxy that matches no row starts as it
+`SILO_NODE_URL` (or `NODE_URL`) and then by `SILO_NODE_NAME` (or `NODE_NAME`,
+or the watcher's fallback name `proxy` when neither is set) when exactly one
+row has that name. A proxy that matches no row starts as it
 always has when it declares nothing, and refuses to start when it declares
 something. With `SILO_NODE_REGISTER=true` it registers itself instead: a new
 enabled proxy row at its URL, named by its name variable or, with none set, by

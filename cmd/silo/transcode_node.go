@@ -273,24 +273,24 @@ func runTranscodeNode() {
 // once it lands; with nothing declared there is nothing to unlock, and it says
 // nothing. It reports false when ctx ended first.
 func declareTranscodeNode(ctx, appCtx context.Context, client *nodecontrol.Client, remote *nodeconfig.Remote, declaration nodepool.UpdateNodeInput) bool {
+	if len(declaration.SetFields()) == 0 {
+		// Nothing to apply, so nothing to wait for.
+		nodeconfig.Release(ctx, appCtx, client)
+		return ctx.Err() == nil
+	}
 	registration := nodecontrol.RegistrationFrom(declaration)
-	declares := len(declaration.SetFields()) > 0
 	result, err := nodeconfig.Declare(ctx, client, registration)
 	switch {
 	case err == nil:
-		if declares || len(result.EnvManaged) > 0 {
-			slog.InfoContext(ctx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
-		}
+		slog.InfoContext(ctx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
 		return true
 	case errors.Is(err, nodeconfig.ErrRegistrationUnsupported):
-		if declares {
-			slog.WarnContext(ctx, "the main server predates node declarations; starting without them and offering them again every poll. Upgrade the main server to apply them",
-				"variables", declaredVariables(declaration))
-			go nodeconfig.RetryDeclaration(appCtx, client, registration, func(result *nodecontrol.RegistrationResult) {
-				slog.InfoContext(appCtx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
-				remote.RequestReload()
-			})
-		}
+		slog.WarnContext(ctx, "the main server does not accept node declarations: it predates them, or a gateway in front of it blocks this route. Starting without them and offering them again every poll",
+			"route", "PUT "+nodecontrol.PathRegistration, "variables", declaredVariables(declaration))
+		go nodeconfig.RetryDeclaration(appCtx, client, registration, func(result *nodecontrol.RegistrationResult) {
+			slog.InfoContext(appCtx, "the main server applied this node's declaration", "node_id", client.NodeID(), "env_managed", result.EnvManaged)
+			remote.RequestReload()
+		})
 		return true
 	}
 	if refused, ok := errors.AsType[*nodecontrol.RegistrationError](err); ok {
