@@ -9,7 +9,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import type { VersionAudioTrack } from "@/api/types";
-import { v2 } from "@/api/v2/request";
+import { readableErrorText, v2 } from "@/api/v2/request";
 import { buildAudioPreferenceBody } from "@/player/utils/audioChoicePersistence";
 import {
   runTrackPreferenceWrite,
@@ -73,7 +73,7 @@ export function useSetAudioPreference() {
       ),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.player.tracks.saveAudioFailed"));
+      toast.error(readableErrorText(err, t("web.player.tracks.saveAudioFailed")));
     },
   });
 }
@@ -96,7 +96,7 @@ export function useDeleteAudioPreference() {
       ),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.player.tracks.resetAudioFailed"));
+      toast.error(readableErrorText(err, t("web.player.tracks.resetAudioFailed")));
     },
   });
 }
