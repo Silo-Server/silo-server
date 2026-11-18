@@ -88,13 +88,12 @@ export function useSeekPreferences(media: SeekMedia, options?: { enabled?: boole
     // check withholds them, so a failed request cannot lock a working player.
     legacyAvailable: !supported && !capabilities.isPending,
     isLoading: capabilities.isPending || (supported && effective.isPending),
-    // A failed background refetch keeps the last good answer as `data` under an
-    // error status, so either query counts as failed only with no answer to
-    // show. The cached values stay safe to edit: every write here sets one key
-    // with the value the user picked, never a document built from the others.
-    error:
-      (capabilities.data === undefined ? capabilities.error : null) ??
-      (effective.data === undefined ? effective.error : null),
+    // A failed capabilities refetch keeps the last answer as `data` under an
+    // error status. Once that answer has proved support, the error no longer
+    // matters; without it, the failure still reads as unknown, not as an old
+    // server. A failed settings read always counts: after a save, the cached
+    // values may no longer be what the server holds.
+    error: (supported ? null : capabilities.error) ?? effective.error,
     isSaving: importing || writer.isPending || clearer.isPending,
     skipBack: read("back"),
     skipForward: read("forward"),
