@@ -1559,7 +1559,25 @@ func normalizeWebMediaURL(value string) (string, error) {
 			return "", fmt.Errorf("%s must use a port from 1 to 65535", WebMediaURLSettingKey)
 		}
 	}
+	// url.Parse also accepts a hostname with a character a browser refuses, such
+	// as "a<b.example". Refuse the forbidden domain code points of the WHATWG URL
+	// host parser (https://url.spec.whatwg.org/#forbidden-domain-code-point). An
+	// IP literal is exempt: its colons are valid, and url.Parse checks its form.
+	host := strings.TrimPrefix(normalized, "https://")
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if !strings.Contains(host, ":") && strings.ContainsFunc(host, isForbiddenDomainCodePoint) {
+		return "", fmt.Errorf("%s must use a valid hostname", WebMediaURLSettingKey)
+	}
 	return normalized, nil
+}
+
+// isForbiddenDomainCodePoint reports whether a browser's URL host parser
+// rejects r in a domain: a C0 control, U+007F, space, or one of
+// # % / : < > ? @ [ \ ] ^ |.
+func isForbiddenDomainCodePoint(r rune) bool {
+	return r <= 0x20 || r == 0x7f || strings.ContainsRune(`#%/:<>?@[\]^|`, r)
 }
 
 // normalizeOriginURL accepts an http(s) origin and returns it as scheme://host,

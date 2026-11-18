@@ -116,6 +116,7 @@ func TestAdminSettingWebMediaURLValidation(t *testing.T) {
 		{name: "fragment", value: "https://media.example.test#f", err: true},
 		{name: "port out of range", value: "https://media.example.test:65536", err: true},
 		{name: "port without a hostname", value: "https://:443", err: true},
+		{name: "hostname a browser rejects", value: "https://a<b.example", err: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
