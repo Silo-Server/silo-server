@@ -29,7 +29,7 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 	if err != nil {
 		return nil, fmt.Errorf("begin rebind request integrations: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := lockRoutingMode(ctx, tx); err != nil {
 		return nil, err
