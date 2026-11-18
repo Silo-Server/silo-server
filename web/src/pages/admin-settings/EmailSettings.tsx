@@ -70,6 +70,7 @@ export default function EmailSettings() {
             value={form.getValue("email.enabled")}
             onChange={(v) => form.setValue("email.enabled", v)}
             restartRequired={restartKeys.has("email.enabled")}
+            managedByEnv={form.envVar("email.enabled")}
           />
           <SettingField
             label={t("web.admin.settings.email.fromAddress")}

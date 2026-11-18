@@ -28,25 +28,37 @@ func bootstrapPoolSize(env config.EnvSettings) int {
 // one batch (through the encrypting repo, so secrets rest encrypted), and
 // overlays every one on settings, the map startup builds its config from. It
 // returns the checked values and the stored keys it changed.
+//
+// The check and the write share one settings transaction, as an admin save's
+// do, so the check sees the rows the write replaces: a storage transition
+// another server commits while this one starts cannot slip between them.
 func applyEnvSettings(ctx context.Context, repo *catalog.EncryptedSettingsRepo, settings map[string]string, env config.EnvSettings, redisBootstrapURL string) (config.EnvSettings, []string, error) {
 	if len(env) == 0 {
 		return env, nil, nil
 	}
 	normalizedRedis, redisErr := config.NormalizeRedisURL(redisBootstrapURL)
-	checked, err := handlers.CheckEnvironmentSettings(settings, env, normalizedRedis != "" && redisErr == nil)
+	redisBootstrapAvailable := normalizedRedis != "" && redisErr == nil
+	var checked config.EnvSettings
+	var changed map[string]string
+	var checkErr error
+	err := repo.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+		if checked, checkErr = handlers.CheckEnvironmentSettings(current, env, redisBootstrapAvailable); checkErr != nil {
+			return nil, checkErr
+		}
+		changed = map[string]string{}
+		for key, value := range checked.Values(config.EnvScopeStored) {
+			if current[key] != value {
+				changed[key] = value
+			}
+		}
+		return changed, nil
+	})
+	if checkErr != nil {
+		// Already names the variable.
+		return nil, nil, checkErr
+	}
 	if err != nil {
-		return nil, nil, err
-	}
-	changed := map[string]string{}
-	for key, value := range checked.Values(config.EnvScopeStored) {
-		if settings[key] != value {
-			changed[key] = value
-		}
-	}
-	if len(changed) > 0 {
-		if err := repo.SetMany(ctx, changed); err != nil {
-			return nil, nil, fmt.Errorf("storing settings from the environment: %w", err)
-		}
+		return nil, nil, fmt.Errorf("storing settings from the environment: %w", err)
 	}
 	maps.Copy(settings, checked.All())
 	return checked, slices.Sorted(maps.Keys(changed)), nil

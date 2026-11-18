@@ -76,6 +76,7 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_S3_PRIVATE_ACCESS_KEY", "s3.private_access_key", EnvScopeStored},
 	{"SILO_S3_PRIVATE_SECRET_KEY", "s3.private_secret_key", EnvScopeStored},
 
+	{"SILO_SMTP_ENABLED", "email.enabled", EnvScopeStored},
 	{"SILO_SMTP_HOST", "email.smtp_host", EnvScopeStored},
 	{"SILO_SMTP_PORT", "email.smtp_port", EnvScopeStored},
 	{"SILO_SMTP_SECURITY", "email.smtp_security", EnvScopeStored},
