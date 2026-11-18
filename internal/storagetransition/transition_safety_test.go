@@ -186,8 +186,36 @@ func TestStorageSetByTheEnvironmentRefusesTransitions(t *testing.T) {
 	if settings.values[StagedTargetSettingKey] != "" {
 		t.Error("a refused transition was staged")
 	}
-	_, err = service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: "staged-before-restart", Policy: PolicyFresh}, func(adminjob.StorageTransitionProgress) {})
+	// A transition staged before the variable was added does not copy, but
+	// one that already committed still settles instead of failing.
+	service.SetEnvironmentManaged(nil)
+	if _, _, err := service.Start(t.Context(), 1, StartRequest{Policy: PolicyFresh, Values: map[string]string{settingArtworkLocalPath: t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+	service.SetEnvironmentManaged(map[string]string{settingArtworkLocalPath: "SILO_ARTWORK_PATH"})
+	setPhase := func(phase string) string {
+		t.Helper()
+		var staged stagedTarget
+		if err := json.Unmarshal([]byte(settings.values[StagedTargetSettingKey]), &staged); err != nil {
+			t.Fatal(err)
+		}
+		staged.Phase = phase
+		raw, err := json.Marshal(staged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settings.values[StagedTargetSettingKey] = string(raw)
+		return staged.ID
+	}
+	run := func(id string) error {
+		_, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: id, Policy: PolicyFresh}, func(adminjob.StorageTransitionProgress) {})
+		return err
+	}
+	if err := run(setPhase(transitionPhaseRestartPending)); !errors.Is(err, adminjob.ErrStorageTransitionAlreadyCommitted) {
+		t.Fatalf("a committed transition = %v, want ErrStorageTransitionAlreadyCommitted", err)
+	}
+	err = run(setPhase(transitionPhaseStaged))
 	if _, ok := errors.AsType[*ValidationError](err); !ok || !strings.Contains(err.Error(), "SILO_ARTWORK_PATH") {
-		t.Fatalf("ExecuteStorageTransition = %v, want a validation error naming SILO_ARTWORK_PATH", err)
+		t.Fatalf("a staged transition = %v, want a validation error naming SILO_ARTWORK_PATH", err)
 	}
 }

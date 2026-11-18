@@ -747,11 +747,6 @@ func (s *Service) ExecuteStorageTransition(ctx context.Context, req adminjob.Sto
 			_ = s.recordStageFailure(context.Background(), req.TransitionID, resultErr)
 		}
 	}()
-	// A transition staged before a restart that added a storage variable
-	// would commit a location the environment replaces on the next start.
-	if err := s.refuseEnvironmentManagedStorage(); err != nil {
-		return nil, err
-	}
 	if s.nodeAdmission != nil {
 		acquired, err := s.tryExclusiveAdmission(ctx)
 		if err != nil {
@@ -831,6 +826,12 @@ func (s *Service) ExecuteStorageTransition(ctx context.Context, req adminjob.Sto
 	if staged.Phase == transitionPhaseRestartPending {
 		// The runner settles the receipt instead of recording a failure.
 		return nil, fmt.Errorf("%w; awaiting restart or recovery", adminjob.ErrStorageTransitionAlreadyCommitted)
+	}
+	// A transition staged before a restart that added a storage variable
+	// would commit a location the environment replaces on the next start.
+	// One that already committed is past this point and settles above.
+	if err := s.refuseEnvironmentManagedStorage(); err != nil {
+		return nil, err
 	}
 	if err := s.updateStage(ctx, staged.ID, func(state *stagedTarget) {
 		state.Phase = transitionPhaseCopying
