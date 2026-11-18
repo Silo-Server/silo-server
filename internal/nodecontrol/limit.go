@@ -8,8 +8,9 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Per-node request budget for the node's background calls (config, report,
-// logs, health-changed and revoke-recipes) on one API replica. A healthy node
+// Per-node request budget for the node's background calls (config,
+// registration, report, logs, health-changed and revoke-recipes) on one API
+// replica. A healthy node
 // sends about one and a half a second (a report every second, a log batch
 // every two, a configuration poll every thirty seconds, a rare health change
 // or revoke), plus retries and split log batches, so the budget sits well

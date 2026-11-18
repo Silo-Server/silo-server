@@ -464,6 +464,7 @@ serve them. The `x-silo-worker-protocols` extension lists them under listener
 | Route | Purpose |
 | --- | --- |
 | `GET config` | The calling node's configuration document, with a strong `ETag`. |
+| `PUT registration` | The configuration the node declares from its environment, sent at startup; the API writes it to the node's row and locks those fields. |
 | `POST report` | Session records and stream telemetry, every second, fenced on `(boot_id, seq)`. |
 | `POST logs` | A batch of up to 100 operational log entries. |
 | `POST health-changed` | The node's drain state changed; the API publishes `node_drain_changed`. |
@@ -481,8 +482,8 @@ budgets but under a per-node cap on concurrent responses (`429` with
 graceful shutdown.
 
 [Transcode nodes](transcode-nodes.md) is the authority for what each route
-checks, its statuses, the two per-node request budgets (one for config, report,
-logs, health-changed and revoke-recipes, one for resolve and sources/open, both
+checks, its statuses, the two per-node request budgets (one for config,
+registration, report, logs, health-changed and revoke-recipes, one for resolve and sources/open, both
 answering `429` with `Retry-After`), and how the node calls them.
 
 ### Source grants
