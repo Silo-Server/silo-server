@@ -537,11 +537,20 @@ export function invalidateSettingValueQueries(
   return Promise.all(invalidations).then(() => undefined);
 }
 
+/**
+ * A setting write replaces the value stored at its key, so it must not wait
+ * for the browser to come back online: replayed after reconnect, it would carry
+ * the value this page built before it went offline over whatever another device
+ * saved meanwhile. Offline writes fail at once and their callers report it.
+ */
+const SETTING_WRITE_NETWORK_MODE = "always";
+
 /** Write one value at one scope. */
 export function useSetSettingValue() {
   const qc = useQueryClient();
 
   return useMutation({
+    networkMode: SETTING_WRITE_NETWORK_MODE,
     mutationFn: ({
       key,
       value,
@@ -630,6 +639,7 @@ export function useClearSettingValue() {
   const qc = useQueryClient();
 
   return useMutation({
+    networkMode: SETTING_WRITE_NETWORK_MODE,
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       v2("DELETE /api/v2/settings/values/{key}", { path: { key }, query: identityQuery(identity) }),
     onSuccess: (_data, variables) => {
