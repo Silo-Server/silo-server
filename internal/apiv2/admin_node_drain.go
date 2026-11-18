@@ -33,6 +33,9 @@ type AdminNodeCapabilities struct {
 	// SourceAccess is always true on a server that has the column: the mode
 	// is stored configuration and needs nothing else to be set.
 	SourceAccess bool `json:"source_access" doc:"Transcode nodes can read source media through the API servers instead of a library mount: source_access on node rows and in the create and update bodies."`
+	// EnvDeclarations is always true on a server that has the column: a node
+	// declares through its own database write or the node control plane.
+	EnvDeclarations bool `json:"env_declarations" doc:"Nodes can declare their own configuration from their environment: env_managed on node rows names the fields a node declares, and updateAdminNode refuses a change to them with field code managed_by_environment."`
 }
 type AdminNodeCapabilitiesOutput struct {
 	Status       int
@@ -62,7 +65,7 @@ func registerAdminNodeDrain(reg *Registry) {
 		if reg.deps.AdminNodeDrain == nil {
 			state = StateNotConfigured
 		}
-		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: reg.deps.AdminNodesRead != nil, NodeKeys: reg.deps.AdminNodeKeys != nil, SourceAccess: reg.deps.AdminNodeConfiguration != nil}}, nil
+		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: reg.deps.AdminNodesRead != nil, NodeKeys: reg.deps.AdminNodeKeys != nil, SourceAccess: reg.deps.AdminNodeConfiguration != nil, EnvDeclarations: reg.deps.AdminNodeConfiguration != nil}}, nil
 	})
 
 	op := func(suffix, id, summary string) Operation {

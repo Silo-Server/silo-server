@@ -413,13 +413,16 @@ export default function HeroBanner({
           advance slides manually — important when `prefers-reduced-motion`
           disables autoplay, and for accessibility generally. On mobile they
           render smaller and slightly more transparent so they don't crowd
-          narrow viewports. On lg+ they fade in on hover. */}
+          narrow viewports. On lg+ with a mouse they fade in on hover; a touch
+          screen has no hover, so there they stay visible. The gate is the
+          observed pointer (lib/pointerCapability.ts), wrapped in :where() so
+          group-hover still outranks it. */}
       {slides.length > 1 && (
         <>
           <button
             type="button"
             onClick={prev}
-            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
             aria-label={t("web.home.hero.previousSlide")}
           >
             <ChevronLeft className="size-4 sm:size-5" />
@@ -427,7 +430,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={next}
-            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
             aria-label={t("web.home.hero.nextSlide")}
           >
             <ChevronRight className="size-4 sm:size-5" />

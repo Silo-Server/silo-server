@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -108,6 +109,15 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer s.trickplay.done()
+	// A run is a job, so the node's own job cap refuses it as busy, which a
+	// core of any version tries elsewhere or later.
+	slot, admitted := s.admitJob()
+	if !admitted {
+		setRefusal(w, nodepool.RefusalAtCapacity)
+		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeBusyReason, Message: errNodeAtCapacity})
+		return
+	}
+	defer slot.release()
 	// The run reads the source the core grants, never the path the request
 	// names, and ends if the core withdraws it.
 	source, err := s.openSource(r.Context(), req.SourceGrant)
@@ -126,7 +136,7 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := sourceContext(r.Context(), source)
 	defer cancel()
 	req.Input = source.Input()
-	s.activeJobs.Add(1)
+	s.countJob(slot)
 	defer s.activeJobs.Add(-1)
 	// Backend resolution can smoke-encode after the shared probe cache is
 	// invalidated. Reserve admission before it starts and keep it through
@@ -204,7 +214,7 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 	failure := schemas.Schema(reflect.TypeFor[trickplay.ExtractError](), true, "")
 	text := &huma.MediaType{Schema: &huma.Schema{Type: huma.TypeString}}
 	problem := &huma.MediaType{Schema: failure}
-	return workerprotocol.Operation{
+	return withJobCapRefusal(workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: "/trickplay/extract",
 		Handler: "(*internal/transcodenode.Server).handleTrickplayExtract", AuthClass: bearerClass,
 		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on the granted source, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
@@ -216,7 +226,7 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 			"409": {Description: mountMismatchDescription, Content: map[string]*huma.MediaType{jsonMedia: problem}},
 			"401": {Description: http.StatusText(http.StatusUnauthorized), Content: map[string]*huma.MediaType{textMedia: text}},
 			"422": {Description: "Sampling failed; permanent names a cause in the file itself", Content: map[string]*huma.MediaType{jsonMedia: problem}},
-			"503": {Description: "Node at its trickplay run capacity, re-probing, unconfigured, or unable to reach the core's source authority", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"503": {Description: "Node at its trickplay run capacity or its job cap (reason node_busy), re-probing, unconfigured, or unable to reach the core's source authority", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 		},
-	}
+	}, "")
 }

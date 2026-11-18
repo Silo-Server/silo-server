@@ -49,6 +49,7 @@ type AdminNode struct {
 	DrainRequested                   bool            `json:"drain_requested" doc:"An administrator asked this transcode node to drain: new work is not placed on it while its sessions finish."`
 	DrainState                       string          `json:"drain_state" enum:"none,draining,drained" doc:"What the node reported on its last health check: draining while it refuses new work (after a drain request or SIGTERM), drained once it has none left and can be stopped without cutting a stream."`
 	KeyIssued                        bool            `json:"key_issued" doc:"A key has been issued to this transcode node. The key itself is shown only when it is issued. Always false for a proxy."`
+	EnvManaged                       []string        `json:"env_managed" doc:"Configuration fields the node declared from its own environment at its last start, named as in the update body. updateAdminNode refuses a change to any of them; restating the current value is accepted. Empty when the node declares nothing. Requires the env_declarations node capability."`
 	// NetworkAccess is keyed by provider slug ("tailscale"). Only proxy nodes
 	// report it; a transcode node never does because clients never reach one.
 	NetworkAccess map[string]AdminNodeNetworkAccess `json:"network_access,omitempty" doc:"Last network access provider status the node reported on its health check, keyed by provider slug. Omitted when the node reports no providers."`
@@ -81,7 +82,10 @@ func compareNodePosition(a, b adminNodePosition) int {
 	return cmp.Or(cmp.Compare(a.Type, b.Type), cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
 }
 func adminNodeOf(n *nodepool.Node) AdminNode {
-	out := AdminNode{ID: IDFromInt(int64(n.ID)), Name: n.Name, Type: n.Type, URL: n.URL, Enabled: n.Enabled, PublicURL: n.PublicURL, Healthy: n.Healthy, ActiveJobs: n.ActiveJobs, Group: n.Group, MaxJobs: n.MaxJobs, MaxBandwidthKbps: n.MaxBandwidthKbps, EgressKbps: n.EgressKbps, CreatedAt: NewInstant(n.CreatedAt), Capabilities: n.Capabilities, CapabilitiesHash: n.CapabilitiesHash, LastStats: n.LastStats, HWAccelOverride: n.HWAccelOverride, HWDeviceOverride: n.HWDeviceOverride, DownloadArtifactDirOverride: n.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: n.DownloadArtifactMaxBytesOverride, CapabilityDrift: n.CapabilityDrift, CapabilityDriftBaseline: n.CapabilityDriftBaseline, AdvertisedCapabilitiesHash: n.AdvertisedCapabilitiesHash, PhysicalGPUKeys: n.PhysicalGPUKeys, DrainRequested: n.DrainRequested, DrainState: adminNodeDrainState(n), KeyIssued: n.Type == nodepool.NodeTypeTranscode && n.KeyIssued}
+	out := AdminNode{ID: IDFromInt(int64(n.ID)), Name: n.Name, Type: n.Type, URL: n.URL, Enabled: n.Enabled, PublicURL: n.PublicURL, Healthy: n.Healthy, ActiveJobs: n.ActiveJobs, Group: n.Group, MaxJobs: n.MaxJobs, MaxBandwidthKbps: n.MaxBandwidthKbps, EgressKbps: n.EgressKbps, CreatedAt: NewInstant(n.CreatedAt), Capabilities: n.Capabilities, CapabilitiesHash: n.CapabilitiesHash, LastStats: n.LastStats, HWAccelOverride: n.HWAccelOverride, HWDeviceOverride: n.HWDeviceOverride, DownloadArtifactDirOverride: n.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: n.DownloadArtifactMaxBytesOverride, CapabilityDrift: n.CapabilityDrift, CapabilityDriftBaseline: n.CapabilityDriftBaseline, AdvertisedCapabilitiesHash: n.AdvertisedCapabilitiesHash, PhysicalGPUKeys: n.PhysicalGPUKeys, DrainRequested: n.DrainRequested, DrainState: adminNodeDrainState(n), KeyIssued: n.Type == nodepool.NodeTypeTranscode && n.KeyIssued, EnvManaged: n.EnvManaged}
+	if out.EnvManaged == nil {
+		out.EnvManaged = []string{}
+	}
 	if n.Type == nodepool.NodeTypeTranscode {
 		out.SourceAccess = n.SourceAccess
 	}
