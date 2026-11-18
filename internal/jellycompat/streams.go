@@ -1457,12 +1457,8 @@ func (h *PlaybackHandler) headMasterManifest(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
 		return
 	}
-	if _, err := h.fileResolver.GetByID(r.Context(), fileID); errors.Is(err, scanner.ErrFileNotFound) {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
-		return
-	} else if err != nil {
-		// A failed lookup says nothing about the file; the controller may retry.
-		writeSessionCheckUnavailable(w)
+	if _, err := h.fileResolver.GetByID(r.Context(), fileID); err != nil {
+		writeCompatFileLookupError(w, r, fileID, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
