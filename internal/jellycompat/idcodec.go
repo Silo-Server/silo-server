@@ -141,7 +141,7 @@ func (c *ResourceIDCodec) EncodeStringID(kind EncodedIDType, value string) strin
 // dashed MediaSourceId at its first dash when it echoes it in a PlaybackInfo
 // body, so PlaybackInfo could not tell which version was picked.
 func (c *ResourceIDCodec) EncodeIntID(kind EncodedIDType, value int64) string {
-	id := EncodeNumericID(kind, uint64(value))
+	id := EncodeNumericID(kind, uint64(value)) //nolint:gosec // G115: DecodeIntID converts back, so every int64 round-trips
 	if kind == EncodedIDMediaSource {
 		return jellyfinGUID(id)
 	}
