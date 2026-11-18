@@ -2823,6 +2823,9 @@ func buildRecentlyAddedSingleLibraryQuery(s ResolvedSection, cfgFilters SectionC
 	return sectionQuery{sql: query, args: args}, true
 }
 
+// mediaScopeMovie is the section filter_type for movie-only rows.
+const mediaScopeMovie = "movie"
+
 func buildRecentlyReleasedQuery(s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, []any) {
 	cfgFilters := ParseConfigFilters(s.Config)
 
@@ -2845,11 +2848,16 @@ func buildRecentlyReleasedQuery(s ResolvedSection, libraryID *int, libraryIDs []
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// The library's Release Date sort, with the same content ID tie-break as
-	// the row's See All page. Titles with no date trail the dated ones by year.
+	// The row's See All page orders by exactly these terms (both paging paths),
+	// so the row is always its first page. Titles with no date come last. A
+	// movie-only row sorts by the movie release date alone, as See All does.
+	releaseDate := catalog.ReleaseDateSortSQL("mi")
+	if cfgFilters.FilterType == mediaScopeMovie {
+		releaseDate = "mi.release_date"
+	}
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s %s ORDER BY %s DESC NULLS LAST, mi.year DESC, mi.content_id ASC LIMIT $%d`,
-		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, catalog.ReleaseDateSortSQL("mi"), argIdx,
+		`SELECT %s FROM %s %s ORDER BY %s DESC NULLS LAST, mi.content_id ASC LIMIT $%d`,
+		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, releaseDate, argIdx,
 	)
 	args = append(args, s.ItemLimit)
 	return query, args

@@ -79,8 +79,9 @@ func TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries(t *testing.T) {
 // Recently Released orders a row the way the library's Release Date sort
 // does: by the release date (a series' premiere when it has no release date),
 // newest first, whatever order the titles were added in. Titles with no date
-// trail the dated ones, newest year first; ties go by content ID, as on the
-// See All page.
+// come last. Ties, undated titles included, go by content ID, as on the See All
+// page, so the row stays that page's first page. A movie-only row, like its See
+// All page, treats a movie with only a premiere date as undated.
 func TestRecentlyReleasedOrdersByReleaseDate(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -110,10 +111,11 @@ func TestRecentlyReleasedOrdersByReleaseDate(t *testing.T) {
 		{name: "tie-a", kind: "movie", releaseDate: "2026-08-01", year: 2026},
 		{name: "tie-b", kind: "movie", releaseDate: "2026-08-01", year: 2026},
 		{name: "jun-17", kind: "movie", releaseDate: "2026-06-17", year: 2026},
-		{name: "year-only-2026", kind: "movie", year: 2026},
+		{name: "movie-premiere-only", kind: "movie", firstAirDate: "2026-07-01", year: 2026},
+		{name: "undated-b", kind: "movie", year: 2026},
 		{name: "series-may-02", kind: "series", firstAirDate: "2026-05-02", year: 2026},
 		{name: "dec-2025", kind: "movie", releaseDate: "2025-12-01", year: 2025},
-		{name: "year-only-2024", kind: "movie", year: 2024},
+		{name: "undated-a", kind: "movie", year: 2024},
 		{name: "mar-12", kind: "movie", releaseDate: "2026-03-12", year: 2026},
 		{name: "jan-20", kind: "movie", releaseDate: "2026-01-20", year: 2026},
 	}
@@ -134,19 +136,31 @@ func TestRecentlyReleasedOrdersByReleaseDate(t *testing.T) {
 		}
 	}
 
-	items, _, err := NewFetcher(pool).fetchRecentlyReleased(ctx, ResolvedSection{
-		SectionType: SectionRecentlyReleased,
-		ItemLimit:   20,
-	}, &folderID, nil, catalog.AccessFilter{})
-	if err != nil {
-		t.Fatalf("fetch recently released: %v", err)
+	order := func(config string) []string {
+		t.Helper()
+		items, _, err := NewFetcher(pool).fetchRecentlyReleased(ctx, ResolvedSection{
+			SectionType: SectionRecentlyReleased,
+			ItemLimit:   20,
+			Config:      json.RawMessage(config),
+		}, &folderID, nil, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatalf("fetch recently released (%s): %v", config, err)
+		}
+		got := make([]string, 0, len(items))
+		for _, item := range items {
+			got = append(got, ids[item.ContentID])
+		}
+		return got
 	}
-	got := make([]string, 0, len(items))
-	for _, item := range items {
-		got = append(got, ids[item.ContentID])
-	}
-	want := []string{"sep-30", "tie-a", "tie-b", "jun-17", "series-may-02", "mar-12", "jan-20", "dec-2025", "year-only-2026", "year-only-2024"}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("order = %v\nwant    %v", got, want)
+	for _, tc := range []struct {
+		config string
+		want   []string
+	}{
+		{`{}`, []string{"sep-30", "tie-a", "tie-b", "movie-premiere-only", "jun-17", "series-may-02", "mar-12", "jan-20", "dec-2025", "undated-a", "undated-b"}},
+		{`{"filter_type":"movie"}`, []string{"sep-30", "tie-a", "tie-b", "jun-17", "mar-12", "jan-20", "dec-2025", "movie-premiere-only", "undated-a", "undated-b"}},
+	} {
+		if got := order(tc.config); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+			t.Fatalf("%s order = %v\nwant    %v", tc.config, got, tc.want)
+		}
 	}
 }
