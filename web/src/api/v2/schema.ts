@@ -15712,6 +15712,8 @@ export interface components {
       allowed: boolean;
       /** @description catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators */
       item_change_events: boolean;
+      /** @description listAdminCatalogItems accepts include_file_paths from this caller: a login session, an unscoped key, or a key holding admin:catalog:paths */
+      item_file_paths: boolean;
       /** @description listAdminCatalogItems is served */
       item_listing: boolean;
       /**
@@ -15885,6 +15887,11 @@ export interface components {
        * @example 120
        */
       file_id: string;
+      /**
+       * @description The file's path as the scanning server stores it, only with include_file_paths. Map it to another host's mounts through the library's paths. Bytes of a name that are not UTF-8 are stored as private-use code points
+       * @example /media/movies/Heat (1995)/Heat.mkv
+       */
+      file_path?: string;
       /**
        * Format: int64
        * @description Bytes
@@ -47916,6 +47923,8 @@ export interface operations {
         content_ids?: string[];
         /** @description Opaque cursor from page.next_cursor; valid only with the filters that produced it */
         cursor?: string;
+        /** @description Also return each version's file_path. Send it only when getAdminCatalogCapabilities reports item_file_paths; a key whose scopes lack admin:catalog:paths receives 403 */
+        include_file_paths?: boolean;
         /** @description Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata */
         include_people?: boolean;
         /** @description Only items present in this library; added_at and added_after then use the item's first-seen time in this library */

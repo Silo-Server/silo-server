@@ -5685,6 +5685,10 @@
             "description": "catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators",
             "type": "boolean"
           },
+          "item_file_paths": {
+            "description": "listAdminCatalogItems accepts include_file_paths from this caller: a login session, an unscoped key, or a key holding admin:catalog:paths",
+            "type": "boolean"
+          },
           "item_listing": {
             "description": "listAdminCatalogItems is served",
             "type": "boolean"
@@ -5728,6 +5732,7 @@
           "item_match_hints",
           "item_metadata",
           "item_metadata_reset",
+          "item_file_paths",
           "revision",
           "state",
           "allowed"
@@ -6048,6 +6053,13 @@
               "120"
             ],
             "minLength": 1,
+            "type": "string"
+          },
+          "file_path": {
+            "description": "The file's path as the scanning server stores it, only with include_file_paths. Map it to another host's mounts through the library's paths. Bytes of a name that are not UTF-8 are stored as private-use code points",
+            "examples": [
+              "/media/movies/Heat (1995)/Heat.mkv"
+            ],
             "type": "string"
           },
           "file_size": {
@@ -74092,6 +74104,16 @@
             "name": "include_people",
             "schema": {
               "description": "Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Also return each version's file_path. Send it only when getAdminCatalogCapabilities reports item_file_paths; a key whose scopes lack admin:catalog:paths receives 403",
+            "explode": false,
+            "in": "query",
+            "name": "include_file_paths",
+            "schema": {
+              "description": "Also return each version's file_path. Send it only when getAdminCatalogCapabilities reports item_file_paths; a key whose scopes lack admin:catalog:paths receives 403",
               "type": "boolean"
             }
           }

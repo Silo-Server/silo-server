@@ -42,7 +42,8 @@ seed or administrator filesystem operation.
 
 `GET /api/v2/admin/catalog/items` (`listAdminCatalogItems`) lets an administrator,
 or a tool holding an administrator's key, mirror the video catalog. Unlike the
-discovery operations above it returns no paths or storage keys.
+discovery operations above it returns no storage keys, and file paths only on
+request (see `include_file_paths` below).
 
 It lists movies, series and episodes that have a membership row in an enabled
 library. Books, podcasts and their episodes are left out, as are items that only
@@ -62,7 +63,7 @@ starts a new listing. `content_ids` is a set, so repeating or reordering ids
 keeps the cursor. Ids that are not present movies, series or episodes are left
 out without an error, which is how a caller learns an item left the catalog.
 Each page is read in one snapshot with at most two statements, whatever it
-holds, or three with `include_people`. Later pages read the live catalog, so an
+holds, or three with `include_people`; `include_file_paths` adds none. Later pages read the live catalog, so an
 item added behind the cursor appears on the next full pass, not this one.
 
 Each item carries `content_id`, `type`, `title`, `year`, the provider ids, and
@@ -120,6 +121,17 @@ viewer has no language preference (the file's default track, else its first);
 a file-level value
 fills a field that track lacks. Fields the scanner has not probed are absent.
 
+`include_file_paths=true` also returns each version's `file_path`, so a tool
+can match files without reading every item. It is the path the scanning server
+stores, in that server's filesystem; a tool on another host maps it through the
+library's `paths`. Bytes of a file name that are not valid UTF-8 are stored as
+private-use code points, so a byte-exact comparison fails on those names. A
+login session, an unscoped administrator key, or a key holding
+`admin:catalog:paths` may send it; any other scoped key, such as one holding
+only `admin:monitor:read`, receives `403 permission_denied`, never a page
+without paths. Like every filter, it is bound into the cursor. A changed path
+raises `files_changed`.
+
 To keep a mirror current between full passes, subscribe to the `catalog` channel
 of the v2 events socket. An API key with the `admin:monitor:read` scope can mint
 its ticket (see [realtime-api.md](realtime-api.md#api-key-handshake)), as can an
@@ -134,7 +146,8 @@ with `content_ids`, and drop any the listing no longer returns. Fetch on
 carries those changes, `item_match_hints`, true when
 `GET /api/v2/admin/items/{id}/match/hints` is served, `item_metadata`, true
 when items carry the stored metadata above and the listing accepts
-`include_people`, and `item_metadata_reset`, true when
+`include_people`, `item_file_paths`, true when this caller may send
+`include_file_paths`, and `item_metadata_reset`, true when
 `POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`. The
 listing and the events have no Apple, Android, or Jellyfin compatibility
 callers; Jellyfin clients read the catalog through their own item queries.
