@@ -51,6 +51,9 @@ func TestJobCapRefusesNewStartsButContinuesHeldWork(t *testing.T) {
 	if rr := start("first-replan", "playback-1"); rr.Code != http.StatusAccepted {
 		t.Fatalf("a new transport for a served playback session at the cap: %d %s", rr.Code, rr.Body.String())
 	}
+	// One transport may overlap the one it replaces; a third for the same
+	// playback session is new work.
+	assertAtCapacity(t, start("first-replan-again", "playback-1"))
 }
 
 // Starts arriving together at the cap less one admit exactly one: a slot
@@ -115,8 +118,8 @@ func TestJobCapRefusesOtherNewJobs(t *testing.T) {
 }
 
 // A declared acceleration holds against the backend the core names from the
-// node's row; the core may still ask for none, and a hardware tone map keeps
-// the backend chosen from the node's own report.
+// node's row; the core may still ask for none, and only a node that declares
+// auto lets a hardware tone map name its backend.
 func TestDeclaredHWAccelHoldsAgainstTheRequest(t *testing.T) {
 	for _, tc := range []struct {
 		declared, requested string
@@ -127,6 +130,8 @@ func TestDeclaredHWAccelHoldsAgainstTheRequest(t *testing.T) {
 		{"vaapi", "nvenc", false, "vaapi"},
 		{"vaapi", playback.HWAccelNone, false, playback.HWAccelNone},
 		{"vaapi", "vaapi", true, "vaapi"},
+		{"vaapi", "qsv", true, "vaapi"},
+		{playback.HWAccelAuto, "vaapi", true, "vaapi"},
 		{playback.HWAccelNone, "nvenc", true, playback.HWAccelNone},
 		{playback.HWAccelAuto, "qsv", false, playback.HWAccelAuto},
 	} {

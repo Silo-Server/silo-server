@@ -1132,6 +1132,18 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if slot == nil {
+		// Admission was skipped because this artifact looked prepared or
+		// in preparation, but what is there does not answer this request
+		// (another recipe), so the node has to encode after all.
+		admitted, ok := s.admitJob()
+		if !ok {
+			writeAtCapacity(w)
+			return
+		}
+		slot = admitted
+		defer slot.release()
+	}
 	jobCtx, cancelJob := sourceContext(r.Context(), source)
 	defer cancelJob()
 	s.countJob(slot)

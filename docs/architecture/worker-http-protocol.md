@@ -83,10 +83,12 @@ count a job refuse: `POST /transcode/start` (plain text, as when draining),
 `POST /downloads/prepare` (plain text), `POST /trickplay/extract` (reason
 `node_busy`) and a progressive remux `GET`. Work that continues a job the node
 holds is never refused: a start with a session id the node runs, a start or
-remux for a `playback_session_id` it runs a session or remux for, a remux
-`GET` for a playback session it served within ten minutes (a seek or a
-reconnect), a prepare for an artifact it is preparing or has prepared, and
-the rebuild of a lost HLS session. Chapter-thumbnail extraction and media
+remux for a `playback_session_id` it runs exactly one session or remux for
+(the replacement overlaps what it replaces; a third transport for one
+playback session is new work), a remux `GET` for a playback session it served
+within ten minutes (a seek or a reconnect), a prepare whose artifact it is
+preparing or has prepared with the same recipe (one it has to encode again
+takes a slot), and the rebuild of a lost HLS session. Chapter-thumbnail extraction and media
 sampling count no job and are not capped. A node that declares a
 prepared-download budget (`SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES`) refuses a
 new preparation once its last measurement of the directory reaches it, with

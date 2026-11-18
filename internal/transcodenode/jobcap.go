@@ -187,9 +187,10 @@ func (s *Server) artifactBudgetReached() bool {
 // one in the request, from the node's row; a node whose operator declared an
 // acceleration runs that one instead, so a core whose row for the node was
 // changed cannot move it to another backend. The core may still ask for none,
-// which a software tone map needs, and a hardware tone map keeps the backend
-// the core chose from this node's own capability report, which the declared
-// acceleration produced. A node that declares none never uses its GPU.
+// which a software tone map needs. A node that declares auto lets a hardware
+// tone map keep the backend the core chose from the node's own capability
+// report, since auto names none; a node that declares a backend runs that one
+// for a hardware tone map too. A node that declares none never uses its GPU.
 func (s *Server) jobHWAccel(requested string, hardwareToneMap bool) string {
 	declared := s.declaredHWAccel
 	switch {
@@ -197,7 +198,7 @@ func (s *Server) jobHWAccel(requested string, hardwareToneMap bool) string {
 		return requested
 	case declared == playback.HWAccelNone, strings.EqualFold(strings.TrimSpace(requested), playback.HWAccelNone):
 		return playback.HWAccelNone
-	case hardwareToneMap:
+	case hardwareToneMap && declared == playback.HWAccelAuto:
 		return requested
 	default:
 		return declared
@@ -214,25 +215,32 @@ const continuationWindow = sessionIdleTTL
 // job this node holds: an HLS session or progressive remux it runs for that
 // playback session (a quality switch or replan starts a new transport for
 // the same session), or a remux it served within continuationWindow. Such
-// work is never refused at the cap; the planner counts it as the same job.
+// work is not refused at the cap; the planner counts it as the same job.
+//
+// Only one transport may overlap the one it replaces. A playback session
+// that already runs two here is not continuing anything: a third transport
+// is new work and needs a slot, so naming one playback session over and over
+// cannot run the node past its cap by more than one process per session.
 func (s *Server) continuesPlayback(playbackSessionID string, now time.Time) bool {
 	if playbackSessionID == "" {
 		return false
 	}
+	running := 0
 	s.mu.RLock()
 	for _, identity := range s.identities {
 		if identity.playbackSessionID == playbackSessionID {
-			s.mu.RUnlock()
-			return true
+			running++
 		}
 	}
 	for _, remux := range s.progressiveRemuxes {
 		if remux.playbackSessionID == playbackSessionID {
-			s.mu.RUnlock()
-			return true
+			running++
 		}
 	}
 	s.mu.RUnlock()
+	if running > 0 {
+		return running == 1
+	}
 	s.admission.Lock()
 	defer s.admission.Unlock()
 	last, ok := s.remuxSeen[playbackSessionID]

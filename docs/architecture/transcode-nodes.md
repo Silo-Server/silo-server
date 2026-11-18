@@ -291,7 +291,7 @@ says, whatever its row or its configuration document says:
 | Variable | Enforced by |
 |---|---|
 | `SILO_NODE_MAX_TRANSCODES` | The node: it refuses new work past the cap ([worker protocol](worker-http-protocol.md)). The planner also reads the row's `max_jobs`. |
-| `SILO_NODE_HW_ACCEL` | The node: `nodeconfig.Remote` uses it over the document's `hw_accel`, and a start runs with it whatever backend the request names (`Server.jobHWAccel`). The core may still ask for `none`, and a hardware tone map keeps the backend the core chose from the node's own capability report. |
+| `SILO_NODE_HW_ACCEL` | The node: `nodeconfig.Remote` uses it over the document's `hw_accel`, and a start runs with it whatever backend the request names (`Server.jobHWAccel`). The core may still ask for `none`. Only a node that declares `auto` lets a hardware tone map name its backend, chosen from the node's own capability report; a node that declares a backend runs that one for a hardware tone map too. |
 | `SILO_NODE_HW_DEVICE` | The node: used over the document's `hw_device`. |
 | `SILO_NODE_SOURCE_ACCESS` | The node: `Remote.SourceAccess` returns it over the document's. With `local` the node never fetches source bytes over HTTP; with `core` it never opens a local path. The core still grants and serves sources either way. |
 | `SILO_NODE_DOWNLOAD_ARTIFACT_DIR` | The node: used over the document's `artifact_dir`. |
