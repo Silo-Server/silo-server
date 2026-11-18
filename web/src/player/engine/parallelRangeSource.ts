@@ -45,6 +45,9 @@ const WARM_HEAD_BYTES = 16 * 2 ** 20;
 /** The most non-head ranges in flight on the stripe URL; the next one goes to the plan's own URL. */
 const MAX_STRIPE_URL_RANGES = MAX_RANGES_IN_FLIGHT - 1;
 
+/** A `Content-Range` that names the range and the file's size. */
+const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/;
+
 type MeteredFetch = Pick<ReturnType<typeof createMeteredFetch>, "fetch" | "newRun">;
 
 interface ReadWorker {
@@ -359,7 +362,11 @@ export class ParallelRangeSource extends InternalUrlSource {
         }
         // Any answer from the stripe URL that is not a readable 206 is the stripe URL failing:
         // a refusal there says nothing about the plan's URL.
-        if (onStripe && (response.status !== 206 || !response.headers.get("Content-Range"))) {
+        if (
+          onStripe &&
+          (response.status !== 206 ||
+            !CONTENT_RANGE.test(response.headers.get("Content-Range") ?? ""))
+        ) {
           void response.body?.cancel().catch(() => {});
           this.stripeFailed = true;
           continue;
@@ -400,7 +407,10 @@ export class ParallelRangeSource extends InternalUrlSource {
         if (position < responseEnd) {
           // The plan's URL ended its answer early after sending bytes: ask for the rest, as the
           // stock source does, without a retry or a stall report.
-          if (received > 0 && !onStripe) continue;
+          if (received > 0 && !onStripe) {
+            failures = 0;
+            continue;
+          }
           failures = await this.failed(
             failures,
             new Error(`Response for bytes=${range.start}-${range.end - 1} ended early`),
@@ -466,7 +476,7 @@ export class ParallelRangeSource extends InternalUrlSource {
         `Error fetching the stream: expected 206 Partial Content, got ${response.status}`,
       );
     }
-    const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get("Content-Range") ?? "");
+    const match = CONTENT_RANGE.exec(response.headers.get("Content-Range") ?? "");
     if (!match) throw new Error("Error fetching the stream: no usable Content-Range");
     const [first, last, total] = [Number(match[1]), Number(match[2]), Number(match[3])];
     if (first !== start || last !== Math.min(end - 1, total - 1)) {

@@ -16,7 +16,10 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 function pattern(size: number): Uint8Array {
   const bytes = new Uint8Array(size);
-  for (let i = 0; i < size; i++) bytes[i] = (i * 31 + (i >>> 8)) & 0xff;
+  // The higher terms keep 512 KiB chunks and 2 MiB ranges from repeating one another.
+  for (let i = 0; i < size; i++) {
+    bytes[i] = (i * 31 + (i >>> 8) + (i >>> 16) * 7 + (i >>> 24) * 13) & 0xff;
+  }
   return bytes;
 }
 
@@ -574,9 +577,28 @@ describe("ParallelRangeSource failures", () => {
     expect(getRetryDelay.mock.calls.map(([attempts]) => attempts)).toEqual([1, 1, 1, 1]);
   });
 
+  it("starts the retry count again after a short body that delivered bytes", async () => {
+    const server = new FakeServer(pattern(SIZE));
+    const faults: Fault[] = [
+      { kind: "fetchError" },
+      { kind: "fetchError" },
+      { kind: "short", bytes: 512 * KIB },
+      { kind: "fetchError" },
+      { kind: "fetchError" },
+    ];
+    let seen = 0;
+    server.fault = (request) =>
+      request.url === HEAD_URL && request.start < FIRST_STRIPE ? faults[seen++] : undefined;
+    const getRetryDelay = vi.fn((attempts: number) => (attempts < 4 ? 0 : null));
+    const { source } = makeSource(server, { getRetryDelay });
+    expect(same(await read(source, 0, 20 * MIB), server.bytes.subarray(0, 20 * MIB))).toBe(true);
+    expect(getRetryDelay.mock.calls.map(([attempts]) => attempts)).toEqual([1, 2, 1, 2]);
+  });
+
   it.each([
     ["a 502", { kind: "status", status: 502 }],
     ["a 404", { kind: "status", status: 404 }],
+    ["a Content-Range without the file's size", { kind: "contentRange", value: "bytes 0-1/*" }],
     ["a network error", { kind: "fetchError" }],
     ["a body-read error", { kind: "bodyError", afterBytes: 512 * KIB }],
     ["a short body", { kind: "short", bytes: 256 * KIB }],
