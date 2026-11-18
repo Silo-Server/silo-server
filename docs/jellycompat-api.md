@@ -608,7 +608,8 @@ The HLS master playlist (`/Videos/{id}/master.m3u8` and its `audio-v2`,
 well as GET, as Jellyfin does for its master playlists; DLNA controllers check
 a `TranscodingUrl` with HEAD before handing it to a TV. A HEAD answers `200`
 with the playlist content type and no body, `404` when the media file is gone,
-or `410` when the play's upstream session has ended, and starts no transcode;
+`410` when the play's upstream session has ended, or a retryable `503` when the
+file lookup fails, and starts no transcode;
 the GET starts it, so a HEAD's `200` does not promise the GET a route or
 capacity. Variant playlists and segments are GET only, as in Jellyfin.
 

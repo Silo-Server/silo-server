@@ -240,10 +240,11 @@ func TestRecordTranscodeStreamDetailsTargets(t *testing.T) {
 
 type testCompatFileResolver struct {
 	file *models.MediaFile
+	err  error
 }
 
 func (r testCompatFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
-	return r.file, nil
+	return r.file, r.err
 }
 
 func writeCompatTestFFmpeg(t *testing.T) string {

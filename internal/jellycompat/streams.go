@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -1440,7 +1441,8 @@ func (h *PlaybackHandler) remoteCompatDenied(ctx context.Context, playSession *P
 
 // headMasterManifest answers a HEAD on a master playlist without starting
 // playback: 410 when the play's upstream session was denied, 404 for a missing
-// file, and otherwise the playlist's headers with no body.
+// file, a retryable 503 when the file lookup fails, and otherwise the
+// playlist's headers with no body.
 func (h *PlaybackHandler) headMasterManifest(w http.ResponseWriter, r *http.Request, playSession *PlaybackSession, fileID int) {
 	if h.remoteCompatDenied(r.Context(), playSession) {
 		writeCompatSessionEnded(w)
@@ -1450,8 +1452,12 @@ func (h *PlaybackHandler) headMasterManifest(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
 		return
 	}
-	if _, err := h.fileResolver.GetByID(r.Context(), fileID); err != nil {
+	if _, err := h.fileResolver.GetByID(r.Context(), fileID); errors.Is(err, scanner.ErrFileNotFound) {
 		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		return
+	} else if err != nil {
+		// A failed lookup says nothing about the file; the controller may retry.
+		writeSessionCheckUnavailable(w)
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")

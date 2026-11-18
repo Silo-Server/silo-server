@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -189,18 +190,21 @@ func TestMediaSourceDTOEmitsDedicatedDolbyVisionStripRoute(t *testing.T) {
 	}
 }
 
-// A HEAD on the master playlist answers with the playlist's headers, or 410 for
-// a play whose upstream session was denied, and starts nothing: the handler has
+// A HEAD on the master playlist answers with the playlist's headers, 410 for a
+// play whose upstream session was denied, or a retryable 503 when the file
+// lookup fails, and starts nothing: the handler has
 // no session manager or node planner, so reaching the transcode start would
 // fail the request.
 func TestMasterManifestHeadStartsNothing(t *testing.T) {
 	tests := []struct {
 		name     string
 		denied   bool
+		fileErr  error
 		wantCode int
 	}{
 		{name: "live play", wantCode: http.StatusOK},
 		{name: "denied upstream", denied: true, wantCode: http.StatusGone},
+		{name: "file lookup fails", fileErr: errors.New("database unavailable"), wantCode: http.StatusServiceUnavailable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -219,7 +223,7 @@ func TestMasterManifestHeadStartsNothing(t *testing.T) {
 			t.Cleanup(func() { _ = rdb.Close() })
 			handler := &PlaybackHandler{
 				playbackStore: store,
-				fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: source.FileID}},
+				fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: source.FileID}, err: tt.fileErr},
 				StreamDeny:    playback.NewStreamDeny(rdb),
 			}
 			if tt.denied {
