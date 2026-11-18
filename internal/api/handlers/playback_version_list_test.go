@@ -194,6 +194,117 @@ func TestStartTriesTheNextCandidateWhenTheResolvedRowIsUnlisted(t *testing.T) {
 	}
 }
 
+// An explicit pick whose first resolve bound a catalog row outside the item's
+// version list must serve the row the viewer picked, never the sibling that owned
+// the candidate URI. The measured production case picked 1975761 (720p H.264) and
+// the resolve bound 1975715 (a duplicate row the item's 190-row list did not
+// carry); the confinement re-walk then rotated to the item's default HDR row and
+// terminalised on that file's `hdr_transcode_unsupported`, which is a verdict about
+// a release the viewer never chose.
+func TestExplicitPickOutsideListBindingRebindsToTheRequestedRow(t *testing.T) {
+	const (
+		neutral      = "virtual://movie/tt-explicit-rebind"
+		requestedURI = neutral + "?result=selected"
+		foreignURI   = neutral + "?result=duplicate"
+	)
+	scannerResetVirtualProbeState(t, requestedURI, foreignURI)
+
+	requested := rotationTrackFixtureRow(400, 8_000_000_000, requestedURI, "Movie.2024.720p.SELECTED", 2, 1)
+	requested.ProbeUpdatedAt = timePtr(time.Now().Add(-time.Hour))
+	duplicate := rotationTrackFixtureRow(401, 20_000_000_000, foreignURI, "Movie.2024.2160p.HDR.DUPLICATE", 1, 0)
+	rows := map[string]*models.MediaFile{requestedURI: requested, foreignURI: duplicate}
+	candidates := []VirtualPlaybackStream{
+		{ID: "duplicate", URI: foreignURI, FileSize: 20_000_000_000, OwnerInstallationID: 5},
+		{ID: "selected", URI: requestedURI, FileSize: 8_000_000_000, OwnerInstallationID: 5},
+	}
+	fx := newRotationTrackFixture(t, requested, rows, candidates, func(string, *models.MediaFile) error {
+		return nil
+	})
+	fx.handler.VersionList = staticVersionList{ids: versionIDs(requested.ID)}
+
+	// The first resolve served the duplicate row, which the item does not list.
+	outside := resolvedVirtualPlaybackSource{
+		URI:     foreignURI,
+		OwnerID: 5,
+		File:    duplicate,
+	}
+	r := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", nil)
+	start := playback.StartRequestV3{QualityPreference: "auto", FileSelection: playback.FileSelectionExplicitV3}
+	confined, err := fx.handler.confineStartEffectiveVersionV3(r, r, requested, outside, start, "profile-1", true, 0)
+	if err != nil {
+		t.Fatalf("confine error: %v", err)
+	}
+	if confined.File == nil {
+		t.Fatal("confine returned no effective row")
+	}
+	if confined.File.ID != requested.ID {
+		t.Fatalf("effective row = %d, want the selected row %d", confined.File.ID, requested.ID)
+	}
+	if confined.URI != requestedURI {
+		t.Fatalf("confined URI = %q, want the selected row's own candidate %q", confined.URI, requestedURI)
+	}
+}
+
+// When the selected row's own release cannot be resolved either, an explicit pick
+// answers the selected version's own retryable failure. It must not plan a listed
+// sibling (the silent-substitution shape) and must not carry the sibling's or the
+// version list's verdict into a terminal about the picked release.
+func TestExplicitPickOutsideListBindingFailsAboutTheRequestedRow(t *testing.T) {
+	const (
+		neutral      = "virtual://movie/tt-explicit-own-failure"
+		requestedURI = neutral + "?result=selected"
+		foreignURI   = neutral + "?result=sibling"
+	)
+	scannerResetVirtualProbeState(t, requestedURI, foreignURI)
+
+	requested := rotationTrackFixtureRow(410, 8_000_000_000, requestedURI, "Movie.2024.720p.SELECTED", 2, 1)
+	requested.ProbeUpdatedAt = timePtr(time.Now().Add(-time.Hour))
+	sibling := rotationTrackFixtureRow(411, 12_000_000_000, foreignURI, "Movie.2024.1080p.SIBLING", 2, 1)
+	rows := map[string]*models.MediaFile{foreignURI: sibling}
+	fx := newRotationTrackFixture(t, requested, rows, nil, func(string, *models.MediaFile) error {
+		return nil
+	})
+	// Every provider resolve fails, so re-resolving the selected row cannot succeed
+	// and the only other answer on the table is a sibling.
+	fx.handler.VirtualMediaDetailedResolver = nil
+	fx.handler.VirtualPlaybackResolver = VirtualPlaybackResolverFunc(
+		func(context.Context, string, int, string, int) (string, error) {
+			return "", errors.New("provider listing failed")
+		},
+	)
+	fx.handler.VersionList = staticVersionList{ids: versionIDs(requested.ID, sibling.ID)}
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", nil)
+	start := playback.StartRequestV3{QualityPreference: "auto", FileSelection: playback.FileSelectionExplicitV3}
+	// The sibling is listed, so the old guard would have accepted it and planned a
+	// different release under the viewer's pick.
+	confined, err := fx.handler.confineStartEffectiveVersionV3(r, r, requested, resolvedVirtualPlaybackSource{
+		URI: foreignURI, OwnerID: 5, File: sibling,
+	}, start, "profile-1", true, 0)
+	if err == nil {
+		t.Fatalf("confine planned the sibling row %d for an explicit pick of %d", confined.File.ID, requested.ID)
+	}
+	if !errors.Is(err, errSelectedReleaseNotServableV3) {
+		t.Fatalf("error = %v, want errSelectedReleaseNotServableV3", err)
+	}
+	if errors.Is(err, errEffectiveFileNotInVersionList) {
+		t.Fatalf("a different-release binding was reported as a version-list fault: %v", err)
+	}
+	terminal := virtualStartUnresolvedTerminalV3(err)
+	if terminal.Terminal == nil {
+		t.Fatal("no terminal for the selected row's own failure")
+	}
+	if !terminal.Terminal.Retryable {
+		t.Fatal("the selected row's own failure must be retryable")
+	}
+	if !strings.Contains(terminal.Terminal.Message, "selected version") {
+		t.Fatalf("terminal message %q does not name the selected version", terminal.Terminal.Message)
+	}
+	if virtualCandidateConfirmedDead(requested, err) {
+		t.Fatal("the selected row was indicted by a different release's resolve")
+	}
+}
+
 // When no candidate resolves inside the version list the start must answer a
 // retryable terminal that names the version list, never a plan for the unlisted
 // row. The failure must also stay out of the dead-pin classifier: the requested

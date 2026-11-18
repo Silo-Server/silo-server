@@ -594,7 +594,8 @@ func virtualCandidateConfirmedDead(file *models.MediaFile, resolveErr error) boo
 	// is what turned one play attempt on a source-mismatch row into a durable
 	// failed:true that the version list then showed as dead.
 	if errors.Is(resolveErr, errVirtualSelectedReleaseUnverified) ||
-		errors.Is(resolveErr, errEffectiveFileNotInVersionList) {
+		errors.Is(resolveErr, errEffectiveFileNotInVersionList) ||
+		errors.Is(resolveErr, errSelectedReleaseNotServableV3) {
 		return false
 	}
 	if isVirtualCandidateDeadError(resolveErr) {

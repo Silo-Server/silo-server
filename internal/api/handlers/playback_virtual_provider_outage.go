@@ -390,6 +390,12 @@ func virtualStartUnresolvedTerminalV3(resolveErr error) playback.DecisionRespons
 		return playback.NewTerminalResponseV3(sourceMismatchReasonV3, "The provider served a different release's bytes for this version. Refresh the version list and choose again.", true)
 	case errors.Is(resolveErr, errEffectiveFileNotInVersionList):
 		return playback.NewTerminalResponseV3(virtualSourceUnavailableReasonV3, "The selected version resolved to a release that is not in this item's version list. Refresh the version list and choose another version.", true)
+	case errors.Is(resolveErr, errSelectedReleaseNotServableV3):
+		// The provider answered with another release's candidate. The selected
+		// version itself was never disproven, so this stays retryable and names
+		// that version: a fresh start can resolve it again, and the viewer is
+		// never told a different file's fate.
+		return playback.NewTerminalResponseV3(virtualSourceUnavailableReasonV3, "The selected version could not be prepared from its own release. Try again, or choose another version.", true)
 	case errors.Is(resolveErr, resolver.ErrProviderUnavailable):
 		return playback.NewTerminalResponseV3(providerUnavailableReasonV3, "The virtual source provider is temporarily unavailable.", true)
 	case strings.Contains(strings.ToLower(fmt.Sprint(resolveErr)), "no streams available"):

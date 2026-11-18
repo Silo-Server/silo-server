@@ -2787,13 +2787,21 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 			// is left unmarked.
 			h.stampStartVirtualCandidateFailed(r.Context(), requestedFile, resolveErr)
 			termFileID := requestedFile.ID
-			if requestedFile.EpisodeID != "" && h.VirtualEpisodeFileLookup != nil {
-				if dbFile, err := h.VirtualEpisodeFileLookup(r.Context(), requestedFile.EpisodeID); err == nil && dbFile != nil && dbFile.ID > 0 {
-					termFileID = dbFile.ID
-				}
-			} else if requestedFile.EpisodeID == "" && h.VirtualContentFileLookup != nil && requestedFile.ContentID != "" {
-				if dbFile, err := h.VirtualContentFileLookup(r.Context(), requestedFile.ContentID); err == nil && dbFile != nil && dbFile.ID > 0 {
-					termFileID = dbFile.ID
+			// An explicit pick is recorded against the row the viewer chose. A
+			// discovery rewrite may have replaced the item's default row, but that
+			// row is not this request: a retry re-sends the selected id, and a
+			// terminal that named a sibling would report a different file's fate
+			// (the measured production case terminalised on the item's default HDR
+			// row while the viewer had picked a 720p release).
+			if !explicitPickRequestedV3(req) {
+				if requestedFile.EpisodeID != "" && h.VirtualEpisodeFileLookup != nil {
+					if dbFile, err := h.VirtualEpisodeFileLookup(r.Context(), requestedFile.EpisodeID); err == nil && dbFile != nil && dbFile.ID > 0 {
+						termFileID = dbFile.ID
+					}
+				} else if requestedFile.EpisodeID == "" && h.VirtualContentFileLookup != nil && requestedFile.ContentID != "" {
+					if dbFile, err := h.VirtualContentFileLookup(r.Context(), requestedFile.ContentID); err == nil && dbFile != nil && dbFile.ID > 0 {
+						termFileID = dbFile.ID
+					}
 				}
 			}
 			req.FileID = termFileID
