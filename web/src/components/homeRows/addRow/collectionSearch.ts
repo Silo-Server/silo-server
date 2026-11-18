@@ -44,6 +44,8 @@ export function useCollectionSearch(options: readonly CollectionOption[]) {
     libraries.length > 1 && libraries.some((entry) => entry.id === pickedLibrary)
       ? pickedLibrary
       : "all";
+  // Forget a pick that stopped applying, so it can't return with its library.
+  if (library !== pickedLibrary) setLibrary(library);
   const needle = query.trim().toLowerCase();
   const shown = useMemo(
     () =>
