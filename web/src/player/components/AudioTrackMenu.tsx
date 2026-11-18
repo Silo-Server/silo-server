@@ -1,7 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { AudioLines } from "lucide-react";
 import type { PlayerAudioTrack } from "../types";
-import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
+import {
+  audioTrackIdentity,
+  audioTrackLabel,
+  formatChannels,
+  undeclaredLanguageHint,
+} from "@/lib/mediaFormat";
 import {
   audioTitle,
   compactAudioMeta,
@@ -63,6 +68,8 @@ interface AudioTrackMenuProps {
  */
 interface TrackDescriptor {
   title: string;
+  /** Spoken and hovered note for a row whose language is not declared. */
+  hint: string;
   meta: string;
   codecLabel: string;
   channelsLabel: string;
@@ -70,19 +77,27 @@ interface TrackDescriptor {
 }
 
 function describeTrack(track: PlayerAudioTrack, index: number): TrackDescriptor {
-  const title = audioTitle(track) || `Track ${index + 1}`;
+  const identity = audioTrackIdentity(track, index + 1);
+  // A declared language keeps the track's own title, which the release often
+  // writes better than we could. A row without one takes the shared identity
+  // (codec + layout, else its position) instead of a title that names a
+  // language nobody declared; its embedded title stays readable as meta text.
+  const title = identity.languageUndeclared ? identity.title : audioTitle(track);
   const language = track.languages?.length
     ? track.languages.map(formatLanguageName).filter(Boolean).join("/")
     : formatLanguageName(track.language ?? "");
+  const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
   const metaParts = [
     language && language.toLowerCase() !== title.toLowerCase() ? language : "",
+    identity.languageUndeclared && embeddedTitle !== title ? embeddedTitle : "",
     compactAudioMeta(track),
   ].filter(Boolean);
   return {
     title,
+    hint: identity.languageUndeclared ? undeclaredLanguageHint() : "",
     meta: metaParts.join(" \u00B7 "),
-    codecLabel: audioTrackLabel(track),
-    channelsLabel: formatChannels(track.channels),
+    codecLabel: identity.titleFromFormat ? "" : audioTrackLabel(track),
+    channelsLabel: identity.titleFromFormat ? "" : formatChannels(track.channels),
     isDefault: Boolean(track.default),
   };
 }
@@ -285,6 +300,7 @@ export function AudioTrackMenu({
                 }}
                 role="menuitem"
                 type="button"
+                title={descriptor.hint || undefined}
                 className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                   isActive ? "text-blue-400" : "text-white/85"
                 }`}
@@ -296,6 +312,7 @@ export function AudioTrackMenu({
                 <span className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="truncate text-sm font-medium">{descriptor.title}</span>
+                    {descriptor.hint && <span className="sr-only">{descriptor.hint}</span>}
                     {descriptor.codecLabel && <TrackBadge>{descriptor.codecLabel}</TrackBadge>}
                     {descriptor.channelsLabel && (
                       <TrackBadge>{descriptor.channelsLabel}</TrackBadge>

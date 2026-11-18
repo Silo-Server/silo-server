@@ -4,9 +4,13 @@ import { memo, useCallback, type ReactNode } from "react";
 import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getLanguageName } from "@/player/utils/languageNames";
-import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
-import { audioTitle, compactAudioMeta } from "./versionFormatUtils";
+import {
+  audioTrackIdentity,
+  audioTrackLabel,
+  formatChannels,
+  undeclaredLanguageHint,
+} from "@/lib/mediaFormat";
+import { compactAudioMeta } from "./versionFormatUtils";
 import { formatAudioTrackSummary, resolveAudioTrackSelection } from "./prePlaySelection";
 import { useProvisionalInventoryExpiry } from "@/player/hooks/useProvisionalInventoryExpiry";
 import DetailPopover from "./DetailPopover";
@@ -37,12 +41,15 @@ function AudioOptionRow({
   title,
   description,
   badges,
+  hint,
   onSelect,
 }: {
   active: boolean;
   title: string;
   description?: string;
   badges?: ReactNode;
+  /** Spoken and hovered note for a row whose identity is incomplete. */
+  hint?: string;
   onSelect?: () => void;
 }) {
   const content = (
@@ -50,6 +57,7 @@ function AudioOptionRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-sm font-medium">{title}</span>
+          {hint && <span className="sr-only">{hint}</span>}
           {badges}
         </div>
         {description && <div className="text-muted-foreground mt-0.5 text-xs">{description}</div>}
@@ -63,6 +71,7 @@ function AudioOptionRow({
   if (!onSelect) {
     return (
       <div
+        title={hint}
         className={`flex items-start gap-3 rounded-lg px-3 py-2.5 ${active ? "bg-accent/50" : ""}`}
       >
         {content}
@@ -74,6 +83,7 @@ function AudioOptionRow({
     <button
       type="button"
       onClick={onSelect}
+      title={hint}
       className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
         active ? "bg-accent/50" : "hover:bg-accent/30"
       }`}
@@ -190,38 +200,38 @@ function AudioTracksPopover({
           </div>
         )}
         {(inventoryProvisional || declaredGroupOnly ? [] : tracks).map((track, index) => {
+          const identity = audioTrackIdentity(track, index + 1);
           const codec = audioTrackLabel(track);
           const channels = formatChannels(track.channels);
-          const language = getLanguageName(track.language ?? "");
-          const fallbackTitle = audioTitle(track);
-          const title = language || fallbackTitle;
           const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
           const meta = [
-            embeddedTitle && embeddedTitle !== title ? embeddedTitle : "",
+            embeddedTitle && embeddedTitle !== identity.title ? embeddedTitle : "",
             compactAudioMeta(track),
           ]
             .filter(Boolean)
             .join(" \u00B7 ");
+          const hint = identity.languageUndeclared ? undeclaredLanguageHint() : undefined;
 
           return (
             <AudioOptionRow
-              key={`${track.language}-${track.codec}-${index}`}
+              key={`${index}-${identity.title}`}
               active={
                 isInteractive
                   ? selectionMode === "explicit" && explicitTrackIndex === index
                   : Boolean(track.default)
               }
-              title={title}
+              title={identity.title}
               description={meta}
+              hint={hint}
               onSelect={onSelectTrack ? () => onSelectTrack(index) : undefined}
               badges={
                 <>
-                  {codec && (
+                  {!identity.titleFromFormat && codec && (
                     <Badge variant="secondary" className="px-1.5 py-0 text-[0.625rem] uppercase">
                       {codec}
                     </Badge>
                   )}
-                  {channels && (
+                  {!identity.titleFromFormat && channels && (
                     <Badge variant="secondary" className="px-1.5 py-0 text-[0.625rem]">
                       {channels}
                     </Badge>

@@ -39,9 +39,53 @@ describe("AudioTrackMenu", () => {
     expect(screen.getByText("French")).toBeTruthy();
   });
 
-  it("omits the language segment when no language resolves", () => {
+  it("keeps an undeclared row's embedded title as meta, not as its identity", () => {
     renderMenu([{ title: "Commentary", codec: "ac3", layout: "2.0" }]);
-    expect(screen.getByText("2.0")).toBeTruthy();
+    expect(screen.getByText("AC3")).toBeTruthy();
+    expect(screen.getByText("Commentary \u00B7 2.0")).toBeTruthy();
+  });
+
+  it("identifies an unlabelled row by codec and channel layout, not an unknown language", () => {
+    renderMenu([{ codec: "eac3", channels: 6 }]);
+    expect(screen.getByText("EAC3 5.1")).toBeTruthy();
+    expect(screen.queryByText("Unknown")).toBeNull();
+    expect(screen.queryByText("Inconnue")).toBeNull();
+    expect(screen.getByRole("menuitem")).toHaveAttribute("title", "Language: Unknown");
+  });
+
+  it("names the language for a row that declares one", () => {
+    renderMenu([{ language: "fr", codec: "aac", channels: 2 }]);
+    expect(screen.getByText("French")).toBeTruthy();
+    expect(screen.queryByText("Language: Unknown")).toBeNull();
+  });
+
+  it("falls back to the row's position when neither language nor format is known", () => {
+    renderMenu([{ language: "en", codec: "eac3", channels: 6 }, {}]);
+    const entries = screen.getAllByRole("menuitem");
+    expect(entries[0]).toHaveTextContent("English");
+    expect(entries[1]).toHaveTextContent("Track 2");
+    expect(entries[1]).toHaveAttribute("title", "Language: Unknown");
+  });
+
+  it("relabels the row when a probe replaces the unlabelled release entry", () => {
+    const view = renderMenu([{ codec: "eac3", channels: 6 }]);
+    expect(screen.getByText("EAC3 5.1")).toBeTruthy();
+
+    view.rerender(
+      createElement(AudioTrackMenu, {
+        tracks: [{ language: "fr", codec: "eac3", channels: 6 }],
+        activeIndex: 0,
+        onSelect: () => {},
+        currentPosition: 0,
+        open: true,
+        onOpenChange: () => {},
+        hideTrigger: true,
+      }),
+    );
+
+    expect(screen.getByText("French")).toBeTruthy();
+    expect(screen.queryByText("EAC3 5.1")).toBeNull();
+    expect(screen.queryByText("Language: Unknown")).toBeNull();
   });
 
   it("keeps the trigger enabled with a single track and opens to that entry", () => {
