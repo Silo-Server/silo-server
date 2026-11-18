@@ -76,7 +76,12 @@ export function useWatchDetail(
   },
 ) {
   return useQuery({
-    queryKey: itemKeys.watchDetail(id!, fileId, libraryId),
+    // One entry per item and library. `fileId` only names a preferred file for
+    // the server's own default (`playback_variants[].default_file_id`, the
+    // top-level markers); every field the web reads from this payload is
+    // per-version or per-item, so keying on it split the same title's read into
+    // a second cache entry — the player and the page then each fetched it.
+    queryKey: itemKeys.watchDetail(id!, libraryId),
     queryFn: () => fetchWatchDetail(id!, fileId, libraryId),
     enabled: (options?.enabled ?? true) && !!id,
     // Player navigation remounts this query (detail -> player -> back). A short

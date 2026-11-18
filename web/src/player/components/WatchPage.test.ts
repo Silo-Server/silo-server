@@ -2490,7 +2490,7 @@ describe("WatchPage live inventory refresh", () => {
 
     // The request is keyed on the live file, not the mount-time one.
     const lastQuery = fetchQueryMock.mock.calls.at(-1)?.[0] as { queryKey?: unknown[] };
-    expect(lastQuery?.queryKey).toEqual(itemKeys.watchDetail("content-1", 8, undefined));
+    expect(lastQuery?.queryKey).toEqual(itemKeys.watchDetail("content-1"));
     expect(applyAudioInventory).toHaveBeenCalledWith(richerForNewFile, 8);
   });
 
@@ -2568,7 +2568,7 @@ describe("WatchPage live inventory refresh", () => {
     queryClientOverride.current = client;
     // A payload cached at page mount (< staleTime old) without the probed
     // inventory; a cache-first read would return it and waste the attempt.
-    client.setQueryData(itemKeys.watchDetail("content-1", undefined, undefined), {
+    client.setQueryData(itemKeys.watchDetail("content-1"), {
       versions: [{ ...virtualVersion }],
     });
     fetchWatchDetailMock.mockResolvedValue({
@@ -3277,7 +3277,7 @@ describe("WatchPage chapter refresh", () => {
     const chapterlessVersion: PlayerFileVersion = { ...version, chapters: [] };
     // The mounted query already holds a fresh payload without chapters; a
     // cache-first read would consume the single attempt without a request.
-    client.setQueryData(itemKeys.watchDetail("content-1", undefined, undefined), {
+    client.setQueryData(itemKeys.watchDetail("content-1"), {
       versions: [chapterlessVersion],
     });
     fetchWatchDetailMock.mockResolvedValue({

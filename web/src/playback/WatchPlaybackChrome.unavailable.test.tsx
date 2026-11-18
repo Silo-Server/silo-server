@@ -9,7 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { V2ProblemError, V2TransportError } from "@/api/v2/request";
 import { useWatchDetail } from "@/hooks/queries/items";
 import { createWatchRouteRequest } from "@/pages/watchRouteHelpers";
-import { WatchPlaybackHost, WatchPlaybackProvider } from "./WatchPlaybackChrome";
+import {
+  PREPARING_DEADLINE_MS,
+  WatchPlaybackHost,
+  WatchPlaybackProvider,
+} from "./WatchPlaybackChrome";
 import {
   useWatchPlaybackController,
   type WatchPlaybackControllerValue,
@@ -103,6 +107,45 @@ beforeEach(() => {
   mocks.watchDetail.mockReset();
 });
 afterEach(cleanup);
+
+describe("WatchPlaybackHost's preparing gate", () => {
+  it("bounds the wait and offers a retry when the read never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.watchDetail.mockReturnValue(new Promise(() => {}));
+      const { controller } = renderHost();
+
+      act(() =>
+        controller().syncRouteRequest(
+          createWatchRouteRequest({ contentId: "movie-slow", libraryId: 1 }),
+        ),
+      );
+      expect(screen.getByText("Preparing playback")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(PREPARING_DEADLINE_MS);
+      });
+      expect(screen.queryByText("Preparing playback")).not.toBeInTheDocument();
+      expect(screen.getByText("Playback unavailable")).toBeInTheDocument();
+      expect(screen.getByText("Silo could not start playback.")).toBeInTheDocument();
+
+      // Try Again hands the gate back a fresh window instead of leaving the
+      // viewer on the failure with only a way out.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Try Again" }));
+      });
+      expect(screen.getByText("Preparing playback")).toBeInTheDocument();
+
+      // The new window is bounded too.
+      act(() => {
+        vi.advanceTimersByTime(PREPARING_DEADLINE_MS);
+      });
+      expect(screen.getByText("Playback unavailable")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("WatchPlaybackHost when the title cannot be loaded", () => {
   it("replaces the preparing screen with the unavailable screen on a 404", async () => {

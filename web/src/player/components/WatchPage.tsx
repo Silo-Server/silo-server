@@ -609,7 +609,7 @@ function WatchPagePlayer({
     // Re-read the watch detail so the version list and the indexer releases
     // both come from the server's answer rather than a client-side merge.
     const detail = await queryClient.fetchQuery({
-      queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+      queryKey: itemKeys.watchDetail(contentId, libraryId),
       queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
       staleTime: 0,
     });
@@ -1004,7 +1004,7 @@ function WatchPagePlayer({
         // key would keep reading the mount version's inventory (or a cached
         // payload for it) and never see the newly selected version's probe.
         const detail = await queryClient.fetchQuery({
-          queryKey: itemKeys.watchDetail(contentId, mediaFileId, libraryId),
+          queryKey: itemKeys.watchDetail(contentId, libraryId),
           queryFn: () =>
             fetchWatchDetail(contentId, mediaFileId, libraryId, { signal: controller.signal }),
           staleTime: isFirstAttempt ? 0 : WATCH_DETAIL_STALE_TIME_MS,
@@ -1253,7 +1253,7 @@ function WatchPagePlayer({
     // payload that still lacks chapters would otherwise be returned without a
     // network request, spending this file's single repair attempt for nothing.
     void queryClient.fetchQuery({
-      queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+      queryKey: itemKeys.watchDetail(contentId, libraryId),
       queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
       staleTime: 0,
     });
@@ -1304,7 +1304,7 @@ function WatchPagePlayer({
     // re-applied below before this list replaces them.
     void queryClient
       .fetchQuery({
-        queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+        queryKey: itemKeys.watchDetail(contentId, libraryId),
         queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
         staleTime: 0,
       })
