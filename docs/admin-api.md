@@ -533,7 +533,10 @@ A transcode node declares through the core; see
 [transcode nodes](architecture/transcode-nodes.md#registration).
 
 Upgrade order: the main server first, since its migration adds the column.
-Proxies read node rows with it, so they follow the main server. Transcode
+Proxies read node rows with it, so they follow the main server. A proxy that
+starts while the column is still missing (its main server is migrating beside
+it) starts without its declaration and applies it every 30 seconds until the
+column exists. Transcode
 nodes can go before or after: against an older main server a node that
 declares something logs a warning, starts on its row as it is, and offers the
 declaration again every 30 seconds until the main server takes it.

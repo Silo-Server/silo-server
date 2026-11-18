@@ -35,29 +35,79 @@ func proxyNodeIdentity(getenv func(string) string) (nodeURL, name string) {
 	return first("SILO_NODE_URL", envNodeURL), first("SILO_NODE_NAME", envNodeName)
 }
 
+// proxyDeclarationRetryInterval spaces a proxy's retries while the database
+// predates node declarations: the main server is usually still migrating.
+const proxyDeclarationRetryInterval = 30 * time.Second
+
 // declareProxyNode registers this proxy and writes the configuration it
 // declares from its environment to its row, before the configuration watcher
 // first reads it. A proxy nobody registered creates its own row. It returns
 // the row, or nil when the proxy starts on its row as the administrator left
-// it (a database the main server has not migrated yet, or an identity that
-// matches a row it cannot register as while it declares nothing). An error
-// is one the proxy must not start with: a value the store refuses, named by
-// its variable, or a database that cannot take the write.
+// it: an identity that matches a row it cannot register as while it declares
+// nothing, or a database the main server has not migrated yet, in which case
+// the declaration is retried in the background until the migration lands. An
+// error is one the proxy must not start with: a value the store refuses,
+// named by its variable, or a database that cannot take the write.
 func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string) (*nodepool.Node, error) {
 	input, err := nodedeclare.FromEnv(nodepool.NodeTypeProxy, os.Getenv)
 	if err != nil {
 		return nil, err
 	}
+	node, err := applyProxyDeclaration(ctx, pool, eventBus, nodeURL, name, input)
+	if predatesDeclarations(err) {
+		// Compose starts a proxy beside the main server, so the migration
+		// adding env_managed is often still running; an older main server
+		// never adds it. Either way the proxy runs as before until it does.
+		slog.WarnContext(ctx, "the database predates node declarations; starting without this proxy's declaration and retrying until the main server has migrated it",
+			"component", "nodeconfig")
+		go retryProxyDeclaration(ctx, pool, eventBus, nodeURL, name, input)
+		return nil, nil
+	}
+	if errors.Is(err, nodepool.ErrNodeIdentityConflict) && len(input.SetFields()) == 0 {
+		slog.WarnContext(ctx, "this proxy's URL or name matches a row it cannot register as; starting without registering",
+			"component", "nodeconfig", "error", err)
+		return nil, nil
+	}
+	return node, err
+}
+
+// retryProxyDeclaration applies the declaration every
+// proxyDeclarationRetryInterval until the database has the column. The
+// configuration watcher finds the row by URL or name on its next reload.
+func retryProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string, input nodepool.UpdateNodeInput) {
+	ticker := time.NewTicker(proxyDeclarationRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		_, err := applyProxyDeclaration(ctx, pool, eventBus, nodeURL, name, input)
+		if predatesDeclarations(err) {
+			continue
+		}
+		if err != nil {
+			slog.ErrorContext(ctx, "this proxy's node declaration was not applied; fix it and restart the proxy",
+				"component", "nodeconfig", "error", err)
+		}
+		return
+	}
+}
+
+// predatesDeclarations reports a database without stream_nodes.env_managed.
+func predatesDeclarations(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "42703"
+}
+
+// applyProxyDeclaration writes the declaration once and tells the API
+// servers. A value the store refuses comes back as a *nodedeclare.Error
+// naming its variable.
+func applyProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string, input nodepool.UpdateNodeInput) (*nodepool.Node, error) {
 	callCtx, cancel := context.WithTimeout(ctx, proxyDeclarationTimeout)
 	defer cancel()
 	node, created, err := nodepool.NewAdminConfigurationStore(pool).DeclareProxy(callCtx, nodeURL, name, input)
-	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "42703" {
-		// The main server has not migrated the database to a version with
-		// env_managed: upgrade it first. Until then the proxy runs as before.
-		slog.WarnContext(ctx, "the database predates node declarations; upgrade the main server first. Starting without this proxy's declaration",
-			"component", "nodeconfig")
-		return nil, nil
-	}
 	if declErr, ok := errors.AsType[*nodepool.DeclarationError](err); ok {
 		variable := nodedeclare.VariableFor(nodepool.NodeTypeProxy, declErr.Field)
 		if variable == "" {
@@ -65,12 +115,10 @@ func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.Ev
 		}
 		return nil, &nodedeclare.Error{Variable: variable, Detail: declErr.Detail}
 	}
-	if errors.Is(err, nodepool.ErrNodeIdentityConflict) && len(input.SetFields()) == 0 {
-		slog.WarnContext(ctx, "this proxy's URL or name matches a row it cannot register as; starting without registering",
-			"component", "nodeconfig", "error", err)
-		return nil, nil
-	}
 	if err != nil {
+		if predatesDeclarations(err) || errors.Is(err, nodepool.ErrNodeIdentityConflict) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("register this proxy: %w", err)
 	}
 	if created {
