@@ -89,6 +89,7 @@ var excludedUserTables = map[string]string{
 	"history_import_runs":              "history-import run records",
 	"webhook_sync_connections":         "webhook credentials",
 	"notification_webhooks":            "webhook destinations and secrets",
+	"notification_plugin_destinations": "plugin destinations and their secrets",
 	"notification_discord_prefs":       excludedDiscord,
 	"notification_discord_link_state":  excludedDiscord,
 	"notification_email_prefs":         "an email destination must be verified on this server",
