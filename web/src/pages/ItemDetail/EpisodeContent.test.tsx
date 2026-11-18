@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import type { FileVersion, ItemDetail, Season } from "@/api/types";
-import { catalogKeys, itemKeys } from "@/hooks/queries/keys";
+import { catalogKeys } from "@/hooks/queries/keys";
 import EpisodeContent from "./EpisodeContent";
 import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 
@@ -618,7 +618,7 @@ describe("EpisodeContent", () => {
       // refetch never finishes here.
       let detailFetches = 0;
       const detail = new QueryObserver(client, {
-        queryKey: itemKeys.detail("episode-1"),
+        queryKey: catalogKeys.itemDetail("episode-1"),
         queryFn: () => (++detailFetches === 1 ? Promise.resolve({}) : new Promise(() => {})),
       });
       const unsubscribe = detail.subscribe(() => {});
