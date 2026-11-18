@@ -69,7 +69,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { FileVersion, PlaybackVariant } from "@/api/types";
+import type { FileVersion, PlaybackVariant, WatchDetail } from "@/api/types";
 import type { RedetectMarkersKind, RefreshItemMetadataMode } from "@/hooks/queries/items";
 import type {
   PlayerSubtitleTrackSignature,
@@ -87,6 +87,10 @@ import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import VersionDropdown, { VersionRefreshRow } from "./VersionDropdown";
 import type { ItemVersionSelection } from "./versionRankingUtils";
 import { sanitizeVersionLabel } from "./versionFormatUtils";
+import {
+  PROVISIONAL_INVENTORY_POLL_MS,
+  PROVISIONAL_INVENTORY_TIMEOUT_MS,
+} from "@/player/utils/inventoryProvenance";
 import AudioTracksPopover from "./AudioTracksPopover";
 import SubtitlesPopover from "./SubtitlesPopover";
 
@@ -98,6 +102,25 @@ const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-prim
 const staticGlassActionClass = "transition-none";
 const overflowMenuClass =
   "detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md";
+
+/**
+ * Whether the selected row's inventory is still waiting for the server's answer.
+ *
+ * A row the catalog already stamped (`probed_at`) needs no read, and a watch
+ * detail whose matching version carries the stamp has been answered. Anything
+ * else — no payload yet, or a payload still serving the row's declared listing —
+ * is worth re-reading while the selection window is open.
+ */
+function selectedInventoryPending(
+  watch: WatchDetail | undefined,
+  selectedVersion: FileVersion | null | undefined,
+): boolean {
+  const fileId = selectedVersion?.file_id;
+  if (fileId == null) return false;
+  if (selectedVersion?.probed_at) return false;
+  const row = watch?.versions?.find((version) => version.file_id === fileId);
+  return !row?.probed_at;
+}
 
 /** The row's own name: its release first, then the edition, then the resolution. */
 function versionDisplayLabel(version: FileVersion | null): string {
@@ -494,6 +517,15 @@ export default function ActionBar({
     virtualDetail && !selectedVersion ? handleRefreshVersions : undefined,
     virtualDetail && !selectedVersion ? handleCancelRefresh : undefined,
   );
+  // How long the selected row's inventory read keeps polling after a selection.
+  // It is the same documented selection window the menus use, so an unprobeable
+  // version stops asking instead of polling for as long as the page is open. The
+  // window is armed by the read itself — the first time react-query asks whether
+  // to poll — which is when the selection's read mounts.
+  const inventoryPollWindow = useRef<{ fileId: number | null; deadline: number }>({
+    fileId: null,
+    deadline: 0,
+  });
   // The catalog version rows can omit the probed track inventory. Read the
   // selected file's watch detail and use its current audio/subtitle lists for
   // the pre-play menus, so the media page offers the same tracks as the player
@@ -506,6 +538,27 @@ export default function ActionBar({
     {
       enabled: !!contentId && !!selectedVersion,
       staleTime: 0,
+      // While the server has not answered for this row, ask again on an
+      // interval: the selection probe's answer normally arrives as a
+      // `versions_updated` event, but the event only invalidates this query, so
+      // a delayed or missed frame would leave the menu on declared metadata
+      // until the viewer pressed Retry. Polling makes the wait follow the
+      // server's own answer, and the deadline hands the decision back to the
+      // menus once the documented window is spent.
+      refetchInterval: (query) => {
+        const fileId = selectedVersion?.file_id ?? null;
+        if (fileId == null || selectedVersion?.probed_at) return false;
+        if (inventoryPollWindow.current.fileId !== fileId) {
+          inventoryPollWindow.current = {
+            fileId,
+            deadline: Date.now() + PROVISIONAL_INVENTORY_TIMEOUT_MS,
+          };
+        }
+        if (!selectedInventoryPending(query.state.data, selectedVersion)) return false;
+        return Date.now() < inventoryPollWindow.current.deadline
+          ? PROVISIONAL_INVENTORY_POLL_MS
+          : false;
+      },
     },
   );
   const playerInventory = usePlaybackInventoryMirror(selectedVersion?.file_id);

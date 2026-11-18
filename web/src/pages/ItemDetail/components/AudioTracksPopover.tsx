@@ -94,8 +94,11 @@ function AudioTracksPopover({
   onRetryInventory,
 }: AudioTracksPopoverProps) {
   const tracks = version?.audio_tracks ?? [];
-  const { expired: discoveryExpired, retry: restartDiscovery } =
-    useProvisionalInventoryExpiry(inventoryProvisional);
+  const {
+    expired: discoveryExpired,
+    slow: discoverySlow,
+    retry: restartDiscovery,
+  } = useProvisionalInventoryExpiry(inventoryProvisional);
   const handleRetryInventory = useCallback(() => {
     restartDiscovery();
     onRetryInventory?.();
@@ -121,7 +124,7 @@ function AudioTracksPopover({
 
   return (
     <DetailPopover
-      positionKey={`${inventoryProvisional}:${discoveryExpired}:${tracks.length}`}
+      positionKey={`${inventoryProvisional}:${discoveryExpired}:${discoverySlow}:${tracks.length}`}
       contentClassName="w-80 p-1.5"
       trigger={
         <Button
@@ -134,7 +137,9 @@ function AudioTracksPopover({
             {inventoryProvisional
               ? discoveryExpired
                 ? "Not verified"
-                : "Discovering…"
+                : discoverySlow
+                  ? "Still checking…"
+                  : "Discovering…"
               : declaredGroupOnly
                 ? "Release listing"
                 : isInteractive
@@ -169,7 +174,7 @@ function AudioTracksPopover({
         {inventoryProvisional && !discoveryExpired && (
           <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
             <Loader2 className="size-3 animate-spin" />
-            Discovering audio tracks…
+            {discoverySlow ? "Still checking for audio tracks…" : "Discovering audio tracks…"}
           </div>
         )}
         {inventoryProvisional && discoveryExpired && (

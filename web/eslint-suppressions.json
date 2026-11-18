@@ -245,7 +245,7 @@
   },
   "src/pages/ItemDetail/components/AudioTracksPopover.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 13
+      "count": 15
     },
     "silo/no-physical-direction": {
       "count": 1
@@ -268,7 +268,7 @@
   },
   "src/pages/ItemDetail/components/SubtitlesPopover.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 21
+      "count": 23
     },
     "silo/no-physical-direction": {
       "count": 2

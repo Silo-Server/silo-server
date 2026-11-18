@@ -230,8 +230,11 @@ export default function SubtitlesPopover({
   const needsDownloaded = open || preferredSubtitleTrackSignature?.source === "downloaded";
   const downloadedQuery = useDownloadedSubtitles(needsDownloaded ? version?.file_id : undefined);
   const isInteractive = Boolean(onSelectSubtitle || onSelectSubtitleOff || onResetSelection);
-  const { expired: discoveryExpired, retry: restartDiscovery } =
-    useProvisionalInventoryExpiry(inventoryProvisional);
+  const {
+    expired: discoveryExpired,
+    slow: discoverySlow,
+    retry: restartDiscovery,
+  } = useProvisionalInventoryExpiry(inventoryProvisional);
   const handleRetryInventory = useCallback(() => {
     restartDiscovery();
     onRetryInventory?.();
@@ -292,7 +295,7 @@ export default function SubtitlesPopover({
     <DetailPopover
       open={open}
       onOpenChange={setOpen}
-      positionKey={`${downloadedQuery.isLoading}:${candidates.all.length}:${inventoryProvisional}:${discoveryExpired}`}
+      positionKey={`${downloadedQuery.isLoading}:${candidates.all.length}:${inventoryProvisional}:${discoveryExpired}:${discoverySlow}`}
       contentClassName="max-h-80 w-80 overflow-y-auto p-1.5"
       trigger={
         <Button
@@ -305,7 +308,9 @@ export default function SubtitlesPopover({
             {inventoryProvisional
               ? discoveryExpired
                 ? "Not verified"
-                : "Discovering…"
+                : discoverySlow
+                  ? "Still checking…"
+                  : "Discovering…"
               : isInteractive
                 ? activeSummary
                 : candidates.all.length}
@@ -339,7 +344,7 @@ export default function SubtitlesPopover({
         {inventoryProvisional && !discoveryExpired && (
           <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
             <Loader2 className="size-3 animate-spin" />
-            Discovering subtitles…
+            {discoverySlow ? "Still checking for subtitles…" : "Discovering subtitles…"}
           </div>
         )}
         {inventoryProvisional && discoveryExpired && (

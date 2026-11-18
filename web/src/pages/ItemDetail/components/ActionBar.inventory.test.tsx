@@ -6,7 +6,11 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FileVersion } from "@/api/types";
-import { PROVISIONAL_INVENTORY_TIMEOUT_MS } from "@/player/utils/inventoryProvenance";
+import {
+  PROVISIONAL_INVENTORY_POLL_MS,
+  PROVISIONAL_INVENTORY_SLOW_MS,
+  PROVISIONAL_INVENTORY_TIMEOUT_MS,
+} from "@/player/utils/inventoryProvenance";
 import ActionBar from "./ActionBar";
 
 // The media page reads the selected file's probed tracks from the watch detail.
@@ -15,6 +19,15 @@ import ActionBar from "./ActionBar";
 const watchDetail = vi.hoisted(() => ({
   data: undefined as { versions?: FileVersion[] } | undefined,
   refetch: vi.fn(),
+  // The options the page passed to the read: the inventory poll lives there.
+  options: undefined as
+    | {
+        refetchInterval?:
+          | number
+          | false
+          | ((query: { state: { data: unknown } }) => number | false);
+      }
+    | undefined,
 }));
 
 const playback = vi.hoisted(() => ({ startPlayback: vi.fn() }));
@@ -23,7 +36,10 @@ vi.mock("@/hooks/queries/items", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/queries/items")>();
   return {
     ...actual,
-    useWatchDetail: () => watchDetail,
+    useWatchDetail: (...args: unknown[]) => {
+      watchDetail.options = args[3] as typeof watchDetail.options;
+      return watchDetail;
+    },
     useDeleteMediaItem: () => ({ isPending: false, mutate: vi.fn() }),
   };
 });
@@ -109,6 +125,7 @@ describe("ActionBar pre-play track inventory", () => {
   afterEach(() => {
     vi.useRealTimers();
     watchDetail.data = undefined;
+    watchDetail.options = undefined;
     watchDetail.refetch.mockReset();
     playback.startPlayback.mockReset();
   });
@@ -283,5 +300,110 @@ describe("ActionBar pre-play track inventory", () => {
     expect(screen.getAllByText("English").length).toBeGreaterThan(0);
     expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
     expect(screen.queryByText("From release listing")).toBeNull();
+  });
+
+  // The server bounds a selection probe at 20 s and answers inside it, so a
+  // selection that verifies at 16-18 s must still be waiting when the answer
+  // lands. The previous 15 s window declared "Not verified" first.
+  it("keeps waiting through the old 15 s deadline and shows the tracks when they land", () => {
+    vi.useFakeTimers();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    const view = renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+    openPopover(/Subs/);
+
+    expect(screen.getByText("Discovering subtitles…")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(16_000);
+    });
+
+    expect(screen.queryByText("Tracks not verified. The release listing names none.")).toBeNull();
+    expect(screen.queryByText("Not verified")).toBeNull();
+
+    // The server's answer: the re-read now carries the probed row.
+    const answered: FileVersion = {
+      ...emptyVersion,
+      probed_at: "2026-11-18T14:47:30Z",
+      subtitle_tracks: [{ index: 0, language: "en", codec: "subrip", title: "English" }],
+    };
+    watchDetail.data = { versions: [answered] };
+    view.rerender({ versions: [answered], selectedVersion: answered });
+
+    expect(screen.queryByText("Discovering subtitles…")).toBeNull();
+    expect(screen.queryByText("Not verified")).toBeNull();
+    expect(screen.getAllByText("English").length).toBeGreaterThan(0);
+  });
+
+  it("says it is still checking rather than still discovering once the wait is long", () => {
+    vi.useFakeTimers();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+    openPopover(/Audio/);
+
+    act(() => {
+      vi.advanceTimersByTime(PROVISIONAL_INVENTORY_SLOW_MS);
+    });
+
+    expect(screen.getByText("Still checking for audio tracks…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Audio/ })).toHaveTextContent("Still checking…");
+    expect(screen.queryByText("Tracks not verified. The release listing names none.")).toBeNull();
+  });
+
+  it("polls the selected row's inventory until the server answers", () => {
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+
+    const interval = watchDetail.options?.refetchInterval;
+    expect(typeof interval).toBe("function");
+    if (typeof interval !== "function") return;
+
+    // No payload yet: keep asking.
+    expect(interval({ state: { data: undefined } })).toBe(PROVISIONAL_INVENTORY_POLL_MS);
+    // Still declared: keep asking.
+    expect(interval({ state: { data: { versions: [emptyVersion] } } })).toBe(
+      PROVISIONAL_INVENTORY_POLL_MS,
+    );
+    // The server answered for this row: stop.
+    const answered: FileVersion = { ...emptyVersion, probed_at: "2026-11-18T14:47:30Z" };
+    expect(interval({ state: { data: { versions: [answered] } } })).toBe(false);
+  });
+
+  it("stops polling once the selection window is spent instead of asking forever", () => {
+    vi.useFakeTimers();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+
+    const interval = watchDetail.options?.refetchInterval;
+    if (typeof interval !== "function") {
+      throw new Error("the selected read is not polling at all");
+    }
+    // The read mounts and arms its window on the first evaluation.
+    expect(interval({ state: { data: undefined } })).toBe(PROVISIONAL_INVENTORY_POLL_MS);
+
+    act(() => {
+      vi.advanceTimersByTime(PROVISIONAL_INVENTORY_TIMEOUT_MS);
+    });
+
+    expect(interval({ state: { data: { versions: [emptyVersion] } } })).toBe(false);
   });
 });
