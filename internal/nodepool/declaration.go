@@ -282,7 +282,7 @@ func declareInTx(ctx context.Context, tx pgx.Tx, id int, input UpdateNodeInput) 
 		return nil, nil, err
 	}
 	if input.URL != nil && previous.Type == NodeTypeTranscode && CanonicalNodeURL(*input.URL) != CanonicalNodeURL(previous.URL) {
-		if err = checkTranscodeURLFree(ctx, tx, id, *input.URL); err != nil {
+		if err = checkDeclaredURLFree(ctx, tx, id, *input.URL); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -300,6 +300,30 @@ func declareInTx(ctx context.Context, tx pgx.Tx, id int, input UpdateNodeInput) 
 		return nil, nil, err
 	}
 	return node, previous, nil
+}
+
+// checkDeclaredURLFree refuses a URL a node declares when any other row,
+// proxy or transcode, has its canonical form. The credential registry finds
+// nodes by that address and prefers a transcode row there, so a node's key
+// must not be able to take a proxy's address under another spelling and put
+// the proxy out of use. An administrator's update is held only to the
+// transcode rows (checkTranscodeURLFree).
+func checkDeclaredURLFree(ctx context.Context, tx pgx.Tx, exceptID int, nodeURL string) error {
+	rows, err := tx.Query(ctx, `SELECT url FROM stream_nodes WHERE id <> $1`, exceptID)
+	if err != nil {
+		return err
+	}
+	urls, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	canonical := CanonicalNodeURL(nodeURL)
+	for _, other := range urls {
+		if CanonicalNodeURL(other) == canonical {
+			return ErrTranscodeNodeURLTaken
+		}
+	}
+	return nil
 }
 
 // ErrProxyNotRegistered reports a proxy that matches no row and was not asked

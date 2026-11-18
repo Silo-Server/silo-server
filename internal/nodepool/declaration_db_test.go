@@ -73,6 +73,16 @@ func TestNodeDeclarationsLockFieldsDB(t *testing.T) {
 	if _, _, err := store.Declare(ctx, node.ID, UpdateNodeInput{URL: &spelled}); !errors.Is(err, ErrTranscodeNodeURLTaken) {
 		t.Fatalf("declaring another node's URL: %v, want ErrTranscodeNodeURLTaken", err)
 	}
+}
+
+// A proxy adds its own row only when asked to, is found again by its URL, and
+// keeps that address: a transcode node's key cannot declare it under another
+// spelling.
+func TestProxyDeclarationsDB(t *testing.T) {
+	pool := nodeKeyTestPool(t)
+	ctx := t.Context()
+	repo, store := NewRepository(pool), NewAdminConfigurationStore(pool)
+	node := createNodeKeyTestNode(t, store, repo, NodeTypeTranscode, nodeKeyTestURL("declare-beside-proxy"))
 
 	proxyURL := nodeKeyTestURL("declare-proxy")
 	public := proxyURL + "-public"
@@ -86,6 +96,11 @@ func TestNodeDeclarationsLockFieldsDB(t *testing.T) {
 	t.Cleanup(func() { _ = repo.Delete(ctx, proxy.ID) })
 	if !created || proxy.Type != NodeTypeProxy || !proxy.Enabled || proxy.URL != proxyURL || !slices.Equal(proxy.EnvManaged, []string{FieldPublicURL}) {
 		t.Fatalf("self-registered proxy: created %v, %+v", created, proxy)
+	}
+	// A node's key must not take a proxy's address under another spelling.
+	shadow := proxyURL + "/"
+	if _, _, err := store.Declare(ctx, node.ID, UpdateNodeInput{URL: &shadow}); !errors.Is(err, ErrTranscodeNodeURLTaken) {
+		t.Fatalf("declaring a proxy's URL: %v, want ErrTranscodeNodeURLTaken", err)
 	}
 	again, created, err := store.DeclareProxy(ctx, ProxyIdentity{URL: proxyURL + "/"}, UpdateNodeInput{}, false)
 	if err != nil || created || again.ID != proxy.ID || len(again.EnvManaged) != 0 {

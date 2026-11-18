@@ -1349,8 +1349,10 @@
 # Node declarations: a declaration writes its fields and sets env_managed to
 # exactly their names without moving the admin revision or pool generation on
 # its own; administrator updates that change a declared field are refused and
-# ones that restate it pass; a taken URL is refused; a proxy registers itself.
+# ones that restate it pass; a taken URL is refused. A proxy registers itself
+# only when asked to, and a node cannot declare a proxy's address.
 ./internal/nodepool TestNodeDeclarationsLockFieldsDB
+./internal/nodepool TestProxyDeclarationsDB
 
 # Admin node writes reach every credential registry: the writing API server's
 # before it answers (a deleted node's key is refused at once, a moved node is
