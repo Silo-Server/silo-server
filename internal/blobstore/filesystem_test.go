@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"syscall"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -474,24 +475,43 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 		t.Fatalf("refused stream left files behind: %v %v", entries, err)
 	}
 
-	// Writes in flight share the budget. A stream that has written 2 bytes
-	// leaves room for an 8-byte put, which statfs already counts it against
-	// once written, and none for the stream's next byte, which its own
-	// earlier reading alone would allow.
+	// Writes in flight share the budget, and each byte counts once. Stream A
+	// writes 2 of the 10 bytes.
 	settledBefore := s.space.settled.Load()
+	waitSettled := func(n int64) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); s.space.settled.Load() != settledBefore+n; {
+			if time.Now().After(deadline) {
+				t.Fatalf("stream never wrote its bytes: %d of %d settled", s.space.settled.Load()-settledBefore, n)
+			}
+			runtime.Gosched()
+		}
+	}
 	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
 	streamed := make(chan error, 1)
-	go func() { streamed <- s.PutStream(ctx, "kept/stream.jpg", pr, "") }()
+	go func() {
+		err := s.PutStream(ctx, "kept/stream.jpg", pr, "")
+		_ = pr.CloseWithError(err)
+		streamed <- err
+	}()
 	if _, err = pw.Write(make([]byte, 2)); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(5 * time.Second); s.space.settled.Load() != settledBefore+2; {
-		if time.Now().After(deadline) {
-			t.Fatalf("stream never wrote its bytes: %d settled", s.space.settled.Load()-settledBefore)
-		}
-		runtime.Gosched()
+	waitSettled(2)
+	// A competing stream writes 8 bytes, fails, and removes its file. A's
+	// next 7 bytes then fit, although A's earlier reading still counts them.
+	errSource := errors.New("source failed")
+	if err = s.PutStream(ctx, "kept/failed.jpg", io.MultiReader(bytes.NewReader(make([]byte, 8)), iotest.ErrReader(errSource)), ""); !errors.Is(err, errSource) {
+		t.Fatalf("competing stream: %v", err)
 	}
-	if err = s.Put(ctx, "kept/during.jpg", make([]byte, 8)); err != nil {
+	if _, err = pw.Write(make([]byte, 7)); err != nil {
+		t.Fatal(err)
+	}
+	waitSettled(17)
+	// A 1-byte put fits beside A's 9 bytes, which statfs already counts, and
+	// then A's next byte does not.
+	if err = s.Put(ctx, "kept/during.jpg", make([]byte, 1)); err != nil {
 		t.Fatalf("put that fits beside a stream: %v", err)
 	}
 	if _, err = pw.Write(make([]byte, 1)); err != nil {

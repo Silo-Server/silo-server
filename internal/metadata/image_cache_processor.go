@@ -181,10 +181,11 @@ type ImageCacheProcessor struct {
 	// providers.
 	enabled atomic.Bool
 
-	// storageFullAt is when a write last found the artwork store full (Unix
-	// nanoseconds), so the background jobs after it wait without downloading
-	// anything (deferForFullStorage).
-	storageFullAt atomic.Int64
+	// storageFullAt is when a write last found the artwork store full, so
+	// the background jobs after it wait without downloading anything
+	// (deferForFullStorage). A time.Time keeps the monotonic reading, so a
+	// wall-clock step does not stretch the pause.
+	storageFullAt atomic.Pointer[time.Time]
 
 	// idleWaitTimeout bounds how long CacheTargetArtwork waits on jobs held by
 	// a background worker. Zero means immediateImageCacheIdleTimeout.
@@ -1649,7 +1650,8 @@ func (p *ImageCacheProcessor) storageFull(ctx context.Context, job *models.Metad
 	if !errors.Is(err, syscall.ENOSPC) {
 		return false
 	}
-	p.storageFullAt.Store(time.Now().UnixNano())
+	now := time.Now()
+	p.storageFullAt.Store(&now)
 	return p.deferForFullStorage(ctx, job)
 }
 
@@ -1657,7 +1659,7 @@ func (p *ImageCacheProcessor) storageFull(ctx context.Context, job *models.Metad
 // imageCacheStorageFullPause.
 func (p *ImageCacheProcessor) storageRecentlyFull() bool {
 	at := p.storageFullAt.Load()
-	return at != 0 && time.Since(time.Unix(0, at)) < imageCacheStorageFullPause
+	return at != nil && time.Since(*at) < imageCacheStorageFullPause
 }
 
 // deferForFullStorage puts a claimed job back in the queue without counting
