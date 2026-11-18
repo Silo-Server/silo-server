@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	labelRemote = "remote"
-	labelLocal  = "local"
+	labelRemote    = "remote"
+	labelLocal     = "local"
+	providerPrefix = "provider:"
 )
 
 const (
@@ -50,7 +51,7 @@ func Contradicts(reading, kbps int) bool {
 // network-access provider's does: its reading may come from another network
 // than the one that stalled.
 func SpansNetworks(key string) bool {
-	return strings.HasPrefix(key, "provider:")
+	return strings.HasPrefix(key, providerPrefix)
 }
 
 // Limit is a learned limit: the step-down estimate a buffering client last
@@ -106,7 +107,7 @@ type Store struct{ Pool *pgxpool.Pool }
 // An unresolved address has no identity and must not share another viewer's limit.
 func Key(ctx context.Context, secret string) (key, label string) {
 	if provider := netaccess.PathFromContext(ctx).Provider; provider != "" {
-		return "provider:" + provider, "provider:" + provider
+		return providerPrefix + provider, providerPrefix + provider
 	}
 	ip := net.ParseIP(clientip.FromContext(ctx))
 	if ip == nil {
