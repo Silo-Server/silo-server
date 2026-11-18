@@ -158,7 +158,7 @@ describe("ActionBar pre-play track inventory", () => {
       vi.advanceTimersByTime(PROVISIONAL_INVENTORY_TIMEOUT_MS);
     });
 
-    expect(screen.queryByText("Audio tracks unavailable.")).toBeNull();
+    expect(screen.queryByText("Tracks not verified. The release listing names none.")).toBeNull();
     expect(screen.queryByText("Unavailable")).toBeNull();
     expect(screen.getAllByText("English").length).toBeGreaterThan(0);
   });
@@ -195,7 +195,7 @@ describe("ActionBar pre-play track inventory", () => {
     });
 
     expect(screen.queryByText("Discovering subtitles…")).toBeNull();
-    expect(screen.getByText("Subtitles unavailable.")).toBeTruthy();
+    expect(screen.getByText("Tracks not verified. The release listing names none.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
@@ -220,7 +220,7 @@ describe("ActionBar pre-play track inventory", () => {
       vi.advanceTimersByTime(PROVISIONAL_INVENTORY_TIMEOUT_MS);
     });
 
-    expect(screen.getByText("Audio tracks unavailable.")).toBeTruthy();
+    expect(screen.getByText("Tracks not verified. The release listing names none.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 

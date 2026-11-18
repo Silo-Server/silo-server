@@ -133,7 +133,7 @@ function AudioTracksPopover({
           <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
             {inventoryProvisional
               ? discoveryExpired
-                ? "Unavailable"
+                ? "Not verified"
                 : "Discovering…"
               : declaredGroupOnly
                 ? "Release listing"
@@ -174,7 +174,7 @@ function AudioTracksPopover({
         )}
         {inventoryProvisional && discoveryExpired && (
           <div className="text-muted-foreground flex items-center justify-between gap-2 px-3 py-2 text-xs">
-            <span>Audio tracks unavailable.</span>
+            <span>Tracks not verified. The release listing names none.</span>
             <button
               type="button"
               onClick={handleRetryInventory}

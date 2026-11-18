@@ -56,6 +56,33 @@ import (
 // twice: once here, by the chain owner, and once inside the probe.
 var virtualDefaultProbeChainBudget = 90 * time.Second
 
+// virtualSelectionProbeBudget bounds one explicit-selection probe chain: the
+// target read, the provider URL resolution, and up to
+// virtualSelectionProbeAttempts bounded enumerations. The item page's audio and
+// subtitle menus wait on this answer, so the bound sits under the client's
+// provisional-inventory window (15 s) with room for the read that delivers the
+// result. It is the selection's own bound, not a slice of the discovery chain's
+// 90 s allowance: a probe the viewer asked for must answer while they are still
+// looking, or answer an honest failure.
+var virtualSelectionProbeBudget = 12 * time.Second
+
+// virtualSelectionProbeAttemptBudget bounds one enumeration inside a selection
+// chain. The scanner's background probe timeout is a full minute, which is longer
+// than the viewer will wait; a selection attempt gets a few seconds, and a
+// provider that cannot enumerate inside that earns one retry rather than a
+// 60 s silence.
+var virtualSelectionProbeAttemptBudget = 5 * time.Second
+
+// virtualSelectionProbeAttempts is how many enumerations one selection probe
+// earns. Background chains keep one attempt so a dead provider is not hammered;
+// a viewer's fresh pick earns a second because a single cold-relay failure is
+// common and the answer is due now.
+const virtualSelectionProbeAttempts = 2
+
+// virtualSelectionProbeRetryDelay separates the attempts of a selection probe.
+// Short on purpose: it is a second chance for a cold relay, not an outage backoff.
+var virtualSelectionProbeRetryDelay = 300 * time.Millisecond
+
 // virtualSelectionWarmBudget bounds one explicit-selection warm-up. The work is
 // a single forced provider listing — the same call playback start makes in
 // FillVirtualReleaseCache — not the provider-side fetch itself, which the
@@ -63,10 +90,18 @@ var virtualDefaultProbeChainBudget = 90 * time.Second
 // slow provider listing and still bounds a wedged call.
 var virtualSelectionWarmBudget = 2 * time.Minute
 
-// virtualDefaultProbeChainConcurrency bounds how many chains run at once.
-// Two keeps a household-wide discovery burst from saturating the detached
-// gate while still admitting a genuinely concurrent browse.
+// virtualDefaultProbeChainConcurrency bounds how many discovery-triggered chains
+// run at once. Two keeps a household-wide discovery burst from saturating the
+// detached gate while still admitting a genuinely concurrent browse.
 const virtualDefaultProbeChainConcurrency = 2
+
+// virtualSelectionProbeChainConcurrency is the reserved lane for a probe the
+// viewer asked for by selecting a version. It is deliberately separate from the
+// discovery budget: a browse burst can hold every background slot, and the one
+// thing that must never queue behind it is a person waiting on the menu they just
+// opened. Selection chains never consume the background slots and background
+// chains never consume this one, so neither can starve the other.
+const virtualSelectionProbeChainConcurrency = 1
 
 // Probe-chain triggers are log attributes, not dispatch keys. Discovery
 // schedules the resolved default after persistence; a watch-detail read with
@@ -236,7 +271,9 @@ func NewVirtualDefaultProbeTarget(versions VirtualProbeVersionLister, files File
 type defaultProbeChainAdmission struct {
 	mu       sync.Mutex
 	active   map[string]struct{}
+	done     map[string]chan struct{}
 	admitted int
+	priority int
 }
 
 // defaultProbeChainRefusal names why admission rejected a chain. The empty
@@ -252,24 +289,43 @@ const (
 // acquire admits one chain for contentID. refusal is empty when admitted;
 // otherwise it names the reason the callback was dropped. A live chain for the
 // item already covers it (duplicate callbacks coalesce into that chain), and
-// when every slot is taken the callback is dropped — the play path and any
-// later discovery run still probe normally. The returned func releases the
-// slot and must be called exactly once.
-func (a *defaultProbeChainAdmission) acquire(contentID string) (func(), defaultProbeChainRefusal) {
+// when the caller's own lane is full the callback is dropped — the play path
+// and any later discovery run still probe normally. The returned done channel
+// is the live chain's completion signal, non-nil only for the
+// defaultProbeChainRefusalLive refusal: a selection probe joins the chain that
+// already covers its row instead of being refused.
+//
+// priority admits into the selection lane (virtualSelectionProbeChainConcurrency)
+// rather than the discovery lane, so a selection chain is never refused because
+// background discovery holds every slot, and vice versa. The returned func
+// releases the slot and must be called exactly once.
+func (a *defaultProbeChainAdmission) acquire(contentID string, priority bool) (func(), defaultProbeChainRefusal, <-chan struct{}) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.active == nil {
 		a.active = make(map[string]struct{})
 	}
-	if _, live := a.active[contentID]; live {
-		return nil, defaultProbeChainRefusalLive
+	if a.done == nil {
+		a.done = make(map[string]chan struct{})
 	}
-	if a.admitted >= virtualDefaultProbeChainConcurrency {
-		return nil, defaultProbeChainRefusalCapacity
+	if _, live := a.active[contentID]; live {
+		return nil, defaultProbeChainRefusalLive, a.done[contentID]
+	}
+	if priority {
+		if a.priority >= virtualSelectionProbeChainConcurrency {
+			return nil, defaultProbeChainRefusalCapacity, nil
+		}
+		a.priority++
+	} else {
+		if a.admitted >= virtualDefaultProbeChainConcurrency {
+			return nil, defaultProbeChainRefusalCapacity, nil
+		}
+		a.admitted++
 	}
 	a.active[contentID] = struct{}{}
-	a.admitted++
-	return func() { a.release(contentID) }, defaultProbeChainRefusalNone
+	done := make(chan struct{})
+	a.done[contentID] = done
+	return func() { a.release(contentID, priority) }, defaultProbeChainRefusalNone, nil
 }
 
 // isLive reports whether a chain for key is currently admitted. It performs no
@@ -286,13 +342,23 @@ func (a *defaultProbeChainAdmission) isLive(key string) bool {
 	return live
 }
 
-func (a *defaultProbeChainAdmission) release(contentID string) {
+func (a *defaultProbeChainAdmission) release(contentID string, priority bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, live := a.active[contentID]; !live {
 		return
 	}
 	delete(a.active, contentID)
+	if done, ok := a.done[contentID]; ok {
+		delete(a.done, contentID)
+		close(done)
+	}
+	if priority {
+		if a.priority > 0 {
+			a.priority--
+		}
+		return
+	}
 	a.admitted--
 }
 
@@ -402,7 +468,10 @@ func (h *PlaybackHandler) scheduleFileWarm(contentID string, fileID int, filter 
 		return
 	}
 	ctx, cancel := h.virtualDetachedContext(context.Background(), virtualSelectionWarmBudget)
-	release, refusal := h.selectedWarmChains.acquire("warm\x00" + contentID + "\x00" + strconv.Itoa(fileID))
+	// The warm-up is a viewer action too (the row was just selected), so it runs
+	// on the selection lane: a discovery burst holding every background slot must
+	// not delay the provider fetch the pick started.
+	release, refusal, _ := h.selectedWarmChains.acquire("warm\x00"+contentID+"\x00"+strconv.Itoa(fileID), trigger == virtualProbeChainTriggerSelection)
 	if refusal != defaultProbeChainRefusalNone {
 		cancel()
 		logVirtualSelectionWarmSkip(contentID, trigger, string(refusal))
@@ -515,11 +584,27 @@ func (h *PlaybackHandler) scheduleFileProbe(contentID string, source *models.Med
 	// read uses the same key, so it coalesces with a discovery chain already
 	// probing the same row instead of opening a second probe.
 	admissionKey := contentID + "\x00" + strconv.Itoa(filter.SelectedFileID)
-	ctx, cancel := h.virtualDetachedContext(context.Background(), virtualDefaultProbeChainBudget)
-	release, refusal := h.defaultProbeChains.acquire(admissionKey)
-	if refusal != defaultProbeChainRefusalNone {
+	// A selection probe runs on the selection lane and under the selection's own
+	// budget: a discovery burst can hold both background slots, and the whole
+	// discovery chain allowance is far longer than a menu will wait.
+	chainBudget := virtualDefaultProbeChainBudget
+	if explicitSelection {
+		chainBudget = min(chainBudget, virtualSelectionProbeBudget)
+	}
+	ctx, cancel := h.virtualDetachedContext(context.Background(), chainBudget)
+	release, refusal, liveChain := h.defaultProbeChains.acquire(admissionKey, explicitSelection)
+	var join <-chan struct{}
+	switch {
+	case refusal == defaultProbeChainRefusalNone:
+	case explicitSelection && refusal == defaultProbeChainRefusalLive && liveChain != nil:
+		// A live chain for this exact row is already enumerating the bytes the
+		// viewer selected. Join it instead of refusing: when its evidence lands,
+		// the follow-up below answers already_probed; when it failed, the viewer's
+		// own probe gets its attempt. The wait is bounded by this chain's budget.
+		join = liveChain
+	default:
 		cancel()
-		// A chain for this item is already live, or both slots are taken.
+		// A chain for this item is already live, or the caller's lane is full.
 		// Either way the callback is dropped: the live chain re-reads the same
 		// target, and a dropped probe still happens on the first play. No
 		// queue, no retry, no delay for the caller.
@@ -561,10 +646,31 @@ func (h *PlaybackHandler) scheduleFileProbe(contentID string, source *models.Med
 				slog.ErrorContext(context.WithoutCancel(ctx), "virtual pre-play probe chain panicked",
 					"component", "api", "content_id", contentID, "stack", string(debug.Stack()))
 			}
-			release()
+			if release != nil {
+				release()
+			}
 			cancel()
 			h.probeChainWG.Done()
 		}()
+		if join != nil {
+			// Join the live chain that already covers this row's bytes, then take
+			// the selection lane for the follow-up. A chain that still holds the
+			// row is the answer; a busy lane means the same.
+			select {
+			case <-join:
+			case <-ctx.Done():
+				logVirtualProbeChainSkip(ctx, slog.LevelInfo, trigger, contentID,
+					virtualProbeChainReasonBudgetExpired, "join", virtualEvidenceLogKeyError, ctx.Err())
+				return
+			}
+			var joinedRefusal defaultProbeChainRefusal
+			release, joinedRefusal, _ = h.defaultProbeChains.acquire(admissionKey, explicitSelection)
+			if joinedRefusal != defaultProbeChainRefusalNone {
+				logVirtualProbeChainSkip(ctx, slog.LevelInfo, trigger, contentID,
+					virtualProbeChainReasonScheduleRefused, "joined_"+string(joinedRefusal))
+				return
+			}
+		}
 		// The detached chain reports through its logs and its catalog write.
 		_, _ = h.runFileProbeChain(ctx, contentID, probeSource, streamsSnapshot, filterSnapshot, trigger, explicitSelection)
 	}()
@@ -698,25 +804,23 @@ func (h *PlaybackHandler) runFileProbeChain(ctx context.Context, contentID strin
 		return "", false
 	}
 	if virtualProbeBackedOff(virtualProbeFailureKey(probeCand.URI, oid)) {
-		logVirtualProbeChainSkip(ctx, slog.LevelDebug, trigger, contentID,
-			virtualProbeChainReasonRecentlyFailed, "", virtualEvidenceLogKeyFileID, row.ID)
-		return "", false
+		if explicitSelection {
+			// A fresh selection is the viewer asking now. The damper exists so
+			// background re-probes stop hammering a failing provider; it must not
+			// refuse the pick the viewer just made, or the menu they opened can never
+			// learn the truth about the version they chose.
+			slog.DebugContext(ctx, "virtual probe damper bypassed for a fresh selection",
+				"component", "api", contentIDKey, contentID, "trigger", trigger,
+				virtualEvidenceLogKeyFileID, row.ID,
+				"last_failure", virtualProbeFailures.reason(virtualProbeFailureKey(probeCand.URI, oid)))
+		} else {
+			logVirtualProbeChainSkip(ctx, slog.LevelDebug, trigger, contentID,
+				virtualProbeChainReasonRecentlyFailed, "", virtualEvidenceLogKeyFileID, row.ID)
+			return "", false
+		}
 	}
-	// The enumeration runs behind the shared detached gate, the same bounded
-	// admission every background virtual probe uses. No slot, no probe.
-	gate := h.detachedGate()
-	if gate == nil || !gate.tryAcquire() {
-		logVirtualProbeChainSkip(ctx, slog.LevelInfo, trigger, contentID,
-			virtualProbeChainReasonGateBusy, "", virtualEvidenceLogKeyFileID, row.ID)
-		return "", false
-	}
-	defer gate.release()
 	expectedRuntimeMinutes := h.virtualExpectedRuntimeMinutes(ctx, row)
 	stickyKey := bestResultCacheKey(contentID, virtualPlaybackNeutralKey(row.FilePath), oid)
-	probeTransient := cloneVirtualProbeTransient(*row)
-	// Zero the duration so the probe measures the empirical duration instead
-	// of inheriting the catalog value.
-	probeTransient.Duration = 0
 	probeURL, probeHeaders, hasProbeURL := h.virtualChainProbeURL(ctx, row, *probeCand, filter)
 	if !hasProbeURL {
 		logVirtualProbeChainSkip(ctx, slog.LevelDebug, trigger, contentID,
@@ -724,15 +828,93 @@ func (h *PlaybackHandler) runFileProbeChain(ctx context.Context, contentID strin
 		return "", false
 	}
 	probeCand.RequestHeaders = probeHeaders
-	// The chain probes the selected/default row's own candidate bytes and uses
-	// the durable evidence path: an already-loaded detail/version page can only
-	// be invalidated after the tracks are actually committed. No session binding
-	// exists here, so the fence is nil and the identity tiers are zero — the same
-	// posture the unstamped-row fast path takes, where the row owns its candidate.
-	outcome, carried := h.probeVirtualSourceAndPersistWith(
-		ctx, stickyKey, row, probeURL, probeTransient, *probeCand,
-		resolver.PersistedIdentityTiers{}, expectedRuntimeMinutes, oid, true, nil,
-	)
+	// A selection probe earns one retry inside the selection's own bound: a single
+	// provider-side enumeration failure is common (a cold relay, an ffprobe that
+	// raced a still-opening read) and the viewer is waiting on this exact answer.
+	// Background chains keep one attempt so a dead provider is not hammered.
+	attempts := 1
+	if explicitSelection {
+		attempts = virtualSelectionProbeAttempts
+	}
+	outcome := ""
+	carried := virtualCommittedProbeInventory{}
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(virtualSelectionProbeRetryDelay):
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		attemptCtx := ctx
+		cancelAttempt := func() {}
+		if explicitSelection {
+			attemptCtx, cancelAttempt = context.WithTimeout(ctx, virtualSelectionProbeAttemptBudget)
+		}
+		var (
+			attemptOutcome    string
+			attemptCarried    virtualCommittedProbeInventory
+			enumerationFailed bool
+			attemptExpired    bool
+			gateBusy          bool
+		)
+		// One attempt runs in its own closure so a panic inside the prober still
+		// releases the shared gate and the attempt's deadline: the chain's outer
+		// recover reports the panic, but only this defer gives the slot back.
+		func() {
+			defer cancelAttempt()
+			// The enumeration runs behind the shared detached gate, the same bounded
+			// admission every background virtual probe uses. No slot, no probe.
+			gate := h.detachedGate()
+			if gate == nil || !gate.tryAcquire() {
+				gateBusy = true
+				return
+			}
+			defer gate.release()
+			attemptCand := *probeCand
+			attemptTransient := cloneVirtualProbeTransient(*row)
+			// Zero the duration so the probe measures the empirical duration instead
+			// of inheriting the catalog value.
+			attemptTransient.Duration = 0
+			failuresBefore := virtualProbeFailures.count(virtualProbeFailureKey(attemptCand.URI, oid))
+			// The chain probes the selected/default row's own candidate bytes and uses
+			// the durable evidence path: an already-loaded detail/version page can only
+			// be invalidated after the tracks are actually committed. No session binding
+			// exists here, so the fence is nil and the identity tiers are zero — the same
+			// posture the unstamped-row fast path takes, where the row owns its candidate.
+			attemptOutcome, attemptCarried = h.probeVirtualSourceAndPersistWith(
+				attemptCtx, stickyKey, row, probeURL, attemptTransient, attemptCand,
+				resolver.PersistedIdentityTiers{}, expectedRuntimeMinutes, oid, true, nil,
+			)
+			// Retry only an enumeration that actually failed inside its own allowance:
+			// a recorded probe failure (the damper carries its reason) or an attempt that
+			// ran out of its short attempt budget while the chain still has time. A
+			// refused evidence write and an incomplete enumeration are not provider
+			// failures, and re-probing them would only repeat the same answer.
+			enumerationFailed = virtualProbeFailures.count(virtualProbeFailureKey(attemptCand.URI, oid)) > failuresBefore
+			attemptExpired = attemptCtx.Err() != nil && ctx.Err() == nil
+		}()
+		if gateBusy {
+			logVirtualProbeChainSkip(ctx, slog.LevelInfo, trigger, contentID,
+				virtualProbeChainReasonGateBusy, "", virtualEvidenceLogKeyFileID, row.ID)
+			return "", false
+		}
+		outcome, carried = attemptOutcome, attemptCarried
+		if outcome == probeOutcomeVerified || ctx.Err() != nil {
+			break
+		}
+		if attempt < attempts && !enumerationFailed && !attemptExpired {
+			break
+		}
+		if attempt < attempts {
+			slog.DebugContext(ctx, "virtual selection probe failed; retrying inside the selection bound",
+				"component", "api", contentIDKey, contentID, "trigger", trigger,
+				virtualEvidenceLogKeyFileID, row.ID, "attempt", attempt, "attempts", attempts,
+				"reason", virtualProbeFailures.reason(virtualProbeFailureKey(probeCand.URI, oid)))
+		}
+	}
 	// A verified outcome with an unwritten carrier means the row keeps its
 	// previous evidence: the serve recorded a pin's first served-size
 	// observation, so there is no catalog change for a detail page to refresh
@@ -749,11 +931,18 @@ func (h *PlaybackHandler) runFileProbeChain(ctx context.Context, contentID strin
 				virtualProbeChainReasonBudgetExpired, "probe", virtualEvidenceLogKeyError, ctx.Err())
 			return outcome, false
 		}
+		// The reason travels with the skip line (and with the damper mark a later
+		// background probe reads) so the answer is a named failure, never a silent
+		// "unavailable".
 		logVirtualProbeChainSkip(ctx, slog.LevelInfo, trigger, contentID,
-			virtualProbeChainReasonProbeFailed, "probe", virtualEvidenceLogKeyFileID, row.ID)
+			virtualProbeChainReasonProbeFailed, "probe",
+			virtualEvidenceLogKeyFileID, row.ID,
+			"attempts", attempts,
+			"reason", virtualProbeFailures.reason(virtualProbeFailureKey(probeCand.URI, oid)))
 	case probeOutcomePartial:
 		logVirtualProbeChainSkip(ctx, slog.LevelInfo, trigger, contentID,
-			virtualProbeChainReasonProbeIncomplete, "probe", virtualEvidenceLogKeyFileID, row.ID)
+			virtualProbeChainReasonProbeIncomplete, "probe", virtualEvidenceLogKeyFileID, row.ID,
+			"attempts", attempts)
 	}
 	return outcome, carried.written
 }
@@ -787,7 +976,7 @@ func (h *PlaybackHandler) PreprobeSelectedFile(ctx context.Context, contentID st
 	if h.DefaultProbeTarget == nil || (h.VirtualPlaybackSourceProber == nil && h.VirtualPlaybackSourceProberWithHeaders == nil) {
 		return VirtualPreprobeDeclined
 	}
-	release, refusal := h.defaultProbeChains.acquire(key)
+	release, refusal, _ := h.defaultProbeChains.acquire(key, true)
 	if refusal != defaultProbeChainRefusalNone {
 		return VirtualPreprobeDeclined
 	}

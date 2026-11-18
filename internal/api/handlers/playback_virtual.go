@@ -156,6 +156,12 @@ type virtualProbeFailureMark struct {
 	failures      int
 	servedBytes   int64
 	declaredBytes int64
+	// reason is the last enumeration failure recorded for the candidate, already
+	// redacted and truncated. It exists so a damped skip can say what failed
+	// ("recently_failed" plus the cause) and a selection probe's final answer
+	// names a real reason instead of an unexplained unavailability. It is
+	// advisory telemetry, never a branch input.
+	reason string
 }
 
 // virtualProbeFailureCache remembers the last failed probe per candidate so a
@@ -258,6 +264,37 @@ func (c *virtualProbeFailureCache) markFor(key string, baseTTL, maxTTL time.Dura
 // mark leaves them zero so the version list never reads a size verdict from a
 // dead-candidate or partial-enumeration marker.
 func (c *virtualProbeFailureCache) markForBytes(key string, baseTTL, maxTTL time.Duration, servedBytes, declaredBytes int64) {
+	c.markForBytesReason(key, baseTTL, maxTTL, servedBytes, declaredBytes, "")
+}
+
+// markWithReason records a candidate enumeration failure together with its cause,
+// so a later damped skip can report what actually failed instead of only that
+// something did. The reason is redacted and truncated by the caller.
+func (c *virtualProbeFailureCache) markWithReason(key, reason string) {
+	c.markForBytesReason(key, virtualProbeFailureTTL, virtualProbeFailureMaxTTL, 0, 0, reason)
+}
+
+// reason returns the last failure reason recorded for key while its marker is
+// live, or "" when there is none. Advisory only: no decision branches on it.
+func (c *virtualProbeFailureCache) reason(key string) string {
+	if c == nil || key == "" {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	mark, ok := c.marks[key]
+	if !ok {
+		return ""
+	}
+	if !c.clock().Before(mark.expiresAt) {
+		delete(c.marks, key)
+		return ""
+	}
+	return mark.reason
+}
+
+// markForBytesReason is markForBytes with the failure's cause attached.
+func (c *virtualProbeFailureCache) markForBytesReason(key string, baseTTL, maxTTL time.Duration, servedBytes, declaredBytes int64, reason string) {
 	if c == nil || key == "" {
 		return
 	}
@@ -291,7 +328,7 @@ func (c *virtualProbeFailureCache) markForBytes(key string, baseTTL, maxTTL time
 	}
 	c.marks[key] = virtualProbeFailureMark{
 		ttl: ttl, expiresAt: now.Add(ttl), failures: failures,
-		servedBytes: servedBytes, declaredBytes: declaredBytes,
+		servedBytes: servedBytes, declaredBytes: declaredBytes, reason: reason,
 	}
 }
 
@@ -412,6 +449,22 @@ func (c *virtualProbeFailureCache) clearSizeMismatch(key string) {
 // cache cannot keep a live release out for the dead-source backoff.
 func virtualProbeBackedOff(key string) bool {
 	return virtualProbeFailures.recent(key) || virtualProbeFailures.recent(virtualProbeSizeMismatchKey(key))
+}
+
+// virtualProbeFailureReasonV3 renders a probe failure's cause for the failure
+// damper and the skip log: redacted (a provider URL's credentials are never
+// written to the marker) and bounded, because the marker is read by unrelated
+// later requests and must stay a short operator hint rather than a payload.
+func virtualProbeFailureReasonV3(err error) string {
+	if err == nil {
+		return ""
+	}
+	reason := logredact.SanitizeURLError(err).Error()
+	const maxReasonBytes = 200
+	if len(reason) > maxReasonBytes {
+		reason = reason[:maxReasonBytes] + "…"
+	}
+	return reason
 }
 
 // virtualProbeVerdictUnknown reports whether an error leaves the candidate's
@@ -4907,7 +4960,7 @@ func (h *PlaybackHandler) probeVirtualSourceAndPersistWith(
 		// repeat before the pin is released, so one slow provider cannot steer
 		// later starts.
 		if !virtualProbeVerdictUnknown(probeErr) {
-			virtualProbeFailures.mark(probeKey)
+			virtualProbeFailures.markWithReason(probeKey, virtualProbeFailureReasonV3(probeErr))
 		}
 		slog.WarnContext(bgCtx, "background virtual stream probe failed", "component", "api", "candidate_uri", probeCand.URI, "error", probeErr)
 		if errors.Is(probeErr, scanner.ErrVirtualProbeNoTracks) ||
