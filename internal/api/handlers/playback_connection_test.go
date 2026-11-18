@@ -16,6 +16,8 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -151,7 +153,7 @@ func TestContradictedLoweringIsNotLearnedDB(t *testing.T) {
 	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
 
 	store := &connectionstore.Store{Pool: pool}
-	h := &PlaybackHandler{Connections: store}
+	h := &PlaybackHandler{Connections: store, PlaybackConfig: func() config.PlaybackConfig { return config.PlaybackConfig{BandwidthProbeMaxAgeDays: 7} }}
 	requestCtx := apimw.SetClaims(WithNativeAPIV2(ctx), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess})
 	requestCtx = context.WithValue(clientip.SetContext(requestCtx, "192.168.1.10"), playbackConnectionDeviceContextKey{}, "tv-1")
 	r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(requestCtx)
@@ -201,6 +203,32 @@ func TestContradictedLoweringIsNotLearnedDB(t *testing.T) {
 	congested := lowering(44100, 44100)
 	if limit, err := h.applyLearnedLimit(r, &congested, true); err != nil || limit == nil || limit.Kbps != 44100 || stored() != 44100 {
 		t.Fatalf("uncontradicted lowering: limit=%+v stored=%d err=%v, want 44100 stored", limit, stored(), err)
+	}
+	// A contradicted lowering neither replaces nor renews an earlier limit.
+	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`, user); err != nil {
+		t.Fatal(err)
+	}
+	again := lowering(15484, 2174)
+	if limit, err := h.applyLearnedLimit(r, &again, true); err != nil || limit != nil || *again.BandwidthEstimateKbps != 2174 || stored() != 44100 {
+		t.Fatalf("contradicted lowering over a limit: limit=%+v planned=%d stored=%d err=%v", limit, *again.BandwidthEstimateKbps, stored(), err)
+	}
+	var renewed bool
+	if err := pool.QueryRow(ctx, `SELECT observed_at > now() - interval '30 minutes' FROM playback_connections WHERE user_id = $1`, user).Scan(&renewed); err != nil || renewed {
+		t.Fatalf("contradicted lowering renewed the earlier limit (err %v)", err)
+	}
+
+	// A provider path follows the device across networks: its reading does
+	// not speak for the network that stalled, so the lowering is learned.
+	providerReq := r.WithContext(netaccess.WithPath(requestCtx, netaccess.Path{Provider: "tailscale"}))
+	if err := store.ReportProbe(ctx, user, "tv-1", "provider:tailscale", connectionstore.ProbeResult{Kbps: 114028, Bytes: 7126750, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
+		t.Fatal(err)
+	}
+	roaming := lowering(15484, 2174)
+	if limit, err := h.applyLearnedLimit(providerReq, &roaming, true); err != nil || limit == nil || limit.Kbps != 2174 {
+		t.Fatalf("provider lowering: limit=%+v err=%v, want 2174 learned", limit, err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM playback_connections WHERE user_id = $1 AND connection_key <> 'local'`, user); err != nil {
+		t.Fatal(err)
 	}
 
 	age("8 days")

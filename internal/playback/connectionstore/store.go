@@ -46,6 +46,13 @@ func Contradicts(reading, kbps int) bool {
 	return reading > 0 && kbps > 0 && reading > kbps*ReadingContradictsRatio
 }
 
+// SpansNetworks reports whether key follows a device across networks, as a
+// network-access provider's does: its reading may come from another network
+// than the one that stalled.
+func SpansNetworks(key string) bool {
+	return strings.HasPrefix(key, "provider:")
+}
+
 // Limit is a learned limit: the step-down estimate a buffering client last
 // reported for one device on one connection.
 type Limit struct {

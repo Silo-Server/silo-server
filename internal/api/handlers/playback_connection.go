@@ -137,8 +137,13 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 // because the server is slow (a disk spinning up, a probe that took seconds)
 // looks like a slow link to the client, but a link that a recent speed test or
 // playback sample measured many times faster did not cause it. The request
-// still plans at its lowered estimate; only the next titles go without it.
+// still plans at its lowered estimate; only the next titles go without it. A
+// provider path follows the device across networks, so its reading does not
+// speak for the network that stalled and the lowering is always recorded.
 func (h *PlaybackHandler) observeLearnedLimit(ctx context.Context, user int, device, key string, kbps int) error {
+	if connectionstore.SpansNetworks(key) {
+		return h.Connections.Observe(ctx, user, device, key, kbps)
+	}
 	c, err := h.Connections.Connection(ctx, user, device, key)
 	if err != nil {
 		return err
