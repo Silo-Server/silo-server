@@ -1998,6 +1998,68 @@
       "value": "App 語言"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "結束時"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "結束前 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 分鐘"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "結束前 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 秒"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "顯示接下來"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -53922,12 +53984,6 @@
       "value": "信任的 Proxy"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "由 SILO_TRUSTED_PROXIES 管理。"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -59888,12 +59944,6 @@
       "value": "使用 Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "由 REDIS_URL 設定"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59910,12 +59960,6 @@
     {
       "type": 0,
       "value": "連線 URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "值由 REDIS_URL 提供"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64799,20 +64843,6 @@
     {
       "type": 0,
       "value": "伺服器記錄"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "由 "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": " 管理。"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -129247,12 +129277,6 @@
       "value": "信任的代理伺服器"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "由環境變數 SILO_TRUSTED_PROXIES 設定。"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -129503,12 +129527,6 @@
     {
       "type": 0,
       "value": "資料庫編號"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "由 REDIS_URL 設定"
     }
   ],
   "web.setup.storage.redisDescription": [

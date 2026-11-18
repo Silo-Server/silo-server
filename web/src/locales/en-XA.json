@@ -2045,6 +2045,98 @@
       "value": "⟦Åþþ ļåñĝûåĝé~~~~~⟧"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "⟦Åţ éñđ~~~⟧"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱîñûţé ƀéƒöŕé éñđ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱîñûţéš ƀéƒöŕé éñđ~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéçöñđ ƀéƒöŕé éñđ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéçöñđš ƀéƒöŕé éñđ~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ Ñéẋţ Ûþ~~~~~⟧"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -65147,12 +65239,6 @@
       "value": "⟦Ţŕûšţéđ þŕöẋîéš~~~~~~⟧"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåñåĝéđ ƀý ŠÎĻÖ_ŢŔÛŠŢÉĐ_ÞŔÖẊÎÉŠ.~~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -71509,12 +71595,6 @@
       "value": "⟦Ûšé Ŕéđîš~~~~⟧"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "⟦Šéţ ƀý ŔÉĐÎŠ_ÛŔĻ~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -71531,12 +71611,6 @@
     {
       "type": 0,
       "value": "⟦Çöññéçţîöñ ÛŔĻ~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "⟦Ṽåļûé šûþþļîéđ ƀý ŔÉĐÎŠ_ÛŔĻ~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -77055,20 +77129,6 @@
     {
       "type": 0,
       "value": "⟦Šéŕṽéŕ ļöĝ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåñåĝéđ ƀý "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": ".~~~~~⟧"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -151115,12 +151175,6 @@
       "value": "⟦Ţŕûšţéđ þŕöẋîéš~~~~~~⟧"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "⟦Šéţ ƀý ŠÎĻÖ_ŢŔÛŠŢÉĐ_ÞŔÖẊÎÉŠ îñ ţĥé éñṽîŕöñɱéñţ.~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -151371,12 +151425,6 @@
     {
       "type": 0,
       "value": "⟦Đåţåƀåšé ñûɱƀéŕ~~~~~~⟧"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "⟦Šéţ ƀý ŔÉĐÎŠ_ÛŔĻ~~~~~~~⟧"
     }
   ],
   "web.setup.storage.redisDescription": [

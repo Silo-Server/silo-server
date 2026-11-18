@@ -1998,6 +1998,60 @@
       "value": "ภาษาของแอป"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "เมื่อจบตอน"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " นาทีก่อนจบ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " วินาทีก่อนจบ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "แสดงตอนถัดไป"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -54256,12 +54310,6 @@
       "value": "พร็อกซีที่เชื่อถือได้"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "จัดการโดย SILO_TRUSTED_PROXIES"
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -60198,12 +60246,6 @@
       "value": "ใช้ Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "ตั้งค่าโดย REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -60220,12 +60262,6 @@
     {
       "type": 0,
       "value": "URL การเชื่อมต่อ"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "ค่าที่กำหนดโดย REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -65049,16 +65085,6 @@
     {
       "type": 0,
       "value": "ล็อกเซิร์ฟเวอร์"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "จัดการโดย "
-    },
-    {
-      "type": 1,
-      "value": "env"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -129273,12 +129299,6 @@
       "value": "พร็อกซีที่เชื่อถือได้"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "ตั้งค่าโดย SILO_TRUSTED_PROXIES ในสภาพแวดล้อม"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -129529,12 +129549,6 @@
     {
       "type": 0,
       "value": "หมายเลขฐานข้อมูล"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "กำหนดโดย REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

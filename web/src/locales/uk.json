@@ -2035,6 +2035,158 @@
       "value": "Мова застосунку"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Наприкінці"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилину до кінця"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилини до кінця"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилин до кінця"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилини до кінця"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунду до кінця"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунди до кінця"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунд до кінця"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунди до кінця"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Показ наступних епізодів"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -72810,12 +72962,6 @@
       "value": "Довірені проксі"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Керується змінною SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -79140,12 +79286,6 @@
       "value": "Використовувати Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Задано через REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -79162,12 +79302,6 @@
     {
       "type": 0,
       "value": "URL-адреса з’єднання"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Значення задано через REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -84136,20 +84270,6 @@
     {
       "type": 0,
       "value": "Журнал сервера"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Керується змінною "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -162735,12 +162855,6 @@
       "value": "Довірені проксі"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Задано змінною середовища SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -162991,12 +163105,6 @@
     {
       "type": 0,
       "value": "Номер бази даних"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Задано через REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

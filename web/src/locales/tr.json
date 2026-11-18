@@ -2013,6 +2013,98 @@
       "value": "Uygulama dili"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Bölüm sonunda"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dakika önce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dakika önce"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " saniye önce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " saniye önce"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Sıradaki bölümleri göster"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -59163,12 +59255,6 @@
       "value": "Güvenilen proxy’ler"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIES tarafından yönetiliyor."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -65197,12 +65283,6 @@
       "value": "Redis kullan"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URL tarafından ayarlandı"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65219,12 +65299,6 @@
     {
       "type": 0,
       "value": "Bağlantı URL’si"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Değer REDIS_URL tarafından sağlanıyor"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70087,16 +70161,6 @@
     {
       "type": 0,
       "value": "Sunucu günlüğü"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": " tarafından yönetiliyor."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -137825,12 +137889,6 @@
       "value": "Güvenilir proxy’ler"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Ortamdaki SILO_TRUSTED_PROXIES tarafından ayarlanır."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -138081,12 +138139,6 @@
     {
       "type": 0,
       "value": "Veritabanı numarası"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URL tarafından ayarlandı"
     }
   ],
   "web.setup.storage.redisDescription": [

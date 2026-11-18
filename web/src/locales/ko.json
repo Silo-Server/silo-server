@@ -1998,6 +1998,68 @@
       "value": "앱 언어"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "종료 시"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "종료 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "분 전"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "종료 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "초 전"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "다음 에피소드 표시"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -53696,12 +53758,6 @@
       "value": "신뢰할 수 있는 프록시"
     }
   ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIES에서 관리해요."
-    }
-  ],
   "web.admin.settings.general.title": [
     {
       "type": 0,
@@ -59614,12 +59670,6 @@
       "value": "Redis 사용"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URL에서 설정됨"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59636,12 +59686,6 @@
     {
       "type": 0,
       "value": "연결 URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "REDIS_URL에서 제공된 값"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64517,16 +64561,6 @@
     {
       "type": 0,
       "value": "서버 로그"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "에서 관리해요."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -128305,12 +128339,6 @@
       "value": "신뢰할 수 있는 프록시"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "환경 변수 SILO_TRUSTED_PROXIES로 설정됐어요."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -128561,12 +128589,6 @@
     {
       "type": 0,
       "value": "데이터베이스 번호"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URL에서 설정됨"
     }
   ],
   "web.setup.storage.redisDescription": [
