@@ -257,6 +257,18 @@ provider again. Without a marker the stored provider
 is left alone, so an external Meilisearch configured in the admin UI keeps
 working.
 
+Meilisearch's own default lets indexing take two thirds of the memory it
+sees, which in this image it shares with PostgreSQL, Redis, Silo, and ffmpeg;
+a full rebuild of a large catalog holds that much for hours. So
+`svc-meilisearch` sets `MEILI_MAX_INDEXING_MEMORY` to a quarter of the
+container's memory, at least 512 MiB, in bytes. It reads the memory from
+`silo memory-limit`, which detects it as `POSTGRES_TUNE_MEMORY=auto` does: a
+finite cgroup limit, else `/host/proc/meminfo`, else `/proc/meminfo`. When
+that fails, Meilisearch keeps its default and the script logs a warning.
+Indexing threads stay at Meilisearch's default of half the CPUs it sees. A
+`MEILI_MAX_INDEXING_MEMORY` or `MEILI_MAX_INDEXING_THREADS` set on the
+container overrides either.
+
 ## Nodes
 
 The same image runs a proxy or transcode node. With either `MODE`,

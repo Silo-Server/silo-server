@@ -1,11 +1,13 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,6 +58,10 @@ type queuedMeilisearchTask struct {
 	vecCount int
 }
 
+// meilisearchMaxDocumentPayloadBytes caps one documents request body, as
+// encoded (see forEachCatalogSearchDocumentPayload). Meilisearch rejects a
+// body over its http-payload-size-limit, 100 MB (100,000,000 bytes) by
+// default; 80 MiB stays under it.
 const meilisearchMaxDocumentPayloadBytes = 80 * 1024 * 1024
 
 // meilisearchIndexingTimeout bounds a single indexing HTTP call (document
@@ -130,17 +136,12 @@ func (i *CatalogSearchIndexer) ShouldSyncRun(ctx context.Context) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	rebuildRequired, err := catalogSearchIndexRequiresRebuildOnTarget(
-		ctx,
-		client,
-		state,
-		catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized),
-		settings.MeilisearchIndex,
-	)
+	maintenance, err := planCatalogSearchIndexMaintenance(ctx, client, state, settings)
 	if err != nil {
 		return false, err
 	}
-	if rebuildRequired {
+	switch maintenance {
+	case catalogSearchIndexRebuild:
 		if catalogSearchIndexHasNewerSchema(state) {
 			return false, nil
 		}
@@ -148,6 +149,8 @@ func (i *CatalogSearchIndexer) ShouldSyncRun(ctx context.Context) (bool, error) 
 		if err != nil || !matches {
 			return false, err
 		}
+		return true, nil
+	case catalogSearchIndexApplySettings:
 		return true, nil
 	}
 	pending, err := i.events.PendingCount(ctx, SearchProviderMeilisearch)
@@ -157,6 +160,9 @@ func (i *CatalogSearchIndexer) ShouldSyncRun(ctx context.Context) (bool, error) 
 	return pending > 0, nil
 }
 
+// SyncOutbox brings the active index up to date: it rebuilds an index that
+// needs it, otherwise applies changed index settings in place, then syncs
+// pending catalog events.
 func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIndexProgressReporter) (CatalogSearchIndexSyncStats, error) {
 	stats := CatalogSearchIndexSyncStats{}
 	settings, client, ok, err := i.loadClient(ctx)
@@ -194,47 +200,68 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 	if err != nil {
 		return stats, err
 	}
-	rebuildRequired, err := catalogSearchIndexRequiresRebuildOnTarget(
-		ctx,
-		client,
-		state,
-		catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized),
-		settings.MeilisearchIndex,
-	)
+	maintenance, err := planCatalogSearchIndexMaintenance(ctx, client, state, settings)
 	if err != nil {
 		return stats, err
 	}
-	if rebuildRequired {
-		if catalogSearchIndexHasNewerSchema(state) {
-			stats.Skipped = true
-			stats.Reason = "active search index was built by a newer server version"
-			setSearchIndexTaskResult(progress, stats)
-			reportSearchIndexProgress(progress, 100, "A newer server version owns the active search index")
-			return stats, nil
-		}
-		matches, matchErr := i.runtimeMatchesDesiredSettings(ctx, settings)
-		if matchErr != nil {
-			return stats, matchErr
-		}
-		if !matches {
-			stats.Skipped = true
-			stats.Reason = "saved search settings are waiting for a server restart"
-			setSearchIndexTaskResult(progress, stats)
-			reportSearchIndexProgress(progress, 100, "Restart Silo before rebuilding the catalog search index")
-			return stats, nil
-		}
-		stats.RebuildAttempted = true
-		rebuildStats, rebuildErr := i.rebuildLocked(ctx, progress, settings, client)
-		stats.Rebuilt = !rebuildStats.Skipped && rebuildErr == nil
-		stats.Skipped = rebuildStats.Skipped
-		stats.Reason = rebuildStats.Reason
-		stats.ActiveIndexUID = rebuildStats.ActiveIndexUID
-		stats.DocumentCount = rebuildStats.DocumentCount
-		stats.VectorDocCount = rebuildStats.VectorDocCount
-		stats.RemovedIndexes = rebuildStats.RemovedIndexes
-		setSearchIndexTaskResult(progress, stats)
-		return stats, rebuildErr
+	if maintenance == catalogSearchIndexRebuild {
+		return i.rebuildForSync(ctx, progress, settings, client, state, stats)
 	}
+	var settingsErr error
+	if maintenance == catalogSearchIndexApplySettings {
+		// A failure leaves the recorded fingerprint, so the next run retries.
+		// Pending events still sync: the index keeps serving searches with
+		// its current settings meanwhile. The task still reports the failure.
+		reportSearchIndexProgress(progress, 0, "Applying catalog search index settings")
+		if settingsErr = i.applyIndexSettingsLocked(ctx, client, state.ActiveIndexUID); settingsErr != nil {
+			slog.WarnContext(ctx, "catalog search: failed to apply index settings in place; the next sync retries",
+				"component", "catalog", "index", state.ActiveIndexUID, "err", settingsErr)
+		}
+	}
+	stats, err = i.syncPendingEventsLocked(ctx, progress, settings, client, state, stats)
+	if err == nil && settingsErr != nil {
+		err = fmt.Errorf("applying catalog search index settings: %w", settingsErr)
+	}
+	return stats, err
+}
+
+// rebuildForSync rebuilds the index for SyncOutbox unless a newer server owns
+// it or the saved search settings wait for a restart.
+func (i *CatalogSearchIndexer) rebuildForSync(ctx context.Context, progress SearchIndexProgressReporter, settings CatalogSearchSettings, client *meilisearchClient, state SearchIndexState, stats CatalogSearchIndexSyncStats) (CatalogSearchIndexSyncStats, error) {
+	if catalogSearchIndexHasNewerSchema(state) {
+		stats.Skipped = true
+		stats.Reason = "active search index was built by a newer server version"
+		setSearchIndexTaskResult(progress, stats)
+		reportSearchIndexProgress(progress, 100, "A newer server version owns the active search index")
+		return stats, nil
+	}
+	matches, matchErr := i.runtimeMatchesDesiredSettings(ctx, settings)
+	if matchErr != nil {
+		return stats, matchErr
+	}
+	if !matches {
+		stats.Skipped = true
+		stats.Reason = "saved search settings are waiting for a server restart"
+		setSearchIndexTaskResult(progress, stats)
+		reportSearchIndexProgress(progress, 100, "Restart Silo before rebuilding the catalog search index")
+		return stats, nil
+	}
+	stats.RebuildAttempted = true
+	rebuildStats, rebuildErr := i.rebuildLocked(ctx, progress, settings, client)
+	stats.Rebuilt = !rebuildStats.Skipped && rebuildErr == nil
+	stats.Skipped = rebuildStats.Skipped
+	stats.Reason = rebuildStats.Reason
+	stats.ActiveIndexUID = rebuildStats.ActiveIndexUID
+	stats.DocumentCount = rebuildStats.DocumentCount
+	stats.VectorDocCount = rebuildStats.VectorDocCount
+	stats.RemovedIndexes = rebuildStats.RemovedIndexes
+	setSearchIndexTaskResult(progress, stats)
+	return stats, rebuildErr
+}
+
+// syncPendingEventsLocked applies one batch of pending catalog events to the
+// active index. The caller must hold searchIndexMaintenanceLockID.
+func (i *CatalogSearchIndexer) syncPendingEventsLocked(ctx context.Context, progress SearchIndexProgressReporter, settings CatalogSearchSettings, client *meilisearchClient, state SearchIndexState, stats CatalogSearchIndexSyncStats) (CatalogSearchIndexSyncStats, error) {
 	stats.ActiveIndexUID = state.ActiveIndexUID
 
 	reportSearchIndexProgress(progress, 0, "Loading pending catalog search events")
@@ -294,17 +321,20 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 	}
 	if len(docs) > 0 {
 		reportSearchIndexProgress(progress, 70, "Upserting catalog search documents")
-		for _, batch := range catalogSearchDocumentPayloadBatches(docs, meilisearchMaxDocumentPayloadBytes) {
-			taskID, err := client.AddDocuments(ctx, state.ActiveIndexUID, batch)
+		err := forEachCatalogSearchDocumentPayload(docs, meilisearchMaxDocumentPayloadBytes, func(payload catalogSearchDocumentPayload) error {
+			taskID, err := client.AddDocuments(ctx, state.ActiveIndexUID, payload.body)
 			if err != nil {
-				_ = i.events.MarkFailed(ctx, ids, err)
-				return stats, err
+				return err
 			}
 			if err := client.WaitTask(ctx, taskID); err != nil {
-				_ = i.events.MarkFailed(ctx, ids, err)
-				return stats, err
+				return err
 			}
-			stats.Upserted += len(batch)
+			stats.Upserted += len(payload.docs)
+			return nil
+		})
+		if err != nil {
+			_ = i.events.MarkFailed(ctx, ids, err)
+			return stats, err
 		}
 	}
 
@@ -327,6 +357,68 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 	setSearchIndexTaskResult(progress, stats)
 	reportSearchIndexProgress(progress, 100, fmt.Sprintf("Synced %d catalog search events", len(events)))
 	return stats, nil
+}
+
+// catalogSearchIndexMaintenance is what the sync task must do to the active
+// index before it syncs pending events.
+type catalogSearchIndexMaintenance uint8
+
+const (
+	// catalogSearchIndexCurrentSettings: nothing; the index is current.
+	catalogSearchIndexCurrentSettings catalogSearchIndexMaintenance = iota
+	// catalogSearchIndexApplySettings: the index has the current schema but
+	// was last brought to other index settings; apply them in place.
+	catalogSearchIndexApplySettings
+	// catalogSearchIndexRebuild: the index is missing or has another schema
+	// identity; build a new one from PostgreSQL. A rebuild applies the
+	// current settings, so it never also needs an in-place update.
+	catalogSearchIndexRebuild
+)
+
+func planCatalogSearchIndexMaintenance(
+	ctx context.Context,
+	client *meilisearchClient,
+	state SearchIndexState,
+	settings CatalogSearchSettings,
+) (catalogSearchIndexMaintenance, error) {
+	rebuildRequired, err := catalogSearchIndexRequiresRebuildOnTarget(
+		ctx,
+		client,
+		state,
+		catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized),
+		settings.MeilisearchIndex,
+	)
+	switch {
+	case err != nil:
+		return 0, err
+	case rebuildRequired:
+		return catalogSearchIndexRebuild, nil
+	case state.SettingsFingerprint != catalogSearchMeilisearchSettingsFingerprint:
+		return catalogSearchIndexApplySettings, nil
+	default:
+		return catalogSearchIndexCurrentSettings, nil
+	}
+}
+
+// applyIndexSettingsLocked applies catalogSearchMeilisearchIndexSettings to
+// the active index, waits for Meilisearch to finish, and records the
+// fingerprint. The embedder is left alone: it is part of the schema identity.
+// The caller must hold searchIndexMaintenanceLockID.
+//
+// Meilisearch reindexes every document in place for some settings (searchable
+// attributes, typo tolerance), which on a large index takes as long as
+// indexing does, so the wait is bounded like a rebuild's task waits, not by
+// the request timeout. Searches keep using the index meanwhile; see
+// MeilisearchSearchProvider.searchSettingsCurrent.
+func (i *CatalogSearchIndexer) applyIndexSettingsLocked(ctx context.Context, client *meilisearchClient, indexUID string) error {
+	task, err := client.UpdateSettings(ctx, indexUID, catalogSearchMeilisearchIndexSettings())
+	if err != nil {
+		return err
+	}
+	if err := client.WaitTask(ctx, task); err != nil {
+		return err
+	}
+	return i.events.UpdateSettingsFingerprint(ctx, SearchProviderMeilisearch, indexUID, catalogSearchMeilisearchSettingsFingerprint)
 }
 
 func catalogSearchIndexRequiresRebuildOnTarget(
@@ -439,13 +531,19 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 // rebuildLocked builds and atomically publishes a replacement index. The
 // caller must hold searchIndexMaintenanceLockID so the scheduled sync path and
 // manual forced rebuilds cannot race across server nodes.
+//
+// A build index that fails before it is published is deleted again, and a
+// rebuild first deletes `<prefix>_rebuild_*` leftovers of earlier runs (a
+// process that died mid-rebuild never reached its own cleanup). The sync task
+// retries a required rebuild every minute, so without both each failed attempt
+// would leave another partial copy of the catalog on the Meilisearch instance.
 func (i *CatalogSearchIndexer) rebuildLocked(
 	ctx context.Context,
 	progress SearchIndexProgressReporter,
 	settings CatalogSearchSettings,
 	client *meilisearchClient,
-) (CatalogSearchIndexRebuildStats, error) {
-	stats := CatalogSearchIndexRebuildStats{Configured: true}
+) (stats CatalogSearchIndexRebuildStats, err error) {
+	stats = CatalogSearchIndexRebuildStats{Configured: true}
 
 	rebuildEventHighWater, err := i.events.MaxEventID(ctx, SearchProviderMeilisearch)
 	if err != nil {
@@ -460,6 +558,15 @@ func (i *CatalogSearchIndexer) rebuildLocked(
 		return stats, err
 	}
 
+	reportSearchIndexProgress(progress, 0, "Removing unfinished catalog search indexes")
+	removed, err := cleanupSupersededMeilisearchIndexes(ctx, client, settings.MeilisearchIndex, priorState.ActiveIndexUID, "")
+	stats.RemovedIndexes = removed
+	if err != nil {
+		// Like the cleanup after a rebuild: disk on the Meilisearch instance,
+		// not correctness. The next attempt retries it.
+		slog.WarnContext(ctx, "catalog search: failed to remove unfinished meilisearch rebuild indexes", "component", "catalog", "err", err, "removed", removed)
+	}
+
 	buildIndexUID := fmt.Sprintf("%s_rebuild_%d", settings.MeilisearchIndex, time.Now().Unix())
 	stats.ActiveIndexUID = buildIndexUID
 	reportSearchIndexProgress(progress, 0, "Creating catalog search index")
@@ -467,6 +574,15 @@ func (i *CatalogSearchIndexer) rebuildLocked(
 	if err != nil {
 		return stats, err
 	}
+	published := false
+	defer func() {
+		// CreateIndex accepts an existing index, so a build uid that collides
+		// with the active index (two rebuilds in one second) must never be
+		// deleted here.
+		if err != nil && !published && buildIndexUID != priorState.ActiveIndexUID {
+			discardMeilisearchBuildIndex(ctx, client, buildIndexUID)
+		}
+	}()
 	if err := client.WaitTask(ctx, taskID); err != nil {
 		return stats, err
 	}
@@ -488,23 +604,25 @@ func (i *CatalogSearchIndexer) rebuildLocked(
 		if len(docs) == 0 {
 			break
 		}
-		for _, batch := range catalogSearchDocumentPayloadBatches(docs, meilisearchMaxDocumentPayloadBytes) {
-			taskID, err := client.AddDocuments(ctx, buildIndexUID, batch)
+		err = forEachCatalogSearchDocumentPayload(docs, meilisearchMaxDocumentPayloadBytes, func(payload catalogSearchDocumentPayload) error {
+			taskID, err := client.AddDocuments(ctx, buildIndexUID, payload.body)
 			if err != nil {
-				return stats, err
+				return err
 			}
 			queuedTasks = append(queuedTasks, queuedMeilisearchTask{
 				task:     taskID,
-				docCount: len(batch),
-				vecCount: catalogSearchVectorDocumentCount(batch),
+				docCount: len(payload.docs),
+				vecCount: catalogSearchVectorDocumentCount(payload.docs),
 			})
 			submitted := stats.DocumentCount + queuedDocumentCount(queuedTasks)
 			reportSearchIndexProgress(progress, rebuildIndexingPercent(submitted, totalDocs), fmt.Sprintf("Submitted %d of %d catalog items", submitted, totalDocs))
 			if len(queuedTasks) >= settings.RebuildQueueDepth {
-				if err := waitNextMeilisearchTask(ctx, client, &queuedTasks, &stats, progress, totalDocs); err != nil {
-					return stats, err
-				}
+				return waitNextMeilisearchTask(ctx, client, &queuedTasks, &stats, progress, totalDocs)
 			}
+			return nil
+		})
+		if err != nil {
+			return stats, err
 		}
 		lastID = docs[len(docs)-1].ContentID
 	}
@@ -526,15 +644,21 @@ func (i *CatalogSearchIndexer) rebuildLocked(
 	// active index as idempotent upserts on the next sync. The reverse order
 	// would mark events processed while the old index is still active, losing
 	// those changes from the served index until the next rebuild.
-	if err := i.events.UpdateStateAfterRebuild(ctx, SearchProviderMeilisearch, buildIndexUID, catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized), docCount, rebuildEventHighWater); err != nil {
+	//
+	// The build index stops being discardable before the state write, not
+	// after it: a write that committed but reported an error would otherwise
+	// delete the index searches now use. If the write did fail, the next
+	// rebuild's leftover cleanup removes the index.
+	published = true
+	if err := i.events.UpdateStateAfterRebuild(ctx, SearchProviderMeilisearch, buildIndexUID, catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized), catalogSearchMeilisearchSettingsFingerprint, docCount, rebuildEventHighWater); err != nil {
 		return stats, err
 	}
 	if err := i.events.MarkProcessedThrough(ctx, SearchProviderMeilisearch, rebuildEventHighWater); err != nil {
 		return stats, err
 	}
 	reportSearchIndexProgress(progress, 95, "Removing superseded catalog search indexes")
-	removed, err := cleanupSupersededMeilisearchIndexes(ctx, client, settings.MeilisearchIndex, buildIndexUID, priorState.ActiveIndexUID)
-	stats.RemovedIndexes = removed
+	removed, err = cleanupSupersededMeilisearchIndexes(ctx, client, settings.MeilisearchIndex, buildIndexUID, priorState.ActiveIndexUID)
+	stats.RemovedIndexes += removed
 	if err != nil {
 		// The new index is already active; a failed cleanup costs disk on the
 		// Meilisearch instance, not correctness, and the next rebuild retries.
@@ -560,7 +684,9 @@ func rebuildIndexingPercent(done, total int) float64 {
 // cleanupSupersededMeilisearchIndexes deletes indexes this rebuild has made
 // unreachable: the previously active index and any `<prefix>_rebuild_*`
 // leftovers from failed or superseded runs. Without it, every rebuild leaks a
-// full copy of the catalog on the Meilisearch instance.
+// full copy of the catalog on the Meilisearch instance. With previousActiveUID
+// empty it removes only the `<prefix>_rebuild_*` leftovers other than
+// activeUID, which is how a rebuild clears them before it starts.
 func cleanupSupersededMeilisearchIndexes(ctx context.Context, client *meilisearchClient, indexPrefix, activeUID, previousActiveUID string) (int, error) {
 	uids, err := client.ListIndexUIDs(ctx)
 	if err != nil {
@@ -578,6 +704,23 @@ func cleanupSupersededMeilisearchIndexes(ctx context.Context, client *meilisearc
 		removed++
 	}
 	return removed, nil
+}
+
+// discardMeilisearchBuildIndex deletes the index of a failed rebuild, best
+// effort. It runs on a context detached from ctx's cancellation, because a
+// canceled rebuild is one of the failures it cleans up after, and bounded by
+// meilisearchIndexingTimeout. A failure is logged; the next rebuild's leftover
+// cleanup removes the index then.
+func discardMeilisearchBuildIndex(ctx context.Context, client *meilisearchClient, uid string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), meilisearchIndexingTimeout)
+	defer cancel()
+	task, err := client.DeleteIndex(cleanupCtx, uid)
+	if err == nil {
+		err = client.WaitTask(cleanupCtx, task)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "catalog search: failed to delete the index of a failed rebuild", "component", "catalog", "index", uid, "err", err)
+	}
 }
 
 // staleCatalogSearchIndexUIDs selects which index uids a finished rebuild
@@ -629,60 +772,52 @@ func queuedDocumentCount(queue []queuedMeilisearchTask) int {
 	return total
 }
 
-func catalogSearchDocumentPayloadBatches(docs []catalogSearchDocument, maxBytes int) [][]catalogSearchDocument {
-	if len(docs) == 0 {
-		return nil
-	}
-	if maxBytes <= 0 {
-		return [][]catalogSearchDocument{docs}
-	}
-	batches := make([][]catalogSearchDocument, 0, int(math.Ceil(float64(len(docs))/1000)))
-	current := make([]catalogSearchDocument, 0, len(docs))
-	currentBytes := 2
-	for _, doc := range docs {
-		docBytes := estimateCatalogSearchDocumentJSONBytes(doc)
-		if len(current) > 0 && currentBytes+docBytes+1 > maxBytes {
-			batches = append(batches, current)
-			current = nil
-			currentBytes = 2
+// catalogSearchDocumentPayload is one documents request: docs encoded as the
+// JSON array body.
+type catalogSearchDocumentPayload struct {
+	body json.RawMessage
+	docs []catalogSearchDocument
+}
+
+// forEachCatalogSearchDocumentPayload encodes docs once, in order, and hands
+// send consecutive payloads whose bodies are each at most maxBytes long
+// (maxBytes <= 0 means one payload). A document too large for maxBytes on its
+// own goes alone. The size is the encoded size, so a payload of vector
+// documents fills the cap whatever the model's real dimensions: a vector
+// zero-padded to the canonical dimensions encodes far smaller than a full one.
+// Only the payload being built is held, and send gets it before the next one
+// starts.
+func forEachCatalogSearchDocumentPayload(docs []catalogSearchDocument, maxBytes int, send func(catalogSearchDocumentPayload) error) error {
+	var (
+		body    []byte
+		start   int
+		scratch bytes.Buffer
+	)
+	enc := json.NewEncoder(&scratch)
+	for idx := range docs {
+		scratch.Reset()
+		if err := enc.Encode(&docs[idx]); err != nil {
+			return fmt.Errorf("encode catalog search document %q: %w", docs[idx].ContentID, err)
 		}
-		current = append(current, doc)
-		currentBytes += docBytes + 1
+		encoded := bytes.TrimSuffix(scratch.Bytes(), []byte("\n"))
+		// The separator before the document and the closing bracket after it.
+		if idx > start && maxBytes > 0 && len(body)+1+len(encoded)+1 > maxBytes {
+			if err := send(catalogSearchDocumentPayload{body: append(body, ']'), docs: docs[start:idx]}); err != nil {
+				return err
+			}
+			body, start = nil, idx
+		}
+		if idx == start {
+			body = append(body, '[')
+		} else {
+			body = append(body, ',')
+		}
+		body = append(body, encoded...)
 	}
-	if len(current) > 0 {
-		batches = append(batches, current)
+	if start < len(docs) {
+		return send(catalogSearchDocumentPayload{body: append(body, ']'), docs: docs[start:]})
 	}
-	return batches
-}
-
-func estimateCatalogSearchDocumentJSONBytes(doc catalogSearchDocument) int {
-	size := 512 +
-		len(doc.ContentID) +
-		len(doc.Type) +
-		len(doc.Title) +
-		len(doc.SortTitle) +
-		len(doc.OriginalTitle) +
-		len(doc.Overview) +
-		len(doc.Tagline)
-	size += estimateStringSliceJSONBytes(doc.TitleVariants)
-	size += estimateStringSliceJSONBytes(doc.Genres)
-	size += estimateStringSliceJSONBytes(doc.Studios)
-	size += estimateStringSliceJSONBytes(doc.Networks)
-	size += estimateStringSliceJSONBytes(doc.Countries)
-	size += estimateStringSliceJSONBytes(doc.Keywords)
-	size += estimateStringSliceJSONBytes(doc.People)
-	for embedder, vector := range doc.Vectors {
-		size += len(embedder) + 64 + len(vector)*24
-	}
-	return size
-}
-
-func estimateStringSliceJSONBytes(values []string) int {
-	size := 2
-	for _, value := range values {
-		size += len(value) + 4
-	}
-	return size
+	return nil
 }
 
 func (i *CatalogSearchIndexer) loadClient(ctx context.Context) (CatalogSearchSettings, *meilisearchClient, bool, error) {
@@ -767,27 +902,13 @@ func (i *CatalogSearchIndexer) CheckConnection(ctx context.Context, settings Cat
 	return client.checkConnection(ctx, settings.MeilisearchIndex)
 }
 
+// meilisearchPeopleAttribute is the indexed document's cast and crew names.
+const meilisearchPeopleAttribute = "people"
+
+// catalogSearchMeilisearchSettings is every index setting Silo applies: the
+// index settings plus, with semantic search on, the embedder.
 func catalogSearchMeilisearchSettings(embedder string, semanticEnabled, binaryQuantized bool) map[string]any {
-	settings := map[string]any{
-		"displayedAttributes":  []string{"content_id", "type"},
-		"filterableAttributes": []string{"type", "library_ids"},
-		"searchableAttributes": []string{
-			"title",
-			"original_title",
-			"sort_title",
-			"title_variants",
-			"people",
-			"studios",
-			"networks",
-			"genres",
-			"keywords",
-			"overview",
-			"tagline",
-		},
-		"pagination": map[string]any{
-			"maxTotalHits": meilisearchCandidateScanCap,
-		},
-	}
+	settings := catalogSearchMeilisearchIndexSettings()
 	if semanticEnabled {
 		embedder, err := NormalizeCatalogSearchEmbedderName(embedder)
 		if err != nil {
@@ -796,6 +917,80 @@ func catalogSearchMeilisearchSettings(embedder string, semanticEnabled, binaryQu
 		settings["embedders"] = catalogSearchMeilisearchEmbedderSettings(embedder, binaryQuantized)
 	}
 	return settings
+}
+
+// catalogSearchMeilisearchSettingsFingerprint identifies
+// catalogSearchMeilisearchIndexSettings. catalog_search_index_state records the
+// fingerprint the active index was last brought to; the sync task applies the
+// settings in place when the two differ. json.Marshal writes map keys sorted,
+// so equal settings give equal fingerprints.
+var catalogSearchMeilisearchSettingsFingerprint = func() string {
+	data, err := json.Marshal(catalogSearchMeilisearchIndexSettings())
+	if err != nil {
+		panic(fmt.Sprintf("encode catalog search index settings: %v", err))
+	}
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:])
+}()
+
+// catalogSearchMeilisearchIndexSettings is the part of the index settings that
+// Meilisearch can change on an existing index: everything but the embedder,
+// which is part of the schema identity (catalogSearchMeilisearchSchemaVersion)
+// because changing it needs new vectors. A change here needs no rebuild and no
+// schema version bump; the sync task applies it in place.
+func catalogSearchMeilisearchIndexSettings() map[string]any {
+	return map[string]any{
+		"displayedAttributes":  []string{"content_id", "type"},
+		"filterableAttributes": []string{"type", "library_ids"},
+		// The overview and tagline are not indexed. A word that appears
+		// once in a synopsis made unrelated titles outrank the one searched
+		// for, and descriptive searches drew enough synopsis hits to bury
+		// the matches by meaning. The item's embedding covers the synopsis
+		// by sense; genres and keywords keep themes searchable by word.
+		"searchableAttributes": []string{
+			"title",
+			"original_title",
+			"sort_title",
+			"title_variants",
+			meilisearchPeopleAttribute,
+			"studios",
+			"networks",
+			"genres",
+			"keywords",
+			// Last, so a title that is a number ("1917") still ranks its
+			// title match above items released that year, while "dune
+			// 2021" can match the year of Dune (2021).
+			"year", //nolint:goconst // A Meilisearch document attribute, not a sort field.
+		},
+		// Meilisearch's default rules, then popularity as the final tiebreak
+		// between hits that tie on everything else (same title, no year in
+		// the search). The default order is deliberate: typo ahead of
+		// attributeRank keeps an exact cast match ("tom hanks") above titles
+		// that are one letter off ("Idle Hands"). A custom rule needs no
+		// sortableAttributes entry. Searches cut a keyword ranking at its
+		// first hit that matches fewer words, with more typos, or with its
+		// words further apart than the best hit (meilisearchKeywordMatchCount),
+		// which is right only while words, typo and proximity lead this list.
+		"rankingRules": []string{
+			"words",
+			"typo",
+			"proximity",
+			"attributeRank",
+			"sort",
+			"wordPosition",
+			"exactness",
+			"popularity:desc",
+		},
+		// A typo combined with prefix matching turns a short word into
+		// unrelated names ("scrubs" matched "Srubshchik" and "Shrubsole"),
+		// so people match only as typed. Titles keep typo tolerance.
+		"typoTolerance": map[string]any{
+			"disableOnAttributes": []string{meilisearchPeopleAttribute},
+		},
+		"pagination": map[string]any{
+			"maxTotalHits": meilisearchCandidateScanCap,
+		},
+	}
 }
 
 func coalesceSearchIndexEvents(events []SearchIndexEvent) (upsertIDs []string, deleteIDs []string) {
@@ -851,8 +1046,6 @@ type catalogSearchDocument struct {
 	Aliases       []string             `json:"-"`
 	TitleVariants []string             `json:"title_variants,omitempty"`
 	Year          int                  `json:"year,omitempty"`
-	Overview      string               `json:"overview,omitempty"`
-	Tagline       string               `json:"tagline,omitempty"`
 	Genres        []string             `json:"genres,omitempty"`
 	Studios       []string             `json:"studios,omitempty"`
 	Networks      []string             `json:"networks,omitempty"`
@@ -862,6 +1055,10 @@ type catalogSearchDocument struct {
 	LibraryIDs    []int32              `json:"library_ids,omitempty"`
 	SchemaVersion int                  `json:"schema_version"`
 	Vectors       map[string][]float32 `json:"_vectors,omitempty"`
+	// Popularity orders hits that tie on every other ranking rule. Always
+	// sent: Meilisearch leaves a custom ranking rule undefined for documents
+	// that lack its attribute.
+	Popularity int64 `json:"popularity"`
 }
 
 func (i *CatalogSearchIndexer) LoadDocumentsAfter(ctx context.Context, afterContentID string, limit int, itemTypes []string, embedder string, semanticEnabled, binaryQuantized bool) ([]catalogSearchDocument, error) {
@@ -956,15 +1153,22 @@ func mixedCatalogSearchDocumentSQL(mediaPredicate, episodePredicate string, type
 				COALESCE(mi.original_title, ''),
 				COALESCE(aliases.titles, ARRAY[]::text[]),
 				COALESCE(mi.year, 0),
-				COALESCE(mi.overview, ''),
-				COALESCE(mi.tagline, ''),
 				COALESCE(mi.genres, ARRAY[]::text[]),
 				COALESCE(mi.studios, ARRAY[]::text[]),
 				COALESCE(mi.networks, ARRAY[]::text[]),
 				COALESCE(mi.countries, ARRAY[]::text[]),
 				COALESCE(mi.keywords, ARRAY[]::text[]),
 				COALESCE(people.names, ARRAY[]::text[]),
-				COALESCE(libraries.ids, ARRAY[]::integer[])
+				COALESCE(libraries.ids, ARRAY[]::integer[]),
+				-- Popularity is the largest vote count any rating source
+				-- holds for the item; an item no source counts votes for
+				-- ranks as 0. It reads the sources, not
+				-- media_items.tmdb_vote_count, because IMDb's count covers
+				-- more of a library than TMDB's. A vote-count change writes
+				-- no search event (it would flood the outbox on every
+				-- metadata refresh), so the indexed value refreshes when the
+				-- document is reindexed for another reason or rebuilt.
+				COALESCE(popularity.votes, 0)
 			FROM candidates c
 			JOIN media_items mi ON c.type <> 'episode' AND mi.content_id = c.content_id
 			LEFT JOIN LATERAL (
@@ -972,17 +1176,35 @@ func mixedCatalogSearchDocumentSQL(mediaPredicate, episodePredicate string, type
 				FROM media_item_aliases mia
 				WHERE mia.content_id = mi.content_id
 			) aliases ON true
+			-- People are listed in billing order: each person's best credit
+			-- position, with the lead actor, director and writer of an item
+			-- sharing the front. Meilisearch ranks a match nearer the start
+			-- of an attribute higher, so a search for a name puts the titles
+			-- that person leads ahead of ones they have a small part in. An
+			-- alphabetical list would instead favor items with short casts.
 			LEFT JOIN LATERAL (
-				SELECT array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL AND p.name <> '') AS names
-				FROM item_people ip
-				JOIN people p ON p.id = ip.person_id
-				WHERE ip.content_id = mi.content_id
+				SELECT array_agg(credited.name ORDER BY credited.billing, credited.kind, credited.name) AS names
+				FROM (
+					SELECT p.name,
+					       min(COALESCE(ip.sort_order, 2147483647)) AS billing,
+					       min(ip.kind) AS kind
+					FROM item_people ip
+					JOIN people p ON p.id = ip.person_id
+					WHERE ip.content_id = mi.content_id
+					  AND p.name IS NOT NULL AND p.name <> ''
+					GROUP BY p.name
+				) credited
 			) people ON true
 			LEFT JOIN LATERAL (
 				SELECT array_agg(DISTINCT mil.media_folder_id ORDER BY mil.media_folder_id) AS ids
 				FROM media_item_libraries mil
 				WHERE mil.content_id = mi.content_id
 			) libraries ON true
+			LEFT JOIN LATERAL (
+				SELECT max(rs.votes) AS votes
+				FROM media_item_rating_sources rs
+				WHERE rs.content_id = mi.content_id
+			) popularity ON true
 			UNION ALL
 			SELECT
 				e.content_id,
@@ -992,10 +1214,9 @@ func mixedCatalogSearchDocumentSQL(mediaPredicate, episodePredicate string, type
 				''::text,
 				ARRAY[]::text[],
 				COALESCE(EXTRACT(YEAR FROM e.air_date)::integer, 0),
-				COALESCE(e.overview, ''),
-				''::text,
 				ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[],
-				COALESCE(libraries.ids, ARRAY[]::integer[])
+				COALESCE(libraries.ids, ARRAY[]::integer[]),
+				0::bigint
 			FROM candidates c
 			JOIN episodes e ON c.type = 'episode' AND e.content_id = c.content_id
 			LEFT JOIN LATERAL (
@@ -1021,8 +1242,6 @@ func scanCatalogSearchDocuments(rows pgx.Rows) ([]catalogSearchDocument, error) 
 			&doc.OriginalTitle,
 			&doc.Aliases,
 			&doc.Year,
-			&doc.Overview,
-			&doc.Tagline,
 			&doc.Genres,
 			&doc.Studios,
 			&doc.Networks,
@@ -1030,6 +1249,7 @@ func scanCatalogSearchDocuments(rows pgx.Rows) ([]catalogSearchDocument, error) 
 			&doc.Keywords,
 			&doc.People,
 			&doc.LibraryIDs,
+			&doc.Popularity,
 		); err != nil {
 			return nil, err
 		}
@@ -1211,8 +1431,9 @@ func countCatalogSearchVectorDocuments(ctx context.Context, q coverageQuerier, i
 // countCatalogSearchEligibleDocuments counts the items a rebuild will index
 // (nil/empty itemTypes => all types). It applies the same predicate as the
 // document loaders — NOT the vector-eligibility predicate — so the total is an
-// exact denominator for rebuild progress reporting.
-func countCatalogSearchEligibleDocuments(ctx context.Context, q coverageQuerier, itemTypes []string) (int, error) {
+// exact denominator for rebuild progress reporting. It takes the pool itself,
+// not an interface, so the nil check sees a nil pool.
+func countCatalogSearchEligibleDocuments(ctx context.Context, q *pgxpool.Pool, itemTypes []string) (int, error) {
 	if q == nil {
 		return 0, nil
 	}

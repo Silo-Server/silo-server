@@ -600,7 +600,7 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.matching_strategy":        "last",
 	"catalog.search.meilisearch.sync_batch_size":          "500",
 	"catalog.search.meilisearch.rebuild_batch_size":       "5000",
-	"catalog.search.meilisearch.rebuild_task_queue_depth": "4",
+	"catalog.search.meilisearch.rebuild_task_queue_depth": "16",
 	"catalog.search.meilisearch.semantic_enabled":         "false",
 	"catalog.search.meilisearch.semantic_ratio":           "0.5",
 	"catalog.search.meilisearch.embedder":                 "silo_recommendations",

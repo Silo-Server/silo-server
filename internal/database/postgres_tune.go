@@ -559,6 +559,15 @@ func normalizePostgresTuneDBSize(raw string) (string, error) {
 	}
 }
 
+// DetectMemoryLimitBytes reports the memory this process may use, detected the
+// way POSTGRES_TUNE_MEMORY=auto detects it: a finite cgroup limit, else the
+// host's /proc/meminfo mounted at /host/proc/meminfo, else /proc/meminfo. The
+// omnibus image sizes its bundled services from it.
+func DetectMemoryLimitBytes() (int64, error) {
+	mem, _, err := detectTotalMemoryBytes()
+	return mem, err
+}
+
 func detectTotalMemoryBytes() (int64, string, error) {
 	for _, path := range nodemetrics.CgroupMemoryLimitPaths() {
 		if mem, err := nodemetrics.ReadCgroupMemoryLimit(path); err == nil && mem > 0 {

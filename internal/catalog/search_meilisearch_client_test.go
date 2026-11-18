@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 
 	"net/http"
 	"net/http/httptest"
@@ -21,39 +20,6 @@ func newMeilisearchTestClient(t *testing.T, handler http.HandlerFunc) *meilisear
 		t.Fatalf("newMeilisearchClient: %v", err)
 	}
 	return client
-}
-
-func TestMeilisearchFederatedSearchUsesMultiSearchPagination(t *testing.T) {
-	var gotPath string
-	var gotRequest meilisearchFederatedSearchRequest
-	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"hits":[{"content_id":"episode-1"}],"offset":20,"limit":10,"estimatedTotalHits":1}`))
-	})
-	request := meilisearchFederatedSearchRequest{
-		Federation: meilisearchFederationOptions{Offset: 20, Limit: 10},
-		Queries: []meilisearchFederatedQuery{
-			{IndexUID: "catalog-v3", Query: "Who Are You?"},
-		},
-	}
-	response, err := client.FederatedSearch(context.Background(), request)
-	if err != nil {
-		t.Fatalf("FederatedSearch: %v", err)
-	}
-	if gotPath != "/multi-search" {
-		t.Fatalf("request path = %q, want /multi-search", gotPath)
-	}
-	if gotRequest.Federation.Offset != 20 || gotRequest.Federation.Limit != 10 || len(gotRequest.Queries) != 1 {
-		t.Fatalf("decoded request = %#v", gotRequest)
-	}
-	if len(response.Hits) != 1 || response.Hits[0].ContentID != "episode-1" {
-		t.Fatalf("response = %#v", response)
-	}
 }
 
 func TestMeilisearchWaitTaskSurfacesTaskFailure(t *testing.T) {
