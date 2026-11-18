@@ -154,6 +154,7 @@ type Claims struct {
 	VideoRange                 string  `json:"vrg,omitempty"`
 	CopyVideoMPEGTS            bool    `json:"cvts,omitempty"`
 	KeyframePlaylist           bool    `json:"kfp,omitempty"`
+	KeyframePlanResume         bool    `json:"kfpr,omitempty"`
 	OutputSubdir               string  `json:"osd,omitempty"`
 	SeekSeconds                float64 `json:"seek,omitempty"`
 	StreamOriginSeconds        float64 `json:"origin,omitempty"`

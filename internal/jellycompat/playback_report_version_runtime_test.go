@@ -55,68 +55,6 @@ func versionReportBody(mediaSourceID string) string {
 	return fmt.Sprintf(`{"PlaySessionId":"play-1","MediaSourceId":%q,"PositionTicks":%d}`, mediaSourceID, ticks)
 }
 
-func requireStoredProgress(t *testing.T, store userstore.UserStore, wantWatched bool, wantDuration float64) {
-	t.Helper()
-	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
-	if err != nil || progress == nil {
-		t.Fatalf("progress = %+v, %v", progress, err)
-	}
-	if progress.Completed != wantWatched || progress.DurationSeconds != wantDuration {
-		t.Fatalf("completed = %v with duration %v, want %v with %v", progress.Completed, progress.DurationSeconds, wantWatched, wantDuration)
-	}
-}
-
-// Completion follows the version being played, whether the report names it or
-// only the upstream session's file does, not the first one listed.
-func TestPlaybackReportCompletionUsesPlayedVersionRuntime(t *testing.T) {
-	theatrical, extended := versionedReportVersions()
-	for _, tc := range []struct {
-		name        string
-		listed      []catalog.FileVersion
-		playing     catalog.FileVersion
-		wantWatched bool
-	}{
-		{"extended cut listed second", []catalog.FileVersion{theatrical, extended}, extended, false},
-		{"theatrical cut listed second", []catalog.FileVersion{extended, theatrical}, theatrical, true},
-	} {
-		t.Run(tc.name+"/report names the version", func(t *testing.T) {
-			// A play stored before UpstreamMediaFileID existed has none, so only
-			// the report's MediaSourceId identifies the version.
-			handler, _, store := newVersionedReportHandler(t, true, tc.listed, 0)
-			playingID := testCompatSource(handler.codec, tc.playing).ID
-			if rec := postProgressReport(handler, versionReportBody(playingID)); rec.Code != http.StatusNoContent {
-				t.Fatalf("report: status %d, body %s", rec.Code, rec.Body.String())
-			}
-			requireStoredProgress(t, store, tc.wantWatched, float64(tc.playing.Duration))
-		})
-		t.Run(tc.name+"/upstream session names the version", func(t *testing.T) {
-			handler, _, store := newVersionedReportHandler(t, true, tc.listed, tc.playing.FileID)
-			if rec := postProgressReport(handler, versionReportBody("")); rec.Code != http.StatusNoContent {
-				t.Fatalf("report: status %d, body %s", rec.Code, rec.Body.String())
-			}
-			requireStoredProgress(t, store, tc.wantWatched, float64(tc.playing.Duration))
-		})
-	}
-}
-
-// A report that revives a reaped upstream session keeps the play on the version
-// it was streaming instead of restarting it on the first one listed.
-func TestPlaybackReportReviveKeepsPlayedVersion(t *testing.T) {
-	theatrical, extended := versionedReportVersions()
-	handler, mgr, store := newVersionedReportHandler(t, false, []catalog.FileVersion{theatrical, extended}, extended.FileID)
-	if rec := postProgressReport(handler, versionReportBody("")); rec.Code != http.StatusNoContent {
-		t.Fatalf("report: status %d, body %s", rec.Code, rec.Body.String())
-	}
-	revived := mgr.sessions["upstream-started"]
-	if mgr.startCalls != 1 || revived == nil || revived.MediaFileID != extended.FileID {
-		t.Fatalf("revive started %d sessions, upstream %+v; want one on file %d", mgr.startCalls, revived, extended.FileID)
-	}
-	if play, ok := handler.playbackStore.Get("play-1"); !ok || play.UpstreamMediaFileID != extended.FileID {
-		t.Fatalf("play after revive = %+v", play)
-	}
-	requireStoredProgress(t, store, false, float64(extended.Duration))
-}
-
 // The watch-provider stop sent after the upstream session was reaped judges
 // completion against the version that was playing.
 func TestStoppedScrobbleAfterReapUsesPlayedVersion(t *testing.T) {

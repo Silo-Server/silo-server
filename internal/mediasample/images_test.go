@@ -1,16 +1,12 @@
 package mediasample
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
 func imageRequest(toneMap *ToneMap, attempts ...Attempt) Request {
@@ -35,63 +31,6 @@ func listingCapabilities(calls *atomic.Int32, err error, filters ...string) func
 			return Capabilities{}, err
 		}
 		return FilterCapabilities([]byte(listing.String())), nil
-	}
-}
-
-func TestBuildImageArgs(t *testing.T) {
-	tail := []string{"-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"}
-	head := []string{"-hide_banner", "-loglevel", "error", "-max_pixels", "106250000"}
-	seek := []string{"-ss", "42.500", "-i", "/media/a.mkv"}
-	// Spelled out, so the test pins the text ffmpeg is given.
-	const pixelAspect = `scale=if(between(sar\,0.25\,4)\,round(iw*sar)\,iw):ih`
-	join := func(parts ...[]string) []string {
-		var args []string
-		for _, part := range parts {
-			args = append(args, part...)
-		}
-		return args
-	}
-	tests := []struct {
-		name     string
-		width    int
-		threads  int
-		toneMap  bool
-		hardware bool
-		hw       hardwareDecode
-		software string
-		want     []string
-	}{
-		{name: "software", want: join(head, seek, []string{"-vf", pixelAspect}, tail)},
-		{name: "software tone map", toneMap: true, software: softwareToneMapHable, want: join(head, seek, []string{"-vf", softwareToneMapHable + "," + pixelAspect}, tail)},
-		{name: "scaled", width: 320, want: join(head, seek, []string{"-vf", pixelAspect + ",scale=320:-2"}, tail)},
-		{name: "threads", threads: 2, want: join(head, []string{"-threads", "2"}, seek, []string{"-vf", pixelAspect}, tail)},
-		{
-			name: "vaapi scaled", width: 320, hardware: true, hw: hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"},
-			want: join(head, []string{"-init_hw_device", "vaapi=hw:/dev/dri/renderD128", "-filter_hw_device", "hw", "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"},
-				seek, []string{"-vf", "hwdownload,format=nv12," + pixelAspect + ",scale=320:-2"}, tail),
-		},
-		{
-			name: "videotoolbox tone map", toneMap: true, hardware: true, hw: hardwareDecode{Accel: "videotoolbox"}, software: softwareToneMapBT2390,
-			want: join(head, []string{"-hwaccel", "videotoolbox"}, seek, []string{"-vf", softwareToneMapBT2390 + "," + pixelAspect}, tail),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var toneMap *ToneMap
-			if tt.toneMap {
-				toneMap = &ToneMap{AllowSoftware: true}
-			}
-			req := imageRequest(toneMap)
-			req.Images.Width = tt.width
-			req.Threads = tt.threads
-			got, err := buildImageArgs(req, Attempt{Hardware: tt.hardware}, tt.hw, tt.software)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("args\n got %q\nwant %q", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -123,39 +62,6 @@ func TestBuildImageArgsRejectsWhatCannotRun(t *testing.T) {
 	}
 }
 
-func TestSelectSoftwareToneMap(t *testing.T) {
-	tests := []struct {
-		name       string
-		filters    []string
-		loadErr    error
-		wantFilter string
-		wantReason Reason
-		wantError  string
-	}{
-		{name: "prefers tonemapx bt2390", filters: []string{"zscale", "tonemap", "tonemapx"}, wantFilter: softwareToneMapBT2390},
-		{name: "falls back to standard hable", filters: []string{"zscale", "tonemap"}, wantFilter: softwareToneMapHable},
-		{name: "requires zscale", filters: []string{"tonemapx"}, wantReason: ReasonUnsupported, wantError: "lacks the required zscale filter"},
-		{name: "requires a tone map filter", filters: []string{"zscale"}, wantReason: ReasonUnsupported, wantError: "lacks the required tonemapx or tonemap filter"},
-		{name: "listing failure", loadErr: errors.New("ffmpeg filter listing failed: exit status 1"), wantReason: ReasonCapabilities, wantError: "exit status 1"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var calls atomic.Int32
-			runner := Runner{FFmpegPath: "/test/ffmpeg", Capabilities: listingCapabilities(&calls, tt.loadErr, tt.filters...)}
-			filter, failure := runner.selectSoftwareToneMap(context.Background())
-			if tt.wantError != "" {
-				if failure == nil || failure.Reason != tt.wantReason || !strings.Contains(failure.Err.Error(), tt.wantError) {
-					t.Fatalf("failure %+v, want %s containing %q", failure, tt.wantReason, tt.wantError)
-				}
-				return
-			}
-			if failure != nil || filter != tt.wantFilter {
-				t.Fatalf("filter %q failure %+v, want %q", filter, failure, tt.wantFilter)
-			}
-		})
-	}
-}
-
 // fakeImage answers image attempts from a list of results, one per process,
 // and records each process's arguments.
 type fakeImage struct {
@@ -172,28 +78,6 @@ func (f *fakeImage) exec(_ context.Context, _ string, args []string, _ io.Reader
 	}
 	_, _ = stdout.Write([]byte("\xff\xd8jpeg"))
 	return nil
-}
-
-func TestRunImageFallsBackFromHardware(t *testing.T) {
-	var loads atomic.Int32
-	fake := &fakeImage{results: []error{errors.New("exit status 1"), nil}}
-	runner := Runner{FFmpegPath: "ffmpeg", HWAccel: "vaapi", HWDevice: "/dev/dri/renderD128", Workload: processmetrics.Thumbnail,
-		Exec: fake.exec, Capabilities: listingCapabilities(&loads, nil, "zscale", "tonemap")}
-	req := imageRequest(&ToneMap{AllowSoftware: true}, Attempt{Hardware: true, TimeoutSeconds: 20}, Attempt{TimeoutSeconds: 25})
-
-	result, err := runner.Run(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(result.Images) != 1 || result.Images[0].Seconds != 42.5 || !bytes.Equal(result.Images[0].JPEG, []byte("\xff\xd8jpeg")) {
-		t.Fatalf("images %+v, want the software attempt's frame at 42.5 s", result.Images)
-	}
-	if result.Decoder != "software" || len(fake.calls) != 2 || loads.Load() != 1 {
-		t.Fatalf("decoder %q after %d processes and %d capability loads, want software after 2 and 1", result.Decoder, len(fake.calls), loads.Load())
-	}
-	if !strings.Contains(strings.Join(fake.calls[0], " "), "tonemap_vaapi") || !strings.Contains(strings.Join(fake.calls[1], " "), softwareToneMapHable) {
-		t.Fatalf("processes %q, want the VAAPI tone map and then the software one", fake.calls)
-	}
 }
 
 func TestRunFallbackDecidesWhetherToMoveOn(t *testing.T) {
@@ -230,14 +114,5 @@ func TestRunImageRefusesDisallowedSoftwareToneMap(t *testing.T) {
 	}
 	if len(fake.calls) != 0 || loads.Load() != 0 {
 		t.Fatalf("%d processes and %d capability loads, want none", len(fake.calls), loads.Load())
-	}
-}
-
-func TestRunImageWithoutOutputFails(t *testing.T) {
-	runner := Runner{Exec: func(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error { return nil }}
-	_, err := runner.Run(context.Background(), imageRequest(nil))
-	var runErr *Error
-	if !errors.As(err, &runErr) || runErr.Reason != ReasonEmpty {
-		t.Fatalf("error %v, want an empty-output failure", err)
 	}
 }

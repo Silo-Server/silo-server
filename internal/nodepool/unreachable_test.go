@@ -195,21 +195,6 @@ func TestUnreachableNodeStaysOutUntilAHealthCheckSucceeds(t *testing.T) {
 	}
 }
 
-func TestPeerUnreachableReportIsRecheckedAndNotRebroadcast(t *testing.T) {
-	nodeURL, _ := flakyHealthNode(t, 0)
-	f := newUnreachableFixture(t, nodeURL)
-
-	f.checker.ApplyUnreachableAnnouncement(peerAnnouncement(t, nodeURL+"/"))
-	f.checker.rechecks.Wait()
-
-	if !f.planner.TranscodeNodeHealthy(nodeURL) {
-		t.Fatal("a node this process can reach stayed out after a peer's report")
-	}
-	if got := f.broadcasts.Load(); got != 0 {
-		t.Fatalf("peer report was rebroadcast %d times", got)
-	}
-}
-
 func TestRecheckStopsWithTheCheckerContext(t *testing.T) {
 	nodeURL := closedNodeURL(t)
 	f := newUnreachableFixture(t, nodeURL)
@@ -270,24 +255,6 @@ func TestOwnAnnouncementEchoDoesNotUndoARecheck(t *testing.T) {
 	f.checker.rechecks.Wait()
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("health requests = %d, want a recheck for the peer's report", got)
-	}
-}
-
-func TestNodeMarkedAgainAfterARecheckIsRecheckedAgain(t *testing.T) {
-	nodeURL, calls := flakyHealthNode(t, 0)
-	f := newUnreachableFixture(t, nodeURL)
-
-	for range 2 {
-		if !f.planner.MarkTranscodeNodeUnreachable(nodeURL) {
-			t.Fatal("mark did not flip a healthy node")
-		}
-		f.checker.rechecks.Wait()
-		if !f.planner.TranscodeNodeHealthy(nodeURL) {
-			t.Fatal("node stayed out after answering its recheck")
-		}
-	}
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("health requests = %d, want one recheck per mark", got)
 	}
 }
 
@@ -354,40 +321,6 @@ func TestMarkUnreachableCoversEveryEntryForTheEndpoint(t *testing.T) {
 	}
 }
 
-func TestHealthResultForAnotherNodeDoesNotClearTheMark(t *testing.T) {
-	row := func() []*Node {
-		return []*Node{{ID: 4, URL: "http://worker:8080", Type: NodeTypeTranscode, Enabled: true, Healthy: true}}
-	}
-	pool := newKeyedTranscodePool()
-	pool.SetNodes(row())
-	pool.MarkUnreachable("http://worker:8080")
-
-	// A late result for a node that used to have this URL under another id.
-	pool.ApplyHealthReport(3, "http://worker:8080", HealthReport{Healthy: true}, time.Now())
-	pool.SetNodes(row())
-	if pool.FindByURL("http://worker:8080").Healthy {
-		t.Fatal("a result about another node cleared the mark")
-	}
-}
-
-func TestRecheckRestoresEveryEntryForTheEndpoint(t *testing.T) {
-	nodeURL, _ := flakyHealthNode(t, 0)
-	pool := newKeyedTranscodePool()
-	pool.SetNodes([]*Node{
-		{ID: 1, URL: nodeURL, Type: NodeTypeTranscode, Enabled: true, Healthy: true},
-		{ID: 2, URL: nodeURL + "/", Type: NodeTypeTranscode, Enabled: true, Healthy: true},
-	})
-	checker := NewHealthChecker(NewProxyPool(), pool, nil)
-	checker.ReportUnreachable(nodeURL)
-	checker.rechecks.Wait()
-
-	for _, n := range pool.Nodes() {
-		if !n.Healthy {
-			t.Fatalf("node %d at the rechecked endpoint is still unhealthy", n.ID)
-		}
-	}
-}
-
 // A node can come back from a connection failure draining, after a restart
 // that is winding it down. The recheck must publish that, or placement would
 // send it new work until the next sweep.
@@ -408,5 +341,23 @@ func TestRecheckPublishesTheDrainStateTheNodeAnsweredWith(t *testing.T) {
 	}
 	if n.TakesNewWork() {
 		t.Fatal("a node that answered draining takes new work")
+	}
+}
+
+func TestNodeMarkedAgainAfterARecheckIsRecheckedAgain(t *testing.T) {
+	nodeURL, calls := flakyHealthNode(t, 0)
+	f := newUnreachableFixture(t, nodeURL)
+
+	for range 2 {
+		if !f.planner.MarkTranscodeNodeUnreachable(nodeURL) {
+			t.Fatal("mark did not flip a healthy node")
+		}
+		f.checker.rechecks.Wait()
+		if !f.planner.TranscodeNodeHealthy(nodeURL) {
+			t.Fatal("node stayed out after answering its recheck")
+		}
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("health requests = %d, want one recheck per mark", got)
 	}
 }

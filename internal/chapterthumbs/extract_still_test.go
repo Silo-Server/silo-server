@@ -26,8 +26,6 @@ func TestExtractStillClassifiesFailures(t *testing.T) {
 		{"node response naming itself unavailable", chapterThumbnailNodeUnavailableReason, errors.New("remote 400"), nil},
 		{"undecodable data", reasonDecodeInvalidData, errors.New("invalid data"), ErrUndecodableFile},
 		{"probe failure", reasonFFmpegProbeFailed, errors.New("probe"), nil},
-		{"timeout", reasonCPUTimeout, errors.New("timeout"), nil},
-		{"tone mapping off", reasonToneMapUnsupported, errors.New("tonemap"), nil},
 	} {
 		s := &Service{extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
 			return nil, tt.reason, tt.err

@@ -574,14 +574,43 @@ ID at capacity returns 429; an existing ID can still update its profile. Expired
 registrations release their slots when the token next registers a profile.
 The quota is enforced across API processes.
 
-Media requests require a login/API token or an unexpired `PlaySessionId` grant,
-with one exception, the address-only static-stream grant. Jellyfin for Android
-TV and Findroid open static direct-play URLs without credentials, so a GET or
-HEAD of `/Videos/{id}/stream` or `/Videos/{id}/stream.{container}` with
-`Static=true` and a `MediaSourceId` is served as the caller of an authenticated
-`PlaybackInfo` that offered that item and source from the same client address
-and connection path, has not stopped or expired, and was active in the last two
-hours, while that caller's login or API key is still valid.
+Media requests require a login/API token, an unexpired `PlaySessionId` grant,
+or, on a static video stream only, a per-play `tag`. With the setting below
+off, nothing else grants a media request.
+
+`PlaybackInfo` sets each `MediaSources[].ETag` to a per-play value: the play
+session ID in compact form (32 lowercase hex digits) followed by the source's
+16-hex item-detail ETag, and the play records that value for the source. Item
+detail keeps the 16-hex value. Jellyfin for Android TV 0.19+ and its Kotlin
+forks open static direct-play URLs with no auth header, `api_key` or
+`PlaySessionId`, but echo that ETag as `tag` (upstream Jellyfin ignores `tag`).
+So a GET or HEAD of `/Videos/{id}/stream` or `/Videos/{id}/stream.{container}`
+with `Static=true`, a `MediaSourceId`, and a `tag` (parameter name in any case)
+is granted exactly as that play's `PlaySessionId` would be, and the stream is
+served as that play. A 16-hex item-detail ETag, a `tag` repeated with
+different values, or a `tag` on any other route grants nothing. The tag is no
+narrower a credential than the `PlaySessionId` it starts with: whoever holds
+one can send those 32 digits as `PlaySessionId` and reach every source and
+media route that play covers, so a URL carrying a tag needs the same care as
+one carrying a `PlaySessionId`.
+
+The address-only static-stream grant runs only while the administrator turns
+on `jellyfin_compat.address_stream_grant_enabled`; its default is the
+`config.DefaultJellyfinCompatAddressStreamGrantEnabled` constant. Findroid
+sends only `Static=true&MediaSourceId=...` and has no way to carry a
+credential, so it needs this grant. With the setting on, a credential-less GET
+or HEAD of a static video stream with a `MediaSourceId` is served as the caller
+of an authenticated `PlaybackInfo` that offered that item and source from the
+same client address and connection path, has not stopped or expired, and was
+active in the last two hours, while that caller's login or API key is still
+valid. Anyone sharing that address (household or carrier NAT, a VPN exit, a
+proxy that collapses clients to one address) who knows the item and source IDs
+can then stream the file. Each request that reaches this grant reads the
+setting from the database, so a change applies on every API server without a
+restart, and requests that carry a credential never read it. An unreadable
+setting refuses the grant. Each grant is logged as `jellycompat static stream
+granted without credentials` with the negotiating client's name and version.
+
 A grant authorizes GET/HEAD for its negotiated item and source; catalog item and
 source IDs alone are not credentials. An invalid explicit token does not fall
 back to a playback grant, and a grant does not cover a request whose
@@ -593,15 +622,29 @@ Media URLs that Silo builds (`DirectStreamUrl`, `TranscodingUrl`, subtitle
 log grants that media only until the play session ends. A client that fetches
 one after the play session expired or stopped, or after a newer negotiation
 from the same device replaced an unstarted one, must send its own token.
-A `PlaySessionId` grant that cannot be read because the database is
-unavailable answers a retryable `503`, not `401`, unless the API server that
+A `PlaySessionId` or `tag` grant whose play session cannot be read because the
+database is unavailable answers a retryable `503`, not `401`, unless the API server that
 answers still holds the play session. HLS master playlist, playlist and
 segment requests that carry a token answer the same retryable `503` when their
 play session cannot be read, and so do progressive stream, subtitle and
 attachment requests; a play session that is absent or belongs to another token
-answers `404`. `PlaybackInfo` answers `503` instead of
+answers `404`. When this API server looks up the media file for one of these
+requests or for a local transcode start, a failed lookup answers a retryable
+`503` and keeps the play session for the retry, and `404` means the file is
+gone; a progressive stream GET or HEAD, or a master playlist GET, that answers it
+ends the play, while a master playlist HEAD keeps it. A remote transcode's failover answers `502` as before. `PlaybackInfo` answers `503` instead of
 returning a `PlaySessionId` it could not store, since other API servers could
 not resolve it.
+
+The HLS master playlist (`/Videos/{id}/master.m3u8` and its `audio-v2`,
+`hevc-v1`, `remux-v1`, `remux-ts-v1` and `remux-dv-v1` forms) answers HEAD as
+well as GET, as Jellyfin does for its master playlists; DLNA controllers check
+a `TranscodingUrl` with HEAD before handing it to a TV. A HEAD answers `200`
+with the playlist content type and no body, `404` when the media file is gone,
+`410` when the play's upstream session has ended, or a retryable `503` when the
+file lookup fails, and starts no transcode;
+the GET starts it, so a HEAD's `200` does not promise the GET a route or
+capacity. Variant playlists and segments are GET only, as in Jellyfin.
 
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA
@@ -634,6 +677,16 @@ HDR10+", "Dolby Vision Profile 8.1 (HDR10+)"), where Jellyfin writes `HDR` and
 Vision but whose profile was never recorded, where Jellyfin writes `HDR`, and
 leaves out the stream title, which Silo cannot tell apart from ffprobe's codec
 name.
+
+An audio stream's `DisplayTitle` is the language name, the codec (or the
+profile, except AAC's "LC") and the channels ("English - EAC3 5.1"). The file's
+own title tag follows only when it adds a word the label does not already
+carry, such as "English - AAC Stereo - Commentary". A tag made only of words
+from the label, the language's ISO 639 codes, the codec, the channel layout or
+channel words that fit the track ("English", "ENG 5.1", "Surround") is left
+off, while one that contradicts the track ("Mono" on a stereo track, "de-DE"
+on a `de-AT` track) stays. An untagged track gets no suffix: its stored
+`title` is ffprobe's codec long name.
 
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both
@@ -688,6 +741,12 @@ an ID, the route serves that stored subtitle of the media source's file
 whatever `{index}` says, and answers 404 once it is deleted, for an ID that is
 not one of that file's, or for a malformed ID. A URL without it, as a client
 builds from the index, resolves the index against the current list.
+
+An external subtitle's `Path`, sidecar or stored, is its stream route
+`/Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/stream.{format}` with no
+query, so a client that loads external subtitles by `Path` gets the subtitle.
+A stored subtitle's `Path` therefore resolves by index; only its `DeliveryUrl`
+carries `StoredSubtitleId`.
 
 Extracting an embedded text subtitle reads the whole source file, which can
 take minutes for a large remux on network storage. As in Jellyfin, the first
@@ -859,11 +918,13 @@ connection's shared budget, as described in
   (global, per-IP and account) after authentication, as the native authenticated routes
   and v2 playback delivery do. Unauthenticated requests are refused before they
   spend budget. Compat auth sets no native API-key claims, so the per-API-key
-  tier budget does not apply here. Compat sessions, admin API keys and explicit
-  `PlaySessionId` grants charge the owning login account, shared with its native
-  sessions and keys. An address-only static-stream grant carries no caller
-  credential and spends only source/global budgets, without charging an inferred
-  owner's account. See [Authenticated account allowance](auth-api.md#authenticated-account-allowance)
+  tier budget does not apply here. Compat sessions, admin API keys, explicit
+  `PlaySessionId` grants and per-play `tag` grants charge the owning login
+  account, shared with its native sessions and keys. The address-only
+  static-stream grant, which runs only while
+  `jellyfin_compat.address_stream_grant_enabled` is on, carries no caller
+  credential and spends only source/global budgets, without charging an
+  inferred owner's account. See [Authenticated account allowance](auth-api.md#authenticated-account-allowance)
   for defaults and settings.
 - Anonymous routes are not limited: item and user images, `/api/v2/artwork/*`,
   `/web/*`, and the public `/System/*`, `/Branding/Configuration`,

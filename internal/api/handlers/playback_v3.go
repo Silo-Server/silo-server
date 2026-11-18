@@ -534,13 +534,6 @@ func (h *PlaybackHandler) remoteTransformationsV3(ctx context.Context, target no
 	return h.lookupRemoteTransformationsV3(ctx, target, nodeURL, false)
 }
 
-// remoteTransformationsPlanningV3 is the planning-time variant: it honors
-// negatively-cached fetch failures so an unreachable node costs one timeout
-// per error-TTL window instead of one per playback start.
-func (h *PlaybackHandler) remoteTransformationsPlanningV3(ctx context.Context, target nodeauth.Target, nodeURL string) ([]playback.TransformationV3, error) {
-	return h.lookupRemoteTransformationsV3(ctx, target, nodeURL, true)
-}
-
 // lookupRemoteTransformationsV3 returns a node's cached or freshly fetched transformation inventory.
 func (h *PlaybackHandler) lookupRemoteTransformationsV3(ctx context.Context, target nodeauth.Target, nodeURL string, honorCachedFailure bool) ([]playback.TransformationV3, error) {
 	entry, err := h.lookupRemoteCapabilitiesV3(ctx, target, nodeURL, honorCachedFailure)
@@ -1572,36 +1565,6 @@ func (h *PlaybackHandler) pooledNodeCapabilitiesV3(ctx context.Context, target n
 		}
 	}
 	return byURL
-}
-
-// planNodeSessionV3 remains as a focused test seam. Production starts resolve
-// the complete policy in resolveHLSRouteV3 below; this wrapper asks that same
-// resolver for a hard worker route with the requested egress.
-func (h *PlaybackHandler) planNodeSessionV3(ctx context.Context, session *playback.Session, result playback.PlannerResultV3, localEgress bool) nodepool.Plan {
-	return h.planNodeSessionExcludingV3(ctx, session, result, localEgress, nil)
-}
-
-// planNodeSessionExcludingV3 is planNodeSessionV3 with a set of node URLs the
-// caller has already exhausted. The tone-map software fallback uses it so a
-// second attempt cannot land back on the node that just refused the recipe.
-func (h *PlaybackHandler) planNodeSessionExcludingV3(ctx context.Context, session *playback.Session, result playback.PlannerResultV3, localEgress bool, excluded map[string]struct{}) nodepool.Plan {
-	workload, _, ok := routingClassV3(result)
-	if !ok {
-		return nodepool.Plan{}
-	}
-	egress := config.PlaybackEgressPreferProxy
-	if localEgress {
-		egress = config.PlaybackEgressAPIOnly
-	}
-	policy := config.DefaultPlaybackRoutingPolicy()
-	if workload == noderouting.WorkloadRemux {
-		policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
-		policy.RemuxEgress = egress
-	} else {
-		policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
-		policy.VideoTranscodeEgress = egress
-	}
-	return h.resolveHLSRouteWithPolicyV3(ctx, session, result, policy, true, excluded, nil).Plan
 }
 
 func routingClassV3(result playback.PlannerResultV3) (noderouting.Workload, noderouting.Delivery, bool) {
@@ -4773,7 +4736,7 @@ func (h *PlaybackHandler) liveTranscodeRouteV3(session *playback.Session) (nodeU
 // not part of the node's request/response contract, so the caller supplies it.
 func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFile, nodeURL, transportID string, req transcodenode.TranscodeStartRequest, nodeResp transcodenode.TranscodeStartResponse, toneMapFilter string) playback.RecipeCard {
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
-	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, nodeURL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SourceAudioChannels: req.SourceAudioChannels, SoftwareVideoDecode: req.SoftwareVideoDecode || nodeResp.SoftwareVideoDecode, ToneMapPolicy: req.ToneMapPolicy, ToneMapMode: req.ToneMapMode, ToneMapSourceKind: req.ToneMapSourceKind, ToneMapFilter: toneMapFilter, ToneMapRecipeVersion: req.ToneMapRecipeVersion, ToneMapPreflightRequired: req.ToneMapPreflightRequired, ToneMapSourceRevision: req.ToneMapSourceRevision, VideoBitstreamFilter: req.VideoBitstreamFilter, VideoSampleEntry: req.VideoSampleEntry, VideoRange: req.VideoRange, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, KeyframePlaylist: req.KeyframePlaylist, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, RequireAudioTrack: req.RequireAudioTrack, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, SubtitleRendition: req.SubtitleRendition, SubtitleRenditionTracks: req.SubtitleRenditionTracks, SubtitleRenditionSource: req.SubtitleRenditionSource, TotalDuration: req.TotalDuration, ThrottleSeconds: req.ThrottleSeconds})
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, nodeURL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SourceAudioChannels: req.SourceAudioChannels, SoftwareVideoDecode: req.SoftwareVideoDecode || nodeResp.SoftwareVideoDecode, ToneMapPolicy: req.ToneMapPolicy, ToneMapMode: req.ToneMapMode, ToneMapSourceKind: req.ToneMapSourceKind, ToneMapFilter: toneMapFilter, ToneMapRecipeVersion: req.ToneMapRecipeVersion, ToneMapPreflightRequired: req.ToneMapPreflightRequired, ToneMapSourceRevision: req.ToneMapSourceRevision, VideoBitstreamFilter: req.VideoBitstreamFilter, VideoSampleEntry: req.VideoSampleEntry, VideoRange: req.VideoRange, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, KeyframePlaylist: req.KeyframePlaylist, KeyframePlanResume: nodeResp.KeyframePlanResume, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, RequireAudioTrack: req.RequireAudioTrack, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, SubtitleRendition: req.SubtitleRendition, SubtitleRenditionTracks: req.SubtitleRenditionTracks, SubtitleRenditionSource: req.SubtitleRenditionSource, TotalDuration: req.TotalDuration, ThrottleSeconds: req.ThrottleSeconds})
 	card.ToneMapDVConfigPresent = req.ToneMapDVConfigPresent
 	card.CopyVideoMPEGTS = req.CopyVideoMPEGTS
 	card.CopyAudioCodec = req.CopyAudioCodec

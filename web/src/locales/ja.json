@@ -20896,6 +20896,270 @@
       "value": "接続を確認できませんでした。"
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "AIサービスの設定でChatGPTにサインインしてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "エンベディングに接続しました。モデルは"
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "次元を返します。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "エンベディングは"
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "次元のベクトルで作成されていますが、現在のモデルは"
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "次元を返します。モデルを切り替える前にエンベディングをリセットしてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "エンベディングのロックには"
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "次元のベクトルが記録されていますが、Siloが保存できるのは1～"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "次元です。エンベディングをリセットし、最大"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "次元を返すモデルを使用してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "保存されているエンベディングのロックを読み取れません。エンベディングをリセットしてクリアしてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "エンベディングは「"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "」ではなく「"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "」モデルで作成されています。モデルを切り替える前にエンベディングをリセットしてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "エンベディングプロバイダーがテスト用テキストのベクトルを返しませんでした。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "エンベディングは"
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "次元で保存されていますが、このサーバーは"
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": "次元で保存します。エンベディングをリセットしてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "モデルは"
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "次元を返しますが、Siloが保存できるのは最大"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "次元です。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "接続を確認できませんでした。送信した設定とプロバイダーの稼働状況を確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBListのAPIキーを確認しました。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearchに接続しました"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "MeilisearchがAPIキーを拒否したか、APIキーが必要です。Default Admin API Keyなど、インデックスとドキュメントを管理できるキーを入力してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearchが確認を別のアドレスにリダイレクトしました。https:// のURLなど、リダイレクト先のアドレスを入力し、APIキーを再度入力してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redisに接続しました。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3への接続と、オブジェクトの読み取り・書き込み・削除の権限を確認しました。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "音声認識に接続しました。タイムスタンプ付きの音声認識結果を受信しました。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "音声認識へのアクセスが拒否されました。APIキーの権限と許可されたプロバイダーを確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "音声認識モデルがタイムスタンプ付きのセグメントを返しません。Siloで字幕を作成するにはタイムスタンプが必要です。OpenAIのwhisper-1など、セグメントのタイムスタンプに対応したモデルを選択してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "音声認識のエンドポイントまたはモデルを利用できません。プロバイダーのベースURL、モデル、許可されたプロバイダーを確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "音声認識プロバイダーで支払いが必要です。プロバイダーの残高と利用上限を確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "音声認識プロバイダーのクォータを使い切りました。プロバイダーの残高と上限を確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "音声認識プロバイダーがリクエストのレートを制限しています。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "音声認識の接続確認がタイムアウトしました。プロバイダーの稼働状況を確認して、もう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "音声認識の認証に失敗しました。AIサービスでプロバイダーのAPIキーを置き換えてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "音声認識プロバイダーは一時的に利用できません。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "テキストAIに接続しました。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "テキストAIに接続できませんでした。モデル、推論レベル、サービスティア、アカウントの連携、プロバイダーの利用上限を確認してください。"
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -46716,6 +46980,20 @@
       "value": "接続チェックに失敗しました。"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "エンベディングプロバイダーが選択されていません。「"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "」を提供するプロバイダーを選択するか、別のモデルを使用する場合はエンベディングをリセットしてください。"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -52224,6 +52502,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "同じアドレスからサインインなしで再生"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Findroidなど一部のJellyfinアプリは、サインインせずにダイレクト再生やダウンロードのリンクを開きます。オンにすると、同じネットワークアドレスでサインインしているアプリが過去2時間以内にそのファイルの再生をリクエストしていた場合、Siloはそのようなリクエストに応答します。その場合、同じ自宅のネットワーク、モバイル通信事業者、VPNを使う人など、そのアドレスを共有する人もそのファイルを再生できるようになります。これらのアプリを使用する場合にのみオンにしてください。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -81605,6 +81895,12 @@
       "value": "並び順"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "関連度"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -96201,6 +96497,12 @@
       "value": "コレクション"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "ライブラリ"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -96249,6 +96551,12 @@
     {
       "type": 0,
       "value": "コレクションはまだありません。先にコレクションで作成してください。"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "このライブラリにはこの種類のコレクションはありません。"
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -110831,6 +111139,12 @@
       "value": "一時停止・再開できます"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Partyを利用するにはRedisが必要ですが、このサーバーでは設定されていません。サーバー管理者に設定を依頼してください。"
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -114503,6 +114817,86 @@
     {
       "type": 0,
       "value": "ライブラリを検索、またはリクエストするタイトルを探す…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "ライブラリ内のすべての結果"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "関連度順に戻す"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "最も一致する結果"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "ライブラリ内"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "その他の結果"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "ライブラリにないタイトル"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "概要"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "追加をリクエスト"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "すべての結果を表示"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "並べ替え："
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "結果の表示"
     }
   ],
   "web.search.resultsLabel": [
@@ -126973,6 +127367,18 @@
       "value": "アクセスキー"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "新しいストレージを使用するため、Siloを再起動しています。再起動が完了すると、セットアップが続行されます。"
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "ストレージの設定を適用しています"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -127253,6 +127659,18 @@
     {
       "type": 0,
       "value": "接続URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Siloが自動的に復帰するのは、Docker、Kubernetes、またはsystemdで再起動するよう設定されている場合のみです。それ以外の場合は、Siloを手動で起動し直してください。再起動が完了すると、セットアップが続行されます。"
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Siloはまだ再起動していません"
     }
   ],
   "web.setup.storage.saveFailed": [

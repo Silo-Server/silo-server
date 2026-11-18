@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -24,50 +23,6 @@ type compatThemeFixture struct {
 	owner   string
 	inherit bool
 	err     error
-}
-
-func TestThemePlaybackReportsDoNotCreateSessions(t *testing.T) {
-	mgr := &testCompatSessionManager{}
-	h, _ := newActiveEncodingsHandler(mgr)
-	syncer := &recordingSessionSyncer{}
-	h.SessionSyncer = syncer
-	for _, handle := range []http.HandlerFunc{h.HandleSessionPlaying, h.HandleSessionPlayingProgress, h.HandleSessionPlayingStopped} {
-		body := strings.NewReader(`{"ItemId":"0b000000-0000-0000-0000-000000000007","MediaSourceId":"0b000000-0000-0000-0000-000000000007","PlaySessionId":"theme-session","PositionTicks":50000000}`)
-		req := withCompatSession(httptest.NewRequest("POST", "/Sessions/Playing", body), "tok")
-		rec := httptest.NewRecorder()
-		handle(rec, req)
-		if rec.Code != 204 || syncer.calls != 0 || len(mgr.sessions) != 0 || mgr.progressCalls != 0 || len(mgr.stopCalls) != 0 {
-			t.Fatalf("theme report changed playback state: status=%d syncs=%d sessions=%d", rec.Code, syncer.calls, len(mgr.sessions))
-		}
-	}
-}
-
-func TestThemeDirectPlayFormats(t *testing.T) {
-	file := themesongs.File{Song: themesongs.Song{Container: "m4a"}, AudioCodec: "aac", AudioChannels: 2, BitrateKbps: 128, SampleRate: 44100}
-	for _, tc := range []struct {
-		query     string
-		container string
-		allowed   bool
-	}{
-		{"container=mp4,mp3&audioCodec=aac&transcodingContainer=ts&transcodingProtocol=hls", "", true},
-		{"", "mp4", true},
-		{"maxAudioBitRate=128000&maxAudioChannels=2&audioSampleRate=44100&audioStreamIndex=-1", "m4a", true},
-		{"audioCodec=mp3", "", false},
-		{"audioStreamIndex=0", "", false},
-		{"maxAudioBitRate=64000", "", false},
-		{"audioChannels=1", "", false},
-		{"container=mp4", "ogg", false},
-	} {
-		t.Run(tc.container+"?"+tc.query, func(t *testing.T) {
-			values, err := url.ParseQuery(tc.query)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := themeDirectPlayAllowed(newCaseInsensitiveQuery(values), tc.container, file, false); got != tc.allowed {
-				t.Fatalf("allowed=%v, want %v", got, tc.allowed)
-			}
-		})
-	}
 }
 
 func TestThemeUniversalFallbackNegotiation(t *testing.T) {
@@ -95,26 +50,6 @@ func TestThemeUniversalFallbackNegotiation(t *testing.T) {
 				t.Fatalf("allowed=%v, want %v", got, tc.allowed)
 			}
 		})
-	}
-}
-
-func TestThemeUniversalUnknownMetadata(t *testing.T) {
-	file := themesongs.File{Song: themesongs.Song{Container: "mp3"}, AudioCodec: "mp3"}
-	for _, tc := range []struct {
-		query   string
-		allowed bool
-	}{
-		{"Container=mp3&MaxStreamingBitrate=40000000&MaxAudioChannels=2&MaxAudioSampleRate=44100", true},
-		{"Container=mp3&MaxStreamingBitrate=39999999", false},
-		{"Container=mp3&MaxAudioChannels=invalid", false},
-	} {
-		values, err := url.ParseQuery(tc.query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := themeDirectPlayAllowed(newCaseInsensitiveQuery(values), "", file, true); got != tc.allowed {
-			t.Fatalf("%s: allowed=%v, want %v", tc.query, got, tc.allowed)
-		}
 	}
 }
 

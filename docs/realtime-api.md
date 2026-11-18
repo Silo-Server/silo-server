@@ -326,9 +326,27 @@ playback session. The body's `installation_id` is optional: send the value
 Minting checks, in order: a bounded
 login session; the current session, enabled account, role and viewer/PIN proof;
 that the playback session exists in the session manager and belongs to the
-caller's account and profile (`404 not_found` when it does not exist,
-`403 permission_denied` when it belongs to someone else); and that a
-presented `installation_id` matches the server's (`409 conflict`). A lane
+caller's account and profile (`403 permission_denied` when it belongs to someone
+else); and that a presented `installation_id` matches the server's
+(`409 conflict`). A session the manager does not hold is read from its durable
+playback attempt, because a restart empties the manager and a live session is
+rebuilt under the same id by the player's next media request, on the replica
+that serves it (see
+[restart-resilient playback](architecture/restart-resilient-playback.md)). For
+the session's owner the answer separates three cases:
+
+- the attempt was stopped (by the player, an administrator, expiry or an
+  abort): `410 playback_session_ended`. The session is gone for good, so the
+  client stops minting and does not retry;
+- the attempt is still live and this replica has not rebuilt the session:
+  `503 dependency_unavailable` with `Retry-After`. Retry the mint later. The
+  control socket still needs the session affinity the other session routes
+  need, so a replica that never serves the player's media keeps answering this;
+- no attempt exists, or it has expired: `404 not_found`.
+
+A caller that is not the attempt's account and profile gets `404 not_found`,
+the same as when no attempt exists, so a session's state is not disclosed to
+anyone else. A durable store that cannot be read answers `503` too. A lane
 already held by a different account, profile or installation is also `409`. The
 response carries `ticket`, `expires_in` (at most 30 seconds),
 `max_connection_seconds` (14400) and `protocol` (`silo.playback-control.v2`).
@@ -345,7 +363,7 @@ credential is consumed atomically (Redis `GETDEL`; process-local without
 Redis), login authority is re-validated, and ownership and installation are
 re-admitted against the credential's captured binding: a binding that moved
 since minting is `409` and the credential is spent. A credential presented for
-another session is `403`; an ended session is `404`.
+another session is `403`; a session this replica no longer holds is `404`.
 
 The connection is the session's single realtime lane. A reconnect resumes the
 lane only for the same account, profile and installation: it takes the lane
@@ -366,8 +384,10 @@ connection with `1009` (message too big).
 `GET /api/v2/playback/sessions/control/capabilities` reports `available` and
 `protocol`, an empty string when this server does not serve the handshake. The web
 player mints under captured profile authority for every connection, offers the
-protocol pair, discards frames once that authority changes, and retries a refused
-mint with bounded backoff under the same authority.
+protocol pair, and discards frames once that authority changes. It stops minting
+after a `410 playback_session_ended`. Any other refused mint is retried under the
+same authority with a backoff that grows to one attempt every 30 seconds, and
+never sooner than the refusal's `Retry-After` (capped at 60 seconds).
 
 
 ### V2 suggestion reads and vote membership

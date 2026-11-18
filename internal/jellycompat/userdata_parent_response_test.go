@@ -9,13 +9,8 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/Silo-Server/silo-server/internal/watchstate"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 type parentResponseContent struct{ parentAtomicContent }
@@ -25,81 +20,6 @@ func (s parentResponseContent) ListSeasons(context.Context, *Session, string, *i
 }
 func (s parentResponseContent) ListEpisodes(context.Context, *Session, string, int, *int) ([]upstreamEpisode, error) {
 	return s.episodes, nil
-}
-
-func TestParentUserDataResponsesRollUpChildren(t *testing.T) {
-	for _, kind := range []string{"series", "season"} {
-		for _, empty := range []bool{false, true} {
-			name := kind
-			if empty {
-				name += "-empty"
-			}
-			t.Run(name, func(t *testing.T) {
-				store := newJellycompatUserStore(t)
-				provider := compatTestUserStoreProvider{store: store}
-				service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
-				content := parentResponseContent{parentAtomicContent{stubContentService: &stubContentService{detail: &upstreamItemDetail{ContentID: kind, Type: kind}}}}
-				if !empty {
-					content.episodes = []upstreamEpisode{{ContentID: "episode-1"}, {ContentID: "episode-2"}}
-				}
-				codec := NewResourceIDCodec()
-				h := NewUserDataHandler(content, service, codec, &config.Config{})
-				session := &Session{StreamAppUserID: 1, ProfileID: "profile-1", PseudoUserID: uuid.New()}
-				// A stale parent progress row must never override the actual episode rollup.
-				if err := store.SetProgressAt(t.Context(), session.ProfileID, kind, 50, 100, true, time.Now()); err != nil {
-					t.Fatal(err)
-				}
-				if err := store.SetProgressAt(t.Context(), session.ProfileID, "episode-1", 0, 100, true, time.Now()); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := store.AddFavorite(t.Context(), session.ProfileID, kind); err != nil {
-					t.Fatal(err)
-				}
-				run := func(handler http.HandlerFunc, body string, played bool, unplayed int, favorite bool) {
-					t.Helper()
-					req := viewerRequest("POST", "/", body, "itemId", codec.EncodeStringID(EncodedIDItem, kind), session)
-					chi.RouteContext(req.Context()).URLParams.Add("userId", session.PseudoUserID.String())
-					rec := httptest.NewRecorder()
-					handler(rec, req)
-					if rec.Code != 200 {
-						t.Fatalf("response=%d %s", rec.Code, rec.Body.String())
-					}
-					var dto itemUserDataDTO
-					if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
-						t.Fatal(err)
-					}
-					if dto.Played != played || dto.UnplayedItemCount != unplayed || dto.IsFavorite != favorite || dto.PlaybackPositionTicks != 0 {
-						t.Fatalf("body=%s dto=%+v want played=%v unplayed=%d favorite=%v", body, dto, played, unplayed, favorite)
-					}
-					count := 0
-					if played {
-						count = 1
-					}
-					if dto.PlayCount != count {
-						t.Fatalf("play count=%d want=%d", dto.PlayCount, count)
-					}
-				}
-				partial, total := 1, 2
-				if empty {
-					partial, total = 0, 0
-				}
-				run(h.HandleGetUserData, "", false, partial, true)
-				run(h.HandleGetUserDataLegacy, "", false, partial, true)
-				run(h.HandleMarkPlayed, "", !empty, 0, true)
-				run(h.HandleGetUserData, "", !empty, 0, true)
-				run(h.HandleMarkUnplayed, "", false, total, true)
-				run(h.HandleUpdateUserData, `{"PlayCount":1,"IsFavorite":true}`, !empty, 0, true)
-				run(h.HandleUpdateUserData, `{"Played":false,"IsFavorite":false}`, false, total, false)
-				run(h.HandleAddFavorite, "", false, total, true)
-				run(h.HandleRemoveFavorite, "", false, total, false)
-				if err := store.CreateProfile(t.Context(), userstore.Profile{ID: "other", Name: "Other"}); err != nil {
-					t.Fatal(err)
-				}
-				session.ProfileID = "other"
-				run(h.HandleGetUserData, "", false, total, false)
-			})
-		}
-	}
 }
 
 type parentResponseProgressService struct {

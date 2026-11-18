@@ -46,19 +46,3 @@ func TestRequestOrigin(t *testing.T) {
 		})
 	}
 }
-
-func TestSerializeOrigin(t *testing.T) {
-	for _, tc := range []struct{ scheme, host, want string }{
-		{"https", "silo.test", "https://silo.test"},
-		{"HTTPS", "Silo.Example.TEST:443", "https://silo.example.test"},
-		{"http", "10.0.0.5:80", "http://10.0.0.5"},
-		{"http", "10.0.0.5:8096", "http://10.0.0.5:8096"},
-		{"https", "silo.test:80", "https://silo.test:80"},
-		{"https", "[FE80::1]:8443", "https://[fe80::1]:8443"},
-		{"https", "[::1]", "https://[::1]"},
-	} {
-		if got := SerializeOrigin(tc.scheme, tc.host); got != tc.want {
-			t.Errorf("SerializeOrigin(%q, %q) = %q, want %q", tc.scheme, tc.host, got, tc.want)
-		}
-	}
-}

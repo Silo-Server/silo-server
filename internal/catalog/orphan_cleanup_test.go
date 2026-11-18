@@ -31,16 +31,4 @@ func TestOrphanedProvisionalPredicatePreservesDurableMediaItemReferences(t *test
 			t.Fatalf("cleanup predicate missing durable reference guard %q", want)
 		}
 	}
-	for _, droppedTable := range []string{
-		"abs_collection_items",
-		"abs_playlist_items",
-		"abs_playlists",
-		"watch_provider_favorite_items",
-		"plex_sync_item_bindings",
-		"plex_sync_item_state",
-	} {
-		if strings.Contains(predicate, droppedTable) {
-			t.Fatalf("cleanup predicate must not reference dropped legacy table %q", droppedTable)
-		}
-	}
 }

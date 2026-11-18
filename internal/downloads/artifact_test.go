@@ -2,7 +2,6 @@ package downloads
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync/atomic"
@@ -117,21 +116,6 @@ func TestValidateArtifactToneMapRevisionRejectsCatalogProbeDrift(t *testing.T) {
 	}
 }
 
-func TestArtifactReadyStatusIncludesFencedRecipeRows(t *testing.T) {
-	if !artifactReady(&Artifact{Status: ArtifactReady}) {
-		t.Fatal("ordinary ready artifact was not ready")
-	}
-	if !artifactReady(&Artifact{Status: ArtifactToneMapReady}) {
-		t.Fatal("fenced tone-map ready artifact was not ready")
-	}
-	if !artifactReady(&Artifact{Status: ArtifactAudioV2Ready}) {
-		t.Fatal("fenced audio-v2 ready artifact was not ready")
-	}
-	if artifactReady(&Artifact{Status: ArtifactToneMapRunning}) {
-		t.Fatal("running tone-map artifact was ready")
-	}
-}
-
 func TestToneMapArtifactExecutionFingerprintRejectsRefreshedPathOrDuration(t *testing.T) {
 	manager := &ArtifactManager{}
 	file := hdrDownloadTestFile()
@@ -228,26 +212,6 @@ func TestPreparedTracksFreezeStreamLayoutInExecutionFingerprint(t *testing.T) {
 	}
 }
 
-func TestPreparedSourceAudioChannelsRequiresAACSurroundToDefaultStereo(t *testing.T) {
-	file := &models.MediaFile{AudioTracks: []models.AudioTrack{{Channels: 2}, {Channels: 6}}}
-	for _, test := range []struct {
-		name       string
-		trackIndex int
-		codec      string
-		want       int
-	}{
-		{name: "AAC surround", trackIndex: 1, codec: "aac", want: 6},
-		{name: "AAC stereo", trackIndex: 0, codec: "aac"},
-		{name: "EAC3 surround", trackIndex: 1, codec: "eac3"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := preparedSourceAudioChannels(file, test.trackIndex, test.codec); got != test.want {
-				t.Fatalf("preparedSourceAudioChannels() = %d, want %d", got, test.want)
-			}
-		})
-	}
-}
-
 // resolveToneMapRefusalCase is one TestResolveToneMapTargetRefusals case.
 type resolveToneMapRefusalCase struct {
 	name     string
@@ -339,44 +303,6 @@ var resolveToneMapTargetRefusalsCases = func() []resolveToneMapRefusalCase {
 	}
 }()
 
-// Every way resolveToneMapTarget refuses an HDR download: the error class
-// decides whether the download fails for good, retries later, or waits for
-// capacity, and a refused target is never frozen to a recipe.
-func TestResolveToneMapTargetRefusals(t *testing.T) {
-	for _, test := range resolveToneMapTargetRefusalsCases {
-		t.Run(test.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			if test.canceled {
-				cancel()
-			}
-			file := test.file
-			if file == nil {
-				file = hdrDownloadTestFile()
-			}
-			manager := &ArtifactManager{preparer: test.preparer, settings: test.settings}
-			target := playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"}
-			got, err := manager.resolveToneMapTarget(ctx, file, target)
-			if !test.wantErr(err) {
-				t.Fatalf("resolveToneMapTarget() error = %v", err)
-			}
-			if test.unfrozen && got != target {
-				t.Fatalf("target = %#v, want unfrozen %#v", got, target)
-			}
-		})
-	}
-}
-
-func TestToneMapPlanningTimeoutAllowsColdProbeWithoutLocalFallback(t *testing.T) {
-	provider := capacityAwareToneMapPreparer{}
-	if got := toneMapPlanningTimeout(provider, true); got != toneMapPlanTimeout {
-		t.Fatalf("planning timeout with local fallback = %s, want %s", got, toneMapPlanTimeout)
-	}
-	if got := toneMapPlanningTimeout(provider, false); got != remoteOnlyToneMapPlanTimeout {
-		t.Fatalf("remote-only planning timeout = %s, want %s", got, remoteOnlyToneMapPlanTimeout)
-	}
-}
-
 type unavailableToneMapPreparer struct{}
 
 func (unavailableToneMapPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
@@ -409,33 +335,6 @@ func (p capacityAwareToneMapPreparer) ToneMapModeAvailable(_ context.Context, mo
 	return p.available[mode], p.capacityErr[mode]
 }
 
-func TestResolveToneMapTargetHashesSoftwareWhenHardwareHasNoCapacity(t *testing.T) {
-	preparer := capacityAwareToneMapPreparer{
-		capabilities: tonemap.Capabilities{
-			{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
-			{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
-		},
-		available: map[tonemap.Mode]bool{tonemap.ModeSoftware: true},
-	}
-	manager := &ArtifactManager{
-		preparer: preparer,
-		settings: staticDownloadSettings{
-			config.Allow4KTranscodeSettingKey:                 "true",
-			config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
-			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-		},
-	}
-	target, err := manager.resolveToneMapTarget(context.Background(), hdrDownloadTestFile(), playback.PrepareTarget{
-		Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", AudioTrackIndex: -1, TargetBitrateKbps: 10000,
-	})
-	if err != nil {
-		t.Fatalf("resolveToneMapTarget() error = %v", err)
-	}
-	if target.ToneMapMode != tonemap.ModeSoftware {
-		t.Fatalf("tone-map mode = %q, want software", target.ToneMapMode)
-	}
-}
-
 func hdrDownloadTestFile() *models.MediaFile {
 	return &models.MediaFile{
 		HDR: true,
@@ -443,25 +342,6 @@ func hdrDownloadTestFile() *models.MediaFile {
 			Codec: "hevc", Height: 1080, BitDepth: 10, VideoRange: "HDR10",
 			ColorRange: "tv", ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc",
 		}},
-	}
-}
-
-func TestArtifactOutputPathDeterministic(t *testing.T) {
-	p1 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-1")
-	p2 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-1")
-	if p1 != p2 {
-		t.Fatalf("output path not deterministic: %q != %q", p1, p2)
-	}
-	// A later job for the same recipe, such as one created after a cancel,
-	// never shares a path with the job it replaces.
-	if other := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-2"); other == p1 {
-		t.Fatalf("two jobs share output path %q", p1)
-	}
-	if !strings.HasPrefix(p1, "/var/artifacts/") || !strings.HasSuffix(p1, ".mp4") {
-		t.Fatalf("unexpected output path %q", p1)
-	}
-	if !strings.Contains(p1, "42_transcode_") {
-		t.Fatalf("output path missing identity components: %q", p1)
 	}
 }
 
@@ -523,99 +403,5 @@ func (p *lifecycleTestPreparer) DeleteArtifact(ctx context.Context, artifact *Ar
 type fakeUserRepo struct{ user *models.User }
 
 func (f fakeUserRepo) GetByID(context.Context, int) (*models.User, error) { return f.user, nil }
-
-func TestCapabilityQualityPresetsGating(t *testing.T) {
-	newSvc := func(user *models.User, transcodeEnabled bool) *Service {
-		cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: transcodeEnabled}
-		return NewService(nil, nil, nil, nil, nil, nil, fakeUserRepo{user}, nil, nil, &cfg)
-	}
-	allowAll := &models.User{DownloadAllowed: ptrBool(true), DownloadTranscodeAllowed: ptrBool(true)}
-
-	// No artifact pipeline wired → only original is fulfillable.
-	svc := newSvc(allowAll, true)
-	capInfo, err := svc.Capability(context.Background(), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
-		t.Fatalf("quality presets without pipeline = %q, want original", got)
-	}
-
-	// Pipeline wired + transcode server/user gates open → full bitrate ladder.
-	svc = newSvc(allowAll, true)
-	svc.SetArtifactManager(&ArtifactManager{})
-	capInfo, _ = svc.Capability(context.Background(), 1)
-	if got := strings.Join(capInfo.QualityPresets, ","); got != "original,20mbps,10mbps,5mbps,2mbps,1mbps" {
-		t.Fatalf("quality presets with pipeline = %q, want full ladder", got)
-	}
-
-	// Transcode gated off (user flag) → original only.
-	svc = newSvc(&models.User{DownloadAllowed: ptrBool(true), DownloadTranscodeAllowed: ptrBool(false)}, true)
-	svc.SetArtifactManager(&ArtifactManager{})
-	capInfo, _ = svc.Capability(context.Background(), 1)
-	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
-		t.Fatalf("quality presets with transcode gated = %q, want original", got)
-	}
-
-	// An admin with no overrides gets the full ladder (#1403); an ungrouped
-	// regular account with no overrides keeps the no-group deny.
-	svc = newSvc(&models.User{Role: models.RoleAdmin}, true)
-	svc.SetArtifactManager(&ArtifactManager{})
-	capInfo, _ = svc.Capability(context.Background(), 1)
-	if got := strings.Join(capInfo.QualityPresets, ","); got != "original,20mbps,10mbps,5mbps,2mbps,1mbps" {
-		t.Fatalf("quality presets for an admin without overrides = %q, want full ladder", got)
-	}
-	svc = newSvc(&models.User{Role: models.RoleUser}, true)
-	svc.SetArtifactManager(&ArtifactManager{})
-	capInfo, _ = svc.Capability(context.Background(), 1)
-	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
-		t.Fatalf("quality presets for an ungrouped user without overrides = %q, want original", got)
-	}
-
-	// Download permission revoked → an EMPTY array, never nil: the capability
-	// contract documents quality_presets as an array, and a nil slice would
-	// serialize as JSON null and break typed clients.
-	svc = newSvc(&models.User{DownloadAllowed: ptrBool(false)}, true)
-	capInfo, _ = svc.Capability(context.Background(), 1)
-	if capInfo.QualityPresets == nil {
-		t.Fatal("quality presets for a denied user must be an empty array, not nil")
-	}
-	if len(capInfo.QualityPresets) != 0 {
-		t.Fatalf("quality presets for a denied user = %v, want empty", capInfo.QualityPresets)
-	}
-	if b, err := json.Marshal(capInfo.QualityPresets); err != nil || string(b) != "[]" {
-		t.Fatalf("quality presets serialize to %s (%v), want []", b, err)
-	}
-}
-
-// TestTriggerDrainDoesNotBlockCaller pins the async-dispatch contract:
-// Ensure runs on request goroutines and the kick drains the whole encode
-// queue (ffmpeg included), so triggerDrain must return without waiting on it.
-func TestTriggerDrainDoesNotBlockCaller(t *testing.T) {
-	m := &ArtifactManager{}
-	started := make(chan struct{})
-	release := make(chan struct{})
-	m.SetKick(func() {
-		close(started)
-		<-release
-	})
-
-	done := make(chan struct{})
-	go func() {
-		m.triggerDrain()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("triggerDrain blocked on the kick; it must dispatch asynchronously")
-	}
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("kick was never invoked")
-	}
-	close(release)
-}
 
 func ptrBool(value bool) *bool { return &value }

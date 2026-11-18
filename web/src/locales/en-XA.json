@@ -24931,6 +24931,270 @@
       "value": "⟦Çöññéçţîöñ çĥéçķ ƒåîļéđ.~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ îñ ŵîţĥ ÇĥåţĜÞŢ îñ ÅÎ Šéŕṽîçéš šéţţîñĝš.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝ çöññéçţîöñ šûççéššƒûļ. Ţĥé ɱöđéļ ŕéţûŕñš "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝš ŵéŕé çŕéåţéđ ŵîţĥ "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "-đîɱéñšîöñ ṽéçţöŕš, ƀûţ ţĥé ɱöđéļ ñöŵ ŕéţûŕñš "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Ŕéšéţ éɱƀéđđîñĝš ƀéƒöŕé šŵîţçĥîñĝ ɱöđéļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé éɱƀéđđîñĝ ļöçķ ŕéçöŕđš "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "-đîɱéñšîöñ ṽéçţöŕš; Šîļö šţöŕéš 1 ţö "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Ŕéšéţ éɱƀéđđîñĝš åñđ ûšé å ɱöđéļ ţĥåţ ŕéţûŕñš åţ ɱöšţ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šţöŕéđ éɱƀéđđîñĝ ļöçķ çåññöţ ƀé ŕéåđ. Ŕéšéţ éɱƀéđđîñĝš ţö çļéåŕ îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝš ŵéŕé çŕéåţéđ ŵîţĥ ɱöđéļ \""
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "\", ñöţ \""
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "\". Ŕéšéţ éɱƀéđđîñĝš ƀéƒöŕé šŵîţçĥîñĝ ɱöđéļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé éɱƀéđđîñĝ þŕöṽîđéŕ ŕéţûŕñéđ ñö ṽéçţöŕ ƒöŕ ţĥé ţéšţ ţéẋţ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝš ŵéŕé šţöŕéđ åţ "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš; ţĥîš šéŕṽéŕ šţöŕéš "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Ŕéšéţ éɱƀéđđîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ɱöđéļ ŕéţûŕñš "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš; Šîļö šţöŕéš åţ ɱöšţ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţîöñ çĥéçķ ƒåîļéđ. Ṽéŕîƒý ţĥé šûƀɱîţţéđ šéţţîñĝš åñđ þŕöṽîđéŕ åṽåîļåƀîļîţý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "⟦ṀĐƁĻîšţ ÅÞÎ ķéý ṽéŕîƒîéđ.~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéîļîšéåŕçĥ çöññéçţîöñ šûççéššƒûļ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéîļîšéåŕçĥ ŕéƒûšéđ ţĥé ÅÞÎ ķéý, öŕ ŕéǫûîŕéš öñé. Éñţéŕ å ķéý ţĥåţ çåñ ɱåñåĝé îñđéẋéš åñđ đöçûɱéñţš, šûçĥ åš ţĥé Đéƒåûļţ Åđɱîñ ÅÞÎ Ķéý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéîļîšéåŕçĥ ŕéđîŕéçţéđ ţĥé çĥéçķ ţö åñöţĥéŕ åđđŕéšš. Éñţéŕ ţĥé åđđŕéšš îţ ŕéđîŕéçţš ţö, šûçĥ åš îţš ĥţţþš:// ÛŔĻ, åñđ éñţéŕ ţĥé ÅÞÎ ķéý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéđîš çöññéçţîöñ šûççéššƒûļ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "⟦Š3 çöññéçţîöñ åñđ öƀĵéçţ ŕéåđ/ŵŕîţé/đéļéţé þéŕɱîššîöñš ṽéŕîƒîéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ çöññéçţîöñ šûççéššƒûļ: ţîɱéšţåɱþéđ šþééçĥ ŕéçéîṽéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ åççéšš ŵåš đéñîéđ. Çĥéçķ ýöûŕ ÅÞÎ ķéý þéŕɱîššîöñš åñđ åļļöŵéđ þŕöṽîđéŕš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ ɱöđéļ đöéš ñöţ ŕéţûŕñ ţîɱéšţåɱþéđ šéĝɱéñţš, ŵĥîçĥ Šîļö ñééđš ţö ɱåķé šûƀţîţļéš. Çĥööšé å ɱöđéļ ţĥåţ šûþþöŕţš šéĝɱéñţ ţîɱéšţåɱþš, šûçĥ åš ŵĥîšþéŕ-1 öñ ÖþéñÅÎ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ éñđþöîñţ öŕ ɱöđéļ îš ûñåṽåîļåƀļé. Çĥéçķ ţĥé þŕöṽîđéŕ'š ƀåšé ÛŔĻ, ţĥé ɱöđéļ, åñđ åļļöŵéđ þŕöṽîđéŕš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ ŕéǫûîŕéš þåýɱéñţ. Çĥéçķ ýöûŕ þŕöṽîđéŕ ƀåļåñçé åñđ šþéñđîñĝ ļîɱîţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ ǫûöţå îš éẋĥåûšţéđ. Çĥéçķ ýöûŕ þŕöṽîđéŕ ƀåļåñçé åñđ ļîɱîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ îš ŕåţé ļîɱîţîñĝ ŕéǫûéšţš. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ çöññéçţîöñ çĥéçķ ţîɱéđ öûţ. Çĥéçķ þŕöṽîđéŕ åṽåîļåƀîļîţý åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ åûţĥéñţîçåţîöñ ƒåîļéđ. Ŕéþļåçé ţĥé þŕöṽîđéŕ'š ÅÞÎ ķéý îñ ÅÎ Šéŕṽîçéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ îš ţéɱþöŕåŕîļý ûñåṽåîļåƀļé. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ çöññéçţîöñ šûççéššƒûļ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ çöññéçţîöñ ƒåîļéđ. Çĥéçķ ţĥé ɱöđéļ, ŕéåšöñîñĝ ļéṽéļ, šéŕṽîçé ţîéŕ, åççöûñţ çöññéçţîöñ, åñđ þŕöṽîđéŕ ûšåĝé ļîɱîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -57407,6 +57671,20 @@
       "value": "⟦Çöññéçţîöñ çĥéçķ ƒåîļéđ.~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "⟦Ñö éɱƀéđđîñĝ þŕöṽîđéŕ îš çĥöšéñ. Çĥööšé å þŕöṽîđéŕ ţĥåţ šéŕṽéš \""
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "\", öŕ ŕéšéţ éɱƀéđđîñĝš ţö ûšé åñöţĥéŕ ɱöđéļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -63931,6 +64209,18 @@
     {
       "type": 0,
       "value": "⟦Åûţöšçåñ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "⟦Þļåý ŵîţĥöûţ šîĝñ-îñ ƒŕöɱ ţĥé šåɱé åđđŕéšš~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "⟦Šöɱé Ĵéļļýƒîñ åþþš, šûçĥ åš Ƒîñđŕöîđ, öþéñ đîŕéçţ-þļåý åñđ đöŵñļöåđ ļîñķš ŵîţĥöûţ šîĝñîñĝ îñ. Ŵĥéñ ţĥîš îš öñ, Šîļö šéŕṽéš šûçĥ å ŕéǫûéšţ îƒ å šîĝñéđ-îñ åþþ åţ ţĥé šåɱé ñéţŵöŕķ åđđŕéšš åšķéđ ţö þļåý ţĥåţ ƒîļé îñ ţĥé ļåšţ ţŵö ĥöûŕš. Åñýöñé ŵĥö šĥåŕéš ţĥåţ åđđŕéšš, šûçĥ åš þéöþļé öñ ţĥé šåɱé ĥöɱé ñéţŵöŕķ, ɱöƀîļé çåŕŕîéŕ öŕ ṼÞÑ, çåñ ţĥéñ þļåý ţĥåţ ƒîļé ţöö. Ţûŕñ îţ öñ öñļý îƒ ýöû ûšé öñé öƒ ţĥöšé åþþš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -97102,6 +97392,12 @@
       "value": "⟦Öŕđéŕ~~⟧"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļéṽåñçé~~~~⟧"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -115358,6 +115654,12 @@
       "value": "⟦Çöļļéçţîöñ~~~~⟧"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕý~~~⟧"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -115410,6 +115712,12 @@
     {
       "type": 0,
       "value": "⟦Ñö çöļļéçţîöñš ýéţ. Ṁåķé öñé îñ Çöļļéçţîöñš ƒîŕšţ.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Ñö çöļļéçţîöñš öƒ ţĥîš ţýþé îñ ţĥîš ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -132539,6 +132847,12 @@
       "value": "⟦Ýöû çåñ þåûšé & ŕéšûɱé~~~~~~~~~⟧"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ Þåŕţý ñééđš Ŕéđîš, ŵĥîçĥ ţĥîš šéŕṽéŕ đöéšñ'ţ ĥåṽé šéţ ûþ. Åšķ ýöûŕ šéŕṽéŕ åđɱîñîšţŕåţöŕ ţö çöñƒîĝûŕé îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 0,
@@ -136761,6 +137075,94 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ ļîƀŕåŕý öŕ ƒîñđ ţîţļéš ţö ŕéǫûéšţ...~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ ŕéšûļţš îñ ýöûŕ ļîƀŕåŕý~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+~⟧"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "⟦Ɓåçķ ţö ŕéļéṽåñçé~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ɓéšţ ɱåţçĥéš~~~~~⟧"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Îñ ýöûŕ ļîƀŕåŕý~~~~~~⟧"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé ŕéšûļţš~~~~~⟧"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ îñ ýöûŕ ļîƀŕåŕý~~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "⟦Öṽéŕṽîéŵ~~~~⟧"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ ţö åđđ~~~~~~⟧"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ åļļ ŕéšûļţš~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "⟦Šöŕţéđ ƀý "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéšûļţ ṽîéŵš~~~~~⟧"
     }
   ],
   "web.search.resultsLabel": [
@@ -150699,6 +151101,18 @@
       "value": "⟦Åççéšš ķéý~~~~⟧"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö îš ŕéšţåŕţîñĝ ţö ûšé ţĥé ñéŵ šţöŕåĝé. Šéţûþ çöñţîñûéš ŵĥéñ îţ’š ƀåçķ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "⟦Åþþļýîñĝ šţöŕåĝé šéţţîñĝš~~~~~~~~~~⟧"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -150979,6 +151393,18 @@
     {
       "type": 0,
       "value": "⟦Çöññéçţîöñ ÛŔĻ~~~~~~⟧"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö çöɱéš ƀåçķ öñ îţš öŵñ öñļý îƒ Đöçķéŕ, Ķûƀéŕñéţéš öŕ šýšţéɱđ îš šéţ ţö ŕéšţåŕţ îţ. Öţĥéŕŵîšé, šţåŕţ Šîļö åĝåîñ ýöûŕšéļƒ. Šéţûþ çöñţîñûéš ŵĥéñ îţ’š ƀåçķ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö ĥåšñ’ţ ŕéšţåŕţéđ ýéţ~~~~~~~~~~⟧"
     }
   ],
   "web.setup.storage.saveFailed": [

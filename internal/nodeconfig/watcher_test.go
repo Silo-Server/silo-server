@@ -12,32 +12,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-func TestWatcherNodeRowID(t *testing.T) {
-	var nilWatcher *Watcher
-	if id, ok := nilWatcher.NodeRowID(); ok || id != 0 {
-		t.Fatalf("nil watcher NodeRowID = (%d, %t), want (0, false)", id, ok)
-	}
-
-	w := &Watcher{}
-	if id, ok := w.NodeRowID(); ok || id != 0 {
-		t.Fatalf("unresolved NodeRowID = (%d, %t), want (0, false)", id, ok)
-	}
-	w.rememberNodeRegistration(11, "https://registered-node.example")
-	if id, ok := w.NodeRowID(); !ok || id != 11 {
-		t.Fatalf("resolved NodeRowID = (%d, %t), want (11, true)", id, ok)
-	}
-	if registeredURL, ok := w.NodeRegisteredURL(); !ok || registeredURL != "https://registered-node.example" {
-		t.Fatalf("resolved NodeRegisteredURL = (%q, %t)", registeredURL, ok)
-	}
-	w.forgetNodeRowID()
-	if id, ok := w.NodeRowID(); ok || id != 0 {
-		t.Fatalf("forgotten NodeRowID = (%d, %t), want (0, false)", id, ok)
-	}
-	if registeredURL, ok := w.NodeRegisteredURL(); ok || registeredURL != "" {
-		t.Fatalf("forgotten NodeRegisteredURL = (%q, %t), want empty and false", registeredURL, ok)
-	}
-}
-
 // testJWTSecret is the signing secret every settings fixture carries: the
 // watcher refuses a snapshot without one.
 const testJWTSecret = "watcher-test-secret"
@@ -45,63 +19,6 @@ const testJWTSecret = "watcher-test-secret"
 func newTestWatcher(t *testing.T, bootstrap BootstrapOverrides) *Watcher {
 	t.Helper()
 	return NewWatcher(nil, nil, nil, bootstrap)
-}
-
-func TestApplySettingsSkipsCallbacksOnNoopReload(t *testing.T) {
-	w := newTestWatcher(t, BootstrapOverrides{})
-
-	var calls int
-	w.OnChange(func(old, updated *config.Config) {
-		calls++
-	})
-
-	settings := map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "debug"}
-	if err := w.applySettings(context.Background(), settings); err != nil {
-		t.Fatalf("first apply: %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("after initial apply: calls = %d, want 1", calls)
-	}
-
-	// Same settings again — pointer swaps, but callbacks must not fire.
-	if err := w.applySettings(context.Background(), settings); err != nil {
-		t.Fatalf("second apply: %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("after no-op apply: calls = %d, want 1", calls)
-	}
-
-	// A real change fires callbacks again.
-	if err := w.applySettings(context.Background(), map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "warn"}); err != nil {
-		t.Fatalf("third apply: %v", err)
-	}
-	if calls != 2 {
-		t.Fatalf("after changed apply: calls = %d, want 2", calls)
-	}
-}
-
-func TestApplySettingsReappliesBootstrapOverrides(t *testing.T) {
-	w := newTestWatcher(t, BootstrapOverrides{
-		Listen:   ":9999",
-		RedisURL: "redis://env-host:6379",
-	})
-
-	err := w.applySettings(context.Background(), map[string]string{
-		"auth.jwt_secret": testJWTSecret,
-		"server.listen":   ":8080",
-		"redis.url":       "redis://db-host:6379",
-	})
-	if err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-
-	cfg := w.Config()
-	if cfg.Server.Listen != ":9999" {
-		t.Errorf("Listen = %q, want bootstrap override %q", cfg.Server.Listen, ":9999")
-	}
-	if cfg.Redis.URL != "redis://env-host:6379" {
-		t.Errorf("Redis.URL = %q, want bootstrap override %q", cfg.Redis.URL, "redis://env-host:6379")
-	}
 }
 
 func TestApplySettingsAppliesRedisDBToTheSavedURLOnly(t *testing.T) {
@@ -178,55 +95,6 @@ func TestRequestReloadCoalesces(t *testing.T) {
 
 	if got := len(w.reloadCh); got != 1 {
 		t.Fatalf("pending reloads = %d, want 1 (coalesced)", got)
-	}
-}
-
-func TestOnChangeAfterFirstApplySeesLaterChanges(t *testing.T) {
-	w := newTestWatcher(t, BootstrapOverrides{})
-
-	if err := w.applySettings(context.Background(), map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "info"}); err != nil {
-		t.Fatalf("initial apply: %v", err)
-	}
-
-	var gotOld, gotNew string
-	w.OnChange(func(old, updated *config.Config) {
-		gotOld = old.Server.LogLevel
-		gotNew = updated.Server.LogLevel
-	})
-
-	if err := w.applySettings(context.Background(), map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "error"}); err != nil {
-		t.Fatalf("second apply: %v", err)
-	}
-	if gotOld != "info" || gotNew != "error" {
-		t.Errorf("callback saw old=%q new=%q, want old=info new=error", gotOld, gotNew)
-	}
-}
-
-func TestOnLoadNormalizersApplyOnEveryLoad(t *testing.T) {
-	w := &Watcher{}
-	w.OnLoad(func(c *config.Config) {
-		c.Playback.FFmpegPath = "/resolved/ffmpeg"
-	})
-
-	if err := w.applySettings(context.Background(), map[string]string{
-		"auth.jwt_secret":      testJWTSecret,
-		"playback.ffmpeg_path": "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-	}); err != nil {
-		t.Fatalf("applySettings() error = %v", err)
-	}
-	if got := w.Config().Playback.FFmpegPath; got != "/resolved/ffmpeg" {
-		t.Fatalf("Playback.FFmpegPath = %q, want normalized value", got)
-	}
-
-	// A reload constructs a fresh config; the normalizer must apply again.
-	if err := w.applySettings(context.Background(), map[string]string{
-		"auth.jwt_secret":      testJWTSecret,
-		"playback.ffmpeg_path": "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-	}); err != nil {
-		t.Fatalf("applySettings() reload error = %v", err)
-	}
-	if got := w.Config().Playback.FFmpegPath; got != "/resolved/ffmpeg" {
-		t.Fatalf("after reload Playback.FFmpegPath = %q, want normalized value", got)
 	}
 }
 

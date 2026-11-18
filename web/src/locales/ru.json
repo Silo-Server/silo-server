@@ -27933,6 +27933,270 @@
       "value": "Не удалось проверить подключение."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Войдите через ChatGPT в настройках «ИИ-сервисы»."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Подключение для эмбеддингов установлено. Размерность векторов модели: "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Эмбеддинги созданы с размерностью векторов "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": ", а модель теперь возвращает "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Сбросьте эмбеддинги, прежде чем менять модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "В блокировке эмбеддингов записана размерность векторов "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "; Silo хранит от 1 до "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Сбросьте эмбеддинги и используйте модель с размерностью не более "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Не удалось прочитать сохранённую блокировку эмбеддингов. Сбросьте эмбеддинги, чтобы очистить её."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Эмбеддинги созданы моделью «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "», а не «"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "». Сбросьте эмбеддинги, прежде чем менять модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Провайдер эмбеддингов не вернул вектор для тестового текста."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Эмбеддинги сохранены с размерностью "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "; этот сервер хранит размерность "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Сбросьте эмбеддинги."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Размерность векторов модели: "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "; Silo хранит не более "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Не удалось проверить подключение. Проверьте отправленные настройки и доступность провайдера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "Ключ API MDBList проверен."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Подключение к Meilisearch установлено"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch отклонил ключ API или требует его. Введите ключ с правами на управление индексами и документами, например Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch перенаправил проверку на другой адрес. Введите адрес перенаправления, например его URL с https://, и снова введите ключ API."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Подключение к Redis установлено."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "Подключение к S3 и права на чтение, запись и удаление объектов проверены."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Подключение для распознавания речи установлено: получен текст с временными метками."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "В доступе к распознаванию речи отказано. Проверьте права ключа API и разрешённых провайдеров."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Модель распознавания речи не возвращает сегменты с временными метками, а без них Silo не может создавать субтитры. Выберите модель с поддержкой временных меток сегментов, например whisper-1 от OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Конечная точка или модель распознавания речи недоступна. Проверьте базовый URL провайдера, модель и разрешённых провайдеров."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Провайдер распознавания речи требует оплату. Проверьте баланс и лимит расходов у провайдера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Квота провайдера распознавания речи исчерпана. Проверьте баланс и лимиты у провайдера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Провайдер распознавания речи ограничивает частоту запросов. Повторите попытку позже."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Время проверки подключения для распознавания речи истекло. Проверьте доступность провайдера и повторите попытку."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Не удалось пройти аутентификацию для распознавания речи. Замените ключ API провайдера в разделе «ИИ-сервисы»."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Провайдер распознавания речи временно недоступен. Повторите попытку позже."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Подключение к текстовому ИИ установлено."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось подключиться к текстовому ИИ. Проверьте модель, уровень рассуждений, уровень обслуживания, подключение аккаунта и лимиты использования у провайдера."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -65256,6 +65520,20 @@
       "value": "Не удалось проверить подключение."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Провайдер эмбеддингов не выбран. Выберите провайдера, который обслуживает модель «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "», или сбросьте эмбеддинги, чтобы использовать другую модель."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -72672,6 +72950,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Воспроизводить без входа с того же адреса"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Некоторые приложения Jellyfin, например Findroid, открывают ссылки для прямого воспроизведения и скачивания без входа в аккаунт. Когда этот параметр включён, Silo выполняет такой запрос при условии, что приложение с выполненным входом с того же сетевого адреса запросило воспроизведение этого файла за последние два часа. Тогда этот файл сможет воспроизвести и любой, кто использует тот же адрес, например люди в той же домашней сети, у того же мобильного оператора или в том же VPN. Включайте его, только если используете одно из этих приложений."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -106302,6 +106592,12 @@
       "value": "Порядок"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "По релевантности"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -127026,6 +127322,12 @@
       "value": "Коллекция"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Медиатека"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -127074,6 +127376,12 @@
     {
       "type": 0,
       "value": "Коллекций пока нет. Сначала создайте коллекцию в разделе «Коллекции»."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "В этой медиатеке нет коллекций этого типа."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -144887,6 +145195,12 @@
       "value": "Вы можете ставить на паузу и продолжать"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Для Watch Party нужен Redis, но на этом сервере он не настроен. Попросите администратора сервера настроить его."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -149257,6 +149571,86 @@
     {
       "type": 0,
       "value": "Ищите в медиатеке или найдите, что запросить…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Все результаты в вашей медиатеке"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Сортировать по релевантности"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Лучшие совпадения"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "В вашей медиатеке"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Другие результаты"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Нет в вашей медиатеке"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Обзор"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Запросить добавление"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Показать все результаты"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Сортировка: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Режимы просмотра результатов"
     }
   ],
   "web.search.resultsLabel": [
@@ -163757,6 +164151,18 @@
       "value": "Ключ доступа"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo перезапускается, чтобы использовать новое хранилище. Настройка продолжится, когда сервер снова станет доступен."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Применение настроек хранилища"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -164037,6 +164443,18 @@
     {
       "type": 0,
       "value": "URL подключения"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo запустится снова сам, только если в Docker, Kubernetes или systemd настроен его автоматический перезапуск. В противном случае запустите Silo вручную. Настройка продолжится, когда сервер снова станет доступен."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Перезапуск Silo ещё не завершён"
     }
   ],
   "web.setup.storage.saveFailed": [

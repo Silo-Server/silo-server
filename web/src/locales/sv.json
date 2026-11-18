@@ -22867,6 +22867,270 @@
       "value": "Anslutningskontrollen misslyckades."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Logga in med ChatGPT i inställningarna för AI-tjänster."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Anslutningen för embeddings lyckades. Modellen returnerar "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingarna skapades med vektorer med "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner, men modellen returnerar nu "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Återställ embeddings innan du byter modell."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Embedding-låset anger vektorer med "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner; Silo lagrar 1 till "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Återställ embeddings och använd en modell som returnerar högst "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Det lagrade embedding-låset går inte att läsa. Återställ embeddings för att rensa det."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingarna skapades med modellen ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, inte ”"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Återställ embeddings innan du byter modell."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Leverantören av embeddings returnerade ingen vektor för testtexten."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingarna lagrades med "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner; den här servern lagrar "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Återställ embeddings."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Modellen returnerar "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner; Silo lagrar högst "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Anslutningskontrollen misslyckades. Kontrollera de angivna inställningarna och att leverantören är tillgänglig."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "API-nyckeln för MDBList har verifierats."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Anslutningen till Meilisearch lyckades"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch avvisade API-nyckeln eller kräver en. Ange en nyckel som kan hantera index och dokument, till exempel Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch omdirigerade kontrollen till en annan adress. Ange adressen som den omdirigerar till, till exempel dess https://-URL, och ange API-nyckeln igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Anslutningen till Redis lyckades."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-anslutningen och behörigheterna att läsa, skriva och radera objekt har verifierats."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Anslutningen för tal till text lyckades: tal med tidsstämplar togs emot."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Åtkomst till tal till text nekades. Kontrollera API-nyckelns behörigheter och tillåtna leverantörer."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Modellen för tal till text returnerar inte segment med tidsstämplar, vilket Silo behöver för att skapa undertexter. Välj en modell som har stöd för tidsstämplar per segment, till exempel whisper-1 hos OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Slutpunkten eller modellen för tal till text är inte tillgänglig. Kontrollera leverantörens bas-URL, modellen och tillåtna leverantörer."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Leverantören av tal till text kräver betalning. Kontrollera ditt saldo och din utgiftsgräns hos leverantören."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Kvoten hos leverantören av tal till text är slut. Kontrollera ditt saldo och dina gränser hos leverantören."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Leverantören av tal till text begränsar antalet förfrågningar. Försök igen senare."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Anslutningskontrollen för tal till text tog för lång tid. Kontrollera att leverantören är tillgänglig och försök igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Autentiseringen för tal till text misslyckades. Byt ut leverantörens API-nyckel under AI-tjänster."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Leverantören av tal till text är tillfälligt otillgänglig. Försök igen senare."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Anslutningen för text-AI lyckades."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Anslutningen för text-AI misslyckades. Kontrollera modellen, resonemangsnivån, tjänstenivån, kontoanslutningen och leverantörens användningsgränser."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -52407,6 +52671,20 @@
       "value": "Anslutningskontrollen misslyckades."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Ingen embeddingleverantör är vald. Välj en leverantör som tillhandahåller ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, eller återställ embeddings för att använda en annan modell."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -58447,6 +58725,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Spela upp utan inloggning från samma adress"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Vissa Jellyfin-appar, till exempel Findroid, öppnar länkar för direktuppspelning och nedladdning utan att logga in. När detta är på hanterar Silo en sådan förfrågan om en inloggad app på samma nätverksadress har bett om att spela upp filen under de senaste två timmarna. Alla som delar den adressen, till exempel personer i samma hemnätverk, hos samma mobiloperatör eller i samma VPN, kan då också spela upp filen. Slå bara på det om du använder någon av de apparna."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -89254,6 +89544,12 @@
       "value": "Ordning"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Relevans"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -106030,6 +106326,12 @@
       "value": "Samling"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Bibliotek"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106074,6 +106376,12 @@
     {
       "type": 0,
       "value": "Inga samlingar än. Skapa en i Samlingar först."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Inga samlingar av den här typen i det här biblioteket."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -121823,6 +122131,12 @@
       "value": "Du kan pausa och återuppta"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party kräver Redis, som inte är konfigurerat på den här servern. Be serveradministratören att konfigurera det."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -125745,6 +126059,86 @@
     {
       "type": 0,
       "value": "Sök i biblioteket eller hitta titlar att begära…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Alla resultat i ditt bibliotek"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Tillbaka till relevans"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Bästa träffar"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "I ditt bibliotek"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Fler resultat"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Inte i ditt bibliotek"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Översikt"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Begär att lägga till"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Visa alla resultat"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Sorterade efter "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Resultatvyer"
     }
   ],
   "web.search.resultsLabel": [
@@ -138959,6 +139353,18 @@
       "value": "Åtkomstnyckel"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo startar om för att använda den nya lagringen. Konfigurationen fortsätter när Silo är tillbaka."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Tillämpar lagringsinställningar"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -139239,6 +139645,18 @@
     {
       "type": 0,
       "value": "Anslutnings-URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo kommer bara tillbaka av sig själv om Docker, Kubernetes eller systemd är inställt på att starta om Silo. Annars startar du Silo igen själv. Konfigurationen fortsätter när Silo är tillbaka."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo har inte startat om än"
     }
   ],
   "web.setup.storage.saveFailed": [

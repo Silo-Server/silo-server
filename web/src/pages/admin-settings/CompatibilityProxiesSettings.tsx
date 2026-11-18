@@ -41,6 +41,7 @@ const JELLYFIN_ADVANCED_KEYS = [
   "jellyfin_compat.emulated_server_version",
   "jellyfin_compat.session_ttl",
   "jellyfin_compat.playback_session_ttl",
+  "jellyfin_compat.address_stream_grant_enabled",
   "jellyfin_compat.web_version",
   "jellyfin_compat.web_install_dir",
 ];
@@ -548,6 +549,16 @@ export default function CompatibilityProxiesSettings() {
               value={form.getValue("jellyfin_compat.playback_session_ttl")}
               onChange={(v) => form.setValue("jellyfin_compat.playback_session_ttl", v)}
               restartRequired={restartKeys.has("jellyfin_compat.playback_session_ttl")}
+            />
+            <SettingField
+              label={t("web.admin.settings.compatibilityProxies.advanced.addressStreamGrant")}
+              type="toggle"
+              description={t(
+                "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription",
+              )}
+              value={form.getValue("jellyfin_compat.address_stream_grant_enabled")}
+              onChange={(v) => form.setValue("jellyfin_compat.address_stream_grant_enabled", v)}
+              restartRequired={restartKeys.has("jellyfin_compat.address_stream_grant_enabled")}
             />
             <SettingField
               label={t("web.admin.settings.compatibilityProxies.advanced.webVersion")}

@@ -5685,6 +5685,10 @@
             "description": "catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators",
             "type": "boolean"
           },
+          "item_file_paths": {
+            "description": "listAdminCatalogItems accepts include_file_paths from this caller: a login session, an unscoped key, or a key holding admin:catalog:paths",
+            "type": "boolean"
+          },
           "item_listing": {
             "description": "listAdminCatalogItems is served",
             "type": "boolean"
@@ -5728,6 +5732,7 @@
           "item_match_hints",
           "item_metadata",
           "item_metadata_reset",
+          "item_file_paths",
           "revision",
           "state",
           "allowed"
@@ -6048,6 +6053,13 @@
               "120"
             ],
             "minLength": 1,
+            "type": "string"
+          },
+          "file_path": {
+            "description": "The file's path as the scanning server stores it, only with include_file_paths. Map it to another host's mounts through the library's paths. Bytes of a name that are not UTF-8 are stored as private-use code points",
+            "examples": [
+              "/media/movies/Heat (1995)/Heat.mkv"
+            ],
             "type": "string"
           },
           "file_size": {
@@ -18881,6 +18893,17 @@
             "description": "Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not.",
             "type": "string"
           },
+          "lock_conflict_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty.",
+            "type": "object"
+          },
+          "lock_conflict_key": {
+            "description": "Translation catalog key of lock_conflict, which clients show in a non-English interface. Absent when lock_conflict is empty.",
+            "type": "string"
+          },
           "recommendations": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           },
@@ -21371,6 +21394,25 @@
         "additionalProperties": false,
         "properties": {
           "message": {
+            "type": "string"
+          },
+          "message_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the message_key message's placeholders by name; present only with message_key, and absent when the message has none",
+            "examples": [
+              {
+                "dimensions": "1024"
+              }
+            ],
+            "type": "object"
+          },
+          "message_key": {
+            "description": "Key of the shared translation catalog message whose English is message. A client that has the key shows its translation, filling message_args, and otherwise shows message. Absent when message has no catalog entry",
+            "examples": [
+              "web.admin.common.connectionCheck.result.redisConnected"
+            ],
             "type": "string"
           },
           "success": {
@@ -74062,6 +74104,16 @@
             "name": "include_people",
             "schema": {
               "description": "Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Also return each version's file_path. Send it only when getAdminCatalogCapabilities reports item_file_paths; a key whose scopes lack admin:catalog:paths receives 403",
+            "explode": false,
+            "in": "query",
+            "name": "include_file_paths",
+            "schema": {
+              "description": "Also return each version's file_path. Send it only when getAdminCatalogCapabilities reports item_file_paths; a key whose scopes lack admin:catalog:paths receives 403",
               "type": "boolean"
             }
           }
@@ -202026,6 +202078,16 @@
             },
             "description": "Conflict"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -202528,6 +202590,209 @@
                 }
               }
             },
+            "description": "Playback bytes or HEAD metadata",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-raw-protocol": "hls",
+        "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
+        "x-silo-service-backed": true
+      },
+      "head": {
+        "operationId": "headPlaybackManifest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.",
+            "in": "query",
+            "name": "token",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
+            "in": "query",
+            "name": "st",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.",
+            "in": "query",
+            "name": "silo_rendition",
+            "schema": {
+              "enum": [
+                "video",
+                "subtitles"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer.",
+            "in": "query",
+            "name": "silo_track",
+            "schema": {
+              "pattern": "^[1-9][0-9]{0,19}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
             "description": "Playback bytes or HEAD metadata",
             "headers": {
               "Cache-Control": {
@@ -249558,6 +249823,12 @@
           "is_jellyfin_compat": {
             "type": "boolean"
           },
+          "keyframe_plan_resume": {
+            "type": "boolean"
+          },
+          "keyframe_planned": {
+            "type": "boolean"
+          },
           "keyframe_playlist": {
             "type": "boolean"
           },
@@ -250129,6 +250400,9 @@
           "input_path": {
             "type": "string"
           },
+          "keyframe_plan_resume": {
+            "type": "boolean"
+          },
           "keyframe_playlist": {
             "type": "boolean"
           },
@@ -250308,6 +250582,12 @@
           },
           "hw_accel": {
             "type": "string"
+          },
+          "keyframe_plan_resume": {
+            "type": "boolean"
+          },
+          "keyframe_planned": {
+            "type": "boolean"
           },
           "keyframe_playlist": {
             "type": "boolean"

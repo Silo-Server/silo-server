@@ -396,7 +396,7 @@ function boxSetMinMovieOptions(current: number): number[] {
   return [...new Set<number>([...BOX_SET_MIN_MOVIE_OPTIONS, current])].sort((a, b) => a - b);
 }
 
-export function BoxSetFields({ form }: { form: LibraryFormController }) {
+function BoxSetFields({ form }: { form: LibraryFormController }) {
   const t = useT();
   return (
     <div className="border-border bg-surface rounded-xl border p-3.5">

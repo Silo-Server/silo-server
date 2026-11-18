@@ -149,6 +149,11 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/server/status$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/catalog/(items|capabilities)$`)},
 	},
+	// The catalog listing with file paths, which the listing handler gives
+	// only to unscoped callers and keys holding this scope.
+	auth.ScopeAdminCatalogPaths: {
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/catalog/(items|capabilities)$`)},
+	},
 	auth.ScopeAdminSessionsControl: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/command-capabilities$`)},
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/admin/sessions/[^/]+/(pause|resume|stop|message|terminate)$`)},

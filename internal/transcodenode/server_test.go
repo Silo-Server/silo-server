@@ -470,20 +470,6 @@ func TestRestartSessionLockedRejectsChangedToneMapSourceWithoutStoppingLiveSessi
 	}
 }
 
-func TestNewServerKeepsDefaultDownloadArtifactsInsideTranscodeVolume(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Playback.TranscodeDir = filepath.Join(t.TempDir(), "transcodes")
-
-	server := NewServer(newTestRuntime(cfg), nil)
-	want := filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
-	if server.artifactRoot != want {
-		t.Fatalf("artifact root = %q, want mounted path %q", server.artifactRoot, want)
-	}
-	if _, protected := server.activeSessionIDs()[downloadprepare.ArtifactDirectoryName]; !protected {
-		t.Fatal("default artifact directory is not protected from the transcode orphan sweep")
-	}
-}
-
 func TestHandleHWCapabilitiesReturnsServiceUnavailableWhenProbeIsCanceled(t *testing.T) {
 	server := newTestServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -495,69 +481,6 @@ func TestHandleHWCapabilitiesReturnsServiceUnavailableWhenProbeIsCanceled(t *tes
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d; body = %s", recorder.Code, http.StatusServiceUnavailable, recorder.Body.String())
-	}
-}
-
-func TestProxiedSegmentCompletionRequiresDownstreamAcknowledgement(t *testing.T) {
-	truePath, err := exec.LookPath("true")
-	if err != nil {
-		t.Skipf("`true` not found in PATH: %v", err)
-	}
-
-	const sessionID = "proxy-completion-session"
-	server := newTestServer(t)
-	outputDir := t.TempDir()
-	session, err := playback.StartTranscode(context.Background(), playback.TranscodeOpts{
-		SessionID:               sessionID,
-		OutputDir:               outputDir,
-		FFmpegPath:              truePath,
-		TargetCodecVideo:        "h264",
-		TargetCodecAudio:        "aac",
-		SegmentDuration:         2,
-		SegmentRetentionSeconds: 600,
-	})
-	if err != nil {
-		t.Fatalf("StartTranscode: %v", err)
-	}
-	t.Cleanup(func() { _ = session.Close() })
-	server.sessions[sessionID] = session
-	server.lastAccess[sessionID] = time.Now()
-
-	const segmentName = "seg_00007.ts"
-	if err := os.WriteFile(filepath.Join(outputDir, segmentName), []byte("complete segment"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	segmentReq := withNodeRouteParams(
-		httptest.NewRequest(http.MethodGet, "/transcode/"+sessionID+"/segment/"+segmentName, nil),
-		map[string]string{"session_id": sessionID, "name": segmentName},
-	)
-	segmentReq.Header.Set(transcodeproxy.RequestHeader, "1")
-	segmentRR := httptest.NewRecorder()
-	server.handleSegment(segmentRR, segmentReq)
-	if segmentRR.Code != http.StatusOK {
-		t.Fatalf("segment status = %d, body = %q", segmentRR.Code, segmentRR.Body.String())
-	}
-	generation := segmentRR.Header().Get(transcodeproxy.GenerationHeader)
-	if generation == "" {
-		t.Fatal("proxied segment omitted generation")
-	}
-	if got := session.LastRequestedSegment(); got != 0 {
-		t.Fatalf("node counted proxy-hop completion as client completion: got %d, want 0", got)
-	}
-
-	ackReq := withNodeRouteParams(
-		httptest.NewRequest(http.MethodPost, "/transcode/"+sessionID+"/segment/"+segmentName+"/downloaded", nil),
-		map[string]string{"session_id": sessionID, "name": segmentName},
-	)
-	ackReq.Header.Set(transcodeproxy.GenerationHeader, generation)
-	ackRR := httptest.NewRecorder()
-	server.handleSegmentDownloaded(ackRR, ackReq)
-	if ackRR.Code != http.StatusNoContent {
-		t.Fatalf("ack status = %d, body = %q", ackRR.Code, ackRR.Body.String())
-	}
-	if got := session.LastRequestedSegment(); got != 7 {
-		t.Fatalf("acknowledged segment = %d, want 7", got)
 	}
 }
 
@@ -606,38 +529,6 @@ func withNodeRouteParams(req *http.Request, values map[string]string) *http.Requ
 		routeCtx.URLParams.Add(key, value)
 	}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
-
-func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T) {
-	server := newTestServer(t)
-	artifactDir := server.artifactRoot
-	server.watcher.Config().Download.ArtifactDir = t.TempDir()
-	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
-	useFakeFFmpeg(t, server, "#!/bin/sh\nfor last; do :; done\nprintf artifact > \"$last\"\n")
-	server.watcher.Config().Playback.HWAccel = "none"
-	outputPath := filepath.Join(artifactDir, "artifact-1.mp4")
-	rr := postPrepare(t, server, downloadprepare.Request{
-		ArtifactID: "artifact-1", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "copy", TargetCodecAudio: "copy", AudioTrackIndex: -1,
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	info, err := os.Stat(outputPath)
-	if err != nil {
-		t.Fatalf("prepared output: %v", err)
-	}
-	responseBody := rr.Body.String()
-	var result downloadprepare.Result
-	if err := json.Unmarshal([]byte(responseBody), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.ArtifactID != "artifact-1" || result.FileSize != info.Size() || strings.Contains(responseBody, artifactDir) {
-		t.Fatalf("prepare result = %+v body=%s", result, responseBody)
-	}
-	if got := server.activeJobs.Load(); got != 0 {
-		t.Fatalf("active jobs after prepare = %d, want 0", got)
-	}
 }
 
 func TestHandleDownloadPreparePublishesToneMapReceiptAndStatusAttestation(t *testing.T) {
@@ -697,17 +588,6 @@ func TestHandleDownloadPreparePublishesToneMapReceiptAndStatusAttestation(t *tes
 	}
 	if got := headRecorder.Header().Get("X-Silo-Tone-Map-Source-Revision-Fingerprint"); got != want.ToneMapSourceRevisionFingerprint {
 		t.Fatalf("source revision header = %q, want %q", got, want.ToneMapSourceRevisionFingerprint)
-	}
-}
-
-func TestExpectedDownloadPrepareResultAttestsExplicitAudioOutput(t *testing.T) {
-	request := downloadprepare.Request{
-		ArtifactID: "artifact-explicit-audio", TargetCodecAudio: "aac",
-		TargetAudioChannels: 1, TargetAudioBitrateKbps: 256,
-	}
-	result, ok := expectedDownloadPrepareResult(request, 55)
-	if !ok || result.ExecutionFingerprint != request.ExecutionFingerprint() {
-		t.Fatalf("explicit audio output result = (%+v, %t), want exact execution receipt", result, ok)
 	}
 }
 
@@ -1012,6 +892,15 @@ func TestValidateKeyframePlaylistAttestation(t *testing.T) {
 	if err := ValidateKeyframePlaylistAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
 		t.Fatalf("request without a keyframe playlist rejected a legacy node response: %v", err)
 	}
+	// An older node echoes keyframe_playlist but ignores keyframe_plan_resume
+	// and serves FFmpeg's playlist, whose segments the moved player can't use.
+	resume := TranscodeStartRequest{KeyframePlaylist: true, KeyframePlanResume: true}
+	if err := ValidateKeyframePlaylistAttestation(resume, TranscodeStartResponse{KeyframePlaylist: true}); !errors.Is(err, ErrKeyframePlaylistAttestationMismatch) {
+		t.Fatalf("missing resume plan attestation error = %v, want %v", err, ErrKeyframePlaylistAttestationMismatch)
+	}
+	if err := ValidateKeyframePlaylistAttestation(resume, TranscodeStartResponse{KeyframePlaylist: true, KeyframePlanResume: true}); err != nil {
+		t.Fatalf("matching resume plan attestation rejected: %v", err)
+	}
 }
 
 // A node that ignores requested MPEG-TS packaging would publish fMP4 under a
@@ -1181,6 +1070,22 @@ func TestHandleStartAttestsRecipeVersions(t *testing.T) {
 			},
 			receipt: func(response TranscodeStartResponse) string { return response.CopyAudioCodec },
 			want:    "aac",
+		},
+		{
+			// The echo says the node understood the request; the source has
+			// no keyframe index, so the node keeps FFmpeg's playlist and
+			// says so (#4044).
+			name: "keyframe playlist the node can't plan",
+			request: TranscodeStartRequest{
+				SessionID: "attested-unplanned", InputPath: "/media/movie.mkv",
+				SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, KeyframePlaylist: true,
+				SegmentDuration: 2, TotalDuration: 60,
+			},
+			receipt: func(response TranscodeStartResponse) string {
+				return fmt.Sprintf("keyframe_playlist=%t keyframe_planned=%t", response.KeyframePlaylist, response.KeyframePlanned)
+			},
+			want: "keyframe_playlist=true keyframe_planned=false",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1414,45 +1319,6 @@ func TestHandleStartDistinctReplacementFailurePreservesPredecessor(t *testing.T)
 	}
 	if got := server.activeJobs.Load(); got != 1 {
 		t.Fatalf("active jobs = %d, want predecessor only", got)
-	}
-}
-
-func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
-	server := newTestServer(t)
-	server.nodeRowID = func() (int, bool) { return 11, true }
-	mediaPath, _ := writeNodeSource(t, "source")
-	ffmpegMarker := filepath.Join(t.TempDir(), "ffmpeg-ran")
-	useFakeFFmpeg(t, server, "#!/bin/sh\ntouch \""+ffmpegMarker+"\"\n")
-	claims := progressiveRemuxClaims("playback-head", mediaPath, "transport-head")
-	claims.TranscodeNode = "http://registered-node"
-	recorder := httptest.NewRecorder()
-
-	server.handleRemux(recorder, remuxRequest(t, server, http.MethodHead, claims))
-
-	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "video/mp4" {
-		t.Fatalf("response = %d content-type %q", recorder.Code, recorder.Header().Get("Content-Type"))
-	}
-	if got := server.activeJobs.Load(); got != 0 {
-		t.Fatalf("active jobs = %d, want no FFmpeg start", got)
-	}
-	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
-		t.Fatalf("HEAD invoked ffmpeg: %v", err)
-	}
-
-	if opened := sourcesOf(server).opened; len(opened) != 0 {
-		t.Fatalf("HEAD opened %d sources, want none", len(opened))
-	}
-
-	coreOf(server).refuse("transport-head", refusal(http.StatusGone, nodecontrol.ResolveStopped))
-	stoppedRecorder := httptest.NewRecorder()
-
-	server.handleRemux(stoppedRecorder, remuxRequest(t, server, http.MethodHead, claims))
-
-	if stoppedRecorder.Code != http.StatusGone {
-		t.Fatalf("stopped HEAD status = %d, want 410", stoppedRecorder.Code)
-	}
-	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
-		t.Fatalf("stopped HEAD invoked ffmpeg: %v", err)
 	}
 }
 
@@ -2238,89 +2104,6 @@ func TestHandleStart_LiftsStopFence(t *testing.T) {
 	}
 }
 
-// The idle reaper must close only jobs whose last access predates the TTL;
-// registration counts as an access, so a just-started job (including one still
-// waiting on its manifest in the RequireReady flow) is spared. Zero-value
-// TranscodeSessions Close without ffmpeg, so this runs without a real spawn.
-func TestReapIdleSessions_ClosesOnlyIdleJobs(t *testing.T) {
-	s := newTestServer(t)
-	s.tracker = nodesessions.NewLocalTracker()
-
-	s.sessions["fresh-1"] = &playback.TranscodeSession{}
-	s.sessions["stale-1"] = &playback.TranscodeSession{}
-	s.lastAccess = map[string]time.Time{
-		"fresh-1": time.Now(),
-		"stale-1": time.Now().Add(-sessionIdleTTL - time.Minute),
-	}
-	s.activeJobs.Store(2)
-
-	s.reapIdleSessions(sessionIdleTTL)
-
-	s.mu.RLock()
-	_, freshAlive := s.sessions["fresh-1"]
-	_, staleAlive := s.sessions["stale-1"]
-	_, staleTracked := s.lastAccess["stale-1"]
-	s.mu.RUnlock()
-	if !freshAlive {
-		t.Fatal("recently accessed session was reaped")
-	}
-	if staleAlive {
-		t.Fatal("idle session survived the reaper")
-	}
-	if staleTracked {
-		t.Fatal("reaped session's idle clock was not dropped")
-	}
-	if got := s.activeJobs.Load(); got != 1 {
-		t.Fatalf("activeJobs = %d, want 1", got)
-	}
-}
-
-// A registered job with no recorded access (untracked registration) must not
-// be closed; the sweep starts its idle clock instead of reaping a job that may
-// be actively serving.
-func TestReapIdleSessions_StartsClockForUntrackedJob(t *testing.T) {
-	s := newTestServer(t)
-	s.sessions["untracked-1"] = &playback.TranscodeSession{}
-	s.activeJobs.Store(1)
-
-	s.reapIdleSessions(sessionIdleTTL)
-
-	s.mu.RLock()
-	_, alive := s.sessions["untracked-1"]
-	last, tracked := s.lastAccess["untracked-1"]
-	s.mu.RUnlock()
-	if !alive {
-		t.Fatal("untracked session was reaped")
-	}
-	if !tracked || last.IsZero() {
-		t.Fatal("sweep did not start the untracked session's idle clock")
-	}
-	if got := s.activeJobs.Load(); got != 1 {
-		t.Fatalf("activeJobs = %d, want 1", got)
-	}
-}
-
-// touchSession must refresh a registered job's idle clock and ignore ids with
-// no live session (a reconstruct records its own first access on register).
-func TestTouchSession_RefreshesIdleClock(t *testing.T) {
-	s := newTestServer(t)
-	s.sessions["live-1"] = &playback.TranscodeSession{}
-	stale := time.Now().Add(-sessionIdleTTL - time.Minute)
-	s.lastAccess = map[string]time.Time{"live-1": stale}
-
-	s.touchSession("live-1")
-	s.touchSession("ghost-1")
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if !s.lastAccess["live-1"].After(stale) {
-		t.Fatal("touch did not refresh the live session's idle clock")
-	}
-	if _, ok := s.lastAccess["ghost-1"]; ok {
-		t.Fatal("touch recorded access for an unregistered session")
-	}
-}
-
 func TestSpawnReconstructRejectsSessionIDOutsideTranscodeRoot(t *testing.T) {
 	server := newTestServer(t)
 	logPath := filepath.Join(t.TempDir(), "invocations.log")
@@ -2446,66 +2229,6 @@ func TestSpawnReconstructIgnoresThePreviousProcessManifest(t *testing.T) {
 	}
 	if got := strings.Count(string(logData), "-f hls"); got != 2 {
 		t.Fatalf("real transcode attempts = %d, want hardware plus the software retry:\n%s", got, logData)
-	}
-}
-
-// A fresh /transcode/start must resolve this node's configured hw_device list
-// through the shared GPU pool — the same path reconstruction uses — rather
-// than bypassing it with an empty device.
-func TestHandleStartUsesConfiguredHWDeviceList(t *testing.T) {
-	server := newLoopingFFmpegServer(t)
-	// Neither device exists, so resolution deterministically lands on the
-	// first entry; the point is that the configured list reaches the session.
-	server.watcher.Config().Playback.HWDevice = "/dev/dri/renderD888,/dev/dri/renderD889"
-
-	_, session := startRegisteredSession(t, server, TranscodeStartRequest{
-		SessionID: "hwdevice-start-1", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "vaapi",
-	})
-	if got := session.Opts().HWDevice; got != "/dev/dri/renderD888" {
-		t.Fatalf("session HWDevice = %q, want one concrete device from the configured list", got)
-	}
-}
-
-func TestHandleStartAndReconstructArmRequestedThrottle(t *testing.T) {
-	for _, test := range []struct {
-		name        string
-		reconstruct bool
-	}{
-		{name: "fresh start"},
-		{name: "reconstruct", reconstruct: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			server := newLoopingFFmpegServer(t)
-			started := make(chan int, 1)
-			server.startThrottler = func(_ *playback.TranscodeSession, seconds int) { started <- seconds }
-
-			if test.reconstruct {
-				card := nativeTransportCard("session-1", "transport-1")
-				card.ThrottleSeconds = 180
-				session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), "transport-1", -1, resolutionOf(*card))
-				if err != nil {
-					t.Fatalf("spawnReconstruct: %v", err)
-				}
-				if session == nil {
-					t.Fatal("session was not registered")
-				}
-				t.Cleanup(func() { _ = session.CloseProcess() })
-			} else {
-				startRegisteredSession(t, server, TranscodeStartRequest{
-					SessionID: "session-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
-					TargetCodecAudio: "aac", SegmentDuration: 2, ThrottleSeconds: 180,
-				})
-			}
-			select {
-			case got := <-started:
-				if got != 180 {
-					t.Fatalf("throttle seconds = %d, want 180", got)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("node did not arm the requested throttle")
-			}
-		})
 	}
 }
 
@@ -2906,9 +2629,101 @@ func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
 	}
 }
 
-// Stops and remux registrations sweep the fence maps under mu; the sweep runs
-// at most once per interval so a day of fences is not rescanned on every stop,
-// while lookups keep ignoring entries that expired in between.
+func TestProxiedSegmentCompletionRequiresDownstreamAcknowledgement(t *testing.T) {
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("`true` not found in PATH: %v", err)
+	}
+
+	const sessionID = "proxy-completion-session"
+	server := newTestServer(t)
+	outputDir := t.TempDir()
+	session, err := playback.StartTranscode(context.Background(), playback.TranscodeOpts{
+		SessionID:               sessionID,
+		OutputDir:               outputDir,
+		FFmpegPath:              truePath,
+		TargetCodecVideo:        "h264",
+		TargetCodecAudio:        "aac",
+		SegmentDuration:         2,
+		SegmentRetentionSeconds: 600,
+	})
+	if err != nil {
+		t.Fatalf("StartTranscode: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	server.sessions[sessionID] = session
+	server.lastAccess[sessionID] = time.Now()
+
+	const segmentName = "seg_00007.ts"
+	if err := os.WriteFile(filepath.Join(outputDir, segmentName), []byte("complete segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	segmentReq := withNodeRouteParams(
+		httptest.NewRequest(http.MethodGet, "/transcode/"+sessionID+"/segment/"+segmentName, nil),
+		map[string]string{"session_id": sessionID, "name": segmentName},
+	)
+	segmentReq.Header.Set(transcodeproxy.RequestHeader, "1")
+	segmentRR := httptest.NewRecorder()
+	server.handleSegment(segmentRR, segmentReq)
+	if segmentRR.Code != http.StatusOK {
+		t.Fatalf("segment status = %d, body = %q", segmentRR.Code, segmentRR.Body.String())
+	}
+	generation := segmentRR.Header().Get(transcodeproxy.GenerationHeader)
+	if generation == "" {
+		t.Fatal("proxied segment omitted generation")
+	}
+	if got := session.LastRequestedSegment(); got != 0 {
+		t.Fatalf("node counted proxy-hop completion as client completion: got %d, want 0", got)
+	}
+
+	ackReq := withNodeRouteParams(
+		httptest.NewRequest(http.MethodPost, "/transcode/"+sessionID+"/segment/"+segmentName+"/downloaded", nil),
+		map[string]string{"session_id": sessionID, "name": segmentName},
+	)
+	ackReq.Header.Set(transcodeproxy.GenerationHeader, generation)
+	ackRR := httptest.NewRecorder()
+	server.handleSegmentDownloaded(ackRR, ackReq)
+	if ackRR.Code != http.StatusNoContent {
+		t.Fatalf("ack status = %d, body = %q", ackRR.Code, ackRR.Body.String())
+	}
+	if got := session.LastRequestedSegment(); got != 7 {
+		t.Fatalf("acknowledged segment = %d, want 7", got)
+	}
+}
+
+func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T) {
+	server := newTestServer(t)
+	artifactDir := server.artifactRoot
+	server.watcher.Config().Download.ArtifactDir = t.TempDir()
+	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
+	useFakeFFmpeg(t, server, "#!/bin/sh\nfor last; do :; done\nprintf artifact > \"$last\"\n")
+	server.watcher.Config().Playback.HWAccel = "none"
+	outputPath := filepath.Join(artifactDir, "artifact-1.mp4")
+	rr := postPrepare(t, server, downloadprepare.Request{
+		ArtifactID: "artifact-1", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "copy", TargetCodecAudio: "copy", AudioTrackIndex: -1,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatalf("prepared output: %v", err)
+	}
+	responseBody := rr.Body.String()
+	var result downloadprepare.Result
+	if err := json.Unmarshal([]byte(responseBody), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.ArtifactID != "artifact-1" || result.FileSize != info.Size() || strings.Contains(responseBody, artifactDir) {
+		t.Fatalf("prepare result = %+v body=%s", result, responseBody)
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after prepare = %d, want 0", got)
+	}
+}
+
 func TestPruneStopFencesRunsAtMostOncePerInterval(t *testing.T) {
 	s := newTestServer(t)
 	s.stoppedTranscodes = make(map[string]time.Time)

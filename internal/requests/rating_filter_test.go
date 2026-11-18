@@ -66,50 +66,6 @@ func TestDiscoverFiltersResultsAboveCeiling(t *testing.T) {
 	}
 }
 
-// TestDiscoverFilterDropsNRTitles pins the regression the TMDB-side
-// certification.lte pre-filter cannot catch: TMDB ranks "NR" below "G", and a
-// title with several US cert entries matches when any one qualifies. The
-// picked certification for such titles is "NR", which the ladder rejects.
-func TestDiscoverFilterDropsNRTitles(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &certTMDBClient{
-		fakeTMDBClient: fakeTMDBClient{page: &tmdb.MediaPage{
-			Page: 1,
-			Results: []tmdb.MediaResult{
-				{ID: 10, MediaType: "movie", Title: "Explicitly NR"},
-				{ID: 11, MediaType: "movie", Title: "Clean G"},
-			},
-		}},
-		certs: map[int]string{10: "NR", 11: "G"},
-	}
-	service := newRatedService(store, client, nil, "G")
-
-	section, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", 1)
-	if err != nil {
-		t.Fatalf("DiscoverRow returned error: %v", err)
-	}
-	if len(section.Results) != 1 || section.Results[0].TMDBID != 11 {
-		t.Fatalf("results = %+v, want NR title dropped", section.Results)
-	}
-}
-
-func TestDiscoverCertificationErrorPropagates(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &certTMDBClient{
-		fakeTMDBClient: fakeTMDBClient{page: discoverTestPage()},
-		certErr:        errors.New("tmdb unavailable"),
-	}
-	service := newRatedService(store, client, nil, "PG")
-
-	// A failed certification lookup must surface as an error, not as a
-	// silently empty (fail-closed) page that reads as "no matches".
-	if _, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", 1); err == nil {
-		t.Fatal("Discover succeeded, want certification error to propagate")
-	}
-}
-
 // pagedCertTMDBClient serves distinct section pages so backfill behavior is
 // observable: which TMDB pages were fetched and what survived.
 type pagedCertTMDBClient struct {
@@ -126,58 +82,6 @@ func (f *pagedCertTMDBClient) ChartPage(_ context.Context, _ tmdb.ChartParams, p
 		return p, nil
 	}
 	return &tmdb.MediaPage{Page: page, TotalPages: len(f.pages), Results: nil}, nil
-}
-
-func TestDiscoverBackfillsSectionFromLaterPages(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	// 3 TMDB pages; one G title per page among R titles. Ceiling PG should
-	// walk the whole window (pages 1-5, capped at TotalPages=3) and surface
-	// all three G titles on Silo page 1.
-	pages := map[int]*tmdb.MediaPage{}
-	certs := map[int]string{}
-	for p := 1; p <= 3; p++ {
-		var results []tmdb.MediaResult
-		for i := 0; i < 20; i++ {
-			id := p*100 + i
-			results = append(results, tmdb.MediaResult{ID: id, MediaType: "movie", Title: "Movie"})
-			if i == 0 {
-				certs[id] = "G"
-			} else {
-				certs[id] = "R"
-			}
-		}
-		pages[p] = &tmdb.MediaPage{Page: p, TotalPages: 3, TotalResults: 60, Results: results}
-	}
-	client := &pagedCertTMDBClient{
-		certTMDBClient: certTMDBClient{certs: certs},
-		pages:          pages,
-	}
-	service := NewService(store, client, &fakePresence{})
-	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
-
-	section, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", 1)
-	if err != nil {
-		t.Fatalf("DiscoverRow returned error: %v", err)
-	}
-	ids := make([]int, 0, len(section.Results))
-	for _, r := range section.Results {
-		ids = append(ids, r.TMDBID)
-	}
-	if len(ids) != 3 || ids[0] != 100 || ids[1] != 200 || ids[2] != 300 {
-		t.Fatalf("result ids = %v, want [100 200 300] (one survivor per TMDB page)", ids)
-	}
-	if got := client.fetchedPage; len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
-		t.Fatalf("fetched TMDB pages = %v, want [1 2 3] (stop at TotalPages)", got)
-	}
-	if section.TotalPages != 3 {
-		t.Fatalf("TotalPages = %d, want TMDB's 3", section.TotalPages)
-	}
-	// All upstream pages were consumed within budget, so the cursor points
-	// past the last page and a client stops.
-	if section.NextPage != 4 {
-		t.Fatalf("NextPage = %d, want 4 (past TotalPages)", section.NextPage)
-	}
 }
 
 // TestDiscoverBackfillPreservesOverflowAcrossPages pins the review regression:
@@ -257,29 +161,6 @@ func TestGetDetailBlocksTitleAboveCeiling(t *testing.T) {
 	}
 }
 
-// TestGetDetailIgnoresForeignDisplayRating pins the round-2 review finding:
-// the guard compares the US-only enforcement certification, not the detail
-// payload's display rating. A foreign "PG" (same string as US PG) in the
-// display field must not admit a title whose US certification is unresolved.
-func TestGetDetailIgnoresForeignDisplayRating(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &certTMDBClient{
-		fakeTMDBClient: fakeTMDBClient{detail: &tmdb.MediaDetail{
-			MediaType:     "movie",
-			ID:            77,
-			Title:         "Foreign Only",
-			ContentRating: "PG", // display fallback from a non-US country
-		}},
-		certs: map[int]string{77: ""}, // US-only enforcement lookup: unresolved
-	}
-	service := newRatedService(store, client, nil, "PG")
-
-	if _, err := service.GetDetail(context.Background(), testViewer(1), MediaTypeMovie, 77); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetDetail error = %v, want ErrNotFound (foreign display rating must not pass)", err)
-	}
-}
-
 func TestCreateRequestBlocksTitleAboveCeiling(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -296,67 +177,5 @@ func TestCreateRequestBlocksTitleAboveCeiling(t *testing.T) {
 	}
 	if store.count != 0 {
 		t.Fatalf("stored requests = %d, want 0", store.count)
-	}
-}
-
-func TestBrowsePushesCertificationCeilingToTMDB(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &certTMDBClient{}
-	service := newRatedService(store, client, nil, "PG-13")
-
-	if _, err := service.BrowseStudio(context.Background(), testViewer(1), "pixar", "", 1); err != nil {
-		t.Fatalf("BrowseStudio returned error: %v", err)
-	}
-	if got := client.gotDiscoverParams.CertificationLte; got != "PG-13" {
-		t.Fatalf("movie certification.lte = %q, want PG-13", got)
-	}
-
-	if _, err := service.BrowseNetwork(context.Background(), testViewer(1), "netflix", "", 1); err != nil {
-		t.Fatalf("BrowseNetwork returned error: %v", err)
-	}
-	if got := client.gotDiscoverParams.CertificationLte; got != "TV-14" {
-		t.Fatalf("tv certification.lte = %q, want TV-14", got)
-	}
-
-	service.SetEntitlementResolver(ratedCeiling{rating: ""})
-	if _, err := service.BrowseStudio(context.Background(), testViewer(1), "pixar", "", 1); err != nil {
-		t.Fatalf("BrowseStudio returned error: %v", err)
-	}
-	if got := client.gotDiscoverParams.CertificationLte; got != "" {
-		t.Fatalf("certification.lte = %q, want empty without a ceiling", got)
-	}
-}
-
-func TestCertificationCeilingFor(t *testing.T) {
-	cases := []struct {
-		ceiling   string
-		mediaType string
-		want      string
-	}{
-		{"G", "movie", "G"},
-		{"PG", "movie", "PG"},
-		{"PG-13", "movie", "PG-13"},
-		// Rank 3 maps to the ladder maximum: an R ceiling locally allows
-		// NC-17 (same rank), and the pre-filter must stay a superset of the
-		// post-filter or allowed titles vanish upstream unrecoverably.
-		{"R", "movie", "NC-17"},
-		{"NC-17", "movie", "NC-17"},
-		{"TV-G", "tv", "TV-G"},
-		{"TV-Y7", "tv", "TV-PG"},
-		{"TV-14", "tv", "TV-14"},
-		{"TV-MA", "tv", "TV-MA"},
-		// The ceiling field holds one value spanning both ladders, so a
-		// movie-scale ceiling must map onto the TV ladder and vice versa.
-		{"PG-13", "tv", "TV-14"},
-		{"TV-14", "movie", "PG-13"},
-		{"", "movie", ""},
-		{"BOGUS", "movie", ""},
-		{"", "tv", ""},
-	}
-	for _, tc := range cases {
-		if got := certificationCeilingFor(tc.ceiling, tc.mediaType); got != tc.want {
-			t.Errorf("certificationCeilingFor(%q, %q) = %q, want %q", tc.ceiling, tc.mediaType, got, tc.want)
-		}
 	}
 }

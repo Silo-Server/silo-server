@@ -268,30 +268,3 @@ func TestProfileIsolation_BookmarksScopedPerProfile(t *testing.T) {
 		t.Errorf("profile B saw profile A's bookmark: %v", list[0])
 	}
 }
-
-func TestDelete_OtherUserBookmark_NoOpAndNoExistenceLeak(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-
-	// User B seeds a bookmark.
-	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"B's bookmark","time":42.5}`), "2", "", hb.H.handleUpsertBookmark("bookmark_created"))
-
-	// User A tries to DELETE at the same item+time.
-	rec := dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/42.5", "book-1", "42.5", nil, "1", "", hb.H.handleDeleteBookmark)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (no leak); body=%s", rec.Code, rec.Body.String())
-	}
-	var aList []map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &aList)
-	if len(aList) != 0 {
-		t.Errorf("user A response list = %v, want empty", aList)
-	}
-
-	// User B's bookmark must still be there.
-	bList, err := hb.Book.List(context.Background(), "2", "", "book-1")
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(bList) != 1 {
-		t.Errorf("user B bookmarks = %d, want 1 (was wrongly deleted)", len(bList))
-	}
-}

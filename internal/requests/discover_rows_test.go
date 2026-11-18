@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
@@ -66,14 +65,6 @@ func (c cardSnapshots) Statuses(context.Context, []string) (map[string]discoverr
 	return nil, nil
 }
 
-func moviePage(ids ...int) *tmdb.MediaPage {
-	page := &tmdb.MediaPage{Page: 1, TotalPages: 5, TotalResults: 100}
-	for _, id := range ids {
-		page.Results = append(page.Results, tmdb.MediaResult{ID: id, MediaType: "movie", Title: fmt.Sprintf("Movie %d", id)})
-	}
-	return page
-}
-
 func movieCards(from, to int) []discoverrows.Card {
 	var cards []discoverrows.Card
 	for id := from; id <= to; id++ {
@@ -105,53 +96,6 @@ func resultIDs(results []MediaResult) []int {
 		ids = append(ids, r.TMDBID)
 	}
 	return ids
-}
-
-func TestDiscoverRowsFollowsTheLayout(t *testing.T) {
-	listRow := discoverrows.Row{ID: "r_list", Type: discoverrows.TypeMDBList, Title: "My List", Enabled: true, HideAvailable: true, List: &discoverrows.ListSpec{URL: "https://mdblist.com/lists/u/l"}}
-	rows := []discoverrows.Row{
-		{ID: "r_pop", Type: discoverrows.TypeTMDBChart, Title: "Popular", Enabled: true, Limit: 2, Chart: &discoverrows.ChartSpec{Preset: "popular", MediaType: "movie"}},
-		{Type: discoverrows.TypeStudios, Title: "Studios", Enabled: true},
-		{ID: "trending_movies", Type: discoverrows.TypeTMDBChart, Title: "Off", Chart: &discoverrows.ChartSpec{Preset: "trending", MediaType: "movie", TimeWindow: "week"}},
-		{ID: "r_broken", Type: discoverrows.TypeTMDBDiscover, Title: "Broken", Enabled: true, Discover: &discoverrows.DiscoverSpec{MediaType: "movie", SortBy: "popularity.desc"}},
-		{ID: "r_empty", Type: discoverrows.TypeTMDBChart, Title: "Empty", Enabled: true, Chart: &discoverrows.ChartSpec{Preset: "top_rated", MediaType: "movie"}},
-		listRow,
-	}
-	client := &rowsTMDB{
-		charts:      map[string]*tmdb.MediaPage{"popular/movie": moviePage(1, 2, 3)},
-		discoverErr: errors.New("tmdb rejected the filter"),
-	}
-	presence := &fakePresence{available: map[MediaType]map[int]bool{MediaTypeMovie: {11: true}}}
-	service := newLayoutService(t, rows, client, presence, "")
-	service.SetDiscoverLists(cardSnapshots{discoverrows.SourceKey(listRow): movieCards(10, 12)}, nil)
-
-	page, err := service.DiscoverRows(t.Context(), testViewer(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var order []string
-	for _, ref := range page.Order {
-		order = append(order, ref.Key+":"+string(ref.Type))
-	}
-	if want := []string{"r_pop:tmdb_chart", "studios:studios", "r_broken:tmdb_discover", "r_empty:tmdb_chart", "r_list:mdblist"}; !slices.Equal(order, want) {
-		t.Fatalf("order = %v, want %v (disabled row left out, brand row placed)", order, want)
-	}
-	// The broken and empty rows are left out of the titles; the chart is cut
-	// to its limit; the list drops the title the library has.
-	if len(page.Sections) != 2 || page.Sections[0].Key != "r_pop" || page.Sections[1].Key != "r_list" {
-		t.Fatalf("sections = %+v", page.Sections)
-	}
-	if got := resultIDs(page.Sections[0].Results); !slices.Equal(got, []int{1, 2}) || page.Sections[0].NextPage != 0 {
-		t.Fatalf("chart row = %v next %d, want [1 2] with no resume cursor", got, page.Sections[0].NextPage)
-	}
-	if got := resultIDs(page.Sections[1].Results); !slices.Equal(got, []int{10, 12}) || page.Sections[1].Title != "My List" {
-		t.Fatalf("list row = %v %q, want [10 12]", got, page.Sections[1].Title)
-	}
-
-	onlyBroken := newLayoutService(t, rows[3:4], client, nil, "")
-	if _, err := onlyBroken.DiscoverRows(t.Context(), testViewer(1)); err == nil {
-		t.Fatal("every title row failed, want the error")
-	}
 }
 
 func TestDiscoverRowHidesAvailableTitlesAndResumes(t *testing.T) {

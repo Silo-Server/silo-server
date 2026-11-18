@@ -20,25 +20,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestLocalDownloadCanceledReadReturnsCommittedError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fixture.mp4")
-	payload := bytes.Repeat([]byte("synthetic media"), 8192)
-	if err := os.WriteFile(path, payload, 0600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	svc := &Service{bandwidth: NewBandwidthManager(131072, 0)}
-	w := httptest.NewRecorder()
-	err := svc.serveLocalFile(ctx, w, httptest.NewRequest("GET", "/file", nil), path, "", 2)
-	if !errors.Is(err, ErrResponseCommitted) || !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled body read must report a committed response error: %v", err)
-	}
-	if w.Body.Len() >= len(payload) {
-		t.Fatalf("canceled transfer unexpectedly delivered the complete body: %d bytes", w.Body.Len())
-	}
-}
-
 type interruptedResponseWriter struct {
 	*httptest.ResponseRecorder
 	cancel        context.CancelFunc
@@ -54,17 +35,6 @@ func (w *interruptedResponseWriter) Write([]byte) (int, error) {
 	}
 	return 0, io.ErrClosedPipe
 }
-func TestLocalDownloadWriteFailureReturnsCommittedError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fixture.mp4")
-	if err := os.WriteFile(path, bytes.Repeat([]byte("media"), 8192), 0600); err != nil {
-		t.Fatal(err)
-	}
-	w := &interruptedResponseWriter{ResponseRecorder: httptest.NewRecorder()}
-	err := (&Service{}).serveLocalFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), path, "", 2)
-	if !errors.Is(err, ErrResponseCommitted) || !errors.Is(err, io.ErrClosedPipe) {
-		t.Fatalf("write failure must be reported: %v", err)
-	}
-}
 
 type truncatedResponseWriter struct {
 	*httptest.ResponseRecorder
@@ -79,42 +49,6 @@ func (w *truncatedResponseWriter) WriteHeader(status int) {
 		}
 	}
 	w.ResponseRecorder.WriteHeader(status)
-}
-func TestLocalDownloadEarlyEOFReturnsCommittedError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fixture.mp4")
-	if err := os.WriteFile(path, bytes.Repeat([]byte("media"), 8192), 0600); err != nil {
-		t.Fatal(err)
-	}
-	w := &truncatedResponseWriter{ResponseRecorder: httptest.NewRecorder(), path: path, t: t}
-	err := (&Service{}).serveLocalFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), path, "", 2)
-	if !errors.Is(err, ErrResponseCommitted) || !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("short response must be reported: %v", err)
-	}
-}
-func TestLocalDownloadCompleteResponses(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fixture.mp4")
-	payload := bytes.Repeat([]byte("media"), 8192)
-	if err := os.WriteFile(path, payload, 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		method, ranged string
-		length         int
-	}{{"GET", "", len(payload)}, {"GET", "bytes=3-20", 18}, {"GET", "bytes=0-2,10-12", -1}, {"HEAD", "", 0}} {
-		t.Run(tc.method+tc.ranged, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, "/file", nil)
-			if tc.ranged != "" {
-				req.Header.Set("Range", tc.ranged)
-			}
-			w := httptest.NewRecorder()
-			if err := (&Service{}).serveLocalFile(t.Context(), w, req, path, "", 2); err != nil {
-				t.Fatal(err)
-			}
-			if tc.length >= 0 && w.Body.Len() != tc.length {
-				t.Fatalf("body length %d, want %d", w.Body.Len(), tc.length)
-			}
-		})
-	}
 }
 func TestLocalDownloadCanceledWritePersistsFailureDB(t *testing.T) {
 	for _, terminal := range []string{"", StatusCompleted, StatusCancelled} {

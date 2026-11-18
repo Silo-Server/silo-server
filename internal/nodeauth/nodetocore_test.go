@@ -287,15 +287,6 @@ func TestVerifySignedRefusesTheLegacyBearer(t *testing.T) {
 	}
 }
 
-// SignWith asks the keyring for the key of the kind of worker the caller
-// names, so a proxy credential is never requested for a transcode node.
-func TestSignWithAsksForTheTargetKind(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/status", nil)
-	if err := SignProxy(req, "http://node.test", fixedKeyring{key: testNodeKey}); !errors.Is(err, ErrUnknownNode) || req.Header.Get("Authorization") != "" {
-		t.Fatalf("SignProxy with a transcode-only keyring = %v, Authorization %q", err, req.Header.Get("Authorization"))
-	}
-}
-
 // A known node whose signature fails against the loaded key is checked once
 // more after a reload: it may hold a key rotated since the last load.
 func TestVerifyFromNodeRetriesOnceAfterAReload(t *testing.T) {

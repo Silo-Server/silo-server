@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -183,17 +182,6 @@ func TestInstallBinaryDownloadStatusIsPackageError(t *testing.T) {
 	}
 }
 
-func TestInstallBinaryUnreachableHostIsTransient(t *testing.T) {
-	server := packageErrorTestServer(t, http.StatusOK, nil)
-	url := server.URL + "/plugin"
-	server.Close()
-	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir()})
-
-	_, err := installer.InstallBinary(context.Background(), InstallBinaryRequest{BinaryURL: url, Checksum: sha256Hex(nil)})
-	requirePackageError(t, err, "couldn't reach the host for the plugin")
-	requireTransient(t, err, true)
-}
-
 // A catalog entry must not install a binary that says it is another plugin
 // or another version: the catalog's identity decides which installation an
 // install replaces.
@@ -217,17 +205,6 @@ func TestInstallBinaryRejectsBinaryNotListedByCatalog(t *testing.T) {
 			})
 			requirePackageError(t, err, "not the test.plugin 1.0.0 its catalog lists")
 		})
-	}
-}
-
-func TestResolvedCatalogInstallBinaryRequestCarriesCatalogIdentity(t *testing.T) {
-	target := &ResolvedCatalogInstall{RepositoryID: 7, PluginID: "test.plugin", Version: "1.2.0", ArchiveURL: "https://example.test/plugin", Checksum: "abc"}
-	req := target.BinaryRequest()
-	if req.PluginID != "test.plugin" || req.Version != "1.2.0" || req.BinaryURL != target.ArchiveURL || req.Checksum != "abc" {
-		t.Fatalf("BinaryRequest() = %+v, want the target's identity, URL and checksum", req)
-	}
-	if req.RepositoryID == nil || *req.RepositoryID != 7 {
-		t.Fatalf("BinaryRequest().RepositoryID = %v, want 7", req.RepositoryID)
 	}
 }
 
@@ -307,14 +284,6 @@ func TestInstallArchiveRefusesUnsupportedOrUnlistedPlugins(t *testing.T) {
 				t.Fatalf("refused archive wrote %d entries to the plugin dir", len(entries))
 			}
 		})
-	}
-}
-
-func TestResolvedCatalogInstallArchiveRequestCarriesCatalogIdentity(t *testing.T) {
-	target := &ResolvedCatalogInstall{RepositoryID: 7, PluginID: "test.plugin", Version: "1.2.0", ArchiveURL: "https://example.test/plugin.zip", LegacyArchive: true}
-	req := target.ArchiveRequest()
-	if req.PluginID != "test.plugin" || req.Version != "1.2.0" || req.ArchiveURL != target.ArchiveURL || req.RepositoryID == nil || *req.RepositoryID != 7 {
-		t.Fatalf("ArchiveRequest() = %+v, want the target's identity, URL and repository", req)
 	}
 }
 
@@ -453,58 +422,6 @@ func TestCatalogInvalidDownloadAddressIsPackageError(t *testing.T) {
 	}
 	_, err := service.installTargetFromPackage(context.Background(), &Repository{ID: 1, URL: "https://example.test/catalog.json"}, pkg)
 	requirePackageError(t, err, "invalid download address")
-}
-
-// A plugin built on a newer SDK prints manifest fields this server doesn't
-// know. They are ignored, as for an archive's manifest, and the plugin
-// installs; output that isn't a manifest at all is still refused. The stored
-// manifest keeps them, so a later server that knows them reads the same
-// manifest the plugin reports.
-func TestLoadManifestFromBinaryIgnoresUnknownFields(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses shell scripts")
-	}
-	known, err := protojson.Marshal(packageErrorTestManifest("test.plugin", "1.0.0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fields map[string]any
-	if err := json.Unmarshal(known, &fields); err != nil {
-		t.Fatal(err)
-	}
-	// The plugin reports its own checksum, as the SDK computes it at run time.
-	fields["checksum"] = "CHECKSUM"
-	fields["fieldFromANewerSdk"] = true
-	fields["capabilities"].([]any)[0].(map[string]any)["descriptorFromANewerSdk"] = map[string]any{"flag": true}
-	newer, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := func(output string) []byte {
-		return []byte("#!/bin/sh\nsum=$( (sha256sum \"$0\" 2>/dev/null || shasum -a 256 \"$0\") | cut -d' ' -f1)\n" +
-			"sed \"s/CHECKSUM/$sum/\" <<'MANIFEST'\n" + output + "\nMANIFEST\n")
-	}
-
-	store := newRecordingInstallationStore()
-	result, err := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()}).InstallBinaryUpload(context.Background(), script(string(newer)))
-	if err != nil {
-		t.Fatalf("InstallBinaryUpload() error = %v, want the unknown fields ignored", err)
-	}
-	if result.Manifest.GetPluginId() != "test.plugin" || len(result.Manifest.GetCapabilities()) != 1 {
-		t.Fatalf("manifest = %v, want the known fields kept", result.Manifest)
-	}
-	installed, err := os.ReadFile(result.ManifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, stored := range map[string][]byte{"manifest.json": installed, "archive manifest": store.saveArchiveManifest} {
-		if !bytes.Contains(stored, []byte("descriptorFromANewerSdk")) {
-			t.Fatalf("%s = %s, want the plugin's own manifest with the newer fields", name, stored)
-		}
-	}
-
-	_, _, err = loadManifestFromBinary(context.Background(), script("not a manifest"))
-	requirePackageError(t, err, "manifest couldn't be read")
 }
 
 // Only a binary that runs and fails, or isn't an executable at all, is

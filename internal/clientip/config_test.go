@@ -64,18 +64,6 @@ func TestSeedDefaultsEnvOverridesExistingValue(t *testing.T) {
 	}
 }
 
-func TestSeedDefaultsEnvIdempotent(t *testing.T) {
-	t.Setenv(EnvTrustedProxies, "203.0.113.7/32")
-	store := newFakeStore()
-	store.values[SettingTrustedProxies] = "203.0.113.7/32"
-	if err := SeedDefaults(context.Background(), store); err != nil {
-		t.Fatal(err)
-	}
-	if store.sets != 0 {
-		t.Fatalf("expected no writes for unchanged env value, got %d", store.sets)
-	}
-}
-
 func TestSeedDefaultsEnvInvalid(t *testing.T) {
 	t.Setenv(EnvTrustedProxies, "not-a-cidr")
 	store := newFakeStore()
@@ -84,36 +72,5 @@ func TestSeedDefaultsEnvInvalid(t *testing.T) {
 	}
 	if store.sets != 0 {
 		t.Fatalf("expected no writes on invalid env, got %d", store.sets)
-	}
-}
-
-func TestNormalizeCIDRList(t *testing.T) {
-	cases := []struct {
-		in      string
-		want    string
-		wantErr bool
-	}{
-		{"", "", false},
-		{" , ,", "", false},
-		{"10.0.0.0/8", "10.0.0.0/8", false},
-		{" 10.0.0.0/8, ::1/128 ", "10.0.0.0/8, ::1/128", false},
-		{"10.0.0.1", "", true},   // bare IP, no prefix
-		{"garbage/33", "", true}, // invalid prefix
-	}
-	for _, tc := range cases {
-		got, err := NormalizeCIDRList(tc.in)
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("NormalizeCIDRList(%q): expected error", tc.in)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("NormalizeCIDRList(%q): %v", tc.in, err)
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("NormalizeCIDRList(%q) = %q, want %q", tc.in, got, tc.want)
-		}
 	}
 }

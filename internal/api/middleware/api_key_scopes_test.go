@@ -319,8 +319,9 @@ func TestAPIKeyMonitorScopeResponsesCarryNoDeploymentDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	denied := map[string]bool{"path": true, "file_path": true, "dir": true, "url": true, "public_url": true, "origin": true, "hostname": true, "storage_key": true, "error": true, "last_stats": true, "download_artifact_dir_override": true}
-	// Fields a handler withholds from scoped keys.
-	withheld := map[string]bool{"AdminDiskStats.path": true, "AdminDownloadPreparation.error": true}
+	// Fields a handler withholds from scoped keys. The catalog listing refuses
+	// file paths to a key without admin:catalog:paths.
+	withheld := map[string]bool{"AdminDiskStats.path": true, "AdminDownloadPreparation.error": true, "AdminCatalogItemVersion.file_path": true}
 
 	var walk func(owner string, schema json.RawMessage, seen map[string]bool, report func(string))
 	walk = func(owner string, schema json.RawMessage, seen map[string]bool, report func(string)) {

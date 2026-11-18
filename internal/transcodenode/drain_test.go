@@ -20,19 +20,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
-
-// The health status values are what nodepool parses into a drain state.
-func TestHealthStatusesMatchNodePoolDrainStates(t *testing.T) {
-	if HealthStatusDraining != string(nodepool.DrainStateDraining) || HealthStatusDrained != string(nodepool.DrainStateDrained) {
-		t.Fatalf("health statuses %q/%q do not match nodepool drain states", HealthStatusDraining, HealthStatusDrained)
-	}
-}
 
 func healthStatusOf(t *testing.T, s *Server) HealthResponse {
 	t.Helper()
@@ -62,22 +54,6 @@ func postStart(t *testing.T, s *Server, sessionID string) *httptest.ResponseReco
 		SessionID: sessionID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
 		TargetCodecAudio: "aac", SegmentDuration: 2,
 	})
-}
-
-func stopSession(t *testing.T, s *Server, sessionID string) {
-	t.Helper()
-	s.mu.RLock()
-	session := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if session != nil {
-		t.Cleanup(func() { _ = session.CloseProcess() })
-	}
-	r := httptest.NewRequest(http.MethodDelete, "/transcode/"+sessionID, nil)
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, signed(t, r))
-	if rr.Code >= 300 {
-		t.Fatalf("stop %s: status %d %s", sessionID, rr.Code, rr.Body.String())
-	}
 }
 
 func signed(t *testing.T, r *http.Request) *http.Request {
@@ -111,38 +87,6 @@ func TestDrainingNodeRefusesNewStartsButReplacesItsOwn(t *testing.T) {
 	}
 	if got := s.activeJobs.Load(); got != 1 {
 		t.Fatalf("active jobs = %d after a replacement, want 1", got)
-	}
-}
-
-// Health keeps answering 200 through a drain and says where the drain is:
-// draining while a session or a request is left, drained once neither is.
-func TestHealthReportsDrainProgress(t *testing.T) {
-	s := newLoopingFFmpegServer(t)
-	if got := healthStatusOf(t, s).Status; got != HealthStatusOK {
-		t.Fatalf("status = %q before a drain, want ok", got)
-	}
-	if rr := postStart(t, s, "watching"); rr.Code != http.StatusAccepted {
-		t.Fatalf("start: %d %s", rr.Code, rr.Body.String())
-	}
-
-	s.BeginShutdownDrain()
-	if health := healthStatusOf(t, s); health.Status != HealthStatusDraining || health.ActiveJobs != 1 {
-		t.Fatalf("health = %q with %d jobs, want draining with 1", health.Status, health.ActiveJobs)
-	}
-
-	stopSession(t, s, "watching")
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
-		t.Fatalf("status = %q with nothing left, want drained", got)
-	}
-
-	// A transfer or extraction in flight is work activeJobs does not count.
-	done := s.trackInFlight()
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDraining {
-		t.Fatalf("status = %q with a request in flight, want draining", got)
-	}
-	done()
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
-		t.Fatalf("status = %q after the request finished, want drained", got)
 	}
 }
 
@@ -299,38 +243,6 @@ func TestDrainingNodeRefusesNewJobs(t *testing.T) {
 	}
 }
 
-// A draining node rebuilds a lost session (a viewer back from a long pause)
-// until it has reported itself drained; from then on whoever read that may
-// stop it, so it rebuilds none.
-func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
-	const sessionID = "sess-drain-1"
-	const transportID = sessionID + "-plan1234-abcd1234"
-	s := newLoopingFFmpegServer(t)
-	coreOf(s).resolve(transportID, resolutionOf(*nativeTransportCard(sessionID, transportID)))
-	s.BeginShutdownDrain()
-
-	session, err := s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
-	if err != nil || session == nil {
-		t.Fatalf("reconstruct while draining = %v, %v; want the session rebuilt", session, err)
-	}
-	_ = session.CloseProcess()
-	// The viewer pauses long enough for the idle reaper to close the job. A
-	// stop would fence the transport instead, and the drain check would never
-	// run.
-	s.reapIdleSessions(0)
-
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
-		t.Fatalf("status = %q, want drained", got)
-	}
-	session, err = s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
-	if err != nil || session != nil {
-		if session != nil {
-			_ = session.CloseProcess()
-		}
-		t.Fatalf("reconstruct after reporting drained = %v, %v; want no session", session, err)
-	}
-}
-
 // A drain request the node read before its announcer was set (its first config
 // load at boot) is announced when the announcer is set, and so is its end.
 func TestDrainReadAtBootIsAnnounced(t *testing.T) {
@@ -395,5 +307,34 @@ func assertChapterFallsBackToLocal(t *testing.T, body []byte) {
 	}
 	if !chapterthumbs.IsInfrastructureRemoteFailure(refusal.Reason) {
 		t.Fatalf("chapter refusal reason %q: the core would record the chapter as failed instead of extracting locally", refusal.Reason)
+	}
+}
+
+func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
+	const sessionID = "sess-drain-1"
+	const transportID = sessionID + "-plan1234-abcd1234"
+	s := newLoopingFFmpegServer(t)
+	coreOf(s).resolve(transportID, resolutionOf(*nativeTransportCard(sessionID, transportID)))
+	s.BeginShutdownDrain()
+
+	session, err := s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
+	if err != nil || session == nil {
+		t.Fatalf("reconstruct while draining = %v, %v; want the session rebuilt", session, err)
+	}
+	_ = session.CloseProcess()
+	// The viewer pauses long enough for the idle reaper to close the job. A
+	// stop would fence the transport instead, and the drain check would never
+	// run.
+	s.reapIdleSessions(0)
+
+	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
+		t.Fatalf("status = %q, want drained", got)
+	}
+	session, err = s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
+	if err != nil || session != nil {
+		if session != nil {
+			_ = session.CloseProcess()
+		}
+		t.Fatalf("reconstruct after reporting drained = %v, %v; want no session", session, err)
 	}
 }

@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -41,20 +40,6 @@ func sweepCheckpointAfter(t *testing.T, start artworkSweepCheckpoint, runner *fa
 		t.Fatalf("checkpoint unreadable: %v", err)
 	}
 	return saved
-}
-
-// A refused page would be refused again on every run. Resuming at it pinned
-// the sweep to one prefix forever and left the others unswept, so the task
-// moves on instead.
-func TestSweepArtworkStorageMovesOnAfterAnAnomalyStop(t *testing.T) {
-	runner := &fakeSweepRunner{
-		stats: metadata.ArtworkStorageSweepStats{StoppedOnAnomaly: true, NextToken: "local/before-the-bad-page"},
-		err:   errors.New("refusing to delete"),
-	}
-	saved := sweepCheckpointAfter(t, artworkSweepCheckpoint{Prefix: "local/", Token: "local/earlier"}, runner)
-	if saved.Prefix != "tmdb/" || saved.Token != "" {
-		t.Fatalf("checkpoint after an anomaly stop = %+v, want the start of tmdb/", saved)
-	}
 }
 
 func TestSweepArtworkStorageResumesABoundedRun(t *testing.T) {

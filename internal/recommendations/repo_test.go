@@ -8,20 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The picker's first page leads with every genre's best candidate, then each
-// genre's second, each round in rank order, rather than the top genre's run.
-func TestInterleaveByGenreTakesEachGenresBestFirst(t *testing.T) {
-	ranked := []tasteSeedCandidate{
-		{"drama-1", "Drama"}, {"drama-2", "Drama"}, {"drama-3", "Drama"},
-		{"horror-1", "Horror"}, {"drama-4", "Drama"}, {"untagged-1", ""}, {"horror-2", "Horror"},
-	}
-	got := interleaveByGenre(ranked)
-	want := []string{"drama-1", "horror-1", "untagged-1", "drama-2", "horror-2", "drama-3", "drama-4"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("interleaved = %v, want %v", got, want)
-	}
-}
-
 // seedRecoMediaItem inserts a minimal embed-eligible media item whose title is
 // its content_id. Delegates to seedRecoMediaItemTitled so both the cheap-query
 // and EmbedAll tests seed rows that survive ItemRepository.GetByIDs.

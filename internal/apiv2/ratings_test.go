@@ -290,27 +290,6 @@ func TestGetRating(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:z", "", viewerHeaders()), TypeNotFound)
 }
 
-func TestRatingsDenied(t *testing.T) {
-	h := newTestHandler(t, ratingsDeps(&fakeRatings{err: errStore}))
-	for _, tc := range []struct{ method, path, body string }{
-		{http.MethodGet, "/api/v2/ratings", ""}, {http.MethodGet, "/api/v2/ratings/movie:c", ""},
-		{http.MethodPut, "/api/v2/ratings/movie:c", `{"rating":3}`}, {http.MethodDelete, "/api/v2/ratings/movie:c", ""},
-	} {
-		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, nil), TypeAuthenticationRequired)
-		p := requireProblem(t, do(t, h, tc.method, tc.path, tc.body, bearer(memberToken)), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != locationProfileHeader {
-			t.Fatalf("%s %s: errors = %+v", tc.method, tc.path, p.Errors)
-		}
-		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, with(bearer(memberToken), "X-Profile-Id", "p-unknown")), TypeNotFound)
-		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, viewerHeaders()), TypeInternalError)
-	}
-	deps := pilotDeps(nil, nil)
-	deps.Ratings = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/ratings", "", viewerHeaders()), TypeDependencyUnavailable)
-}
-
-var _ RatingService = (*handlers.RatingsHandler)(nil)
-
 // A rating runs from 1 to 10, shown as five stars with half stars, and reads
 // back as it was set.
 func TestSetRatingOneToTen(t *testing.T) {

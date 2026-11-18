@@ -22,7 +22,12 @@ import (
 // without a Redis in the test environment.
 func unreachableStreamDeny(t *testing.T) *playback.StreamDeny {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:0", DialTimeout: 50 * time.Millisecond, MaxRetries: -1})
+	client := redis.NewClient(&redis.Options{
+		Addr:          "127.0.0.1:0",
+		DialTimeout:   50 * time.Millisecond,
+		DialerRetries: 1, // The address cannot accept a connection.
+		MaxRetries:    -1,
+	})
 	t.Cleanup(func() { _ = client.Close() })
 	return playback.NewStreamDeny(client)
 }
@@ -58,30 +63,6 @@ func TestStreamDenyRefusesTokenRoutesBeforeServing(t *testing.T) {
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stream/direct/"+live, nil))
 	if rr.Code != http.StatusOK || rr.Body.String() != "0123456789" {
 		t.Fatalf("fail-open live session = %d %q, want 200 with media", rr.Code, rr.Body.String())
-	}
-}
-
-// The grant outlives the session it describes, so /stream/v3 needs the same
-// marker check — with the JSON error shape that route family answers with.
-func TestStreamDenyRefusesGrantRoutes(t *testing.T) {
-	path := writeGrantMedia(t, "0123456789")
-	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{
-		"session-1": {SessionID: "session-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: path},
-	})
-	deny := unreachableStreamDeny(t)
-	srv.SetStreamDeny(deny)
-	deny.Deny(t.Context(), "session-1")
-
-	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "login-1"))
-	if rr.Code != http.StatusGone {
-		t.Fatalf("status = %d, want 410 (body %s)", rr.Code, rr.Body.String())
-	}
-	var body grantErrorResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("error body %q is not the API's error shape: %v", rr.Body.String(), err)
-	}
-	if body.Error != "playback_session_ended" {
-		t.Fatalf("error code = %q, want playback_session_ended", body.Error)
 	}
 }
 
@@ -161,5 +142,27 @@ func TestStreamDenyRefusesEveryTranscodeNodeRelay(t *testing.T) {
 	}
 	if got := nodeHits.Load(); got != served {
 		t.Fatalf("node hits = %d after the deny, want %d: a relay forwarded a denied session", got, served)
+	}
+}
+
+func TestStreamDenyRefusesGrantRoutes(t *testing.T) {
+	path := writeGrantMedia(t, "0123456789")
+	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{
+		"session-1": {SessionID: "session-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: path},
+	})
+	deny := unreachableStreamDeny(t)
+	srv.SetStreamDeny(deny)
+	deny.Deny(t.Context(), "session-1")
+
+	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "login-1"))
+	if rr.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410 (body %s)", rr.Code, rr.Body.String())
+	}
+	var body grantErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body %q is not the API's error shape: %v", rr.Body.String(), err)
+	}
+	if body.Error != "playback_session_ended" {
+		t.Fatalf("error code = %q, want playback_session_ended", body.Error)
 	}
 }

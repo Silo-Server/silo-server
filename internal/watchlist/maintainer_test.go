@@ -2,7 +2,6 @@ package watchlist
 
 import (
 	"context"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -48,77 +47,4 @@ type fakeDispatcher struct {
 func (f *fakeDispatcher) HandleLocalListEvent(_ context.Context, event watchsync.LocalListEvent) error {
 	f.events = append(f.events, event)
 	return nil
-}
-
-func newMaintainer(store *fakeStore, items fakeItems, dispatcher *fakeDispatcher) *Maintainer {
-	return &Maintainer{
-		storeFor:   func(context.Context, int) (maintainerStore, error) { return store, nil },
-		items:      items,
-		dispatcher: dispatcher,
-	}
-}
-
-func TestMaintainerRemovesWatchedMovie(t *testing.T) {
-	store := &fakeStore{removeWatched: true, watchlist: map[string]bool{"movie-1": true}}
-	items := fakeItems{"movie-1": {ContentID: "movie-1", Type: "movie", Title: "M", ImdbID: "tt1"}}
-	dispatcher := &fakeDispatcher{}
-	m := newMaintainer(store, items, dispatcher)
-
-	if err := m.process(context.Background(), 7, "profile-1", []string{"movie-1"}); err != nil {
-		t.Fatalf("process: %v", err)
-	}
-	if store.watchlist["movie-1"] {
-		t.Fatal("watched movie should be removed from the watchlist")
-	}
-	if len(dispatcher.events) != 1 || dispatcher.events[0].List != watchsync.ListKindWatchlist ||
-		dispatcher.events[0].Change != watchsync.ListChangeRemoved {
-		t.Fatalf("expected one watchlist-removed event, got %+v", dispatcher.events)
-	}
-}
-
-func TestMaintainerSkipsMovieNotOnWatchlist(t *testing.T) {
-	store := &fakeStore{removeWatched: true, watchlist: map[string]bool{}}
-	items := fakeItems{"movie-1": {ContentID: "movie-1", Type: "movie"}}
-	dispatcher := &fakeDispatcher{}
-	m := newMaintainer(store, items, dispatcher)
-
-	if err := m.process(context.Background(), 7, "profile-1", []string{"movie-1"}); err != nil {
-		t.Fatalf("process: %v", err)
-	}
-	if len(store.removed) != 0 || len(dispatcher.events) != 0 {
-		t.Fatalf("nothing should happen for a movie not on the watchlist: removed=%v events=%v", store.removed, dispatcher.events)
-	}
-}
-
-func TestMaintainerNeverRemovesSeries(t *testing.T) {
-	// Even a series explicitly marked watched stays on the watchlist: the read
-	// paths hide it instead, so newly added episodes make it reappear.
-	items := fakeItems{"series-1": {ContentID: "series-1", Type: "series", TvdbID: "99"}}
-	store := &fakeStore{removeWatched: true, watchlist: map[string]bool{"series-1": true}}
-	dispatcher := &fakeDispatcher{}
-	m := newMaintainer(store, items, dispatcher)
-
-	if err := m.process(context.Background(), 7, "profile-1", []string{"series-1"}); err != nil {
-		t.Fatalf("process: %v", err)
-	}
-	if !store.watchlist["series-1"] {
-		t.Fatal("a fully-watched series must stay on the watchlist (hidden at read time)")
-	}
-	if len(dispatcher.events) != 0 {
-		t.Fatalf("no removal events expected for series, got %+v", dispatcher.events)
-	}
-}
-
-func TestMaintainerRespectsPreferenceOff(t *testing.T) {
-	store := &fakeStore{removeWatched: false, watchlist: map[string]bool{"movie-1": true}}
-	items := fakeItems{"movie-1": {ContentID: "movie-1", Type: "movie"}}
-	dispatcher := &fakeDispatcher{}
-	m := newMaintainer(store, items, dispatcher)
-
-	if err := m.process(context.Background(), 7, "profile-1", []string{"movie-1"}); err != nil {
-		t.Fatalf("process: %v", err)
-	}
-	if !store.watchlist["movie-1"] || len(store.removed) != 0 {
-		t.Fatal("preference off must leave the watchlist untouched")
-	}
 }

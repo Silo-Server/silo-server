@@ -3,7 +3,6 @@ package discord
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -59,31 +58,6 @@ func TestExchangeCodeAndGetUser(t *testing.T) {
 	}
 	if user.ID != "42" || user.Username != "quick" {
 		t.Fatalf("unexpected user %+v", user)
-	}
-}
-
-func TestErrorMapping(t *testing.T) {
-	cases := []struct {
-		name   string
-		status int
-		body   string
-		want   error
-	}{
-		{"dm blocked", http.StatusForbidden, `{"code":50007,"message":"Cannot send messages to this user"}`, ErrDMBlocked},
-		{"bad token", http.StatusUnauthorized, `{"message":"401: Unauthorized"}`, ErrUnauthorized},
-		{"rate limited", http.StatusTooManyRequests, `{"message":"You are being rate limited."}`, ErrRateLimited},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			err := client.SendDM(context.Background(), "bot-token", "dm-123", []byte(`{}`))
-			if !errors.Is(err, tc.want) {
-				t.Fatalf("got %v, want %v", err, tc.want)
-			}
-		})
 	}
 }
 

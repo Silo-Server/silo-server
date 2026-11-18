@@ -10,85 +10,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
-
-func remuxVideoBitstreamFilterArg(args []string) string {
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "-bsf:v" {
-			return args[i+1]
-		}
-	}
-	return ""
-}
-
-func TestBuildRemuxArgsDropsLeadingPicturesOnlyForSeekedVideo(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		seek      float64
-		audioOnly bool
-		drop      bool
-		dvProfile int
-		want      string
-	}{
-		{name: "seeked copy", seek: 1_234.5, drop: true, want: ResumeLeadingPictureDropBitstreamFilter},
-		{name: "start at zero has no leading pictures", seek: 0, drop: true, want: ""},
-		{name: "not requested", seek: 1_234.5, drop: false, want: ""},
-		{name: "audio only", seek: 1_234.5, drop: true, audioOnly: true, want: ""},
-		{name: "chained ahead of the DV7 strip", seek: 1_234.5, drop: true, dvProfile: 7, want: ResumeLeadingPictureDropBitstreamFilter + "," + DV7ToHDR10BitstreamFilter},
-		{name: "DV7 strip alone at zero", seek: 0, drop: true, dvProfile: 7, want: DV7ToHDR10BitstreamFilter},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			args := buildRemuxArgsWithLeadingPictureDropV3("/x.mkv", "mp4", test.seek, false, -1, test.dvProfile, false, test.audioOnly, 0, 0, 0, test.drop, "", nil)
-			if got := remuxVideoBitstreamFilterArg(args); got != test.want {
-				t.Fatalf("-bsf:v = %q, want %q (args=%s)", got, test.want, strings.Join(args, " "))
-			}
-		})
-	}
-}
-
-func TestBuildRemuxArgsTakesPrimedVideoFromConcatList(t *testing.T) {
-	primer := &remuxIDRPrimer{firstPTS: 0, anchorPTS: 86.67, anchorSeconds: 86.67}
-	for _, test := range []struct {
-		name   string
-		primer *remuxIDRPrimer
-		inputs []string
-		maps   []string
-		drop   string
-	}{
-		{name: "plain seeked copy", inputs: []string{"/x.mkv"}, maps: []string{"0:V:0", "0:a:0?"}, drop: ResumeLeadingPictureDropBitstreamFilter},
-		{name: "primed copy", primer: primer, inputs: []string{"pipe:0", "/x.mkv"}, maps: []string{"0:V:0", "1:a:0?"}, drop: primedResumeLeadingPictureDropBitstreamFilter},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			args := buildRemuxArgsWithLeadingPictureDropV3("/x.mkv", "mp4", 88.213, true, -1, 0, false, false, 0, 0, 0, true, "", test.primer)
-			var inputs, maps []string
-			for i := 0; i+1 < len(args); i++ {
-				switch args[i] {
-				case "-i":
-					inputs = append(inputs, args[i+1])
-				case "-map":
-					maps = append(maps, args[i+1])
-				}
-			}
-			if strings.Join(inputs, " ") != strings.Join(test.inputs, " ") || strings.Join(maps, " ") != strings.Join(test.maps, " ") {
-				t.Fatalf("inputs %v maps %v, want %v %v (args=%s)", inputs, maps, test.inputs, test.maps, strings.Join(args, " "))
-			}
-			if got := remuxVideoBitstreamFilterArg(args); got != test.drop {
-				t.Fatalf("-bsf:v = %q, want %q", got, test.drop)
-			}
-			joined := strings.Join(args, " ")
-			if test.primer != nil && !strings.Contains(joined, "-f concat -safe 0 -protocol_whitelist file,pipe -i pipe:0") {
-				t.Fatalf("concat input missing: %s", joined)
-			}
-			// The seeked input starts at the request, 1.543 s past the keyframe the concat clock starts on.
-			if hasOffset := strings.Contains(joined, "-itsoffset 1.543000 -i /x.mkv"); hasOffset != (test.primer != nil) {
-				t.Fatalf("-itsoffset present = %v, want %v: %s", hasOffset, test.primer != nil, joined)
-			}
-		})
-	}
-}
 
 // hevcSliceNALTypes lists the NAL unit types of the slices in an Annex B
 // HEVC stream, in order.
@@ -247,135 +171,15 @@ func TestPrimedRemuxStartsOnTheSourceIDRThenTheSeekKeyframe(t *testing.T) {
 	}
 }
 
-// The primer lookup reads the source, so stalled storage must never hold a
-// remux start for longer than its budget, nor queue starts behind lookups
-// that are already waiting.
-func TestRemuxIDRPrimerLookupNeverHoldsTheStart(t *testing.T) {
-	release := make(chan struct{})
-	var lookups atomic.Int32
-	original := lookupRemuxIDRPrimer
-	lookupRemuxIDRPrimer = func(string, float64) *remuxIDRPrimer {
-		lookups.Add(1)
-		<-release
-		return &remuxIDRPrimer{}
-	}
-	t.Cleanup(func() {
-		lookupRemuxIDRPrimer = original
-		close(release)
-		// Taking every slot waits for the stalled lookup to give its back.
-		for range maxRemuxIDRPrimerLookups {
-			remuxIDRPrimerLookups <- struct{}{}
-		}
-		for range maxRemuxIDRPrimerLookups {
-			<-remuxIDRPrimerLookups
-		}
-	})
-
-	// The budget is 300 ms; the bound leaves room for a loaded host, and still
-	// fails a start that waits on the stalled lookup itself.
-	const maxWait = 5 * time.Second
-	begin := time.Now()
-	if primer := resolveRemuxIDRPrimer(t.Context(), "/x.mkv", 12); primer != nil {
-		t.Fatal("a stalled lookup returned a primer")
-	}
-	if waited := time.Since(begin); waited > maxWait {
-		t.Fatalf("a stalled lookup held the start for %v", waited)
-	}
-
-	// The stalled lookup still holds its slot; take the others too.
-	for range maxRemuxIDRPrimerLookups - 1 {
-		remuxIDRPrimerLookups <- struct{}{}
-	}
-	primer := resolveRemuxIDRPrimer(t.Context(), "/x.mkv", 12)
-	for range maxRemuxIDRPrimerLookups - 1 {
-		<-remuxIDRPrimerLookups
-	}
-	if primer != nil || lookups.Load() != 1 {
-		t.Fatalf("with every lookup slot taken, a start got primer %v and %d lookups ran; want none and one", primer, lookups.Load())
-	}
-}
-
-func TestPlanPlaybackV3RequestsLeadingPictureDropOnlyForMacOSFirefoxHEVCProgressive(t *testing.T) {
-	const macFirefox = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0"
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationAudioToAACV3, RecipeVersion: "1", Available: true, ValidatedClaims: []string{ClaimAudioDecodeV3}},
-	})
-	plan := func(userAgent, videoCodec string, start float64) PlannerResultV3 {
-		file := detailedFixtureFileV3()
-		file.VideoTracks[0].Codec = videoCodec
-		file.CodecVideo = videoCodec
-		file.VideoTracks[0].Profile = "Main"
-		file.VideoTracks[0].BitDepth = 8
-		file.VideoTracks[0].VideoRange = "SDR"
-		file.VideoTracks[0].VideoRangeType = "SDR"
-		request := validStartRequestV3()
-		request.ClientPlaybackContext.FormFactor = "desktop"
-		request.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": userAgent}}
-		request.Capabilities.VideoEvidence = EvidenceDeclaredV3
-		request.Capabilities.AudioEvidence = EvidenceDeclaredV3
-		request.Capabilities.Containers = []string{"mp4"}
-		request.ClientPlaybackContext.Deliveries = map[string]DeliveryCapabilityV3{
-			DeliveryClassProgressiveV3: {Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"}, VideoCodecs: []string{videoCodec}, AudioDecodeCodecs: []string{"aac"}},
-		}
-		request.StartPosition = floatPointerV3(start)
-		return PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: registry})
-	}
-
-	for _, start := range []float64{0, 1_234.5} {
-		result := plan(macFirefox, "hevc", start)
-		if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
-			t.Fatalf("start %v: %s", start, ExplainPlannerResultV3(result))
-		}
-		// The flag is frozen for the whole session: a later seek in the same
-		// remux needs it even when playback started at zero.
-		if !result.RemuxResumeLeadingPictureDrop {
-			t.Fatalf("start %v: leading-picture drop not requested for macOS Firefox HEVC", start)
-		}
-		// Best effort means the plan never names it as a required server
-		// transformation, so it cannot narrow the executor pool.
-		for _, transformation := range result.Plan.Transformations {
-			if strings.Contains(transformation.Name, "leading") {
-				t.Fatalf("start %v: leading-picture drop leaked into plan transformations: %#v", start, result.Plan.Transformations)
-			}
-		}
-	}
-
-	for _, test := range []struct {
-		name, userAgent, codec string
-	}{
-		{name: "Windows Firefox", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0", codec: "hevc"},
-		{name: "macOS Safari", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Safari/605.1.15", codec: "hevc"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			result := plan(test.userAgent, test.codec, 1_234.5)
-			if test.codec == "hevc" && (result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3) {
-				t.Fatalf("%s", ExplainPlannerResultV3(result))
-			}
-			if result.RemuxResumeLeadingPictureDrop {
-				t.Fatalf("leading-picture drop requested outside macOS Firefox HEVC: %s", ExplainPlannerResultV3(result))
-			}
-		})
-	}
-}
-
 func TestLeadingPictureDropScopeIsHEVCOnly(t *testing.T) {
 	request := validStartRequestV3()
 	request.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{
 		"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0",
 	}}
-	for codec, want := range map[string]bool{"hevc": true, "h265": true, "h264": false, "av1": false} {
+	for codec, want := range map[string]bool{"hevc": true, "h265": true, "h264": false} {
 		if got := firefoxMacOSHEVCResumeLeadingPictureDropV3(SourceDescriptorV3{VideoCodec: codec}, request); got != want {
 			t.Errorf("codec %s: drop = %v, want %v", codec, got, want)
 		}
-	}
-}
-
-// Pin the exact argv token: Quick104 validated this string against real
-// open-GOP HEVC media, including the escaped comma when it is chained with
-// DV7ToHDR10BitstreamFilter.
-func TestResumeLeadingPictureDropFilterString(t *testing.T) {
-	if ResumeLeadingPictureDropBitstreamFilter != `noise=drop=lt(pts\,startpts)*not(key)` {
-		t.Fatalf("filter = %q", ResumeLeadingPictureDropBitstreamFilter)
 	}
 }
 

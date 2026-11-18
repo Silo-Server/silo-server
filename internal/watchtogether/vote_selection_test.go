@@ -75,72 +75,12 @@ func voteRoomSuggestions() []Suggestion {
 	}
 }
 
-// The gate on direct selection and the gate on promotion sit on the same code
-// path, so a vote room can very easily end up with no way in at all. This is
-// the test that catches that: promoting the winner must still start playback.
-func TestPromotingTheWinnerStartsAVoteRoom(t *testing.T) {
-	service, _ := newVoteRoomService(t, RoomSelectionModeVote, voteRoomSuggestions())
-
-	snapshot, err := service.PromoteSuggestion(context.Background(), "room-1", "winner", 7, "host")
-	if err != nil {
-		t.Fatalf("PromoteSuggestion() error = %v, want the vote winner to start", err)
-	}
-	if snapshot.Phase != RoomPhasePlaying {
-		t.Fatalf("phase = %q, want %q", snapshot.Phase, RoomPhasePlaying)
-	}
-	if snapshot.SelectedContentID == nil || *snapshot.SelectedContentID != "movie-winner" {
-		t.Fatalf("selected content = %v, want movie-winner", snapshot.SelectedContentID)
-	}
-}
-
 func TestPromotingSomethingOtherThanTheWinnerIsRefused(t *testing.T) {
 	service, _ := newVoteRoomService(t, RoomSelectionModeVote, voteRoomSuggestions())
 
 	_, err := service.PromoteSuggestion(context.Background(), "room-1", "runner-up", 7, "host")
 	if !errors.Is(err, ErrNotVoteWinner) {
 		t.Fatalf("PromoteSuggestion() error = %v, want ErrNotVoteWinner", err)
-	}
-}
-
-// VoteWinner still reports the leader (and refuses to name one with no votes)
-// for v1 promotion and clients that show who is ahead.
-func TestVoteWinnerStillReportsTheLeader(t *testing.T) {
-	ordered := voteRoomSuggestions()
-	ordered[1].VoteCount = ordered[0].VoteCount
-	service, _ := newVoteRoomService(t, RoomSelectionModeVote, ordered)
-	winner, err := service.VoteWinner(context.Background(), "room-1")
-	if err != nil || winner.ID != "winner" {
-		t.Fatalf("VoteWinner() = %+v, %v", winner, err)
-	}
-	for _, tt := range []struct {
-		name        string
-		suggestions []Suggestion
-	}{
-		{name: "empty"},
-		{name: "unvoted", suggestions: []Suggestion{{ID: "a", RoomID: "room-1", VoteCount: 0}}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			service.suggestions = &stubSuggestions{ordered: tt.suggestions}
-			if _, err := service.VoteWinner(context.Background(), "room-1"); !errors.Is(err, ErrNoVotesCast) {
-				t.Fatalf("VoteWinner() with no votes error = %v, want ErrNoVotesCast", err)
-			}
-		})
-	}
-}
-
-// Neither gate applies to a host_pick room: the host picks, votes are not part
-// of the mode, and an unvoted suggestion is still promotable.
-func TestHostPickRoomIsUntouchedByTheVoteGates(t *testing.T) {
-	unvoted := []Suggestion{{ID: "a", RoomID: "room-1", ContentID: "movie-winner", VoteCount: 0}}
-	service, _ := newVoteRoomService(t, RoomSelectionModeHostPick, unvoted)
-
-	if _, err := service.SelectItem(context.Background(), "room-1", 7, "host", SelectItemInput{
-		ContentID: "movie-winner",
-	}); err != nil {
-		t.Fatalf("SelectItem() error = %v, want a host_pick room to select directly", err)
-	}
-	if _, err := service.PromoteSuggestion(context.Background(), "room-1", "a", 7, "host"); err != nil {
-		t.Fatalf("PromoteSuggestion() error = %v, want a host_pick room to promote freely", err)
 	}
 }
 

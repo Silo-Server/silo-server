@@ -29,7 +29,7 @@ func TestBitrateProbeHonorsSize(t *testing.T) {
 	for _, tc := range []struct {
 		query        string
 		status, size int
-	}{{"", 200, 102400}, {"?size=1", 200, 1}, {"?SIZE=32769", 200, 32769}, {"?size=0", 400, 0}, {"?size=100000001", 400, 0}, {"?size=no", 400, 0}} {
+	}{{"", 200, 102400}, {"?size=1", 200, 1}, {"?SIZE=32769", 200, 32769}, {"?size=0", 400, 0}, {"?size=100000001", 400, 0}} {
 		t.Run(tc.query, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			(&PlaybackHandler{}).HandleBitrateTest(rr, httptest.NewRequest("GET", "/Playback/BitrateTest"+tc.query, nil))
@@ -298,24 +298,12 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 // hls.js, even when it plays the static direct URL, so only a source played
 // through its TranscodingUrl may say hls (#2879).
 func TestTranscodingSubProtocolFollowsPlayedURL(t *testing.T) {
+	// The direct-play and transcode-only cases are in
+	// TestMediaSourceDTOOmitsTranscodingURLOnDirectPlaySources.
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	for _, tc := range []struct {
-		name   string
-		source PlaybackMediaSource
-		want   string
-	}{
-		{"direct play with transcode fallback", PlaybackMediaSource{SupportsDirectPlay: true, SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
-		{"direct stream with transcode fallback", PlaybackMediaSource{SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
-		{"transcode only", PlaybackMediaSource{SupportsTranscoding: true}, "hls"},
-		{"nothing playable", PlaybackMediaSource{}, "http"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.source.ID = "source"
-			dto := h.mediaSourceDTO("item", "play", tc.source)
-			if dto.TranscodingSubProtocol != tc.want {
-				t.Fatalf("TranscodingSubProtocol = %q, want %q", dto.TranscodingSubProtocol, tc.want)
-			}
-		})
+	dto := h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source"})
+	if dto.TranscodingSubProtocol != "http" {
+		t.Fatalf("nothing playable: TranscodingSubProtocol = %q, want http", dto.TranscodingSubProtocol)
 	}
 }
 

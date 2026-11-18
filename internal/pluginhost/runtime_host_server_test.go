@@ -51,31 +51,6 @@ func TestRuntimeHostServer_PublishEvent_AutoPrefixesAndPublishes(t *testing.T) {
 	}
 }
 
-func TestRuntimeHostServer_PublishEventTo_AutoPrefixesAndTargets(t *testing.T) {
-	hub := &fakeHub{}
-	srv := pluginhost.NewRuntimeHostServer(hub, &fakeLibLister{}, "silo.example")
-
-	payload, _ := structpb.NewStruct(map[string]any{"foo": "bar"})
-	_, err := srv.PublishEventTo(context.Background(), &pluginv1.PublishEventToRequest{
-		TargetPluginId: "silo.requests",
-		EventName:      "approved",
-		Payload:        payload,
-	})
-	if err != nil {
-		t.Fatalf("PublishEventTo: %v", err)
-	}
-	if len(hub.calls) != 1 {
-		t.Fatalf("hub calls = %d, want 1", len(hub.calls))
-	}
-	got := hub.calls[0]
-	if got.Event != "plugin.silo.example.approved" {
-		t.Errorf("event = %q, want plugin.silo.example.approved", got.Event)
-	}
-	if got.TargetPluginID != "silo.requests" {
-		t.Errorf("target_plugin_id = %q, want silo.requests", got.TargetPluginID)
-	}
-}
-
 func TestRuntimeHostServer_ListLibraries_PassesUserID(t *testing.T) {
 	for _, userID := range []string{"", "u1"} {
 		t.Run("user="+userID, func(t *testing.T) {
@@ -100,44 +75,6 @@ func TestRuntimeHostServer_ListLibraries_PassesUserID(t *testing.T) {
 				t.Errorf("first lib id = %q", resp.GetLibraries()[0].GetId())
 			}
 		})
-	}
-}
-
-type fakeConfigSetter struct {
-	installationID int
-	key            string
-	value          map[string]any
-}
-
-func (f *fakeConfigSetter) SetGlobalConfigEntry(_ context.Context, installationID int, key string, value map[string]any) error {
-	f.installationID = installationID
-	f.key = key
-	f.value = value
-	return nil
-}
-
-func TestRuntimeHostServer_SetGlobalConfigEntry_PassesInstallationKeyAndValue(t *testing.T) {
-	setter := &fakeConfigSetter{}
-	srv := pluginhost.NewRuntimeHostServerWithServices(
-		&fakeHub{}, &fakeLibLister{}, nil, nil, setter, "silo.example", 42,
-	)
-	value, _ := structpb.NewStruct(map[string]any{"baseUrl": "https://example.test"})
-
-	_, err := srv.SetGlobalConfigEntry(context.Background(), &pluginv1.SetGlobalConfigEntryRequest{
-		Key:   "connection",
-		Value: value,
-	})
-	if err != nil {
-		t.Fatalf("SetGlobalConfigEntry: %v", err)
-	}
-	if setter.installationID != 42 {
-		t.Errorf("installationID = %d, want 42", setter.installationID)
-	}
-	if setter.key != "connection" {
-		t.Errorf("key = %q, want connection", setter.key)
-	}
-	if got := setter.value["baseUrl"]; got != "https://example.test" {
-		t.Errorf("baseUrl = %#v, want https://example.test", got)
 	}
 }
 

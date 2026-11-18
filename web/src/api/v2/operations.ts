@@ -586,6 +586,7 @@ export const v2Operations = {
   "HEAD /api/v2/downloads/{id}/file-proxy": "headDownloadFileViaProxy",
   "HEAD /api/v2/ebooks/{content_id}/files/{file_id}/read": "headEbookFile",
   "HEAD /api/v2/overlay-images/{ref}": "headOverlayImage",
+  "HEAD /api/v2/playback/transcode/{session_id}/master.m3u8": "headPlaybackManifest",
   "HEAD /api/v2/stream/{session_id}": "headPlaybackMedia",
   "HEAD /api/v2/stream/{session_id}/subtitles/{track}": "headPlaybackSubtitle",
   "PATCH /api/v2/admin/ai/providers/{id}": "updateAdminAIProvider",

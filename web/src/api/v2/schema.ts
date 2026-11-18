@@ -10832,7 +10832,7 @@ export interface paths {
     post?: never;
     delete?: never;
     options?: never;
-    head?: never;
+    head: operations["headPlaybackManifest"];
     patch?: never;
     trace?: never;
   };
@@ -15712,6 +15712,8 @@ export interface components {
       allowed: boolean;
       /** @description catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators */
       item_change_events: boolean;
+      /** @description listAdminCatalogItems accepts include_file_paths from this caller: a login session, an unscoped key, or a key holding admin:catalog:paths */
+      item_file_paths: boolean;
       /** @description listAdminCatalogItems is served */
       item_listing: boolean;
       /**
@@ -15885,6 +15887,11 @@ export interface components {
        * @example 120
        */
       file_id: string;
+      /**
+       * @description The file's path as the scanning server stores it, only with include_file_paths. Map it to another host's mounts through the library's paths. Bytes of a name that are not UTF-8 are stored as private-use code points
+       * @example /media/movies/Heat (1995)/Heat.mkv
+       */
+      file_path?: string;
       /**
        * Format: int64
        * @description Bytes
@@ -20857,6 +20864,12 @@ export interface components {
       embeddings: components["schemas"]["AdminRecommendationJobStatus"];
       /** @description Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not. */
       lock_conflict: string;
+      /** @description Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty. */
+      lock_conflict_args?: {
+        [key: string]: string;
+      };
+      /** @description Translation catalog key of lock_conflict, which clients show in a non-English interface. Absent when lock_conflict is empty. */
+      lock_conflict_key?: string;
       recommendations: components["schemas"]["AdminRecommendationJobStatus"];
       /** @description The stale profile sweep, which rebuilds profiles after their signals or access change. */
       stale_sweep: components["schemas"]["AdminRecommendationStaleSweep"];
@@ -21742,6 +21755,20 @@ export interface components {
     };
     AdminSettingsCheckResult: {
       message: string;
+      /**
+       * @description Values of the message_key message's placeholders by name; present only with message_key, and absent when the message has none
+       * @example {
+       *       "dimensions": "1024"
+       *     }
+       */
+      message_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is message. A client that has the key shows its translation, filling message_args, and otherwise shows message. Absent when message has no catalog entry
+       * @example web.admin.common.connectionCheck.result.redisConnected
+       */
+      message_key?: string;
       success: boolean;
     };
     AdminSettingsUpdateInputBody: {
@@ -47896,6 +47923,8 @@ export interface operations {
         content_ids?: string[];
         /** @description Opaque cursor from page.next_cursor; valid only with the filters that produced it */
         cursor?: string;
+        /** @description Also return each version's file_path. Send it only when getAdminCatalogCapabilities reports item_file_paths; a key whose scopes lack admin:catalog:paths receives 403 */
+        include_file_paths?: boolean;
         /** @description Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata */
         include_people?: boolean;
         /** @description Only items present in this library; added_at and added_after then use the item's first-seen time in this library */
@@ -132495,6 +132524,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -132888,6 +132926,132 @@ export interface operations {
         content: {
           "application/vnd.apple.mpegurl": string;
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  headPlaybackManifest: {
+    parameters: {
+      query?: {
+        /** @description Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist. */
+        silo_rendition?: "video" | "subtitles";
+        /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
+        silo_track?: string;
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
+        st?: string;
+        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
+        token?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Playback bytes or HEAD metadata */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: number;
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {

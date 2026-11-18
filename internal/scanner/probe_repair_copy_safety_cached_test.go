@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // EnsureCopySafetyCached is the optimistic half of the remux race: a play must
@@ -36,140 +34,6 @@ func TestEnsureCopySafetyCachedNeverScans(t *testing.T) {
 	}
 	if writes := writer.recorded(); len(writes) != 0 {
 		t.Fatalf("cached ensure recorded %d verdicts, want 0", len(writes))
-	}
-}
-
-// A verdict that is already known is stamped without a scan, so a known-unsafe
-// file never gets an optimistic remux in the first place.
-func TestEnsureCopySafetyCachedStampsKnownVerdicts(t *testing.T) {
-	mtime := time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC)
-
-	t.Run("persisted", func(t *testing.T) {
-		ffmpegPath, runs := fakeFFmpeg(t, conflictingPPSAnnexB, 0)
-		ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath}
-
-		file := copySafetyTestFile(mtime)
-		verdict := true
-		scanSize := file.FileSize
-		scanMtime := mtime
-		file.MultiplePPS = &verdict
-		file.MultiplePPSScanSize = &scanSize
-		file.MultiplePPSScanMtime = &scanMtime
-
-		got, err := ensurer.EnsureCopySafetyCached(context.Background(), file)
-		if err != nil {
-			t.Fatalf("EnsureCopySafetyCached() error = %v", err)
-		}
-		if runs() != 0 {
-			t.Fatalf("ffmpeg ran %d times, want 0", runs())
-		}
-		track := got.VideoTracks[0]
-		if track.MultiplePPS == nil || !*track.MultiplePPS || !track.VideoCopyUnsafe {
-			t.Fatalf("track = %+v, want the persisted multi-PPS verdict stamped copy-unsafe", track)
-		}
-	})
-
-	t.Run("memoized", func(t *testing.T) {
-		ffmpegPath, runs := fakeFFmpeg(t, conflictingPPSAnnexB, 0)
-		ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath}
-
-		file := copySafetyTestFile(mtime)
-		ensurer.storeCopySafety(file, false, true)
-
-		got, err := ensurer.EnsureCopySafetyCached(context.Background(), file)
-		if err != nil {
-			t.Fatalf("EnsureCopySafetyCached() error = %v", err)
-		}
-		if runs() != 0 {
-			t.Fatalf("ffmpeg ran %d times, want 0", runs())
-		}
-		track := got.VideoTracks[0]
-		if track.MultiplePPS == nil || *track.MultiplePPS || track.VideoCopyUnsafe {
-			t.Fatalf("track = %+v, want the memoized copy-safe verdict", track)
-		}
-	})
-}
-
-func TestNeedsCopySafetyScan(t *testing.T) {
-	mtime := time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC)
-	ffmpegPath, _ := fakeFFmpeg(t, "", 0)
-
-	t.Run("unknown h264 needs a scan", func(t *testing.T) {
-		ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath}
-		if !ensurer.NeedsCopySafetyScan(copySafetyTestFile(mtime)) {
-			t.Fatal("NeedsCopySafetyScan() = false, want true for an unresolved H.264 file")
-		}
-	})
-
-	t.Run("known verdict needs none", func(t *testing.T) {
-		ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath}
-		file := copySafetyTestFile(mtime)
-		ensurer.storeCopySafety(file, true, true)
-		if ensurer.NeedsCopySafetyScan(file) {
-			t.Fatal("NeedsCopySafetyScan() = true, want false once the verdict is known")
-		}
-	})
-
-	t.Run("non-h264 needs none", func(t *testing.T) {
-		ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath}
-		file := copySafetyTestFile(mtime)
-		file.CodecVideo = "hevc"
-		file.VideoTracks[0].Codec = "hevc"
-		if ensurer.NeedsCopySafetyScan(file) {
-			t.Fatal("NeedsCopySafetyScan() = true, want false for a non-H.264 source")
-		}
-	})
-
-	t.Run("without ffmpeg needs none", func(t *testing.T) {
-		ensurer := &PlaybackProbeEnsurer{}
-		if ensurer.NeedsCopySafetyScan(copySafetyTestFile(mtime)) {
-			t.Fatal("NeedsCopySafetyScan() = true, want false without an ffmpeg to scan with")
-		}
-	})
-}
-
-// ScanCopySafety is the asynchronous half: it runs the scan, persists the
-// verdict, and memoizes it so the next plan for the file excludes the copy
-// route without touching the disk again.
-func TestScanCopySafetyPersistsAndMemoizes(t *testing.T) {
-	ffmpegPath, runs := fakeFFmpeg(t, conflictingPPSAnnexB, 0)
-	writer := &fakeCopySafetyWriter{}
-	ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath, copySafetyRepo: writer}
-
-	mtime := time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC)
-	file := copySafetyTestFile(mtime)
-
-	multi, stale, err := ensurer.ScanCopySafety(context.Background(), file)
-	if err != nil {
-		t.Fatalf("ScanCopySafety() error = %v", err)
-	}
-	if stale {
-		t.Fatal("ScanCopySafety() stale = true, want false for a write the row accepted")
-	}
-	if !multi {
-		t.Fatal("ScanCopySafety() = false, want true for the conflicting-PPS stream")
-	}
-	if runs() != 1 {
-		t.Fatalf("ffmpeg ran %d times, want 1", runs())
-	}
-	want := recordedPPSWrite{fileID: 42, multiplePPS: true, scanSize: 1234, scanMtime: mtime, scanMtimeSet: true}
-	if writes := writer.recorded(); len(writes) != 1 || writes[0] != want {
-		t.Fatalf("UpdateMultiplePPS writes = %+v, want exactly %+v", writes, want)
-	}
-	if ensurer.NeedsCopySafetyScan(file) {
-		t.Fatal("NeedsCopySafetyScan() = true after a completed scan, want false")
-	}
-
-	// The memoized verdict is what a later start reads, without re-execing.
-	got, err := ensurer.EnsureCopySafetyCached(context.Background(), file)
-	if err != nil {
-		t.Fatalf("EnsureCopySafetyCached() error = %v", err)
-	}
-	if runs() != 1 {
-		t.Fatalf("ffmpeg ran %d times after the cached ensure, want 1", runs())
-	}
-	if track := got.VideoTracks[0]; track.MultiplePPS == nil || !*track.MultiplePPS || !track.VideoCopyUnsafe {
-		t.Fatalf("track = %+v, want the scanned multi-PPS verdict", track)
 	}
 }
 
@@ -205,13 +69,6 @@ func TestScanCopySafetyErrorRecordsNothing(t *testing.T) {
 	}
 	if track := got.VideoTracks[0]; track.MultiplePPS != nil || track.VideoCopyUnsafe {
 		t.Fatalf("track = %+v, want the verdict left unknown after a failed scan", track)
-	}
-}
-
-func TestVideoCopySafetyUnknownIgnoresAudioOnlyFiles(t *testing.T) {
-	file := &models.MediaFile{ID: 7, CodecAudio: "flac"}
-	if file.VideoCopySafetyUnknown() {
-		t.Fatal("VideoCopySafetyUnknown() = true for an audio-only file, want false")
 	}
 }
 

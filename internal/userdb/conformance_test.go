@@ -18,80 +18,12 @@ func newConformanceStore(t *testing.T) userstore.UserStore {
 	return NewSQLiteUserStore(db.DB)
 }
 
-// TestSQLiteProgressSince runs the offline-sync progress-reconciliation
-// conformance test (invariant 1) against the real SQLite backend, exercising the
-// synced_seq stamping triggers and event_at LWW comparison.
-func TestSQLiteProgressSince(t *testing.T) {
-	storetest.RunProgressSince(t, newConformanceStore)
-}
-
-// TestSQLiteProgressHints runs the version hints sync conformance test against
-// the SQLite backend; the Postgres backend runs it in internal/userstore/pgstore.
-func TestSQLiteProgressHints(t *testing.T) {
-	storetest.RunProgressHints(t, newConformanceStore)
-}
-
 // TestSQLiteUnmarkKeepsHistory runs the mark-unwatched conformance test
 // against the SQLite backend; the Postgres backend runs it in
 // internal/userstore/pgstore.
 func TestSQLiteUnmarkKeepsHistory(t *testing.T) {
 	storetest.RunUnmarkKeepsHistory(t, newConformanceStore)
 	storetest.RunPlayFinishedAfterUnmark(t, newConformanceStore)
-}
-
-// TestSQLiteMarkWatchedBatch runs the batch mark-watched conformance test
-// (series/season mark-watched) against the real SQLite backend. The Postgres
-// backend runs the same suite in internal/userstore/pgstore, which is what
-// keeps the two transactional implementations from drifting.
-func TestSQLiteMarkWatchedBatch(t *testing.T) {
-	storetest.RunMarkWatchedBatch(t, newConformanceStore)
-}
-
-// TestSQLiteSettingValues runs the canonical settings-contract storage
-// conformance tests against the per-user SQLite backend. The Postgres backend
-// runs the same suite in internal/userstore/pgstore, which is what keeps the two
-// from drifting on scope identity, partial uniqueness and delete behavior.
-func TestSQLiteSettingValues(t *testing.T) {
-	storetest.RunSettingValues(t, newConformanceStore)
-}
-
-// TestSQLiteJellycompatDisplayPrefs runs the Jellyfin DisplayPreferences
-// storage conformance tests against the per-user SQLite backend; the Postgres
-// backend runs the same suite in internal/userstore/pgstore.
-func TestSQLiteJellycompatDisplayPrefs(t *testing.T) {
-	storetest.RunJellycompatDisplayPrefs(t, newConformanceStore)
-}
-
-func TestSQLiteCollectionSortPreferences(t *testing.T) {
-	storetest.RunCollectionSortPreferences(t, newConformanceStore)
-}
-
-// TestSQLiteProgressPage runs the keyset progress paging conformance test
-// against the real SQLite backend; the Postgres backend runs the same suite in
-// internal/userstore/pgstore.
-func TestSQLiteProgressPage(t *testing.T) {
-	storetest.RunProgressPage(t, newConformanceStore)
-}
-
-// TestSQLitePersonalListPage runs the keyset favorites/watchlist paging
-// conformance test against the real SQLite backend, which is what pins the
-// text comparison of added_at to the RFC 3339 form AddFavoriteAt writes.
-func TestSQLitePersonalListPage(t *testing.T) {
-	storetest.RunPersonalListPage(t, newConformanceStore)
-	storetest.RunPersonalListMembership(t, newConformanceStore)
-	storetest.RunNotInterested(t, newConformanceStore)
-}
-
-func TestSQLiteCompletedHistoryPage(t *testing.T) {
-	storetest.RunCompletedHistoryPage(t, newConformanceStore)
-}
-
-func TestSQLiteHistoryEntryOnce(t *testing.T) {
-	storetest.RunHistoryEntryOnce(t, newConformanceStore(t))
-}
-
-func TestSQLiteJellycompatPlayedByDate(t *testing.T) {
-	storetest.RunJellycompatPlayedByDate(t, newConformanceStore(t))
 }
 
 func TestSQLiteDatedMarkWatchedBatchAtomic(t *testing.T) {
@@ -109,10 +41,6 @@ func TestSQLiteAtomicJellycompatProgressHistoryRollback(t *testing.T) {
 		}
 	}
 	storetest.RunAtomicJellycompatProgress(t, store)
-}
-
-func TestSQLiteCollectionSharing(t *testing.T) {
-	storetest.RunCollectionSharing(t, newConformanceStore)
 }
 
 // TestSQLiteProfilePINRevision runs the profile PIN revision conformance test

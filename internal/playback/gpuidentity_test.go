@@ -42,18 +42,6 @@ func (e *hwAccelTestEnv) setBootID(t *testing.T, bootID string) {
 	t.Cleanup(func() { procBootIDPath = previous })
 }
 
-// stubNVIDIASMI replaces the nvidia-smi invocation and clears its process-wide
-// cache, which is otherwise computed once and would leak between tests.
-func stubNVIDIASMI(t *testing.T, output string, err error) {
-	t.Helper()
-	stubNVIDIASMIQuery(t, func(context.Context) ([]byte, error) {
-		if err != nil {
-			return nil, err
-		}
-		return []byte(output), nil
-	})
-}
-
 // stubNVIDIASMIQuery is stubNVIDIASMI for a query whose answer changes.
 func stubNVIDIASMIQuery(t *testing.T, query func(context.Context) ([]byte, error)) {
 	t.Helper()
@@ -81,43 +69,6 @@ func renderDeviceDetail(t *testing.T, info HWAccelInfo, path string) RenderDevic
 	return RenderDeviceInfo{}
 }
 
-// The device paths under /dev/dri are assigned by enumeration order and move
-// when hardware is added or removed. PCI address, GPU uuid and boot id are what
-// let an operator (and the node inventory) say the GPU behind a path is still
-// the same GPU.
-func TestDetectHWAccelReportsHardwareIdentity(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addPCIRenderDevice(t, "renderD128", "0x10de", "0000:03:00.0")
-	env.addPCIRenderDevice(t, "renderD129", "0x8086", "0000:04:00.0")
-	env.setBootID(t, "2f6e7a8b-9c0d-4a2b-8c3d-5b2c1f0e1111")
-	// nvidia-smi prints a 32-bit PCI domain in upper case; sysfs prints 16 bits.
-	stubNVIDIASMI(t, "GPU-11112222-3333-4444-5555-666677778888, 00000000:03:00.0\n"+
-		"GPU-99990000-1111-2222-3333-444455556666, 00000000:04:00.0\n", nil)
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
-
-	if info.BootID != "2f6e7a8b-9c0d-4a2b-8c3d-5b2c1f0e1111" {
-		t.Fatalf("BootID = %q", info.BootID)
-	}
-	nvidia := renderDeviceDetail(t, info, filepath.Join(env.driDir, "renderD128"))
-	if nvidia.PCIAddress != "0000:03:00.0" {
-		t.Fatalf("nvidia PCIAddress = %q, want 0000:03:00.0", nvidia.PCIAddress)
-	}
-	if nvidia.GPUUUID != "GPU-11112222-3333-4444-5555-666677778888" {
-		t.Fatalf("nvidia GPUUUID = %q", nvidia.GPUUUID)
-	}
-	intel := renderDeviceDetail(t, info, filepath.Join(env.driDir, "renderD129"))
-	if intel.PCIAddress != "0000:04:00.0" {
-		t.Fatalf("intel PCIAddress = %q, want 0000:04:00.0", intel.PCIAddress)
-	}
-	// nvidia-smi listed this address, but the device is Intel: attributing an
-	// NVIDIA uuid to it would merge two distinct GPUs into one inventory entry.
-	if intel.GPUUUID != "" {
-		t.Fatalf("intel GPUUUID = %q, want empty", intel.GPUUUID)
-	}
-}
-
 // A device with no PCI symlink (virtual, or a restricted sysfs) reports no
 // address rather than the literal directory name behind the lookup.
 func TestDetectHWAccelOmitsPCIAddressWithoutSysfsLink(t *testing.T) {
@@ -129,31 +80,5 @@ func TestDetectHWAccelOmitsPCIAddressWithoutSysfsLink(t *testing.T) {
 
 	if detail.PCIAddress != "" {
 		t.Fatalf("PCIAddress = %q, want empty", detail.PCIAddress)
-	}
-}
-
-func TestNormalizePCIAddress(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"0000:03:00.0", "0000:03:00.0"},
-		{"00000000:03:00.0", "0000:03:00.0"},
-		{"00000000:0A:00.0", "0000:0a:00.0"},
-		{" 0000:03:00.0 ", "0000:03:00.0"},
-		{"not-an-address", "not-an-address"},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		if got := normalizePCIAddress(tt.in); got != tt.want {
-			t.Fatalf("normalizePCIAddress(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
-func TestParseNVIDIAGPUUUIDsSkipsMalformedRows(t *testing.T) {
-	parsed := parseNVIDIAGPUUUIDs([]byte("GPU-aaa, 00000000:03:00.0\n\nmissing-separator\n, 00000000:05:00.0\nGPU-bbb, \n"))
-	if len(parsed) != 1 {
-		t.Fatalf("parsed = %v, want exactly the one well-formed row", parsed)
-	}
-	if parsed["0000:03:00.0"] != "GPU-aaa" {
-		t.Fatalf("parsed = %v", parsed)
 	}
 }

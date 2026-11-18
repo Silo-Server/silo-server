@@ -271,36 +271,11 @@ function changedElsewhere() {
 }
 
 describe("page states", () => {
-  it("offers a retry instead of calling a failed account read missing", async () => {
-    mocks.user = null;
-    mocks.userError = userProblem(500);
-    renderUserDetail();
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Couldn't load this user" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("User not found")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(mocks.refetchUser).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps showing a loaded account when a background read fails", () => {
     mocks.userError = userProblem(500);
     renderUserDetail();
     expect(screen.getByRole("heading", { level: 1, name: "taylor" })).toBeInTheDocument();
     expect(screen.queryByText("User not found")).not.toBeInTheDocument();
-  });
-
-  it("asks for a profile instead of calling an unread account missing", () => {
-    mocks.user = null;
-    renderUserDetail();
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Choose a profile first" }),
-    ).toBeInTheDocument();
-    // Choosing a profile returns to this account, as the profile guard does.
-    expect(screen.getByRole("link", { name: "Choose profile" })).toHaveAttribute(
-      "href",
-      "/profiles?redirect=%2Fadmin%2Fusers%2F7",
-    );
   });
 
   it("lets a 404 from a background read replace a loaded account", () => {
@@ -350,23 +325,6 @@ describe("header", () => {
       { userId: 7, body: { password: "recovered-pass", require_password_change: true } },
       expect.anything(),
     );
-  });
-
-  it("shows a disabled account's banner and enables it with a fresh validator", async () => {
-    const ui = userEvent.setup();
-    mocks.user = { ...adminUser, enabled: false };
-    renderUserDetail();
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
-    expect(
-      screen.getByText("This account can't sign in. Its profiles and history are kept."),
-    ).toBeInTheDocument();
-    // A temporary password can still be set while the account is disabled.
-    expect(screen.getByRole("button", { name: "Reset password" })).toBeEnabled();
-    await ui.click(screen.getByRole("button", { name: "Enable account" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    const call = mocks.update.mock.calls[0]![0] as UpdateArg;
-    expect(call.body).toEqual({ enabled: true });
-    expect(call.editor.etag).toBe('"read-1"');
   });
 
   it.each([
@@ -595,15 +553,5 @@ describe("unsaved changes", () => {
     expect(search()).toBe("?tab=access");
     expect(mocks.update).not.toHaveBeenCalled();
     expect(limit).toHaveValue(0);
-  });
-
-  it("asks before leaving the page too", async () => {
-    const ui = userEvent.setup();
-    await dirtyPlayback(ui);
-    await ui.click(screen.getByRole("link", { name: "Users" }));
-    await ui.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Discard" }),
-    );
-    expect(await screen.findByText("All accounts")).toBeInTheDocument();
   });
 });

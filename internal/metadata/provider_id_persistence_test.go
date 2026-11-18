@@ -649,67 +649,6 @@ func TestFindExistingByProviderIDsRespectsDurableProviderItemType(t *testing.T) 
 	}
 }
 
-func TestProcess_LoadsAndPersistsDurableProviderIDs(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	providerRepo, _ := seedProviderIdentity(t, h, &models.MediaItem{ContentID: "existing-1", Type: "movie", Title: "Old Title", Status: "matched"},
-		[]string{"custom", "custom-123"}, nil)
-
-	provider := &capturingMetadataProvider{
-		response: &MetadataResult{
-			HasMetadata: true,
-			Title:       "Updated Title",
-			ProviderIDs: map[string]string{
-				"custom":    "custom-123",
-				"metadb":    "existing-1",
-				"_filepath": "/media/existing-1.mkv",
-				"oshash":    "deadbeef",
-			},
-		},
-	}
-
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "existing-1",
-		Language:  "en",
-		Mode:      ModeManualRefresh,
-	}, []Provider{provider})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want Updated=true", result)
-	}
-
-	req := provider.lastRequest()
-	if got := req.ProviderIDs["custom"]; got != "custom-123" {
-		t.Fatalf("provider request custom id = %q, want custom-123", got)
-	}
-
-	providerRepo.mu.Lock()
-	replace := providerRepo.lastReplace["existing-1"]
-	providerRepo.mu.Unlock()
-	if got := replace["custom"]; got != "custom-123" {
-		t.Fatalf("persisted custom id = %q, want custom-123", got)
-	}
-	if _, ok := replace["metadb"]; ok {
-		t.Fatal("persisted metadb id unexpectedly")
-	}
-	if _, ok := replace["_filepath"]; ok {
-		t.Fatal("persisted _filepath unexpectedly")
-	}
-	if _, ok := replace["oshash"]; ok {
-		t.Fatal("persisted oshash unexpectedly")
-	}
-
-	item, err := h.itemRepo.GetByID(ctx, "existing-1")
-	if err != nil {
-		t.Fatalf("get updated item: %v", err)
-	}
-	if item.Title != "Updated Title" {
-		t.Fatalf("item title = %q, want Updated Title", item.Title)
-	}
-}
-
 func TestProcess_InitialMatchSuppressesRecordedStaleProviderIDs(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()

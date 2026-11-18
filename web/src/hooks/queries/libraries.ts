@@ -34,7 +34,7 @@ export function normalizeLibraryIDs(ids: number[]) {
  * null/undefined (the contract default), and always lands on a normalized id
  * list. Backs both ui.disabled_library_ids and ui.library_order.
  */
-export function parseLibraryIDList(value: unknown): number[] {
+function parseLibraryIDList(value: unknown): number[] {
   if (value == null) return [];
   let parsed: unknown = value;
   if (typeof value === "string") {

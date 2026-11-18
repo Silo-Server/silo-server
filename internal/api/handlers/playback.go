@@ -410,7 +410,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		// under the same id between the pre-check above and here. We only tear down the
 		// upstream playback session when the compare-and-delete actually matched the
 		// dead transcode. When it returns false a successor owns the session — do
-		// nothing further, or finalizeSessionStop's unconditional CloseTranscodeSession
+		// nothing further, or finalizeSessionStopWithResult's unconditional CloseTranscodeSession
 		// would reap the live successor's output dir mid-serve.
 		if !h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
 			return
@@ -1279,12 +1279,8 @@ func (h *PlaybackHandler) touchSessionActivity(sessionID string) {
 	}
 }
 
-func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, reason PlaybackEndReason) {
-	h.finalizeSessionStopWithResult(ctx, session, syncNow, syncReason, reason)
-}
-
-// finalizeSessionStopWithResult is finalizeSessionStop reporting the history
-// writer's result, which the v2 stop receipt carries. reason is why the
+// finalizeSessionStopWithResult ends a playback session and reports the
+// history writer's result, which the v2 stop receipt carries. reason is why the
 // attempt ended; a system teardown the client can rebuild under the same id
 // passes none.
 func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, reason PlaybackEndReason) watchstate.PlaybackStopResult {
@@ -1965,7 +1961,8 @@ func alignedSeekSeconds(seekSeconds float64, segmentDuration int, targetVideoCod
 	return float64(computeStartSegment(seekSeconds, segmentDuration) * segmentDuration)
 }
 
-// HandleGetTranscodeManifest handles GET /playback/transcode/{session_id}/master.m3u8.
+// HandleGetTranscodeManifest handles GET /playback/transcode/{session_id}/master.m3u8,
+// and HEAD, whose body net/http drops.
 // Legacy transports allow the session UUID to act as the access capability.
 // Header-authenticated V3 transports require the live session owner on every
 // request; their UUID is only a route identifier.
@@ -2548,24 +2545,12 @@ func (h *PlaybackHandler) maybeStartThrottler(ctx context.Context, session *play
 	playback.StartConfiguredTranscodeThrottler(ctx, h.SettingsRepo, session)
 }
 
-// findAlternateFile finds another file version for the same content. It
-// prefers non-4K versions because they can escape a disabled-4K-transcode
-// terminal, but when none exist it returns a 4K candidate so the planner can
-// still accept one that direct-plays or remuxes without forbidden video
-// encoding.
-// Within each class it prefers SDR, then resolution, then bitrate.
-func (h *PlaybackHandler) findAlternateFile(ctx context.Context, source *models.MediaFile, filter catalog.AccessFilter) (*models.MediaFile, error) {
-	candidates, err := h.findAlternateFiles(ctx, source, filter)
-	if err != nil || len(candidates) == 0 {
-		return nil, err
-	}
-	return candidates[0], nil
-}
-
 // findAlternateFiles returns every compatible edition/version candidate in
-// fallback order. Callers that plan candidates must keep trying after a
-// terminal: a lower-resolution candidate can still fail while a later 4K
-// candidate direct-plays or remuxes without forbidden video encoding.
+// fallback order. Non-4K versions come first because they can escape a
+// disabled-4K-transcode terminal; within each class SDR comes first, then
+// resolution, then bitrate. Callers that plan candidates must keep trying
+// after a terminal: a lower-resolution candidate can still fail while a later
+// 4K candidate direct-plays or remuxes without forbidden video encoding.
 //
 // Only versions the viewer may play are returned: the per-file checks
 // loadAuthorizedFile applies to a requested file (library access and the

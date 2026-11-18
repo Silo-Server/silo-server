@@ -144,6 +144,20 @@ const (
 	DownloadLocalTranscodeFallbackSettingKey      = "download.local_transcode_fallback"
 )
 
+// JellyfinCompatAddressStreamGrantSettingKey turns on the Jellyfin API's
+// address-only stream grant: a static video stream that carries no credential
+// is served as the owner of a live PlaybackInfo negotiation made from the same
+// client address. Anyone sharing that address (household or carrier NAT, a VPN
+// exit, a proxy that collapses clients to one address) who knows the item and
+// source IDs can then stream the file. The Jellyfin API reads it live on each
+// request that reaches that grant.
+const JellyfinCompatAddressStreamGrantSettingKey = "jellyfin_compat.address_stream_grant_enabled"
+
+// DefaultJellyfinCompatAddressStreamGrantEnabled is the address-only stream
+// grant's value while the setting is unset. Every default of that setting
+// derives from this constant.
+const DefaultJellyfinCompatAddressStreamGrantEnabled = false
+
 // ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
 // stored alongside server settings for durability but must not be exposed or
 // edited through the administrator settings API.
@@ -467,16 +481,17 @@ var adminSettingDefaults = map[string]string{
 	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
 	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
 
-	"audiobookshelf_compat.enabled":           "true",
-	"jellyfin_compat.enabled":                 "true",
-	"jellyfin_compat.public_url":              "http://127.0.0.1:8096",
-	"jellyfin_compat.emulated_server_version": DefaultJellyfinCompatEmulatedServerVersion,
-	"jellyfin_compat.server_name":             "Silo",
-	"jellyfin_compat.web_enabled":             "true",
-	"jellyfin_compat.web_version":             DefaultJellyfinWebVersion,
-	"jellyfin_compat.web_install_dir":         DefaultJellyfinWebInstallDir,
-	"jellyfin_compat.session_ttl":             "87600h",
-	"jellyfin_compat.playback_session_ttl":    defaultJellyfinCompatPlaybackSessionTTL,
+	"audiobookshelf_compat.enabled":            "true",
+	"jellyfin_compat.enabled":                  "true",
+	"jellyfin_compat.public_url":               "http://127.0.0.1:8096",
+	"jellyfin_compat.emulated_server_version":  DefaultJellyfinCompatEmulatedServerVersion,
+	"jellyfin_compat.server_name":              "Silo",
+	"jellyfin_compat.web_enabled":              "true",
+	"jellyfin_compat.web_version":              DefaultJellyfinWebVersion,
+	"jellyfin_compat.web_install_dir":          DefaultJellyfinWebInstallDir,
+	"jellyfin_compat.session_ttl":              "87600h",
+	"jellyfin_compat.playback_session_ttl":     defaultJellyfinCompatPlaybackSessionTTL,
+	JellyfinCompatAddressStreamGrantSettingKey: strconv.FormatBool(DefaultJellyfinCompatAddressStreamGrantEnabled),
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
@@ -585,7 +600,7 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.matching_strategy":        "last",
 	"catalog.search.meilisearch.sync_batch_size":          "500",
 	"catalog.search.meilisearch.rebuild_batch_size":       "5000",
-	"catalog.search.meilisearch.rebuild_task_queue_depth": "4",
+	"catalog.search.meilisearch.rebuild_task_queue_depth": "16",
 	"catalog.search.meilisearch.semantic_enabled":         "false",
 	"catalog.search.meilisearch.semantic_ratio":           "0.5",
 	"catalog.search.meilisearch.embedder":                 "silo_recommendations",
@@ -737,7 +752,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
-		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
+		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", JellyfinCompatAddressStreamGrantSettingKey, "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,

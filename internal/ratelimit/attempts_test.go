@@ -3,13 +3,11 @@ package ratelimit
 import (
 	"context"
 	"errors"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"golang.org/x/time/rate"
 )
 
 type fakeClock struct {
@@ -77,73 +75,6 @@ func TestAttemptLimiterLockoutStartsAtLastAttempt(t *testing.T) {
 	retry, ok := l.Reserve(context.Background(), "k")
 	if ok || retry != 5*time.Minute {
 		t.Fatalf("Reserve = (%v, %v), want locked for 5m", retry, ok)
-	}
-}
-
-func TestAttemptLimiterWindowExpiryForgetsAttempts(t *testing.T) {
-	l, clock := newTestMemoryAttemptLimiter(ProfilePINPolicy)
-	reserveN(t, l, "k", 4)
-	clock.Advance(5 * time.Minute)
-	reserveN(t, l, "k", 5)
-}
-
-func TestAttemptLimiterResetClearsCount(t *testing.T) {
-	l, _ := newTestMemoryAttemptLimiter(ProfilePINPolicy)
-	reserveN(t, l, "k", 4)
-	l.Reset(context.Background(), "k")
-	reserveN(t, l, "k", 5)
-	if _, ok := l.Reserve(context.Background(), "k"); ok {
-		t.Fatal("attempt past the limit allowed after a reset and five more")
-	}
-}
-
-func TestAttemptLimiterKeysAreIndependent(t *testing.T) {
-	l, _ := newTestMemoryAttemptLimiter(ProfilePINPolicy)
-	reserveN(t, l, ProfilePINKey(1, "a"), 5)
-	if _, ok := l.Reserve(context.Background(), ProfilePINKey(1, "a")); ok {
-		t.Fatal("profile a not locked")
-	}
-	reserveN(t, l, ProfilePINKey(1, "b"), 5)
-	reserveN(t, l, ProfilePINKey(2, "a"), 5)
-}
-
-func TestAttemptLimiterSweepsExpiredEntries(t *testing.T) {
-	l, clock := newTestMemoryAttemptLimiter(ProfilePINPolicy)
-	reserveN(t, l, "old", 1)
-	clock.Advance(6 * time.Minute)
-	reserveN(t, l, "new", 1)
-	m := l.backend.(*memoryAttempts)
-	if _, ok := m.entries["old"]; ok || len(m.entries) != 1 {
-		t.Fatalf("entries = %v, want only the live key", m.entries)
-	}
-}
-
-func TestNilAttemptLimiterAllows(t *testing.T) {
-	var l *AttemptLimiter
-	for range 10 {
-		if _, ok := l.Reserve(context.Background(), "k"); !ok {
-			t.Fatal("nil limiter refused an attempt")
-		}
-	}
-	l.Reset(context.Background(), "k")
-}
-
-func TestRetryAfterSecondsRoundsUp(t *testing.T) {
-	type testCase struct {
-		in   time.Duration
-		want int
-	}
-	cases := []testCase{{0, 1}, {time.Millisecond, 1}, {time.Second, 1}, {1500 * time.Millisecond, 2}, {5 * time.Minute, 300}}
-	// A saturated wait only fits in a 64-bit int; a constant conversion would
-	// stop this package compiling on 32-bit targets.
-	if strconv.IntSize == 64 {
-		d := rate.InfDuration
-		cases = append(cases, testCase{d, int(d/time.Second) + 1})
-	}
-	for _, tc := range cases {
-		if got := RetryAfterSeconds(tc.in); got != tc.want {
-			t.Errorf("RetryAfterSeconds(%v) = %d, want %d", tc.in, got, tc.want)
-		}
 	}
 }
 

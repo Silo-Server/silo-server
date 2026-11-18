@@ -25106,6 +25106,270 @@
       "value": "No se pudo comprobar la conexión."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Inicia sesión con ChatGPT en la configuración de Servicios de IA."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Conexión de embeddings correcta. El modelo devuelve "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensiones."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Los embeddings se crearon con vectores de "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensiones, pero el modelo ahora devuelve "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Restablece los embeddings antes de cambiar de modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "El bloqueo de embeddings registra vectores de "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensiones; Silo almacena de 1 a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Restablece los embeddings y usa un modelo que devuelva como máximo "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimensiones."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "No se puede leer el bloqueo de embeddings guardado. Restablece los embeddings para borrarlo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Los embeddings se crearon con el modelo “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, no con “"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Restablece los embeddings antes de cambiar de modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "El proveedor de embeddings no devolvió ningún vector para el texto de prueba."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Los embeddings se almacenaron con "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " dimensiones; este servidor almacena "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Restablece los embeddings."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "El modelo devuelve "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensiones; Silo almacena como máximo "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "No se pudo comprobar la conexión. Verifica la configuración enviada y la disponibilidad del proveedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "Clave de API de MDBList verificada."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Conexión con Meilisearch correcta"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch rechazó la clave de API o necesita una. Introduce una clave que pueda administrar índices y documentos, como la Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch redirigió la comprobación a otra dirección. Introduce la dirección a la que redirige, como su URL https://, y vuelve a introducir la clave de API."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Conexión con Redis correcta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "Conexión con S3 y permisos de lectura, escritura y eliminación de objetos verificados."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Conexión de voz a texto correcta: se recibió voz con marcas de tiempo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Se denegó el acceso a voz a texto. Revisa los permisos de tu clave de API y los proveedores permitidos."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "El modelo de voz a texto no devuelve segmentos con marcas de tiempo, que Silo necesita para crear subtítulos. Elige un modelo que admita marcas de tiempo por segmento, como whisper-1 en OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "El endpoint o el modelo de voz a texto no está disponible. Revisa la URL base del proveedor, el modelo y los proveedores permitidos."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "El proveedor de voz a texto requiere un pago. Revisa el saldo y el límite de gasto de tu proveedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Se agotó la cuota del proveedor de voz a texto. Revisa el saldo y los límites de tu proveedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "El proveedor de voz a texto está limitando la frecuencia de las solicitudes. Vuelve a intentarlo más tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Se agotó el tiempo de la comprobación de conexión de voz a texto. Revisa la disponibilidad del proveedor y vuelve a intentarlo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Error de autenticación de voz a texto. Reemplaza la clave de API del proveedor en Servicios de IA."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "El proveedor de voz a texto no está disponible temporalmente. Vuelve a intentarlo más tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Conexión con la IA de texto correcta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "No se pudo conectar con la IA de texto. Revisa el modelo, el nivel de razonamiento, el nivel de servicio, la conexión de la cuenta y los límites de uso del proveedor."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -58441,6 +58705,20 @@
       "value": "No se pudo comprobar la conexión."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "No se eligió ningún proveedor de embeddings. Elige un proveedor que ofrezca “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” o restablece los embeddings para usar otro modelo."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -65069,6 +65347,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Reproducir sin iniciar sesión desde la misma dirección"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Algunas apps de Jellyfin, como Findroid, abren enlaces de reproducción directa y de descarga sin iniciar sesión. Cuando esta opción está activada, Silo atiende esa solicitud si una app con la sesión iniciada en la misma dirección de red solicitó reproducir ese archivo en las últimas dos horas. Cualquiera que comparta esa dirección, como las personas de la misma red doméstica, operador de telefonía o VPN, también podrá reproducir ese archivo. Actívala solo si usas una de esas apps."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -97157,6 +97447,12 @@
       "value": "Orden"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Relevancia"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -115845,6 +116141,12 @@
       "value": "Colección"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Biblioteca"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -115889,6 +116191,12 @@
     {
       "type": 0,
       "value": "Aún no hay colecciones. Crea una primero en Colecciones."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "No hay colecciones de este tipo en esta biblioteca."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -132605,6 +132913,12 @@
       "value": "Puedes pausar y reanudar"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party necesita Redis, que este servidor no tiene configurado. Pídele a la persona que administra tu servidor que lo configure."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -136754,6 +137068,86 @@
     {
       "type": 0,
       "value": "Busca en la biblioteca o encuentra títulos para solicitar..."
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Todos los resultados de tu biblioteca"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Volver a relevancia"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Mejores coincidencias"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "En tu biblioteca"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Más resultados"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "No está en tu biblioteca"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Resumen"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Solicitar para añadir"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Mostrar todos los resultados"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Ordenado por "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Vistas de resultados"
     }
   ],
   "web.search.resultsLabel": [
@@ -150614,6 +151008,18 @@
       "value": "Clave de acceso"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo se está reiniciando para usar el nuevo almacenamiento. La configuración inicial continuará cuando vuelva a estar disponible."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Aplicando la configuración de almacenamiento"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -150894,6 +151300,18 @@
     {
       "type": 0,
       "value": "URL de conexión"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo solo se reinicia automáticamente si Docker, Kubernetes o systemd están configurados para reiniciarlo. Si no, vuelve a iniciar Silo manualmente. La configuración inicial continuará cuando vuelva a estar disponible."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo aún no se ha reiniciado"
     }
   ],
   "web.setup.storage.saveFailed": [

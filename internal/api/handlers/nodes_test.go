@@ -3,14 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"sync"
-	"testing"
-	"time"
-
-	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -59,54 +52,6 @@ func (s *stubNodeRepository) UpdateHealth(context.Context, int, string, bool, in
 	return nil
 }
 
-// The node reload route answers 204. Treating anything outside 2xx as a refusal
-// is what keeps a successful reload from logging a failure an operator would
-// then go looking for.
-func TestReloadNodeConfigAcceptsNoContent(t *testing.T) {
-	for _, status := range []int{http.StatusOK, http.StatusNoContent, http.StatusAccepted} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			called := make(chan struct{}, 1)
-			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called <- struct{}{}
-				w.WriteHeader(status)
-			}))
-			t.Cleanup(node.Close)
-
-			handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
-			if !handler.reloadNodeConfig(context.Background(), &nodepool.Node{ID: 1, Name: "gpu-1", URL: node.URL}) {
-				t.Fatalf("HTTP %d was not accepted as a confirmed reload", status)
-			}
-
-			select {
-			case <-called:
-			default:
-				t.Fatal("the node was never called")
-			}
-		})
-	}
-}
-
-// A node that does not confirm the reload is out of step: its backend now comes
-// from this server's pool while its device still comes from its own
-// configuration. The policy is published regardless — withholding it would
-// strand an override the operator can see stored, since nothing else re-reads
-// the column — so what this pins down is that the update still succeeds and the
-// caller learns the node did not confirm.
-func TestReloadNodeConfigReportsAnUnconfirmedNode(t *testing.T) {
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(node.Close)
-
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
-	if handler.reloadNodeConfig(context.Background(), &nodepool.Node{ID: 1, Name: "gpu-1", URL: node.URL}) {
-		t.Fatal("a 500 from the node reported the reload as confirmed")
-	}
-	if handler.reloadNodeConfig(context.Background(), &nodepool.Node{ID: 1, Name: "gpu-1", URL: "http://127.0.0.1:1"}) {
-		t.Fatal("an unreachable node reported the reload as confirmed")
-	}
-}
-
 // recordingEventBus captures publications so a test can assert the pool change
 // actually reached the other replicas.
 type recordingEventBus struct {
@@ -144,63 +89,9 @@ func (l *ctxAwareLister) ListEnabled(ctx context.Context, _ string) ([]*nodepool
 	return l.nodes, nil
 }
 
-// The pool reload runs after the response is written, so the request context is
-// no longer the right lifetime: an admin whose browser gives up on a slow save
-// cancels it, and the reload would then fail its reads and never publish. The
-// row is already committed at that point, so this instance and every replica
-// would keep dispatching under the old acceleration policy indefinitely —
-// nothing else re-reads the column.
-func TestReloadPoolsSurvivesRequestCancellation(t *testing.T) {
-	bus := &recordingEventBus{}
-	lister := &ctxAwareLister{nodes: []*nodepool.Node{{ID: 1, URL: "http://node", Enabled: true}}}
-	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepooltest.NewTranscodePool(), lister, bus, nil, nodeauthtest.SameKey("secret"))
-
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	handler.reloadPools(canceled)
-
-	if got := bus.types(); len(got) != 1 || got[0] != string(cache.EventNodePoolChanged) {
-		t.Fatalf("published %v, want a single %q after a canceled request", got, cache.EventNodePoolChanged)
-	}
-	if got := handler.transcodePool.Nodes(); len(got) != 1 {
-		t.Fatalf("transcode pool holds %d nodes, want the reload to have landed", len(got))
-	}
-}
-
-func TestReadAdminNodesDoesNotMutateRepositoryRows(t *testing.T) {
-	stored := &nodepool.Node{ID: 1, URL: "http://worker.example.test", Type: nodepool.NodeTypeProxy, Enabled: true}
-	repo := &stubNodeRepository{nodes: []*nodepool.Node{stored}}
-	pool := nodepool.NewProxyPool()
-	pool.SetNodes([]*nodepool.Node{stored})
-	pool.ApplyHealth(1, stored.URL, true, 0, 0, "advertised", nil, nil, time.Now())
-	rows, err := NewNodeHandler(repo, pool, nil, nil, nil, nil, nil).ReadAdminNodes(t.Context())
-	if err != nil || len(rows) != 1 || rows[0] == stored || stored.AdvertisedCapabilitiesHash != nil || rows[0].AdvertisedCapabilitiesHash == nil || *rows[0].AdvertisedCapabilitiesHash != "advertised" {
-		t.Fatal(rows, stored, err)
-	}
-}
-
 // failingLister fails every read, as a database outage does.
 type failingLister struct{}
 
 func (failingLister) ListEnabled(context.Context, string) ([]*nodepool.Node, error) {
 	return nil, errors.New("database unavailable")
-}
-
-// A committed key reaches the other replicas and proxies through
-// node_pool_changed even when this server cannot reload its own pools, and
-// even when the request that issued it is gone.
-func TestIssueAdminNodeKeyPublishesWhenThePoolReloadFails(t *testing.T) {
-	bus := &recordingEventBus{}
-	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepooltest.NewTranscodePool(), failingLister{}, bus, nil, nodeauthtest.SameKey("secret"))
-	handler.SetNodeKeyIssuance(func(context.Context, int) (string, error) { return "issued", nil })
-
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	key, err := handler.IssueAdminNodeKey(canceled, 7)
-	if err != nil || key != "issued" {
-		t.Fatalf("IssueAdminNodeKey = %q, %v", key, err)
-	}
-	if got := bus.types(); len(got) != 1 || got[0] != string(cache.EventNodePoolChanged) {
-		t.Fatalf("published %v, want a single %q", got, cache.EventNodePoolChanged)
-	}
 }

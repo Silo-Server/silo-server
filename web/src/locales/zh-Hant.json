@@ -21032,6 +21032,270 @@
       "value": "連線檢查失敗。"
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "請在 AI 服務設定中使用 ChatGPT 登入。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "嵌入連線成功。模型會傳回 "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " 個維度。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "現有嵌入是以 "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " 維向量建立，但模型現在傳回 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " 維。切換模型前，請先重設嵌入。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "嵌入鎖定記錄的是 "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " 維向量；Silo 可儲存 1 到 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " 維。請重設嵌入，並使用最多傳回 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " 個維度的模型。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "無法讀取已儲存的嵌入鎖定。請重設嵌入以清除。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "現有嵌入是以模型「"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "」建立，而非「"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "」。切換模型前，請先重設嵌入。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "嵌入提供者未針對測試文字傳回任何向量。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "現有嵌入以 "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " 維儲存；此伺服器儲存 "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": " 維。請重設嵌入。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "模型會傳回 "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " 個維度；Silo 最多只能儲存 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " 個。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "連線檢查失敗。請確認送出的設定，以及提供者是否可用。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "已驗證 MDBList API 金鑰。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch 連線成功"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch 拒絕了此 API 金鑰，或需要提供金鑰。請輸入可管理索引與文件的金鑰，例如 Default Admin API Key。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch 將檢查重新導向至其他位址。請輸入其重新導向的位址（例如其 https:// URL），並重新輸入 API 金鑰。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis 連線成功。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "已驗證 S3 連線，以及物件的讀取、寫入與刪除權限。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "語音轉文字連線成功：已收到含時間戳記的語音辨識結果。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "語音轉文字存取遭拒。請檢查你的 API 金鑰權限與允許的提供者。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "語音轉文字模型不會傳回含時間戳記的片段，而 Silo 需要這些片段才能製作字幕。請選擇支援片段時間戳記的模型，例如 OpenAI 的 whisper-1。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "無法使用語音轉文字端點或模型。請檢查提供者的基本 URL、模型與允許的提供者。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "語音轉文字提供者要求付款。請檢查你在提供者的餘額與消費上限。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "語音轉文字提供者的配額已用盡。請檢查你在提供者的餘額與限制。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "語音轉文字提供者正在限制請求頻率。請稍後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "語音轉文字連線檢查逾時。請檢查提供者是否可用，然後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "語音轉文字驗證失敗。請在 AI 服務中更換提供者的 API 金鑰。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "語音轉文字提供者暫時無法使用。請稍後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "文字 AI 連線成功。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "文字 AI 連線失敗。請檢查模型、推理等級、服務層級、帳號連線，以及提供者的使用量限制。"
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -47166,6 +47430,20 @@
       "value": "連線檢查失敗。"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "未選擇嵌入提供者。請選擇提供「"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "」的提供者，或重設嵌入向量以使用其他模型。"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -52726,6 +53004,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "允許同一網路位址免登入播放"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "部分 Jellyfin App（例如 Findroid）會在未登入的情況下開啟直接播放和下載連結。開啟此選項後，若同一網路位址上已登入的 App 在過去兩小時內請求播放該檔案，Silo 就會處理這類請求。屆時，任何共用該位址的人（例如同一個家用網路、行動電信業者或 VPN 上的使用者）也都能播放該檔案。請僅在你使用這類 App 時開啟此選項。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -82465,6 +82755,12 @@
       "value": "順序"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "相關性"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -97409,6 +97705,12 @@
       "value": "合輯"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "媒體庫"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -97453,6 +97755,12 @@
     {
       "type": 0,
       "value": "尚無合輯。請先在合輯頁面建立一個。"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "此媒體庫中沒有此類型的合輯。"
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -112461,6 +112769,12 @@
       "value": "你可以暫停及繼續播放"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party 需要 Redis，但此伺服器尚未設定。請洽詢你的伺服器管理員進行設定。"
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -116193,6 +116507,90 @@
     {
       "type": 0,
       "value": "搜尋媒體庫或尋找要請求的作品……"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "媒體庫中的所有結果"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "改回依相關性排序"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "最佳相符結果"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "在你的媒體庫中"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "更多結果"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "不在你的媒體庫中"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "總覽"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "請求新增"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "顯示所有結果"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "依 "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    },
+    {
+      "type": 0,
+      "value": " 排序"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "結果檢視"
     }
   ],
   "web.search.resultsLabel": [
@@ -128835,6 +129233,18 @@
       "value": "存取金鑰"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo 正在重新啟動以使用新的儲存空間。重新啟動完成後，設定會繼續進行。"
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "正在套用儲存空間設定"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -129115,6 +129525,18 @@
     {
       "type": 0,
       "value": "連線 URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "只有在 Docker、Kubernetes 或 systemd 設定為自動重新啟動 Silo 時，Silo 才會自行重新啟動。否則，請自行再次啟動 Silo。重新啟動完成後，設定會繼續進行。"
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo 尚未重新啟動"
     }
   ],
   "web.setup.storage.saveFailed": [

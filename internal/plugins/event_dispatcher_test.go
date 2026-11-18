@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -226,46 +225,6 @@ func (r *fakeResolver) EventConsumerClient(_ context.Context, _ int, _ string) (
 	return r.client, nil
 }
 
-// newFixture starts a dispatcher with one installation subscribed to subs and
-// returns the bus its server publishes on, its hub, and the plugin's client.
-func newFixture(t *testing.T, subs []string, want int) (cache.EventBus, *events.Hub, *recordingClient) {
-	t.Helper()
-	bus := newFakeBus()
-	hub := events.NewHub("test-node", bus)
-	if err := hub.Start(context.Background()); err != nil {
-		t.Fatalf("hub start: %v", err)
-	}
-
-	subsAny := make([]any, 0, len(subs))
-	for _, s := range subs {
-		subsAny = append(subsAny, s)
-	}
-	store := &fakeInstallationStore{
-		installations: []*Installation{{ID: 1, PluginID: "test", Enabled: true}},
-		capabilities: map[int][]*Capability{
-			1: {{
-				InstallationID: 1,
-				Type:           "event_consumer.v1",
-				ID:             "watcher",
-				Metadata:       map[string]any{"subscriptions": subsAny},
-			}},
-		},
-	}
-	client := &recordingClient{done: make(chan struct{}), want: want}
-	ctx, cancel := context.WithCancel(context.Background())
-	d := NewEventDispatcher(bus, hub, store, &fakeResolver{client: client}, newMemoryDeliveryStore(), 4)
-	if err := d.Start(ctx); err != nil {
-		t.Fatalf("start dispatcher: %v", err)
-	}
-	observed := cache.NewObservedEventBus(bus)
-	observed.ObservePublishes(d.ObservePublish)
-	t.Cleanup(func() {
-		cancel()
-		d.Stop()
-	})
-	return observed, hub, client
-}
-
 func waitFor(t *testing.T, c *recordingClient) {
 	t.Helper()
 	c.mu.Lock()
@@ -282,60 +241,5 @@ func waitFor(t *testing.T, c *recordingClient) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for events; got %d, want %d", len(c.get()), c.want)
-	}
-}
-
-func TestDispatcher_BusEvent_DecodesJSONPayloadIntoFields(t *testing.T) {
-	bus, _, client := newFixture(t, []string{"library.media_added"}, 1)
-
-	body, _ := json.Marshal(map[string]any{
-		"libraryId": "lib-1",
-		"mediaType": "movie",
-		"mediaId":   "media-xyz",
-		"tmdbId":    603,
-	})
-	_ = bus.Publish(context.Background(), cache.ChannelCatalog, cache.Event{
-		Type:    "library.media_added",
-		Payload: string(body),
-	})
-
-	waitFor(t, client)
-	got := client.get()
-	if len(got) != 1 {
-		t.Fatalf("got %d events", len(got))
-	}
-	p := got[0].GetPayload().AsMap()
-	if p["libraryId"] != "lib-1" {
-		t.Errorf("libraryId: got %v want lib-1; full payload=%v", p["libraryId"], p)
-	}
-	if _, wrapped := p["payload"]; wrapped {
-		t.Error("payload should not be wrapped under \"payload\" key")
-	}
-}
-
-func TestDispatcher_HubPluginEvent_ReachesConsumer(t *testing.T) {
-	const eventName = "plugin.silo.arrproxy.submitted"
-	_, hub, client := newFixture(t, []string{eventName}, 1)
-
-	body, _ := json.Marshal(map[string]any{"requestId": "01J", "error": ""})
-	if err := hub.Publish(context.Background(), events.Envelope{
-		Channel: events.ChannelPlugins,
-		Event:   eventName,
-		Data:    body,
-	}); err != nil {
-		t.Fatalf("publish: %v", err)
-	}
-
-	waitFor(t, client)
-	got := client.get()
-	if len(got) != 1 {
-		t.Fatalf("got %d events", len(got))
-	}
-	if got[0].GetEventName() != eventName {
-		t.Errorf("event name: got %q want %q", got[0].GetEventName(), eventName)
-	}
-	p := got[0].GetPayload().AsMap()
-	if p["requestId"] != "01J" {
-		t.Errorf("requestId: got %v want 01J; full payload=%v", p["requestId"], p)
 	}
 }

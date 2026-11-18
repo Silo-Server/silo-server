@@ -435,7 +435,7 @@ func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 		TranscodeNodeURL: node.URL, TranscodeTransportID: transportID,
 	}
 
-	handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
+	handler.finalizeSessionStopWithResult(context.Background(), session, false, "", PlaybackEndStopped)
 
 	select {
 	case request := <-requests:

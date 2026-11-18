@@ -1,12 +1,21 @@
 import { Search } from "lucide-react";
 import { PosterArt } from "@/components/calm/PosterTile";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { CollectionLibrary } from "@/hooks/queries/useAllUserCollections";
 import { useT, type MessageKey } from "@/i18n";
-import type { CollectionFilter } from "./collectionSearch";
+import type { CollectionFilter, CollectionLibraryFilter } from "./collectionSearch";
 
 /**
  * What the collection pickers of Add row share: the search box, the
- * Manual / Smart / Synced filter, and how one collection reads in the list.
+ * Manual / Smart / Synced filter, the library filter, and how one collection
+ * reads in the list.
  * A collection row picks one (CollectionPicker); a row of collections adds
  * several (CollectionsRowEditor).
  */
@@ -18,13 +27,19 @@ const FILTERS: ReadonlyArray<[CollectionFilter, MessageKey]> = [
   ["synced", "web.home.addRow.collection.filterSynced"],
 ];
 
-/** The bar over a collection list: the search box and the type filter. */
+/**
+ * The bar over a collection list: the search box, the type filter and, when
+ * the collections come from more than one library, the library filter.
+ */
 export function CollectionSearchBar({
   count,
   query,
   onQueryChange,
   filter,
   onFilterChange,
+  libraries,
+  library,
+  onLibraryChange,
 }: {
   /** How many collections there are, for the placeholder. */
   count: number;
@@ -32,6 +47,9 @@ export function CollectionSearchBar({
   onQueryChange: (query: string) => void;
   filter: CollectionFilter;
   onFilterChange: (filter: CollectionFilter) => void;
+  libraries: readonly CollectionLibrary[];
+  library: CollectionLibraryFilter;
+  onLibraryChange: (library: CollectionLibraryFilter) => void;
 }) {
   const t = useT();
   return (
@@ -70,6 +88,28 @@ export function CollectionSearchBar({
           </button>
         ))}
       </div>
+      {libraries.length > 1 ? (
+        <Select
+          value={String(library)}
+          onValueChange={(value) => onLibraryChange(value === "all" ? "all" : Number(value))}
+        >
+          <SelectTrigger
+            size="sm"
+            aria-label={t("web.home.addRow.collection.library")}
+            className="max-w-48 text-[13px]"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("web.home.addRow.params.allLibraries")}</SelectItem>
+            {libraries.map((entry) => (
+              <SelectItem key={entry.id} value={String(entry.id)}>
+                {entry.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
     </div>
   );
 }

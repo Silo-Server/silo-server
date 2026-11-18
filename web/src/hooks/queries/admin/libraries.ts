@@ -190,7 +190,7 @@ export function useSkippedLibraryRoots({
 }
 
 /** Page size of the library roots listing. */
-export const LIBRARY_ROOTS_PAGE_LIMIT = 50;
+const LIBRARY_ROOTS_PAGE_LIMIT = 50;
 
 export interface LibraryRootsPage {
   roots: LibraryRoot[];

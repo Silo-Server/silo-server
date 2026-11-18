@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -638,7 +639,8 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		h.endPlayIfFileGone(r, playSession, err)
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 
@@ -806,6 +808,12 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
+	// A DLNA controller checks the URL with HEAD before handing it to a TV.
+	// Like Jellyfin's, that HEAD starts nothing; the GET that follows does.
+	if r.Method == http.MethodHead {
+		h.headMasterManifest(w, r, playSession, source.FileID)
+		return
+	}
 	// Attach BEFORE ensureUpstreamPlayback below: this route can start a
 	// transcode before it writes a byte, which is the whole reason §4.2 enrolls
 	// manifest routes. A cut has to be able to act here, not after the side
@@ -824,7 +832,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		h.endPlayIfFileGone(r, playSession, err)
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 	upstreamSession, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
@@ -879,7 +888,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		tcNode := plan.TranscodeNode
 		initialSeekSeconds, _ := compatInitialTranscodePosition(*source, h.compatSegmentDuration(), playSession.InitialSeekSeconds)
 		remoteNodeURL := tcNode.URL
-		startErr := h.startRemoteTranscodeWithToneMapMode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL, requiredToneMapMode)
+		startErr := h.startRemoteTranscodeWithToneMapMode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL, requiredToneMapMode, false)
 		if errors.Is(startErr, errRemoteStartAdoptedLocal) {
 			// Route resolution reserved the remote candidate before the concurrent
 			// local winner was observed. Neither the allowed local continuation nor
@@ -1035,6 +1044,11 @@ func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source changed; refresh playback information")
 	case errors.Is(err, tonemap.ErrSourcePreflightRejected):
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source is unsupported by the selected tone-map executor")
+	case errors.Is(err, scanner.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+	case errors.Is(err, errCompatFileLookupUnavailable):
+		slog.Warn("compat transcode file lookup failed", "component", "jellycompat", "error", logredact.SanitizeText(err.Error()))
+		writeSessionCheckUnavailable(w)
 	case errors.Is(err, errCompatUpstreamSessionGone):
 		// As the segment route answers a rebuild whose session is gone.
 		writeError(w, http.StatusNotFound, "NotFound", "Upstream session not found")
@@ -1432,6 +1446,28 @@ func (h *PlaybackHandler) remoteCompatDenied(ctx context.Context, playSession *P
 	return sessionID != "" && sessionID != transportID && h.StreamDeny.Denied(ctx, sessionID)
 }
 
+// headMasterManifest answers a HEAD on a master playlist without starting
+// playback: 410 when the play's upstream session was denied, 404 for a missing
+// file, a retryable 503 when the file lookup fails, and otherwise the
+// playlist's headers with no body.
+func (h *PlaybackHandler) headMasterManifest(w http.ResponseWriter, r *http.Request, playSession *PlaybackSession, fileID int) {
+	if h.remoteCompatDenied(r.Context(), playSession) {
+		writeCompatSessionEnded(w)
+		return
+	}
+	if h.fileResolver == nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
+		return
+	}
+	if _, err := h.fileResolver.GetByID(r.Context(), fileID); err != nil {
+		writeCompatFileLookupError(w, r, fileID, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.WriteHeader(http.StatusOK)
+}
+
 // writeCompatSessionEnded answers a relay request for a denied session: 410,
 // no media bytes.
 func writeCompatSessionEnded(w http.ResponseWriter) {
@@ -1658,7 +1694,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 	// Identity is fully known here. The later 400/404 branches for a bad index or
@@ -2782,6 +2818,11 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 		}
 	} else {
 		card = playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
+		if method == string(playback.PlayTranscode) {
+			// A transcode whose recipe isn't saved yet still rebuilds as a
+			// transcode, so the user's transcode limit admits and counts it.
+			card.PlayMethod = playback.PlayTranscode
+		}
 	}
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
@@ -2907,7 +2948,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			if h.tm != nil {
 				card := h.upstreamRecipeCard(playSession, compatSession, source, method)
 				fillReconstructedClientInfo(&card, playback.ClientInfoFromContext(ctx))
-				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {
+				reconstructed, admissionErr := h.tm.ReconstructSessionWithError(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card)
+				if admissionErr != nil {
+					// The user's limits refused the play. Keep its upstream session
+					// id: replacing it here could detach a transcode that another
+					// API server is still starting, and a retry admits under it.
+					return nil, admissionErr
+				}
+				if reconstructed != nil {
 					if !playSession.ProgressPersistenceKnown ||
 						playSession.DisableProgressPersistence != reconstructed.DisableProgressPersistence {
 						h.recordCompatProgressPersistence(playSession.ID, reconstructed.DisableProgressPersistence)
@@ -3143,7 +3191,10 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 		// transcode. Either the play has already ended, or its session expired
 		// and the play can still resume, which a teardown here would prevent by
 		// deleting its row.
-		if !errors.Is(err, errCompatUpstreamSessionGone) && (requestErr == nil || !errors.Is(err, requestErr)) {
+		// A file lookup that failed without finding the file missing keeps the
+		// play too, so the client's retry finds it.
+		if !errors.Is(err, errCompatUpstreamSessionGone) && !errors.Is(err, errCompatFileLookupUnavailable) &&
+			(requestErr == nil || !errors.Is(err, requestErr)) {
 			h.teardownPlaySession(ctx, playSession, nil, nil)
 		}
 		return nil, err
@@ -3169,6 +3220,10 @@ var compatManifestStartupTimeout = playback.ManifestStartupTimeout
 // errCompatUpstreamSessionGone means a rebuilt or newly started transcode was
 // closed because the play's native session went away while it was starting.
 var errCompatUpstreamSessionGone = errors.New("upstream session ended during the transcode rebuild")
+
+// errCompatFileLookupUnavailable means the media file lookup failed for a
+// reason other than a missing file row, such as a database timeout.
+var errCompatFileLookupUnavailable = errors.New("media file lookup unavailable")
 
 func compatTranscodeSessionUsesToneMapMode(session *playback.TranscodeSession, required tonemap.Mode) bool {
 	return required == "" || (session != nil && session.Opts().ToneMapMode == required)
@@ -3240,6 +3295,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 
 	file, err := h.fileResolver.GetByID(ctx, source.FileID)
 	if err != nil {
+		if !errors.Is(err, scanner.ErrFileNotFound) {
+			err = fmt.Errorf("%w: %w", errCompatFileLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("resolve file: %w", err)
 	}
 	if err := os.MkdirAll(h.TranscodeDir, 0o755); err != nil {
@@ -3973,7 +4031,27 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 	if err != nil {
 		return false, err
 	}
-	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
+	// The player holds a keyframe-planned session's playlist, planned from the
+	// beginning. The node starts the replacement in a new output directory and
+	// plans only a run from the beginning, so restart from the recipe's start,
+	// as RecipeOpts keeps a local session's recipe: the node plans the same
+	// segments, and the player's next segment request restarts FFmpeg at the
+	// planned segment for its position once the from-start run has set the
+	// timeline (#4044). The recipe records whether the node planned: a session
+	// that kept FFmpeg's playlist, because the node couldn't plan it or
+	// predates the attestation, restarts at the position. A planned session's
+	// replacement must plan too: one that keeps FFmpeg's playlist, because the
+	// index has become unreadable or the plan can't be recorded, is stopped
+	// and the switch fails rather than serve segments the playlist doesn't
+	// list.
+	seekSeconds := positionSeconds
+	planned := false
+	if recipe := playSession.Recipe; recipe != nil && recipe.KeyframePlanned &&
+		recipe.SeekSeconds == 0 && recipe.StartSegmentNumber == 0 {
+		seekSeconds, planned = 0, true
+	}
+	if err := h.startRemoteTranscodeWithToneMapMode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID,
+		source, file, seekSeconds, upstreamSession.TranscodeNodeURL, "", planned); err != nil {
 		if errors.Is(err, errRemoteStartAdoptedLocal) || errors.Is(err, errRemoteStartAdoptedRemote) {
 			return true, nil
 		}
@@ -4058,6 +4136,31 @@ type playSessionReadError struct {
 func (e *playSessionReadError) Error() string { return "reading play session: " + e.err.Error() }
 func (e *playSessionReadError) Unwrap() error { return e.err }
 
+// endPlayIfFileGone ends a play whose file row is gone, as the other terminal
+// failures of a playback start do. Any other lookup failure keeps the play so
+// the client's retry of the retryable 503 finds it.
+func (h *PlaybackHandler) endPlayIfFileGone(r *http.Request, playSession *PlaybackSession, err error) {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil)
+	}
+}
+
+// writeCompatFileLookupError answers a media route whose file lookup failed:
+// 404 only when the file row is gone. Any other failure (a database timeout,
+// an exhausted pool) says nothing about the file, so the client gets a
+// retryable 503 instead of being told the file was removed.
+func writeCompatFileLookupError(w http.ResponseWriter, r *http.Request, fileID int, err error) {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		return
+	}
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "jellycompat: media file lookup failed; answering 503", "component", "jellycompat",
+			"path", redactHLSPlaySessionID(r.URL.Path), "file_id", fileID, "error", logredact.SanitizeText(err.Error()))
+	}
+	writeSessionCheckUnavailable(w)
+}
+
 // writeIfPlaySessionUnreadable answers the retryable 503 for a route
 // resolution that failed on an unreadable playback store, and reports whether
 // it did, so a brief outage does not end playback with a 404 (#4067).
@@ -4080,6 +4183,20 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	// lookup below may still find the session cached, and only when it doesn't
 	// is the request answered as unreadable rather than absent.
 	var readErr error
+	// A request authorized by a play's PlaySessionId or per-play tag is
+	// served as that play, whatever PlaySessionId it also carries: a tag
+	// request carries none, and the ID-less fallback below would pick
+	// whichever started play matches. A play that can't be read answers as
+	// retryable; one that is gone falls through.
+	if grant := playbackGrantFromContext(r.Context()); grant != nil {
+		playSession, ok, err := h.playbackStore.Lookup(grant.ID)
+		if err != nil {
+			return nil, nil, &playSessionReadError{playSessionID: grant.ID, err: err}
+		}
+		if ok && playSession.CompatToken == compatSession.Token && mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
+			return playSession, playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest), nil
+		}
+	}
 	if clientPlaySessionID != "" {
 		playSession, ok, err := h.playbackStore.Lookup(clientPlaySessionID)
 		if err != nil {

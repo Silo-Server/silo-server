@@ -327,10 +327,17 @@ state, semantic readiness, and links to the search maintenance tasks.
 `active_provider` describes the route requests actually take; it is not merely
 the configured provider. `degraded` and the optional `degraded_reason` explain
 temporary fallback or keyword-only operation. `index.rebuild_required` is true
-when the active index does not match the current settings. Background search
-maintenance runs at startup and every minute: it rebuilds a missing or stale
-index, then resumes incremental event sync. When the prior index is known to
-have the same document and media scope, Meilisearch continues serving keyword
+when the active index's document schema does not match the current search
+settings, or when Meilisearch no longer has it (for example after its data
+directory was emptied); in that case `index.document_count` is 0 and searches
+use PostgreSQL, while `meilisearch.healthy` still reports whether Meilisearch
+itself answers. A status read learns that the index is missing from the
+semantic capability probe, so it can take up to five minutes to show.
+Background search maintenance runs at startup and every minute: it rebuilds a
+missing or stale index, applies changed index settings to a current one in
+place (not a rebuild, so not `rebuild_required`), then resumes incremental
+event sync. When the prior index is known to have the same document and media
+scope, Meilisearch continues serving keyword
 search while the replacement is built; otherwise searches use PostgreSQL.
 
 ## `GET /api/v2/admin/nodes`

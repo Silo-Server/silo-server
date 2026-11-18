@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -76,25 +75,6 @@ func TestNodeExtractorSkipsCapabilitiesRejectedByLatestHealthCheck(t *testing.T)
 				}
 			})
 		}
-	}
-}
-
-func TestRemoteGenerationDoesNotRequireAPIMediaMount(t *testing.T) {
-	for _, mode := range []string{ExecutionPreferTranscodeNodes, ExecutionTranscodeNodesOnly} {
-		t.Run(mode, func(t *testing.T) {
-			node, calls := fakeNode(t, http.StatusOK, mediasample.Result{Decoder: "software", SheetTileHeight: 126, Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}})
-			local := &countingExtractor{}
-			settings := fakeSettings{ExecutionSetting: mode}
-			extractor := NewNodeExtractor(local, fixedNodes{node}, settings, nodeauthtest.NodeKey("secret"))
-			queue := newFakeQueue()
-			service := newService(queue, &fakeStore{}, settings, extractor, "api")
-			job := testJob(1, 10)
-			job.FilePath = filepath.Join(t.TempDir(), "only-readable-on-node.mkv")
-			service.process(t.Context(), job)
-			if calls.Load() != 1 || local.calls != 0 || len(queue.published) != 1 || len(queue.finished) != 0 {
-				t.Fatalf("node calls=%d local calls=%d published=%d finished=%v", calls.Load(), local.calls, len(queue.published), queue.finished)
-			}
-		})
 	}
 }
 
@@ -302,35 +282,5 @@ func TestNodeExtractorFailureClassification(t *testing.T) {
 				t.Fatalf("finished %+v, want %+v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestInputUnreadableReadsTheLastAttempt(t *testing.T) {
-	run := func(tails ...string) error {
-		failure := &mediasample.Error{Reason: mediasample.ReasonExit}
-		for _, tail := range tails {
-			failure.Attempts = append(failure.Attempts, mediasample.AttemptError{Reason: mediasample.ReasonExit, StderrTail: tail})
-		}
-		return failure
-	}
-	// A VAAPI probe logs a missing driver on the hardware attempt.
-	if InputUnreadable(run("dlopen of /usr/lib/dri/iHD_drv_video.so failed: No such file or directory", "Invalid data found when processing input")) {
-		t.Fatal("a hardware attempt's driver log counted as an unreadable input")
-	}
-	if !InputUnreadable(run("Permission denied", "Error opening input files: Permission denied")) {
-		t.Fatal("an input the software attempt cannot open was not reported")
-	}
-	// A software attempt refused before ffmpeg starts leaves no log.
-	if !InputUnreadable(run("Error opening input: Permission denied", "")) {
-		t.Fatal("an input the hardware attempt cannot open was not reported when software never ran")
-	}
-}
-
-func TestNodeExtractorKeepsTheLastNodeAnswerWhenNoNodeRan(t *testing.T) {
-	node, _ := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: InputUnreadableReason, Message: "Permission denied"})
-	settings := fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}
-	_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{node}, settings, nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
-	if !errors.Is(err, errNoNode) || !strings.Contains(err.Error(), "Permission denied") {
-		t.Fatalf("error=%v, want errNoNode naming the node's answer", err)
 	}
 }

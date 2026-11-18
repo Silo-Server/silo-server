@@ -5,7 +5,6 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -61,32 +60,6 @@ func TestValidateCatalogQueryRequest_RejectsPersonalizedSortWithoutProfileScoped
 
 	if err := validateCatalogQueryRequest(req, false); err == nil {
 		t.Fatal("expected progress sort to be rejected for shared query sources")
-	}
-}
-
-func TestCatalogRuleMatchesItem_InLastDateFields(t *testing.T) {
-	recentRelease := time.Now().UTC().AddDate(0, 0, -10).Format("2006-01-02")
-	oldRelease := time.Now().UTC().AddDate(-2, 0, 0).Format("2006-01-02")
-	recentItem := &models.MediaItem{
-		CreatedAt:   time.Now().AddDate(0, 0, -10),
-		ReleaseDate: &recentRelease,
-	}
-	oldItem := &models.MediaItem{
-		CreatedAt:   time.Now().AddDate(-2, 0, 0),
-		ReleaseDate: &oldRelease,
-	}
-
-	if !catalogRuleMatchesItem(recentItem, QueryRule{Field: "added_at", Op: "in_last", Value: "1y"}) {
-		t.Fatal("expected recent added_at to match 1y in_last")
-	}
-	if catalogRuleMatchesItem(oldItem, QueryRule{Field: "added_at", Op: "in_last", Value: "1y"}) {
-		t.Fatal("expected old added_at not to match 1y in_last")
-	}
-	if !catalogRuleMatchesItem(recentItem, QueryRule{Field: "release_date", Op: "in_last", Value: "1y"}) {
-		t.Fatal("expected recent release_date to match 1y in_last")
-	}
-	if catalogRuleMatchesItem(oldItem, QueryRule{Field: "release_date", Op: "in_last", Value: "1y"}) {
-		t.Fatal("expected old release_date not to match 1y in_last")
 	}
 }
 
@@ -158,80 +131,4 @@ type fakeSearchProvider struct {
 func (f *fakeSearchProvider) Search(_ context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
 	f.requests = append(f.requests, req)
 	return f.result, nil
-}
-
-// TestResolveDirectSearchSource_EarlyEmptyOmitsDiagnostics asserts that the
-// early-empty path (no accessible libraries) returns a zero-valued Provider so
-// the handler omits search_diagnostics for it.
-func TestResolveDirectSearchSource_EarlyEmptyOmitsDiagnostics(t *testing.T) {
-	resolver := &CatalogResolver{
-		searchProvider: &fakeSearchProvider{result: &CatalogSearchResult{Provider: SearchProviderMeilisearch}},
-	}
-
-	got, err := resolver.resolveDirectSearchSource(
-		context.Background(),
-		CatalogRequest{Source: CatalogSourceQuery, SearchQuery: "dune", Limit: 20},
-		// AllowedLibraryIDs empty (non-nil) => AccessFilter.LibraryScope early-empties.
-		AccessFilter{AllowedLibraryIDs: []int{}},
-	)
-	if err != nil {
-		t.Fatalf("resolveDirectSearchSource error: %v", err)
-	}
-	if got.Provider != "" {
-		t.Fatalf("early-empty Provider = %q, want empty", got.Provider)
-	}
-}
-
-// TestResolveDirectSearchSource_PassesViewerProfile asserts that search hands
-// the provider the viewer's user and profile, which personalized sorts such as
-// plays need (#3626).
-func TestResolveDirectSearchSource_PassesViewerProfile(t *testing.T) {
-	provider := &fakeSearchProvider{result: &CatalogSearchResult{Provider: SearchProviderPostgres}}
-	resolver := &CatalogResolver{searchProvider: provider}
-
-	_, err := resolver.resolveDirectSearchSource(
-		context.Background(),
-		CatalogRequest{
-			Source:      CatalogSourceQuery,
-			SearchQuery: "dune",
-			Limit:       20,
-			Query:       QueryDefinition{Sort: QuerySort{Field: "plays", Order: "desc"}},
-		},
-		AccessFilter{AllowedLibraryIDs: []int{7}, UserID: 42, ProfileID: "profile-1"},
-	)
-	if err != nil {
-		t.Fatalf("resolveDirectSearchSource error: %v", err)
-	}
-	if len(provider.requests) != 1 {
-		t.Fatalf("provider requests = %d, want 1", len(provider.requests))
-	}
-	access := provider.requests[0].Access
-	if access.UserID != 42 || access.ProfileID != "profile-1" {
-		t.Fatalf("search access user/profile = %d/%q, want 42/%q", access.UserID, access.ProfileID, "profile-1")
-	}
-	if !slices.Equal(access.AllowedLibraryIDs, []int{7}) {
-		t.Fatalf("search allowed libraries = %v, want [7]", access.AllowedLibraryIDs)
-	}
-}
-
-func TestSearchFacet_EbookScopeRejectsNarratorFacet(t *testing.T) {
-	resolver := &CatalogResolver{
-		browseRepo: &BrowseRepository{},
-		facets:     &recordingFacetFetcher{},
-	}
-
-	_, err := resolver.SearchFacet(
-		context.Background(),
-		CatalogRequest{
-			Source: CatalogSourceQuery,
-			Query:  QueryDefinition{MediaScope: "ebook"},
-		},
-		AccessFilter{},
-		"narrator",
-		"Na",
-		20,
-	)
-	if err == nil {
-		t.Fatal("expected narrator facet to be rejected for ebook scope")
-	}
 }

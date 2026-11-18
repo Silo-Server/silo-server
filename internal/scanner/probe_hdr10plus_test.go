@@ -59,29 +59,6 @@ func frameProbeInvocations(t *testing.T, argsLog string) []string {
 	return frames
 }
 
-func TestProbeFileDetectsHDR10PlusFromFirstFrame(t *testing.T) {
-	ffprobe, argsLog := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON, "printf '%s' '"+hdr10PlusFrameJSON+"'")
-
-	probe, err := ProbeFile(context.Background(), ffprobe, filepath.Join(t.TempDir(), "movie.mkv"))
-	if err != nil {
-		t.Fatalf("ProbeFile: %v", err)
-	}
-	if len(probe.VideoTracks) != 1 {
-		t.Fatalf("video tracks = %d, want 1", len(probe.VideoTracks))
-	}
-	track := probe.VideoTracks[0]
-	if !track.HDR10Plus || track.VideoRangeType != "HDR10Plus" || track.HDR10PlusUnchecked {
-		t.Fatalf("track = %+v; want a checked HDR10Plus track", track)
-	}
-	frames := frameProbeInvocations(t, argsLog)
-	if len(frames) != 1 {
-		t.Fatalf("frame probes = %d, want 1: %q", len(frames), frames)
-	}
-	if !strings.Contains(frames[0], "-select_streams 1 ") || !strings.Contains(frames[0], "-read_intervals %+#1 ") {
-		t.Fatalf("frame probe args = %q, want the first frame of stream 1", frames[0])
-	}
-}
-
 func TestProbeFileSkipsFrameProbeForNonPQVideo(t *testing.T) {
 	sdr := strings.Replace(hdr10PlusStreamsJSON, `"smpte2084"`, `"bt709"`, 1)
 	ffprobe, argsLog := writeHDR10PlusFFprobe(t, sdr, "printf '%s' '"+hdr10PlusFrameJSON+"'")

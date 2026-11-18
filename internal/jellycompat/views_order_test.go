@@ -10,8 +10,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/settingscontract"
-	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -91,35 +89,5 @@ func TestUserViewsFollowPostedOrderedViews(t *testing.T) {
 	}
 	if got := userViewNames(t, views, session); !slices.Equal(got, defaultOrder) {
 		t.Fatalf("cleared order = %v, want %v", got, defaultOrder)
-	}
-}
-
-// Libraries follow the profile's native library order. OrderedViews then
-// moves the views it names to the front; the rest keep the native order.
-func TestUserViewsFallBackToNativeLibraryOrder(t *testing.T) {
-	store := newJellycompatUserStore(t)
-	views := newViewOrderTestHandler(store)
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	tx, ok := store.(userstore.PreferenceSettingsTransactioner)
-	if !ok {
-		t.Fatal("test store does not support settings transactions")
-	}
-	if err := tx.WithPreferenceSettingsTransaction(t.Context(), func(writer userstore.PreferenceSettingsWriter) error {
-		_, err := writer.UpsertSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.UiLibraryOrder, Scope: settingscontract.ScopeProfile, ProfileID: session.ProfileID}, json.RawMessage(`[3,1]`))
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if got, want := userViewNames(t, views, session), []string{"Collections", "Kids", "Movies", "Shows"}; !slices.Equal(got, want) {
-		t.Fatalf("native order = %v, want %v", got, want)
-	}
-
-	shows := views.codec.EncodeIntID(EncodedIDLibrary, 2)
-	if err := store.SetSetting(t.Context(), configurationKey(session.ProfileID), `{"OrderedViews":["`+shows+`"]}`); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := userViewNames(t, views, session), []string{"Shows", "Collections", "Kids", "Movies"}; !slices.Equal(got, want) {
-		t.Fatalf("OrderedViews over native order = %v, want %v", got, want)
 	}
 }

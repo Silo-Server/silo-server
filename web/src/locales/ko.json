@@ -20936,6 +20936,270 @@
       "value": "연결을 확인하지 못했어요."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "AI 서비스 설정에서 ChatGPT로 로그인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "임베딩 연결에 성공했어요. 모델이 "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환해요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "임베딩은 "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "차원 벡터로 만들어졌지만 지금 모델은 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환해요. 모델을 바꾸기 전에 임베딩을 재설정하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "임베딩 잠금에 "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "차원 벡터가 기록돼 있지만 Silo는 1~"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "차원만 저장해요. 임베딩을 재설정하고 최대 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환하는 모델을 사용하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "저장된 임베딩 잠금을 읽을 수 없어요. 임베딩을 재설정해서 지우세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "임베딩은 “"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "” 모델이 아니라 “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” 모델로 만들어졌어요. 모델을 바꾸기 전에 임베딩을 재설정하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "임베딩 제공자가 테스트 텍스트에 대한 벡터를 반환하지 않았어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "임베딩은 "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "차원으로 저장돼 있지만 이 서버는 "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": "차원으로 저장해요. 임베딩을 재설정하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "모델이 "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환하지만 Silo는 최대 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "차원까지 저장해요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "연결을 확인하지 못했어요. 입력한 설정과 제공자의 사용 가능 여부를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList API 키를 확인했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch 연결에 성공했어요"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch에서 API 키를 거부했거나 API 키가 필요해요. Default Admin API Key처럼 인덱스와 문서를 관리할 수 있는 키를 입력하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch에서 확인 요청을 다른 주소로 리디렉션했어요. https:// URL처럼 리디렉션되는 주소를 입력하고 API 키를 다시 입력하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis 연결에 성공했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3 연결과 객체 읽기/쓰기/삭제 권한을 확인했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 연결에 성공했어요. 타임스탬프가 포함된 음성 인식 결과를 받았어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 액세스가 거부됐어요. API 키 권한과 허용된 제공자를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 모델이 타임스탬프가 포함된 세그먼트를 반환하지 않아요. Silo에서 자막을 만들려면 이 정보가 필요해요. OpenAI의 whisper-1처럼 세그먼트 타임스탬프를 지원하는 모델을 선택하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 엔드포인트나 모델을 사용할 수 없어요. 제공자의 기본 URL, 모델, 허용된 제공자를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자에서 결제가 필요해요. 제공자 잔액과 지출 한도를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자의 할당량을 모두 사용했어요. 제공자 잔액과 한도를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자가 요청 속도를 제한하고 있어요. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 연결 확인 시간이 초과됐어요. 제공자의 사용 가능 여부를 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 인증에 실패했어요. AI 서비스에서 제공자의 API 키를 교체하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자를 일시적으로 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 연결에 성공했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "텍스트 AI에 연결하지 못했어요. 모델, 추론 수준, 서비스 등급, 계정 연결, 제공자 사용 한도를 확인하세요."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -46992,6 +47256,20 @@
       "value": "연결 확인에 실패했어요."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "임베딩 제공자가 선택되지 않았어요. “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” 모델을 제공하는 제공자를 선택하거나, 다른 모델을 사용하려면 임베딩을 초기화하세요."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -52496,6 +52774,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "같은 주소에서 로그인 없이 재생"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Findroid 등 일부 Jellyfin 앱은 로그인하지 않고 직접 재생 및 다운로드 링크를 열어요. 이 옵션을 켜면 같은 네트워크 주소에서 로그인한 앱이 최근 2시간 안에 해당 파일의 재생을 요청한 경우 Silo가 이러한 요청을 처리해요. 이 경우 같은 가정 네트워크, 이동통신사 또는 VPN을 사용하는 사람처럼 해당 주소를 공유하는 누구나 그 파일을 재생할 수 있어요. 이러한 앱 중 하나를 사용하는 경우에만 켜세요."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -81917,6 +82207,12 @@
       "value": "순서"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "관련성"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -96719,6 +97015,12 @@
       "value": "컬렉션"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "라이브러리"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -96767,6 +97069,12 @@
     {
       "type": 0,
       "value": "아직 컬렉션이 없어요. 먼저 컬렉션에서 하나 만드세요."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "이 라이브러리에 이 유형의 컬렉션이 없어요."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -111679,6 +111987,12 @@
       "value": "일시정지 및 재개 가능"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party를 사용하려면 Redis가 필요한데 이 서버에는 설정되어 있지 않아요. 서버 관리자에게 설정을 요청하세요."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -115383,6 +115697,86 @@
     {
       "type": 0,
       "value": "라이브러리 검색 또는 요청할 작품 찾기…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "라이브러리의 모든 결과"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "관련성순으로 보기"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "가장 관련성 높은 결과"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "라이브러리에 있음"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "기타 결과"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "라이브러리에 없음"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "개요"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "추가 요청"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "모든 결과 보기"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "정렬 기준: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "결과 보기 방식"
     }
   ],
   "web.search.resultsLabel": [
@@ -127897,6 +128291,18 @@
       "value": "액세스 키"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "새 저장소를 사용하기 위해 Silo를 다시 시작하고 있어요. Silo가 다시 실행되면 설정이 계속돼요."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "저장소 설정 적용 중"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -128177,6 +128583,18 @@
     {
       "type": 0,
       "value": "연결 URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Docker, Kubernetes 또는 systemd에서 Silo를 다시 시작하도록 설정한 경우에만 Silo가 자동으로 다시 실행돼요. 그렇지 않으면 Silo를 직접 다시 시작하세요. Silo가 다시 실행되면 설정이 계속돼요."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo가 아직 다시 시작되지 않았어요"
     }
   ],
   "web.setup.storage.saveFailed": [

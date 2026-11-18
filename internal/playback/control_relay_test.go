@@ -365,45 +365,6 @@ func TestControlRelayLaneOwnershipFollowsTheNewestConnection(t *testing.T) {
 	waitForRelayOwner(t, owners, "s1", "")
 }
 
-// TestControlRelayRefreshRepairsADroppedTakeover: when the newer replica's
-// open notification was dropped, its refresh still takes the key from the
-// replica holding the older connection, whichever refreshes first.
-func TestControlRelayRefreshRepairsADroppedTakeover(t *testing.T) {
-	owners := newRelayTestOwners()
-	hubA, hubB := NewRealtimeHub(), NewRealtimeHub()
-	a, b := NewControlRelayWithOwners(hubA, owners), NewControlRelayWithOwners(hubB, owners)
-	hubA.Register("s1", registrationTestConn{})
-	a.refresh(context.Background())
-	olderAt, _ := hubA.LaneConnectedAt("s1")
-	for {
-		hubB.Register("s1", registrationTestConn{})
-		if newerAt, _ := hubB.LaneConnectedAt("s1"); newerAt.After(olderAt) {
-			break
-		}
-	}
-	b.refresh(context.Background())
-	a.refresh(context.Background())
-	if got := owners.get("s1"); got != b.id {
-		t.Fatalf("owner after refreshes = %q, want the newest connection's replica", got)
-	}
-}
-
-func TestControlRelayRefreshReclaimsAnExpiredClaim(t *testing.T) {
-	owners := newRelayTestOwners()
-	hub := NewRealtimeHub()
-	relay := NewControlRelayWithOwners(hub, owners)
-	hub.Register("s1", registrationTestConn{})
-	relay.refresh(context.Background())
-	if got := owners.get("s1"); got != relay.id {
-		t.Fatalf("refresh did not claim an open lane: owner %q", got)
-	}
-	_ = owners.Release(context.Background(), "s1", relay.id) // the key expired
-	relay.refresh(context.Background())
-	if got := owners.get("s1"); got != relay.id {
-		t.Fatalf("refresh did not reclaim: owner %q", got)
-	}
-}
-
 // gatedRelayTestOwners holds every Claim until gate closes, standing in for a
 // slow Redis round trip, and records the order the claims completed in.
 type gatedRelayTestOwners struct {
@@ -461,16 +422,6 @@ func TestControlRelayRefreshDoesNotSerializeBehindTheRoundTrip(t *testing.T) {
 	}
 }
 
-func TestControlRelayNilNeverForwards(t *testing.T) {
-	var relay *ControlRelay
-	if _, outcome := relay.Forward(context.Background(), "s1", "pause", nil); outcome != ControlRelayServeLocally {
-		t.Fatalf("nil relay = %v, want served locally", outcome)
-	}
-	if NewControlRelay(NewRealtimeHub(), nil) != nil {
-		t.Fatal("relay without Redis")
-	}
-}
-
 // TestRedisControlRelayOwners checks the ownership scripts against Redis.
 func TestRedisControlRelayOwners(t *testing.T) {
 	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
@@ -523,5 +474,25 @@ func TestRedisControlRelayOwners(t *testing.T) {
 	}
 	if err := owners.Release(ctx, sessionID, "b"); err != nil || owner() != "" {
 		t.Fatalf("release: %v, owner %q", err, owner())
+	}
+}
+
+func TestControlRelayRefreshRepairsADroppedTakeover(t *testing.T) {
+	owners := newRelayTestOwners()
+	hubA, hubB := NewRealtimeHub(), NewRealtimeHub()
+	a, b := NewControlRelayWithOwners(hubA, owners), NewControlRelayWithOwners(hubB, owners)
+	hubA.Register("s1", registrationTestConn{})
+	a.refresh(context.Background())
+	olderAt, _ := hubA.LaneConnectedAt("s1")
+	for {
+		hubB.Register("s1", registrationTestConn{})
+		if newerAt, _ := hubB.LaneConnectedAt("s1"); newerAt.After(olderAt) {
+			break
+		}
+	}
+	b.refresh(context.Background())
+	a.refresh(context.Background())
+	if got := owners.get("s1"); got != b.id {
+		t.Fatalf("owner after refreshes = %q, want the newest connection's replica", got)
 	}
 }
