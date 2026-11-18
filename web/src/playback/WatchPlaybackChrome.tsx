@@ -6,7 +6,6 @@ import {
   resetStillWatchingStreak,
 } from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
-import { useAutoPlayNextEnabled } from "@/hooks/queries/autoPlayNext";
 import {
   lazy,
   Suspense,
@@ -45,7 +44,7 @@ import {
   useEffectiveSettings,
   useSettingsCapabilities,
 } from "@/hooks/queries/settingValues";
-import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { useWatchDetail } from "@/hooks/queries/items";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
@@ -91,6 +90,7 @@ import {
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
 import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { isInNextUpPromptWindow } from "./nextUpPrompt";
 import { playbackQualitySettings } from "./playbackQualitySettings";
 
 const WatchPage = lazy(() =>
@@ -669,7 +669,8 @@ function WatchPlaybackHostContent() {
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
       SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
-      SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
+      // How long before the end of the file Next Up opens.
+      SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
       // The resolution cap, which the quality picker writes canonically and
       // no longer mirrors into the profile column playback used to read.
       SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
@@ -691,9 +692,6 @@ function WatchPlaybackHostContent() {
     ],
     enabled: signedIn,
   });
-  // Shares the post-roll switch's query, so the credits card and the post-roll
-  // screen agree. Until the server answers, the card holds its countdown.
-  const autoPlayNext = useAutoPlayNextEnabled({ enabled: signedIn }) === true;
   const loadedBufferingMode = supportsBufferingQualityMode
     ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
         | BufferingMode
@@ -971,8 +969,17 @@ function WatchPlaybackHostContent() {
 
   const requestKeyValue = activeRequest?.requestKey ?? "";
 
-  // -- Early post-roll trigger (30s before end) --
-  const POST_ROLL_SECONDS_BEFORE_END = 30;
+  // -- Early post-roll trigger (the viewer's Show Next Up lead time) --
+  // Until the setting loads the contract default applies; 0 means "At end",
+  // which leaves post-roll to the `ended` fallback below.
+  const nextUpPromptSeconds = Number(
+    effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS]?.value ??
+      SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS].defaultValue,
+  );
+  const nextUpPromptSecondsRef = useRef(nextUpPromptSeconds);
+  useEffect(() => {
+    nextUpPromptSecondsRef.current = nextUpPromptSeconds;
+  }, [nextUpPromptSeconds]);
   const postRollEnteredRef = useRef(false);
   const [postRollVideoEnded, setPostRollVideoEnded] = useState(false);
 
@@ -1065,7 +1072,8 @@ function WatchPlaybackHostContent() {
         }
         return;
       }
-      // Fallback: enter post-roll on ended if 30s threshold was missed.
+      // Enter post-roll on ended: with Show Next Up set to "At end", or when
+      // the early window was missed (a seek past it, a short file).
       // Applies whether or not a next episode exists; the screen renders an
       // end-of-series state when nextEpisodeRef is null.
       postRollEnteredRef.current = true;
@@ -1119,7 +1127,8 @@ function WatchPlaybackHostContent() {
         prefetchPlayingNextScreen(shuffledRef.current);
       }
 
-      // Enter post-roll early when approaching end of a series episode.
+      // Enter post-roll early when the episode reaches the viewer's Show Next
+      // Up window before the end of the file.
       // Fires regardless of whether a next episode exists so the end-of-
       // series case still gets a graceful overlay instead of an HLS tail loop.
       // A Watch Together room decides what follows for everyone: it returns to
@@ -1132,9 +1141,11 @@ function WatchPlaybackHostContent() {
         hasPostRollRef.current &&
         !awaitsLaterPartRef.current &&
         modeRef.current === "foreground" &&
-        snapshot.duration > 0 &&
-        snapshot.currentTime > 0 &&
-        snapshot.duration - snapshot.currentTime <= POST_ROLL_SECONDS_BEFORE_END
+        isInNextUpPromptWindow(
+          snapshot.currentTime,
+          snapshot.duration,
+          nextUpPromptSecondsRef.current,
+        )
       ) {
         postRollEnteredRef.current = true;
         setPostRollVideoEnded(false);
@@ -1255,10 +1266,6 @@ function WatchPlaybackHostContent() {
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
   );
-  const autoPlayNextPreview = resolvedBool(
-    SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
-    watchPageProps.autoPlayNextPreview,
-  );
   // Opt-in, and both default off: an untouched profile's prompt is unchanged.
   // A server that cannot answer either key leaves them false, which is the same
   // shape it would show if the viewer had turned them off.
@@ -1280,8 +1287,6 @@ function WatchPlaybackHostContent() {
           showMarkerSource={showMarkerSource}
           bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
-          autoPlayNextPreview={autoPlayNextPreview}
-          autoPlayNext={autoPlayNext}
           canEditMarkers={canEditMarkers}
           playbackRequestKey={requestKeyValue}
           onNavigateEpisode={handleNavigateEpisode}

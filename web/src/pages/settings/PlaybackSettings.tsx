@@ -52,7 +52,19 @@ const BASE_PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
+  SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
 ];
+
+/** Show Next Up choices, in seconds before the end; 0 is "At end". The native apps offer the same. */
+const NEXT_UP_PROMPT_CHOICES = [0, 10, 30, 60, 120];
+
+function nextUpPromptLabel(t: Translate, seconds: number) {
+  if (seconds <= 0) return t("settings.nextUp.atEnd");
+  if (seconds % 60 === 0) {
+    return t("settings.nextUp.minutesBeforeEnd", { count: seconds / 60 });
+  }
+  return t("settings.nextUp.secondsBeforeEnd", { count: seconds });
+}
 
 const BUFFERING_MODE_SETTING = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE];
 
@@ -754,6 +766,40 @@ export default function PlaybackSettings() {
               }
             />
           )}
+        />
+
+        <SettingRow
+          label={t("settings.nextUp.title")}
+          description={settingDescription(
+            SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS],
+          )}
+          control={(id) => {
+            const seconds = read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS);
+            // A value another client stored outside the list still shows as itself.
+            const choices = NEXT_UP_PROMPT_CHOICES.includes(seconds)
+              ? NEXT_UP_PROMPT_CHOICES
+              : [...NEXT_UP_PROMPT_CHOICES, seconds].sort((a, b) => a - b);
+            return (
+              <Select
+                value={String(seconds)}
+                disabled={pending}
+                onValueChange={(value) =>
+                  saveValue(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS, Number(value))
+                }
+              >
+                <SelectTrigger id={id} className="w-full sm:w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {choices.map((choice) => (
+                    <SelectItem key={choice} value={String(choice)}>
+                      {nextUpPromptLabel(t, choice)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            );
+          }}
         />
 
         <AutoPlayNextSetting />

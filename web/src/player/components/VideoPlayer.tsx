@@ -25,7 +25,6 @@ import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOver
 import { IntroSkipButton } from "./IntroSkipButton";
 import { BufferingQualityPill } from "./BufferingQualityPill";
 import { MarkerEditPanel } from "./MarkerEditPanel";
-import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
@@ -50,7 +49,6 @@ import { useSubtitleDelay } from "../hooks/useSubtitleDelay";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
-import { useNextEpisode } from "../hooks/useNextEpisode";
 import { resetStillWatchingStreak } from "../stillWatching";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { useWatchTogetherPlaybackSync } from "../hooks/useWatchTogetherPlaybackSync";
@@ -76,11 +74,7 @@ import { StartupGuard } from "../utils/startupGuard";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
-import {
-  markerOccurrenceAtTime,
-  resolveAutoplayMarker,
-  resolveMarkerRegions,
-} from "../utils/watchPageMarkers";
+import { markerOccurrenceAtTime, resolveMarkerRegions } from "../utils/watchPageMarkers";
 import type {
   PlaybackExitState,
   IntroSkipMode,
@@ -349,9 +343,6 @@ interface VideoPlayerProps {
   autoSkipRecap?: boolean;
   preview?: PlayerTimeRange | null;
   markerSegments?: PlayerMarkerSegment[];
-  autoPlayNextPreview?: boolean;
-  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
-  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   /**
    * Notified after a successful in-player marker edit, with only the kinds it
@@ -569,8 +560,6 @@ export function VideoPlayer({
   autoSkipRecap = false,
   preview = null,
   markerSegments,
-  autoPlayNextPreview = false,
-  autoPlayNext = true,
   canEditMarkers = true,
   onMarkersEdited,
   duration: propDuration,
@@ -2503,36 +2492,28 @@ export function VideoPlayer({
   const activeRecap = markerOccurrenceAtTime(savedMarkerRegions, "recap", currentTime);
   const activeCredits = markerOccurrenceAtTime(savedMarkerRegions, "credits", currentTime);
   const activePreview = markerOccurrenceAtTime(savedMarkerRegions, "preview", currentTime);
-  const autoplayMarker = useMemo(() => {
-    if (markerSegments !== undefined) {
-      return resolveAutoplayMarker(savedMarkerRegions, duration, autoPlayNextPreview);
-    }
-    return autoPlayNextPreview && preview ? preview : credits;
-  }, [markerSegments, savedMarkerRegions, duration, autoPlayNextPreview, preview, credits]);
-  const nextEpisode = useNextEpisode(
-    roomPlaybackActive ? null : autoplayMarker,
-    roomPlaybackActive ? undefined : seriesContext,
-    currentTime,
-    handleNavigate,
-    { autoPlay: autoPlayNext, playing },
-  );
-
-  // Previous-episode lookup (mirrors the helper in useNextEpisode). Auto-play
-  // is next-only, so we just need the reference + a navigation callback for
-  // the floating player cluster.
-  const prevEpisodeRef = (() => {
-    if (!seriesContext) return null;
-    const idx = seriesContext.episodes.findIndex(
-      (ep) =>
-        ep.seasonNumber === seriesContext.currentSeason &&
-        ep.episodeNumber === seriesContext.currentEpisode,
-    );
-    if (idx <= 0) return null;
-    return seriesContext.episodes[idx - 1] ?? null;
-  })();
+  // The neighbouring episodes for the floating player cluster. Next Up itself
+  // is the post-roll screen, timed from the end of the file by the host. A
+  // Watch Together room decides what plays next, so it offers no next episode.
+  const episodeIndex = seriesContext
+    ? seriesContext.episodes.findIndex(
+        (ep) =>
+          ep.seasonNumber === seriesContext.currentSeason &&
+          ep.episodeNumber === seriesContext.currentEpisode,
+      )
+    : -1;
+  const prevEpisodeRef =
+    seriesContext && episodeIndex > 0 ? (seriesContext.episodes[episodeIndex - 1] ?? null) : null;
+  const nextEpisodeRef =
+    seriesContext && !roomPlaybackActive && episodeIndex >= 0
+      ? (seriesContext.episodes[episodeIndex + 1] ?? null)
+      : null;
   const goToPrevEpisode = useCallback(() => {
     if (prevEpisodeRef) handleNavigate(prevEpisodeRef.contentId, "viewer");
   }, [prevEpisodeRef, handleNavigate]);
+  const goToNextEpisode = useCallback(() => {
+    if (nextEpisodeRef) handleNavigate(nextEpisodeRef.contentId, "viewer");
+  }, [nextEpisodeRef, handleNavigate]);
 
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
@@ -2545,25 +2526,11 @@ export function VideoPlayer({
     : year
       ? numberText(year)
       : undefined;
-  const cancelNextEpisodeAutoPlay = nextEpisode.cancelAutoPlay;
-  const cancelNextEpisodeAutoPlayRef = useRef(cancelNextEpisodeAutoPlay);
   const flushWatchProgressRef = useRef(flushWatchProgress);
-
-  useEffect(() => {
-    cancelNextEpisodeAutoPlayRef.current = cancelNextEpisodeAutoPlay;
-  }, [cancelNextEpisodeAutoPlay]);
 
   useEffect(() => {
     flushWatchProgressRef.current = flushWatchProgress;
   }, [flushWatchProgress]);
-
-  // Cancel the in-player credits countdown when entering postroll mode,
-  // since PlayingNextScreen takes over next-episode navigation.
-  useEffect(() => {
-    if (displayMode === "postroll") {
-      cancelNextEpisodeAutoPlay();
-    }
-  }, [cancelNextEpisodeAutoPlay, displayMode]);
 
   // -- Intro/recap skip --
   const activeSkipMarker = [activeRecap, activeCredits, activePreview].find(
@@ -3468,8 +3435,6 @@ export function VideoPlayer({
       if (endedFiredRef.current) return;
       endedFiredRef.current = true;
       setHasEnded(true);
-      // Cancel any active credits countdown to prevent it racing with post-roll.
-      cancelNextEpisodeAutoPlayRef.current();
       // Flush progress so the server records the final position.
       flushWatchProgressRef.current().catch(() => {});
       // Use ref to get the latest callback, avoiding stale closure issues
@@ -4875,11 +4840,10 @@ export function VideoPlayer({
     }),
     [plan, activeQualityId],
   );
-  // Intro skip, the other segment skips and Next Up take priority; a
+  // Intro skip and the other segment skips take priority; a
   // buffering pill waits behind them with its timer frozen. A minimized
   // player shows no pill either, so the pill waits for it to come back.
-  const higherPriorityPillActive =
-    activeIntroPrompt !== null || nextEpisode.showCountdown || activeSkipMarker !== undefined;
+  const higherPriorityPillActive = activeIntroPrompt !== null || activeSkipMarker !== undefined;
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
@@ -5768,7 +5732,7 @@ export function VideoPlayer({
           showSource={showMarkerSource}
         />
       )}
-      {!isDetached && !activeIntroPrompt && !nextEpisode.showCountdown && activeSkipMarker && (
+      {!isDetached && !activeIntroPrompt && activeSkipMarker && (
         <IntroSkipButton
           onSkip={skipMarker}
           label={skipMarkerLabel(t, activeSkipMarker.kind)}
@@ -5783,17 +5747,6 @@ export function VideoPlayer({
       {/* Marker editor */}
       {!isDetached && markerEditor.editing && (
         <MarkerEditPanel editor={markerEditor} currentTime={currentTime} />
-      )}
-
-      {/* Next episode overlay */}
-      {!isDetached && nextEpisode.showCountdown && nextEpisode.nextEpisode && (
-        <NextEpisodeOverlay
-          dockHeight={controlsVisible ? dockClearance : 0}
-          episode={nextEpisode.nextEpisode}
-          secondsRemaining={nextEpisode.secondsRemaining}
-          onSkip={nextEpisode.skipToNext}
-          onCancel={nextEpisode.cancelAutoPlay}
-        />
       )}
 
       {/* Live translation buffering indicator */}
@@ -5909,9 +5862,9 @@ export function VideoPlayer({
           showPlaybackInfo={showPlaybackInfo}
           onTogglePlaybackInfo={() => setShowPlaybackInfo((v) => !v)}
           hasPrevEpisode={!!prevEpisodeRef}
-          hasNextEpisode={!!nextEpisode.nextEpisode}
+          hasNextEpisode={!!nextEpisodeRef}
           onPrevEpisode={goToPrevEpisode}
-          onNextEpisode={nextEpisode.skipToNext}
+          onNextEpisode={goToNextEpisode}
           title={hudTitle}
           subtitleLabel={hudSubtitle}
         />
