@@ -599,8 +599,8 @@ answers still holds the play session. HLS master playlist, playlist and
 segment requests that carry a token answer the same retryable `503` when their
 play session cannot be read, and so do progressive stream, subtitle and
 attachment requests; a play session that is absent or belongs to another token
-answers `404`. Master playlist, progressive stream, subtitle and attachment
-requests answer a retryable `503` when the media file lookup fails, and `404`
+answers `404`. The same media requests answer a retryable `503` when the media
+file lookup fails, and keep the play session for the retry; they answer `404`
 only when the file is gone. `PlaybackInfo` answers `503` instead of
 returning a `PlaySessionId` it could not store, since other API servers could
 not resolve it.

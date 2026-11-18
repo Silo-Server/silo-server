@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -278,6 +279,39 @@ func TestCanceledTranscodeStartupKeepsWatchProviderSessionRetryable(t *testing.T
 	}
 }
 
+// A file lookup that fails without finding the file missing says nothing about
+// the file: the transcode start keeps the play and answers a retryable 503, so
+// the client's retry of the playlist finds it.
+func TestTranscodeStartupFileLookupFailureKeepsPlayRetryable(t *testing.T) {
+	mgr := &testCompatSessionManager{}
+	h, store := newActiveEncodingsHandler(mgr)
+	h.fileResolver = cancelingErrorFileResolver{cancel: func() {}, err: errors.New("database unavailable")}
+	source := PlaybackMediaSource{ID: "source-1", FileID: 42, Version: testCompatVersion()}
+	store.Put(PlaybackSession{
+		ID:           "play-1",
+		CompatToken:  "token-1",
+		ItemID:       "movie-1",
+		MediaSources: []PlaybackMediaSource{source},
+	})
+	compatSession := &Session{Token: "token-1", StreamAppUserID: 7, ProfileID: "profile-1"}
+
+	_, err := h.ensureTranscodeManifest(t.Context(), compatSession, "play-1", source)
+	if err == nil {
+		t.Fatal("ensureTranscodeManifest succeeded, want the lookup failure")
+	}
+	if _, ok := store.Get("play-1"); !ok {
+		t.Fatal("a failed file lookup removed the retryable play session")
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("a failed file lookup stopped upstream sessions: %v", mgr.stopCalls)
+	}
+	recorder := httptest.NewRecorder()
+	writeCompatTranscodeError(recorder, err)
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Retry-After") == "" {
+		t.Fatalf("status = %d, Retry-After = %q; want a retryable 503", recorder.Code, recorder.Header().Get("Retry-After"))
+	}
+}
+
 func TestFailedTranscodeStartupStillClosesWhenRequestCancelsAfterFailure(t *testing.T) {
 	mgr := &testCompatSessionManager{}
 	h, store := newActiveEncodingsHandler(mgr)
@@ -291,7 +325,7 @@ func TestFailedTranscodeStartupStillClosesWhenRequestCancelsAfterFailure(t *test
 		MediaSources: []PlaybackMediaSource{source},
 	})
 	compatSession := &Session{Token: "token-1", StreamAppUserID: 7, ProfileID: "profile-1"}
-	startupErr := errors.New("file lookup failed")
+	startupErr := scanner.ErrFileNotFound
 	ctx, cancel := context.WithCancel(context.Background())
 	h.fileResolver = cancelingErrorFileResolver{cancel: cancel, err: startupErr}
 
