@@ -320,6 +320,16 @@ func (s *Service) environmentManagedStorageVars() []string {
 	return out
 }
 
+// refuseEnvironmentManagedStorage is the refusal of a transition on a server
+// whose environment sets a storage setting.
+func (s *Service) refuseEnvironmentManagedStorage() error {
+	vars := s.environmentManagedStorageVars()
+	if len(vars) == 0 {
+		return nil
+	}
+	return validationErrorf("storage is set by the environment (%s); unset those variables and restart before a managed storage transition", strings.Join(vars, ", "))
+}
+
 func New(pool *pgxpool.Pool, settings Settings, jobs JobRepository, source, private blobstore.Store) *Service {
 	service := &Service{pool: pool, settings: settings, jobs: jobs, source: source, private: private, commitVerifyAttempts: 5, progressInterval: 2 * time.Second, probeTimeout: 5 * time.Second, receiptFlushBytes: 256 << 20, receiptFlushInterval: 10 * time.Second, copyWorkers: 8, smallObjectBytes: 8 << 20, admissionRejoinAttempts: 10, memoryObjects: map[string]objectCheckpoint{}, memoryCursors: map[string]prefixCursor{}}
 	service.openPublic = openTarget
@@ -466,8 +476,8 @@ func (s *Service) Start(ctx context.Context, userID int, req StartRequest) (*mod
 	if !validPolicy(req.Policy) {
 		return nil, Preflight{}, validationErrorf("unknown migration policy %q", req.Policy)
 	}
-	if vars := s.environmentManagedStorageVars(); len(vars) > 0 {
-		return nil, Preflight{}, validationErrorf("storage is set by the environment (%s); unset those variables and restart before a managed storage transition", strings.Join(vars, ", "))
+	if err := s.refuseEnvironmentManagedStorage(); err != nil {
+		return nil, Preflight{}, err
 	}
 	// Stage selection and job admission must have one owner. The job index
 	// alone cannot prevent a losing request from changing the winner's stage.
@@ -737,6 +747,11 @@ func (s *Service) ExecuteStorageTransition(ctx context.Context, req adminjob.Sto
 			_ = s.recordStageFailure(context.Background(), req.TransitionID, resultErr)
 		}
 	}()
+	// A transition staged before a restart that added a storage variable
+	// would commit a location the environment replaces on the next start.
+	if err := s.refuseEnvironmentManagedStorage(); err != nil {
+		return nil, err
+	}
 	if s.nodeAdmission != nil {
 		acquired, err := s.tryExclusiveAdmission(ctx)
 		if err != nil {

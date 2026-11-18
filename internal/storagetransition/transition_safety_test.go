@@ -173,8 +173,9 @@ func TestNestedPublicSourceCannotAliasPrivateArtifactPrefix(t *testing.T) {
 }
 
 // The environment would put its storage settings back on the next start, so
-// a transition cannot be staged while it sets any.
-func TestStartRefusesStorageSetByTheEnvironment(t *testing.T) {
+// a transition cannot be staged while it sets any, and one staged before the
+// variable was added does not run.
+func TestStorageSetByTheEnvironmentRefusesTransitions(t *testing.T) {
 	settings := &memorySettings{values: map[string]string{settingArtworkBackend: blobstore.BackendLocal, settingArtworkLocalPath: t.TempDir()}}
 	service := New(nil, settings, memoryJobs{}, &memoryStore{identity: "local|source", objects: map[string][]byte{}}, nil)
 	service.SetEnvironmentManaged(map[string]string{settingArtworkLocalPath: "SILO_ARTWORK_PATH", "server.log_level": "SILO_LOG_LEVEL"})
@@ -184,5 +185,9 @@ func TestStartRefusesStorageSetByTheEnvironment(t *testing.T) {
 	}
 	if settings.values[StagedTargetSettingKey] != "" {
 		t.Error("a refused transition was staged")
+	}
+	_, err = service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: "staged-before-restart", Policy: PolicyFresh}, func(adminjob.StorageTransitionProgress) {})
+	if _, ok := errors.AsType[*ValidationError](err); !ok || !strings.Contains(err.Error(), "SILO_ARTWORK_PATH") {
+		t.Fatalf("ExecuteStorageTransition = %v, want a validation error naming SILO_ARTWORK_PATH", err)
 	}
 }

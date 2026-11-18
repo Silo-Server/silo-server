@@ -117,6 +117,8 @@ export default function LibraryMetadataSettings() {
     form.isDirty(REALTIME_MONITORING_KEY);
   function restoreWorkerDefaults() {
     for (const [key, fallback] of Object.entries(WORKER_SETTING_DEFAULTS)) {
+      // A count the environment sets is not the admin's to restore.
+      if (form.envVar(key)) continue;
       if (form.getValue(key) !== fallback) form.setValue(key, fallback);
     }
   }

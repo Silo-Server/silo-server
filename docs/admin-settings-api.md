@@ -41,7 +41,11 @@ environment variable`; `redis.db` has one exception, described below.
 `REDIS_URL` is never stored. While any storage key (`artwork.*`, `s3.public_*`,
 `s3.private_*`) is set by the environment, `POST /api/v2/admin/storage-transitions`
 is refused with a validation problem naming the variables, because the
-environment would put its values back on the next start.
+environment would put its values back on the next start. A transition staged
+before a restart that added such a variable fails when its job runs, for the
+same reason. Both checks look at the environment of the API server that
+handles the request or runs the job, so every API server has to be restarted
+without the storage variables before a transition.
 
 Stored and effective settings are string dictionaries keyed by the server
 settings registry. An empty dictionary is `{}`. Inspection copies stored values
