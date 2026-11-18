@@ -62,7 +62,6 @@ type Tracker struct {
 	sessions  map[string]*trackedSession // active sessions by ID
 	touched   map[string]time.Time       // ephemeral sessions by last-activity time
 	delivered map[string]time.Time       // last delivery record written per playback session
-	lingering map[string][]byte          // record of a session in touched by a lingering release
 }
 
 // trackedSession counts the in-flight requests holding one session. A session
@@ -87,7 +86,6 @@ func NewTracker(rdb *redis.Client, nodeURL, nodeName, nodeType string) *Tracker 
 		sessions:  make(map[string]*trackedSession),
 		touched:   make(map[string]time.Time),
 		delivered: make(map[string]time.Time),
-		lingering: make(map[string][]byte),
 	}
 }
 
@@ -159,20 +157,6 @@ func (tr *Tracker) Track(ctx context.Context, info SessionInfo) {
 // still end the session outright; a hold taken before them releases as a
 // no-op. Calling the returned func more than once has no further effect.
 func (tr *Tracker) Hold(ctx context.Context, info SessionInfo) func(context.Context) {
-	return tr.hold(ctx, info, false)
-}
-
-// HoldLingering is Hold for requests that arrive as a series with gaps between
-// them, such as the range requests of one direct-play stream. The last release
-// keeps the session counted for sessionTTL, and its record refreshed while it
-// is counted, as Touch does, so a gap between requests does not end the
-// session. The first Touch for the session after that release writes its own
-// record.
-func (tr *Tracker) HoldLingering(ctx context.Context, info SessionInfo) func(context.Context) {
-	return tr.hold(ctx, info, true)
-}
-
-func (tr *Tracker) hold(ctx context.Context, info SessionInfo, linger bool) func(context.Context) {
 	if tr.rdb == nil {
 		return func(context.Context) {}
 	}
@@ -193,13 +177,12 @@ func (tr *Tracker) hold(ctx context.Context, info SessionInfo, linger bool) func
 
 	var once sync.Once
 	return func(ctx context.Context) {
-		once.Do(func() { tr.release(ctx, info.SessionID, entry, linger) })
+		once.Do(func() { tr.release(ctx, info.SessionID, entry) })
 	}
 }
 
-// release drops one hold and ends the session when it was the last one. With
-// linger, the last release moves the session to the touched set instead.
-func (tr *Tracker) release(ctx context.Context, sessionID string, entry *trackedSession, linger bool) {
+// release drops one hold and ends the session when it was the last one.
+func (tr *Tracker) release(ctx context.Context, sessionID string, entry *trackedSession) {
 	tr.mu.Lock()
 	if tr.sessions[sessionID] != entry {
 		// Remove or Cleanup already ended the session this hold belonged to.
@@ -212,14 +195,7 @@ func (tr *Tracker) release(ctx context.Context, sessionID string, entry *tracked
 		return
 	}
 	delete(tr.sessions, sessionID)
-	if linger {
-		tr.touched[sessionID] = time.Now()
-		tr.lingering[sessionID] = entry.record
-		tr.mu.Unlock()
-		return
-	}
 	delete(tr.touched, sessionID)
-	delete(tr.lingering, sessionID)
 	tr.mu.Unlock()
 
 	if err := tr.rdb.Del(ctx, tr.redisKey(sessionID)).Err(); err != nil {
@@ -237,11 +213,6 @@ func (tr *Tracker) Touch(ctx context.Context, info SessionInfo) {
 	}
 	tr.mu.Lock()
 	_, known := tr.touched[info.SessionID]
-	if _, lingered := tr.lingering[info.SessionID]; lingered {
-		// The record in Redis is the lingering release's, not this Touch's.
-		known = false
-		delete(tr.lingering, info.SessionID)
-	}
 	tr.touched[info.SessionID] = time.Now()
 	tr.mu.Unlock()
 	if known {
@@ -267,7 +238,6 @@ func (tr *Tracker) Remove(ctx context.Context, sessionID string) {
 	tr.mu.Lock()
 	delete(tr.sessions, sessionID)
 	delete(tr.touched, sessionID)
-	delete(tr.lingering, sessionID)
 	tr.mu.Unlock()
 
 	if err := tr.rdb.Del(ctx, tr.redisKey(sessionID)).Err(); err != nil {
@@ -292,7 +262,6 @@ func (tr *Tracker) Cleanup(ctx context.Context) {
 	}
 	tr.sessions = make(map[string]*trackedSession)
 	tr.touched = make(map[string]time.Time)
-	tr.lingering = make(map[string][]byte)
 	// Delivery records stay in Redis: the deliveries happened, and the records
 	// expire on their own within DeliveryWindow.
 	tr.delivered = make(map[string]time.Time)
@@ -352,7 +321,6 @@ func (tr *Tracker) refreshAll(ctx context.Context) {
 			// Idle ephemeral session: stop refreshing and let the Redis
 			// key expire on its own.
 			delete(tr.touched, id)
-			delete(tr.lingering, id)
 			continue
 		}
 		if _, dup := tr.sessions[id]; !dup {
@@ -388,9 +356,7 @@ func (tr *Tracker) refreshAll(ctx context.Context) {
 // its record deleted. A session Hold registered again, or held with a newer
 // record, gets its current record written. A session only Touch registered
 // again has its record deleted and its touch forgotten, so the next Touch
-// writes its own record. A session a lingering last release moved to the
-// touched set keeps its touch and gets the release's record written when
-// refresh wrote another. The writes run under the lock so a Hold or Touch that
+// writes its own record. The writes run under the lock so a Hold or Touch that
 // registers the session again sends its SET after them.
 func (tr *Tracker) reconcileAfterRefresh(ctx context.Context, written map[string][]byte) {
 	tr.mu.Lock()
@@ -401,12 +367,6 @@ func (tr *Tracker) reconcileAfterRefresh(ctx context.Context, written map[string
 		if entry, ok := tr.sessions[id]; ok {
 			if entry.record != nil && !bytes.Equal(entry.record, record) {
 				current[id] = entry.record
-			}
-			continue
-		}
-		if lingered, ok := tr.lingering[id]; ok {
-			if !bytes.Equal(lingered, record) {
-				current[id] = lingered
 			}
 			continue
 		}
