@@ -17,6 +17,9 @@ func TestNotificationChannelsResolveTheProvidingInstallation(t *testing.T) {
 		Type: "notification_channel.v1", Id: "ntfy",
 		NotificationChannel: &pluginv1.NotificationChannelDescriptor{DisplayName: "ntfy", DestinationSchema: &pluginv1.ConfigSchema{
 			Key: "destination", JsonSchema: `{"type":"object","properties":{"topic":{"type":"string"}}}`,
+			AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
+				{Key: "topic", Label: "Topic", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_TEXT},
+			}},
 		}},
 	})
 	records, err := CapabilityRecordsFromManifest(manifest)

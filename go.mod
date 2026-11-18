@@ -6,7 +6,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/DataDog/go-sqllexer v0.2.5
 	github.com/SherClockHolmes/webpush-go v1.4.0
-	github.com/Silo-Server/silo-plugin-sdk v0.34.1-0.20261118222624-7ab31d99f636
+	github.com/Silo-Server/silo-plugin-sdk v0.34.1-0.20261118224616-728069ff2fb3
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/andybalholm/brotli v1.2.8

@@ -95,7 +95,11 @@ export function useCreateNotificationPluginDestination() {
   return useMutation({
     retry: false,
     mutationFn: async (
-      input: NotificationPluginDestinationWrite & { plugin_id: string; capability_id: string },
+      input: Omit<NotificationPluginDestinationWrite, "name" | "clear_secrets"> & {
+        plugin_id: string;
+        capability_id: string;
+        name: string;
+      },
     ) => {
       if (!context) throw new StaleApiRequestContextError();
       requireNotificationAuthority(context);
