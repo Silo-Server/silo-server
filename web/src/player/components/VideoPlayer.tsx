@@ -3139,16 +3139,28 @@ export function VideoPlayer({
             if (destroyed || !surface) return;
             startupGuardRef.current?.dispose();
             const meter = meterMedia(false);
-            // The engine numbers its reads from 0 on each attach, and a
-            // transport rebuilt for the plan measures into the same meter, so
-            // this attach's reads get keys of their own.
-            const reads: object[] = [];
+            // The meter sees one request for the whole attach, so its gate and
+            // rate count every run's bytes and receiving time together. The
+            // engine numbers its runs from 0 on each attach, and a transport
+            // rebuilt for the plan measures into the same meter, so each
+            // attach has a key of its own.
+            const source = {};
+            const runs = new Map<number, { bytes: number; spans: [number, number][] }>();
             engineSession = attachBrowserEngine({
               video,
               surface,
               source: route.source,
-              onMediaData: (request, bytes, first, last) => {
-                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last);
+              onMediaData: (request, bytes, first, last, spans) => {
+                if (destroyed) return;
+                runs.set(request, { bytes, spans });
+                const all = [...runs.values()];
+                meter.received(
+                  source,
+                  all.reduce((sum, run) => sum + run.bytes, 0),
+                  first,
+                  last,
+                  all.flatMap((run) => run.spans),
+                );
               },
               onFailure: (failure) => {
                 if (destroyed) return;

@@ -42,35 +42,96 @@ describe("createMeteredFetch", () => {
     vi.unstubAllGlobals();
   });
 
-  // Each 2 MiB stripe is a sub-second request, and the meter drops those, so
-  // striped playback would report no throughput and a start deadline could not
-  // lower quality. One run counts every response it carries.
-  it("reports the bytes of every response of one run as one long request", async () => {
-    const meter = new MediaDataMeter(0);
-    const metered = createMeteredFetch((message) => {
-      if (message.type === "media-data") {
-        meter.received(message.request, message.bytes, message.first, message.last);
+  // A 2 MiB range is a sub-second request on a fast link, and the meter drops
+  // those, so striped playback would report no throughput and a start deadline
+  // could not lower quality. One run counts every response it carries, for the
+  // time at least one of them was receiving, and time several runs were
+  // receiving at once counts once.
+  it.each([
+    {
+      name: "back to back",
+      responses: [
+        { run: 0, at: 0, chunks: 4, every: 200 },
+        { run: 0, at: 600, chunks: 4, every: 200 },
+      ],
+      want: Math.floor((2 * MIB * 8) / 1200),
+    },
+    {
+      name: "an idle gap between ranges",
+      responses: [
+        { run: 0, at: 0, chunks: 4, every: 200 },
+        { run: 0, at: 1600, chunks: 4, every: 200 },
+      ],
+      want: Math.floor((2 * MIB * 8) / 1200),
+    },
+    {
+      name: "a run receiving under a second",
+      responses: [
+        { run: 0, at: 0, chunks: 4, every: 100 },
+        { run: 0, at: 1300, chunks: 4, every: 100 },
+      ],
+      want: undefined,
+    },
+    {
+      name: "overlap within one run",
+      responses: [
+        { run: 0, at: 0, chunks: 6, every: 200 },
+        { run: 0, at: 500, chunks: 6, every: 200 },
+      ],
+      want: Math.floor((3 * MIB * 8) / 1500),
+    },
+    {
+      name: "overlap across runs",
+      responses: [
+        { run: 0, at: 0, chunks: 6, every: 200 },
+        { run: 1, at: 0, chunks: 6, every: 200 },
+        { run: 0, at: 2000, chunks: 6, every: 200 },
+      ],
+      want: Math.floor((4.5 * MIB * 8) / 2000),
+    },
+  ])(
+    "counts the time engine runs were receiving, overlapping time once: $name",
+    async ({ responses, want }) => {
+      const meter = new MediaDataMeter(0);
+      const metered = createMeteredFetch((message) => {
+        if (message.type === "media-data") {
+          meter.received(
+            message.request,
+            message.bytes,
+            message.first,
+            message.last,
+            message.spans,
+          );
+        }
+      });
+      let next = responses[0] as (typeof responses)[number];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ranged(timedBody(next.chunks, MIB / 4, next.every))),
+      );
+
+      const runs = new Map<number, ReturnType<typeof metered.newRun>>();
+      const reads: Promise<void>[] = [];
+      let now = 0;
+      let end = 0;
+      for (const response of responses) {
+        await vi.advanceTimersByTimeAsync(response.at - now);
+        now = response.at;
+        next = response;
+        if (!runs.has(response.run)) runs.set(response.run, metered.newRun());
+        const fetched = await metered.fetch(
+          "https://media.example.test/s",
+          undefined,
+          runs.get(response.run),
+        );
+        reads.push(drain(fetched.body));
+        end = Math.max(end, response.at + (response.chunks - 1) * response.every);
       }
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ranged(timedBody(4, MIB / 4, 200))),
-    );
+      await vi.advanceTimersByTimeAsync(end - now);
+      await Promise.all(reads);
+      await vi.advanceTimersByTimeAsync(300);
 
-    const run = metered.newRun();
-    // Response A receives 1 MiB over 600 ms; response B starts then and takes
-    // 1 MiB over another 600 ms.
-    const a = await metered.fetch("https://media.example.test/s", undefined, run);
-    const readA = drain(a.body);
-    await vi.advanceTimersByTimeAsync(600);
-    const b = await metered.fetch("https://media.example.test/s", undefined, run);
-    const readB = drain(b.body);
-    await vi.advanceTimersByTimeAsync(600);
-    await Promise.all([readA, readB]);
-    await vi.advanceTimersByTimeAsync(300);
-
-    expect(meter.throughputKbps(performance.timeOrigin + performance.now())).toBe(
-      Math.floor((2 * MIB * 8) / 1200),
-    );
-  });
+      expect(meter.throughputKbps(performance.timeOrigin + performance.now())).toBe(want);
+    },
+  );
 });

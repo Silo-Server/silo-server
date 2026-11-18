@@ -218,7 +218,14 @@ function makeSource(server: FakeServer, options: UrlSourceOptions = {}) {
   let runs = 0;
   const metered = {
     fetch: server.fetch as unknown as MeteredFetch["fetch"],
-    newRun: (): MediaRun => ({ request: runs++, bytes: 0, first: 0, last: 0, report: null }),
+    newRun: (): MediaRun => ({
+      request: runs++,
+      bytes: 0,
+      first: 0,
+      last: 0,
+      spans: [],
+      report: null,
+    }),
   };
   const source = new ParallelRangeSource(
     HEAD_URL,
