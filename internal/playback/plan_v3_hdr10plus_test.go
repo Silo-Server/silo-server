@@ -117,9 +117,9 @@ func TestHDRDetailsSupportHDR10PlusPlanWithinHDR10Limits(t *testing.T) {
 }
 
 // A client's Dolby Vision profile claims don't say it decodes a full
-// enhancement layer, so a Profile 7 source plays natively only when its layer
-// is known to be minimal.
-func TestProfile7PlaysNativelyOnlyWithAMinimalEnhancementLayer(t *testing.T) {
+// enhancement layer, so a Profile 7 source with a full or unknown layer doesn't
+// play natively; a minimal layer or none keeps the ordinary checks.
+func TestProfile7RefusesNativePlaybackForAFullOrUnknownEnhancementLayer(t *testing.T) {
 	req := hdrRequestV3(&HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{7, 8}})
 	for _, tt := range []struct {
 		layer      EnhancementLayerV3
@@ -127,6 +127,7 @@ func TestProfile7PlaysNativelyOnlyWithAMinimalEnhancementLayer(t *testing.T) {
 		wantReason string
 	}{
 		{layer: EnhancementMELV3, eligible: true, wantReason: "native_profile_supported"},
+		{layer: EnhancementNoneV3, eligible: true, wantReason: "native_profile_supported"},
 		{layer: EnhancementFELV3, wantReason: "profile_7_full_enhancement_layer"},
 		{layer: EnhancementUnknownV3, wantReason: "profile_7_enhancement_layer_unknown"},
 	} {

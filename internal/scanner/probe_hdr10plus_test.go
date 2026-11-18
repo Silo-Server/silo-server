@@ -201,7 +201,7 @@ func TestProbeFileReadsTheDolbyVisionEnhancementLayerType(t *testing.T) {
 	frame := `{"frames":[{"media_type":"video","color_range":"tv","side_data_list":[{"side_data_type":"Dolby Vision RPU Data"},` +
 		`{"side_data_type":"Dolby Vision Metadata","coef_log2_denom":23,"components":[` + component + "," + component + "," + component + `]}]}]}`
 	ffprobe, _ := writeHDR10PlusFFprobe(t, streams, "case \"$*\" in\n"+
-		"*frame_side_data_component=nlq_offset,vdr_in_max,linear_deadzone_slope,linear_deadzone_threshold*) printf '%s' '"+frame+"' ;;\n"+
+		"*frame_side_data=side_data_type,coef_log2_denom*frame_side_data_component=nlq_offset,vdr_in_max,linear_deadzone_slope,linear_deadzone_threshold*) printf '%s' '"+frame+"' ;;\n"+
 		"*) printf '%s' '"+hdr10PlusFrameJSON+"' ;;\nesac")
 
 	probe, err := ProbeFile(context.Background(), ffprobe, filepath.Join(t.TempDir(), "movie.mkv"))

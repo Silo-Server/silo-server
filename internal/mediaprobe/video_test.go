@@ -38,15 +38,23 @@ var hdr10PlusFrameSideData = []SideData{
 
 // dolbyVisionFrameJSON is FFmpeg 8.1.3's first-frame "Dolby Vision Metadata"
 // for a Profile 7 remux, trimmed to the fields the scanner asks for, with each
-// of the three components' NLQ coefficients set to nlq.
-func dolbyVisionFrameJSON(nlq string) string {
-	component := `{"pieces":[{"mapping_idc":0,"poly_order":1,"poly_coef":"0 8388608"}]` + nlq + `}`
+// of the three components' NLQ coefficients set to nlq, or the last one's to
+// lastNLQ when given.
+func dolbyVisionFrameJSON(nlq string, lastNLQ ...string) string {
+	component := func(nlq string) string {
+		return `{"pieces":[{"mapping_idc":0,"poly_order":1,"poly_coef":"0 8388608"}]` + nlq + `}`
+	}
+	last := nlq
+	if len(lastNLQ) > 0 {
+		last = lastNLQ[0]
+	}
 	return `[{"side_data_type":"Dolby Vision RPU Data"},` +
 		`{"side_data_type":"Dolby Vision Metadata","coef_log2_denom":23,"components":[` +
-		component + "," + component + "," + component + `]}]`
+		component(nlq) + "," + component(nlq) + "," + component(last) + `]}]`
 }
 
 func TestNormalizeVideoTrackReadsTheEnhancementLayerTypeFromTheFirstFrame(t *testing.T) {
+	const minimalNLQ = `,"nlq_offset":0,"vdr_in_max":8388608,"linear_deadzone_slope":0,"linear_deadzone_threshold":0`
 	dv7 := []SideData{{SideDataType: "DOVI configuration record", DVProfile: 7, DVLevel: 6, DVBlPresent: 1, DVElPresent: 1, DVRPUPresent: 1, DVBLCompatID: 6, DVBLCompatIDPresent: true}}
 	tests := []struct {
 		name  string
@@ -55,9 +63,11 @@ func TestNormalizeVideoTrackReadsTheEnhancementLayerTypeFromTheFirstFrame(t *tes
 		want  string
 	}{
 		// A UHD Blu-ray remux with a minimal enhancement layer.
-		{name: "minimal", frame: dolbyVisionFrameJSON(`,"nlq_offset":0,"vdr_in_max":8388608,"linear_deadzone_slope":0,"linear_deadzone_threshold":0`), read: true, want: "mel"},
+		{name: "minimal", frame: dolbyVisionFrameJSON(minimalNLQ), read: true, want: "mel"},
 		// A UHD Blu-ray remux with a full enhancement layer.
 		{name: "full", frame: dolbyVisionFrameJSON(`,"nlq_offset":512,"vdr_in_max":1048576,"linear_deadzone_slope":2048,"linear_deadzone_threshold":0`), read: true, want: "fel"},
+		// One coefficient off the identity in one component is enough.
+		{name: "one component's deadzone", frame: dolbyVisionFrameJSON(minimalNLQ, `,"nlq_offset":0,"vdr_in_max":8388608,"linear_deadzone_slope":0,"linear_deadzone_threshold":1`), read: true, want: "fel"},
 		{name: "no NLQ coefficients", frame: dolbyVisionFrameJSON(""), read: true, want: "unknown"},
 		{name: "frame without Dolby Vision metadata", frame: `[{"side_data_type":"Mastering display metadata"}]`, read: true, want: "unknown"},
 		{name: "frame not read", frame: `[]`, want: "unknown"},
