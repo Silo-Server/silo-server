@@ -32,6 +32,12 @@ beforeEach(() => {
   setRefreshToken("synthetic-refresh");
   setProfileId("profile-a");
 });
+function harness() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+}
+
 afterEach(() => {
   cleanup();
   onlineManager.setOnline(true);
@@ -58,15 +64,33 @@ it.each([
   row(useDeleteSubtitlePreference, (h) => h.mutate("series-a")),
   row(useSetAudioPreference, (h) => h.mutate({ prefId: "series-a", trackIndex: 1, track })),
   row(useDeleteAudioPreference, (h) => h.mutate("series-a")),
-])("$name sends an offline write at once instead of holding it", async ({ useHook, send }) => {
+])("$name fails an offline write at once instead of holding it", async ({ useHook, send }) => {
   onlineManager.setOnline(false);
-  const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
-  vi.stubGlobal("fetch", fetchMock);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children);
-  const { result } = renderHook(useHook, { wrapper });
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+  const { result } = renderHook(useHook, { wrapper: harness() });
   act(() => send(result.current));
   await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).toHaveBeenCalled();
+});
+
+// The browser can report offline while an earlier request for the same title
+// is still pending; a choice queued behind it would go out after reconnect.
+it("fails an offline track choice instead of queueing it behind a pending one", async () => {
+  let release!: (response: Response) => void;
+  const fetchMock = vi.fn(() => new Promise<Response>((resolve) => (release = resolve)));
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(
+    () => ({ pick: useSetSubtitlePreference(), reset: useDeleteSubtitlePreference() }),
+    { wrapper: harness() },
+  );
+  act(() => result.current.pick.mutate({ prefId: "series-a", selection: null }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+  onlineManager.setOnline(false);
+  act(() => result.current.reset.mutate("series-a"));
+  await waitFor(() => expect(result.current.reset.isError).toBe(true));
+
+  onlineManager.setOnline(true);
+  release(new Response(null, { status: 204 }));
+  await waitFor(() => expect(result.current.pick.isSuccess).toBe(true));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

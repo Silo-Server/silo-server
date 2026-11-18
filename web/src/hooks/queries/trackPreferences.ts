@@ -1,4 +1,9 @@
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  onlineManager,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
@@ -38,12 +43,17 @@ export function invalidateItemDetails(queryClient: QueryClient): Promise<unknown
  * writes for the same title and dimension, so the viewer's last choice is the
  * one that sticks. The profile is captured now: a write that waits in line
  * still goes out for the profile that made the choice.
+ *
+ * A choice made offline fails here, as its request would, instead of waiting
+ * in line: an earlier request can stay pending until the browser reconnects,
+ * and the choice would then replace a newer one made in another browser.
  */
 export function runOrderedPreferenceWrite<T>(
   dimension: TrackPreferenceDimension,
   prefId: string,
   write: (profileContext: ProfileRequestContextSnapshot) => Promise<T>,
 ): Promise<T> {
+  if (!onlineManager.isOnline()) return Promise.reject(new TypeError("Failed to fetch"));
   const profileContext = captureProfileRequestContext();
   if (!profileContext) return Promise.reject(new StaleApiRequestContextError());
   return runTrackPreferenceWrite(
