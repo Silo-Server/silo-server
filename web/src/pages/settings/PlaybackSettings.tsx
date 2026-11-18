@@ -35,7 +35,6 @@ import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
 import { NextUpPromptSetting } from "./NextUpPromptSetting";
-import { nextUpPickerChoices, nextUpPickerValue, nextUpPickerWrites } from "./nextUpPicker";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -525,7 +524,6 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
   );
-  // Off needs the revision-30 key; an older server is never sent it.
   const supportsNextUpOff = settingsCapabilitiesSupportKey(
     capabilities.data,
     SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED,
@@ -562,18 +560,6 @@ export default function PlaybackSettings() {
   // control would snap back to the override it cannot see.
   const saveValue = (key: SettingKey, value: unknown) => {
     saveProfileDefault(key, value).catch(() => toast.error(t("web.settings.playback.saveFailed")));
-  };
-
-  // One choice can write both Next Up keys, each through the same profile
-  // writer, so a device override on either is cleared too.
-  const saveNextUp = async (choice: string) => {
-    try {
-      for (const [key, value] of nextUpPickerWrites(choice, supportsNextUpOff)) {
-        await saveProfileDefault(key, value);
-      }
-    } catch {
-      toast.error(t("web.settings.playback.saveFailed"));
-    }
   };
 
   const pending = isSaving;
@@ -764,16 +750,11 @@ export default function PlaybackSettings() {
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
         <NextUpPromptSetting
-          value={nextUpPickerValue({
-            enabled: read<boolean>(SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED),
-            seconds: read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS),
-          })}
-          choices={nextUpPickerChoices(supportsNextUpOff)}
-          // Waits for both reads: until capabilities answer, a choice would
-          // not know whether to write next_up_enabled, and until the values
-          // load, the writer cannot see a device override to clear.
+          enabled={read<boolean>(SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED)}
+          seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
+          offOffered={supportsNextUpOff}
           disabled={pending || capabilities.isPending || effectivePending}
-          onChange={saveNextUp}
+          save={saveProfileDefault}
         />
 
         <AutoPlayNextSetting />
