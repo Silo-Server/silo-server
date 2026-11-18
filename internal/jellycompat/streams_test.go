@@ -646,6 +646,45 @@ func TestEnsureUpstreamPlayback_ReplacesStaleUpstreamWhenRecipeMissing(t *testin
 	}
 }
 
+// A transcode play whose recipe was never saved must not come back as a
+// direct-play session that skips the user's transcode limit.
+func TestEnsureUpstreamPlayback_TranscodeWithoutRecipeCountsAsTranscode(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID:                 "ps-1",
+		CompatToken:        "tok",
+		UpstreamSessionID:  "lost-upstream",
+		UpstreamPlayMethod: "transcode",
+	})
+	mgr := playback.NewSessionManager(0, 1)
+	other, err := mgr.StartSession(7, "profile-1", 41, playback.PlayTranscode, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := keyedTranscodeManager()
+	tm.Sessions = mgr
+	h := &PlaybackHandler{playbackStore: store, sessionMgr: mgr, tm: tm}
+	compatSession := &Session{Token: "tok", StreamAppUserID: 7, ProfileID: "profile-1"}
+
+	_, err = h.ensureUpstreamPlayback(t.Context(), compatSession, "ps-1", PlaybackMediaSource{FileID: 42}, "transcode")
+	if !errors.Is(err, playback.ErrTooManyTranscodes) {
+		t.Fatalf("over the limit: error = %v, want %v", err, playback.ErrTooManyTranscodes)
+	}
+
+	// Under the limit the play keeps its session, which counts as a transcode.
+	if err := mgr.StopSession(other.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.ensureUpstreamPlayback(t.Context(), compatSession, "ps-1", PlaybackMediaSource{FileID: 42}, "transcode")
+	if err != nil {
+		t.Fatalf("under the limit: %v", err)
+	}
+	rebuilt, err := mgr.GetSession("lost-upstream")
+	if got.UpstreamSessionID != "lost-upstream" || err != nil || rebuilt.PlayMethod != playback.PlayTranscode {
+		t.Fatalf("play upstream = %q, rebuilt session = %+v (%v); want lost-upstream rebuilt as a transcode", got.UpstreamSessionID, rebuilt, err)
+	}
+}
+
 // newActiveEncodingsHandler builds a PlaybackHandler literal directly (not
 // NewPlaybackHandler, which touches the filesystem) with a transcode manager
 // wired — teardown calls tm.CloseTranscodeSession and would nil-panic otherwise.
