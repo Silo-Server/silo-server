@@ -206,7 +206,10 @@ func ParseSubtitleTrackParam(param string) (int, string, error) {
 }
 
 // ServeSubtitle writes subtitle data to the HTTP response with the appropriate
-// content type for the given format.
+// content type for the given format. It always states Content-Length: without
+// it net/http sends a body over its 2 KiB buffer chunked, and Infuse drops a
+// chunked external subtitle. The native API and jellycompat both answer
+// through it.
 func ServeSubtitle(w http.ResponseWriter, data []byte, format string) {
 	switch strings.ToLower(format) {
 	case "ass", "ssa":
