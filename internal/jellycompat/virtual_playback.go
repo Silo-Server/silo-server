@@ -375,7 +375,8 @@ func (h *PlaybackHandler) resolveAndProbeVirtualSource(ctx context.Context, file
 		// path. Already-probed rows skip this entirely (no probe-per-play),
 		// matching the native probe gate.
 		if file.ProbeUpdatedAt == nil && (h.VirtualSourceProber != nil || h.VirtualSourceProberWithHeaders != nil) {
-			if probed, ok := h.probeCompatVirtualSource(ctx, &transient, uri, ownerID, userID, profileID); ok {
+			probed, probeFailure := h.probeCompatVirtualSource(ctx, &transient, uri, ownerID, userID, profileID)
+			if probeFailure == nil {
 				if transient.ID > 0 {
 					probed.ID = transient.ID
 					probed.MediaFolderID = transient.MediaFolderID
@@ -389,7 +390,15 @@ func (h *PlaybackHandler) resolveAndProbeVirtualSource(ctx context.Context, file
 			}
 			// Resolution or probe failed. Fall back to the candidate-declared
 			// metadata exactly like the native path: a probe must never fail the
-			// request or block playback.
+			// request or block playback. It says so, though: the fallback serves
+			// declared values in place of a probe, which is why two clients can
+			// see different track counts for the same title while one of them
+			// reported the failure and the other did not.
+			slog.WarnContext(ctx, "jellycompat virtual source probe failed; serving declared candidate metadata",
+				"component", "jellycompat",
+				"file_id", file.ID,
+				"candidate_uri", uri,
+				"reason", probeFailure.Error())
 		}
 
 		mergeCompatCandidateTracks(&transient, candidate)
@@ -400,29 +409,48 @@ func (h *PlaybackHandler) resolveAndProbeVirtualSource(ctx context.Context, file
 
 // probeCompatVirtualSource resolves the candidate to a temporary provider URL
 // and probes that stream for real metadata. It mirrors the native path's
-// resolve-then-probe ordering (native probeVirtualSource). ok is false when the
-// URL cannot be resolved or the probe fails, so the caller falls back to the
-// candidate-declared inventory.
-func (h *PlaybackHandler) probeCompatVirtualSource(ctx context.Context, transient *models.MediaFile, uri string, ownerID, userID int, profileID string) (*models.MediaFile, bool) {
+// resolve-then-probe ordering (native probeVirtualSource). A nil error means the
+// probe established the file's real inventory; a non-nil one names why it did
+// not (resolve failed, probe failed, probe timed out) so the caller's fallback
+// to declared values can say so instead of looking like a layout disagreement.
+func (h *PlaybackHandler) probeCompatVirtualSource(ctx context.Context, transient *models.MediaFile, uri string, ownerID, userID int, profileID string) (*models.MediaFile, error) {
 	if h == nil || (h.VirtualSourceProber == nil && h.VirtualSourceProberWithHeaders == nil) || transient == nil || !isCompatVirtualPath(uri) {
-		return nil, false
+		return nil, errCompatProbeUnavailable
 	}
 	resolved, err := h.resolveVirtualTransportForIdentity(ctx, userID, profileID, PlaybackMediaSource{
 		FileID:                           transient.ID,
 		VirtualSourceURI:                 uri,
 		VirtualSourceOwnerInstallationID: ownerID,
 	}, false)
-	if err != nil || strings.TrimSpace(resolved.URL) == "" {
-		return nil, false
+	if err != nil {
+		return nil, fmt.Errorf("resolve failed: %w", err)
+	}
+	if strings.TrimSpace(resolved.URL) == "" {
+		return nil, fmt.Errorf("resolve failed: %w", errCompatProbeEmptyURL)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, compatVirtualProbeTimeout)
 	defer cancel()
 	probed, err := h.probeVirtualSourceWithHeaders(probeCtx, resolved.URL, transient, resolved.RequestHeaders)
-	if err != nil || probed == nil {
-		return nil, false
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || probeCtx.Err() != nil {
+			return nil, fmt.Errorf("probe timed out after %s: %w", compatVirtualProbeTimeout, err)
+		}
+		return nil, fmt.Errorf("probe failed: %w", err)
 	}
-	return probed, true
+	if probed == nil {
+		return nil, fmt.Errorf("probe failed: %w", errCompatProbeNoResult)
+	}
+	return probed, nil
 }
+
+// The reasons probeCompatVirtualSource reports when it cannot establish a
+// probed inventory. They exist so the fallback log names the failure kind rather
+// than a bare "unavailable".
+var (
+	errCompatProbeUnavailable = errors.New("no virtual source prober is wired")
+	errCompatProbeEmptyURL    = errors.New("the provider resolved no stream URL")
+	errCompatProbeNoResult    = errors.New("the prober returned no file")
+)
 
 // probeVirtualSourceWithHeaders prefers the header-aware prober so a probe of a
 // provider URL that validates the caller's request headers is authenticated the
@@ -581,13 +609,13 @@ func (h *PlaybackHandler) persistCompatVirtualMetadata(ctx context.Context, file
 	args.OwnerID = target.OwnerID
 	args.LibraryID = target.LibraryID
 	if !h.acquireCompatBackgroundWork() {
-		slog.DebugContext(ctx, "compat virtual metadata persist dropped: background workers closed",
+		slog.WarnContext(ctx, "compat virtual metadata persist dropped: background workers closed",
 			"component", "jellycompat", "file_id", args.FileID)
 		return
 	}
 	if !acquireCompatEvidenceSlot() {
 		h.releaseCompatBackgroundWork()
-		slog.DebugContext(ctx, "compat virtual metadata persist dropped: all persist slots busy",
+		slog.WarnContext(ctx, "compat virtual metadata persist dropped: all persist slots busy",
 			"component", "jellycompat", "file_id", args.FileID)
 		return
 	}
