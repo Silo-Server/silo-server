@@ -30393,14 +30393,15 @@ export interface components {
     };
     NotificationPluginDestinationCreateInputBody: {
       capability_id: string;
-      /** @description Secret settings to remove */
-      clear_secrets?: string[];
+      /** @description Defaults to true */
       enabled?: boolean;
-      name?: string;
+      name: string;
+      /** @description Defaults to true */
       notify_next_up?: boolean;
+      /** @description Defaults to true */
       notify_requests?: boolean;
       plugin_id: string;
-      /** @description Settings fields, merged over the stored ones on update. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value */
+      /** @description Settings fields, checked against the channel's settings form: declared fields only, each of its declared type, and every required field present */
       settings?: {
         [key: string]: unknown;
       };
@@ -30412,7 +30413,7 @@ export interface components {
       name?: string;
       notify_next_up?: boolean;
       notify_requests?: boolean;
-      /** @description Settings fields, merged over the stored ones on update. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value */
+      /** @description Settings fields, merged over the stored ones. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value. Each value is checked against the channel's settings form */
       settings?: {
         [key: string]: unknown;
       };
@@ -127345,6 +127346,15 @@ export interface operations {
       };
       /** @description Request Timeout */
       408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

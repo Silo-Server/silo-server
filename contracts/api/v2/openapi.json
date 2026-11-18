@@ -42201,15 +42201,8 @@
             "minLength": 1,
             "type": "string"
           },
-          "clear_secrets": {
-            "description": "Secret settings to remove",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 64,
-            "type": "array"
-          },
           "enabled": {
+            "description": "Defaults to true",
             "type": "boolean"
           },
           "name": {
@@ -42218,9 +42211,11 @@
             "type": "string"
           },
           "notify_next_up": {
+            "description": "Defaults to true",
             "type": "boolean"
           },
           "notify_requests": {
+            "description": "Defaults to true",
             "type": "boolean"
           },
           "plugin_id": {
@@ -42230,14 +42225,15 @@
           },
           "settings": {
             "additionalProperties": true,
-            "description": "Settings fields, merged over the stored ones on update. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value",
+            "description": "Settings fields, checked against the channel's settings form: declared fields only, each of its declared type, and every required field present",
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           }
         },
         "required": [
           "plugin_id",
-          "capability_id"
+          "capability_id",
+          "name"
         ],
         "type": "object"
       },
@@ -42268,7 +42264,7 @@
           },
           "settings": {
             "additionalProperties": true,
-            "description": "Settings fields, merged over the stored ones on update. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value",
+            "description": "Settings fields, merged over the stored ones. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value. Each value is checked against the channel's settings form",
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           }
@@ -194983,6 +194979,16 @@
               }
             },
             "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "412": {
             "content": {
