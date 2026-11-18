@@ -2335,6 +2335,13 @@ func (s *Server) startReconstructProcess(rebuildCtx context.Context, r *http.Req
 					return nil, err
 				}
 				if _, retryErr := session.WaitForGenerationManifest(playback.ManifestStartupTimeout); retryErr != nil {
+					// A retry still running is kept, as a slow first attempt is:
+					// the segment path serves it once output appears (#4263).
+					if session.IsRunning() {
+						slog.WarnContext(r.Context(), "reconstructed software retry slow to produce a manifest", "component", "transcodenode",
+							"error", retryErr, "session", sessionID, "playback_session_id", sessionID)
+						return session, nil
+					}
 					_ = session.Close()
 					slog.ErrorContext(r.Context(), "reconstructed software retry failed readiness check", "component", "transcodenode", "error", retryErr,
 						"session", sessionID, "playback_session_id", sessionID)
