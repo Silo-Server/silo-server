@@ -183,10 +183,16 @@ func TestServeRemuxPreBodyFailureWritesErrorWhenNotDeferred(t *testing.T) {
 
 // A relay that accepts the request but never produces a media byte must not
 // park the response until the client stops the session (a dead virtual candidate
-// hung a production media request for 38.9s). The first-output budget closes the
+// hung a production media request for 38.9s). The first-output window closes the
 // process and returns the same no-output error a fast failure produces, so the
-// caller can rotate candidates or fail fast.
+// caller can rotate candidates or fail fast. The window is the ordinary budget
+// plus one grace for a still-silent process (see remuxFirstOutputSlowSourceGrace),
+// and it stays finite, which is the invariant here.
 func TestServeRemuxFirstOutputTimeoutFailsFast(t *testing.T) {
+	prevGrace := remuxFirstOutputSlowSourceGrace
+	remuxFirstOutputSlowSourceGrace = 200 * time.Millisecond
+	t.Cleanup(func() { remuxFirstOutputSlowSourceGrace = prevGrace })
+
 	source := remuxSourceFile(t)
 	w := &failoverResponseWriter{}
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/stream/session-1", nil)
@@ -205,8 +211,14 @@ func TestServeRemuxFirstOutputTimeoutFailsFast(t *testing.T) {
 	if !errors.Is(err, errRemuxNoOutput) {
 		t.Fatalf("error = %v, want it to identify the no-output failure", err)
 	}
+	if !strings.Contains(err.Error(), "first output timeout after 300ms") {
+		t.Fatalf("error = %v, want the ordinary window and its grace named", err)
+	}
+	if elapsed < 250*time.Millisecond {
+		t.Fatalf("first-output timeout took %s; the silent source was indicted before its extension was spent", elapsed)
+	}
 	if elapsed > 3*time.Second {
-		t.Fatalf("first-output timeout took %s, want a prompt failure", elapsed)
+		t.Fatalf("first-output timeout took %s, want a bounded failure", elapsed)
 	}
 	if w.status != 0 || w.rejected || w.body.Len() != 0 {
 		t.Fatalf("timeout committed status=%d rejected=%v body=%q", w.status, w.rejected, w.body.String())

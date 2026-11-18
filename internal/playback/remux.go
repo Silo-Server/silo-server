@@ -539,6 +539,50 @@ func remuxRecipeFault(stderr string) error {
 	return fmt.Errorf("%w: ffmpeg rejected a bitstream filter: %s", ErrRemuxRecipeFault, strings.TrimSpace(stderr))
 }
 
+// remuxInputRefusalCause names one permanent input refusal FFmpeg prints when it
+// cannot open or identify the source at all, with the words a viewer-facing
+// sentence uses for it.
+type remuxInputRefusalCause struct {
+	needle   string
+	sentence string
+}
+
+// remuxInputRefusalCauses are the stderr fragments that mean the input will
+// never produce a byte, however long the transport waits: the scheme is not
+// buildable, the provider answered an error status, the file is absent or
+// unreadable, or the bytes are not media at all.
+//
+// Only permanent refusals belong here. A transient read error, a slow connect or
+// an aborted read is exactly the case the slow-source extension exists for, so
+// listing one would turn a play that would have delivered into an abort.
+var remuxInputRefusalCauses = []remuxInputRefusalCause{
+	{needle: "Protocol not found", sentence: "the input protocol is not available"},
+	{needle: "Invalid data found when processing input", sentence: "the source is not a readable media file"},
+	{needle: "Server returned 4", sentence: "the source server refused the request"},
+	{needle: "Server returned 5", sentence: "the source server failed the request"},
+	{needle: "HTTP error 4", sentence: "the source server refused the request"},
+	{needle: "HTTP error 5", sentence: "the source server failed the request"},
+	{needle: "No such file or directory", sentence: "the source file is missing"},
+	{needle: "Permission denied", sentence: "the source file is not readable"},
+	{needle: "moov atom not found", sentence: "the source container is truncated"},
+	{needle: "could not find codec parameters", sentence: "the source has no readable stream parameters"},
+	{needle: "does not contain any stream", sentence: "the source contains no playable stream"},
+	{needle: "matches no streams", sentence: "the source contains none of the requested streams"},
+}
+
+// remuxInputRefusal reports whether FFmpeg's own stderr names a permanent reason
+// the input cannot be read, so the first-output watchdog can indict the delivery
+// from evidence instead of from elapsed time. A nil result means "no cause named
+// yet", which is what buys a silent process its one extension.
+func remuxInputRefusal(stderr string) error {
+	for _, cause := range remuxInputRefusalCauses {
+		if strings.Contains(stderr, cause.needle) {
+			return errors.New(cause.sentence)
+		}
+	}
+	return nil
+}
+
 // Kind values for remuxInputKind.
 const (
 	remuxInputVirtual = "virtual"
@@ -736,6 +780,20 @@ type RemuxServeOptions struct {
 // time a client will wait before giving up.
 var remuxFirstOutputTimeout = 15 * time.Second
 
+// remuxFirstOutputSlowSourceGrace is the one extension a silent but still-live
+// remux earns before it is indicted, so the whole first-output window is
+// remuxFirstOutputTimeout + this grace (25 s by default).
+//
+// The evidence for it is the production measurement: cold AltMount providers
+// produced their first byte at 15-20 s, and the 15 s watchdog aborted ten of
+// those plays in one window — plays that then delivered on the retry. Waiting is
+// only ever spent on a process that has named no failure (see
+// remuxInputRefusal) and is still running, and the total stays under the client's
+// 60 s transport startup guard and its 45 s per-attempt replan budget, so a
+// genuinely dead candidate still answers a retryable failure well before the
+// viewer gives up.
+var remuxFirstOutputSlowSourceGrace = 10 * time.Second
+
 // RemuxContentType returns the override required for an audio-only fMP4.
 func RemuxContentType(audioOnly bool) string {
 	if audioOnly {
@@ -886,23 +944,59 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	}()
 	var n int
 	var readErr error
-	select {
-	case result := <-readResult:
-		n, readErr = result.n, result.err
-	case <-time.After(firstTimeout):
-		session.Abort()
-		// Reap before logging: Close is what waits for FFmpeg and for its
-		// stderr to be copied, and the deferred Close would otherwise run
-		// after the diagnostic line was written.
-		_ = session.Close()
-		logRemuxNoOutput(r.Context(), filePath, session)
-		if fault := remuxRecipeFault(session.stderr.String()); fault != nil {
+	// The first-output window has two phases so the watchdog can tell a slow
+	// provider from a dead one. Phase one is the ordinary budget: a healthy
+	// remote source answers in a few hundred milliseconds, so nothing that is
+	// still silent at the budget and has not named a cause is being fast. Phase
+	// two is one bounded extension for that case, because a cold provider that
+	// takes 15-20 s to open is slowness, not a verdict — aborting it killed plays
+	// that would have delivered (ten occurrences in one production window, one
+	// of which the client then reported as a non-retryable audio-codec failure).
+	// A process that already named a permanent input refusal is indicted at the
+	// ordinary budget: waiting cannot change "Protocol not found".
+	window := firstTimeout
+	extended := false
+	for {
+		timer := time.NewTimer(window)
+		select {
+		case result := <-readResult:
+			timer.Stop()
+			n, readErr = result.n, result.err
+		case <-timer.C:
+			if !extended && remuxInputRefusal(session.stderr.String()) == nil {
+				extended = true
+				window = remuxFirstOutputSlowSourceGrace
+				slog.InfoContext(r.Context(), "remux first output still pending; extending the window for a live source",
+					logKeyComponent, logValuePlayback,
+					"input_kind", remuxInputKind(filePath),
+					"first_output_timeout", firstTimeout,
+					"extension", remuxFirstOutputSlowSourceGrace,
+				)
+				continue
+			}
+			session.Abort()
+			// Reap before logging: Close is what waits for FFmpeg and for its
+			// stderr to be copied, and the deferred Close would otherwise run
+			// after the diagnostic line was written.
+			_ = session.Close()
+			logRemuxNoOutput(r.Context(), filePath, session)
+			if fault := remuxRecipeFault(session.stderr.String()); fault != nil {
+				writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+				return fault
+			}
+			if refusal := remuxInputRefusal(session.stderr.String()); refusal != nil {
+				writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+				return fmt.Errorf("%w: %s: %w", errRemuxNoOutput, refusal.Error(), io.EOF)
+			}
+			budget := firstTimeout
+			if extended {
+				budget = firstTimeout + remuxFirstOutputSlowSourceGrace
+			}
+			err := fmt.Errorf("%w: first output timeout after %s: %w", errRemuxNoOutput, budget, io.EOF)
 			writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
-			return fault
+			return err
 		}
-		err := fmt.Errorf("%w: first output timeout after %s: %w", errRemuxNoOutput, firstTimeout, io.EOF)
-		writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
-		return err
+		break
 	}
 	if n > 0 {
 		first = append(first, buf[:n]...)
