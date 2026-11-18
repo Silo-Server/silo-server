@@ -985,8 +985,8 @@ function WatchPlaybackHostContent() {
   const requestKeyValue = activeRequest?.requestKey ?? "";
 
   // -- Next Up: the early post-roll trigger and what the end of the file does --
-  // A promptSeconds of 0 ("At end", or Next Up off) leaves post-roll to the
-  // `ended` fallback below. Until capabilities say whether the read includes
+  // A promptSeconds of 0 never opens post-roll early: "At end" leaves it to
+  // the `ended` handler below, and Off closes the player there instead. Until capabilities say whether the read includes
   // next_up_enabled, the settings count as still loading: a read without the
   // key would otherwise open Next Up early for a viewer who turned it off.
   const capabilitiesPending = settingsCapabilities.isPending;
@@ -1080,6 +1080,18 @@ function WatchPlaybackHostContent() {
         return;
       }
 
+      // With Next Up off a series episode ends where post-roll's own close
+      // would take the viewer: no card, no countdown, no automatic next
+      // episode, even if a card opened before the viewer turned it off.
+      // A minimized or picture-in-picture player leaves the page the viewer
+      // is browsing alone, as post-roll does there.
+      if (episodeSeriesId && nextUpAtEndRef.current === "close") {
+        if (modeRef.current === "foreground" || modeRef.current === "post-roll") {
+          handlePostRollClose();
+        }
+        return;
+      }
+
       // If post-roll was shown before the video ended, wait for the real
       // `ended` event before starting the autoplay countdown.
       if (modeRef.current === "post-roll") {
@@ -1106,12 +1118,6 @@ function WatchPlaybackHostContent() {
             { up: true },
           );
         }
-        return;
-      }
-      // With Next Up off the episode ends where post-roll's own close would
-      // take the viewer: no card, no countdown, no automatic next episode.
-      if (nextUpAtEndRef.current === "close") {
-        handlePostRollClose();
         return;
       }
       // Enter post-roll on ended: with Show Next Up set to "At end", or when

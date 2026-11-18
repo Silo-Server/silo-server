@@ -544,7 +544,9 @@ export default function PlaybackSettings() {
     ],
     [supportsIntroSkipMode, supportsBuffering, supportsMarkerProvenance, supportsNextUpOff],
   );
-  const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
+  const { data: effective, isPending: effectivePending } = useEffectiveSettings({
+    keys: playbackKeys,
+  });
   const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
 
   // The effective endpoint resolves an unset key to the contract default, so
@@ -767,7 +769,10 @@ export default function PlaybackSettings() {
             seconds: read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS),
           })}
           choices={nextUpPickerChoices(supportsNextUpOff)}
-          disabled={pending}
+          // Waits for both reads: until capabilities answer, a choice would
+          // not know whether to write next_up_enabled, and until the values
+          // load, the writer cannot see a device override to clear.
+          disabled={pending || capabilities.isPending || effectivePending}
           onChange={saveNextUp}
         />
 
