@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -4815,8 +4816,15 @@ func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
 // first. The retained stderr already holds the line (the session's tail
 // buffer is written before this writer), so the exit classifies as
 // ErrHardwareDecodeUnsupported and startup walks CPU decoding at once.
+//
+// Only the decoder's own line counts, on a command that asked for GPU
+// decoding: FFmpeg echoes input paths in other lines, and a file named after
+// the message must not stop a transcode that is working.
 func (w *ffmpegStderrWriter) stopOnHardwareDecodeUnavailable(line string) {
-	if w.stopped || w.cmd == nil || w.cmd.Process == nil || !strings.Contains(line, ffmpegAV1HardwareDecodeUnavailable) {
+	if w.stopped || w.cmd == nil || w.cmd.Process == nil ||
+		!strings.HasPrefix(line, ffmpegAV1DecoderLogPrefix) ||
+		!strings.Contains(line, ffmpegAV1HardwareDecodeUnavailable) ||
+		!slices.Contains(w.cmd.Args, "-hwaccel") {
 		return
 	}
 	w.stopped = true

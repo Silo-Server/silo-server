@@ -257,6 +257,10 @@ var hardwareDecodeUnsupportedMarkers = []string{
 // any other decoder rejection.
 const ffmpegAV1HardwareDecodeUnavailable = "doesn't support hardware accelerated AV1 decoding"
 
+// ffmpegAV1DecoderLogPrefix starts every line the native AV1 decoder logs,
+// such as "[av1 @ 0x5581c2a0] Your platform doesn't support ...".
+const ffmpegAV1DecoderLogPrefix = "[av1 @ "
+
 // ErrHardwareDecodeUnsupported marks an FFmpeg failure whose diagnostics say
 // the hardware decoder cannot decode the source. errors.Is finds it on the
 // startup errors TranscodeSession and PrepareFile return.

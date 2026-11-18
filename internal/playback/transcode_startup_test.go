@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const startupTestManifest = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg_00000.ts\n#EXT-X-ENDLIST\n"
@@ -637,5 +639,57 @@ func TestRequiresSoftwareVideoDecodeForCodecsWithoutGPUDecoder(t *testing.T) {
 		if got := RequiresSoftwareVideoDecode(codec, "", 8); got != want {
 			t.Errorf("RequiresSoftwareVideoDecode(%q) = %v, want %v", codec, got, want)
 		}
+	}
+}
+
+// Only the AV1 decoder's own line on a GPU-decode command stops FFmpeg.
+// FFmpeg echoes input paths in other lines, and a file named after the
+// message must not stop a transcode that is working.
+func TestStderrWriterStopsOnlyOnAV1DecoderRejection(t *testing.T) {
+	const decoderLine = "[av1 @ 0x5581c2a0] Your platform doesn't support hardware accelerated AV1 decoding.\n"
+	tests := []struct {
+		name     string
+		hwaccel  bool
+		line     string
+		wantStop bool
+	}{
+		{name: "decoder line on GPU decode", hwaccel: true, line: decoderLine, wantStop: true},
+		{name: "decoder line on CPU decode", line: decoderLine},
+		{name: "input path naming the message", hwaccel: true,
+			line: "/media/doesn't support hardware accelerated AV1 decoding.mkv: Invalid data found when processing input\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"-c", "sleep 30", "sh"}
+			if tt.hwaccel {
+				args = append(args, "-hwaccel", "vaapi")
+			}
+			cmd := procgroup.CommandContext(context.Background(), "/bin/sh", args...)
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			exited := make(chan struct{})
+			go func() { _ = cmd.Wait(); close(exited) }()
+			t.Cleanup(func() { _ = procgroup.Kill(cmd); <-exited })
+
+			writer := &ffmpegStderrWriter{session: &TranscodeSession{}, ctx: context.Background(), cmd: cmd}
+			if _, err := writer.Write([]byte(tt.line)); err != nil {
+				t.Fatal(err)
+			}
+			wait := 5 * time.Second
+			if !tt.wantStop {
+				wait = 200 * time.Millisecond
+			}
+			select {
+			case <-exited:
+				if !tt.wantStop {
+					t.Fatal("FFmpeg was stopped by a line that is not the AV1 decoder's rejection on a GPU-decode command")
+				}
+			case <-time.After(wait):
+				if tt.wantStop {
+					t.Fatal("FFmpeg kept running after its AV1 decoder rejected the GPU")
+				}
+			}
+		})
 	}
 }
