@@ -646,8 +646,24 @@ func TestEnsureUpstreamPlayback_ReplacesStaleUpstreamWhenRecipeMissing(t *testin
 	}
 }
 
+// slotFreeingSessionManager frees a slot just before a fresh session starts,
+// as when another transcode ends on this server at that moment.
+type slotFreeingSessionManager struct {
+	*playback.SessionManager
+	beforeStart func()
+}
+
+func (m *slotFreeingSessionManager) StartSessionWithContext(ctx context.Context, userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
+	if m.beforeStart != nil {
+		m.beforeStart()
+		m.beforeStart = nil
+	}
+	return m.SessionManager.StartSessionWithContext(ctx, userID, profileID, fileID, method, transcodeAudio)
+}
+
 // A transcode play whose recipe was never saved must not come back as a
-// direct-play session that skips the user's transcode limit.
+// direct-play session that skips the user's transcode limit, and a refused
+// rebuild must keep the play's upstream session id.
 func TestEnsureUpstreamPlayback_TranscodeWithoutRecipeCountsAsTranscode(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{
@@ -663,18 +679,20 @@ func TestEnsureUpstreamPlayback_TranscodeWithoutRecipeCountsAsTranscode(t *testi
 	}
 	tm := keyedTranscodeManager()
 	tm.Sessions = mgr
-	h := &PlaybackHandler{playbackStore: store, sessionMgr: mgr, tm: tm}
+	sessions := &slotFreeingSessionManager{SessionManager: mgr, beforeStart: func() { _ = mgr.StopSession(other.ID) }}
+	h := &PlaybackHandler{playbackStore: store, sessionMgr: sessions, tm: tm}
 	compatSession := &Session{Token: "tok", StreamAppUserID: 7, ProfileID: "profile-1"}
 
 	_, err = h.ensureUpstreamPlayback(t.Context(), compatSession, "ps-1", PlaybackMediaSource{FileID: 42}, "transcode")
 	if !errors.Is(err, playback.ErrTooManyTranscodes) {
 		t.Fatalf("over the limit: error = %v, want %v", err, playback.ErrTooManyTranscodes)
 	}
+	if row, _ := store.Get("ps-1"); row.UpstreamSessionID != "lost-upstream" {
+		t.Fatalf("over the limit: play upstream = %q, want lost-upstream kept", row.UpstreamSessionID)
+	}
 
 	// Under the limit the play keeps its session, which counts as a transcode.
-	if err := mgr.StopSession(other.ID); err != nil {
-		t.Fatal(err)
-	}
+	_ = mgr.StopSession(other.ID)
 	got, err := h.ensureUpstreamPlayback(t.Context(), compatSession, "ps-1", PlaybackMediaSource{FileID: 42}, "transcode")
 	if err != nil {
 		t.Fatalf("under the limit: %v", err)
