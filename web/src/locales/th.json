@@ -53336,6 +53336,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "เล่นโดยไม่ต้องลงชื่อเข้าใช้จากที่อยู่เดียวกัน"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "แอป Jellyfin บางแอป เช่น Findroid เปิดลิงก์เล่นโดยตรงและลิงก์ดาวน์โหลดโดยไม่ลงชื่อเข้าใช้ เมื่อเปิดตัวเลือกนี้ Silo จะให้บริการคำขอดังกล่าวหากแอปที่ลงชื่อเข้าใช้แล้วจากที่อยู่เครือข่ายเดียวกันขอเล่นไฟล์นั้นภายในสองชั่วโมงที่ผ่านมา ทุกคนที่ใช้ที่อยู่นั้นร่วมกัน เช่น ผู้ที่อยู่ในเครือข่ายภายในบ้านเดียวกัน ผู้ให้บริการเครือข่ายมือถือเดียวกัน หรือ VPN เดียวกัน จะเล่นไฟล์นั้นได้ด้วย เปิดตัวเลือกนี้เฉพาะเมื่อคุณใช้แอปใดแอปหนึ่งในกลุ่มนี้เท่านั้น"
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

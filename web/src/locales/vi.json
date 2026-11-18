@@ -59047,6 +59047,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Phát không cần đăng nhập từ cùng địa chỉ"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Một số ứng dụng Jellyfin, chẳng hạn Findroid, mở liên kết phát trực tiếp và liên kết tải xuống mà không đăng nhập. Khi bật tùy chọn này, Silo sẽ phục vụ yêu cầu như vậy nếu một ứng dụng đã đăng nhập ở cùng địa chỉ mạng đã yêu cầu phát tệp đó trong hai giờ qua. Khi đó, bất kỳ ai dùng chung địa chỉ đó, chẳng hạn những người trên cùng mạng gia đình, cùng nhà mạng di động hoặc cùng VPN, cũng có thể phát tệp đó. Chỉ bật tùy chọn này nếu bạn dùng một trong những ứng dụng đó."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

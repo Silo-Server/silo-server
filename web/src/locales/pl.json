@@ -72777,6 +72777,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Odtwarzanie bez logowania z tego samego adresu"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Niektóre aplikacje Jellyfin, takie jak Findroid, otwierają linki do odtwarzania bezpośredniego i pobierania bez logowania. Gdy ta opcja jest włączona, Silo obsługuje takie żądanie, jeśli zalogowana aplikacja z tego samego adresu sieciowego poprosiła o odtworzenie tego pliku w ciągu ostatnich dwóch godzin. Wtedy ten plik może odtworzyć również każda osoba korzystająca z tego adresu, np. w tej samej sieci domowej, u tego samego operatora komórkowego lub w tej samej sieci VPN. Włącz tę opcję tylko wtedy, gdy używasz jednej z tych aplikacji."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

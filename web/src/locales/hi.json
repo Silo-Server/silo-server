@@ -58515,6 +58515,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "उसी पते से बिना साइन इन के प्लेबैक"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "कुछ Jellyfin ऐप, जैसे Findroid, डायरेक्ट-प्ले और डाउनलोड लिंक बिना साइन इन किए खोलते हैं। यह चालू होने पर, अगर उसी नेटवर्क पते पर साइन इन किए गए किसी ऐप ने पिछले दो घंटों में वह फ़ाइल चलाने का अनुरोध किया हो, तो Silo ऐसा अनुरोध पूरा करता है। तब उस पते को शेयर करने वाला कोई भी व्यक्ति, जैसे एक ही घरेलू नेटवर्क, मोबाइल कैरियर या VPN पर मौजूद लोग, भी वह फ़ाइल चला सकता है। इसे सिर्फ़ तब चालू करें, जब इनमें से कोई ऐप इस्तेमाल हो रहा हो।"
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

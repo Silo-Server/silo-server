@@ -65453,6 +65453,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Reproducció sense iniciar la sessió des de la mateixa adreça"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Algunes aplicacions de Jellyfin, com ara Findroid, obren enllaços de reproducció directa i de baixada sense iniciar la sessió. Quan aquesta opció està activada, Silo atén aquestes sol·licituds si una aplicació amb la sessió iniciada a la mateixa adreça de xarxa ha sol·licitat reproduir aquest fitxer durant les dues últimes hores. Llavors, qualsevol persona que comparteixi aquesta adreça, com ara qui és a la mateixa xarxa domèstica o utilitza el mateix operador mòbil o la mateixa VPN, també pot reproduir aquest fitxer. Activa-la només si utilitzes alguna d’aquestes aplicacions."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

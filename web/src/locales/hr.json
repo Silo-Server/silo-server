@@ -65465,6 +65465,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Reprodukcija bez prijave s iste adrese"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Neke aplikacije za Jellyfin, poput aplikacije Findroid, otvaraju poveznice za izravnu reprodukciju i preuzimanje bez prijave. Kada je ovo uključeno, Silo poslužuje takav zahtjev ako je prijavljena aplikacija s iste mrežne adrese zatražila reprodukciju te datoteke u posljednja dva sata. Tada tu datoteku može reproducirati i svatko tko dijeli tu adresu, primjerice osobe na istoj kućnoj mreži, kod istog mobilnog operatera ili na istom VPN-u. Uključite ovo samo ako koristite neku od tih aplikacija."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

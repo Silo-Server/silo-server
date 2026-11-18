@@ -52392,6 +52392,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Putar tanpa masuk dari alamat yang sama"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Beberapa aplikasi Jellyfin, seperti Findroid, membuka tautan putar langsung dan unduhan tanpa masuk. Saat opsi ini aktif, Silo melayani permintaan seperti itu jika aplikasi yang sudah masuk di alamat jaringan yang sama meminta untuk memutar file itu dalam dua jam terakhir. Siapa pun yang berbagi alamat itu, seperti orang di jaringan rumah, operator seluler, atau VPN yang sama, kemudian juga dapat memutar file itu. Aktifkan hanya jika Anda menggunakan salah satu aplikasi tersebut."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

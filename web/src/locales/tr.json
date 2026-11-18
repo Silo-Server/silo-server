@@ -58247,6 +58247,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Aynı adresten oturum açmadan oynat"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Findroid gibi bazı Jellyfin uygulamaları, doğrudan oynatma ve indirme bağlantılarını oturum açmadan açar. Bu seçenek açıkken Silo, aynı ağ adresindeki oturum açmış bir uygulama son iki saat içinde o dosyayı oynatmak istediyse böyle bir isteği karşılar. Bu durumda o adresi paylaşan herkes, örneğin aynı ev ağındaki, aynı mobil operatördeki veya aynı VPN’deki kişiler de o dosyayı oynatabilir. Yalnızca bu uygulamalardan birini kullanıyorsanız açın."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

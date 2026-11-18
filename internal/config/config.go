@@ -304,6 +304,9 @@ type jellyfinCompatConfigRaw struct {
 	WebInstallDir         string `yaml:"web_install_dir"`
 	SessionTTL            string `yaml:"session_ttl"`
 	PlaybackSessionTTL    string `yaml:"playback_session_ttl"`
+	// AddressStreamGrantEnabled is imported only when the file sets it, so
+	// an absent key leaves the server default in force.
+	AddressStreamGrantEnabled *bool `yaml:"address_stream_grant_enabled"`
 }
 
 // RecommendationsConfig holds AI recommendation engine settings.

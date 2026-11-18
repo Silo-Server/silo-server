@@ -71894,6 +71894,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Відтворювати без входу з тієї самої адреси"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Деякі застосунки Jellyfin, як-от Findroid, відкривають посилання для прямого відтворення й завантаження без входу. Коли цей параметр увімкнено, Silo обслуговує такий запит, якщо застосунок із тієї самої мережевої адреси, у якому виконано вхід, запитував відтворення цього файлу протягом останніх двох годин. Тоді будь-хто з тією самою адресою, наприклад люди в тій самій домашній мережі, у того самого мобільного оператора чи VPN, також зможе відтворити цей файл. Вмикайте його, лише якщо використовуєте один із цих застосунків."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

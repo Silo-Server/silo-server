@@ -52872,6 +52872,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "允许同一地址免登录播放"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "部分Jellyfin应用（如Findroid）会在未登录的情况下打开直接播放和下载链接。开启后，如果同一网络地址上已登录的应用在过去2小时内请求播放该文件，Silo就会处理此类请求。这样一来，共享该地址的任何人（例如同一家庭网络、移动运营商或VPN上的用户）也都能播放该文件。仅在你使用这类应用时才开启此选项。"
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

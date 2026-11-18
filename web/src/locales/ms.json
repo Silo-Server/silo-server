@@ -52380,6 +52380,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Main tanpa log masuk dari alamat yang sama"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Sesetengah apl Jellyfin, seperti Findroid, membuka pautan main terus dan muat turun tanpa log masuk. Apabila pilihan ini dihidupkan, Silo melayan permintaan sedemikian jika apl yang telah log masuk di alamat rangkaian yang sama meminta untuk memainkan fail itu dalam tempoh dua jam yang lalu. Sesiapa yang berkongsi alamat itu, seperti orang dalam rangkaian rumah, pembawa mudah alih atau VPN yang sama, kemudian boleh memainkan fail itu juga. Hidupkan hanya jika anda menggunakan salah satu apl tersebut."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,

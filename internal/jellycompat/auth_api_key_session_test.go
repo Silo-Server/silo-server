@@ -156,7 +156,7 @@ func TestPlaybackSessionAuth_APIKeyViaPlaySessionId(t *testing.T) {
 	playback.Put(PlaybackSession{ID: "ps1", CompatToken: "sa_test", RouteItemID: "x"})
 
 	var got *Session
-	h := PlaybackSessionAuth(sessions, playback, keyAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := PlaybackSessionAuth(sessions, playback, keyAuth, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = SessionFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))

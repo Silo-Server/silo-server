@@ -65661,6 +65661,18 @@
       "value": "Autoscan"
     }
   ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Reprodução sem início de sessão a partir do mesmo endereço"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Algumas apps do Jellyfin, como a Findroid, abrem links de reprodução direta e de transferência sem iniciar sessão. Quando esta opção está ativada, o Silo atende esse pedido se uma app com sessão iniciada no mesmo endereço de rede tiver pedido para reproduzir esse ficheiro nas últimas duas horas. Qualquer pessoa que partilhe esse endereço, como quem está na mesma rede doméstica, operadora móvel ou VPN, passa então a poder reproduzir também esse ficheiro. Ative esta opção apenas se usar uma dessas apps."
+    }
+  ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
     {
       "type": 0,
