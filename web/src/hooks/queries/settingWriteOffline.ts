@@ -5,10 +5,14 @@ import { toast } from "sonner";
 import { t } from "@/i18n";
 import { appearanceCache, type StorageKey } from "@/utils/storage";
 
-/** A setting write refused unsent because the browser was offline. */
+/**
+ * A setting write refused unsent because the browser was offline. Its message
+ * is the localized offline notice, so pages that show a save error's message
+ * show that instead of transport text.
+ */
 export class SettingWriteOfflineError extends Error {
   constructor() {
-    super("The browser is offline, so the setting was not sent");
+    super(t("web.settings.offlineChangeNotSaved"));
     this.name = "SettingWriteOfflineError";
   }
 }
