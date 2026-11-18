@@ -33,22 +33,25 @@ describe("useShowThenSave after an online failure", () => {
   });
 
   /**
-   * Makes each change in turn, then settles save i with outcomes[i] (an Error
-   * rejects), in the given order of indexes or else in order.
+   * Runs the steps in order: a string picks that value; [i, outcome] settles
+   * the i-th pick's save with outcome (an Error rejects). Returns what is shown
+   * and cached at the end.
    */
-  async function change(
-    values: string[],
-    outcomes: unknown[],
-    order: Iterable<number> = outcomes.keys(),
-  ) {
+  async function run(steps: Array<string | [number, unknown]>) {
     const settles: Array<(outcome: unknown) => void> = [];
     const { result } = renderHook(() => useShowThenSave(null));
     let current = "normal";
-    for (const value of values) {
+    for (const step of steps) {
+      if (typeof step !== "string") {
+        const [i, outcome] = step;
+        settles[i]!(outcome);
+        await settled();
+        continue;
+      }
       result.current({
         key: "ui.text_scale",
         cacheKey: CACHE_KEY,
-        value,
+        value: step,
         previous: current,
         show: (v: string) => {
           current = v;
@@ -59,16 +62,12 @@ describe("useShowThenSave after an online failure", () => {
           ),
       });
     }
-    for (const i of order) {
-      settles[i]!(outcomes[i]);
-      await settled();
-    }
     return { shown: current, cached: appearanceCache.get(CACHE_KEY, null) };
   }
 
   // A 4xx other than 408 means the server stored nothing.
   it.each([409, 422])("puts back the previous value after a %s rejection", async (status) => {
-    expect(await change(["large"], [problem(status)])).toEqual({
+    expect(await run(["large", [0, problem(status)]])).toEqual({
       shown: "normal",
       cached: "normal",
     });
@@ -76,24 +75,36 @@ describe("useShowThenSave after an online failure", () => {
   });
 
   it("puts back the value from before two rejected changes", async () => {
-    expect(await change(["large", "x-large"], [REJECTED, REJECTED])).toEqual({
+    expect(await run(["large", "x-large", [0, REJECTED], [1, REJECTED]])).toEqual({
       shown: "normal",
       cached: "normal",
     });
   });
 
   it("puts back an earlier change that saved", async () => {
-    expect(await change(["large", "x-large"], ["saved", REJECTED])).toEqual({
+    expect(await run(["large", "x-large", [0, "saved"], [1, REJECTED]])).toEqual({
       shown: "large",
       cached: "large",
     });
   });
 
   it("shows an earlier change that saved after a newer one was rejected", async () => {
-    expect(await change(["large", "x-large"], ["saved", problem(429)], [1, 0])).toEqual({
+    expect(await run(["large", "x-large", [1, problem(429)], [0, "saved"]])).toEqual({
       shown: "large",
       cached: "large",
     });
+  });
+
+  it("puts back an earlier change that saved while a later one was pending", async () => {
+    expect(
+      await run(["large", "x-large", [1, REJECTED], "small", [0, "saved"], [2, REJECTED]]),
+    ).toEqual({ shown: "large", cached: "large" });
+  });
+
+  it("keeps a later change that saved over an earlier one that lands after it", async () => {
+    expect(
+      await run(["large", "x-large", [1, REJECTED], "small", [2, "saved"], [0, "saved"]]),
+    ).toEqual({ shown: "small", cached: "small" });
   });
 
   // These may have saved; the effective-settings re-read decides what shows.
@@ -102,7 +113,7 @@ describe("useShowThenSave after an online failure", () => {
     ["408", problem(408)],
     ["network", new TypeError("Failed to fetch")],
   ])("keeps the change after an ambiguous %s failure", async (_label, error) => {
-    expect(await change(["large"], [error])).toEqual({ shown: "large", cached: "large" });
+    expect(await run(["large", [0, error]])).toEqual({ shown: "large", cached: "large" });
     expect(toastError).not.toHaveBeenCalled();
   });
 });
