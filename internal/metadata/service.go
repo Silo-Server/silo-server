@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -3607,7 +3608,8 @@ func (s *MetadataService) refreshItem(ctx context.Context, req ProcessRequest, i
 		// The item keeps the values that provider would have confirmed or
 		// replaced; an ordinary refresh still applies what the others sent.
 		slog.WarnContext(ctx, "metadata: a provider did not answer, so the complete refresh keeps stored values",
-			"component", "metadata", "content_id", contentID, "error", err)
+			"component", "metadata", "content_id", contentID,
+			"error", logredact.RedactSecretAssignments(logredact.SanitizeURLError(err).Error()))
 		req.rebuildMatch = false
 		result, err = s.Process(ctx, req)
 	}
