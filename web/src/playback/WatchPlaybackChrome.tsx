@@ -1079,15 +1079,14 @@ function WatchPlaybackHostContent() {
         return;
       }
 
-      // With Next Up off a series episode ends where post-roll's own close
-      // would take the viewer: no card, no countdown, no automatic next
-      // episode, even if a card opened before the viewer turned it off.
-      // A minimized or picture-in-picture player leaves the page the viewer
-      // is browsing alone, as post-roll does there.
+      // With Next Up off a series episode ends as the player's Close does:
+      // no card, no countdown, no automatic next episode. A card that opened
+      // before the viewer turned it off closes as its own Close does. A
+      // minimized or picture-in-picture player leaves the page the viewer is
+      // browsing alone, as post-roll does there.
       if (episodeSeriesId && nextUpAtEndRef.current === "close") {
-        if (modeRef.current === "foreground" || modeRef.current === "post-roll") {
-          handlePostRollClose();
-        }
+        if (modeRef.current === "foreground") void handleExit(exitState);
+        else if (modeRef.current === "post-roll") handlePostRollClose();
         return;
       }
 
@@ -1137,6 +1136,7 @@ function WatchPlaybackHostContent() {
       stopPlayback,
       navigate,
       controller,
+      handleExit,
       handlePostRollClose,
     ],
   );
