@@ -124,9 +124,11 @@ func notificationPluginChannelOf(channel notifications.PluginChannel) (Notificat
 	return out, nil
 }
 
+// NotificationPluginDestinationWrite is an update. A field left out keeps
+// its value.
 type NotificationPluginDestinationWrite struct {
 	Name           *string         `json:"name,omitempty" minLength:"1" maxLength:"64"`
-	Settings       PluginJSONValue `json:"settings,omitempty" doc:"Settings fields, merged over the stored ones on update. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value"`
+	Settings       PluginJSONValue `json:"settings,omitempty" doc:"Settings fields, merged over the stored ones. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value. Each value is checked against the channel's settings form"`
 	ClearSecrets   []string        `json:"clear_secrets,omitempty" maxItems:"64" doc:"Secret settings to remove"`
 	Enabled        *bool           `json:"enabled,omitempty"`
 	NotifyNextUp   *bool           `json:"notify_next_up,omitempty"`
@@ -140,11 +142,27 @@ func (w NotificationPluginDestinationWrite) input() notifications.PluginDestinat
 	}
 }
 
+// NotificationPluginDestinationCreateInputBody is a new destination. Its
+// name keeps the schema name the anonymous body had.
+type NotificationPluginDestinationCreateInputBody struct {
+	PluginID       string          `json:"plugin_id" minLength:"1" maxLength:"256"`
+	CapabilityID   string          `json:"capability_id" minLength:"1" maxLength:"256"`
+	Name           string          `json:"name" minLength:"1" maxLength:"64"`
+	Settings       PluginJSONValue `json:"settings,omitempty" doc:"Settings fields, checked against the channel's settings form: declared fields only, each of its declared type, and every required field present"`
+	Enabled        *bool           `json:"enabled,omitempty" doc:"Defaults to true"`
+	NotifyNextUp   *bool           `json:"notify_next_up,omitempty" doc:"Defaults to true"`
+	NotifyRequests *bool           `json:"notify_requests,omitempty" doc:"Defaults to true"`
+}
+
 type NotificationPluginDestinationCreateInput struct {
-	Body struct {
-		PluginID     string `json:"plugin_id" minLength:"1" maxLength:"256"`
-		CapabilityID string `json:"capability_id" minLength:"1" maxLength:"256"`
-		NotificationPluginDestinationWrite
+	Body NotificationPluginDestinationCreateInputBody
+}
+
+func (c NotificationPluginDestinationCreateInputBody) input() notifications.PluginDestinationInput {
+	return notifications.PluginDestinationInput{
+		Channel: notifications.PluginChannelRef{PluginID: c.PluginID, CapabilityID: c.CapabilityID},
+		Name:    &c.Name, Settings: map[string]any(c.Settings), Enabled: c.Enabled,
+		NotifyNextUp: c.NotifyNextUp, NotifyRequests: c.NotifyRequests,
 	}
 }
 
@@ -180,9 +198,24 @@ func notificationPluginDestinationProblem(err error) error {
 	if rejected, ok := errors.AsType[*notifications.PluginDestinationRejectedError](err); ok {
 		return validationProblem(locationBody+".settings", codeInvalid, rejected.Message)
 	}
+	if invalid, ok := errors.AsType[*notifications.PluginDestinationSettingsError](err); ok {
+		fieldErrors := make([]ProblemError, 0, len(invalid.Fields))
+		for _, field := range invalid.Fields {
+			location := locationBody + ".settings"
+			if field.Field != "" {
+				location += "." + field.Field
+			}
+			fieldErrors = append(fieldErrors, ProblemError{Location: location, Code: field.Code, Detail: field.Message})
+		}
+		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").WithErrors(fieldErrors...)
+	}
 	switch {
 	case errors.Is(err, notifications.ErrPluginDestinationNotFound):
 		return NewProblem(TypeNotFound, "Notification destination not found.")
+	case errors.Is(err, notifications.ErrPluginDestinationProfileGone):
+		return NewProblem(TypeNotFound, "Profile not found.")
+	case errors.Is(err, notifications.ErrPluginDestinationSettingsUnreadable):
+		return NewProblem(TypeConflict, "This server can't read the destination's stored settings, so they weren't changed.")
 	case errors.Is(err, notifications.ErrPluginDestinationLimit):
 		return NewProblem(TypeValidationFailed, "Notification destination limit reached.")
 	case errors.Is(err, notifications.ErrPluginDestinationInvalid):
@@ -288,9 +321,7 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		input := in.Body.input()
-		input.Channel = notifications.PluginChannelRef{PluginID: in.Body.PluginID, CapabilityID: in.Body.CapabilityID}
-		row, err := svc.Create(ctx, user, profile, input)
+		row, err := svc.Create(ctx, user, profile, in.Body.input())
 		if err != nil {
 			return nil, notificationPluginDestinationProblem(err)
 		}
@@ -302,6 +333,9 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	update.Guarded = true
 	update.RetrySafety = RetrySafetyNaturalIdempotent
 	update.MaxBodyBytes = 32768
+	// 409: this server can't decrypt the stored settings, so a settings
+	// change is refused.
+	update.Errors = []int{http.StatusConflict}
 	update.Summary = "Update a plugin destination using the original observed validator. Changed settings are checked by the plugin again. Never rebase or replay an uncertain update."
 	Register(reg, update, func(ctx context.Context, in *NotificationPluginDestinationUpdateInput) (*NotificationPluginDestinationOutput, error) {
 		svc, p := reg.pluginDestinations()

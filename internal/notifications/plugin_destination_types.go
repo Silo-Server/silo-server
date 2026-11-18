@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -57,14 +58,26 @@ func (c PluginChannel) declaredFields() map[string]struct{} {
 // The plugin runtime implements it; the notification system never starts or
 // addresses plugin processes itself.
 type PluginChannelHost interface {
-	// Channels lists the channels the enabled plugins provide.
+	// Channels lists the channels the enabled plugins provide, one per
+	// channel: when several enabled installations of a plugin provide it,
+	// the one Connect resolves.
 	Channels(ctx context.Context) ([]PluginChannel, error)
 	// AvailableChannels names the channels enabled plugins provide, read
 	// through tx so a caller holding a transaction needs no second
 	// connection.
 	AvailableChannels(ctx context.Context, tx pgx.Tx) ([]PluginChannelRef, error)
-	ValidateDestination(ctx context.Context, ref PluginChannelRef, req *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error)
-	SendNotification(ctx context.Context, ref PluginChannelRef, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error)
+	// Connect resolves ref to the installation that provides it, the one
+	// Channels describes, and returns its channel and a client, starting
+	// the plugin when needed. It returns when ctx ends even while the
+	// plugin is still starting. Its errors wrap ErrPluginChannelUnavailable.
+	Connect(ctx context.Context, ref PluginChannelRef) (*PluginChannel, PluginChannelClient, error)
+}
+
+// PluginChannelClient calls one installation's notification channel. The
+// caller bounds each call.
+type PluginChannelClient interface {
+	ValidateDestination(ctx context.Context, req *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error)
+	SendNotification(ctx context.Context, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error)
 }
 
 // PluginDestination is a profile's destination on a plugin-provided channel.
@@ -113,8 +126,10 @@ const DeliveryTypePluginDestinationAutoDisabled = "plugin_destination.auto_disab
 // PluginDestinationMaxPerProfile caps each profile's plugin destinations.
 const PluginDestinationMaxPerProfile = 10
 
-// pluginDestinationDeliveriesPerMinute bounds sends per profile, as the
-// webhook limit does: over-limit notifications stay in the inbox.
+// pluginDestinationDeliveriesPerMinute bounds the fanout's sends per
+// profile, as the webhook limit does: over-limit notifications stay in the
+// inbox. Like the webhook limit it is counted in memory on each server and
+// doesn't apply to operational notices such as request updates.
 const pluginDestinationDeliveriesPerMinute = 30
 
 // maxPluginDestinationConfigBytes bounds a destination's settings JSON.
@@ -128,7 +143,41 @@ var (
 	// ErrPluginChannelUnavailable means no enabled plugin provides the channel
 	// right now, or its plugin couldn't be reached.
 	ErrPluginChannelUnavailable = errors.New("plugin notification channel unavailable")
+	// ErrPluginDestinationSettingsUnreadable refuses a settings edit when
+	// this server can't decrypt the stored settings, typically a wrong
+	// at-rest key: merging over nothing would drop the stored secrets.
+	ErrPluginDestinationSettingsUnreadable = errors.New("the destination's stored settings can't be read on this server")
+	// ErrPluginDestinationProfileGone refuses a create for a profile
+	// deleted meanwhile.
+	ErrPluginDestinationProfileGone = errors.New("profile not found")
 )
+
+// PluginSettingError is one setting that doesn't fit the channel's schema.
+// Code is an API field error code: required, invalid_type, invalid_enum,
+// out_of_range or invalid.
+type PluginSettingError struct {
+	Field   string
+	Code    string
+	Message string
+}
+
+// PluginDestinationSettingsError lists the settings that don't fit the
+// channel's schema.
+type PluginDestinationSettingsError struct {
+	Fields []PluginSettingError
+}
+
+func (e *PluginDestinationSettingsError) Error() string {
+	parts := make([]string, 0, len(e.Fields))
+	for _, field := range e.Fields {
+		parts = append(parts, field.Field+": "+field.Message)
+	}
+	return "settings don't fit the destination's form: " + strings.Join(parts, "; ")
+}
+
+func (e *PluginDestinationSettingsError) Is(target error) bool {
+	return target == ErrPluginDestinationInvalid
+}
 
 // PluginDestinationRejectedError carries the plugin's reason for refusing a
 // destination's settings, which the user can act on.

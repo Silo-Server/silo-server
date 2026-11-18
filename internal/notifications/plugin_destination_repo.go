@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -88,7 +87,11 @@ func isPluginDestinationNameViolation(err error) bool {
 
 // InsertWithLimit stores a new destination unless the profile already has
 // maxPerProfile. The count and insert run under an advisory lock on the
-// account profile, so concurrent creates can't both pass the check.
+// account profile, so concurrent creates can't both pass the check. The
+// profile row is key-share locked first: a profile deleted before that
+// refuses the create with ErrPluginDestinationProfileGone, and a deletion
+// after it waits for this insert and then purges the new destination with
+// the profile's others, so none is left behind to receive notices.
 func (r *PluginDestinationRepository) InsertWithLimit(ctx context.Context, d PluginDestination, maxPerProfile int) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -96,6 +99,15 @@ func (r *PluginDestinationRepository) InsertWithLimit(ctx context.Context, d Plu
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	var profileExists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR KEY SHARE)`,
+		d.UserID, d.ProfileID).Scan(&profileExists); err != nil {
+		return fmt.Errorf("lock plugin destination profile: %w", err)
+	}
+	if !profileExists {
+		return ErrPluginDestinationProfileGone
+	}
 	if _, err := tx.Exec(ctx,
 		`SELECT pg_advisory_xact_lock(hashtextextended('notification_plugin_destinations:' || $1::integer || ':' || $2, 0))`,
 		d.UserID, d.ProfileID); err != nil {
@@ -277,12 +289,24 @@ func (r *PluginDestinationRepository) DeleteAllForProfile(ctx context.Context, u
 	return err
 }
 
+// lockForFinish locks a destination row for an attempt's bookkeeping. A
+// destination deleted meanwhile locks nothing; its attempt cascaded.
+func (r *PluginDestinationRepository) lockForFinish(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, `SELECT 1 FROM notification_plugin_destinations WHERE id = $1 FOR NO KEY UPDATE`, id)
+	return err
+}
+
+// pluginDestinationExec runs a statement on the pool or in a transaction.
+type pluginDestinationExec interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 // RecordSuccess clears the failure streak after a delivered message.
 //
 // Delivery bookkeeping leaves revision alone: revision guards the owner's
 // edits, and a send finishing must not turn an edit in progress into a 412.
-func (r *PluginDestinationRepository) RecordSuccess(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `
+func (r *PluginDestinationRepository) RecordSuccess(ctx context.Context, q pluginDestinationExec, id string) error {
+	_, err := q.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET last_success_at = now(), consecutive_failures = 0
 		WHERE id = $1`, id)
@@ -293,8 +317,8 @@ func (r *PluginDestinationRepository) RecordSuccess(ctx context.Context, id stri
 // Like Disable it applies only while the destination still has the settings
 // the failed send used (sentConfig): new settings start with a clean streak.
 // It leaves revision alone, as RecordSuccess does.
-func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, id, message, sentConfig string) error {
-	_, err := r.pool.Exec(ctx, `
+func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, q pluginDestinationExec, id, message, sentConfig string) error {
+	_, err := q.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET last_failure_at = now(), last_failure_message = left($2, 256),
 		    consecutive_failures = consecutive_failures + 1
@@ -309,8 +333,8 @@ func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, id, mes
 // saved new settings during that send keeps them working. Unlike the other
 // bookkeeping it bumps revision: it changes enabled, which the owner edits,
 // so an editor that hasn't seen the disable must reload first.
-func (r *PluginDestinationRepository) Disable(ctx context.Context, id, reason, sentConfig string) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `
+func (r *PluginDestinationRepository) Disable(ctx context.Context, q pluginDestinationExec, id, reason, sentConfig string) (bool, error) {
+	tag, err := q.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET enabled = false, disabled_reason = left($2, 256), revision = revision + 1, updated_at = now()
 		WHERE id = $1 AND config_ciphertext = $3 AND enabled`, id, reason, sentConfig)
@@ -322,39 +346,55 @@ func (r *PluginDestinationRepository) Disable(ctx context.Context, id, reason, s
 
 // EnqueueAttempts inserts pending outbox rows inside the delivery's
 // transaction. attempt_number starts at 0: no send tried yet.
+//
+// The destinations were read without a lock, so one may be deleted before
+// this insert. Its foreign key would then abort the whole delivery
+// transaction, inbox row and every other channel included. The insert
+// instead key-share locks the destinations that still exist and queues only
+// for those: a deletion committed first drops its attempt, and one after
+// waits for this transaction and then cascades. The lock blocks nothing but
+// deletion, and the delivery transaction makes no plugin call.
 func (r *PluginDestinationRepository) EnqueueAttempts(ctx context.Context, tx pgx.Tx, attempts []DeliveryAttempt) error {
+	return enqueueAttemptsForLiveTargets(ctx, tx, "plugin_destination_delivery_attempts", "destination_id", "notification_plugin_destinations", attempts)
+}
+
+// enqueueAttemptsForLiveTargets inserts pending attempts into an outbox
+// table for the targets that still exist, key-share locking them until the
+// transaction ends (see PluginDestinationRepository.EnqueueAttempts).
+// The table and column names are constants of the callers.
+func enqueueAttemptsForLiveTargets(ctx context.Context, tx pgx.Tx, table, targetColumn, targetTable string, attempts []DeliveryAttempt) error {
 	if len(attempts) == 0 {
 		return nil
 	}
-	var sb strings.Builder
-	sb.WriteString(`INSERT INTO plugin_destination_delivery_attempts
-		(id, notification_delivery_id, destination_id, attempt_number, outcome) VALUES `)
-	args := make([]any, 0, len(attempts)*5)
+	ids := make([]string, len(attempts))
+	deliveries := make([]string, len(attempts))
+	targets := make([]string, len(attempts))
 	for i, attempt := range attempts {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		base := len(args)
-		fmt.Fprintf(&sb, "($%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5)
-		args = append(args, attempt.ID, attempt.NotificationDeliveryID, attempt.TargetID, 0, WebhookOutcomePending)
+		ids[i], deliveries[i], targets[i] = attempt.ID, attempt.NotificationDeliveryID, attempt.TargetID
 	}
-	sb.WriteString(" ON CONFLICT DO NOTHING")
-	if _, err := tx.Exec(ctx, sb.String(), args...); err != nil {
-		return fmt.Errorf("enqueue plugin destination attempts: %w", err)
+	query := `INSERT INTO ` + table + ` (id, notification_delivery_id, ` + targetColumn + `, attempt_number, outcome)
+		SELECT a.id, a.delivery_id, t.id, 0, $4
+		FROM unnest($1::text[], $2::text[], $3::text[]) AS a(id, delivery_id, target_id)
+		JOIN ` + targetTable + ` t ON t.id = a.target_id
+		FOR KEY SHARE OF t
+		ON CONFLICT DO NOTHING`
+	if _, err := tx.Exec(ctx, query, ids, deliveries, targets, WebhookOutcomePending); err != nil {
+		return fmt.Errorf("enqueue %s: %w", table, err)
 	}
 	return nil
 }
 
 // pluginDestinationClaimLease hides a claimed attempt from other claimers.
 // A claim holds at most pluginDestinationClaimLimit attempts, sent one after
-// another with pluginSendTimeout each, so the lease outlasts a whole claim
-// and a send still running is not claimed again; a server that dies mid-send
-// frees its attempts when the lease runs out.
+// another, each with at most pluginConnectTimeout to reach its plugin and
+// pluginSendTimeout to send, so the lease outlasts a whole claim; a server
+// that dies mid-send frees its attempts when the lease runs out.
 const pluginDestinationClaimLease = 5 * time.Minute
 
-// pluginDestinationClaimLimit bounds one claim: 10 sends at the 15-second
-// limit take 150 seconds, half the lease. A profile has at most
-// PluginDestinationMaxPerProfile destinations, so one delivery fits.
+// pluginDestinationClaimLimit bounds one claim: 10 attempts at 10 seconds to
+// connect and 15 to send take at most 250 seconds, inside the lease. A
+// profile has at most PluginDestinationMaxPerProfile destinations, so one
+// delivery fits.
 const pluginDestinationClaimLimit = 10
 
 // ClaimPendingForDelivery claims a delivery's pending attempts for the
@@ -397,16 +437,33 @@ func (r *PluginDestinationRepository) claim(ctx context.Context, query string, a
 	return scanPluginDestinationAttempts(rows)
 }
 
+// ClaimHeld reports whether this server's claim on an attempt still holds
+// with at least remaining left on its lease, so a send started now finishes
+// inside it. Checked just before the send: a claim that ran out may already
+// be another server's.
+func (r *PluginDestinationRepository) ClaimHeld(ctx context.Context, claimed DeliveryAttempt, remaining time.Duration) (bool, error) {
+	var held bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM plugin_destination_delivery_attempts
+			WHERE id = $1 AND outcome = 'retrying' AND next_retry_at = $2 AND next_retry_at > now() + $3
+		)`, claimed.ID, claimed.NextRetryAt, remaining).Scan(&held)
+	if err != nil {
+		return false, fmt.Errorf("check plugin destination claim: %w", err)
+	}
+	return held, nil
+}
+
 // FinalizeAttempt records a send's outcome, the attempt number it used, and
 // when to try again, if the claim still holds: the attempt's lease is the one
 // claimed returned. It reports false when the lease ran out and another
 // server claimed the attempt since, whose result then stands.
-func (r *PluginDestinationRepository) FinalizeAttempt(ctx context.Context, claimed DeliveryAttempt, outcome string, attemptNumber int, failureMessage string, nextRetryAt *time.Time) (bool, error) {
+func (r *PluginDestinationRepository) FinalizeAttempt(ctx context.Context, q pluginDestinationExec, claimed DeliveryAttempt, outcome string, attemptNumber int, failureMessage string, nextRetryAt *time.Time) (bool, error) {
 	var message *string
 	if failureMessage != "" {
 		message = &failureMessage
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := q.Exec(ctx, `
 		UPDATE plugin_destination_delivery_attempts
 		SET outcome = $2, attempt_number = $3, attempted_at = now(),
 		    failure_message = left($4, 256), next_retry_at = $5

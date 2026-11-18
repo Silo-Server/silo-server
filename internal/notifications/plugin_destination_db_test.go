@@ -29,6 +29,8 @@ type scriptedChannelHost struct {
 	validating func()
 	// unavailable makes sends fail as if the plugin were turned off.
 	unavailable bool
+	// reject makes settings checks refuse with this message.
+	reject string
 }
 
 func (h *scriptedChannelHost) AvailableChannels(ctx context.Context, _ pgx.Tx) ([]PluginChannelRef, error) {
@@ -45,26 +47,46 @@ func (h *scriptedChannelHost) Channels(context.Context) ([]PluginChannel, error)
 		PluginChannelRef: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"},
 		DisplayName:      "ntfy",
 		Schema: &pluginv1.ConfigSchema{
-			JsonSchema: `{"type":"object","properties":{"topic":{"type":"string"},"token":{"type":"string"}}}`,
-			AdminForm:  &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "topic"}, {Key: "token", Secret: true}}},
+			JsonSchema: `{"type":"object","required":["topic"],"properties":{"topic":{"type":"string","maxLength":32},"token":{"type":"string"},"priority":{"type":"integer","minimum":1,"maximum":5},"sound":{"type":"string","enum":["bell","none"]}}}`,
+			AdminForm:  &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "topic"}, {Key: "token", Secret: true}, {Key: "priority"}, {Key: "sound"}}},
 		},
-		PublicFields: []string{"topic"},
+		PublicFields: []string{"topic", "priority", "sound"},
 		SecretFields: []string{"token"},
 	}}, nil
 }
 
-func (h *scriptedChannelHost) ValidateDestination(context.Context, PluginChannelRef, *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error) {
+func (h *scriptedChannelHost) Connect(ctx context.Context, ref PluginChannelRef) (*PluginChannel, PluginChannelClient, error) {
+	h.mu.Lock()
+	unavailable := h.unavailable
+	h.mu.Unlock()
+	if unavailable {
+		return nil, nil, ErrPluginChannelUnavailable
+	}
+	channels, _ := h.Channels(ctx)
+	for i := range channels {
+		if channels[i].PluginChannelRef == ref {
+			return &channels[i], h, nil
+		}
+	}
+	return nil, nil, ErrPluginChannelUnavailable
+}
+
+func (h *scriptedChannelHost) ValidateDestination(context.Context, *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error) {
 	h.mu.Lock()
 	validating := h.validating
 	h.validating = nil
+	reject := h.reject
 	h.mu.Unlock()
 	if validating != nil {
 		validating()
 	}
+	if reject != "" {
+		return &pluginv1.ValidateNotificationDestinationResponse{Message: reject}, nil
+	}
 	return &pluginv1.ValidateNotificationDestinationResponse{Valid: true}, nil
 }
 
-func (h *scriptedChannelHost) SendNotification(_ context.Context, _ PluginChannelRef, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error) {
+func (h *scriptedChannelHost) SendNotification(_ context.Context, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error) {
 	h.mu.Lock()
 	during := h.during
 	h.during = nil
@@ -74,9 +96,6 @@ func (h *scriptedChannelHost) SendNotification(_ context.Context, _ PluginChanne
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.unavailable {
-		return nil, ErrPluginChannelUnavailable
-	}
 	h.sent = append(h.sent, req)
 	if len(h.outcomes) == 0 {
 		return &pluginv1.SendNotificationResponse{}, nil
@@ -97,6 +116,14 @@ func pluginDestinationDB(t *testing.T) *pgxpool.Pool {
 	}
 	up, _, _ := strings.Cut(strings.ReplaceAll(string(data), "public.", ""), "-- +goose Down")
 	if _, err := pool.Exec(t.Context(), up); err != nil {
+		t.Fatal(err)
+	}
+	// Destinations are created only for profiles that exist.
+	if _, err := pool.Exec(t.Context(), `CREATE TABLE user_profiles (LIKE public.user_profiles INCLUDING DEFAULTS)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'A'), ($1, $3, 'B')`,
+		sharedID, accountA, accountB); err != nil {
 		t.Fatal(err)
 	}
 	return pool
@@ -150,6 +177,23 @@ func enqueueTestAttempt(t *testing.T, pool *pgxpool.Pool, repo *PluginDestinatio
 }
 
 func anyRevision(int64) error { return nil }
+
+// recordNotices has the sender write its auto-disable notices to the inbox,
+// in its own transaction as the system does, and returns them as committed.
+func recordNotices(pool *pgxpool.Pool, sender *pluginDestinationSender) *[]Delivery {
+	var notices []Delivery
+	sender.insertNotice = func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+		inserted, err := NewDeliveryRepository(pool).BulkInsert(ctx, tx, []Delivery{notice})
+		if err != nil || len(inserted) == 0 {
+			return nil, err
+		}
+		return &inserted[0], nil
+	}
+	sender.dispatchNotice = func(_ context.Context, row InsertedDelivery) {
+		notices = append(notices, Delivery{ID: row.ID, UserID: row.UserID, ProfileID: row.ProfileID, Type: DeliveryTypePluginDestinationAutoDisabled})
+	}
+	return &notices
+}
 
 // processTestAttempt queues one of account A's deliveries to the
 // destination as its attemptNumber-th try, claims it, and processes it.
@@ -218,6 +262,14 @@ func TestPluginDestinationsStayOnTheirAccountDB(t *testing.T) {
 		t.Fatalf("other account DeleteGuarded = %v, want not found", err)
 	}
 
+	// A profile deleted meanwhile gets no destination.
+	if _, err := service.Create(ctx, accountA, "deleted-profile", PluginDestinationInput{
+		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
+		Settings: map[string]any{"topic": "alerts"},
+	}); !errors.Is(err, ErrPluginDestinationProfileGone) {
+		t.Fatalf("create for a missing profile = %v, want ErrPluginDestinationProfileGone", err)
+	}
+
 	// The owner sees it, without the secret.
 	rows, err := service.ListPage(ctx, accountA, sharedID, 10, nil)
 	if err != nil || len(rows) != 1 || !rows[0].Enabled {
@@ -236,14 +288,7 @@ func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 	ctx := t.Context()
 	host := &scriptedChannelHost{}
 	service, sender := newTestPluginDestinationService(t, pool, host)
-	var notices []Delivery
-	sender.operational = func(_ context.Context, d Delivery, opts OperationalDispatch) (*InsertedDelivery, error) {
-		if opts.PluginDestinationFilter != nil || opts.WebhookFilter != nil {
-			t.Errorf("auto-disable notice reaches destinations: %+v", opts)
-		}
-		notices = append(notices, d)
-		return nil, nil
-	}
+	notices := recordNotices(pool, sender)
 	name := "Phone"
 	d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
 		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
@@ -286,8 +331,8 @@ func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 	if unavailable.Outcome != WebhookOutcomeFailed {
 		t.Fatalf("after the schedule ran out with the plugin off the attempt is %s, want failed", unavailable.Outcome)
 	}
-	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || len(notices) != 0 {
-		t.Fatalf("after the plugin was off the destination is %+v with %d notices, want it enabled", got, len(notices))
+	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || len(*notices) != 0 {
+		t.Fatalf("after the plugin was off the destination is %+v with %d notices, want it enabled", got, len(*notices))
 	}
 
 	invalid := send(&pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "token revoked"})
@@ -298,8 +343,8 @@ func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 	if got.Enabled || got.DisabledReason == nil || !strings.Contains(*got.DisabledReason, "token revoked") {
 		t.Fatalf("after DESTINATION_INVALID the destination is %+v, want disabled with the reason", got)
 	}
-	if len(notices) != 1 || notices[0].Type != DeliveryTypePluginDestinationAutoDisabled || notices[0].UserID != accountA {
-		t.Fatalf("notices = %+v, want one auto-disable notice to the owner", notices)
+	if len(*notices) != 1 || (*notices)[0].Type != DeliveryTypePluginDestinationAutoDisabled || (*notices)[0].UserID != accountA {
+		t.Fatalf("notices = %+v, want one auto-disable notice to the owner", *notices)
 	}
 	if req := host.sent[len(host.sent)-1]; req.GetDeliveryKey() == "" || req.GetConfig().AsMap()["topic"] != "alerts" || req.GetCapabilityId() != "ntfy" {
 		t.Fatalf("send request = %v, want the delivery key, settings and capability", req)
@@ -324,11 +369,7 @@ func TestPluginDestinationStaleSendsDontWinDB(t *testing.T) {
 	ctx := t.Context()
 	host := &scriptedChannelHost{}
 	service, sender := newTestPluginDestinationService(t, pool, host)
-	var notices int
-	sender.operational = func(context.Context, Delivery, OperationalDispatch) (*InsertedDelivery, error) {
-		notices++
-		return nil, nil
-	}
+	notices := recordNotices(pool, sender)
 	name := "Phone"
 	d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
 		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
@@ -353,7 +394,11 @@ func TestPluginDestinationStaleSendsDontWinDB(t *testing.T) {
 		t.Fatalf("second claim = %d, %v", len(fresh), err)
 	}
 	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID})
+	sends := len(host.sent)
 	sender.processAttempt(ctx, stale[0])
+	if len(host.sent) != sends {
+		t.Fatal("sent after the claim was lost: the newer claim's server sends it")
+	}
 	var outcome string
 	if err := pool.QueryRow(ctx, `SELECT outcome FROM plugin_destination_delivery_attempts WHERE id = $1`, stale[0].ID).Scan(&outcome); err != nil {
 		t.Fatal(err)
@@ -377,8 +422,8 @@ func TestPluginDestinationStaleSendsDontWinDB(t *testing.T) {
 	}
 	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "token revoked"})
 	sender.processAttempt(ctx, claimed[0])
-	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || got.ConsecutiveFailures != 0 || notices != 0 {
-		t.Fatalf("after a stale failure: destination %+v, %d notices; want the repaired destination enabled, with no failure counted and no notice", got, notices)
+	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || got.ConsecutiveFailures != 0 || len(*notices) != 0 {
+		t.Fatalf("after a stale failure: destination %+v, %d notices; want the repaired destination enabled, with no failure counted and no notice", got, len(*notices))
 	}
 }
 
@@ -465,5 +510,172 @@ func TestPluginDestinationsOfAMissingPluginGetNothingQueuedDB(t *testing.T) {
 		if (row.Channel == nil) != (row.ID == orphan.ID) {
 			t.Fatalf("destination %s channel = %v, want only the removed plugin's unavailable", row.ID, row.Channel)
 		}
+	}
+}
+
+func createTestDestination(t *testing.T, service *PluginDestinationService, settings map[string]any) *PluginDestination {
+	t.Helper()
+	name := "Phone"
+	d, err := service.Create(t.Context(), accountA, sharedID, PluginDestinationInput{
+		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name, Settings: settings,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// A destination deleted after the delivery transaction listed it must not
+// abort that transaction on the attempt's foreign key: the inbox row and
+// every other channel's attempts would go with it.
+func TestPluginDestinationEnqueueSurvivesADeleteDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	service, sender := newTestPluginDestinationService(t, pool, &scriptedChannelHost{})
+	d := createTestDestination(t, service, map[string]any{"topic": "alerts"})
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	inserted, err := NewDeliveryRepository(pool).BulkInsert(ctx, tx, []Delivery{{
+		ID: "delivery-race", UserID: accountA, ProfileID: sharedID, Type: DeliveryTypeRequestApproved, ReasonFlags: []byte(`{}`),
+	}})
+	if err != nil || len(inserted) != 1 {
+		t.Fatalf("insert delivery: %v", err)
+	}
+	owner := profileKey{accountA, sharedID}
+	byProfile, err := sender.enqueueable(ctx, tx, []profileKey{owner})
+	if err != nil || len(byProfile[owner]) != 1 {
+		t.Fatalf("enqueueable = %+v, %v", byProfile, err)
+	}
+	// The owner deletes it before the attempt is inserted.
+	if err := service.DeleteGuarded(ctx, accountA, sharedID, d.ID, anyRevision); err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.repo.EnqueueAttempts(ctx, tx, []DeliveryAttempt{{ID: "attempt-race", NotificationDeliveryID: inserted[0].ID, TargetID: d.ID}}); err != nil {
+		t.Fatalf("enqueue after the delete: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit after the delete: %v", err)
+	}
+	var deliveries, attempts int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM notification_deliveries WHERE id = 'delivery-race'),
+		(SELECT count(*) FROM plugin_destination_delivery_attempts)`).Scan(&deliveries, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if deliveries != 1 || attempts != 0 {
+		t.Fatalf("after the race: %d deliveries, %d attempts; want the delivery kept and no attempt", deliveries, attempts)
+	}
+}
+
+// An attempt's outcome, the auto-disable and its notice commit together: if
+// any of it fails, none of it applies and the attempt runs again.
+func TestPluginDestinationFinishIsAtomicDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	host := &scriptedChannelHost{}
+	service, sender := newTestPluginDestinationService(t, pool, host)
+	notices := recordNotices(pool, sender)
+	insertNotice := sender.insertNotice
+	sender.insertNotice = func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+		return nil, errors.New("server stopped")
+	}
+	d := createTestDestination(t, service, map[string]any{"topic": "alerts"})
+
+	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "revoked"})
+	attempt := processTestAttempt(t, pool, sender, d.ID, 1)
+	got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID)
+	if attempt.Outcome != WebhookOutcomeRetrying || attempt.AttemptNumber != 0 || !got.Enabled || got.ConsecutiveFailures != 0 {
+		t.Fatalf("after a failed finish: attempt %+v, destination %+v; want nothing applied", attempt, got)
+	}
+
+	// Once the lease runs out the attempt runs again and finishes whole.
+	sender.insertNotice = insertNotice
+	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET next_retry_at = now() - interval '1 second' WHERE id = $1`, attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := sender.repo.ClaimDue(ctx, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("reclaim = %d, %v", len(claimed), err)
+	}
+	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "revoked"})
+	sender.processAttempt(ctx, claimed[0])
+	got, _ = sender.repo.GetByID(ctx, accountA, sharedID, d.ID)
+	var inbox int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification_deliveries WHERE type = $1`, DeliveryTypePluginDestinationAutoDisabled).Scan(&inbox); err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled || got.ConsecutiveFailures != 1 || inbox != 1 || len(*notices) != 1 {
+		t.Fatalf("after the retry: destination %+v, %d inbox notices, %d dispatched; want it disabled with one notice", got, inbox, len(*notices))
+	}
+}
+
+// Settings this server can't decrypt (a wrong at-rest key) are a temporary
+// failure, as for a webhook URL, and an edit is refused rather than saved
+// over nothing, which would drop the stored secrets.
+func TestPluginDestinationUnreadableSettingsDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	host := &scriptedChannelHost{}
+	service, sender := newTestPluginDestinationService(t, pool, host)
+	d := createTestDestination(t, service, map[string]any{"topic": "alerts", "token": "s3cret"})
+	otherKey, err := secret.New([]byte("abcdefghijabcdefghijabcdefghijab"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := otherKey.Encrypt(`{"topic":"alerts","token":"s3cret"}`, pluginDestinationConfigAAD(d.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE notification_plugin_destinations SET config_ciphertext = $2 WHERE id = $1`, d.ID, foreign); err != nil {
+		t.Fatal(err)
+	}
+
+	attempt := processTestAttempt(t, pool, sender, d.ID, 1)
+	requireRetryingAfter(t, attempt, 0)
+	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || len(host.sent) != 0 {
+		t.Fatalf("after an unreadable send: destination %+v, %d sends; want it enabled and nothing sent", got, len(host.sent))
+	}
+
+	_, err = service.UpdateGuarded(ctx, accountA, sharedID, d.ID, PluginDestinationInput{Settings: map[string]any{"topic": "news"}}, anyRevision)
+	if !errors.Is(err, ErrPluginDestinationSettingsUnreadable) {
+		t.Fatalf("edit of unreadable settings = %v, want ErrPluginDestinationSettingsUnreadable", err)
+	}
+	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); got.ConfigCiphertext != foreign {
+		t.Fatal("the refused edit changed the stored settings")
+	}
+}
+
+// Text from a plugin can quote a credential. It is masked before it is
+// stored, returned from a test, or returned as a validation refusal.
+func TestPluginDestinationTextNeverCarriesSecretsDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	host := &scriptedChannelHost{}
+	service, sender := newTestPluginDestinationService(t, pool, host)
+	const token = "tk_live_8f3a"
+	d := createTestDestination(t, service, map[string]any{"topic": "alerts", "token": token})
+
+	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_RETRY, Message: "provider refused " + token})
+	attempt := processTestAttempt(t, pool, sender, d.ID, 1)
+	got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID)
+	if got.LastFailureMessage == nil || strings.Contains(*got.LastFailureMessage, token) ||
+		attempt.FailureMessage == nil || strings.Contains(*attempt.FailureMessage, token) {
+		t.Fatalf("stored messages %v / %v carry the secret", got.LastFailureMessage, attempt.FailureMessage)
+	}
+
+	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_FAILED, Message: "bad key " + token})
+	result, err := service.Test(ctx, accountA, sharedID, d.ID)
+	if err != nil || result.OK || strings.Contains(result.Message, token) {
+		t.Fatalf("test result %+v, %v; want a failure without the secret", result, err)
+	}
+
+	host.reject = token + " is not a valid token"
+	_, err = service.UpdateGuarded(ctx, accountA, sharedID, d.ID, PluginDestinationInput{Settings: map[string]any{"topic": "news"}}, anyRevision)
+	rejected, ok := errors.AsType[*PluginDestinationRejectedError](err)
+	if !ok || strings.Contains(rejected.Message, token) {
+		t.Fatalf("validation refusal = %v, want one without the secret", err)
 	}
 }

@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-
-	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // pluginValidateTimeout bounds a plugin's ValidateDestination call.
@@ -78,17 +77,15 @@ func (s *PluginDestinationService) Channels(ctx context.Context) ([]PluginChanne
 	return host.Channels(ctx)
 }
 
-func (s *PluginDestinationService) channel(ctx context.Context, ref PluginChannelRef) (*PluginChannel, error) {
-	channels, err := s.Channels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrPluginChannelUnavailable, err)
+// connect resolves the installation that provides ref, so the schema the
+// settings are checked against and the plugin that validates them are the
+// same installation's.
+func (s *PluginDestinationService) connect(ctx context.Context, ref PluginChannelRef) (*PluginChannel, PluginChannelClient, error) {
+	host := s.sender.host()
+	if host == nil {
+		return nil, nil, ErrPluginChannelUnavailable
 	}
-	for i := range channels {
-		if channels[i].PluginChannelRef == ref {
-			return &channels[i], nil
-		}
-	}
-	return nil, ErrPluginChannelUnavailable
+	return host.Connect(ctx, ref)
 }
 
 // Create checks a new destination with its plugin and stores it.
@@ -100,7 +97,10 @@ func (s *PluginDestinationService) Create(ctx context.Context, userID int, profi
 	if err != nil {
 		return nil, err
 	}
-	channel, err := s.channel(ctx, in.Channel)
+	if len(in.ClearSecrets) > 0 {
+		return nil, fmt.Errorf("%w: clear_secrets applies only to an update", ErrPluginDestinationInvalid)
+	}
+	channel, client, err := s.connect(ctx, in.Channel)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (s *PluginDestinationService) Create(ctx context.Context, userID int, profi
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validate(ctx, *channel, settings); err != nil {
+	if err := s.validate(ctx, *channel, client, settings, nil); err != nil {
 		return nil, err
 	}
 	d := PluginDestination{
@@ -192,22 +192,24 @@ func (s *PluginDestinationService) UpdateGuarded(ctx context.Context, userID int
 }
 
 // validatedSettings merges a settings write over d's stored settings, has
-// the plugin check the result, and returns it encrypted.
+// the plugin check the result, and returns it encrypted. Stored settings
+// this server can't decrypt refuse the edit: merging over nothing would
+// silently drop the stored secrets, and a server with the right key can
+// still read them.
 func (s *PluginDestinationService) validatedSettings(ctx context.Context, d *PluginDestination, in PluginDestinationInput) (string, error) {
-	channel, err := s.channel(ctx, d.Ref())
-	if err != nil {
-		return "", err
-	}
 	stored, err := s.sender.decryptConfig(d)
 	if err != nil {
-		// Unreadable settings are replaced wholesale.
-		stored = map[string]any{}
+		return "", ErrPluginDestinationSettingsUnreadable
+	}
+	channel, client, err := s.connect(ctx, d.Ref())
+	if err != nil {
+		return "", err
 	}
 	settings, err := mergePluginSettings(*channel, stored, in.Settings, in.ClearSecrets)
 	if err != nil {
 		return "", err
 	}
-	if err := s.validate(ctx, *channel, settings); err != nil {
+	if err := s.validate(ctx, *channel, client, settings, stored); err != nil {
 		return "", err
 	}
 	return s.sender.encryptConfig(d.ID, settings)
@@ -280,7 +282,7 @@ func (s *PluginDestinationService) Test(ctx context.Context, userID int, profile
 	}
 	row := sampleDeliveryRow(profileID)
 	row.UserID = userID
-	result := s.sender.send(ctx, host, d, row, 1, true)
+	result := s.sender.send(ctx, host, d, row, nil)
 	return &PluginDestinationTestResult{
 		OK:         result.outcome == pluginSendDelivered,
 		Message:    result.message,
@@ -288,11 +290,11 @@ func (s *PluginDestinationService) Test(ctx context.Context, userID int, profile
 	}, nil
 }
 
-// validate asks the plugin whether settings work.
-func (s *PluginDestinationService) validate(ctx context.Context, channel PluginChannel, settings map[string]any) error {
-	host := s.sender.host()
-	if host == nil {
-		return ErrPluginChannelUnavailable
+// validate checks settings against the channel's schema, then asks the
+// plugin whether they work. stored is what the settings replace, if anything.
+func (s *PluginDestinationService) validate(ctx context.Context, channel PluginChannel, client PluginChannelClient, settings, stored map[string]any) error {
+	if err := checkPluginSettings(channel, settings); err != nil {
+		return err
 	}
 	config, err := structpb.NewStruct(settings)
 	if err != nil {
@@ -300,7 +302,7 @@ func (s *PluginDestinationService) validate(ctx context.Context, channel PluginC
 	}
 	callCtx, cancel := context.WithTimeout(ctx, pluginValidateTimeout)
 	defer cancel()
-	resp, err := host.ValidateDestination(callCtx, channel.PluginChannelRef, &pluginv1.ValidateNotificationDestinationRequest{
+	resp, err := client.ValidateDestination(callCtx, &pluginv1.ValidateNotificationDestinationRequest{
 		Config:       config,
 		CapabilityId: channel.CapabilityID,
 	})
@@ -309,7 +311,7 @@ func (s *PluginDestinationService) validate(ctx context.Context, channel PluginC
 	}
 	if !resp.GetValid() {
 		// The reason reaches the client, and secret settings never may.
-		message := logredact.SanitizeText(resp.GetMessage())
+		message := redactPluginText(resp.GetMessage(), &channel, settings, stored)
 		if message == "" {
 			message = "The plugin didn't accept these settings."
 		}
@@ -334,10 +336,17 @@ func mergePluginSettings(channel PluginChannel, stored, write map[string]any, cl
 			merged[key] = value
 		}
 	}
-	for key, value := range write {
+	var unknown []PluginSettingError
+	for key := range write {
 		if _, ok := declared[key]; !ok {
-			return nil, fmt.Errorf("%w: %q is not a setting of this destination", ErrPluginDestinationInvalid, key)
+			unknown = append(unknown, PluginSettingError{Field: key, Code: "unknown_field", Message: "Not a setting of this destination."})
 		}
+	}
+	if len(unknown) > 0 {
+		slices.SortFunc(unknown, func(a, b PluginSettingError) int { return strings.Compare(a.Field, b.Field) })
+		return nil, &PluginDestinationSettingsError{Fields: unknown}
+	}
+	for key, value := range write {
 		if slices.Contains(secrets, key) {
 			if text, isString := value.(string); value == nil || (isString && text == "") {
 				continue

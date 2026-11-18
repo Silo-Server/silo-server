@@ -1,5 +1,11 @@
 package notifications
 
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5"
+)
+
 // SetPluginChannelHost wires the plugin runtime into plugin destinations.
 // Until it is called they list no channels, queue nothing and send nothing.
 func (s *System) SetPluginChannelHost(host PluginChannelHost) {
@@ -15,7 +21,11 @@ func (s *System) wirePluginDestinationSender() {
 	if s.pluginDestinationSender == nil {
 		return
 	}
-	s.pluginDestinationSender.operational = s.DispatchOperational
+	// The notice reaches no webhook or plugin destination (loop guard).
+	s.pluginDestinationSender.insertNotice = func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+		return s.insertOperational(ctx, tx, notice, OperationalDispatch{}, nil)
+	}
+	s.pluginDestinationSender.dispatchNotice = s.dispatchOperationalRow
 	s.pluginDestinationSender.posterURL = s.discordPosterURL
 	s.pluginDestinationSender.linkBase = s.emailLinkBase
 	s.pluginDestinationSender.payload = s.PayloadForRow

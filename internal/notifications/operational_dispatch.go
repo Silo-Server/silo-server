@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -51,6 +52,25 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	row, err := s.insertOperational(ctx, tx, delivery, opts, recipient)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit operational dispatch: %w", err)
+	}
+	s.dispatchOperationalRow(ctx, *row)
+	return row, nil
+}
+
+// insertOperational is DispatchOperational's transaction: the inbox row and
+// its outbox rows, written through tx, which the caller commits before
+// dispatchOperationalRow. recipient is the resolved access of a delivery
+// that names a catalog item, and nil otherwise.
+func (s *System) insertOperational(ctx context.Context, tx pgx.Tx, delivery Delivery, opts OperationalDispatch, recipient *recipientAccess) (*InsertedDelivery, error) {
+	if recipient == nil && delivery.SeriesID != nil && *delivery.SeriesID != "" {
+		return nil, fmt.Errorf("operational delivery %s names a catalog item without the recipient's access", delivery.ID)
+	}
 	if recipient != nil {
 		allowed, err := recipient.canOpen(ctx, tx, delivery.UserID, delivery.ProfileID, *delivery.SeriesID, 0)
 		if err != nil {
@@ -91,25 +111,8 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			return nil, err
 		}
 	}
-	if opts.PluginDestinationFilter != nil && s.pluginDestinationSender != nil {
-		byProfile, err := s.pluginDestinationSender.enqueueable(ctx, tx, []profileKey{owner})
-		if err != nil {
-			return nil, err
-		}
-		attempts := make([]DeliveryAttempt, 0, 2)
-		for _, destination := range byProfile[owner] {
-			if !opts.PluginDestinationFilter(destination) {
-				continue
-			}
-			attempts = append(attempts, DeliveryAttempt{
-				ID:                     ulid.Make().String(),
-				NotificationDeliveryID: row.ID,
-				TargetID:               destination.ID,
-			})
-		}
-		if err := s.pluginDestinationSender.repo.EnqueueAttempts(ctx, tx, attempts); err != nil {
-			return nil, err
-		}
+	if err := s.enqueueOperationalPluginDestinations(ctx, tx, row, opts.PluginDestinationFilter); err != nil {
+		return nil, err
 	}
 	if s.webPushRepo != nil && s.Settings.WebPushEnabled(ctx) {
 		subsByProfile, err := s.webPushRepo.ListEnabledByProfiles(ctx, tx, []profileKey{owner})
@@ -140,21 +143,47 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			}
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit operational dispatch: %w", err)
-	}
+	return &row, nil
+}
 
-	// Post-commit dispatch is best-effort: the durable inbox row covers
-	// websocket reconnect, and the retry workers recover the outbox rows.
+// enqueueOperationalPluginDestinations queues an operational delivery for
+// the owner's plugin destinations that filter selects; a nil filter keeps
+// it off them.
+func (s *System) enqueueOperationalPluginDestinations(ctx context.Context, tx pgx.Tx, row InsertedDelivery, filter func(PluginDestination) bool) error {
+	if filter == nil || s.pluginDestinationSender == nil {
+		return nil
+	}
+	owner := row.key()
+	byProfile, err := s.pluginDestinationSender.enqueueable(ctx, tx, []profileKey{owner})
+	if err != nil {
+		return err
+	}
+	attempts := make([]DeliveryAttempt, 0, 2)
+	for _, destination := range byProfile[owner] {
+		if !filter(destination) {
+			continue
+		}
+		attempts = append(attempts, DeliveryAttempt{
+			ID:                     ulid.Make().String(),
+			NotificationDeliveryID: row.ID,
+			TargetID:               destination.ID,
+		})
+	}
+	return s.pluginDestinationSender.repo.EnqueueAttempts(ctx, tx, attempts)
+}
+
+// dispatchOperationalRow hands a committed operational delivery to realtime
+// and the channel dispatchers. It is best-effort: the durable inbox row
+// covers websocket reconnect, and the retry workers recover the outbox rows.
+func (s *System) dispatchOperationalRow(ctx context.Context, row InsertedDelivery) {
 	full, err := s.Deliveries.GetRowByID(ctx, row.ID)
 	if err != nil || full == nil {
 		s.logger.WarnContext(ctx, "operational delivery reload failed",
 			"delivery_id", row.ID, "error", err)
-		return &row, nil
+		return
 	}
 	if err := s.dispatcher.Dispatch(ctx, *full); err != nil {
 		s.logger.WarnContext(ctx, "operational delivery dispatch failed",
 			"delivery_id", row.ID, "error", err)
 	}
-	return &row, nil
 }

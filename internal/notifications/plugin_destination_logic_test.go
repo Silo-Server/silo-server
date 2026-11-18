@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,5 +128,64 @@ func TestPluginDestinationMessage(t *testing.T) {
 	test := sender.message(t.Context(), row, true)
 	if test.GetType() != "test" || test.GetDetails() != nil {
 		t.Fatalf("test message = %v, want type test and no details", test)
+	}
+}
+
+// The host enforces the destination form's own rules before the plugin sees
+// the settings, and reports each failing field.
+func TestCheckPluginSettings(t *testing.T) {
+	channels, _ := (&scriptedChannelHost{}).Channels(t.Context())
+	channel := channels[0]
+	for _, tc := range []struct {
+		name     string
+		settings map[string]any
+		want     []PluginSettingError
+	}{
+		{name: "valid", settings: map[string]any{"topic": "alerts", "token": "s3cret", "priority": float64(3), "sound": "bell"}},
+		{name: "required missing", settings: map[string]any{"token": "s3cret"}, want: []PluginSettingError{{Field: "topic", Code: "required"}}},
+		{name: "object refused", settings: map[string]any{"topic": map[string]any{"nested": "x"}}, want: []PluginSettingError{{Field: "topic", Code: "invalid_type"}}},
+		{name: "array refused", settings: map[string]any{"topic": "alerts", "token": []any{"a"}}, want: []PluginSettingError{{Field: "token", Code: "invalid_type"}}},
+		{name: "integer type", settings: map[string]any{"topic": "alerts", "priority": 2.5}, want: []PluginSettingError{{Field: "priority", Code: "invalid_type"}}},
+		{name: "bounds", settings: map[string]any{"topic": "this topic name is longer than thirty-two", "priority": float64(9)},
+			want: []PluginSettingError{{Field: "priority", Code: "out_of_range"}, {Field: "topic", Code: "out_of_range"}}},
+		{name: "enum", settings: map[string]any{"topic": "alerts", "sound": "siren"}, want: []PluginSettingError{{Field: "sound", Code: "invalid_enum"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkPluginSettings(channel, tc.settings)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("checkPluginSettings() = %v, want nil", err)
+				}
+				return
+			}
+			invalid, ok := errors.AsType[*PluginDestinationSettingsError](err)
+			if !ok || !errors.Is(err, ErrPluginDestinationInvalid) {
+				t.Fatalf("checkPluginSettings() = %v, want a settings error", err)
+			}
+			got := make([]PluginSettingError, 0, len(invalid.Fields))
+			for _, field := range invalid.Fields {
+				got = append(got, PluginSettingError{Field: field.Field, Code: field.Code})
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("fields = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A plugin's text can quote a credential it was given. Every value that
+// isn't a declared public field is masked, including a stored secret the
+// current schema no longer declares; public values stay readable.
+func TestRedactPluginText(t *testing.T) {
+	channel := &PluginChannel{PublicFields: []string{"topic"}, SecretFields: []string{"token"}}
+	stored := map[string]any{"topic": "alerts", "token": "tk_live_123", "old_key": "legacy-key-9", "pin": float64(4321), "loud": true}
+	got := redactPluginText("token tk_live_123 rejected for alerts; legacy-key-9 expired; pin 4321; loud true; https://user:pw@example.com", channel, stored)
+	for _, leaked := range []string{"tk_live_123", "legacy-key-9", "4321", "user:pw"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("redactPluginText() = %q, leaks %q", got, leaked)
+		}
+	}
+	if !strings.Contains(got, "alerts") || !strings.Contains(got, "loud true") {
+		t.Fatalf("redactPluginText() = %q, want public values kept", got)
 	}
 }

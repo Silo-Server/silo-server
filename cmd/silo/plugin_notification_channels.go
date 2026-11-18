@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
-	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
@@ -27,18 +25,22 @@ func (h pluginChannelHost) Channels(ctx context.Context) ([]notifications.Plugin
 	}
 	out := make([]notifications.PluginChannel, 0, len(channels))
 	for _, channel := range channels {
-		schema := channel.Descriptor.GetDestinationSchema()
-		public, secrets := plugins.ConfigSchemaFieldSets(schema)
-		out = append(out, notifications.PluginChannel{
-			PluginChannelRef: notifications.PluginChannelRef{PluginID: channel.PluginID, CapabilityID: channel.CapabilityID},
-			DisplayName:      channel.Descriptor.GetDisplayName(),
-			Description:      channel.Descriptor.GetDescription(),
-			Schema:           schema,
-			PublicFields:     public,
-			SecretFields:     secrets,
-		})
+		out = append(out, pluginChannelOf(channel))
 	}
 	return out, nil
+}
+
+func pluginChannelOf(channel plugins.NotificationChannel) notifications.PluginChannel {
+	schema := channel.Descriptor.GetDestinationSchema()
+	public, secrets := plugins.ConfigSchemaFieldSets(schema)
+	return notifications.PluginChannel{
+		PluginChannelRef: notifications.PluginChannelRef{PluginID: channel.PluginID, CapabilityID: channel.CapabilityID},
+		DisplayName:      channel.Descriptor.GetDisplayName(),
+		Description:      channel.Descriptor.GetDescription(),
+		Schema:           schema,
+		PublicFields:     public,
+		SecretFields:     secrets,
+	}
 }
 
 func (h pluginChannelHost) AvailableChannels(ctx context.Context, tx pgx.Tx) ([]notifications.PluginChannelRef, error) {
@@ -53,26 +55,11 @@ func (h pluginChannelHost) AvailableChannels(ctx context.Context, tx pgx.Tx) ([]
 	return out, nil
 }
 
-func (h pluginChannelHost) client(ctx context.Context, ref notifications.PluginChannelRef) (*pluginhost.NotificationChannelClient, error) {
-	client, err := h.plugins.NotificationChannelClientFor(ctx, ref.PluginID, ref.CapabilityID)
+func (h pluginChannelHost) Connect(ctx context.Context, ref notifications.PluginChannelRef) (*notifications.PluginChannel, notifications.PluginChannelClient, error) {
+	channel, client, err := h.plugins.NotificationChannelClientFor(ctx, ref.PluginID, ref.CapabilityID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", notifications.ErrPluginChannelUnavailable, err)
+		return nil, nil, fmt.Errorf("%w: %w", notifications.ErrPluginChannelUnavailable, err)
 	}
-	return client, nil
-}
-
-func (h pluginChannelHost) ValidateDestination(ctx context.Context, ref notifications.PluginChannelRef, req *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error) {
-	client, err := h.client(ctx, ref)
-	if err != nil {
-		return nil, err
-	}
-	return client.ValidateDestination(ctx, req)
-}
-
-func (h pluginChannelHost) SendNotification(ctx context.Context, ref notifications.PluginChannelRef, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error) {
-	client, err := h.client(ctx, ref)
-	if err != nil {
-		return nil, err
-	}
-	return client.SendNotification(ctx, req)
+	out := pluginChannelOf(*channel)
+	return &out, client, nil
 }
