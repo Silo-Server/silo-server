@@ -559,6 +559,8 @@
 ./internal/notifications TestPluginDestinationFinishIsAtomicDB
 ./internal/notifications TestPluginDestinationUnreadableSettingsDB
 ./internal/notifications TestPluginDestinationTextNeverCarriesSecretsDB
+./internal/notifications TestPluginDestinationExhaustedScheduleDB
+./internal/notifications TestPluginDestinationRetryOutlivesInboxRetentionDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
@@ -1249,6 +1251,7 @@
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
 ./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
+./internal/backup TestCarrySwapsDestinationNamesDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
 ./internal/backup TestLostLockSessionCancelsWorkDB
