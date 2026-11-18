@@ -217,10 +217,9 @@ func (c *contextReader) Read(p []byte) (int, error) {
 // before any directory is created when size is known, and otherwise as soon
 // as the data reaches the reserve.
 func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclusive bool, write func(io.Writer) error) (err error) {
-	var budget spaceBudget
 	defer func() {
 		if err == nil {
-			f.noteWritten(budget)
+			f.noteWritten()
 		} else {
 			f.noteWriteError(err)
 		}
@@ -239,7 +238,16 @@ func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclus
 	if err = check(root, key); err != nil {
 		return err
 	}
-	if budget, err = f.writeBudget(); err != nil {
+	if exclusive {
+		// An existing key adds no bytes, so it reports ErrExists even at
+		// the reserve, which a restore run again relies on. The link in
+		// place stays the final check.
+		if _, statErr := root.Lstat(key); statErr == nil {
+			return ErrExists
+		}
+	}
+	budget, err := f.writeBudget()
+	if err != nil {
 		return err
 	}
 	// A write of known size claims its bytes before creating anything; a

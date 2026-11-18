@@ -437,8 +437,9 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A 100 GiB filesystem with 10 bytes above the reserve, less whatever is
-	// written to the store from here on, temporary files included.
-	const total = 100 << 30
+	// written to the store from here on, temporary files included. The
+	// reserve is the 2 GiB cap, which a tenth of 100 GiB exceeds.
+	const total, reserve = 100 << 30, 2 << 30
 	stored := func() int64 {
 		var n int64
 		_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
@@ -453,7 +454,7 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 	}
 	start := stored()
 	realStat := statSpace
-	statSpace = func(string) (int64, int64, error) { return reserveFor(total) + 10 - (stored() - start), total, nil }
+	statSpace = func(string) (int64, int64, error) { return reserve + 10 - (stored() - start), total, nil }
 	t.Cleanup(func() { statSpace = realStat })
 
 	// A write that would cut into the reserve is refused before it creates
@@ -488,9 +489,13 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 		}
 	}
 	pr, pw := io.Pipe()
-	t.Cleanup(func() { _ = pw.Close() })
 	streamed := make(chan error, 1)
+	streamDone := make(chan struct{})
+	// Runs before statSpace is restored, so the stream never reads the
+	// real function mid-test.
+	t.Cleanup(func() { _ = pw.Close(); <-streamDone })
 	go func() {
+		defer close(streamDone)
 		err := s.PutStream(ctx, "kept/stream.jpg", pr, "")
 		_ = pr.CloseWithError(err)
 		streamed <- err
@@ -521,7 +526,19 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 	if err = <-streamed; !errors.Is(err, ErrStorageFull) {
 		t.Fatalf("stream past the budget another write took: %v", err)
 	}
-	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/during.jpg"}); err != nil || n != 2 {
+	// A's failure removed its 9 bytes. Fill them, so the store sits at the
+	// reserve: an existing key still reports ErrExists, which a restore run
+	// again relies on, and deletes still work.
+	if err = s.Put(ctx, "kept/fill.jpg", make([]byte, 9)); err != nil {
+		t.Fatalf("put that fills the budget: %v", err)
+	}
+	if err = s.Put(ctx, "kept/more.jpg", make([]byte, 1)); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("put at the reserve: %v", err)
+	}
+	if err = s.CreateExclusive(ctx, "kept/poster.jpg", bytes.NewReader(make([]byte, 64<<10)), ""); !errors.Is(err, ErrExists) {
+		t.Fatalf("exclusive create of an existing key at the reserve: %v", err)
+	}
+	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/during.jpg", "kept/fill.jpg"}); err != nil || n != 3 {
 		t.Fatalf("delete while full: %d %v", n, err)
 	}
 }

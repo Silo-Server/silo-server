@@ -103,13 +103,22 @@ func (f *Filesystem) writeBudget() (spaceBudget, error) {
 }
 
 // noteWritten logs that a store which refused writes has room again, once a
-// write succeeds with lowSpaceRecoveryMargin to spare. Waiting for a write to
-// succeed keeps a filesystem out of inodes, which still shows free bytes,
-// from logging a recovery before every failed attempt.
-func (f *Filesystem) noteWritten(b spaceBudget) {
-	if (b.limit < 0 || b.limit >= lowSpaceRecoveryMargin) && f.space.low.CompareAndSwap(true, false) {
+// write succeeds and a fresh reading shows lowSpaceRecoveryMargin above the
+// reserve. Waiting for a write to succeed keeps a filesystem out of inodes,
+// which still shows free bytes, from logging a recovery before every failed
+// attempt; reading again keeps a write that used up the room from logging one.
+func (f *Filesystem) noteWritten() {
+	if !f.space.low.Load() {
+		return
+	}
+	available, total, err := statSpace(f.root)
+	known := err == nil && total > 0
+	if known && available-reserveFor(total)-(f.space.claimed.Load()-f.space.settled.Load()) < lowSpaceRecoveryMargin {
+		return
+	}
+	if f.space.low.CompareAndSwap(true, false) {
 		slog.Info("local storage has free space again; resuming writes",
-			"component", "blobstore", "path", f.root, "available_bytes", b.available, "reserve_bytes", b.reserve)
+			"component", "blobstore", "path", f.root, "available_bytes", available, "reserve_bytes", reserveFor(total))
 	}
 }
 
