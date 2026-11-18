@@ -49,10 +49,11 @@ interface ShownChange<T> {
   save: (value: T) => Promise<unknown>;
 }
 
-interface UnsettledChange {
-  /** The value and cache entry before the first of the unsettled changes. */
-  previous: unknown;
-  cached: string | null;
+interface UnsettledPreference {
+  /** The newest change; only its failure may restore. */
+  latest: object;
+  /** The last value known stored, and its cache entry, to restore. */
+  stored: { value: unknown; cached: string | null };
 }
 
 /**
@@ -68,34 +69,39 @@ export function sendingOffline(): boolean {
 /**
  * For appearance preferences applied before they are saved: shows the change
  * and caches it, then saves it. When the newest change to a preference was
- * sent offline and fails, it puts back the value and cache entry from before
- * the first unsettled change, the last one stored. Their sync effects re-run
- * only when the stored value changes, which a failed save never does.
+ * sent offline and fails, it puts back the last value known stored, with its
+ * cache entry: the one from before the first unsettled change, or a later
+ * change that has since landed. Their sync effects re-run only when the stored
+ * value changes, which a failed save never does.
  */
 export function useShowThenSave(cacheOwner: string | null) {
-  const unsettled = useRef(new Map<string, UnsettledChange>());
+  const unsettled = useRef(new Map<string, UnsettledPreference>());
   return useCallback(
     <T>({ key, cacheKey, value, previous, show, save }: ShownChange<T>) => {
-      const earlier = unsettled.current.get(key);
-      const entry: UnsettledChange = earlier
-        ? { ...earlier }
-        : { previous, cached: appearanceCache.get(cacheKey, cacheOwner) };
-      unsettled.current.set(key, entry);
+      const token = {};
+      const pending = unsettled.current.get(key) ?? {
+        latest: token,
+        stored: { value: previous, cached: appearanceCache.get(cacheKey, cacheOwner) },
+      };
+      pending.latest = token;
+      unsettled.current.set(key, pending);
       const offline = sendingOffline();
       show(value);
       appearanceCache.set(cacheKey, String(value), cacheOwner);
       save(value).then(
         () => {
-          if (unsettled.current.get(key) === entry) unsettled.current.delete(key);
+          // Even an older change that lands moves the value a failure restores.
+          pending.stored = { value, cached: String(value) };
+          if (pending.latest === token) unsettled.current.delete(key);
         },
         () => {
           // A newer change to this preference settles it instead.
-          if (unsettled.current.get(key) !== entry) return;
+          if (pending.latest !== token) return;
           unsettled.current.delete(key);
           if (!offline || !reportOfflineSettingFailure()) return;
-          show(entry.previous as T);
-          if (entry.cached === null) appearanceCache.remove(cacheKey, cacheOwner);
-          else appearanceCache.set(cacheKey, entry.cached, cacheOwner);
+          show(pending.stored.value as T);
+          if (pending.stored.cached === null) appearanceCache.remove(cacheKey, cacheOwner);
+          else appearanceCache.set(cacheKey, pending.stored.cached, cacheOwner);
         },
       );
     },
