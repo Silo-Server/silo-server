@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/dovirpu"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -626,7 +627,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 	cmd.Dir = opts.OutputDir
-	cmd.Stderr = s.newStderrWriter(ctx)
+	cmd.Stderr = s.newStderrWriter(ctx, cmd)
 	cmd.WaitDelay = 3 * time.Second
 
 	// Stamp the generation before the process can write anything, so every file
@@ -746,12 +747,32 @@ func IsMPEG4Part2VideoCodec(codec string) bool {
 // execution recipes must not feed to their video decoders. AVC High 10 is not
 // supported by Intel VAAPI/QSV decode; scanner rows are not perfectly uniform,
 // so either the probed bit depth or the normalized profile is sufficient.
+// Codecs no GPU decodes (see hasNoHardwareVideoDecoder) always decode on the
+// CPU.
 func RequiresSoftwareVideoDecode(codec, profile string, bitDepth int) bool {
+	if hasNoHardwareVideoDecoder(codec) {
+		return true
+	}
 	if normalizeCodecV3(codec) != transcodeCodecH264 {
 		return false
 	}
 	normalizedProfile := normalizeVideoProfile(profile)
 	return bitDepth > 8 || normalizedProfile == "high10" || normalizedProfile == "high10intra" || normalizedProfile == "hi10p"
+}
+
+// hasNoHardwareVideoDecoder reports Windows Media Video 7 and 8 and the
+// Microsoft MPEG-4 variants (ffprobe's codec names). FFmpeg has no VAAPI,
+// QSV, CUDA or VideoToolbox decoder for them, so -hwaccel decodes them on the
+// CPU anyway and hands system-memory frames to a graph that expects hardware
+// frames, which fails before the first segment. WMV3 (Windows Media Video 9)
+// is VC-1, which those GPUs do decode, so it is not listed.
+func hasNoHardwareVideoDecoder(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "wmv1", "wmv2", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "msmpeg4":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeVideoProfile(profile string) string {
@@ -4067,7 +4088,7 @@ func (s *TranscodeSession) restart(
 		return fmt.Errorf("create stdin pipe: %w", err)
 	}
 	cmd.Dir = opts.OutputDir
-	cmd.Stderr = s.newStderrWriter(ctx)
+	cmd.Stderr = s.newStderrWriter(ctx, cmd)
 	cmd.WaitDelay = 3 * time.Second
 
 	// The previous process released its reservation before closing done. Keep
@@ -4762,6 +4783,11 @@ type ffmpegStderrWriter struct {
 	session *TranscodeSession
 	ctx     context.Context
 	partial []byte
+	// cmd is the process writing this stderr. exec.Cmd.Start sets its Process
+	// before it starts copying stderr here.
+	cmd       *exec.Cmd
+	sessionID string
+	stopped   bool
 }
 
 func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
@@ -4776,9 +4802,31 @@ func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
 		}
 		line := strings.TrimRight(string(w.partial[:idx]), "\r")
 		w.session.logFFmpegLine(w.ctx, line)
+		w.stopOnHardwareDecodeUnavailable(line)
 		w.partial = append([]byte(nil), w.partial[idx+1:]...)
 	}
 	return len(p), nil
+}
+
+// stopOnHardwareDecodeUnavailable kills FFmpeg when line says its AV1
+// decoder has no hardware to run on (see ffmpegAV1HardwareDecodeUnavailable).
+// It runs on the stderr copy, before Wait returns, as procgroup.Kill requires.
+// No frame can follow, and the process would otherwise read the whole input
+// first. The retained stderr already holds the line (the session's tail
+// buffer is written before this writer), so the exit classifies as
+// ErrHardwareDecodeUnsupported and startup walks CPU decoding at once.
+func (w *ffmpegStderrWriter) stopOnHardwareDecodeUnavailable(line string) {
+	if w.stopped || w.cmd == nil || w.cmd.Process == nil || !strings.Contains(line, ffmpegAV1HardwareDecodeUnavailable) {
+		return
+	}
+	w.stopped = true
+	slog.WarnContext(w.ctx, "ffmpeg has no hardware AV1 decoder; stopping it so startup can decode on the CPU",
+		"component", "playback",
+		"playback_session_id", w.sessionID,
+	)
+	// The whole group: a configured FFmpeg path may be a wrapper script whose
+	// real FFmpeg would otherwise read on, outside the device allocator.
+	_ = procgroup.Kill(w.cmd)
 }
 
 func (w *ffmpegStderrWriter) Flush() {
@@ -4789,10 +4837,10 @@ func (w *ffmpegStderrWriter) Flush() {
 	w.partial = nil
 }
 
-func (s *TranscodeSession) newStderrWriter(ctx context.Context) io.Writer {
-	lineWriter := &ffmpegStderrWriter{session: s, ctx: ctx}
+func (s *TranscodeSession) newStderrWriter(ctx context.Context, cmd *exec.Cmd) io.Writer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lineWriter := &ffmpegStderrWriter{session: s, ctx: ctx, cmd: cmd, sessionID: s.opts.SessionID}
 	if s.stderr == nil {
 		s.stderr = newBoundedTailBuffer(stderrTailMaxBytes)
 	}
