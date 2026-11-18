@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -638,7 +639,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 
@@ -824,7 +825,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 	upstreamSession, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
@@ -1658,7 +1659,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 	// Identity is fully known here. The later 400/404 branches for a bad index or
@@ -4077,6 +4078,22 @@ type playSessionReadError struct {
 
 func (e *playSessionReadError) Error() string { return "reading play session: " + e.err.Error() }
 func (e *playSessionReadError) Unwrap() error { return e.err }
+
+// writeCompatFileLookupError answers a media route whose file lookup failed:
+// 404 only when the file row is gone. Any other failure (a database timeout,
+// an exhausted pool) says nothing about the file, so the client gets a
+// retryable 503 instead of being told the file was removed.
+func writeCompatFileLookupError(w http.ResponseWriter, r *http.Request, fileID int, err error) {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		return
+	}
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "jellycompat: media file lookup failed; answering 503", "component", "jellycompat",
+			"file_id", fileID, "error", logredact.SanitizeText(err.Error()))
+	}
+	writeSessionCheckUnavailable(w)
+}
 
 // writeIfPlaySessionUnreadable answers the retryable 503 for a route
 // resolution that failed on an unreadable playback store, and reports whether
