@@ -59,24 +59,33 @@ var virtualDefaultProbeChainBudget = 90 * time.Second
 // virtualSelectionProbeBudget bounds one explicit-selection probe chain: the
 // target read, the provider URL resolution, and up to
 // virtualSelectionProbeAttempts bounded enumerations. The item page's audio and
-// subtitle menus wait on this answer, so the bound sits under the client's
-// provisional-inventory window (15 s) with room for the read that delivers the
-// result. It is the selection's own bound, not a slice of the discovery chain's
-// 90 s allowance: a probe the viewer asked for must answer while they are still
-// looking, or answer an honest failure.
-var virtualSelectionProbeBudget = 12 * time.Second
+// subtitle menus wait on this answer, so it is the number this server documents
+// to clients as the selection's bound, and a client's provisional-inventory
+// window must not be shorter than it (web/src/player/utils/inventoryProvenance.ts
+// carries the matching constant). It is the selection's own bound, not a slice of
+// the discovery chain's 90 s allowance: a probe the viewer asked for must answer
+// while they are still looking, or answer an honest failure.
+var virtualSelectionProbeBudget = 20 * time.Second
 
 // virtualSelectionProbeAttemptBudget bounds one enumeration inside a selection
 // chain. The scanner's background probe timeout is a full minute, which is longer
-// than the viewer will wait; a selection attempt gets a few seconds, and a
-// provider that cannot enumerate inside that earns one retry rather than a
-// 60 s silence.
-var virtualSelectionProbeAttemptBudget = 5 * time.Second
+// than the viewer will wait; a selection attempt gets the time a cold provider
+// actually needs and one retry inside the chain bound if it fails.
+//
+// The measured cold enumeration — a provider relay that has to open the release
+// before ffprobe can read it — took 6-10 s in production. The previous 5 s
+// attempt budget cut every one of those before it could enumerate, so a selection
+// that would have verified answered "probe failed" and the item page kept
+// declared metadata until a post-commit probe delivered the inventory ~40 s after
+// Play. 12 s covers the measured range with margin and still leaves the second
+// attempt room inside the chain bound.
+var virtualSelectionProbeAttemptBudget = 12 * time.Second
 
 // virtualSelectionProbeAttempts is how many enumerations one selection probe
 // earns. Background chains keep one attempt so a dead provider is not hammered;
 // a viewer's fresh pick earns a second because a single cold-relay failure is
-// common and the answer is due now.
+// common and the answer is due now. The second attempt is capped by the chain's
+// remaining budget, so the pair can never exceed virtualSelectionProbeBudget.
 const virtualSelectionProbeAttempts = 2
 
 // virtualSelectionProbeRetryDelay separates the attempts of a selection probe.

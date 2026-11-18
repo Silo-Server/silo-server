@@ -1203,6 +1203,48 @@ func TestScheduleSelectedFileProbeProbesTheSelectedRow(t *testing.T) {
 	}
 }
 
+// TestScheduleSelectedFileProbePublishesInventoryWithoutAPlayback pins the
+// browse-then-select path end to end: the only event that happened is a
+// watch-detail read naming one version, the chain verified the row's bytes, and
+// the inventory reaches the open item page through the versions_updated publish
+// the evidence write already triggers. Nothing here can have committed a play:
+// the handler has no session manager, so there is no playback session to write,
+// and the chain is not part of any playback path (it is scheduled from the read
+// that renders the menu).
+//
+// This is the delivery half of the item-page latency measurement: the selection
+// probe's own result has to reach the browse surface when it verifies, rather
+// than waiting for a post-commit probe minutes later.
+func TestScheduleSelectedFileProbePublishesInventoryWithoutAPlayback(t *testing.T) {
+	defaultRow := probeChainRow(760, "virtual://movie/probe-chain?result=default", nil)
+	selectedRow := probeChainRow(761, "virtual://movie/probe-chain?result=selected", nil)
+	reader := &probeChainVersionReader{
+		files: []*models.MediaFile{defaultRow, selectedRow},
+		rows:  map[int]*models.MediaFile{defaultRow.ID: defaultRow, selectedRow.ID: selectedRow},
+	}
+	bus := &recordingEventBus{}
+	hub := notifications.NewHub("probe-chain-selection-event", bus)
+	prober := &recordingProber{}
+	h := &PlaybackHandler{
+		ServiceContext:              context.Background(),
+		EventsHub:                   hub.EventsHub(),
+		DefaultProbeTarget:          NewVirtualDefaultProbeTarget(reader, reader),
+		VirtualPlaybackSourceProber: prober.probe,
+		VirtualFileMetadataSaver: func(context.Context, models.VirtualFilePersistArgs) (VirtualFileMetadataUpdateResult, error) {
+			return VirtualFileMetadataUpdateResult{MetadataUpdated: true, RowsAffected: 1}, nil
+		},
+	}
+
+	h.ScheduleSelectedFileProbe(probeChainTestContent, selectedRow.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{77}})
+	if payload := waitForRecordingEvent(t, bus, 2*time.Second, "catalog.item.changed", "versions_updated", probeChainTestContent); payload == "" {
+		t.Fatal("a verified selection probe did not publish versions_updated to the open item page")
+	}
+	h.probeChainWG.Wait()
+	if prober.count() != 1 || prober.last() != probeChainProviderURL(selectedRow) {
+		t.Fatalf("probes = %d, last = %q; want exactly the selected row %q", prober.count(), prober.last(), probeChainProviderURL(selectedRow))
+	}
+}
+
 // TestScheduleSelectedFileWarmStartsProviderFetchForProbedSelection pins
 // warm-on-select: an explicit selection hands the row's virtual URI to the same
 // fill playback start uses, even when the row already carries probe evidence,
