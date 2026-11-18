@@ -538,10 +538,8 @@ export function invalidateSettingValueQueries(
 }
 
 /**
- * A setting write replaces the value stored at its key, so it must not wait
- * for the browser to come back online: replayed after reconnect, it would carry
- * the value this page built before it went offline over whatever another device
- * saved meanwhile. Offline writes fail at once and their callers report it.
+ * Sent even offline, so it fails at once: replayed on reconnect, a write would
+ * replace whatever another device saved at its key in the meantime.
  */
 const SETTING_WRITE_NETWORK_MODE = "always";
 
