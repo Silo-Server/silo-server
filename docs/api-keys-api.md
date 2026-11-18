@@ -255,9 +255,11 @@ answers any owner.
 The scope never returns filesystem paths, node addresses, storage keys, setting
 values or credentials. Operations that carry them stay outside it: item files, download
 storage, settings, logs, API keys, audit, per-device setting values and node
-sessions. Three monitored reads withhold details from scoped keys:
+sessions. Four monitored reads withhold details from scoped keys:
 
 - `/admin/system/resources` omits each disk's `path`.
+- `/admin/catalog/items` refuses `include_file_paths` with `403` unless the key
+  also holds `admin:catalog:paths`.
 - `/admin/downloads/preparations` omits each job's `error`.
 - Nodes are read through `/admin/nodes/summary`, which has no addresses, paths,
   overrides or capability documents. `/admin/nodes` stays outside the scope.
@@ -276,4 +278,13 @@ four hours. The key's revision and scope are rechecked every 15 seconds; see
 `pause`, `resume`, `stop`, `message` and `terminate`, plus
 `GET /api/v2/admin/sessions/command-capabilities`. It grants no reads beyond
 that; combine it with `admin:monitor:read` to find the sessions to act on.
+
+## Catalog paths scope
+
+`admin:catalog:paths` admits `GET /api/v2/admin/catalog/items` and
+`/admin/catalog/capabilities`, and lets the listing answer `include_file_paths`
+with each file's path on the server, for a tool that mirrors the library and
+matches its files. It requires a key owned by an administrator account, like
+the monitoring scopes. It grants nothing else: combine it with
+`admin:monitor:read` for the realtime socket that keeps a mirror current.
 

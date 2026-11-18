@@ -34,6 +34,11 @@ const (
 	// values or credentials; the few monitored operations that carry such
 	// details withhold them from scoped keys.
 	ScopeAdminMonitorRead = "admin:monitor:read"
+	// ScopeAdminCatalogPaths covers the catalog listing with each file's
+	// on-disk path, for a tool that mirrors the library and matches its files.
+	// It reaches nothing else; combine it with admin:monitor:read for the
+	// change events.
+	ScopeAdminCatalogPaths = "admin:catalog:paths"
 	// ScopeAdminSessionsControl covers the administrator playback commands:
 	// pause, resume, stop, message and terminate a live session.
 	ScopeAdminSessionsControl = "admin:sessions:control"
@@ -125,6 +130,11 @@ func APIKeyScopeCatalog() []APIKeyScope {
 			Description: "Monitor the server read-only: live sessions, playback history, activity stats, " +
 				"accounts, devices, downloads, node and host health, and the catalog listing. Never exposes filesystem paths, " +
 				"node addresses, storage keys, setting values or credentials.",
+		},
+		{
+			Name: ScopeAdminCatalogPaths, Audience: APIKeyScopeAudienceAdmin,
+			Description: "Read the catalog listing with each file's path on the server, to mirror the library " +
+				"and match its files. Nothing else.",
 		},
 		{
 			Name:        ScopeAdminSessionsControl,
