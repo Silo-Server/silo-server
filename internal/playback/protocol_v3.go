@@ -165,6 +165,14 @@ const (
 	DeviceQuirkRegistryRevisionV3     = "2026-07-13.1"
 )
 
+// ClaimClientDV10BaseLayerFallbackV3 is the AV1 counterpart of
+// ClaimClientDV8BaseLayerFallbackV3, with the same original_http scope and
+// server gates: the executor decodes a single-layer Dolby Vision Profile 10
+// stream through an ordinary AV1 decoder and presents its standards-compatible
+// base layer. It is a separate claim because the Profile 8 claim promises an
+// HEVC base-layer decoder.
+const ClaimClientDV10BaseLayerFallbackV3 = "client_dv10_base_layer_fallback_v1"
+
 // FeatureHLSVariableSubstitutionV3 is an hls delivery feature: the client
 // resolves EXT-X-DEFINE variables in media playlists, so a playlist the
 // server rewrites (FFmpeg's real copy playlist, a transcode node's

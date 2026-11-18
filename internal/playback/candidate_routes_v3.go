@@ -28,14 +28,18 @@ func (p *candidatePlannerV3) originalCandidate(c candidateV3) *PlannerResultV3 {
 		plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationDVRemovedV3, Message: "Dolby Vision Profile 7 is played from the same 4K file as its HDR10 base layer."})
 	case candidateClientManagedV3:
 		plan.DecisionReason = decisionReasonClientManagedDynamicRangeV3
-	case candidateDV8BaseLayerV3:
-		// The same bytes through an ordinary HEVC decoder: the recipe names the
+	case candidateDVBaseLayerV3:
+		// The same bytes through an ordinary decoder: the recipe names the
 		// base range that reaches the output, and never claims Dolby Vision.
-		baseRange := f.dv8BaseRange
-		plan.DecisionReason = decisionReasonClientDV8BaseLayerV3
+		baseRange := f.dvBaseRange
+		reason, dvReason, decoder := decisionReasonClientDV8BaseLayerV3, dvBaseLayerReasonV3, "HEVC"
+		if p.source.DVProfile == 10 {
+			reason, dvReason, decoder = decisionReasonClientDV10BaseLayerV3, dvBaseLayerReasonAV1V3, "AV1"
+		}
+		plan.DecisionReason = reason
 		plan.EffectiveRecipe.DynamicRange = baseRange
-		plan.Claims.Video = VideoClaimsV3{HDR10: baseRange == DynamicRangeHDR10V3, HLG: baseRange == DynamicRangeHLGV3, DolbyVisionReason: dvBaseLayerReasonV3}
-		plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationDVBaseLayerOnlyV3, Message: "This output does not carry Dolby Vision; the file plays unchanged through an HEVC decoder as its " + strings.ToUpper(baseRange) + " base layer and the Dolby Vision metadata is not presented."})
+		plan.Claims.Video = VideoClaimsV3{HDR10: baseRange == DynamicRangeHDR10V3, HLG: baseRange == DynamicRangeHLGV3, DolbyVisionReason: dvReason}
+		plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationDVBaseLayerOnlyV3, Message: "This output does not carry Dolby Vision; the file plays unchanged through an " + decoder + " decoder as its " + strings.ToUpper(baseRange) + " base layer and the Dolby Vision metadata is not presented."})
 	}
 	if p.source.DVProfile != 7 {
 		applyCopiedVideoQuirksV3(&plan, p.source, request, f.high10)

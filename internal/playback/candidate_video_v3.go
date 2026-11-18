@@ -5,6 +5,7 @@ const (
 	decisionReasonValidatedOriginalV3 = "validated_original_playback"
 	degradationDVRemovedV3            = "dolby_vision_removed"
 	dvBaseLayerReasonV3               = "base_layer_compatible_hevc"
+	dvBaseLayerReasonAV1V3            = "base_layer_compatible_av1"
 	degradationDVBaseLayerOnlyV3      = "dolby_vision_base_layer_only"
 	transcodeReasonCopyExhaustedV3    = "copy_routes_exhausted"
 	audioReasonNoTrackV3              = "no_audio_track"
@@ -19,8 +20,8 @@ type videoFactsV3 struct {
 	quality                                            QualityResultV3
 	videoOK                                            bool
 	high10                                             *AppliedQuirkV3
-	rangeOK, clientManagedRange, dv8BaseOK             bool
-	dv8BaseRange                                       string
+	rangeOK, clientManagedRange, dvBaseOK              bool
+	dvBaseRange                                        string
 	audioOK, originalAudioOK, noAudioTrack             bool
 	audioClaims                                        AudioClaimsV3
 	stripProgressive, stripHLS                         bool
@@ -46,7 +47,7 @@ type remuxAudioFactsV3 struct {
 }
 
 func (f *videoFactsV3) originalRangeOK() bool {
-	return f.rangeOK || f.clientManagedRange || f.dv8BaseOK
+	return f.rangeOK || f.clientManagedRange || f.dvBaseOK
 }
 
 func (f *videoFactsV3) anyCopyRange() bool {
@@ -101,7 +102,7 @@ func (p *candidatePlannerV3) videoFacts() *PlannerResultV3 {
 	rangeOK, videoClaims := outputRangeEligibleV3(source, request)
 	f.rangeOK = rangeOK
 	f.clientManagedRange = clientManagesOriginalDynamicRangeV3(source, request)
-	f.dv8BaseOK, f.dv8BaseRange = clientDV8BaseLayerFallbackV3(source, request)
+	f.dvBaseOK, f.dvBaseRange = clientDVBaseLayerFallbackV3(source, request)
 	audioOK, passthrough, audioClaims := audioEligibilityV3(source, request)
 	f.originalAudioOK = audioSelectionUsesContainerDefaultV3(file, in.AudioTrackIndex) || clientSelectsOriginalAudioTrackV3(request)
 	// Video-only media has no audio to adapt.
@@ -280,8 +281,8 @@ func (p *candidatePlannerV3) videoCandidates() []candidateV3 {
 		original(candidateClientDV81V3, dv7 && f.clientDV81)
 		original(candidateClientHDR10V3, dv7 && f.clientHDR10)
 		original(candidateCopyV3, !dv7 && f.rangeOK)
-		original(candidateDV8BaseLayerV3, !dv7 && f.dv8BaseOK)
-		original(candidateClientManagedV3, f.clientManagedRange && (dv7 || !f.rangeOK && !f.dv8BaseOK))
+		original(candidateDVBaseLayerV3, !dv7 && f.dvBaseOK)
+		original(candidateClientManagedV3, f.clientManagedRange && (dv7 || !f.rangeOK && !f.dvBaseOK))
 	}
 	if f.remuxActive {
 		strip := f.stripProgressive || f.stripHLS
