@@ -428,7 +428,7 @@ func TestSubtitleResponsesStateContentLength(t *testing.T) {
 		m, s := i*2/60, i*2%60
 		fmt.Fprintf(&srt, "%d\n00:%02d:%02d,000 --> 00:%02d:%02d,500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", i+1, m, s, m, s, i)
 		fmt.Fprintf(&vtt, "00:%02d:%02d.000 --> 00:%02d:%02d.500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", m, s, m, s, i)
-		fmt.Fprintf(&ass, "Dialogue: 0,0:%02d:%02d.00,0:%02d:%02d.50,Default,,0,0,0,,Line %d of a subtitle long enough to outgrow the buffer\n", m, s, m, s, i)
+		fmt.Fprintf(&ass, "Dialogue: 0,0:%02d:%02d.00,0:%02d:%02d.50,Default,,0,0,0,,Line %d of a subtitle long enough to outgrow the buffer\n", m, s, m, s, i) //nolint:misspell // ASS event keyword
 	}
 	r := chi.NewRouter()
 	r.Use(httpstream.CompressExcept(skipCompatMediaCompression, "application/json"))
@@ -455,7 +455,7 @@ func TestSubtitleResponsesStateContentLength(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				t.Fatal(err)
