@@ -3,13 +3,13 @@ import { AlertTriangle, BellPlus, Loader2, Pencil, Plus, Send, Trash2 } from "lu
 import { toast } from "sonner";
 
 import { notificationScope } from "@/api/v2/notifications";
-import type { NotificationPreferences } from "@/api/types";
+import type { NotificationPreferences, PluginAdminForm } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
 import {
   buildSchemaValues,
-  parseFieldTypes,
   type BuildSchemaValuesOptions,
+  type FieldType,
 } from "@/components/admin/plugins/schemaFormUtils";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,7 @@ import {
   useUpdateNotificationPluginDestination,
   type NotificationPluginChannel,
   type NotificationPluginDestination,
+  type NotificationPluginSettingsField,
 } from "@/hooks/queries/notificationPluginDestinations";
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { useT } from "@/i18n";
@@ -53,6 +54,50 @@ import { DESTINATION_NOTIFY_FIELDS, type DestinationNotifyKey } from "./notifica
 
 const channelKey = (c: { plugin_id: string; capability_id: string }) =>
   `${c.plugin_id}/${c.capability_id}`;
+
+/**
+ * The destination's flat settings form as the shared SchemaForm renders it.
+ * A setting the server lists in secretsSet is write-only even when the
+ * current form no longer marks it secret: it renders as a password left
+ * blank, and blank keeps the stored value, so it isn't required either.
+ */
+function destinationForm(
+  fields: NotificationPluginSettingsField[],
+  secretsSet: string[],
+): PluginAdminForm {
+  return {
+    fields: fields.map((field) => {
+      const stored = secretsSet.includes(field.key);
+      const secret = field.secret || stored;
+      return {
+        key: field.key,
+        label: field.label,
+        description: field.description || undefined,
+        placeholder: field.placeholder || undefined,
+        control: secret
+          ? "PASSWORD"
+          : (field.control.toUpperCase() as Uppercase<typeof field.control>),
+        required: field.required && !stored,
+        secret,
+        multiline: false,
+        default_value: field.default_value,
+        options: field.options,
+        validation: {
+          has_min: field.minimum != null,
+          min: field.minimum ?? undefined,
+          has_max: field.maximum != null,
+          max: field.maximum ?? undefined,
+          pattern: field.pattern || undefined,
+          min_length: field.min_length ?? undefined,
+          max_length: field.max_length ?? undefined,
+        },
+      };
+    }),
+  };
+}
+
+const destinationFieldTypes = (fields: NotificationPluginSettingsField[]) =>
+  Object.fromEntries(fields.map((field) => [field.key, field.type])) as Record<string, FieldType>;
 
 function ReasonToggles({
   reasons,
@@ -130,28 +175,15 @@ function DestinationFormDialog({
   });
   const pending = create.isPending || update.isPending;
   // The server names every secret with a stored value here, however the
-  // schema marks it. Left blank, such a secret stays as saved, so it isn't a
-  // missing required field.
+  // form marks it. Left blank, such a secret stays as saved.
   const secretsSet = destination?.secret_settings_set ?? [];
-  const declared = channel?.settings_form.admin_form;
-  const form = declared && {
-    ...declared,
-    fields: declared.fields.map((field) =>
-      secretsSet.includes(field.key) ? { ...field, required: false } : field,
-    ),
-  };
+  const fields = channel?.settings_form.fields ?? [];
+  const form = fields.length > 0 ? destinationForm(fields, secretsSet) : undefined;
 
   // The form keeps number inputs as text and shows defaults it never
-  // stores, so settings go out typed as the schema declares them.
+  // stores, so settings go out typed as each field declares.
   const settingsToSend = (options?: BuildSchemaValuesOptions) =>
-    form
-      ? buildSchemaValues(
-          form,
-          settings,
-          parseFieldTypes(channel?.settings_form.json_schema),
-          options,
-        )
-      : settings;
+    form ? buildSchemaValues(form, settings, destinationFieldTypes(fields), options) : settings;
 
   // An update merges over the stored settings. A stored secret the user
   // didn't type is left out, so neither a blank nor the field's form default

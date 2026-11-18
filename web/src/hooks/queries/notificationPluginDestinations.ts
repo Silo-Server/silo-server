@@ -11,16 +11,12 @@ import {
 } from "@/api/v2/notifications";
 import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { t } from "@/i18n";
-import type { PluginConfigSchema } from "@/api/types";
 import { notificationKeys } from "./keys";
 
-export type NotificationPluginChannel = Omit<
-  V2Result<"GET /api/v2/notifications/plugin-channels">["items"][number],
-  "settings_form"
-> & {
-  // The v2 form schema is the admin plugin form the SchemaForm renders.
-  settings_form: PluginConfigSchema;
-};
+export type NotificationPluginChannel =
+  V2Result<"GET /api/v2/notifications/plugin-channels">["items"][number];
+export type NotificationPluginSettingsField =
+  NotificationPluginChannel["settings_form"]["fields"][number];
 export type NotificationPluginDestination =
   V2Result<"GET /api/v2/notifications/plugin-destinations">["items"][number];
 
@@ -59,7 +55,7 @@ export function useNotificationPluginChannels(enabled = true) {
       const result = await v2("GET /api/v2/notifications/plugin-channels", {
         profileContext: context ?? captureNotificationAuthority(),
       });
-      return result.items as unknown as NotificationPluginChannel[];
+      return result.items;
     },
     enabled: enabled && context !== null,
     retry: false,

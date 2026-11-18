@@ -7,6 +7,25 @@ const state = vi.hoisted(() => ({
   update: vi.fn(),
   remove: vi.fn(),
 }));
+// field is one flat destination form field, as the server describes it.
+function field(overrides: Record<string, unknown>) {
+  return {
+    description: "",
+    placeholder: "",
+    control: "text",
+    type: "string",
+    required: false,
+    secret: false,
+    options: [],
+    minimum: null,
+    maximum: null,
+    min_length: null,
+    max_length: null,
+    pattern: "",
+    ...overrides,
+  };
+}
+
 vi.mock("@/api/v2/notifications", () => ({ notificationScope: () => "synthetic-profile" }));
 vi.mock("@/hooks/queries/notifications", () => ({
   useNotificationPreferences: () => ({ data: undefined }),
@@ -27,16 +46,12 @@ vi.mock("@/hooks/queries/notificationPluginDestinations", () => ({
         display_name: "ntfy",
         description: "",
         settings_form: {
-          json_schema: JSON.stringify({
-            type: "object",
-            properties: { topic: { type: "string" }, tag: { type: "string", minLength: 2 } },
-          }),
-          admin_form: {
-            fields: [
-              { key: "topic", label: "Topic", control: "TEXT", required: true, secret: false },
-              { key: "tag", label: "Tag", control: "TEXT", required: false, secret: false },
-            ],
-          },
+          fields: [
+            field({ key: "topic", label: "Topic", required: true }),
+            field({ key: "tag", label: "Tag", min_length: 2 }),
+            field({ key: "priority", label: "Priority", control: "number", type: "integer" }),
+            field({ key: "token", label: "Token", control: "password", secret: true }),
+          ],
         },
       },
     ],
@@ -53,8 +68,8 @@ vi.mock("@/hooks/queries/notificationPluginDestinations", () => ({
         channel_name: "ntfy",
         available: true,
         enabled: true,
-        settings: { topic: "alerts", tag: "tv" },
-        secret_settings_set: [],
+        settings: { topic: "alerts", tag: "tv", priority: 3 },
+        secret_settings_set: ["token"],
         notify_next_up: true,
         notify_requests: true,
         consecutive_failures: 0,
@@ -74,14 +89,20 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("sends a cleared optional setting as null so the plugin's default applies", () => {
+it("sends settings typed as the form declares, keeps a blank stored secret, and clears with null", () => {
   render(<PluginDestinationsSection />);
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Tag"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "4" } });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(state.update).toHaveBeenCalledOnce();
-  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({ topic: "alerts", tag: null });
+  // The stored token isn't sent, so it stays as saved.
+  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({
+    topic: "alerts",
+    tag: null,
+    priority: 4,
+  });
 });
 
 it("deletes with the validator seen when the confirmation opened", () => {
