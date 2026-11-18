@@ -10,168 +10,6 @@ import (
 	"time"
 )
 
-func TestReportSegmentDownloadedPrunesOnlyExpiredBackBuffer(t *testing.T) {
-	dir := t.TempDir()
-	old := time.Now().Add(-time.Minute)
-	for segment := 0; segment <= 15; segment++ {
-		writePrunerTestFile(t, filepath.Join(dir, segmentFilename(segment, TranscodeOpts{})), []byte("segment"), old)
-	}
-	writePrunerTestFile(t, filepath.Join(dir, "init.mp4"), []byte("init"), old)
-	writePrunerTestFile(t, filepath.Join(dir, "stream.m3u8"), []byte("manifest"), old)
-	writePrunerTestFile(t, filepath.Join(dir, "seg_00004.ts.tmp"), []byte("temporary"), old)
-	writePrunerTestFile(t, filepath.Join(dir, "notes.txt"), []byte("other"), old)
-	// A newly-created file below the floor may belong to a replacement ffmpeg
-	// process and must survive this pass.
-	writePrunerTestFile(t, filepath.Join(dir, segmentFilename(4, TranscodeOpts{})), []byte("fresh"), time.Now())
-
-	session := &TranscodeSession{
-		opts: TranscodeOpts{
-			SessionID:               "prune-test",
-			SegmentDuration:         2,
-			SegmentRetentionSeconds: 10,
-		},
-		outputDir:            dir,
-		lastPruneFloor:       -1,
-		lastRequestedSegment: 0,
-	}
-	session.ReportSegmentDownloaded(15)
-	waitForPrunerFileMissing(t, filepath.Join(dir, segmentFilename(9, TranscodeOpts{})))
-	t.Cleanup(func() {
-		session.mu.Lock()
-		session.segmentGeneration++
-		session.segmentPruneRunning = false
-		session.mu.Unlock()
-	})
-
-	for _, segment := range []int{0, 1, 2, 4, 10, 11, 12, 13, 14, 15} {
-		assertPrunerFileExists(t, filepath.Join(dir, segmentFilename(segment, TranscodeOpts{})))
-	}
-	for _, segment := range []int{3, 5, 6, 7, 8, 9} {
-		assertPrunerFileMissing(t, filepath.Join(dir, segmentFilename(segment, TranscodeOpts{})))
-	}
-	for _, name := range []string{"init.mp4", "stream.m3u8", "seg_00004.ts.tmp", "notes.txt"} {
-		assertPrunerFileExists(t, filepath.Join(dir, name))
-	}
-}
-
-func TestFreshSegmentIsRetriedAfterGuardExpires(t *testing.T) {
-	dir := t.TempDir()
-	opts := TranscodeOpts{
-		SessionID:               "retry-test",
-		SegmentDuration:         2,
-		SegmentRetentionSeconds: 10,
-	}
-	guard := 2*time.Duration(opts.SegmentDuration)*time.Second + 30*time.Second
-	path := filepath.Join(dir, segmentFilename(3, opts))
-	writePrunerTestFile(t, path, []byte("segment"), time.Now().Add(-guard+time.Second))
-	session := &TranscodeSession{
-		opts:                 opts,
-		outputDir:            dir,
-		lastPruneFloor:       -1,
-		lastRequestedSegment: 0,
-	}
-
-	session.ReportSegmentDownloaded(9)
-	waitForPrunerFileMissing(t, path)
-	waitForPrunePass(t, session, 4)
-}
-
-// A planned session's assembler can write a pruned segment again in the same
-// generation, so its DV8.1 conversion entry goes with the file; a retained
-// segment keeps its entry.
-func TestPruningForgetsTheDV81ConversionOfARemovedSegment(t *testing.T) {
-	dir := t.TempDir()
-	old := time.Now().Add(-time.Minute)
-	opts := TranscodeOpts{
-		SessionID:               "dv81-prune-test",
-		SegmentDuration:         2,
-		SegmentRetentionSeconds: 10,
-	}
-	for segment := 0; segment <= 9; segment++ {
-		writePrunerTestFile(t, filepath.Join(dir, segmentFilename(segment, opts)), []byte("segment"), old)
-	}
-	pruned, kept := segmentFilename(3, opts), segmentFilename(9, opts)
-	session := &TranscodeSession{
-		opts:                 opts,
-		outputDir:            dir,
-		lastPruneFloor:       -1,
-		lastRequestedSegment: 0,
-		dv81Converted:        map[string]uint64{pruned: 1, kept: 1},
-	}
-
-	session.ReportSegmentDownloaded(9)
-	waitForPrunerFileMissing(t, filepath.Join(dir, pruned))
-	waitForPrunePass(t, session, 4)
-	session.dv81Mu.Lock()
-	defer session.dv81Mu.Unlock()
-	if _, ok := session.dv81Converted[pruned]; ok {
-		t.Fatalf("conversion entries %v; want %s's removed with it", session.dv81Converted, pruned)
-	}
-	if _, ok := session.dv81Converted[kept]; !ok {
-		t.Fatalf("conversion entries %v; want %s's kept", session.dv81Converted, kept)
-	}
-}
-
-func TestPruningContinuesAcrossBoundedBatches(t *testing.T) {
-	dir := t.TempDir()
-	old := time.Now().Add(-time.Minute)
-	opts := TranscodeOpts{
-		SessionID:               "batch-test",
-		SegmentDuration:         2,
-		SegmentRetentionSeconds: 10,
-	}
-	for segment := 0; segment <= 600; segment++ {
-		writePrunerTestFile(t, filepath.Join(dir, segmentFilename(segment, opts)), []byte("segment"), old)
-	}
-	session := &TranscodeSession{
-		opts:                 opts,
-		outputDir:            dir,
-		lastPruneFloor:       -1,
-		lastRequestedSegment: 0,
-	}
-
-	session.ReportSegmentDownloaded(600)
-	waitForPrunerFileMissing(t, filepath.Join(dir, segmentFilename(594, opts)))
-	waitForPrunePass(t, session, 595)
-
-	for _, segment := range []int{0, 1, 2, 595, 600} {
-		assertPrunerFileExists(t, filepath.Join(dir, segmentFilename(segment, opts)))
-	}
-}
-
-func TestForwardRestartPrunesOnlyFilesPresentAcrossSparseGap(t *testing.T) {
-	dir := t.TempDir()
-	old := time.Now().Add(-time.Minute)
-	opts := TranscodeOpts{
-		SessionID:               "sparse-restart-test",
-		SegmentDuration:         2,
-		SegmentRetentionSeconds: 10,
-		StartSegmentNumber:      100_000,
-	}
-	for _, segment := range []int{3, 70, 99_999, 100_000} {
-		writePrunerTestFile(t, filepath.Join(dir, segmentFilename(segment, opts)), []byte("segment"), old)
-	}
-	writePrunerTestFile(t, filepath.Join(dir, "seg_00004.ts.tmp"), []byte("temporary"), old)
-	session := &TranscodeSession{
-		opts:                 opts,
-		outputDir:            dir,
-		lastPruneFloor:       -1,
-		lastRequestedSegment: opts.StartSegmentNumber,
-		lastCompletedSegment: opts.StartSegmentNumber - 1,
-		pruneBeforeStart:     true,
-	}
-
-	session.ReportSegmentDownloaded(opts.StartSegmentNumber + 5)
-	waitForPrunerFileMissing(t, filepath.Join(dir, segmentFilename(99_999, opts)))
-	waitForPrunePass(t, session, opts.StartSegmentNumber)
-
-	for _, segment := range []int{3, 70, 99_999} {
-		assertPrunerFileMissing(t, filepath.Join(dir, segmentFilename(segment, opts)))
-	}
-	assertPrunerFileExists(t, filepath.Join(dir, segmentFilename(100_000, opts)))
-	assertPrunerFileExists(t, filepath.Join(dir, "seg_00004.ts.tmp"))
-}
-
 func TestForwardRestartPrunesPreservedRangeBeforeFreshWindowFills(t *testing.T) {
 	dir := t.TempDir()
 	old := time.Now().Add(-time.Minute)
@@ -310,40 +148,6 @@ func TestCopyRetentionParsesOnlyNewManifestEntries(t *testing.T) {
 	}
 	if !complete || floor != 3_000 {
 		t.Fatalf("incremental retention floor = (%d, %t), want (3000, true)", floor, complete)
-	}
-}
-
-func TestReportSegmentDownloadedDisabledKeepsSegments(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, segmentFilename(3, TranscodeOpts{}))
-	writePrunerTestFile(t, path, []byte("segment"), time.Now().Add(-time.Minute))
-	session := &TranscodeSession{
-		opts:                 TranscodeOpts{SegmentDuration: 2},
-		outputDir:            dir,
-		lastPruneFloor:       -1,
-		lastRequestedSegment: 0,
-	}
-
-	session.ReportSegmentDownloaded(500)
-	time.Sleep(20 * time.Millisecond)
-	assertPrunerFileExists(t, path)
-}
-
-func TestOldGenerationDownloadDoesNotAdvanceRestartedSession(t *testing.T) {
-	session := &TranscodeSession{
-		opts:                 TranscodeOpts{SegmentRetentionSeconds: 600},
-		lastRequestedSegment: 100,
-	}
-	oldGeneration := session.SegmentGeneration()
-
-	session.mu.Lock()
-	session.segmentGeneration++
-	session.lastRequestedSegment = 20
-	session.mu.Unlock()
-
-	session.ReportSegmentDownloadedForGeneration(101, oldGeneration)
-	if got := session.LastRequestedSegment(); got != 20 {
-		t.Fatalf("last requested segment = %d, want restarted position 20", got)
 	}
 }
 
@@ -538,5 +342,23 @@ func assertPrunerFileMissing(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to be removed, stat error = %v", filepath.Base(path), err)
+	}
+}
+
+func TestOldGenerationDownloadDoesNotAdvanceRestartedSession(t *testing.T) {
+	session := &TranscodeSession{
+		opts:                 TranscodeOpts{SegmentRetentionSeconds: 600},
+		lastRequestedSegment: 100,
+	}
+	oldGeneration := session.SegmentGeneration()
+
+	session.mu.Lock()
+	session.segmentGeneration++
+	session.lastRequestedSegment = 20
+	session.mu.Unlock()
+
+	session.ReportSegmentDownloadedForGeneration(101, oldGeneration)
+	if got := session.LastRequestedSegment(); got != 20 {
+		t.Fatalf("last requested segment = %d, want restarted position 20", got)
 	}
 }

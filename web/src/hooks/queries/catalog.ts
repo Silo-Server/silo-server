@@ -71,7 +71,7 @@ function catalogScopeQuery(state: CatalogSearchState): CatalogScopeQuery {
   };
 }
 
-export interface CatalogPage extends CatalogResponse {
+interface CatalogPage extends CatalogResponse {
   next_cursor?: string;
   search_diagnostics?: V2Result<"POST /api/v2/catalog/query">["search_diagnostics"];
   /**
@@ -137,7 +137,7 @@ export async function fetchCatalogPage(
 }
 
 /** The most items one `POST /api/v2/catalog/query` page may ask for (its `limit` maximum). */
-export const MAX_CATALOG_PAGE = 100;
+const MAX_CATALOG_PAGE = 100;
 
 /**
  * The items `state` lists, up to `max` (every one when `max` is omitted), read
@@ -171,7 +171,7 @@ export async function fetchCatalogItems(
   return items.slice(0, max);
 }
 
-export async function fetchCatalogFilters(
+async function fetchCatalogFilters(
   state: CatalogSearchState,
   options?: Pick<RequestInit, "signal">,
   requestOptions: { includeTechnical?: boolean } = {},

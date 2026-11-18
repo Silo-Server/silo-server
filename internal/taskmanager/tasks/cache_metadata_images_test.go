@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
-	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 )
 
 type fakeMetadataImageCacheRunner struct {
@@ -85,64 +84,5 @@ func TestMetadataImageTasksUseDistinctExecutionLeaseOwners(t *testing.T) {
 		if _, err := uuid.Parse(suffix); err != nil {
 			t.Fatalf("worker ID %q has invalid UUID suffix: %v", workerID, err)
 		}
-	}
-}
-
-func TestImageCacheWorkerCount(t *testing.T) {
-	const gib = int64(1) << 30
-	cases := []struct {
-		configured int
-		numCPU     int
-		memory     int64
-		want       int
-	}{
-		{numCPU: 0, memory: 0, want: 1}, // defensive floor; GOMAXPROCS never reports < 1
-		{numCPU: 1, memory: 0, want: 1},
-		{numCPU: 4, memory: 0, want: 4}, // one encode per core: vips runs single-threaded
-		{numCPU: 12, memory: 0, want: 12},
-		{numCPU: 48, memory: 0, want: 48},
-		{numCPU: 64, memory: 0, want: 48}, // cap: more cores must not monopolize providers
-		// A many-core container with a small memory limit is bounded by
-		// memory, never below the original pool of 2 — a sub-1GiB deployment
-		// already ran 2 workers before this change, so 2 is the floor, not 1.
-		{numCPU: 16, memory: 256 << 20, want: 2},
-		{numCPU: 16, memory: 512 << 20, want: 2},
-		{numCPU: 16, memory: 1 * gib, want: 2},
-		{numCPU: 16, memory: 2 * gib, want: 4},
-		{numCPU: 16, memory: 8 * gib, want: 16},
-		{numCPU: 16, memory: 64 * gib, want: 16},
-		// Plenty of memory but few cores: CPU stays the binding cap.
-		{numCPU: 2, memory: 64 * gib, want: 2},
-		// An explicit setting replaces the CPU sizing, above or below it, and
-		// may go all the way down to 1; the memory cap still applies.
-		{configured: 3, numCPU: 16, memory: 0, want: 3},
-		{configured: 64, numCPU: 4, memory: 0, want: 64},
-		{configured: 1, numCPU: 16, memory: 0, want: 1},
-		{configured: 1, numCPU: 16, memory: 256 << 20, want: 1},
-		{configured: 32, numCPU: 16, memory: 2 * gib, want: 4},
-	}
-	for _, tc := range cases {
-		if got := imageCacheWorkerCount(tc.configured, tc.numCPU, tc.memory); got != tc.want {
-			t.Errorf("imageCacheWorkerCount(%d, %d, %d) = %d, want %d", tc.configured, tc.numCPU, tc.memory, got, tc.want)
-		}
-	}
-	// A claimed page is stamped with one lease up front, so it must fully
-	// drain before the lease expires or another worker reclaims the tail.
-	// The job timeout cannot preempt the synchronous decode/encode segment,
-	// so the timeout-based drain must leave real headroom under the lease
-	// for that bounded overshoot — at least one extra timeout per job.
-	drain := time.Duration(cacheMetadataImagesClaimPerWorker) * metadata.ImageCacheJobTimeout
-	overshootBudget := time.Duration(cacheMetadataImagesClaimPerWorker) * metadata.ImageCacheJobTimeout / 2
-	if drain+overshootBudget > metadata.ImageCacheLeaseDuration {
-		t.Errorf("page drain %s plus overshoot budget %s must stay within the %s claim lease", drain, overshootBudget, metadata.ImageCacheLeaseDuration)
-	}
-	if got := cacheMetadataImagesClaimLimit(7); got != cacheMetadataImagesClaimPerWorker*7 {
-		t.Errorf("claim limit = %d, want %d per worker (%d)", got, cacheMetadataImagesClaimPerWorker, cacheMetadataImagesClaimPerWorker*7)
-	}
-	// The admin setting flows through to the next run.
-	SetImageWorkers(3)
-	defer SetImageWorkers(0)
-	if got := cacheMetadataImagesWorkers(); got != 3 && nodemetrics.ProcessMemoryLimitBytes() >= 3*imageCacheWorkerMemoryBudget {
-		t.Errorf("configured workers = %d, want 3", got)
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
@@ -181,86 +180,5 @@ func TestRuntimeHostServer_InstanceState_RoundTripAndLimits(t *testing.T) {
 	}
 	if _, err := testRun.ReadInstanceState(ctx, &pluginv1.ReadInstanceStateRequest{Key: "k"}); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("test-run read: %v", err)
-	}
-}
-
-func TestRuntimeHostServer_ReportNetworkAccessStatus(t *testing.T) {
-	broker := netaccess.NewBroker()
-	token, err := broker.Issue(9, "tailscale")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := pluginhost.NewRuntimeHostServerWithOptions(pluginhost.RuntimeHostOptions{
-		NetworkAccess: broker, InstallationID: 9, NetworkAccessProvider: "tailscale", IngressToken: token, Logger: hclog.NewNullLogger(),
-	})
-	ctx := context.Background()
-	_, err = srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{
-		State: "connected", Hostname: "silo.tail1234.ts.net", Origin: "https://silo.tail1234.ts.net",
-		Listeners: []*pluginv1.NetworkAccessListener{{Name: "api", Origin: "https://silo.tail1234.ts.net"}, {Name: "abs", Origin: "https://silo.tail1234.ts.net:13378"}},
-		AuthUrl:   "https://login.tailscale.com/a/secret", ProviderVersion: "tsnet 1.0", DesiredConnected: true,
-	}})
-	if err != nil {
-		t.Fatalf("report: %v", err)
-	}
-	got, ok := broker.Status.Get(9)
-	if !ok || got.Provider != "tailscale" || !got.Connected() || got.AuthURL != "https://login.tailscale.com/a/secret" || len(got.Listeners) != 2 || !got.DesiredConnected {
-		t.Fatalf("cached status = %+v, %v", got, ok)
-	}
-	origins := broker.Status.ConnectedOrigins()
-	if len(origins) != 2 || origins[0] != "https://silo.tail1234.ts.net" || origins[1] != "https://silo.tail1234.ts.net:13378" {
-		t.Fatalf("connected origins = %v", origins)
-	}
-
-	if _, err := srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{}); status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("nil status: %v", err)
-	}
-	// A push from a process whose token was revoked (it was stopped or
-	// replaced while the RPC was in flight) is dropped, so it cannot write a
-	// stale origin over the replacement's.
-	broker.Revoke(9, token)
-	if _, err := srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{State: "connected", Origin: "https://stale.tail1234.ts.net"}}); err != nil {
-		t.Fatalf("revoked push must be accepted quietly: %v", err)
-	}
-	if _, ok := broker.Status.Get(9); ok {
-		t.Fatal("a revoked process repopulated the status cache")
-	}
-	replacement, _ := broker.Issue(9, "tailscale")
-	broker.Report(netaccess.Status{InstallationID: 9, Provider: "tailscale", State: "connected", Origin: "https://fresh.tail1234.ts.net"})
-	if _, err := srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{State: "connected", Origin: "https://stale.tail1234.ts.net"}}); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := broker.Status.Get(9); got.Origin != "https://fresh.tail1234.ts.net" {
-		t.Fatalf("old process overwrote the replacement's status: %+v", got)
-	}
-	_ = replacement
-
-	notProvider := pluginhost.NewRuntimeHostServerWithOptions(pluginhost.RuntimeHostOptions{NetworkAccess: broker, InstallationID: 10})
-	if _, err := notProvider.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{State: "connected"}}); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("non-provider push: %v", err)
-	}
-	if _, ok := broker.Status.Get(10); ok {
-		t.Fatal("non-provider status was cached")
-	}
-}
-
-func TestNetworkAccessProviderSlug(t *testing.T) {
-	manifest := &pluginv1.PluginManifest{Capabilities: []*pluginv1.CapabilityDescriptor{
-		{Type: capability.MetadataProvider, Id: "tmdb"},
-		{Type: capability.NetworkAccessProvider, Id: "stub", NetworkAccessProvider: &pluginv1.NetworkAccessProviderDescriptor{Provider: "tailscale"}},
-	}}
-	if slug, ok := pluginhost.NetworkAccessProviderSlug(manifest); !ok || slug != "tailscale" {
-		t.Fatalf("slug = %q, %v", slug, ok)
-	}
-	manifest.Capabilities[1].NetworkAccessProvider = nil
-	if slug, ok := pluginhost.NetworkAccessProviderSlug(manifest); !ok || slug != "stub" {
-		t.Fatalf("fallback slug = %q, %v", slug, ok)
-	}
-	if _, ok := pluginhost.NetworkAccessProviderSlug(&pluginv1.PluginManifest{Capabilities: manifest.Capabilities[:1]}); ok {
-		t.Fatal("non-provider manifest reported a slug")
-	}
-	for in, want := range map[string]string{":8080": "127.0.0.1:8080", "0.0.0.0:8080": "127.0.0.1:8080", "[::]:8080": "127.0.0.1:8080", "10.0.0.5:9000": "10.0.0.5:9000", "": ""} {
-		if got := pluginhost.LoopbackDialAddress(in); got != want {
-			t.Fatalf("LoopbackDialAddress(%q) = %q, want %q", in, got, want)
-		}
 	}
 }

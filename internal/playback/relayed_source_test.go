@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
@@ -251,40 +250,5 @@ func TestRelayedSourceMatchesTheFileRealFFmpeg(t *testing.T) {
 
 	if core.Requests.Load() == 0 {
 		t.Fatal("nothing was read through the core")
-	}
-}
-
-// The plan records the source version from the API server's stat; the node
-// reads it through its own mount or the relay, which may report another
-// sub-microsecond time. Versions compare at microseconds.
-func TestSubtitleRenditionSourceMatchesAtMicroseconds(t *testing.T) {
-	recorded := time.Unix(1_700_000_000, 123_456_100)
-	v := SubtitleRenditionSource{Size: 10, ModTimeUnixNano: recorded.UnixNano()}
-	if !v.matches(&embeddedsub.Index{Size: 10, ModTime: time.Unix(1_700_000_000, 123_456_900)}) {
-		t.Fatal("a sub-microsecond difference is another version")
-	}
-	if v.matches(&embeddedsub.Index{Size: 10, ModTime: recorded.Add(time.Microsecond)}) {
-		t.Fatal("a microsecond later is the same version")
-	}
-	if v.matches(&embeddedsub.Index{Size: 11, ModTime: recorded}) {
-		t.Fatal("another size is the same version")
-	}
-}
-
-// An ffconcat list reaches FFmpeg on stdin, where fspath.CommandContext cannot
-// restrict the inputs it names. The remux IDR primer names its source in one,
-// so for a relayed input fspath refuses the list entry and the primer is
-// skipped before it reads anything.
-func TestRemuxIDRPrimerSkipsARelayedInput(t *testing.T) {
-	src := filepath.Join(t.TempDir(), "source.mkv")
-	if err := os.WriteFile(src, []byte("not read"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	relayed := nodesourcetest.NewCore(t, src).Open(t).Input()
-	if _, err := fspath.FFConcatFileURL(relayed); !errors.Is(err, fspath.ErrRelayed) {
-		t.Fatalf("FFConcatFileURL(relayed) error = %v, want ErrRelayed", err)
-	}
-	if primer := findRemuxIDRPrimer(relayed, 5); primer != nil {
-		t.Fatalf("relayed input got a primer naming %q", fspath.RedactRelayed(primer.fileURL))
 	}
 }

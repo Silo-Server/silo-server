@@ -22,7 +22,7 @@ const DAY_MS = 86_400_000;
 
 /** Which heading a notification created at `created` falls under, counted in
  * local calendar days before `now`. */
-export function inboxDay(created: Date, now: Date): InboxDay {
+function inboxDay(created: Date, now: Date): InboxDay {
   const startOf = (date: Date) =>
     new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   // Round, since a day that crosses a daylight-saving change is not 24 hours.

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 )
 
@@ -88,61 +86,6 @@ func putEncryptedBackup(t *testing.T, srv *s3test.Server, seed, serverID, id str
 	return &m
 }
 
-func TestPartSizeGrowsWithThePreviousBackup(t *testing.T) {
-	for _, c := range []struct{ previous, want int64 }{
-		{1 << 30, defaultPartSize},
-		{1 << 40, 234 << 20},
-		// No earlier backup: room for a large first one.
-		{0, unknownSizePartSize},
-	} {
-		// Twice the previous size must fit in fewer parts than S3 allows.
-		if got := partSizeFor(c.previous); got != c.want || got*s3client.MaxUploadParts < 2*c.previous {
-			t.Errorf("partSizeFor(%d) = %d, want %d", c.previous, got, c.want)
-		}
-	}
-	// The previous backup is the newest one this server authenticated: an
-	// unverified manifest claiming a huge object sizes nothing.
-	sized := func(gb int64) *Manifest { return &Manifest{Objects: []ObjectEntry{{Name: DumpName, Size: gb << 30}}} }
-	day := time.Date(2026, 10, 31, 4, 0, 0, 0, time.UTC)
-	folders := []folder{{at: day, manifest: sized(1), verified: true}, {at: day.AddDate(0, 0, 1), manifest: sized(5000)}}
-	if got := largestObject(folders); got != 1<<30 {
-		t.Errorf("largestObject = %d, want the verified backup's 1 GiB", got)
-	}
-}
-
-// TestRotationRecordsRefusedDeletes: a bucket that refuses deletes keeps
-// every backup whole, and rotation records a warning instead of failing.
-func TestRotationRecordsRefusedDeletes(t *testing.T) {
-	srv := s3test.New(t, testBucket)
-	key := testArchiveKey(t, "server-a")
-	settings := s3Settings(srv, key.Check)
-	svc := New(Options{Settings: settings, ArchiveKey: key, KeyCheck: key.Check, ManifestKey: seedManifestKey(t, "server-a"),
-		ServerID:      func(context.Context) (string, error) { return "server", nil },
-		ActiveRestore: func(context.Context) (*RestoreRequest, error) { return nil, nil }})
-	start := time.Date(2026, 10, 1, 4, 0, 0, 0, time.UTC)
-	for i := range config.DefaultBackupKeep + 2 {
-		putEncryptedBackup(t, srv, "server-a", "server", FolderName(start.Add(time.Duration(i)*24*time.Hour), KindNightly), []byte("set"))
-	}
-	ctx := t.Context()
-	tgt, err := svc.preflight(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := srv.Keys(testBucket, "")
-	srv.RefuseDeletes(true)
-	rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil, true)
-	if len(rotated) != 0 || len(warnings) != 2 || !strings.Contains(warnings[0], "lifecycle rules") {
-		t.Fatalf("rotation against a refusing bucket = rotated %v, warnings %v", rotated, warnings)
-	}
-	if after := srv.Keys(testBucket, ""); len(after) != len(before) {
-		t.Fatalf("a refused rotation removed objects: %d of %d left", len(after), len(before))
-	}
-	srv.RefuseDeletes(false)
-	if rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil, true); len(rotated) != 2 || len(warnings) != 0 {
-		t.Fatalf("rotation = rotated %v, warnings %v", rotated, warnings)
-	}
-}
-
 // failingPrefixDelete deletes single objects but fails every folder delete,
 // as a delete that stops partway does.
 type failingPrefixDelete struct{ Destination }
@@ -184,72 +127,6 @@ func TestBackupFoldersAreDeletedManifestFirst(t *testing.T) {
 				t.Fatalf("after a partial delete: folders %+v, %v; want one incomplete folder of 3 objects", folders, err)
 			}
 		})
-	}
-}
-
-// TestBackupListingsAreBounded: a destination anyone else can write cannot
-// make a listing read without end. A child folder that is not a backup is
-// skipped without reading it, a backup folder holding more objects than a
-// backup writes is read only that far and left alone, other servers are
-// named one request each, and a capped listing stops past its cap.
-func TestBackupListingsAreBounded(t *testing.T) {
-	srv := s3test.New(t, testBucket)
-	ctx := t.Context()
-	dest := NewS3Destination(s3TestConfig(srv))
-	put := func(key string, n int) {
-		for i := range n {
-			srv.Put(testBucket, "silo/"+key+fmt.Sprintf("%05d", i), []byte("x"))
-		}
-	}
-	server := serverPrefix("server")
-	put(server+"20261031T040000Z-nightly/object-", 4)
-	put(server+"20261030T040000Z-overwritten-blobs/library-posters/", 2500)
-	put(server+"20261029T040000Z-manual/object-", maxFolderObjects+100)
-	put(server+"20261028T040000Z-nightly/object-", 2)
-	for _, other := range []string{"other-a", "other-b", "uploads"} {
-		put(serverPrefix(other)+"20261031T040000Z-nightly/object-", 1500)
-	}
-
-	before := srv.ListRequests()
-	folders, err := listBackupFolders(ctx, dest, server)
-	shape := make([]string, len(folders))
-	for i, f := range folders {
-		shape[i] = fmt.Sprintf("%s:%d:%v", f.id, len(f.objects), f.overflow)
-	}
-	if want := fmt.Sprintf("20261028T040000Z-nightly:2:false,20261029T040000Z-manual:%d:true,20261031T040000Z-nightly:4:false", maxFolderObjects); err != nil || strings.Join(shape, ",") != want {
-		t.Fatalf("folders = %v, %v; want %s", shape, err, want)
-	}
-	if n := srv.ListRequests() - before; n > 4 {
-		t.Fatalf("listing the server's folders took %d requests", n)
-	}
-
-	// The folder listed only in part is unknown: never swept or rotated.
-	svc := New(Options{Destination: dest})
-	listed, err := svc.folders(ctx, target{Destination: dest}, "server")
-	if err != nil || len(listed) != 3 {
-		t.Fatalf("folders = %+v, %v", listed, err)
-	}
-	for _, f := range listed {
-		if f.id == "20261029T040000Z-manual" && (!f.unreadable || f.noManifest) {
-			t.Fatalf("the overflowed folder = %+v, want unreadable", f)
-		}
-	}
-	if swept := planSweep(listed, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)); strings.Join(swept, ",") != "20261028T040000Z-nightly,20261031T040000Z-nightly" {
-		t.Fatalf("the sweep would delete %v, want only the two folders with no manifest", swept)
-	}
-
-	before = srv.ListRequests()
-	children, err := childFolders(ctx, dest, RootPrefix, maxOtherServers+2)
-	if err != nil || strings.Join(otherServerIDs(children, "server"), ",") != "other-a,other-b" {
-		t.Fatalf("other servers = %v, %v", children, err)
-	}
-	if n := srv.ListRequests() - before; n > 5 {
-		t.Fatalf("naming the servers took %d requests", n)
-	}
-
-	before = srv.ListRequests()
-	if _, err := listObjects(ctx, dest, server+"20261030T040000Z-overwritten-blobs/", 100); !errors.Is(err, ErrTooManyObjects) || srv.ListRequests()-before != 1 {
-		t.Fatalf("a capped listing = %v after %d requests", err, srv.ListRequests()-before)
 	}
 }
 

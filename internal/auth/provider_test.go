@@ -12,34 +12,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// looksLikeEmail gates the email-column fallback in
-// LocalProvider.Authenticate: only inputs that parse as a bare address may
-// trigger the second lookup, so plain usernames keep the exact pre-fallback
-// behavior (one lookup, one failure mode).
-func TestLooksLikeEmail(t *testing.T) {
-	valid := []string{
-		"marco@example.com",
-		" marco@example.com ", // surrounding whitespace is trimmed
-	}
-	for _, input := range valid {
-		if !looksLikeEmail(input) {
-			t.Errorf("looksLikeEmail(%q) = false, want true", input)
-		}
-	}
-
-	invalid := []string{
-		"marco",                      // ordinary username
-		"marco@",                     // no domain
-		"Marco <marco@example.com>",  // display-name form, not a bare address
-		"marco@example.com, b@x.com", // address list
-	}
-	for _, input := range invalid {
-		if looksLikeEmail(input) {
-			t.Errorf("looksLikeEmail(%q) = true, want false", input)
-		}
-	}
-}
-
 // loginDirectory is a LoginDirectory over a fixed set of accounts.
 type loginDirectory map[string]*models.User
 

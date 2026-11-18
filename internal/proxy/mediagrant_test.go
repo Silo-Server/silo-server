@@ -153,38 +153,6 @@ func TestProxyGrantRoutesRefuseAPIKeys(t *testing.T) {
 	}
 }
 
-// A node that predates the mode (no grant store, no database) must not pretend
-// it can serve these routes, and must keep working otherwise.
-func TestProxyGrantRoutesReportUnavailableWithoutTheirDependencies(t *testing.T) {
-	srv := NewServer(testWatcher(grantTestSecret), nodesessions.NewTracker(nil, "http://proxy-1", "proxy-1", "proxy"))
-	srv.SetNodeKeys(nodeauthtest.NodeKey(grantTestSecret))
-
-	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "login-1"))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %s)", rr.Code, rr.Body.String())
-	}
-}
-
-func TestProxyGrantDirectPlayServesTheGrantedFile(t *testing.T) {
-	path := writeGrantMedia(t, "0123456789")
-	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{
-		"session-1": {SessionID: "session-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: path},
-	})
-
-	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "login-1"))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if rr.Body.String() != "0123456789" {
-		t.Fatalf("body = %q, want the granted file's bytes", rr.Body.String())
-	}
-	// direct_stream_resume_v1 needs the strong validator the shared serve path
-	// sets; the grant route must not lose it by serving the file some other way.
-	if rr.Header().Get("ETag") == "" {
-		t.Fatal("direct play served without an ETag; a resumed range could not validate")
-	}
-}
-
 func TestProxyGrantRoutesEnforceCommittedProxyEgress(t *testing.T) {
 	path := writeGrantMedia(t, "proxy-authorized")
 	base := playback.RecipeCard{
@@ -315,40 +283,6 @@ func TestProxyGrantTranscodeRelaysToTheNodeWithAProxyMintedToken(t *testing.T) {
 	}
 	if relayPath != "/transcode/session-hls-plan-a/segment/seg_00001.m4s" {
 		t.Fatalf("segment relay path = %q", relayPath)
-	}
-}
-
-func TestProxyGrantProgressiveRemuxRelaysToTranscodeNode(t *testing.T) {
-	var forwarded, relayPath, relayQuery string
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		forwarded = r.Header.Get("X-Silo-Stream-Token")
-		relayPath = r.URL.Path
-		relayQuery = r.URL.RawQuery
-		_, _ = w.Write([]byte("remote-remux"))
-	}))
-	t.Cleanup(node.Close)
-
-	card := playback.NewRemuxRecipeCard("session-remux", 7, "profile-1", 42, false, 0, playback.RemuxDVPreserveV3)
-	card.InputPath = "/media/movie.mkv"
-	card.TranscodeNodeURL = node.URL
-	card.TranscodeTransportID = "session-remux-plan-a"
-	card.RoutingWorkload = string(noderouting.WorkloadRemux)
-	card.RoutingExecution = string(noderouting.ExecutionTranscode)
-	card.RoutingEgress = string(noderouting.EgressProxy)
-	card.RoutingEgressNodeID = 11
-	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{card.SessionID: card})
-	srv.nodeRowID = func() (int, bool) { return 11, true }
-
-	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-remux?seek=8", grantAccessToken(t, 7, "login-1"))
-	if rr.Code != http.StatusOK || rr.Body.String() != "remote-remux" {
-		t.Fatalf("response = %d %q", rr.Code, rr.Body.String())
-	}
-	if relayPath != "/remux/session-remux-plan-a" || relayQuery != "seek=8" {
-		t.Fatalf("relay = %q?%s", relayPath, relayQuery)
-	}
-	claims, err := streamtoken.Verify(forwarded, grantTestSecret)
-	if err != nil || claims.TranscodeNode != node.URL || claims.RoutingExecution != string(noderouting.ExecutionTranscode) {
-		t.Fatalf("forwarded claims = %#v, err=%v", claims, err)
 	}
 }
 

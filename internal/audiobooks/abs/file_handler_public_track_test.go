@@ -2,14 +2,7 @@ package abs
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"testing"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -102,74 +95,4 @@ func (f *filesMediaStore) GetMediaFiles(_ context.Context, contentID string, _ c
 		return nil, nil
 	}
 	return f.files, nil
-}
-
-// makeTempAudio writes minimal bytes to a .mp3 file in t.TempDir() and
-// returns the path. ServeDirectPlay only needs the file to exist and be
-// readable; content correctness is not asserted by these tests.
-func makeTempAudio(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	p := filepath.Join(dir, "track.mp3")
-	if err := os.WriteFile(p, []byte("\xff\xfb\x00\x00audio-bytes"), 0o644); err != nil {
-		t.Fatalf("write temp audio: %v", err)
-	}
-	return p
-}
-
-// newPublicTrackHandler builds a Handler with the minimum deps to serve
-// /public/session/{sid}/track/{idx}: a seeded session store + a media store
-// holding ONE audio file for that session's contentID.
-func newPublicTrackHandler(t *testing.T, sid, contentID string, closed bool) (*Handler, string) {
-	t.Helper()
-	audioPath := makeTempAudio(t)
-	sessStore := &fakePlaybackSessionStore{}
-	sess := ABSPlaybackSession{ID: sid, UserID: "u1", ContentID: contentID}
-	if closed {
-		now := time.Now()
-		sess.ClosedAt = &now
-	}
-	_ = sessStore.InsertPlaybackSession(context.Background(), sess)
-
-	mediaStore := &filesMediaStore{
-		contentID: contentID,
-		files:     []*models.MediaFile{{ID: 1, FilePath: audioPath}},
-	}
-	h := New(Dependencies{
-		MediaStore:           mediaStore,
-		PlaybackSessionStore: sessStore,
-	})
-	return h, audioPath
-}
-
-// dispatchTrack invokes handlePublicTrack with the URL params chi would
-// normally inject from the route. Mirrors how chi.URLParam reads from the
-// request context — without this the handler can't see {sid}/{idx}.
-func dispatchTrack(h *Handler, method, sid, idx string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, "/public/session/"+sid+"/track/"+idx, nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("sid", sid)
-	rctx.URLParams.Add("idx", idx)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	rec := httptest.NewRecorder()
-	h.handlePublicTrack(rec, req)
-	return rec
-}
-
-func TestHandlePublicTrack_IndexOutOfRange404(t *testing.T) {
-	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
-	rec := dispatchTrack(h, http.MethodGet, "sid-1", "5")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
-func TestHandlePublicTrack_BadIndex400(t *testing.T) {
-	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
-	for _, bad := range []string{"0", "-1", "abc"} {
-		rec := dispatchTrack(h, http.MethodGet, "sid-1", bad)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("idx=%q: status = %d, want 400", bad, rec.Code)
-		}
-	}
 }

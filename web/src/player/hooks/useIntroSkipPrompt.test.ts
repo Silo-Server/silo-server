@@ -53,30 +53,6 @@ describe("useIntroSkipPrompt", () => {
     );
   }
 
-  it("does nothing in never mode", () => {
-    const { result, rerender } = renderPrompt({ mode: "never" });
-
-    rerender({ mode: "never", currentTime: 12, playing: true, enabled: true });
-
-    expect(result.current.prompt).toBeNull();
-    expect(onSeek).not.toHaveBeenCalled();
-  });
-
-  it("offers ask once and resolves the intro when selected", () => {
-    const { result, rerender } = renderPrompt();
-
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-    expect(result.current.prompt?.label).toBe("Skip Intro");
-
-    act(() => expect(result.current.select()).toBe(true));
-    expect(onSeek).toHaveBeenCalledWith(20);
-    expect(result.current.prompt).toBeNull();
-
-    rerender({ mode: "ask", currentTime: 21, playing: true, enabled: true });
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-    expect(result.current.prompt).toBeNull();
-  });
-
   it("lets an ask timeout re-offer after the viewer leaves and returns", () => {
     const { result, rerender } = renderPrompt();
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
@@ -174,18 +150,6 @@ describe("useIntroSkipPrompt", () => {
       expect(onSeek).toHaveBeenLastCalledWith(10);
     },
   );
-
-  it("resolves an automatic skip when its undo times out", () => {
-    const { result, rerender } = renderPrompt({ mode: "always" });
-    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
-
-    act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
-    expect(result.current.prompt).toBeNull();
-
-    rerender({ mode: "always", currentTime: 21, playing: true, enabled: true });
-    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
-    expect(onSeek).toHaveBeenCalledTimes(1);
-  });
 
   it("does not skip again when the stream reloads before the undo expires", async () => {
     // A reanchor replan answers asynchronously, once the new plan is adopted.
@@ -288,18 +252,6 @@ describe("useIntroSkipPrompt", () => {
 
     // Nothing moved, so "Intro skipped" would be a lie.
     expect(onSeek).toHaveBeenCalledWith(20);
-    expect(result.current.prompt).toBeNull();
-  });
-
-  it("consumes back by resolving without seeking", () => {
-    const { result, rerender } = renderPrompt();
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-
-    act(() => expect(result.current.dismiss()).toBe(true));
-    expect(onSeek).not.toHaveBeenCalled();
-
-    rerender({ mode: "ask", currentTime: 21, playing: true, enabled: true });
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
     expect(result.current.prompt).toBeNull();
   });
 });

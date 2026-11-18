@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -19,10 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
-	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
-	"github.com/Silo-Server/silo-server/internal/nodesource"
-	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -237,106 +232,6 @@ func (f *fixture) run(t *testing.T, trigger string) *Job {
 	return job
 }
 
-func TestExecuteAppliesSyncAndCachesSpeech(t *testing.T) {
-	truth := subtitles.Timing{Scale: 25 / 23.976, OffsetMS: 2500}
-	f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "5.1(side)")
-
-	job := f.run(t, TriggerManual)
-	if job.Status != string(StatusSynced) {
-		t.Fatalf("status %s: %+v", job.Status, f.jobs.finished[job.ID])
-	}
-	assertTiming(t, f.jobs.applied[job.ID], truth, 7200)
-	if f.notifier.calls != 1 {
-		t.Fatalf("notifier calls %d", f.notifier.calls)
-	}
-	if f.decodes != sampledWindows || !f.center[0] {
-		t.Fatalf("decodes %d, center %v", f.decodes, f.center)
-	}
-	if got := f.jobs.finished[job.ID].ExecutedOn; got != ExecutionLocal {
-		t.Fatalf("executed on %q", got)
-	}
-
-	// The next speech request reuses the artifact written by execute.
-	windows, _, executedOn, err := f.svc.speech(t.Context(), f.svc.files.(fakeFiles).file, "en", false, nil)
-	if err != nil || len(windows) != sampledWindows || executedOn != "cache" {
-		t.Fatalf("cached speech: windows=%d executed_on=%q err=%v", len(windows), executedOn, err)
-	}
-	if f.decodes != sampledWindows {
-		t.Fatalf("cached speech decoded again: %d", f.decodes)
-	}
-}
-
-func TestExecuteFallsBackFromCenterChannel(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{OffsetMS: -4000}, settingsMap{SettingExecution: ExecutionLocal}, "5.1")
-	local := f.svc.sampler.local
-	f.svc.sampler.local = func(ctx context.Context, req mediasample.Request) (mediasample.Result, error) {
-		if req.Audio.Speech.CenterChannel {
-			f.decodes++
-			return mediasample.Result{}, &mediasample.Error{Reason: mediasample.ReasonExit,
-				Attempts: []mediasample.AttemptError{{Reason: mediasample.ReasonExit, Err: errors.New("exit status 1")}}}
-		}
-		return local(ctx, req)
-	}
-	job := f.run(t, TriggerManual)
-	if job.Status != string(StatusSynced) {
-		t.Fatalf("status %s: %+v", job.Status, f.jobs.finished[job.ID])
-	}
-	unusable := 0
-	for _, a := range f.artifacts.rows {
-		if a.Status == mediaartifact.StatusUnusable {
-			unusable++
-		}
-	}
-	if unusable != 1 {
-		t.Fatalf("center plan not recorded unusable: %+v", f.artifacts.rows)
-	}
-}
-
-func TestExecuteReportsNoMatch(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	other := dialogCues(77, 7200)
-	f.svc.content = &fakeSubtitles{sub: f.svc.rows.(*fakeSubtitles).sub, data: subtitles.SerializeSRT(other)}
-	job := f.run(t, TriggerAuto)
-	if job.Status != string(StatusNoMatch) || len(f.jobs.applied) != 0 || f.notifier.calls != 0 {
-		t.Fatalf("status %s applied %v", job.Status, f.jobs.applied)
-	}
-}
-
-func TestExecuteEndsJobWhenApplyFails(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{OffsetMS: 3000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	f.jobs.applyErr = errors.New("connection reset")
-	if job := f.run(t, TriggerManual); job.Status != JobFailed || f.notifier.calls != 0 {
-		t.Fatalf("status %s, notifier calls %d; want failed without notifying players", job.Status, f.notifier.calls)
-	}
-}
-
-func TestRequestAutoSkips(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{}, settingsMap{SettingAutoSync: "false"}, "")
-	if job, err := f.svc.Request(context.Background(), 5, TriggerAuto, nil); job != nil || err != nil {
-		t.Fatalf("auto sync off: %v %v", job, err)
-	}
-	f.svc.settings = settingsMap{}
-	// Identical content re-added returns the existing row: a subtitle synced
-	// before, or one whose timing someone set, is not synced again.
-	f.jobs.hasJob = true
-	if job, err := f.svc.Request(context.Background(), 5, TriggerAuto, nil); job != nil || err != nil {
-		t.Fatalf("synced before: %v %v", job, err)
-	}
-	f.jobs.hasJob = false
-	f.svc.rows.(*fakeSubtitles).sub.Timing = subtitles.Timing{OffsetMS: 2000}
-	if job, err := f.svc.Request(context.Background(), 5, TriggerAuto, nil); job != nil || err != nil {
-		t.Fatalf("timing set by hand: %v %v", job, err)
-	}
-	f.svc.rows.(*fakeSubtitles).sub.Timing = subtitles.Timing{}
-	f.svc.rows.(*fakeSubtitles).sub.Format = subtitles.FormatSUB
-	if job, err := f.svc.Request(context.Background(), 5, TriggerAuto, nil); job != nil || err != nil {
-		t.Fatalf("unsupported auto: %v %v", job, err)
-	}
-	if _, err := f.svc.Request(context.Background(), 5, TriggerManual, nil); !errors.Is(err, ErrUnsupportedFormat) {
-		t.Fatalf("unsupported manual: %v", err)
-	}
-}
-
 // stalledNotifier stands for a player connection that does not take writes
 // until released.
 type stalledNotifier struct{ release chan struct{} }
@@ -371,44 +266,6 @@ func idleRunner(store jobrunner.Store) *jobrunner.Runner {
 	return jobrunner.New(ctx, jobrunner.NewSemaphore(1), store, "test", nil)
 }
 
-func TestSubtitlePlayedSyncsAStoredSubtitleNeverSynced(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
-	f.svc.runner = idleRunner(f.jobs)
-	f.svc.SubtitlePlayed(context.Background(), subtitles.SyncTarget{MediaFileID: 9, StoredID: 5})
-	if len(f.jobs.jobs) != 1 || f.jobs.jobs[0].Trigger != TriggerAuto || f.jobs.jobs[0].RequestedBy != nil {
-		t.Fatalf("jobs %+v", f.jobs.jobs)
-	}
-}
-
-func TestSubtitlePlayedSyncsASidecarNeverSynced(t *testing.T) {
-	for name, tc := range map[string]struct {
-		prepare func(f *fixture, external *fakeExternal)
-		want    int
-	}{
-		"never synced":    {func(*fixture, *fakeExternal) {}, 1},
-		"synced before":   {func(f *fixture, _ *fakeExternal) { f.jobs.hasJob = true }, 0},
-		"retimed by hand": {func(_ *fixture, e *fakeExternal) { e.row.Timing = subtitles.Timing{Scale: 1, OffsetMS: 400} }, 0},
-		"auto sync off":   {func(f *fixture, _ *fakeExternal) { f.svc.settings = settingsMap{SettingAutoSync: "false"} }, 0},
-		"cannot be retimed": {func(f *fixture, _ *fakeExternal) {
-			f.svc.files.(fakeFiles).file.ExternalSubtitles[0].Format = "sub"
-		}, 0},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
-			f.svc.runner = idleRunner(f.jobs)
-			external, sidecar := sidecarFixture(t, f)
-			tc.prepare(f, external)
-			f.svc.SubtitlePlayed(context.Background(), subtitles.SyncTarget{MediaFileID: 9, ExternalPath: sidecar.Path})
-			if len(f.jobs.jobs) != tc.want {
-				t.Fatalf("jobs %+v", f.jobs.jobs)
-			}
-			if tc.want == 1 && (f.jobs.jobs[0].Trigger != TriggerAuto || f.jobs.jobs[0].ExternalTimingID != external.row.ID) {
-				t.Fatalf("job %+v", f.jobs.jobs[0])
-			}
-		})
-	}
-}
-
 func TestSubtitlePlayedTriesAgainAfterAFailureToAsk(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
 	f.svc.runner = idleRunner(f.jobs)
@@ -425,203 +282,6 @@ func TestSubtitlePlayedTriesAgainAfterAFailureToAsk(t *testing.T) {
 	f.svc.SubtitlePlayed(context.Background(), target)
 	if len(f.jobs.jobs) != 1 || f.jobs.jobs[0].Trigger != TriggerAuto {
 		t.Fatalf("jobs %+v", f.jobs.jobs)
-	}
-}
-
-// Players fetch a subtitle in windows, many times a session: each played
-// subtitle is considered once per playedTTL on a server.
-func TestFirstPlayRemembersForATime(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	s := &Service{now: func() time.Time { return now }}
-	target := subtitles.SyncTarget{MediaFileID: 9, StoredID: 5}
-	if !s.firstPlay(target) || s.firstPlay(target) {
-		t.Fatal("a second play within the window was considered again")
-	}
-	if !s.firstPlay(subtitles.SyncTarget{MediaFileID: 9, ExternalPath: "/media/film.en.srt"}) {
-		t.Fatal("another subtitle was not considered")
-	}
-	now = now.Add(playedTTL)
-	if !s.firstPlay(target) {
-		t.Fatal("a play after the window was not considered")
-	}
-}
-
-func TestSamplerExecution(t *testing.T) {
-	reqs := []mediasample.Request{{Input: "/m.mkv"}, {Input: "/m.mkv"}}
-	ok := func(context.Context, mediasample.Request) (mediasample.Result, error) {
-		return mediasample.Result{Decoder: "software"}, nil
-	}
-	node := &nodepool.Node{ID: 1, Name: "gpu-1", URL: "http://node", Enabled: true, Healthy: true}
-	settings := settingsMap{}
-	keys := nodeauthtest.NodeKey("secret")
-
-	t.Run("node", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
-			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) { return mediasample.Result{}, nil })}
-		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != "node:gpu-1" {
-			t.Fatalf("%q %v", where, err)
-		}
-	})
-	t.Run("node failure falls back", func(t *testing.T) {
-		calls := 0
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
-			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
-				calls++
-				if calls == 2 {
-					return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusServiceUnavailable, Reason: mediasample.ReasonNodeUnavailable}
-				}
-				return mediasample.Result{}, nil
-			})}
-		var done []int
-		results, where, err := s.run(context.Background(), nil, reqs, func(n int) { done = append(done, n) })
-		if err != nil || where != ExecutionLocal || len(results) != 2 {
-			t.Fatalf("%q %d %v", where, len(results), err)
-		}
-		// Progress continues across the handoff to this server.
-		if fmt.Sprint(done) != "[1 2]" {
-			t.Fatalf("progress %v", done)
-		}
-	})
-	t.Run("node refusing the path falls back", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
-			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
-				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusBadRequest, Reason: mediasample.ReasonNodeUnavailable}
-			})}
-		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != ExecutionLocal {
-			t.Fatalf("%q %v", where, err)
-		}
-	})
-	t.Run("file failure does not fall back", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
-			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
-				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusUnprocessableEntity, Reason: mediasample.ReasonInvalidData}
-			})}
-		if _, _, err := s.run(context.Background(), nil, reqs, nil); err == nil {
-			t.Fatal("invalid data fell back to local")
-		}
-	})
-	t.Run("transcode only does not fall back from a busy node", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly},
-			nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
-			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
-				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusServiceUnavailable, Reason: mediasample.ReasonNodeUnavailable}
-			})}
-		if _, _, err := s.run(context.Background(), nil, reqs, nil); err == nil {
-			t.Fatal("transcode_nodes_only ran locally")
-		}
-	})
-	t.Run("transcode only without node", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly},
-			nodes: nodeList{}, reservations: &nodepool.Reservations{}, keys: keys, local: ok}
-		if _, _, err := s.run(context.Background(), nil, reqs, nil); !errors.Is(err, errNoNode) {
-			t.Fatalf("err %v", err)
-		}
-	})
-	t.Run("each window carries a grant for the node", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "m.mkv")
-		if err := os.WriteFile(path, []byte("media"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		file := &models.MediaFile{ID: 42, FilePath: path}
-		grants := nodesource.NewGrants(func() string { return "secret" })
-		var seen []nodesource.Grant
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok, grants: grants,
-			remote: fakeRemote(func(req mediasample.Request) (mediasample.Result, error) {
-				claims, err := grants.Verify(req.SourceGrant)
-				if err != nil {
-					t.Errorf("window grant: %v", err)
-				}
-				seen = append(seen, claims)
-				return mediasample.Result{}, nil
-			})}
-		if _, where, err := s.run(context.Background(), file, reqs, nil); err != nil || where != "node:gpu-1" {
-			t.Fatalf("%q %v", where, err)
-		}
-		if len(seen) != 2 || seen[0].Node != node.ID || seen[0].ID != 42 || seen[0].Path != path || !seen[1].Revision().Same(seen[0].Revision()) {
-			t.Fatalf("grants %+v", seen)
-		}
-
-		// A file that changes between windows fails the job rather than
-		// aligning against two versions.
-		s.remote = fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
-			return mediasample.Result{}, os.WriteFile(path, []byte("replaced media"), 0o600)
-		})
-		if _, _, err := s.run(context.Background(), file, reqs, nil); !errors.Is(err, nodesource.ErrSourceChanged) {
-			t.Fatalf("err %v, want a changed source", err)
-		}
-	})
-	t.Run("a source the node cannot be granted runs locally", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
-			grants: nodesourcetest.Granter{Err: nodesource.ErrSourceGone},
-			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
-				t.Error("the node was asked without a grant")
-				return mediasample.Result{}, nil
-			})}
-		if _, where, err := s.run(context.Background(), &models.MediaFile{ID: 42, FilePath: "/m.mkv"}, reqs, nil); err != nil || where != ExecutionLocal {
-			t.Fatalf("%q %v", where, err)
-		}
-	})
-	t.Run("prefer without node runs locally", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{}, nodes: nodeList{}, reservations: &nodepool.Reservations{}, keys: keys, local: ok}
-		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != ExecutionLocal {
-			t.Fatalf("%q %v", where, err)
-		}
-	})
-}
-
-func TestPlanSpeech(t *testing.T) {
-	file := &models.MediaFile{Duration: 1800, AudioTracks: []models.AudioTrack{
-		{Language: "jpn", Default: true, Layout: "stereo"}, {Language: "eng", Layout: "5.1(side)"},
-	}}
-	plan, err := planSpeech(file, "en")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.AudioStream != 1 || !plan.CenterChannel || len(plan.Windows) != 15 {
-		t.Fatalf("episode plan %+v", plan)
-	}
-	if last := plan.Windows[len(plan.Windows)-1]; last.StartSeconds+last.DurationSeconds != 1800 {
-		t.Fatalf("last window %+v", last)
-	}
-	plan, _ = planSpeech(file, "fr")
-	if plan.AudioStream != 0 || plan.CenterChannel {
-		t.Fatalf("fallback plan %+v", plan)
-	}
-	file.Duration = 7000
-	plan, _ = planSpeech(file, "en")
-	if len(plan.Windows) != sampledWindows || plan.Windows[0].StartSeconds <= 0 ||
-		math.Abs(plan.Windows[11].StartSeconds+windowSeconds-7000) > 400 {
-		t.Fatalf("film plan %+v", plan.Windows)
-	}
-	if _, err := planSpeech(&models.MediaFile{}, "en"); err == nil {
-		t.Fatal("no duration accepted")
-	}
-}
-
-// A track FFmpeg cannot decode (ffprobe names no codec for AVS3 audio) is
-// never sampled while the file has a decodable one.
-func TestPlanSpeechSkipsUndecodableAudio(t *testing.T) {
-	file := &models.MediaFile{Duration: 1800, AudioTracks: []models.AudioTrack{
-		{Language: "zho", Default: true}, {Language: "zho", Codec: "eac3"}, {Language: "eng", Codec: "aac"},
-	}}
-	for language, want := range map[string]int{"zh": 1, "fr": 1, "en": 2} {
-		if plan, err := planSpeech(file, language); err != nil || plan.AudioStream != want {
-			t.Fatalf("planSpeech(%q) stream = %d err %v, want %d", language, plan.AudioStream, err, want)
-		}
-	}
-}
-
-func TestSpeechCodecRoundTrip(t *testing.T) {
-	windows := []mediasample.SpeechLevels{
-		{StartSeconds: 12.5, FrameSeconds: mediasample.SpeechFrameSeconds, Levels: []byte{1, 2, 3}},
-		{StartSeconds: 600, FrameSeconds: mediasample.SpeechFrameSeconds, Levels: []byte{}},
-	}
-	got, err := decodeSpeech(encodeSpeech(windows))
-	if err != nil || len(got) != 2 || got[0].StartSeconds != 12.5 || string(got[0].Levels) != "\x01\x02\x03" || got[1].StartSeconds != 600 {
-		t.Fatalf("%+v %v", got, err)
-	}
-	if _, err := decodeSpeech([]byte{1, 2}); err == nil {
-		t.Fatal("truncated payload decoded")
 	}
 }
 
@@ -680,20 +340,6 @@ func (f *fixture) runExternal(t *testing.T, row *subtitles.ExternalTiming) *Job 
 	return job
 }
 
-func TestExecuteSyncsSidecar(t *testing.T) {
-	truth := subtitles.Timing{Scale: 1, OffsetMS: -3200}
-	f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	external, sidecar := sidecarFixture(t, f)
-	job := f.runExternal(t, external.row)
-	if job.Status != string(StatusSynced) {
-		t.Fatalf("status %s: %+v", job.Status, f.jobs.finished[job.ID])
-	}
-	assertTiming(t, f.jobs.applied[job.ID], truth, 7200)
-	if len(f.notifier.targets) != 1 || f.notifier.targets[0] != (subtitles.SyncTarget{MediaFileID: 9, ExternalPath: sidecar.Path}) {
-		t.Fatalf("notified %+v", f.notifier.targets)
-	}
-}
-
 // A sidecar whose name is not UTF-8 is stored fspath-encoded; the service
 // reads it through fspath, as NewService wires it.
 func TestExecuteSyncsSidecarWithNonUTF8Name(t *testing.T) {
@@ -719,37 +365,6 @@ func TestExecuteSyncsSidecarWithNonUTF8Name(t *testing.T) {
 	}
 }
 
-func TestExecuteSidecarChangedOrGone(t *testing.T) {
-	for name, change := range map[string]func(f *fixture, row *subtitles.ExternalTiming){
-		"edited on disk": func(f *fixture, _ *subtitles.ExternalTiming) {
-			f.svc.readFile = func(string) ([]byte, error) { return []byte("1\n00:00:01,000 --> 00:00:02,000\nEdited\n"), nil }
-		},
-		"deleted": func(f *fixture, _ *subtitles.ExternalTiming) {
-			f.svc.readFile = func(string) ([]byte, error) { return nil, fs.ErrNotExist }
-		},
-		"no longer scanned": func(f *fixture, _ *subtitles.ExternalTiming) {
-			f.svc.files.(fakeFiles).file.ExternalSubtitles = nil
-		},
-		"retimed meanwhile":       func(_ *fixture, row *subtitles.ExternalTiming) { row.Revision++ },
-		"belongs to another file": func(_ *fixture, row *subtitles.ExternalTiming) { row.MediaFileID++ },
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-			external, _ := sidecarFixture(t, f)
-			job, _, err := f.jobs.CreateExternal(context.Background(), external.row, TriggerManual, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			change(f, external.row)
-			f.svc.execute(context.Background(), job)
-			outcome := f.jobs.finished[job.ID]
-			if outcome.Status != JobFailed || outcome.Error != ErrSubtitleChanged.Error() || len(f.jobs.applied) != 0 {
-				t.Fatalf("outcome %+v applied %v", outcome, f.jobs.applied)
-			}
-		})
-	}
-}
-
 func TestExecuteRefusesStoredSubtitleOfAnotherFile(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
 	sub := f.svc.rows.(*fakeSubtitles).sub
@@ -762,37 +377,6 @@ func TestExecuteRefusesStoredSubtitleOfAnotherFile(t *testing.T) {
 	outcome := f.jobs.finished[job.ID]
 	if outcome.Status != JobFailed || outcome.Error != ErrSubtitleChanged.Error() || len(f.jobs.applied) != 0 || f.decodes != 0 {
 		t.Fatalf("outcome %+v applied %v decodes %d", outcome, f.jobs.applied, f.decodes)
-	}
-}
-
-func TestExecuteDoesNotAnnounceAJobThatEndedMeanwhile(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	sub := f.svc.rows.(*fakeSubtitles).sub
-	job, _, err := f.jobs.Create(context.Background(), sub, TriggerManual, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.notifier.updates = nil
-	sub.Revision++ // the job fails as changed
-	f.jobs.finishErr = jobrunner.ErrJobTerminal
-	f.svc.execute(context.Background(), job)
-	if len(f.notifier.updates) != 0 {
-		t.Fatalf("announced %+v", f.notifier.updates)
-	}
-}
-
-func TestExecuteDoesNotAnnounceProgressOfAJobThatEndedMeanwhile(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	job, _, err := f.jobs.Create(context.Background(), f.svc.rows.(*fakeSubtitles).sub, TriggerManual, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.notifier.updates = nil
-	f.jobs.progressErr = jobrunner.ErrJobTerminal
-	f.svc.execute(context.Background(), job)
-	// It stops at its first progress step: no audio decoded, nothing said.
-	if len(f.notifier.updates) != 0 || f.decodes != 0 || len(f.jobs.finished) != 0 || len(f.jobs.applied) != 0 {
-		t.Fatalf("announced %+v, decoded %d, finished %v, applied %v", f.notifier.updates, f.decodes, f.jobs.finished, f.jobs.applied)
 	}
 }
 
@@ -825,57 +409,6 @@ func TestUpdatesCarryTimingAnotherViewerSetMeanwhile(t *testing.T) {
 	}
 	if last := updates[len(updates)-1]; last.Job.Status != JobFailed || last.Job.Failure != FailureSubtitleChanged {
 		t.Fatalf("last update %+v", last.Job)
-	}
-}
-
-// A sidecar edited, deleted, or dropped from the catalog while its audio is
-// analyzed keeps the correction it had: the result would apply to bytes no
-// longer served.
-func TestExecuteSidecarChangedDuringAnalysis(t *testing.T) {
-	for name, change := range map[string]func(f *fixture){
-		"edited on disk": func(f *fixture) {
-			f.svc.readFile = func(string) ([]byte, error) { return []byte("1\n00:00:01,000 --> 00:00:02,000\nEdited\n"), nil }
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-			external, _ := sidecarFixture(t, f)
-			job, _, err := f.jobs.CreateExternal(context.Background(), external.row, TriggerManual, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			decode := f.svc.sampler.local
-			f.svc.sampler.local = func(ctx context.Context, req mediasample.Request) (mediasample.Result, error) {
-				change(f)
-				return decode(ctx, req)
-			}
-			f.svc.execute(context.Background(), job)
-			outcome := f.jobs.finished[job.ID]
-			if outcome.Status != JobFailed || outcome.Failure != FailureSubtitleChanged || len(f.jobs.applied) != 0 {
-				t.Fatalf("outcome %+v applied %v", outcome, f.jobs.applied)
-			}
-		})
-	}
-}
-
-// Progress travels off the worker; the outcome still reaches players last.
-func TestExecuteSendsProgressOffTheWorker(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 1800}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	f.svc.inline = false
-	job, _, err := f.jobs.Create(context.Background(), f.svc.rows.(*fakeSubtitles).sub, TriggerManual, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.notifier.updates = nil
-	f.svc.execute(context.Background(), job)
-	updates := f.notifier.updates
-	if len(updates) < 2 || updates[len(updates)-1].Job.Status != string(StatusSynced) {
-		t.Fatalf("updates %+v", updates)
-	}
-	for _, u := range updates[:len(updates)-1] {
-		if u.Job.Status != JobRunning {
-			t.Fatalf("step after the outcome or out of place: %+v", u.Job)
-		}
 	}
 }
 

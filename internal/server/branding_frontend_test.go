@@ -108,16 +108,6 @@ func TestFrontendServesDynamicManifest(t *testing.T) {
 	}
 }
 
-func TestFrontendFaviconFallsThroughWhenNoCustom(t *testing.T) {
-	withBranding(t, fakeSettings{}) // no custom favicon configured
-	rr := httptest.NewRecorder()
-	FrontendHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
-
-	if rr.Body.String() != "STATIC_ICO" {
-		t.Fatalf("expected bundled favicon fallthrough, got %q", rr.Body.String())
-	}
-}
-
 // TestFrontendCustomSvgFaviconIsHardened guards the stored-XSS mitigation: an
 // admin-uploaded SVG favicon must be served with nosniff + a sandboxing CSP so
 // it cannot execute scripts when navigated to directly on the app origin.

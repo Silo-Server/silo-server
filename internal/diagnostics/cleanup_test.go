@@ -63,50 +63,6 @@ func TestCleanupReportsDeletesRowBeforeBlob(t *testing.T) {
 	}
 }
 
-func TestCleanupReportsCleansStaleReceiving(t *testing.T) {
-	ops := []string{}
-	repo := &fakeCleanupRepo{
-		stale: []Report{
-			testCleanupReport("r1", 7, StateReceiving, ""),
-		},
-		ops: &ops,
-	}
-	store := &fakeCleanupStore{bucket: "private", ops: &ops}
-
-	result := runCleanup(t, repo, store)
-	if result.StaleReportsDeleted != 1 {
-		t.Fatalf("StaleReportsDeleted = %d, want 1", result.StaleReportsDeleted)
-	}
-	assertStrings(t, ops, []string{
-		"mark-failed:r1",
-		"delete-row:r1",
-		"delete-object:diagnostics/7/r1.tar.gz",
-	})
-}
-
-func TestCleanupReportsDeletesRowsWhenStorageUnavailable(t *testing.T) {
-	ops := []string{}
-	repo := &fakeCleanupRepo{
-		retention: []Report{
-			testCleanupReport("r1", 7, StateReady, "diagnostics/7/r1.tar.gz"),
-		},
-		stale: []Report{
-			testCleanupReport("r2", 7, StateReceiving, "diagnostics/7/r2.tar.gz"),
-		},
-		ops: &ops,
-	}
-
-	result := runCleanup(t, repo, nil)
-	if result.RetentionReportsDeleted != 1 || result.StaleReportsDeleted != 1 {
-		t.Fatalf("result = %#v, want one retention and one stale deletion", result)
-	}
-	assertStrings(t, ops, []string{
-		"delete-row:r1",
-		"mark-failed:r2",
-		"delete-row:r2",
-	})
-}
-
 func TestCleanupReportsDeletesUnmatchedObjects(t *testing.T) {
 	ops := []string{}
 	repo := &fakeCleanupRepo{

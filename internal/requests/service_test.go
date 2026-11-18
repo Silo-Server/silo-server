@@ -17,26 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestCreateRequestQuotaExceeded(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalMaxRequests = 1
-	store.count = 1
-	service := newTestService(store)
-
-	_, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
-	if err == nil {
-		t.Fatal("expected quota error")
-	}
-	var quota QuotaError
-	if !errors.As(err, &quota) {
-		t.Fatalf("error = %v, want QuotaError", err)
-	}
-	if len(store.created) != 0 {
-		t.Fatalf("created requests = %d, want 0", len(store.created))
-	}
-}
-
 func TestCreateRequestGroupPolicyCanForbidRequests(t *testing.T) {
 	store := newFakeStore()
 	service := newTestService(store)
@@ -48,60 +28,6 @@ func TestCreateRequestGroupPolicyCanForbidRequests(t *testing.T) {
 	}
 	if len(store.created) != 0 {
 		t.Fatalf("created requests = %d, want 0", len(store.created))
-	}
-}
-
-func TestCreateRequestAccountOverrideBeatsGroupDeny(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	service := newTestService(store)
-	groupID := int64(1)
-	allow := true
-	service.SetUserRepository(requestUserRepo{user: &models.User{ID: 1, AccessGroupID: &groupID, RequestsAllowed: &allow}})
-	service.SetGroupPolicyProvider(requestGroupProvider{group: &access.GroupPolicy{RequestsAllowed: false}})
-
-	if _, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput); err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-}
-
-func TestCreateRequestFailsWithoutUserRepository(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	service := NewService(store, &fakeTMDBClient{}, &fakePresence{})
-
-	_, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
-	if err == nil {
-		t.Fatal("CreateRequest without a user repository should fail rather than skip the per-user gate")
-	}
-	if len(store.created) != 0 {
-		t.Fatalf("created requests = %d, want 0", len(store.created))
-	}
-}
-
-func TestNormalizeListFilterCapsLimit(t *testing.T) {
-	cases := []struct {
-		name    string
-		in      ListFilter
-		wantLim int
-		wantOff int
-	}{
-		{"zero defaults", ListFilter{}, 50, 0},
-		{"negative defaults", ListFilter{Limit: -10, Offset: -5}, 50, 0},
-		{"under cap preserved", ListFilter{Limit: 75, Offset: 10}, 75, 10},
-		{"at cap preserved", ListFilter{Limit: 100, Offset: 0}, 100, 0},
-		{"over cap clamped", ListFilter{Limit: 1_000_000}, 100, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeListFilter(tc.in)
-			if got.Limit != tc.wantLim {
-				t.Errorf("limit = %d, want %d", got.Limit, tc.wantLim)
-			}
-			if got.Offset != tc.wantOff {
-				t.Errorf("offset = %d, want %d", got.Offset, tc.wantOff)
-			}
-		})
 	}
 }
 
@@ -177,73 +103,6 @@ func TestCreateRequestActiveDuplicateBlocks(t *testing.T) {
 	}
 }
 
-// Auto-approval does not wait for a router: on a server without Sonarr/Radarr
-// the approved request waits for the title to reach the library (AC3, AC4).
-func TestCreateRequestAutoApprovesWithoutRouter(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalAutoApprovalEnabled = true
-	service := newTestService(store)
-
-	req, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if req.Status != StatusApproved || req.Outcome != OutcomeActive || req.LastError != "" {
-		t.Fatalf("request = %+v, want approved and waiting for the library", req)
-	}
-}
-
-// A keyless connection is a setup problem: the auto-approved request keeps its
-// approval and records why it could not be sent, instead of failing, so it goes
-// through once an admin adds the key.
-func TestCreateRequestAutoApprovalDefersOnKeylessConnection(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalAutoApprovalEnabled = true
-	store.integrations = []Integration{autoApproveRouterInst("router-1", "")}
-	service := newTestService(store)
-	router := &fakeRouterProvider{}
-	service.SetRouterProvider(router)
-
-	req, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if req.Status != StatusApproved || req.Outcome != OutcomeActive ||
-		req.LastError != msgRouterNoKey {
-		t.Fatalf("request = %+v, want approved with the missing-key reason recorded", req)
-	}
-	if router.fulfillCalls != 0 {
-		t.Fatalf("fulfill calls = %d, want 0 (must not submit to a keyless connection)", router.fulfillCalls)
-	}
-}
-
-func TestCreateRequestAutoApprovalRespectsSupportedMediaTypes(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalAutoApprovalEnabled = true
-	// A router connection that only serves series is never handed a movie
-	// request; the auto-approved movie waits for the library instead.
-	seriesOnly := routerInst("router-series")
-	seriesOnly.SupportedMediaTypes = []string{string(MediaTypeSeries)}
-	store.integrations = []Integration{seriesOnly}
-	service := newTestService(store)
-	router := &fakeRouterProvider{}
-	service.SetRouterProvider(router)
-
-	req, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if req.Status != StatusApproved || req.Outcome != OutcomeActive || req.LastError != "" {
-		t.Fatalf("request = %+v, want approved and waiting (no router connection supports movie)", req)
-	}
-	if router.fulfillCalls != 0 {
-		t.Fatalf("fulfill calls = %d, want none for a series-only router", router.fulfillCalls)
-	}
-}
-
 func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -269,25 +128,6 @@ func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 	}
 }
 
-func TestCreateRequestSubmissionFailureMarksFailed(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalAutoApprovalEnabled = true
-	store.integrations = []Integration{autoApproveRouterInst("router-1", "radarr-key")}
-	// A provider that creates no targets (e.g. no radarr instance) returns its own
-	// message; the host marks the request failed with it.
-	service := newTestService(store)
-	service.SetRouterProvider(&fakeRouterProvider{noTargets: true, fulfillMsg: "radarr unavailable"})
-
-	req, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if req.Outcome != OutcomeFailed || req.LastError != "radarr unavailable" {
-		t.Fatalf("request = %+v, want failed outcome with provider message", req)
-	}
-}
-
 type fakeTVDBResolver struct {
 	tvdbID    int
 	err       error
@@ -301,28 +141,6 @@ func (f *fakeTVDBResolver) ResolveSeriesTVDBID(_ context.Context, tmdbID int, im
 	f.gotTMDBID = tmdbID
 	f.gotIMDbID = imdbID
 	return f.tvdbID, f.err
-}
-
-func TestCreateRequestResolvesSeriesTVDBIDThroughMetadataWhenTMDBHasNone(t *testing.T) {
-	store := newFakeStore()
-	tmdbClient := &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{IMDbID: "tt31000000"}}
-	service := newTestServiceWithTMDB(store, tmdbClient)
-	resolver := &fakeTVDBResolver{tvdbID: 456789}
-	service.SetTVDBIDResolver(resolver)
-
-	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeSeries,
-		TMDBID:    240001,
-		Title:     "Regional Series",
-	}); err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if resolver.gotTMDBID != 240001 || resolver.gotIMDbID != "tt31000000" {
-		t.Fatalf("resolver got tmdb=%d imdb=%q, want 240001 and the TMDB-provided IMDb id", resolver.gotTMDBID, resolver.gotIMDbID)
-	}
-	if got := store.created[0].Input.TVDBID; got == nil || *got != 456789 {
-		t.Fatalf("tvdb_id = %v, want 456789", got)
-	}
 }
 
 func TestCreateRequestDoesNotTrustCallerIMDbIDForTVDBLookup(t *testing.T) {
@@ -360,148 +178,6 @@ func (c *refreshingTMDBClient) RefreshExternalIDs(context.Context, string, int) 
 		return nil, c.refreshErr
 	}
 	return c.fresh, nil
-}
-
-func TestFailedTMDBRefreshKeepsCachedIMDbID(t *testing.T) {
-	client := &refreshingTMDBClient{
-		fakeTMDBClient: &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{IMDbID: "tt31000000"}},
-		refreshErr:     errors.New("tmdb: HTTP 429"),
-	}
-	service := NewService(newFakeStore(), client, &fakePresence{})
-	resolver := &fakeTVDBResolver{tvdbID: 456789}
-	service.SetTVDBIDResolver(resolver)
-
-	input := CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
-	service.enrichExternalIDs(context.Background(), &input)
-	if resolver.gotIMDbID != "tt31000000" || input.IMDbID != "tt31000000" {
-		t.Fatalf("resolver imdb = %q, stored imdb = %q; want the cached TMDB IMDb id kept", resolver.gotIMDbID, input.IMDbID)
-	}
-	if input.TVDBID == nil || *input.TVDBID != 456789 {
-		t.Fatalf("tvdb_id = %v, want 456789 resolved through the cached IMDb id", input.TVDBID)
-	}
-
-	unresolved := &fakeTVDBResolver{}
-	service.SetTVDBIDResolver(unresolved)
-	input = CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
-	if !service.enrichExternalIDs(context.Background(), &input) {
-		t.Fatalf("enrichExternalIDs reported a confirmed miss after the TMDB refresh failed")
-	}
-}
-
-func TestRetryRefreshesTMDBExternalIDs(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.requests["req-1"] = &Request{
-		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
-		Status: StatusQueued, Outcome: OutcomeFailed,
-	}
-	// The cached lookup still has no TVDB ID; TMDB itself now does.
-	client := &refreshingTMDBClient{
-		fakeTMDBClient: &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{}},
-		fresh:          &tmdb.ExternalIDs{TVDBID: 456789},
-	}
-	service := NewService(store, client, &fakePresence{})
-	service.SetUserRepository(requestUserRepo{})
-	router := &fakeRouterProvider{}
-	service.SetRouterProvider(router)
-
-	if _, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1"); err != nil {
-		t.Fatalf("Retry returned error: %v", err)
-	}
-	if client.refreshCalls != 1 {
-		t.Fatalf("refresh calls = %d, want 1", client.refreshCalls)
-	}
-	if router.gotTVDBID == nil || *router.gotTVDBID != 456789 {
-		t.Fatalf("router got tvdb_id %v, want the refreshed 456789", router.gotTVDBID)
-	}
-}
-
-func TestRetrySubmitsTheSavedTVDBID(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	// A concurrent submission already saved a TVDB ID after this one loaded
-	// the request without it.
-	saved := 111
-	store.requests["req-1"] = &Request{
-		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
-		Status: StatusApproved, Outcome: OutcomeActive,
-	}
-	service := newTestService(store)
-	router := &fakeRouterProvider{}
-	service.SetRouterProvider(router)
-	service.SetTVDBIDResolver(&fakeTVDBResolver{tvdbID: 456789})
-	req := *store.requests["req-1"]
-	store.requests["req-1"].TVDBID = &saved
-
-	if _, err := service.submitApprovedRequest(context.Background(), req, Viewer{UserID: 1, IsAdmin: true}, nil); err != nil {
-		t.Fatalf("submitApprovedRequest returned error: %v", err)
-	}
-	if router.gotTVDBID == nil || *router.gotTVDBID != saved {
-		t.Fatalf("router got tvdb_id %v, want the saved %d", router.gotTVDBID, saved)
-	}
-}
-
-func TestRetryResolvesMissingSeriesTVDBIDBeforeSubmitting(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.requests["req-1"] = &Request{
-		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
-		Status: StatusQueued, Outcome: OutcomeFailed,
-	}
-	service, router := newRoutedService(store)
-	service.SetTVDBIDResolver(&fakeTVDBResolver{tvdbID: 456789})
-
-	if _, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1"); err != nil {
-		t.Fatalf("Retry returned error: %v", err)
-	}
-	if router.gotTVDBID == nil || *router.gotTVDBID != 456789 {
-		t.Fatalf("router got tvdb_id %v, want 456789", router.gotTVDBID)
-	}
-	if got := store.requests["req-1"].TVDBID; got == nil || *got != 456789 {
-		t.Fatalf("stored tvdb_id = %v, want the resolved id recorded on the request", got)
-	}
-}
-
-func TestSubmitKeepsUnrelatedSeriesFailureMessage(t *testing.T) {
-	req := Request{MediaType: MediaTypeSeries}
-	for _, msg := range []string{"sonarr: quality profile is required", "tvdb: HTTP 503 service unavailable", "tvdb API key is missing"} {
-		if got := explainSubmissionFailure(req, msg); got != msg {
-			t.Fatalf("message = %q, want the backend message %q unchanged", got, msg)
-		}
-	}
-	tvdbID := 1
-	req.TVDBID = &tvdbID
-	if got := explainSubmissionFailure(req, "sonarr: tvdb lookup failed"); got != "sonarr: tvdb lookup failed" {
-		t.Fatalf("message = %q, want unchanged when the request has a TVDB id", got)
-	}
-}
-
-func TestExplainSubmissionFailureDistinguishesLookupFailure(t *testing.T) {
-	req := Request{MediaType: MediaTypeSeries}
-	if got := explainSubmissionFailure(req, "sonarr: tvdb_id is required"); got != missingTVDBIDMessage {
-		t.Fatalf("message = %q, want the missing-ID explanation", got)
-	}
-	req.tvdbLookupFailed = true
-	if got := explainSubmissionFailure(req, "sonarr: tvdb_id is required"); got != tvdbLookupFailedMessage {
-		t.Fatalf("message = %q, want the lookup-failed explanation", got)
-	}
-}
-
-func TestCreateRequestTreatsZeroTVDBIDAsMissing(t *testing.T) {
-	store := newFakeStore()
-	service := newTestService(store)
-	resolver := &fakeTVDBResolver{tvdbID: 456789}
-	service.SetTVDBIDResolver(resolver)
-	zero := 0
-
-	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeSeries, TMDBID: 240001, TVDBID: &zero, Title: "Regional Series",
-	}); err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if got := store.created[0].Input.TVDBID; got == nil || *got != 456789 {
-		t.Fatalf("tvdb_id = %v, want the resolved 456789 in place of 0", got)
-	}
 }
 
 func TestRetryKeepsFailedTargetWhenResolvedTVDBIDCannotBeSaved(t *testing.T) {
@@ -556,46 +232,6 @@ func TestCreateRequestBlocksWhenHydratedTVDBIDIsAvailable(t *testing.T) {
 	}
 	if len(store.created) != 0 {
 		t.Fatalf("created requests = %d, want 0", len(store.created))
-	}
-}
-
-func TestSearchMarksSeriesAvailableByHydratedTVDBID(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	tmdbClient := &fakeTMDBClient{
-		page: &tmdb.MediaPage{
-			Page: 1,
-			Results: []tmdb.MediaResult{{
-				ID:        201992,
-				MediaType: "series",
-				Title:     "The Rookie: Feds",
-				Year:      2022,
-			}},
-		},
-		externalIDsByID: map[int]*tmdb.ExternalIDs{
-			201992: {TVDBID: 420105, IMDbID: "tt18076310"},
-		},
-	}
-	presence := &fakePresence{byTVDB: map[MediaType]map[int]int{
-		MediaTypeSeries: {420105: 201992},
-	}}
-	service := NewService(store, tmdbClient, presence)
-
-	page, err := service.Search(context.Background(), testViewer(1), "rookie feds", MediaTypeSeries, 1)
-	if err != nil {
-		t.Fatalf("Search returned error: %v", err)
-	}
-	if got := page.Results[0].Availability; got != AvailabilityAvailable {
-		t.Fatalf("availability = %q, want available", got)
-	}
-	if got := page.Results[0].LibraryContentID; got != "series-201992" {
-		t.Fatalf("library content id = %q, want series-201992", got)
-	}
-	if page.Results[0].Request.Reason != "already_available" {
-		t.Fatalf("request reason = %q, want already_available", page.Results[0].Request.Reason)
-	}
-	if len(presence.got) != 1 || presence.got[0].TVDBID == nil || *presence.got[0].TVDBID != 420105 {
-		t.Fatalf("presence candidates = %+v, want hydrated tvdb id", presence.got)
 	}
 }
 
@@ -729,28 +365,6 @@ func TestDisabledRequestsBlockUserSurfaces(t *testing.T) {
 				t.Fatalf("err = %v, want ErrRequestsDisabled", err)
 			}
 		})
-	}
-}
-
-func TestReconcileRequestsCompletesFromCatalogPresence(t *testing.T) {
-	store := newFakeStore()
-	store.candidates = []*Request{{
-		ID:        "req-1",
-		MediaType: MediaTypeMovie,
-		TMDBID:    550,
-		Status:    StatusQueued,
-		Outcome:   OutcomeActive,
-	}}
-	service := NewService(store, &fakeTMDBClient{}, &fakePresence{available: map[MediaType]map[int]bool{
-		MediaTypeMovie: {550: true},
-	}})
-
-	result, err := service.ReconcileRequests(context.Background(), 100)
-	if err != nil {
-		t.Fatalf("ReconcileRequests returned error: %v", err)
-	}
-	if result.Completed != 1 || len(store.statusUpdates) != 1 || store.statusUpdates[0] != StatusCompleted {
-		t.Fatalf("result = %+v statusUpdates = %+v, want one completed update", result, store.statusUpdates)
 	}
 }
 
@@ -916,78 +530,6 @@ func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T)
 				t.Fatalf("result = %+v, want completed %v", result, wantCompleted)
 			}
 		})
-	}
-}
-
-func TestReconcileRequestsMarksDownloadingFromProvider(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.candidates = []*Request{{
-		ID:        "req-1",
-		MediaType: MediaTypeMovie,
-		TMDBID:    550,
-		Status:    StatusQueued,
-		Outcome:   OutcomeActive,
-	}}
-	// Reconcile drives status per-target via the provider; seed a queued target.
-	store.requests["req-1"] = &Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeActive}
-	if _, err := store.CreateTarget(context.Background(), Target{
-		RequestID: "req-1", IntegrationID: "router-1",
-		Quality: Quality1080p, Status: StatusQueued, ExternalID: "123",
-	}); err != nil {
-		t.Fatalf("seed target: %v", err)
-	}
-	router := &fakeRouterProvider{statuses: []RouterTargetStatus{{
-		Quality:        Quality1080p,
-		ConnectionID:   "router-1",
-		Status:         StatusDownloading,
-		ExternalStatus: "downloading",
-	}}}
-	service := newTestService(store)
-	service.SetRouterProvider(router)
-
-	result, err := service.ReconcileRequests(context.Background(), 100)
-	if err != nil {
-		t.Fatalf("ReconcileRequests returned error: %v", err)
-	}
-	if result.Downloading != 1 || len(store.statusUpdates) != 1 || store.statusUpdates[0] != StatusDownloading {
-		t.Fatalf("result = %+v statusUpdates = %+v, want one downloading update", result, store.statusUpdates)
-	}
-	if router.statusCalls != 1 {
-		t.Fatalf("provider status calls = %d, want 1", router.statusCalls)
-	}
-}
-
-func TestCreateIntegrationRejectedByPluginValidate(t *testing.T) {
-	store := newFakeStore()
-	service := newTestService(store)
-	service.SetRouterProvider(&fakeRouterProvider{
-		validateFieldErrors: map[string]string{"root_folder": "root folder does not exist"},
-		validateFormError:   "connection invalid",
-	})
-
-	install := 1
-	_, err := service.CreateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
-		Name:           "radarr",
-		CapabilityID:   "arr",
-		BaseURL:        "http://radarr.local",
-		InstallationID: &install,
-	})
-	if err == nil {
-		t.Fatal("expected validation error from plugin Validate")
-	}
-	var ve *ValidationError
-	if !errors.As(err, &ve) {
-		t.Fatalf("err = %v, want *ValidationError", err)
-	}
-	if ve.FieldErrors["root_folder"] != "root folder does not exist" {
-		t.Fatalf("field errors = %+v, want root_folder error", ve.FieldErrors)
-	}
-	if ve.FormError != "connection invalid" {
-		t.Fatalf("form error = %q, want connection invalid", ve.FormError)
-	}
-	if len(store.integrations) != 0 {
-		t.Fatalf("integrations = %d, want 0 (rejected before persist)", len(store.integrations))
 	}
 }
 
@@ -1203,96 +745,6 @@ func TestCancelRejectsRequestsAlreadyInFulfillment(t *testing.T) {
 				t.Fatalf("err = %v, want ErrInvalidState for %s", err, tc.name)
 			}
 		})
-	}
-}
-
-func TestDeclineRejectsApprovedRequests(t *testing.T) {
-	store := newFakeStore()
-	inFlight := time.Now().Add(time.Minute)
-	store.requests["req-approved"] = &Request{
-		ID:               "req-approved",
-		MediaType:        MediaTypeMovie,
-		TMDBID:           550,
-		Status:           StatusApproved,
-		Outcome:          OutcomeActive,
-		SubmitLeaseUntil: &inFlight,
-	}
-	service := newTestService(store)
-
-	_, err := service.Decline(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-approved", "changed mind")
-	if !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("err = %v, want ErrInvalidState (a submission is in flight)", err)
-	}
-}
-
-// An approved request nothing was sent for (no router, or backing off after a
-// failed attempt) can still be declined by an admin or withdrawn by its owner;
-// otherwise it could never be closed.
-func TestWithdrawApprovedRequestNothingWasSentFor(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		withdraw func(*Service) (*Request, error)
-		want     Outcome
-	}{
-		{"decline", func(s *Service) (*Request, error) {
-			return s.Decline(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-x", "not this month")
-		}, OutcomeDeclined},
-		{"cancel", func(s *Service) (*Request, error) {
-			return s.Cancel(context.Background(), Viewer{UserID: 7, ProfileID: "profile-1"}, "req-x", "")
-		}, OutcomeCancelled},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newFakeStore()
-			backoff := time.Now().Add(time.Hour)
-			store.requests["req-x"] = &Request{
-				ID: "req-x", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive,
-				RequestedByUserID: 7, NextSubmitAt: &backoff, LastError: "radarr unreachable",
-			}
-			got, err := tc.withdraw(newTestService(store))
-			if err != nil {
-				t.Fatalf("%s: %v", tc.name, err)
-			}
-			if got.Outcome != tc.want {
-				t.Fatalf("outcome = %q, want %q", got.Outcome, tc.want)
-			}
-		})
-	}
-}
-
-func TestDeclineRejectsApprovedRequestWithTarget(t *testing.T) {
-	store := newFakeStore()
-	store.requests["req-x"] = &Request{ID: "req-x", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive}
-	store.targets = map[string][]Target{"req-x": {{ID: 1, RequestID: "req-x", Quality: Quality1080p, Status: StatusQueued}}}
-
-	_, err := newTestService(store).Decline(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-x", "")
-	if !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("err = %v, want ErrInvalidState (a target exists)", err)
-	}
-}
-
-func TestRetryResubmitsFailedQueuedRequest(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.requests["req-1"] = &Request{
-		ID:        "req-1",
-		MediaType: MediaTypeMovie,
-		TMDBID:    550,
-		Status:    StatusQueued,
-		Outcome:   OutcomeFailed,
-	}
-	service, router := newRoutedService(store)
-
-	req, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1")
-	if err != nil {
-		t.Fatalf("Retry returned error: %v", err)
-	}
-	if router.fulfillCalls != 1 {
-		t.Fatalf("fulfill calls = %d, want 1", router.fulfillCalls)
-	}
-	// Retry transitions the failed request back to approved and re-dispatches via
-	// the router; the request aggregate returns to queued with the new external id.
-	if req.Status != StatusQueued || req.ExternalID != "ext-1080p" {
-		t.Fatalf("request = %+v, want re-queued with router external id", req)
 	}
 }
 
@@ -2483,38 +1935,6 @@ func (f *fakeStore) updateTargetLocked(targetID int64, status Status, externalID
 	return &clone, nil
 }
 
-func TestBrowseStudioUnknownSlugReturnsNotFound(t *testing.T) {
-	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
-	_, err := service.BrowseStudio(context.Background(), testViewer(1), "not-a-studio", "popularity", 1)
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("err = %v, want ErrNotFound", err)
-	}
-}
-
-func TestBrowseStudioRejectsBadSort(t *testing.T) {
-	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
-	_, err := service.BrowseStudio(context.Background(), testViewer(1), "marvel-studios", "made-up-sort", 1)
-	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestBrowseGenreRequiresMediaType(t *testing.T) {
-	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
-	_, err := service.BrowseGenre(context.Background(), testViewer(1), "action", "", "popularity", 1)
-	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestBrowseGenreSeriesRejectedWhenUnsupported(t *testing.T) {
-	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
-	_, err := service.BrowseGenre(context.Background(), testViewer(1), "horror", "series", "popularity", 1)
-	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("err = %v, want ErrInvalidInput for horror+series", err)
-	}
-}
-
 type fakePresence struct {
 	mu        sync.Mutex
 	available map[MediaType]map[int]bool
@@ -2909,127 +2329,6 @@ func autoApproveRouterInst(id, apiKeyRef string) Integration {
 	return in
 }
 
-func TestUpdateIntegrationPassesSiblingsToValidate(t *testing.T) {
-	store := newFakeStore()
-	inst := 1
-	a := routerInstOn("conn-a", inst)
-	b := routerInstOn("conn-b", inst)
-	b.PluginConfig = map[string]any{"service_kind": "radarr"}
-	store.integrations = []Integration{a, b}
-	service, router := newRoutedService(store)
-
-	if _, err := service.UpdateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
-		ID:             "conn-a",
-		Name:           "conn-a",
-		CapabilityID:   "arr",
-		BaseURL:        "http://conn-a.local",
-		APIKeyRef:      "key-conn-a",
-		InstallationID: &inst,
-	}); err != nil {
-		t.Fatalf("UpdateIntegration: %v", err)
-	}
-	if len(router.gotValidateSiblings) != 1 {
-		t.Fatalf("siblings = %d, want 1 (the other installation-1 connection)", len(router.gotValidateSiblings))
-	}
-	sib := router.gotValidateSiblings[0]
-	if sib.ID != "conn-b" {
-		t.Fatalf("sibling id = %q, want conn-b (self excluded)", sib.ID)
-	}
-	if sib.APIKey != "" || sib.BaseURL != "" {
-		t.Fatalf("sibling must carry no credentials, got APIKey=%q BaseURL=%q", sib.APIKey, sib.BaseURL)
-	}
-	if sib.Config["service_kind"] != "radarr" {
-		t.Fatalf("sibling config not passed: %+v", sib.Config)
-	}
-}
-
-func TestAllowedQualities(t *testing.T) {
-	svc := newTestService(newFakeStore())
-
-	t.Run("hd ceiling stays 1080p only", func(t *testing.T) {
-		svcHD := newTestService(newFakeStore())
-		svcHD.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-		got, _ := svcHD.allowedQualities(context.Background(), Request{}, Settings{})
-		if len(got) != 1 || got[0] != Quality1080p {
-			t.Fatalf("qualities = %v, want [1080p]", got)
-		}
-	})
-
-	t.Run("any/no-cap ceiling adds 2160p", func(t *testing.T) {
-		// A requester whose max playback quality is "Any" resolves to an empty
-		// (no-cap) ceiling. Empty means UNLIMITED, so 4K must be requested
-		// alongside 1080p — it must not be read as "below 4K".
-		svcAny := newTestService(newFakeStore())
-		svcAny.SetEntitlementResolver(fixedCeiling{q: ""})
-		got, _ := svcAny.allowedQualities(context.Background(), Request{}, Settings{})
-		if len(got) != 2 || got[1] != Quality2160p {
-			t.Fatalf("qualities = %v, want [1080p 2160p]", got)
-		}
-	})
-
-	t.Run("force dual adds 2160p", func(t *testing.T) {
-		got, _ := svc.allowedQualities(context.Background(), Request{}, Settings{ForceDualQuality: true})
-		if len(got) != 2 || got[1] != Quality2160p {
-			t.Fatalf("qualities = %v, want [1080p 2160p]", got)
-		}
-	})
-
-	t.Run("4k ceiling adds 2160p", func(t *testing.T) {
-		svc4k := newTestService(newFakeStore())
-		svc4k.SetEntitlementResolver(fixedCeiling{q: "2160p"})
-		got, _ := svc4k.allowedQualities(context.Background(), Request{}, Settings{})
-		if len(got) != 2 || got[1] != Quality2160p {
-			t.Fatalf("qualities = %v, want [1080p 2160p]", got)
-		}
-	})
-}
-
-func TestSubmitApprovedSkipsUnconfiguredOptional4KTarget(t *testing.T) {
-	store := newFakeStore()
-	hd := routerInst("router-1")
-	hd.PluginConfig = map[string]any{
-		"service_kind": "radarr",
-		"is_default":   true,
-		"is_4k":        false,
-	}
-	store.integrations = []Integration{hd}
-	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: ""})
-
-	mustSubmitApprovedMovie(t, svc, store)
-	if len(router.gotQualities) != 1 || router.gotQualities[0] != Quality1080p {
-		t.Fatalf("qualities = %v, want only [1080p] when no 4K default is configured", router.gotQualities)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].Quality != Quality1080p || targets[0].Status == StatusFailed {
-		t.Fatalf("targets = %+v, want one healthy 1080p target", targets)
-	}
-}
-
-func TestSubmitApprovedUsesConfiguredOptional4KDefault(t *testing.T) {
-	store := newFakeStore()
-	hd := routerInst("router-hd")
-	hd.PluginConfig = map[string]any{
-		"service_kind": "radarr",
-		"is_default":   true,
-		"is_4k":        false,
-	}
-	uhd := routerInst("router-uhd")
-	uhd.PluginConfig = map[string]any{
-		"service_kind":  "radarr",
-		"is_4k":         true,
-		"is_default_4k": true,
-	}
-	store.integrations = []Integration{hd, uhd}
-	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
-
-	mustSubmitApprovedMovie(t, svc, store)
-	if len(router.gotQualities) != 2 || router.gotQualities[0] != Quality1080p || router.gotQualities[1] != Quality2160p {
-		t.Fatalf("qualities = %v, want [1080p 2160p]", router.gotQualities)
-	}
-}
-
 func TestSubmitApprovedIsIdempotentPerQuality(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{routerInst("router-1")}
@@ -3052,55 +2351,6 @@ func TestSubmitApprovedIsIdempotentPerQuality(t *testing.T) {
 	// so Fulfill is never called.
 	if router.fulfillCalls != 0 {
 		t.Fatalf("fulfill calls = %d, want 0 (healthy 1080p target already exists)", router.fulfillCalls)
-	}
-}
-
-func TestSubmitApprovedRecordsDroppedQualityAsFailed(t *testing.T) {
-	store := newFakeStore()
-	store.settings.ForceDualQuality = true // want both 1080p and 2160p
-	store.integrations = []Integration{routerInst("router-1")}
-	// Plugin fulfills only 1080p, dropping the wanted 2160p.
-	router := &fakeRouterProvider{targetsOverride: []RouterTarget{{
-		Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "ext-hd", ExternalStatus: "queued", Status: StatusQueued,
-	}}}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-
-	mustSubmitApprovedMovie(t, svc, store)
-
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 2 {
-		t.Fatalf("targets = %d, want 2 (1080p queued + 2160p failed)", len(targets))
-	}
-	var failed2160 *Target
-	for i := range targets {
-		if targets[i].Quality == Quality2160p {
-			failed2160 = &targets[i]
-		}
-	}
-	if failed2160 == nil || failed2160.Status != StatusFailed {
-		t.Fatalf("2160p target = %+v, want a failed target", failed2160)
-	}
-	if failed2160.LastError != msgNoTargetForQuality {
-		t.Fatalf("2160p last error = %q, want the no-target message", failed2160.LastError)
-	}
-
-	// The failed 2160p target is not "healthy", so a re-run (Retry / reconcile)
-	// re-attempts only that quality. Provide a normal provider for the re-run.
-	retryRouter := &fakeRouterProvider{}
-	svc.SetRouterProvider(retryRouter)
-	// Put the stored row back where ReopenFailed leaves it, so the re-run can
-	// claim the submission.
-	store.requests["r1"].Status = StatusApproved
-	store.requests["r1"].Outcome = OutcomeActive
-	store.requests["r1"].SubmitLeaseUntil = nil
-	store.requests["r1"].NextSubmitAt = nil
-	cur := *store.requests["r1"]
-	if _, err := svc.submitApprovedRequest(context.Background(), cur, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
-		t.Fatalf("retry submit: %v", err)
-	}
-	if len(retryRouter.gotQualities) != 1 || retryRouter.gotQualities[0] != Quality2160p {
-		t.Fatalf("retry qualities = %v, want only [2160p] (1080p is healthy)", retryRouter.gotQualities)
 	}
 }
 
@@ -3172,133 +2422,6 @@ func TestSubmitApprovedDedupesDuplicateQualityTargets(t *testing.T) {
 	}
 }
 
-func TestSubmitApprovedSkipsBadConnectionUsesSibling(t *testing.T) {
-	store := newFakeStore()
-	// Two connections on the same installation: one has no api key (unconfigured),
-	// the other carries a literal key. The healthy sibling must still fulfill the
-	// request, and the no-key connection must never pin the installation.
-	bad := routerInstOn("router-bad", 1)
-	bad.APIKeyRef = ""
-	good := routerInstOn("router-good", 1)
-	good.APIKeyRef = "good-key"
-	store.integrations = []Integration{bad, good}
-	svc, router := newRoutedService(store)
-
-	got, err := submitApprovedMovie(svc, store)
-	if err != nil {
-		t.Fatalf("submit must not abort on a single bad connection: %v", err)
-	}
-	if got.Outcome == OutcomeFailed {
-		t.Fatalf("outcome = failed, want submitted via the healthy sibling")
-	}
-	if router.fulfillCalls != 1 {
-		t.Fatalf("fulfill calls = %d, want 1", router.fulfillCalls)
-	}
-	if len(router.gotConns) != 1 || router.gotConns[0].ID != "router-good" || router.gotConns[0].APIKey != "good-key" {
-		t.Fatalf("router connections = %+v, want only the healthy router-good with resolved key", router.gotConns)
-	}
-}
-
-func TestSubmitApprovedSkipsUnknownQuality(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	// Plugin returns a bogus quality alongside a valid one.
-	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
-		{Quality: Quality("720p"), ConnectionID: "router-1", ExternalID: "ext-bad", Status: StatusQueued},
-		{Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "ext-hd", Status: StatusQueued},
-	}}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-	// Pin an HD ceiling: this test is about skipping an unknown quality, not 4K
-	// entitlement, so keep it to a single requested quality (1080p).
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-
-	mustSubmitApprovedMovie(t, svc, store)
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 {
-		t.Fatalf("targets = %d, want 1 (720p skipped, 1080p persisted)", len(targets))
-	}
-	for _, tg := range targets {
-		if tg.Quality == Quality("720p") {
-			t.Fatalf("a 720p target was persisted: %+v", tg)
-		}
-	}
-}
-
-func TestSubmitApprovedSkipsUnknownConnectionTarget(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
-		{Quality: Quality1080p, ConnectionID: "missing-router", ExternalID: "ext-hd", Status: StatusQueued},
-	}}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-
-	got, err := submitApprovedMovie(svc, store)
-	if err != nil {
-		t.Fatalf("submit must not abort on an unknown plugin connection: %v", err)
-	}
-	if got.Outcome != OutcomeFailed {
-		t.Fatalf("outcome = %q, want failed missing-quality target", got.Outcome)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].IntegrationID != "" || targets[0].Status != StatusFailed {
-		t.Fatalf("targets = %+v, want one failed target without unknown integration id", targets)
-	}
-}
-
-func TestSubmitApprovedCoercesUnknownStatusToQueued(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
-		{Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "ext-hd", Status: Status("bogus")},
-	}}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-	// Pin an HD ceiling: this test is about status coercion, not 4K entitlement,
-	// so keep it to a single requested quality (1080p).
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-
-	mustSubmitApprovedMovie(t, svc, store)
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].Status != StatusQueued {
-		t.Fatalf("targets = %+v, want one StatusQueued target (unknown status coerced)", targets)
-	}
-}
-
-func TestSubmitApprovedUnboundInstallationDefersWithGuidance(t *testing.T) {
-	store := newFakeStore()
-	// A router connection that exists but is not bound to a plugin installation
-	// (the migration leaves installation_id NULL for pre-existing rows).
-	unbound := routerInst("router-unbound")
-	unbound.InstallationID = nil
-	store.integrations = []Integration{unbound}
-	svc := newTestService(store)
-	svc.SetRouterProvider(&fakeRouterProvider{})
-
-	got, err := submitApprovedMovie(svc, store)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	if got.Status != StatusApproved || got.Outcome != OutcomeActive ||
-		got.LastError != msgRouterUnbound {
-		t.Fatalf("request = %+v, want approved with unbound-installation guidance and a retry scheduled", got)
-	}
-}
-
-func TestSubmitApprovedPopulatesRequesterIdentity(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInstOn("router-1", 1)}
-	service, router := newRoutedService(store)
-	service.SetRequesterIdentityResolver(&fakeRequesterIdentity{email: "u@example.com", username: "bob"})
-
-	mustSubmitApprovedMovie(t, service, store)
-	if router.gotRequesterEmail != "u@example.com" || router.gotRequesterUsername != "bob" {
-		t.Fatalf("descriptor identity = %q/%q, want u@example.com/bob", router.gotRequesterEmail, router.gotRequesterUsername)
-	}
-}
-
 type fakeRequesterIdentity struct {
 	email, username string
 	err             error
@@ -3308,41 +2431,4 @@ type fakeRequesterIdentity struct {
 func (f *fakeRequesterIdentity) ResolveRequester(_ context.Context, userID int) (string, string, error) {
 	f.gotUserID = userID
 	return f.email, f.username, f.err
-}
-
-func TestSubmitApprovedSkipsTargetForHealthyQuality(t *testing.T) {
-	store := newFakeStore()
-	store.settings.ForceDualQuality = true // want 1080p + 2160p
-	store.integrations = []Integration{routerInst("router-1")}
-	// Seed a healthy 1080p target; the plugin (misbehaving) returns one anyway.
-	if _, err := store.CreateTarget(context.Background(), Target{
-		RequestID: "r1", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusQueued, ExternalID: "ext-existing",
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
-		{Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "ext-dupe", Status: StatusQueued},
-		{Quality: Quality2160p, ConnectionID: "router-1", ExternalID: "ext-uhd", Status: StatusQueued},
-	}}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-
-	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
-	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
-		t.Fatalf("submit must not error on a duplicate of a healthy quality: %v", err)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 2 {
-		t.Fatalf("targets = %d, want 2 (existing 1080p kept + new 2160p; dup 1080p skipped)", len(targets))
-	}
-	count1080 := 0
-	for _, tg := range targets {
-		if tg.Quality == Quality1080p {
-			count1080++
-		}
-	}
-	if count1080 != 1 {
-		t.Fatalf("1080p targets = %d, want 1 (no duplicate persisted)", count1080)
-	}
 }

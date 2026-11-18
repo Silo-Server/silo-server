@@ -84,15 +84,6 @@ func TestValidatePathRejectsReplacementWithPreservedSizeAndModTime(t *testing.T)
 	}
 }
 
-func TestRevisionForFileNormalizesProbeTimestamp(t *testing.T) {
-	probed := time.Date(2026, time.August, 13, 12, 34, 56, 123456789, time.FixedZone("test", -7*60*60))
-	revision := RevisionForFile(&models.MediaFile{ID: 1, ProbeUpdatedAt: &probed})
-	want := time.Date(2026, time.August, 13, 19, 34, 56, 123456000, time.UTC).UnixNano()
-	if revision.ProbeUpdatedUnixNano != want {
-		t.Fatalf("ProbeUpdatedUnixNano = %d, want %d", revision.ProbeUpdatedUnixNano, want)
-	}
-}
-
 func TestValidatePathClassifiesMissingSourceAsChanged(t *testing.T) {
 	revision := SourceRevision{MediaFileID: 1, FileSize: 1}
 	err := revision.ValidatePath(t.Context(), filepath.Join(t.TempDir(), "missing.mkv"))

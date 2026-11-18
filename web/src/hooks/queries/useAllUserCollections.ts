@@ -29,7 +29,7 @@ type UserCollectionSummary = Pick<Collection, "id" | "name"> &
     >
   >;
 
-export function buildAllUserCollectionOptions(
+function buildAllUserCollectionOptions(
   libraries: readonly LibrarySummary[],
   userCollections: readonly UserCollectionSummary[] | undefined,
   libraryCollectionsByLibrary: ReadonlyArray<readonly LibraryCollection[] | undefined>,

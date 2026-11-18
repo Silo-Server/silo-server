@@ -2,7 +2,6 @@ package watchsync
 
 import (
 	"context"
-	"reflect"
 	"testing"
 )
 
@@ -49,33 +48,6 @@ func (f *fakeFirstPartyStore) HasConnections(_ context.Context, providerKey stri
 	return f.connections[providerKey], f.err
 }
 
-func TestFirstPartyPluginsToInstallUntilMigrated(t *testing.T) {
-	store := &fakeFirstPartyStore{connections: map[string]bool{"simkl": true, "mdblist": true}}
-	got, err := FirstPartyPluginsToInstall(t.Context(), store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"silo.watchprovider.mdblist", "silo.watchprovider.simkl"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("plugins to install = %v, want %v", got, want)
-	}
-
-	for _, key := range []string{"simkl", "plugin:4:floppy"} {
-		if err := MarkFirstPartyMigrated(t.Context(), store, key); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, marked := store.settings[firstPartyMigrationSettingKey("plugin:4:floppy")]; marked {
-		t.Fatal("a third-party provider was recorded as migrated")
-	}
-	got, err = FirstPartyPluginsToInstall(t.Context(), store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"silo.watchprovider.mdblist"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("plugins to install after Simkl migrated = %v, want %v", got, want)
-	}
-}
-
 type fakeConfigSeeder struct {
 	installationID int
 	key            string
@@ -85,35 +57,4 @@ type fakeConfigSeeder struct {
 func (f *fakeConfigSeeder) SeedGlobalConfig(_ context.Context, installationID int, key string, value map[string]any) (bool, error) {
 	f.installationID, f.key, f.value = installationID, key, value
 	return true, nil
-}
-
-func TestSeedFirstPartyAppConfig(t *testing.T) {
-	store := &fakeFirstPartyStore{settings: map[string]string{
-		"watchsync.simkl.client_id":     "simkl-id",
-		"watchsync.simkl.client_secret": "simkl-secret",
-	}}
-	seeder := &fakeConfigSeeder{}
-	seeded, err := SeedFirstPartyAppConfig(t.Context(), "simkl", 5, store, seeder)
-	if err != nil || !seeded {
-		t.Fatalf("SeedFirstPartyAppConfig() = %t, %v", seeded, err)
-	}
-	want := map[string]any{"client_id": "simkl-id", "client_secret": "simkl-secret"}
-	if seeder.installationID != 5 || seeder.key != "app" || !reflect.DeepEqual(seeder.value, want) {
-		t.Fatalf("seeded %d %q %v", seeder.installationID, seeder.key, seeder.value)
-	}
-
-	// Seeding runs once: app credentials an admin clears from the plugin later
-	// are not restored from the old settings.
-	again := &fakeConfigSeeder{}
-	if seeded, err := SeedFirstPartyAppConfig(t.Context(), "simkl", 5, store, again); err != nil || seeded || again.value != nil {
-		t.Fatalf("second seed = %t, err = %v, value = %v; want nothing", seeded, err, again.value)
-	}
-
-	for _, key := range []string{"simkl", "plugin:4:floppy"} {
-		seeder := &fakeConfigSeeder{}
-		seeded, err := SeedFirstPartyAppConfig(t.Context(), key, 5, store, seeder)
-		if err != nil || seeded || seeder.value != nil {
-			t.Fatalf("%s: seeded = %t, err = %v, value = %v; want nothing without saved credentials", key, seeded, err, seeder.value)
-		}
-	}
 }

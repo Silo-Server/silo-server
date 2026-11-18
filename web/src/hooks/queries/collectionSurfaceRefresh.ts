@@ -30,7 +30,7 @@ export async function invalidateUserCollectionQueries(
   ]);
 }
 
-export async function invalidateLibraryCollectionQueries(queryClient: QueryClient) {
+async function invalidateLibraryCollectionQueries(queryClient: QueryClient) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.all }),
     // After the lists, so a pinned-title read joins an open tab's refetch.

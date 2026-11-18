@@ -66,7 +66,7 @@ type RequestToAddSectionCommonProps = {
   libraryResultsKnown?: boolean;
 };
 
-export type RequestToAddSectionProps = RequestToAddSectionCommonProps &
+type RequestToAddSectionProps = RequestToAddSectionCommonProps &
   (
     | { variant: "dialog"; combobox?: RequestSuggestionCombobox }
     | {

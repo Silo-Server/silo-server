@@ -1645,60 +1645,56 @@ func (d importerSample) batchDocument(n int) json.RawMessage {
 	return json.RawMessage(d.head + strings.Join(entries, ",") + d.tail)
 }
 
-func checkBatchImportModes(t *testing.T, pool *pgxpool.Pool, owner userdata.Owner, dt userdata.Type, doc json.RawMessage, n int) {
+func checkBatchImport(t *testing.T, pool *pgxpool.Pool, owner userdata.Owner, dt userdata.Type, doc json.RawMessage, n int, mapped bool) {
 	t.Helper()
-	for _, mode := range []string{"mapped", "unknown"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx := t.Context()
-			tx, err := pool.Begin(ctx)
-			if err != nil {
-				t.Fatal(err)
+	ctx := t.Context()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	counted := &countingTx{Tx: tx}
+	var items userdata.Items = sameItems{}
+	wantAdded, wantLeftOut := n, 0
+	if !mapped {
+		items, err = newItemResolver(ctx, counted, unknownRefs(n), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantAdded, wantLeftOut = 0, n
+	}
+	target := userdata.Target{Owner: owner, Items: items, Now: time.Now(), Untrusted: true,
+		SameServer: true, Library: func(id int) (int, bool) { return id, true }, Profile: func(string) (string, bool) { return "", false },
+		Collections: func(_ context.Context, _ string, ids []string) (map[string]string, error) {
+			out := map[string]string{}
+			for _, id := range ids {
+				out[id] = id
 			}
-			defer func() { _ = tx.Rollback(context.Background()) }()
-			counted := &countingTx{Tx: tx}
-			var items userdata.Items = sameItems{}
-			if mode == "unknown" {
-				resolver, err := newItemResolver(ctx, counted, unknownRefs(n), nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				items = resolver
-			}
-			target := userdata.Target{Owner: owner, Items: items, Now: time.Now(), Untrusted: true,
-				SameServer: true, Library: func(id int) (int, bool) { return id, true }, Profile: func(string) (string, bool) { return "", false },
-				Collections: func(_ context.Context, _ string, ids []string) (map[string]string, error) {
-					out := map[string]string{}
-					for _, id := range ids {
-						out[id] = id
-					}
-					return out, nil
-				}}
-			res, err := dt.Import(ctx, counted, target, doc)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Collections are created or merged one at a time, by name,
-			// in a few statements each, up to the import's cap of 1,000.
-			limit := 64
-			if dt.ID() == userdata.Collections {
-				limit += 4 * min(n, 1000)
-			}
-			if counted.n > limit {
-				t.Fatalf("%d entries sent %d statements (%+v)", n, counted.n, res)
-			}
-		})
+			return out, nil
+		}}
+	res, err := dt.Import(ctx, counted, target, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := 64
+	if dt.ID() == userdata.Collections {
+		// Personal collections are created or merged by name. The import
+		// must report the document cap separately from the profile quota.
+		wantAdded, wantLeftOut = 1000, 1
+		if !slices.Contains(res.Notes, "Only the first 1000 collections were restored; 1 more were left out.") {
+			t.Fatalf("import did not report the collection cap: %+v", res)
+		}
+		limit = 16 + 4*wantAdded
+	}
+	if res.Added != wantAdded || res.LeftOut != wantLeftOut || counted.n > limit {
+		t.Fatalf("%d entries sent %d statements (limit %d) and yielded %+v; want %d added and %d left out",
+			n, counted.n, limit, res, wantAdded, wantLeftOut)
 	}
 }
 
-// TestImportsReadInBatchesDB: an import of any data type's entries sends a
-// bounded number of statements, not one per entry: reads and writes are
-// set-based. Each branch of each importer (importerSamples, one per list
-// and per sort kind) is driven with 100,000 distinct entries and with
-// 1,000, once with every reference mapping, so every entry is planned and
-// written, and once with every item a ref whose provider ids this catalog
-// lacks, so every one misses through the import's resolver (its reads
-// counted too); a document over a type's cap must be refused before the
-// import.
+// TestImportsReadInBatchesDB guards the statement budget of each import
+// list. The regular fixtures exceed the statement budget, while the watch
+// history writes also cross its 5,000-row chunk boundary.
 func TestImportsReadInBatchesDB(t *testing.T) {
 	pool, _ := testDB(t)
 	ctx := t.Context()
@@ -1707,35 +1703,50 @@ func TestImportsReadInBatchesDB(t *testing.T) {
 	profile := "batch-" + sfx
 	testProfile(t, pool, user, profile, "Batch", true, "")
 	owner := userdata.Owner{UserID: user, ProfileID: profile}
-	for name, d := range importerSamples {
-		id, _, _ := strings.Cut(name, " ")
+	for name, sample := range importerSamples {
+		id, part, _ := strings.Cut(name, " ")
 		dt, _ := userDataType(id)
-		for _, n := range []int{100_000, 1000} {
-			t.Run(fmt.Sprintf("%s %d", name, n), func(t *testing.T) {
-				doc := d.batchDocument(n)
-				// A personal list has one sort, whatever collection id an
-				// entry names, so distinct entries are repeats.
-				personal := strings.HasSuffix(name, "watchlist sort") || strings.HasSuffix(name, "favorites sort")
-				if _, err := dt.Validate(doc); err != nil {
-					if n == 100_000 || personal {
-						return // over the type's cap, or repeats: refused before an import plans anything
-					}
-					t.Fatalf("%d entries: %v", n, err)
-				} else if personal {
-					t.Fatalf("%d sorts of one personal list were accepted", n)
-				}
-
-				checkBatchImportModes(t, pool, owner, dt, doc, n)
+		t.Run(name, func(t *testing.T) {
+			const batchEntries = 128
+			n := batchEntries
+			switch {
+			case id == userdata.WatchHistory:
+				n = 5001
+			case id == userdata.Collections:
+				n = 1001
+			case part == "watchlist sort" || part == "favorites sort":
+				// A profile can have only one sort for each personal list.
+				n = 1
+			}
+			t.Run("mapped", func(t *testing.T) {
+				checkBatchImport(t, pool, owner, dt, sample.batchDocument(n), n, true)
 			})
+			if strings.Contains(sample.entry, `"m1"`) || strings.Contains(sample.entry, `"s1"`) {
+				t.Run("unknown", func(t *testing.T) {
+					checkBatchImport(t, pool, owner, dt, sample.batchDocument(batchEntries), batchEntries, false)
+				})
+			}
+		})
+	}
+	t.Run("resolver across lookup chunks", func(t *testing.T) {
+		tx, err := pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	// Watchlist titles outside the library, at their cap, in a profile's own
-	// export: the profile's titles are read once.
-	titles := make([]string, 10_000)
-	for i := range titles {
-		titles[i] = fmt.Sprintf(`{"media_type":"movie","tmdb_id":%d,"imdb_id":"","tvdb_id":0,"title":"T","year":2001,"poster_path":"","certification":"","added_at":%s}`, i+1, sampleAt)
-	}
-	doc := json.RawMessage(`{"favorites":[],"watchlist":[],"titles":[` + strings.Join(titles, ",") + `]}`)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		counted := &countingTx{Tx: tx}
+		// The series IDs exceed the resolver's 20,000-ID lookup chunk.
+		if _, err := newItemResolver(t.Context(), counted, unknownRefs(20_001), nil); err != nil {
+			t.Fatal(err)
+		}
+		if counted.n > 64 {
+			t.Fatalf("resolving 40,002 item references sent %d statements", counted.n)
+		}
+	})
+
+	// Watchlist titles outside the library in a profile export are read once.
+	const titles = 128
+	doc := watchlistTitleBatchDocument(titles)
 	dt, _ := userDataType(userdata.Favorites)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -1744,10 +1755,38 @@ func TestImportsReadInBatchesDB(t *testing.T) {
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	counted := &countingTx{Tx: tx}
 	target := userdata.Target{Owner: userdata.Owner{UserID: user, ProfileID: profile}, Items: unknownItems{}, Now: time.Now(), Untrusted: true}
-	if _, err := dt.Import(ctx, counted, target, doc); err != nil {
-		t.Fatal(err)
+	if res, err := dt.Import(ctx, counted, target, doc); err != nil || res.LeftOut != titles || counted.n > 10 {
+		t.Fatalf("%d watchlist titles sent %d statements and yielded %+v (%v); want every title left out", titles, counted.n, res, err)
 	}
-	if counted.n > 10 {
-		t.Fatalf("10,000 watchlist titles sent %d statements", counted.n)
+}
+
+// TestImportDocumentCaps checks the specific count limit before an import
+// can open a transaction. Distinct entries keep duplicate checks out of
+// these cases.
+func TestImportDocumentCaps(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   string
+		doc  json.RawMessage
+		want string
+	}{
+		{"settings", userdata.Preferences, importerSamples[userdata.Preferences+" settings"].batchDocument(20_001), "more than 20000 settings"},
+		{"collection sorts", userdata.Preferences, importerSamples[userdata.Preferences+" library sort"].batchDocument(10_001), "more than 10000 collection sort preferences"},
+		{"watchlist titles", userdata.Favorites, watchlistTitleBatchDocument(10_001), "more than 10000 watchlist titles"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dt, _ := userDataType(tc.id)
+			if _, err := dt.Validate(tc.doc); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("validating %s: %v; want %q", tc.name, err, tc.want)
+			}
+		})
 	}
+}
+
+func watchlistTitleBatchDocument(n int) json.RawMessage {
+	titles := make([]string, n)
+	for i := range titles {
+		titles[i] = fmt.Sprintf(`{"media_type":"movie","tmdb_id":%d,"imdb_id":"","tvdb_id":0,"title":"T","year":2001,"poster_path":"","certification":"","added_at":%s}`, i+1, sampleAt)
+	}
+	return json.RawMessage(`{"favorites":[],"watchlist":[],"titles":[` + strings.Join(titles, ",") + `]}`)
 }

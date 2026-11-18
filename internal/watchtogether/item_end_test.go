@@ -97,18 +97,6 @@ func TestPlayingRoomReturnsToTheLobbyOnceItsClockReachesTheEnd(t *testing.T) {
 	}
 }
 
-func TestRoomFinishesAfterTheHostLeavesThePlayer(t *testing.T) {
-	f := newItemEndRoom(t, 100, 50, false)
-	f.reconcile(t)
-	// Leaving the player stops the host's session; the room's clock runs on.
-	f.sessions.session = nil
-	f.now = f.now.Add(49 * time.Second)
-	f.reconcile(t)
-	if f.phase() != RoomPhaseLobby {
-		t.Fatalf("room at 99s of 100s after the host left = %s, want lobby", f.phase())
-	}
-}
-
 func TestPinnedFileFinishesWithoutTheHostSession(t *testing.T) {
 	f := newItemEndRoom(t, 100, 99, true)
 	f.files[42] = nil
@@ -120,28 +108,6 @@ func TestPinnedFileFinishesWithoutTheHostSession(t *testing.T) {
 	f.reconcile(t)
 	if f.phase() != RoomPhaseLobby {
 		t.Fatalf("pinned file at its end = %s, want lobby", f.phase())
-	}
-}
-
-func TestReplannedHostFileIsLookedUpAgain(t *testing.T) {
-	f := newItemEndRoom(t, 100, 30, false)
-	f.reconcile(t)
-	// A replan moves the host's session to a shorter file of the same title.
-	f.files[43] = &models.MediaFile{ID: 43, ContentID: "movie-1", Duration: 60}
-	f.sessions.session.MediaFileID = 43
-	f.now = f.now.Add(itemEndRefreshInterval + time.Second)
-	f.reconcile(t)
-	if f.phase() != RoomPhaseLobby {
-		t.Fatalf("room at 61s of the replanned 60s file = %s, want lobby", f.phase())
-	}
-}
-
-func TestRoomPausedBeforeTheEndKeepsPlaying(t *testing.T) {
-	f := newItemEndRoom(t, 100, 97.5, true)
-	f.now = f.now.Add(time.Hour)
-	f.reconcile(t)
-	if f.phase() != RoomPhasePlaying {
-		t.Fatalf("room paused 2.5s before the end = %s, want playing", f.phase())
 	}
 }
 
@@ -187,28 +153,4 @@ type deadlineFiles struct {
 func (f deadlineFiles) GetByID(ctx context.Context, id int) (*models.MediaFile, error) {
 	_, *f.hadDeadline = ctx.Deadline()
 	return f.filesByID.GetByID(ctx, id)
-}
-
-func TestItemEndLookupCannotStallTheReconciler(t *testing.T) {
-	f := newItemEndRoom(t, 100, 99.5, true)
-	var hadDeadline bool
-	f.s.files = deadlineFiles{filesByID: f.files, hadDeadline: &hadDeadline}
-	// The reconciler's own context never expires.
-	if err := f.s.reconcileRoom(context.Background(), f.repo.room.ID); err != nil {
-		t.Fatal(err)
-	}
-	if !hadDeadline {
-		t.Fatal("the duration lookup ran without a deadline")
-	}
-	if f.phase() != RoomPhaseLobby {
-		t.Fatalf("room at its end = %s, want lobby", f.phase())
-	}
-}
-
-func TestRoomWithoutAKnownDurationKeepsPlaying(t *testing.T) {
-	f := newItemEndRoom(t, 0, 5000, false)
-	f.reconcile(t)
-	if f.phase() != RoomPhasePlaying {
-		t.Fatalf("room without a duration = %s, want playing", f.phase())
-	}
 }

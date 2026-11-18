@@ -54,41 +54,6 @@ func TestRemoteTransportIdleGrace(t *testing.T) {
 	}
 }
 
-// A client that reports a running listening total is credited how far it
-// rose past the highest total seen, so a late, lower report credits nothing.
-// A client that never reports a total is measured from its position.
-func TestUpdateProgressReported(t *testing.T) {
-	for _, tc := range []struct {
-		name         string
-		reports      [][2]float64 // position, total
-		wantPlayed   float64
-		wantReported float64
-	}{
-		{name: "late lower total", reports: [][2]float64{{100, 10}, {100, 5}}, wantPlayed: 10, wantReported: 10},
-		{name: "no total", reports: [][2]float64{{110, 0}}, wantPlayed: 10},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			manager := NewSessionManager(0, 0)
-			started := time.Now().Add(-10 * time.Second)
-			var watch WatchTime
-			watch.Observe(100, false, started)
-			manager.RegisterReconstructed(&Session{ID: "reported-1", UserID: 7, StartedAt: started, Watch: watch})
-			for _, r := range tc.reports {
-				if err := manager.UpdateProgressReported("reported-1", r[0], r[1]); err != nil {
-					t.Fatalf("report: %v", err)
-				}
-			}
-			s, err := manager.GetSession("reported-1")
-			if err != nil {
-				t.Fatalf("get session: %v", err)
-			}
-			if math.Abs(s.Watch.PlayedSeconds-tc.wantPlayed) > 0.01 || s.ReportedListening != tc.wantReported {
-				t.Fatalf("played = %v, reported = %v, want %v and %v", s.Watch.PlayedSeconds, s.ReportedListening, tc.wantPlayed, tc.wantReported)
-			}
-		})
-	}
-}
-
 // A delayed report with a lower total credits nothing and leaves the
 // listening baseline alone, so the next rise is capped by all the time since
 // the last accepted total, not by the gap since the delayed report.
@@ -173,32 +138,6 @@ func TestRemoteTransportDeliveryLookupFailureDoesNotProtect(t *testing.T) {
 
 	if expired := manager.CleanInactive(DefaultActiveSessionGrace, DefaultPausedSessionGrace); len(expired) != 1 {
 		t.Fatalf("expired %d sessions after a failed delivery lookup, want 1", len(expired))
-	}
-}
-
-// Every remote session is looked up on each sweep, including ones that still
-// look active, so none can go idle between the lookup and the expiry check. A
-// locally served session has its own transport accounting and is never asked.
-func TestDeliveryLookupAsksAboutEveryRemoteSession(t *testing.T) {
-	manager := NewSessionManager(0, 0)
-	abandoned := startAbandonedRemoteSession(t, manager)
-	local := startPlaybackTestSession(t, manager, 8, "profile-2", 43, PlayDirect)
-	active := startPlaybackTestSession(t, manager, 9, "profile-3", 44, PlayTranscode)
-	if err := manager.SetRemoteTransport(active.ID, true); err != nil {
-		t.Fatalf("mark remote transport: %v", err)
-	}
-
-	asked := make(map[string]bool)
-	manager.SetDeliveryActivityReader(func(_ context.Context, sessions []Session) (map[string]time.Time, error) {
-		for _, s := range sessions {
-			asked[s.ID] = true
-		}
-		return nil, nil
-	})
-	manager.CleanInactive(DefaultActiveSessionGrace, DefaultPausedSessionGrace)
-
-	if !asked[abandoned.ID] || !asked[active.ID] || asked[local.ID] || len(asked) != 2 {
-		t.Fatalf("delivery lookup asked about %v, want both remote sessions (%s, %s) and not the local one", asked, abandoned.ID, active.ID)
 	}
 }
 

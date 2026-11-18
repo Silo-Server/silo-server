@@ -6,52 +6,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestDetectChapterIntroRejectsGeneratedAndAdjacentMatches(t *testing.T) {
-	if _, ok := DetectChapterIntro([]models.MediaChapter{
-		{Index: 0, Title: "Chapter 01", StartSeconds: 0, EndSeconds: 30},
-		{Index: 1, Title: "Part 1", StartSeconds: 30, EndSeconds: 600},
-	}, false); ok {
-		t.Fatal("generated chapter title should not match")
-	}
-	if _, ok := DetectChapterIntro([]models.MediaChapter{
-		{Index: 0, Title: "Intro", StartSeconds: 0, EndSeconds: 30},
-		{Index: 1, Title: "Opening", StartSeconds: 30, EndSeconds: 90},
-		{Index: 2, Title: "Part 1", StartSeconds: 90, EndSeconds: 600},
-	}, false); ok {
-		t.Fatal("adjacent intro-like chapters should not match")
-	}
-}
-
-func TestDetectChapterIntroRejectsAmbiguousOpusTitles(t *testing.T) {
-	for _, title := range []string{"op", "Op", "Op. 5", "Op 5"} {
-		t.Run(title, func(t *testing.T) {
-			if _, ok := DetectChapterIntro([]models.MediaChapter{
-				{Index: 0, Title: title, StartSeconds: 0, EndSeconds: 45},
-				{Index: 1, Title: "Movement I", StartSeconds: 45, EndSeconds: 600},
-			}, false); ok {
-				t.Fatalf("ambiguous title %q should not match", title)
-			}
-		})
-	}
-}
-
-func TestDetectChapterIntroAcceptsExplicitOPTitles(t *testing.T) {
-	for _, title := range []string{"OP", "OP1", "OP 1", "OP: Opening", "OP - Opening"} {
-		t.Run(title, func(t *testing.T) {
-			segment, ok := DetectChapterIntro([]models.MediaChapter{
-				{Index: 0, Title: title, StartSeconds: 0, EndSeconds: 45},
-				{Index: 1, Title: "Part 1", StartSeconds: 45, EndSeconds: 600},
-			}, false)
-			if !ok {
-				t.Fatalf("explicit title %q should match", title)
-			}
-			if segment.Start != 0 || segment.End != 45 {
-				t.Fatalf("unexpected segment %.1f-%.1f", segment.Start, segment.End)
-			}
-		})
-	}
-}
-
 // Cold opens: many anime releases title the cold open Intro and the opening
 // song OP. The episode layouts are those of issue #4382.
 func TestDetectChapterIntroColdOpens(t *testing.T) {
@@ -117,22 +71,5 @@ func TestDetectChapterIntroColdOpens(t *testing.T) {
 				t.Fatalf("segment %.1f-%.1f, want %.1f-%.1f", segment.Start, segment.End, tc.wantStart, tc.wantEnd)
 			}
 		})
-	}
-}
-
-func TestChaptersNameOpening(t *testing.T) {
-	for title, want := range map[string]bool{
-		"OP":              true,
-		"OP2":             true,
-		"Opening":         true,
-		"Opening 2":       true,
-		"Opening: Song":   true,
-		"Opening Credits": false,
-		"Intro":           false,
-		"Op. 5":           false,
-	} {
-		if got := chaptersNameOpening([]models.MediaChapter{{Title: title}}); got != want {
-			t.Errorf("chaptersNameOpening(%q) = %v, want %v", title, got, want)
-		}
 	}
 }

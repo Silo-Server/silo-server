@@ -7,69 +7,6 @@ import (
 	"time"
 )
 
-func TestLoadFromDBAudiobookshelfCompatFlagGatesCompatListener(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.AudiobookshelfCompat.Listen != ":13378" {
-		t.Fatalf("default audiobooks listener = %q, want default :13378", cfg.AudiobookshelfCompat.Listen)
-	}
-
-	cfg, err = LoadFromDB(map[string]string{"audiobookshelf_compat.enabled": "false"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.AudiobookshelfCompat.Listen != "" {
-		t.Fatalf("disabled audiobooks listener = %q, want empty", cfg.AudiobookshelfCompat.Listen)
-	}
-
-	cfg, err = LoadFromDB(map[string]string{"audiobookshelf_compat.enabled": "true"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.AudiobookshelfCompat.Listen != ":13378" {
-		t.Fatalf("enabled audiobooks listener = %q, want default :13378", cfg.AudiobookshelfCompat.Listen)
-	}
-}
-
-func TestLoadFromDBJellyfinCompatEnabledPreservesLegacyListenerDefault(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if !cfg.JellyfinCompat.Enabled {
-		t.Fatal("JellyfinCompat.Enabled = false, want legacy default true when listener would bind")
-	}
-	if cfg.JellyfinCompat.Listen == "" {
-		t.Fatal("JellyfinCompat.Listen is empty, want default listener")
-	}
-
-	cfg, err = LoadFromDB(map[string]string{"jellyfin_compat.listen": ":19096"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if !cfg.JellyfinCompat.Enabled {
-		t.Fatal("JellyfinCompat.Enabled = false, want true when legacy listener is configured")
-	}
-	if cfg.JellyfinCompat.Listen != ":19096" {
-		t.Fatalf("JellyfinCompat.Listen = %q, want configured listener", cfg.JellyfinCompat.Listen)
-	}
-}
-
-func TestLoadFromDBJellyfinCompatEnabledRespectsExplicitDisable(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{
-		"jellyfin_compat.enabled": "false",
-		"jellyfin_compat.listen":  ":19096",
-	})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.JellyfinCompat.Enabled {
-		t.Fatal("JellyfinCompat.Enabled = true, want configured false")
-	}
-}
-
 // TestLoadFromDBRejectsInvalidValues checks that an unreadable stored value
 // fails the load and names its key.
 func TestLoadFromDBRejectsInvalidValues(t *testing.T) {

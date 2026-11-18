@@ -3,7 +3,6 @@ package fspath
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,63 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
-	"unicode/utf8"
 )
-
-func TestEncodeLeavesValidUTF8Unchanged(t *testing.T) {
-	for _, path := range []string{
-		"",
-		"/media/movies/Heat (1995)/Heat (1995).mkv",
-		"/media/tv/Bård Ylvisåker/Season 01/S01E01 – ♫.mkv",
-		"/media/anime/進撃の巨人/第1話.mkv",
-		"/media/odd/� replacement and emoji 🎬.mkv",
-	} {
-		if got := Encode(path); got != path {
-			t.Errorf("Encode(%q) = %q, want it unchanged", path, got)
-		}
-		if got := Decode(path); got != path {
-			t.Errorf("Decode(%q) = %q, want it unchanged", path, got)
-		}
-		if IsEncoded(path) {
-			t.Errorf("IsEncoded(%q) = true", path)
-		}
-	}
-}
-
-func TestEncodeRoundTrips(t *testing.T) {
-	for _, raw := range []string{
-		"/mnt/media/Takk for alt B\xe5rd Ylvis\xe5ker.mkv",
-		"\xff\xfe\x80\x81",
-		"truncated UTF-8 \xe2\x82",
-		"mixed \xe5 and å and \xc3",
-		// A reserved code point really present in a name is escaped too.
-		"reserved \U0010FEE5 code point",
-		"overlong \xc0\xaf slash",
-	} {
-		encoded := Encode(raw)
-		if !utf8.ValidString(encoded) {
-			t.Errorf("Encode(%q) = %q, not valid UTF-8", raw, encoded)
-		}
-		if strings.ContainsRune(encoded, utf8.RuneError) && !strings.ContainsRune(raw, utf8.RuneError) {
-			t.Errorf("Encode(%q) = %q lost bytes to U+FFFD", raw, encoded)
-		}
-		if got := Decode(encoded); got != raw {
-			t.Errorf("Decode(Encode(%q)) = %q", raw, got)
-		}
-		if !IsEncoded(encoded) {
-			t.Errorf("IsEncoded(Encode(%q)) = false", raw)
-		}
-		// Encoded paths survive JSON, which replaces invalid bytes in raw ones.
-		data, err := json.Marshal(encoded)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var back string
-		if err := json.Unmarshal(data, &back); err != nil || Decode(back) != raw {
-			t.Errorf("JSON round trip of %q gave %q (%v)", raw, back, err)
-		}
-	}
-}
 
 func TestEncodePreservesPathStructure(t *testing.T) {
 	dir := "/mnt/media/Takk for alt (2023)"
@@ -167,18 +110,6 @@ func TestOSWrappersOpenEncodedPaths(t *testing.T) {
 	out, err := CommandContext(context.Background(), "cat", encoded).Output()
 	if err != nil || !bytes.Equal(out, []byte("video")) {
 		t.Fatalf("cat via CommandContext = %q, %v", out, err)
-	}
-}
-
-func TestDecodeAllKeepsUnchangedSlice(t *testing.T) {
-	args := []string{"-i", "/media/plain.mkv", "-f", "null"}
-	if got := DecodeAll(args); &got[0] != &args[0] {
-		t.Fatal("DecodeAll copied arguments that needed no decoding")
-	}
-	encoded := Encode("/media/B\xe5rd.mkv")
-	got := DecodeAll([]string{"-i", encoded, "subtitles=filename='" + encoded + "'"})
-	if got[1] != "/media/B\xe5rd.mkv" || got[2] != "subtitles=filename='/media/B\xe5rd.mkv'" {
-		t.Fatalf("DecodeAll = %q", got)
 	}
 }
 

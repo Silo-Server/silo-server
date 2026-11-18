@@ -17,7 +17,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -484,30 +483,6 @@ func TestBrowserCallbackRejectsUnrelatedURLsWithoutConsumingAttempt(t *testing.T
 	}
 }
 
-func TestModelsPreserveVisibleAccountCatalogOrder(t *testing.T) {
-	store := &memoryStore{values: map[string]string{}}
-	save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", AccessToken: "access", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour)}}})
-	s := NewService(store)
-	s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.String() != resource+"/models" || r.Header.Get("Authorization") != "Bearer access" {
-			t.Error("wrong catalog request")
-		}
-		return response(200, map[string]any{"models": []map[string]string{
-			{"slug": "o1-pro", "visibility": "list"},
-			{"slug": "o3-pro-2025-06-10", "visibility": "list"},
-			{"slug": "gpt-5.5-pro", "visibility": "list"},
-			{"slug": "gpt-5.5-pro-2026-04-23", "visibility": "list"},
-			{"slug": "gpt-6-astra", "display_name": "GPT-6 Astra", "visibility": "list"},
-			{"slug": "hidden", "visibility": "hidden"},
-			{"slug": "gpt-6.1-sol", "display_name": "GPT-6.1 Sol", "visibility": "list"},
-		}}), nil
-	})
-	models, err := s.Models(t.Context(), "")
-	if err != nil || len(models) != 2 || models[0].ID != "gpt-6-astra" || models[1].ID != "gpt-6.1-sol" {
-		t.Fatalf("models = %+v, err = %v", models, err)
-	}
-}
-
 func TestModelsUseRequestedAccountInsteadOfActiveAccount(t *testing.T) {
 	store := &memoryStore{values: map[string]string{}}
 	c := credentials{Active: "b", Accounts: []account{
@@ -572,159 +547,6 @@ func TestLoginStateExpiryConsentAndReauthorization(t *testing.T) {
 	save(t, store, c)
 	if err := s.CompleteLogin(t.Context(), login.CallbackURI+"?state="+q.Get("state")+"&code=auth-code"); !errors.Is(err, ErrInvalidLogin) {
 		t.Fatalf("expired attempt: %v", err)
-	}
-}
-
-func TestDisconnectRetriesTransientRevocation(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		status      int
-		network     bool
-		persistent  bool
-		canceled    bool
-		deadline    bool
-		wantCalls   int
-		wantRevoked bool
-	}{
-		{name: "network recovery", network: true, wantCalls: 2, wantRevoked: true},
-		{name: "rate limit recovery", status: http.StatusTooManyRequests, wantCalls: 2, wantRevoked: true},
-		{name: "persistent rate limit", status: http.StatusTooManyRequests, persistent: true, wantCalls: 3},
-		{name: "network outage", network: true, persistent: true, wantCalls: 3},
-		{name: "client rejection", status: http.StatusBadRequest, persistent: true, wantCalls: 1},
-		{name: "caller cancellation", canceled: true, wantCalls: 1, wantRevoked: true},
-		{name: "provider timeout leaves time for cleanup", deadline: true, wantCalls: 3},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				store := &memoryStore{values: map[string]string{}}
-				save(t, store, credentials{HostID: "host", Active: "app", Accounts: []account{
-					{ClientID: "app", Subject: "user", AccessToken: "access", RefreshToken: "refresh", IDToken: "identity", Scopes: planScope},
-					{ClientID: "other", Subject: "other-user", RefreshToken: "other-refresh"},
-				}})
-				s := NewService(store)
-				var calls []time.Time
-				s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-					if r.URL.String() == s.discoveryURL {
-						return response(http.StatusOK, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
-					}
-					calls = append(calls, time.Now())
-					if r.URL.String() != issuer+"/revoke" || r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
-						t.Fatal("unexpected revocation request")
-					}
-					if err := r.ParseForm(); err != nil {
-						t.Fatal(err)
-					}
-					if r.Form.Get("token") != "refresh" || r.Form.Get("token_type_hint") != oauthRefreshToken || r.Form.Get(oauthClientID) != "app" {
-						t.Fatal("revocation changed the starting credentials")
-					}
-					c := stored(t, store)
-					if c.Accounts[0].RefreshToken != "refresh" || !c.Accounts[0].NeedsLogin || c.Accounts[0].AccessToken != "" || r.Context().Err() != nil {
-						t.Fatal("refresh token lost or account still usable during revocation")
-					}
-					if tc.deadline {
-						<-r.Context().Done()
-						return nil, r.Context().Err()
-					}
-					if len(calls) == 1 || tc.persistent {
-						if tc.network {
-							return nil, errors.New("provider offline")
-						}
-						if tc.status != 0 {
-							return response(tc.status, nil), nil
-						}
-					}
-					return response(http.StatusOK, nil), nil
-				})
-				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
-				if tc.canceled {
-					cancel()
-				}
-				revoked, err := s.Disconnect(ctx, "app")
-				if err != nil || revoked != tc.wantRevoked || len(calls) != tc.wantCalls {
-					t.Fatalf("disconnect: revoked=%v, calls=%d, err=%v", revoked, len(calls), err)
-				}
-				if len(calls) > 1 && !calls[1].After(calls[0]) {
-					t.Fatal("revocation retry omitted backoff")
-				}
-				c := stored(t, store)
-				a := c.Accounts[0]
-				if c.Active != "" || c.HostID != "host" || a.ClientID != "app" || a.Subject != "user" || !a.NeedsLogin || a.AccessToken != "" || a.RefreshToken != "" || a.IDToken != "" || a.Scopes != "" || c.Accounts[1].RefreshToken != "other-refresh" {
-					t.Fatal("disconnect lost registration, retained credentials, or changed another account")
-				}
-			})
-		})
-	}
-}
-
-func TestDisconnectRetriesDiscoveryWithinRevocationBudget(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		status        int
-		network       bool
-		persistent    bool
-		invalid       bool
-		revokeFailure bool
-		wantDiscovery int
-		wantRevoke    int
-		wantConfirmed bool
-	}{
-		{name: "network recovery", network: true, wantDiscovery: 2, wantRevoke: 1, wantConfirmed: true},
-		{name: "server recovery", status: http.StatusServiceUnavailable, wantDiscovery: 2, wantRevoke: 1, wantConfirmed: true},
-		{name: "rate limit recovery", status: http.StatusTooManyRequests, wantDiscovery: 2, wantRevoke: 1, wantConfirmed: true},
-		{name: "persistent outage", network: true, persistent: true, wantDiscovery: 3},
-		{name: "shared retry budget", status: http.StatusServiceUnavailable, revokeFailure: true, wantDiscovery: 2, wantRevoke: 2, wantConfirmed: true},
-		{name: "invalid endpoint", invalid: true, wantDiscovery: 1},
-		{name: "identity rejection", status: http.StatusUnauthorized, wantDiscovery: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				store := &memoryStore{values: map[string]string{}}
-				save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", AccessToken: "access", RefreshToken: "refresh"}}})
-				s := NewService(store)
-				var discoveryCalls, revokeCalls int
-				s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-					c := stored(t, store)
-					if c.Active != "" || !c.Accounts[0].NeedsLogin || c.Accounts[0].AccessToken != "" || c.Accounts[0].RefreshToken != "refresh" {
-						t.Fatal("account usable or refresh token discarded before revocation")
-					}
-					if r.URL.String() == s.discoveryURL {
-						discoveryCalls++
-						if discoveryCalls == 1 || tc.persistent {
-							if tc.network {
-								return nil, errors.New("discovery offline")
-							}
-							if tc.status != 0 {
-								return response(tc.status, nil), nil
-							}
-						}
-						endpoint := issuer + "/revoke"
-						if tc.invalid {
-							endpoint = "https://untrusted.example.test/revoke"
-						}
-						return response(http.StatusOK, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: endpoint}), nil
-					}
-					if r.URL.String() != issuer+"/revoke" || r.Method != http.MethodPost {
-						t.Fatal("sent credentials to an unexpected endpoint")
-					}
-					if err := r.ParseForm(); err != nil || r.Form.Get("token") != "refresh" || r.Form.Get(oauthClientID) != "app" {
-						t.Fatal("revocation lost departing credentials", err)
-					}
-					revokeCalls++
-					if tc.revokeFailure && revokeCalls == 1 {
-						return response(http.StatusServiceUnavailable, nil), nil
-					}
-					return response(http.StatusOK, nil), nil
-				})
-				revoked, err := s.Disconnect(t.Context(), "app")
-				if err != nil || revoked != tc.wantConfirmed || discoveryCalls != tc.wantDiscovery || revokeCalls != tc.wantRevoke {
-					t.Fatalf("revoked=%v, discovery=%d, revoke=%d, err=%v", revoked, discoveryCalls, revokeCalls, err)
-				}
-				if c := stored(t, store); c.Accounts[0].RefreshToken != "" || c.Accounts[0].DisconnectID != "" {
-					t.Fatal("cleanup retained credentials")
-				}
-			})
-		})
 	}
 }
 

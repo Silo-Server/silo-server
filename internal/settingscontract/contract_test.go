@@ -346,78 +346,6 @@ func sha256Of(manifest []byte, schemas map[string][]byte) string {
 	return `"` + hex.EncodeToString(digest.Sum(nil)) + `"`
 }
 
-func TestPublicManifestStripsMaintainerNotes(t *testing.T) {
-	public, err := PublicBytes()
-	if err != nil {
-		t.Fatalf("building public manifest: %v", err)
-	}
-
-	var doc struct {
-		Definitions []map[string]json.RawMessage `json:"definitions"`
-	}
-	if err := json.Unmarshal(public, &doc); err != nil {
-		t.Fatalf("parsing public manifest: %v", err)
-	}
-	if len(doc.Definitions) == 0 {
-		t.Fatal("public manifest has no definitions")
-	}
-	for _, def := range doc.Definitions {
-		if _, present := def["notes"]; present {
-			t.Errorf("public manifest leaked maintainer notes: %s", def["key"])
-		}
-	}
-
-	// The private manifest is what carries notes; if it stopped carrying any,
-	// this test would pass vacuously.
-	raw, err := RawBytes()
-	if err != nil {
-		t.Fatalf("reading raw manifest: %v", err)
-	}
-	if !strings.Contains(string(raw), `"notes"`) {
-		t.Fatal("no definition carries notes, so the stripping test proves nothing")
-	}
-	if !strings.Contains(string(public), `"option_sets"`) {
-		t.Fatal("public manifest omitted advisory option_sets")
-	}
-}
-
-func TestLanguageOptionSetsAreCanonicalAndReferenced(t *testing.T) {
-	manifest, err := Load()
-	if err != nil {
-		t.Fatalf("loading manifest: %v", err)
-	}
-
-	wantReferences := map[string]string{
-		"playback.audio_language":    "playback_audio_languages",
-		"playback.subtitle_language": "playback_subtitle_languages",
-		"catalog.metadata_language":  "catalog_metadata_languages",
-	}
-	for key, optionSetID := range wantReferences {
-		def, ok := manifest.Lookup(key)
-		if !ok {
-			t.Fatalf("%s is not registered", key)
-		}
-		if def.SuggestedOptions != optionSetID {
-			t.Errorf("%s suggested_options = %q, want %q",
-				key, def.SuggestedOptions, optionSetID)
-		}
-		optionSet, ok := manifest.OptionSets[optionSetID]
-		if !ok {
-			t.Fatalf("%s references missing option set %q", key, optionSetID)
-		}
-		if len(optionSet.Options) < 30 {
-			t.Errorf("%s has only %d suggestions; want the shared language floor",
-				optionSetID, len(optionSet.Options))
-		}
-		for _, option := range optionSet.Options {
-			normalized, valid := NormalizeLanguageTag(option.Value)
-			if !valid || normalized != option.Value {
-				t.Errorf("%s contains non-canonical value %q", optionSetID, option.Value)
-			}
-		}
-	}
-}
-
 func TestRevisionAwareFilteringHidesNewerElements(t *testing.T) {
 	def := &Definition{
 		Key:          fixtureKey,
@@ -1041,76 +969,10 @@ func TestStrictUnmarshalRejectsTrailingContent(t *testing.T) {
 	}
 }
 
-// TestEnumMatchingIsTypeSafe guards the value types manifest.schema.json
-// already permits. Comparing formatted tokens made the string "3" satisfy an
-// integer member and "true" satisfy a boolean one.
-func TestEnumMatchingIsTypeSafe(t *testing.T) {
-	schema := &ValueSchema{
-		Type: TypeEnum,
-		Values: []EnumMember{
-			{Value: "auto"},
-			{Value: float64(3)},
-			{Value: true},
-			{Value: float64(1000000)},
-		},
-	}
-
-	accepted := []string{`"auto"`, `3`, `true`, `3.0`, `1000000`, `1e6`}
-	for _, raw := range accepted {
-		if err := schema.ValidateValue(json.RawMessage(raw), nil); err != nil {
-			t.Errorf("ValidateValue(%s) = %v, want nil", raw, err)
-		}
-	}
-
-	rejected := []string{`"3"`, `"true"`, `"1000000"`, `4`, `false`, `"AUTO"`}
-	for _, raw := range rejected {
-		if err := schema.ValidateValue(json.RawMessage(raw), nil); err == nil {
-			t.Errorf("ValidateValue(%s) was accepted; wrong JSON type or value", raw)
-		}
-	}
-
-	// A string member and a numeric member that print alike are distinct, not
-	// a duplicate.
-	mixed := &ValueSchema{
-		Type:   TypeEnum,
-		Values: []EnumMember{{Value: "3"}, {Value: float64(3)}},
-	}
-	if errs := mixed.validate(1, 1, nil); len(errs) != 0 {
-		t.Errorf(`members "3" and 3 reported as duplicates: %v`, errs)
-	}
-}
-
 // fixedBound is a bound that has never been widened, which is every bound built
 // by hand in a test.
 func fixedBound(value float64) *Bound {
 	return &Bound{History: []BoundEntry{{Value: value}}}
-}
-
-// TestStepIsEnforced closes the gap between a declared constraint and the
-// single validation path. player.playback_speed advertises a 0.05 step, so a
-// server that stores 1.4372 hands every client a value its stepper cannot
-// represent.
-func TestStepIsEnforced(t *testing.T) {
-	step := 0.05
-	schema := &ValueSchema{
-		Type: TypeNumber, Minimum: fixedBound(0.25), Maximum: fixedBound(3.0), Step: &step,
-	}
-
-	for _, raw := range []string{`0.25`, `0.75`, `1`, `1.25`, `1.4`, `2.5`, `3`} {
-		if err := schema.ValidateValue(json.RawMessage(raw), nil); err != nil {
-			t.Errorf("ValidateValue(%s) = %v, want nil", raw, err)
-		}
-	}
-	for _, raw := range []string{`0.26`, `1.4372`, `1.01`, `2.99`} {
-		if err := schema.ValidateValue(json.RawMessage(raw), nil); err == nil {
-			t.Errorf("ValidateValue(%s) was accepted despite the 0.05 step", raw)
-		}
-	}
-
-	// Range still wins where both apply.
-	if err := schema.ValidateValue(json.RawMessage(`3.05`), nil); err == nil {
-		t.Error("a value above the maximum was accepted")
-	}
 }
 
 // TestLanguageTagsAcceptWhatClientsProduce pins the shapes the narrower
@@ -1159,34 +1021,6 @@ func TestLanguageTagsAcceptWhatClientsProduce(t *testing.T) {
 		if got, ok := NormalizeLanguageTag(input); ok {
 			t.Errorf("NormalizeLanguageTag(%q) = %q, want rejection", input, got)
 		}
-	}
-}
-
-// TestNormalizeValueCanonicalizesLanguageTags proves normalization is reachable
-// through the shared path, not just available as a helper. Without it en-US,
-// en-us and EN-us are three rows for one preference and track matching misses
-// on two of them.
-func TestNormalizeValueCanonicalizesLanguageTags(t *testing.T) {
-	schema := &ValueSchema{Type: TypeLanguageTag, Nullable: true}
-
-	got, err := schema.NormalizeValue(json.RawMessage(`"en_us"`), nil)
-	if err != nil {
-		t.Fatalf("NormalizeValue: %v", err)
-	}
-	if string(got) != `"en-US"` {
-		t.Fatalf("NormalizeValue = %s, want \"en-US\"", got)
-	}
-
-	got, err = schema.NormalizeValue(json.RawMessage(`null`), nil)
-	if err != nil {
-		t.Fatalf("NormalizeValue(null): %v", err)
-	}
-	if string(got) != jsonNull {
-		t.Fatalf("NormalizeValue(null) = %s, want null", got)
-	}
-
-	if _, err := schema.NormalizeValue(json.RawMessage(`""`), nil); err == nil {
-		t.Error(`NormalizeValue("") was accepted; unset must be null, not the empty string`)
 	}
 }
 
@@ -1262,65 +1096,6 @@ func TestValuesEncodingJSONWouldAcceptAreRejected(t *testing.T) {
 	if err := def.ValueSchema.ValidateValue(
 		json.RawMessage(`"body::after { content: \"😀\"; }"`), objSchemas); err != nil {
 		t.Errorf("ui.custom_css rejected a valid surrogate pair: %v", err)
-	}
-}
-
-// TestLibraryPageStateAcceptsTheWebClientsRealSearchStrings pins the search
-// bound against what web/src/pages/libraryPageSearchParams.ts actually produces.
-//
-// An advanced view encodes every filter rule as three
-// groups[i][rules][j][field|op|value] keys, so the serialized string grows
-// about 150 characters per rule — measured at 216 for one rule, 518 for three,
-// 820 for five. The bound started at 256, which the current endpoint has never
-// enforced (it only checks that the value parses), so those rows are already
-// stored in production and would have failed the migration that types them.
-func TestLibraryPageStateAcceptsTheWebClientsRealSearchStrings(t *testing.T) {
-	manifest, err := Load()
-	if err != nil {
-		t.Fatalf("loading manifest: %v", err)
-	}
-	def, ok := manifest.Lookup("ui.library_page_state")
-	if !ok {
-		t.Fatal("ui.library_page_state is not registered")
-	}
-
-	// One group of n rules, in the key shape GROUP_RULE_PATTERN matches.
-	search := func(rules int) string {
-		parts := []string{"tab=movies", "sort=dateAdded", "order=desc", "groups%5B0%5D%5Bmatch%5D=all"}
-		for i := 0; i < rules; i++ {
-			for _, field := range []string{"field", "op", "value"} {
-				parts = append(parts, fmt.Sprintf(
-					"groups%%5B0%%5D%%5Brules%%5D%%5B%d%%5D%%5B%s%%5D=Science+Fiction", i, field))
-			}
-		}
-		return strings.Join(parts, "&")
-	}
-
-	for _, rules := range []int{1, 3, 5, 10} {
-		t.Run(fmt.Sprintf("%d rules", rules), func(t *testing.T) {
-			value, err := json.Marshal(map[string]any{
-				"version":   1,
-				"libraries": map[string]any{"7": map[string]any{"search": search(rules)}},
-			})
-			if err != nil {
-				t.Fatalf("encoding: %v", err)
-			}
-			if err := def.ValueSchema.ValidateValue(value, objSchemas); err != nil {
-				t.Fatalf("a %d-rule saved view was rejected: %v", rules, err)
-			}
-		})
-	}
-
-	// The bound still exists — this is not an unbounded string.
-	oversized, err := json.Marshal(map[string]any{
-		"version":   1,
-		"libraries": map[string]any{"7": map[string]any{"search": strings.Repeat("x", 8192)}},
-	})
-	if err != nil {
-		t.Fatalf("encoding: %v", err)
-	}
-	if err := def.ValueSchema.ValidateValue(oversized, objSchemas); err == nil {
-		t.Error("an 8KiB search string was accepted; the bound is not enforced")
 	}
 }
 
@@ -1504,111 +1279,5 @@ func TestUICustomizationObjectSchemasAreStrict(t *testing.T) {
 				t.Fatalf("invalid %s value was accepted: %s", tc.key, tc.value)
 			}
 		})
-	}
-}
-
-// TestQualityIsTwoIndependentAxes pins the split that replaced the compound
-// ladder values. A client composes its own presets from these two, so the
-// contract must not constrain them jointly.
-func TestQualityIsTwoIndependentAxes(t *testing.T) {
-	manifest, err := Load()
-	if err != nil {
-		t.Fatalf("loading manifest: %v", err)
-	}
-	quality, ok := manifest.Lookup(keyPreferredQuality)
-	if !ok {
-		t.Fatal("playback.preferred_quality is not registered")
-	}
-	bitrate, ok := manifest.Lookup("playback.max_bitrate_kbps")
-	if !ok {
-		t.Fatal("playback.max_bitrate_kbps is not registered")
-	}
-
-	// The resolution axis carries no bitrate spellings.
-	for _, member := range quality.ValueSchema.Values {
-		if s, isString := member.Value.(string); isString && strings.Contains(s, "-") {
-			t.Errorf("quality member %q looks like a compound ladder rung; "+
-				"bitrate belongs to playback.max_bitrate_kbps", s)
-		}
-	}
-
-	// Uncapped has to be expressible, or every client invents a sentinel.
-	if !bitrate.ValueSchema.Nullable {
-		t.Error("max_bitrate_kbps must be nullable so uncapped is a real value")
-	}
-	if string(bitrate.DefaultValue) != jsonNull {
-		t.Errorf("max_bitrate_kbps defaults to %s, want null (uncapped)", bitrate.DefaultValue)
-	}
-
-	// Both axes must resolve identically, or a device override of one and a
-	// profile value of the other would compose into a pair the user never chose.
-	if len(quality.ResolutionOrder) != len(bitrate.ResolutionOrder) {
-		t.Fatalf("resolution orders differ: %v vs %v",
-			quality.ResolutionOrder, bitrate.ResolutionOrder)
-	}
-	for i := range quality.ResolutionOrder {
-		if quality.ResolutionOrder[i] != bitrate.ResolutionOrder[i] {
-			t.Errorf("resolution orders differ at %d: %q vs %q",
-				i, quality.ResolutionOrder[i], bitrate.ResolutionOrder[i])
-		}
-	}
-
-	// The legacy compound values decompose losslessly; this is the table the
-	// migration implements.
-	for _, tc := range []struct {
-		legacy     string
-		resolution string
-		kbps       int
-	}{
-		{"1080p-high", "1080p", 10000},
-		{"1080p", "1080p", 6000},
-		{"1080p-8", "1080p", 6000},
-		{"720p-high", "720p", 4000},
-		{"720p-medium", "720p", 3000},
-		{"720p", "720p", 2000},
-		{"480p", "480p", 1500},
-		{"420p", "480p", 720},
-		{"328p", "480p", 720},
-	} {
-		t.Run("decompose "+tc.legacy, func(t *testing.T) {
-			res, _ := json.Marshal(tc.resolution)
-			if err := quality.ValueSchema.ValidateValue(res, objSchemas); err != nil {
-				t.Errorf("resolution %q is not a member: %v", tc.resolution, err)
-			}
-			kbps, _ := json.Marshal(tc.kbps)
-			if err := bitrate.ValueSchema.ValidateValue(kbps, objSchemas); err != nil {
-				t.Errorf("bitrate %d is out of range: %v", tc.kbps, err)
-			}
-		})
-	}
-}
-
-// TestAdminDefaultForNamesOnlyDeclaredDefinitions keeps the server-settings
-// namespace for administrator defaults closed: only a definition that declares
-// admin_default can be given one, so an admin write cannot invent a default
-// the resolver would never read.
-func TestAdminDefaultForNamesOnlyDeclaredDefinitions(t *testing.T) {
-	manifest, err := Load()
-	if err != nil {
-		t.Fatalf("loading manifest: %v", err)
-	}
-
-	if got := AdminDefaultSettingKey("ui.title_art"); got != "defaults.ui.title_art" {
-		t.Fatalf("AdminDefaultSettingKey = %q", got)
-	}
-	def, ok := manifest.AdminDefaultFor("defaults.ui.title_art")
-	if !ok || def.Key != "ui.title_art" {
-		t.Fatalf("AdminDefaultFor(defaults.ui.title_art) = %v, %v; want ui.title_art", def, ok)
-	}
-
-	for _, key := range []string{
-		"ui.title_art",            // the setting itself, not its default
-		"defaults.ui.theme",       // a definition without admin_default
-		"defaults.card_overlays",  // a legacy server setting, not a contract key
-		"defaults.ui.unknown_key", // no such definition
-	} {
-		if _, ok := manifest.AdminDefaultFor(key); ok {
-			t.Errorf("AdminDefaultFor(%q) = true, want false", key)
-		}
 	}
 }

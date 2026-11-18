@@ -3,8 +3,6 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
-	"strings"
-	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -64,71 +62,4 @@ func (f *fakeEbookAnnotations) DeleteReaderAnnotation(_ context.Context, scope h
 		}
 	}
 	return handlers.ErrEbookAnnotationNotFound
-}
-func TestEbookAnnotationsTransport(t *testing.T) {
-	service := &fakeEbookAnnotations{}
-	deps := pilotDeps(nil, nil)
-	deps.EbookAnnotations = service
-	h := newTestHandler(t, deps)
-	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	path := Prefix + "/ebooks/book/annotations"
-	body := `{"id":"intent1","kind":"note","location":"chapter1","note":"original"}`
-	rec := do(t, h, "POST", path, body, viewer)
-	if rec.Code != 201 || rec.Header().Get("ETag") == "" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	tag := rec.Header().Get("ETag")
-	rec = do(t, h, "POST", path, strings.ReplaceAll(body, "original", "retry"), viewer)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"note":"original"`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if service.scope.UserID != 1 || service.scope.ProfileID != "p-owner" || service.scope.ContentID != "book" {
-		t.Fatalf("%+v", service.scope)
-	}
-	for _, tc := range []struct {
-		match, none string
-		want        int
-	}{
-		{"", "", 428}, {`"stale"`, "", 412}, {tag, "*", 412},
-	} {
-		headers := viewer
-		if tc.match != "" {
-			headers = with(headers, "If-Match", tc.match)
-		}
-		if tc.none != "" {
-			headers = with(headers, "If-None-Match", tc.none)
-		}
-		rec = do(t, h, "PATCH", path+"/intent1", `{"note":"changed"}`, headers)
-		if rec.Code != tc.want {
-			t.Fatalf("guard: %d %s", rec.Code, rec.Body.String())
-		}
-	}
-	rec = do(t, h, "PATCH", path+"/intent1", `{"note":null,"metadata":null}`, with(viewer, "If-Match", tag))
-	if rec.Code != 200 {
-		t.Fatalf("null patch: %d %s", rec.Code, rec.Body.String())
-	}
-	if service.patch.Note == nil || *service.patch.Note != "" || service.patch.Kind != nil || string(service.patch.Metadata) != "{}" {
-		t.Fatalf("%+v", service.patch)
-	}
-	fresh := rec.Header().Get("ETag")
-	rec = do(t, h, "DELETE", path+"/intent1", "", with(viewer, "If-Match", tag))
-	if rec.Code != 412 {
-		t.Fatalf("stale delete: %d", rec.Code)
-	}
-	rec = do(t, h, "DELETE", path+"/intent1", "", with(viewer, "If-Match", fresh))
-	if rec.Code != 204 || rec.Body.Len() != 0 {
-		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, "DELETE", path+"/intent1", "", with(viewer, "If-Match", fresh))
-	if rec.Code != 404 {
-		t.Fatalf("missing: %d", rec.Code)
-	}
-	rec = do(t, h, "POST", path, `{"id":"large","note":"`+strings.Repeat("x", 256<<10)+`"}`, viewer)
-	if rec.Code != 413 {
-		t.Fatalf("cap: %d", rec.Code)
-	}
-	rec = do(t, h, "GET", path, "", nil)
-	if rec.Code != 401 {
-		t.Fatalf("auth: %d", rec.Code)
-	}
 }

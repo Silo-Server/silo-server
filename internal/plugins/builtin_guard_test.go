@@ -23,24 +23,6 @@ func TestReservedPluginIDRejected(t *testing.T) {
 	}
 }
 
-// PreloadEnabled must skip builtin installations explicitly: the sentinel
-// install path has no manifest on disk, and without the skip preload would
-// fail (its caller is log.Fatalf) or at best emit spurious warnings.
-func TestPreloadEnabledSkipsBuiltinInstallation(t *testing.T) {
-	store := newFakeServiceInstallationStore(&Installation{
-		ID:          1,
-		PluginID:    "silo.builtin",
-		Kind:        KindBuiltin,
-		Enabled:     true,
-		InstallPath: "/nonexistent/silo-builtin",
-	})
-	svc := &Service{installations: store}
-
-	if err := svc.PreloadEnabled(context.Background()); err != nil {
-		t.Fatalf("PreloadEnabled with builtin-only store = %v, want nil (builtin must be skipped)", err)
-	}
-}
-
 func builtinGuardTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

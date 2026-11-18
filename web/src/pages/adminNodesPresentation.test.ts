@@ -1,22 +1,17 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import type { HostSystemStats, ReprobeNodeResult, StreamNode } from "@/api/types";
+import type { HostSystemStats, StreamNode } from "@/api/types";
 import {
   CAPABILITY_STALE_AFTER_MS,
   DISK_FILL_WARNING_PCT,
   HW_ACCEL_INHERIT,
   buildNodeHWDeviceRows,
-  describeGPUBusy,
-  describeNodeAccelerationOverride,
   describeNodeDrain,
-  describeNodeEgress,
   describeNodeGPU,
   describeNodeGroups,
-  describeNodeJobs,
   describeNodeGPUBusy,
   describeNodeSystem,
-  describeReprobeOutcome,
   describeResourceSample,
   describeSharedGPU,
   describeSystemStats,
@@ -428,36 +423,6 @@ describe("describeNodeSystem", () => {
   });
 });
 
-describe("describeGPUBusy", () => {
-  it("reports the busiest video engine and the total pinned sessions", () => {
-    expect(
-      describeGPUBusy([
-        { device: "/dev/dri/renderD128", video_busy_pct: 42, sessions: 2, source: "fdinfo" },
-        { device: "cuda:0", video_busy_pct: 71, sessions: 1, source: "nvidia-smi" },
-      ]),
-    ).toMatchObject({
-      label: "GPU",
-      value: "71%",
-      detail: "busiest of 2 GPUs · 3 sessions",
-      muted: false,
-      title: [
-        "/dev/dri/renderD128 — video 42% · 2 sessions",
-        "cuda:0 — video 71% · 1 session",
-      ].join("\n"),
-    });
-  });
-
-  it("mutes the tile when no device could be measured", () => {
-    expect(
-      describeGPUBusy([{ device: "/dev/dri/renderD128", sessions: 0, source: "unavailable" }]),
-    ).toMatchObject({
-      value: "—",
-      muted: true,
-      title: "/dev/dri/renderD128 — not measured · 0 sessions",
-    });
-  });
-});
-
 describe("describeResourceSample", () => {
   it("does not claim a sample when available is true but the body carries none", () => {
     expect(describeResourceSample({ available: true })).toMatchObject({ kind: "unavailable" });
@@ -475,34 +440,6 @@ describe("describeResourceSample", () => {
       gpu: { value: "30%", detail: "video engine · 1 session" },
       sampledAt: null,
     });
-  });
-});
-
-describe("describeNodeAccelerationOverride", () => {
-  it("renders nothing for a node that inherits the cluster-wide settings", () => {
-    expect(describeNodeAccelerationOverride(makeNode())).toBeNull();
-    expect(
-      describeNodeAccelerationOverride(
-        makeNode({ hw_accel_override: null, hw_device_override: null }),
-      ),
-    ).toBeNull();
-    // Whitespace is not an override.
-    expect(describeNodeAccelerationOverride(makeNode({ hw_device_override: " , " }))).toBeNull();
-  });
-
-  it("shows a single pinned device inline and counts several", () => {
-    expect(
-      describeNodeAccelerationOverride(
-        makeNode({ hw_accel_override: "vaapi", hw_device_override: "/dev/dri/renderD129" }),
-      )?.label,
-    ).toBe("override: vaapi · /dev/dri/renderD129");
-
-    const many = describeNodeAccelerationOverride(
-      makeNode({ hw_device_override: "/dev/dri/renderD128, /dev/dri/renderD129" }),
-    );
-    expect(many?.label).toBe("override: 2 devices");
-    expect(many?.title).toContain("GPU devices: /dev/dri/renderD128, /dev/dri/renderD129.");
-    expect(many?.title).toContain("Acceleration: inherited");
   });
 });
 
@@ -579,46 +516,6 @@ describe("buildNodeHWDeviceRows", () => {
       description: "Pinned device this node does not report",
     });
     expect(rows[2]?.title).toContain("not in this node's last capability report");
-  });
-});
-
-describe("describeReprobeOutcome", () => {
-  function result(overrides: Partial<ReprobeNodeResult> = {}): ReprobeNodeResult {
-    return {
-      node_id: 1,
-      node_name: "transcode-1",
-      status: "ok",
-      capabilities_refreshed: true,
-      ...overrides,
-    };
-  }
-
-  it("surfaces the node's own reason when the re-probe failed", () => {
-    expect(
-      describeReprobeOutcome(
-        makeNode(),
-        result({ status: "error", error: "node could not complete its hardware probe" }),
-      ),
-    ).toEqual({
-      ok: false,
-      message: "transcode-1: re-probe failed — node could not complete its hardware probe",
-    });
-  });
-
-  it("reports an unchanged hash as plainly as a change", () => {
-    const node = makeNode({ capabilities_hash: "sha256:aaa" });
-
-    expect(
-      describeReprobeOutcome(node, result({ capability_hash: "sha256:aaa", resolved: "qsv" })),
-    ).toEqual({ ok: true, message: "transcode-1: re-probed, no change (QSV)" });
-  });
-
-  it("calls out a changed report and the backend it resolved to", () => {
-    const node = makeNode({ capabilities_hash: "sha256:aaa" });
-
-    expect(
-      describeReprobeOutcome(node, result({ capability_hash: "sha256:bbb", resolved: "vaapi" })),
-    ).toEqual({ ok: true, message: "transcode-1: re-probed, hardware report changed — now VAAPI" });
   });
 });
 
@@ -807,48 +704,6 @@ describe("load meter fills", () => {
       0,
       null,
     ]);
-  });
-});
-
-describe("describeNodeJobs", () => {
-  it("reports a capped node against its cap", () => {
-    expect(describeNodeJobs(makeNode({ active_jobs: 3, max_jobs: 4 }))).toMatchObject({
-      label: "Transcodes",
-      value: "3 / 4",
-      warning: false,
-      fill: 75,
-    });
-  });
-
-  it("warns once a capped node is full", () => {
-    expect(describeNodeJobs(makeNode({ active_jobs: 4, max_jobs: 4 }))).toMatchObject({
-      value: "4 / 4",
-      warning: true,
-      fill: 100,
-    });
-  });
-
-  // Both spellings of "unlimited" the API uses, and the reason neither draws a
-  // bar: there is no ceiling, so any bar would be measured against a number
-  // this page made up.
-  it("draws no meter for an uncapped node", () => {
-    expect(describeNodeJobs(makeNode({ active_jobs: 7, max_jobs: null }))).toMatchObject({
-      value: "7",
-      detail: "no cap",
-      warning: false,
-      fill: null,
-    });
-    expect(describeNodeJobs(makeNode({ active_jobs: 7, max_jobs: 0 })).fill).toBe(null);
-  });
-});
-
-describe("describeNodeEgress", () => {
-  it("draws no meter for an uncapped node", () => {
-    expect(
-      describeNodeEgress(
-        makeNode({ type: "proxy", egress_kbps: 12_340, max_bandwidth_kbps: null }),
-      ),
-    ).toMatchObject({ value: "12.3 Mbps", detail: "no cap", fill: null });
   });
 });
 

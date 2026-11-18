@@ -135,10 +135,6 @@ func (w *failingCompletionResponseWriter) Write(p []byte) (int, error) {
 	return n, io.ErrClosedPipe
 }
 
-// TestTranscodeProxyFailsPromptlyOnHungNode covers proxy egress for issue
-// #2296: a transcode node that stops answering without closing its connections
-// gets a 502 within the liveness bound instead of holding the request until the
-// player gives up, so the player replans onto another node.
 func TestTranscodeProxyFailsPromptlyOnHungNode(t *testing.T) {
 	release := make(chan struct{})
 	node := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {

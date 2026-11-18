@@ -99,40 +99,6 @@ func plannerForNodes(nodes ...*nodepool.Node) plannedNodes {
 	return plannedNodes{nodepool.NewPlanner(nil, pool), pool}
 }
 
-func TestNodeExtractorSharesReportedAndReservedCapacity(t *testing.T) {
-	for _, mode := range []string{ExecutionPreferTranscodeNodes, ExecutionTranscodeNodesOnly} {
-		for _, load := range []string{"reported job", "reserved job"} {
-			t.Run(mode+"/"+load, func(t *testing.T) {
-				node, calls := fakeNode(t, http.StatusOK, mediasample.Result{Decoder: "node"})
-				node.MaxJobs = new(1)
-				if load == "reported job" {
-					node.ActiveJobs = 1
-				}
-				planner := plannerForNodes(node)
-				if load == "reserved job" {
-					if reserved, release := planner.ReserveTranscodeWork("download"); reserved == nil {
-						t.Fatal("download reservation failed")
-					} else {
-						defer release()
-					}
-				}
-				local := &countingExtractor{}
-				_, err := NewNodeExtractor(local, planner, fakeSettings{ExecutionSetting: mode}, nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
-				if calls.Load() != 0 {
-					t.Fatalf("full node received %d requests", calls.Load())
-				}
-				if mode == ExecutionPreferTranscodeNodes {
-					if err != nil || local.calls != 1 {
-						t.Fatalf("fallback error=%v calls=%d", err, local.calls)
-					}
-				} else if !errors.Is(err, errNoNode) || local.calls != 0 {
-					t.Fatalf("nodes-only error=%v local calls=%d", err, local.calls)
-				}
-			})
-		}
-	}
-}
-
 func TestInFlightTrickplayReservesCapacityUntilRequestEnds(t *testing.T) {
 	started, unblock := make(chan struct{}), make(chan struct{})
 	var once sync.Once

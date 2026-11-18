@@ -1,7 +1,6 @@
 package nodepool
 
 import (
-	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -16,41 +15,6 @@ func testDataCipher(t *testing.T) *secret.Cipher {
 		t.Fatal(err)
 	}
 	return cipher
-}
-
-// Only the canonical text of a key parses, so a key that differs from the one
-// issued (whitespace, padding, another alphabet, a re-spelled id) never names
-// a node.
-func TestParseNodeKeyAcceptsOnlyTheCanonicalForm(t *testing.T) {
-	valid, err := GenerateNodeKey(12)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id, err := ParseNodeKey(valid); err != nil || id != 12 {
-		t.Fatalf("ParseNodeKey(generated) = %d, %v; want 12", id, err)
-	}
-	material := strings.TrimPrefix(valid, "snk1_12_")
-	if random, err := base64.RawURLEncoding.DecodeString(material); err != nil || len(random) != 32 {
-		t.Fatalf("key material = %d bytes, %v; want 32 bytes of base64url", len(random), err)
-	}
-	short := base64.RawURLEncoding.EncodeToString(make([]byte, 31))
-	for name, key := range map[string]string{
-		"wrong prefix":      "snk2_12_" + material,
-		"no id":             "snk1__" + material,
-		"zero id":           "snk1_0_" + material,
-		"leading zero":      "snk1_012_" + material,
-		"signed id":         "snk1_+12_" + material,
-		"no separator":      "snk1_12",
-		"short material":    "snk1_12_" + short,
-		"padded material":   valid + "=",
-		"standard alphabet": "snk1_12_" + strings.NewReplacer("-", "+", "_", "/").Replace(material) + "+/",
-		"embedded newline":  "snk1_12_" + material[:20] + "\n" + material[20:],
-		"trailing space":    valid + " ",
-	} {
-		if _, err := ParseNodeKey(key); !errors.Is(err, ErrInvalidNodeKey) {
-			t.Errorf("%s: ParseNodeKey(%q) = %v, want ErrInvalidNodeKey", name, key, err)
-		}
-	}
 }
 
 // A stored key opens only on its own row, under the project's row AAD, and

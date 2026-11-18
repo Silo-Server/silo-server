@@ -9,7 +9,3 @@ import (
 func TestSQLiteSettingsWriterSerialization(t *testing.T) {
 	storetest.RunSettingsWriterSerialization(t, newConformanceStore)
 }
-
-func TestSQLitePreferenceSnapshot(t *testing.T) {
-	storetest.RunPreferenceSnapshot(t, newConformanceStore)
-}

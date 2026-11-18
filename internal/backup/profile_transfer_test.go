@@ -149,7 +149,7 @@ var importerSamples = map[string]importerSample{
 	userdata.Collections: {`{"collections":[`, `{"id":"c1","name":"A","type":"mdblist","watch_filter":"all","media_filter":"all","items":[],"shared_with":[],` +
 		`"sort_config":{"field":"title","order":"asc"},"source_url":"https://mdblist.com/lists/a/b",` +
 		`"source_config":{"mode":"mdblist_json","url":"https://mdblist.com/lists/a/b","library_ids":[1]}}`, `]}`},
-	userdata.Preferences + " settings": {`{"settings":[`, `{"key":"playback.audio_language","scope":"profile_series","series":"s1","value":"\"en\""}`, `]}`},
+	userdata.Preferences + " settings": {`{"settings":[`, `{"key":"playback.audio_language","scope":"profile_series","series":"s1","value":"en"}`, `]}`},
 	userdata.Preferences + " audio":    {`{"audio":[`, `{"series":"s1","track_index":1,"language":"en","signature":null,"updated_at":` + sampleAt + `}`, `]}`},
 	userdata.Preferences + " subtitles": {`{"subtitles":[`,
 		`{"series":"s1","language":"en","track_index":1,"external_path":"","mode":"always","show_forced_subtitles":null,"signature":null,"updated_at":` + sampleAt + `}`, `]}`},

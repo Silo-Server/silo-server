@@ -13,7 +13,7 @@ import type { RowCollections } from "@/lib/homeRows/types";
  * the server, including ones in libraries the admin's own profile can't open.
  * Hidden collections are left out because a row could not show them.
  */
-export function adminCollectionOptions(
+function adminCollectionOptions(
   collections: readonly LibraryCollection[],
   libraries: ReadonlyArray<{ id: number; name: string }>,
 ): CollectionOption[] {

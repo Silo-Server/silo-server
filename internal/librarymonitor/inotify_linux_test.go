@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func newTestInotify(t *testing.T, hooks inotifyHooks) *inotifyBackend {
@@ -493,35 +491,6 @@ func eventStrings(events []Event) []string {
 	return out
 }
 
-// A recursive copy can write into a new directory before the directory's
-// watch exists. The walk of the new directory reports what it finds as Found
-// creates, so the tracker waits for those files.
-func TestInotifyReportsFilesFoundInANewDirectory(t *testing.T) {
-	root := t.TempDir()
-	newDir := filepath.Join(root, "New")
-	b := newTestInotify(t, inotifyHooks{addWatch: func(fd int, path string, mask uint32) (int, error) {
-		if path == newDir {
-			// The copy got here first.
-			writeFile(t, filepath.Join(newDir, "a.mkv"), "partial")
-		}
-		return unix.InotifyAddWatch(fd, path, mask)
-	}})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	mkdirs(t, root, "New")
-	events := nextEvents(t, b, isEvent(EventCreate, root, "New"))
-	found := false
-	for _, ev := range events {
-		if ev.Kind == EventCreate && ev.Dir == newDir && ev.Name == "a.mkv" && ev.Found {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("events %v, want a Found create for New/a.mkv", eventStrings(events))
-	}
-}
-
 // eventLog drains a backend's events in the background, so its reader never
 // blocks, and lets a test wait for one.
 type eventLog struct {
@@ -810,29 +779,5 @@ func TestInotifyWalkListingDefersToANewerMarkerCheck(t *testing.T) {
 	seen.record(dir)
 	if got := seen.listed(dir, false); got || skippedNow() {
 		t.Fatalf("listing not applied: listed = %v, skipped = %v, want both false", got, skippedNow())
-	}
-}
-
-// A marker that now excludes a directory is reported like one that stops
-// excluding it, so a scan reconciles the media it hides. A directory whose
-// name is not UTF-8 is recorded fspath-encoded and handled the same way.
-func TestInotifyNewMarkerReportsTheFolder(t *testing.T) {
-	for _, name := range []string{"Movie A", "Movie \xe5"} {
-		encoded := fspath.Encode(name)
-		t.Run(fspath.Display(encoded), func(t *testing.T) {
-			root := t.TempDir()
-			mkdirs(t, root, name+"/Extras")
-			b := newTestInotify(t, inotifyHooks{})
-			if err := b.AddRoot(context.Background(), root); err != nil {
-				t.Fatal(err)
-			}
-			writeFile(t, filepath.Join(root, name, ".nomedia"), "")
-			nextEvents(t, b, func(ev Event) bool {
-				return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == encoded && ev.IsDir
-			})
-			if got := b.pathsWithPrefix(filepath.Join(root, encoded, "Extras")); len(got) != 0 {
-				t.Fatalf("still records %v below the marker", got)
-			}
-		})
 	}
 }

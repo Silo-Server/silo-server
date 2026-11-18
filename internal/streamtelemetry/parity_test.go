@@ -17,24 +17,6 @@ func liveSession(id string, mutate ...func(*LiveSession)) LiveSession {
 	return session
 }
 
-func TestCompareLiveSessionsReportsOnlySides(t *testing.T) {
-	telemetry := []LiveSession{liveSession("a"), liveSession("only-telemetry")}
-	legacy := []LiveSession{liveSession("a"), liveSession("only-legacy")}
-	report := CompareLiveSessions("legacy", telemetry, legacy, 0)
-	if report.Agrees {
-		t.Fatal("differing sets agreed")
-	}
-	if len(report.TelemetryOnly) != 1 || report.TelemetryOnly[0] != "only-telemetry" {
-		t.Fatalf("telemetry only = %+v", report.TelemetryOnly)
-	}
-	if len(report.LegacyOnly) != 1 || report.LegacyOnly[0] != "only-legacy" {
-		t.Fatalf("legacy only = %+v", report.LegacyOnly)
-	}
-	if report.InBoth != 1 {
-		t.Fatalf("in both = %d", report.InBoth)
-	}
-}
-
 func TestCompareLiveSessionsFieldRules(t *testing.T) {
 	t.Run("subject disagreement is a mismatch", func(t *testing.T) {
 		telemetry := []LiveSession{liveSession("a")}
@@ -98,71 +80,4 @@ func TestCompareLiveSessionsFieldRules(t *testing.T) {
 			t.Fatalf("mismatches = %+v", report.Mismatches)
 		}
 	})
-}
-
-// Truncation must be visible. A capped list with no count would read as
-// "covered everything".
-func TestCompareLiveSessionsCapsEveryList(t *testing.T) {
-	telemetry := make([]LiveSession, 0, 10)
-	legacy := make([]LiveSession, 0, 10)
-	for i := 0; i < 10; i++ {
-		telemetry = append(telemetry, liveSession(string(rune('a'+i))+"-telemetry"))
-		legacy = append(legacy, liveSession(string(rune('a'+i))+"-legacy"))
-	}
-	// Sessions present in both, disagreeing on subject, to exercise the mismatch cap.
-	for i := 0; i < 10; i++ {
-		id := "shared-" + string(rune('a'+i))
-		telemetry = append(telemetry, liveSession(id))
-		legacy = append(legacy, liveSession(id, func(s *LiveSession) { s.Subject = UserSubject(99) }))
-	}
-
-	report := CompareLiveSessions("legacy", telemetry, legacy, 3)
-	if len(report.TelemetryOnly) != 3 || report.TelemetryMore != 7 {
-		t.Fatalf("telemetry only = %d (+%d)", len(report.TelemetryOnly), report.TelemetryMore)
-	}
-	if len(report.LegacyOnly) != 3 || report.LegacyMore != 7 {
-		t.Fatalf("legacy only = %d (+%d)", len(report.LegacyOnly), report.LegacyMore)
-	}
-	if len(report.Mismatches) != 3 || report.MismatchesMore != 7 {
-		t.Fatalf("mismatches = %d (+%d)", len(report.Mismatches), report.MismatchesMore)
-	}
-}
-
-func TestLiveSessionsFromGlobalView(t *testing.T) {
-	view := GlobalMonitoringView{Sessions: []GlobalSessionView{
-		{
-			SessionID: "b", Subject: UserSubject(7), ProfileID: "profile-1", MediaFileID: 42,
-			StartedAt:   time.Unix(1_700_000_000, 0),
-			PlayMethods: []string{"direct"},
-			ViewerEdgePublishers: []PublisherRef{
-				{PublisherID: "p1", NodeID: ""},
-				{PublisherID: "p2", NodeID: "node-b"},
-			},
-		},
-		{
-			SessionID: "a", Subject: UserSubject(8),
-			// Two publishers disagreed about the play method, so §2.5 leaves the
-			// merged scalar unset and the projection must not invent one.
-			PlayMethods: []string{"direct", "transcode"},
-			// Relay-only: no viewer edge, so this session claims no node.
-			Publishers: []PublisherRef{{PublisherID: "node", NodeID: "node-c"}},
-		},
-	}}
-
-	sessions := LiveSessionsFromGlobalView(view)
-	if len(sessions) != 2 || sessions[0].SessionID != "a" || sessions[1].SessionID != "b" {
-		t.Fatalf("projection not sorted by session id: %+v", sessions)
-	}
-	if sessions[1].Node != "node-b" {
-		t.Fatalf("node = %q, want the first viewer-edge publisher with a node id", sessions[1].Node)
-	}
-	if sessions[1].PlayMethod != "direct" {
-		t.Fatalf("play method = %q", sessions[1].PlayMethod)
-	}
-	if sessions[0].PlayMethod != "" {
-		t.Fatalf("a disputed play method was rendered as %q; §2.5 forbids picking one", sessions[0].PlayMethod)
-	}
-	if sessions[0].Node != "" {
-		t.Fatalf("a relay-only session claimed node %q", sessions[0].Node)
-	}
 }

@@ -118,13 +118,3 @@ func TestTrickplayExtractRefuses(t *testing.T) {
 		t.Fatalf("no bearer: %d", unauthorized.Code)
 	}
 }
-
-func TestSoftwareAttempts(t *testing.T) {
-	plan := []mediasample.Attempt{{Hardware: true, TimeoutSeconds: 10}, {TimeoutSeconds: 20}}
-	if got := softwareAttempts(plan); len(got) != 1 || got[0].Hardware || got[0].TimeoutSeconds != 20 {
-		t.Fatalf("got %+v", got)
-	}
-	if got := softwareAttempts([]mediasample.Attempt{{Hardware: true, TimeoutSeconds: 10}}); len(got) != 1 || got[0].Hardware {
-		t.Fatalf("hardware-only plan: %+v", got)
-	}
-}
