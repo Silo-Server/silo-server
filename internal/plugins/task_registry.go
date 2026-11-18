@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -101,7 +104,7 @@ func (r *TaskRegistry) Tasks(ctx context.Context) ([]taskmanager.Task, error) {
 				name:           name,
 				description:    description,
 				resolver:       r.host,
-				triggers:       defaultPluginTaskTriggers(binding),
+				triggers:       pluginTaskTriggers(binding, capability),
 			}
 			tasks = append(tasks, task)
 		}
@@ -137,6 +140,11 @@ func (t *pluginTask) IsHidden() bool                     { return false }
 func (t *pluginTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return append([]taskmanager.TriggerConfig(nil), t.triggers...)
 }
+
+// FollowsDefaultTriggers keeps a plugin task's default out of task_schedules,
+// so a saved schedule only ever means an administrator's edit and the task
+// otherwise follows its binding and manifest default.
+func (t *pluginTask) FollowsDefaultTriggers() bool { return true }
 
 func (t *pluginTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	progress.Report(0, "Running plugin task")
@@ -182,15 +190,101 @@ func pluginTaskKey(installationID int, capabilityID string) string {
 	return fmt.Sprintf("plugin:%d:%s", installationID, capabilityID)
 }
 
-func defaultPluginTaskTriggers(binding *TaskBinding) []taskmanager.TriggerConfig {
-	if binding == nil || len(binding.Trigger) == 0 {
-		return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+// pluginTaskTriggers is a plugin task's default schedule: the binding's
+// trigger, else the manifest's scheduled_task.default_trigger, else one run
+// at startup. A trigger the task manager cannot run falls through to the
+// next source. A schedule saved on the task page outranks all three; the task
+// manager reads it first.
+func pluginTaskTriggers(binding *TaskBinding, capability *Capability) []taskmanager.TriggerConfig {
+	if trigger := bindingTrigger(binding); trigger != nil {
+		return []taskmanager.TriggerConfig{*trigger}
 	}
+	if trigger := manifestDefaultTrigger(capability); trigger != nil {
+		return []taskmanager.TriggerConfig{*trigger}
+	}
+	return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+}
 
-	var trigger taskmanager.TriggerConfig
-	raw, err := json.Marshal(binding.Trigger)
-	if err != nil || json.Unmarshal(raw, &trigger) != nil || trigger.Type == "" {
-		return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+// bindingTrigger is the runnable trigger stored on the binding, normalized,
+// or nil.
+func bindingTrigger(binding *TaskBinding) *taskmanager.TriggerConfig {
+	if binding == nil || len(binding.Trigger) == 0 {
+		return nil
 	}
-	return []taskmanager.TriggerConfig{trigger}
+	raw, err := json.Marshal(binding.Trigger)
+	if err != nil {
+		return nil
+	}
+	var trigger taskmanager.TriggerConfig
+	if json.Unmarshal(raw, &trigger) != nil || !runnableTrigger(trigger) {
+		return nil
+	}
+	trigger = trigger.Normalized()
+	return &trigger
+}
+
+// manifestDefaultTrigger is the runnable default_trigger the plugin manifest
+// declares for the capability, or nil. Capability metadata holds the
+// descriptor as protojson, so interval_ms arrives as a string.
+func manifestDefaultTrigger(capability *Capability) *taskmanager.TriggerConfig {
+	if capability == nil {
+		return nil
+	}
+	value, ok := capability.Metadata["scheduled_task"]
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var descriptor pluginv1.ScheduledTaskDescriptor
+	if (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, &descriptor) != nil {
+		return nil
+	}
+	return ManifestDefaultTrigger(&descriptor)
+}
+
+// ManifestDefaultTrigger is the schedule a scheduled_task.v1 descriptor
+// declares, normalized, when the task manager can run it, or nil.
+func ManifestDefaultTrigger(descriptor *pluginv1.ScheduledTaskDescriptor) *taskmanager.TriggerConfig {
+	declared := descriptor.GetDefaultTrigger()
+	if declared == nil {
+		return nil
+	}
+	trigger := taskmanager.TriggerConfig{
+		Type:       taskmanager.TriggerType(declared.GetType()),
+		IntervalMs: declared.GetIntervalMs(),
+		TimeOfDay:  declared.GetTimeOfDay(),
+		DayOfWeek:  int(declared.GetDayOfWeek()),
+	}
+	if !runnableTrigger(trigger) ||
+		(trigger.Type == taskmanager.TriggerTypeInterval && trigger.IntervalMs < publicmanifest.MinTriggerIntervalMs) {
+		return nil
+	}
+	trigger = trigger.Normalized()
+	return &trigger
+}
+
+// runnableTrigger reports whether the task manager can schedule trigger:
+// its type is one the manager knows and the fields that type reads are
+// valid.
+func runnableTrigger(trigger taskmanager.TriggerConfig) bool {
+	switch trigger.Type {
+	case taskmanager.TriggerTypeStartup:
+		return true
+	case taskmanager.TriggerTypeInterval:
+		return trigger.IntervalMs > 0
+	case taskmanager.TriggerTypeDaily:
+		return validTimeOfDay(trigger.TimeOfDay)
+	case taskmanager.TriggerTypeWeekly:
+		return validTimeOfDay(trigger.TimeOfDay) && trigger.DayOfWeek >= 0 && trigger.DayOfWeek <= 6
+	default:
+		return false
+	}
+}
+
+func validTimeOfDay(value string) bool {
+	_, err := time.Parse("15:04", value)
+	return err == nil
 }
