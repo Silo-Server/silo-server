@@ -217,19 +217,34 @@ func (s *Server) jobHWAccel(requested string, hardwareToneMap bool) string {
 // It matches the idle lifetime of an HLS session.
 const continuationWindow = sessionIdleTTL
 
-// continuesPlayback reports whether work for playbackSessionID continues a
-// job this node holds: an HLS session or progressive remux it runs for that
-// playback session (a quality switch or replan starts a new transport for
-// the same session), or a remux it served within continuationWindow. Such
-// work is not refused at the cap; the planner counts it as the same job.
+// continuation is the allowance one new transport has to overlap the
+// transport it replaces for a playback session, held from the moment it is
+// granted until the transport is registered or the request fails.
+type continuation struct {
+	s                 *Server
+	playbackSessionID string
+	done              bool
+}
+
+// claimContinuation reports whether work for playbackSessionID continues a
+// job this node holds, and holds that allowance for the caller: an HLS
+// session or progressive remux the node runs for that playback session (a
+// quality switch or replan starts a new transport for the same session), or
+// a remux it served within continuationWindow. Such work is not refused at
+// the cap; the planner counts it as the same job.
 //
-// Only one transport may overlap the one it replaces. A playback session
-// that already runs two here is not continuing anything: a third transport
-// is new work and needs a slot, so naming one playback session over and over
-// cannot run the node past its cap by more than one process per session.
-func (s *Server) continuesPlayback(playbackSessionID string, now time.Time) bool {
+// Only one transport may overlap the one it replaces. The transports the
+// node runs for the playback session and the allowances already granted and
+// not yet registered are counted together, under the admission lock, so
+// starts arriving together for one playback session cannot all pass: a
+// playback session with two is not continuing anything, and a third
+// transport is new work that needs a slot. Naming one playback session over
+// and over therefore cannot run the node past its cap by more than one
+// process per session. The caller releases the allowance once its transport
+// is registered, and on every other return.
+func (s *Server) claimContinuation(playbackSessionID string, now time.Time) (*continuation, bool) {
 	if playbackSessionID == "" {
-		return false
+		return nil, false
 	}
 	running := 0
 	s.mu.RLock()
@@ -244,13 +259,59 @@ func (s *Server) continuesPlayback(playbackSessionID string, now time.Time) bool
 		}
 	}
 	s.mu.RUnlock()
-	if running > 0 {
-		return running == 1
-	}
 	s.admission.Lock()
 	defer s.admission.Unlock()
-	last, ok := s.remuxSeen[playbackSessionID]
-	return ok && now.Sub(last) < continuationWindow
+	held := running + s.continuing[playbackSessionID]
+	switch {
+	case held > 1:
+		return nil, false
+	case held == 0:
+		if last, ok := s.remuxSeen[playbackSessionID]; !ok || now.Sub(last) >= continuationWindow {
+			return nil, false
+		}
+	}
+	if s.continuing == nil {
+		s.continuing = make(map[string]int)
+	}
+	s.continuing[playbackSessionID]++
+	return &continuation{s: s, playbackSessionID: playbackSessionID}, true
+}
+
+// admitStart admits a start under the job cap. One that replaces a session
+// the node runs, or that holds the overlap allowance of its playback session,
+// continues a job and takes no slot; any other is new work. release gives
+// back whatever was held and is called once the start has registered its
+// session or failed. It reports false at the cap.
+func (s *Server) admitStart(req TranscodeStartRequest, now time.Time) (slot *jobSlot, release func(), ok bool) {
+	if s.hostsSession(req.SessionID) {
+		return nil, func() {}, true
+	}
+	if overlap, continues := s.claimContinuation(req.PlaybackSessionID, now); continues {
+		return nil, overlap.release, true
+	}
+	slot, ok = s.admitJob()
+	if !ok {
+		return nil, nil, false
+	}
+	return slot, slot.release, true
+}
+
+// release gives the allowance back; nil and repeated calls do nothing.
+func (c *continuation) release() {
+	if c == nil {
+		return
+	}
+	c.s.admission.Lock()
+	defer c.s.admission.Unlock()
+	if c.done {
+		return
+	}
+	c.done = true
+	if c.s.continuing[c.playbackSessionID] <= 1 {
+		delete(c.s.continuing, c.playbackSessionID)
+		return
+	}
+	c.s.continuing[c.playbackSessionID]--
 }
 
 // noteRemux records that the node serves a progressive remux for

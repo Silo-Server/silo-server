@@ -49,6 +49,10 @@ var (
 	// ErrNodeAtCapacity is a node that refused the preparation at its own
 	// job cap (nodepool.RefusalAtCapacity). It started nothing.
 	ErrNodeAtCapacity = errors.New("remote download prepare: node is at its job limit")
+	// ErrNodeStorageFull is a node that refused the preparation at the
+	// prepared-download budget it declares (nodepool.RefusalStorageFull). It
+	// started nothing.
+	ErrNodeStorageFull = errors.New("remote download prepare: node's prepared-download directory is at its budget")
 )
 
 func newHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
@@ -412,6 +416,10 @@ func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL string, keys nodeauth
 	if nodepool.RefusedAtCapacity(resp) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return Result{}, ErrNodeAtCapacity
+	}
+	if nodepool.RefusedStorageFull(resp) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return Result{}, ErrNodeStorageFull
 	}
 	return decodeResult(resp, "remote download prepare")
 }

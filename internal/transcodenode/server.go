@@ -463,12 +463,14 @@ type Server struct {
 	activeJobs atomic.Int32
 	// jobCap is the node's own job cap, 0 for none; admission guards
 	// admitted, the new work it let in that activeJobs does not count yet,
-	// and remuxSeen, when each progressive remux transport was last served.
-	// See jobcap.go.
+	// remuxSeen, when each progressive remux transport was last served, and
+	// continuing, the overlap allowances granted per playback session and
+	// not yet registered. See jobcap.go.
 	jobCap          atomic.Int32
 	admission       sync.Mutex
 	admitted        int
 	remuxSeen       map[string]time.Time
+	continuing      map[string]int
 	remuxSeenPruned time.Time
 	// declaredHWAccel and artifactBudget are what the node's operator
 	// declared; see SetDeclaredHWAccel and SetArtifactBudget.
@@ -1753,16 +1755,12 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	// (a quality switch or replan), continues a job the node holds, so the
 	// cap never refuses it. Admitted before the source opens, so a refusal
 	// costs the core nothing.
-	var slot *jobSlot
-	if !s.hostsSession(req.SessionID) && !s.continuesPlayback(req.PlaybackSessionID, time.Now()) {
-		admitted, ok := s.admitJob()
-		if !ok {
-			writeAtCapacity(w)
-			return
-		}
-		slot = admitted
-		defer slot.release()
+	slot, releaseAdmission, admitted := s.admitStart(req, time.Now())
+	if !admitted {
+		writeAtCapacity(w)
+		return
 	}
+	defer releaseAdmission()
 	// The session owns the source once it registers, across FFmpeg restarts
 	// and seeks; until then every return closes it.
 	source, ok := s.openJobSource(w, r, req.SourceGrant)
@@ -2459,7 +2457,8 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	// idle lifetime, is a viewer seeking or coming back: it continues a job
 	// the node holds. Any other is new work, checked here before the source
 	// opens so a refusal costs the core no open, and admitted below.
-	continues := s.continuesPlayback(playbackSessionID, time.Now())
+	overlap, continues := s.claimContinuation(playbackSessionID, time.Now())
+	defer overlap.release()
 	if r.Method != http.MethodHead && !continues && s.atJobCap() {
 		writeAtCapacity(w)
 		return
@@ -2566,7 +2565,9 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if continues {
+		// The remux is registered above, so it counts as running from here.
 		s.countJob(nil)
+		overlap.release()
 	} else if !s.claimJob() {
 		writeAtCapacity(w)
 		return

@@ -38,6 +38,13 @@ func RefusedAtCapacity(resp *http.Response) bool {
 		resp.Header.Get(NodeRefusalHeader) == RefusalAtCapacity
 }
 
+// RefusedStorageFull reports whether a node's answer is a refusal at the
+// prepared-download budget it declares.
+func RefusedStorageFull(resp *http.Response) bool {
+	return resp != nil && resp.StatusCode == http.StatusServiceUnavailable &&
+		resp.Header.Get(NodeRefusalHeader) == RefusalStorageFull
+}
+
 // atCapacityMarker is implemented by *Planner.
 type atCapacityMarker interface {
 	MarkTranscodeNodeAtCapacity(nodeURL string)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -84,6 +85,43 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	admitted[0].release()
 	if s.activeJobs.Load() != 3 || s.admitted != 0 || !s.atJobCap() {
 		t.Fatalf("after counting the slot: active %d, admitted %d", s.activeJobs.Load(), s.admitted)
+	}
+}
+
+// Starts arriving together for one playback session the node serves share one
+// overlap allowance: the one already running plus the allowances granted and
+// not yet registered are counted together.
+func TestContinuationAllowanceIsRaceFree(t *testing.T) {
+	s := newTestServer(t)
+	s.mu.Lock()
+	s.identities = map[string]sessionIdentity{"running": {playbackSessionID: "playback-1"}}
+	s.mu.Unlock()
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		granted []*continuation
+	)
+	for range 64 {
+		wg.Go(func() {
+			if overlap, ok := s.claimContinuation("playback-1", time.Now()); ok {
+				mu.Lock()
+				granted = append(granted, overlap)
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	if len(granted) != 1 {
+		t.Fatalf("%d transports allowed to overlap one running session, want 1", len(granted))
+	}
+	granted[0].release()
+	if overlap, ok := s.claimContinuation("playback-1", time.Now()); !ok {
+		t.Fatal("a released allowance was not granted again")
+	} else {
+		overlap.release()
+	}
+	if len(s.continuing) != 0 {
+		t.Fatalf("allowances left held: %v", s.continuing)
 	}
 }
 

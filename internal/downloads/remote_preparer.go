@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -165,26 +166,29 @@ func (p *NodeAwarePreparer) prepareLocally(ctx context.Context, artifactID strin
 }
 
 // maxCapacityRefusals bounds how many nodes in a row may refuse one
-// preparation at their own job cap before it takes the path any other
-// refusal takes.
+// preparation at their own job cap or prepared-download budget before it
+// takes the path any other refusal takes.
 const maxCapacityRefusals = 4
 
 // PrepareFile routes an artifact job to a compatible node or allowed local fallback.
 func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
-	return p.prepareFile(ctx, artifactID, opts, outputPath, 0)
+	return p.prepareFile(ctx, artifactID, opts, outputPath, 0, nil)
 }
 
-// prepareFile is PrepareFile after refusals nodes at their own job cap gave
-// it. Such a node started nothing and is held back by the planner, so the
-// next reservation picks another node, or none and the local fallback.
-func (p *NodeAwarePreparer) prepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string, refusals int) (PreparedArtifact, error) {
+// prepareFile is PrepareFile after refusals nodes gave it at their own job
+// cap or prepared-download budget. Such a node started nothing. One at its
+// job cap is held back by the planner; one at its budget is in storageFull,
+// which the next reservation leaves out and counts as turned away for space.
+// Either way the next reservation picks another node, or none and the local
+// fallback.
+func (p *NodeAwarePreparer) prepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string, refusals int, storageFull map[string]struct{}) (PreparedArtifact, error) {
 	cfg := p.config()
 	keys := p.nodeKeys
 	if cfg == nil || keys == nil || p.remote == nil || p.planner == nil || !downloadprepare.ValidArtifactID(artifactID) {
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 	request := downloadprepare.NewRequest(artifactID, opts)
-	node, release, storageRejected := p.reserveNode(ctx, artifactID, request, opts)
+	node, release, storageRejected := p.reserveNode(ctx, artifactID, request, opts, storageFull)
 	if node == nil {
 		if storageRejected && !p.LocalFallbackAllowed(ctx) {
 			return PreparedArtifact{}, ErrStorageFull
@@ -212,7 +216,16 @@ func (p *NodeAwarePreparer) prepareFile(ctx context.Context, artifactID string, 
 	}
 	if errors.Is(err, downloadprepare.ErrNodeAtCapacity) && refusals+1 < maxCapacityRefusals && ctx.Err() == nil {
 		slog.InfoContext(ctx, "transcode node is at its job limit; placing the download artifact prepare again", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
-		return p.prepareFile(ctx, artifactID, opts, outputPath, refusals+1)
+		return p.prepareFile(ctx, artifactID, opts, outputPath, refusals+1, storageFull)
+	}
+	if errors.Is(err, downloadprepare.ErrNodeStorageFull) && refusals+1 < maxCapacityRefusals && ctx.Err() == nil {
+		slog.InfoContext(ctx, "transcode node's prepared-download directory is at its budget; placing the download artifact prepare again", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
+		full := maps.Clone(storageFull)
+		if full == nil {
+			full = map[string]struct{}{}
+		}
+		full[strings.TrimRight(node.URL, "/")] = struct{}{}
+		return p.prepareFile(ctx, artifactID, opts, outputPath, refusals+1, full)
 	}
 	prepareReturned := err == nil
 	if prepareReturned {
@@ -262,9 +275,17 @@ func (p *NodeAwarePreparer) prepareFile(ctx context.Context, artifactID string, 
 // reserveNode reserves the node a preparation runs on: one that can run its
 // recipe and has room for it. storageRejected reports a node turned away only
 // for want of space, so a job no node can take says it waits for space rather
-// than failing. A nil node means none.
-func (p *NodeAwarePreparer) reserveNode(ctx context.Context, artifactID string, request downloadprepare.Request, opts playback.TranscodeOpts) (node *nodepool.Node, release func(), storageRejected bool) {
+// than failing. A nil node means none. refusedForStorage holds the nodes that
+// already refused this preparation at their own budget: they are left out,
+// and count as turned away for space.
+func (p *NodeAwarePreparer) reserveNode(ctx context.Context, artifactID string, request downloadprepare.Request, opts playback.TranscodeOpts, refusedForStorage map[string]struct{}) (node *nodepool.Node, release func(), storageRejected bool) {
 	hasStorage := func(n *nodepool.Node) bool {
+		if n != nil {
+			if _, refused := refusedForStorage[strings.TrimRight(n.URL, "/")]; refused {
+				storageRejected = true
+				return false
+			}
+		}
 		if p.hasStorage(n) {
 			return true
 		}
@@ -278,8 +299,11 @@ func (p *NodeAwarePreparer) reserveNode(ctx context.Context, artifactID string, 
 		if selective {
 			node, release = selector.ReserveTranscodeWorkWith(workID, p.recipeCapable(ctx, request, opts, hasStorage))
 		}
-	case selective && p.storageFull != nil:
+	case selective && (p.storageFull != nil || len(refusedForStorage) > 0):
 		node, release = selector.ReserveTranscodeWorkWith(workID, hasStorage)
+	case len(refusedForStorage) > 0:
+		// This planner cannot leave a node out, so no other node is tried.
+		storageRejected = true
 	default:
 		node, release = p.planner.ReserveTranscodeWork(workID)
 	}
