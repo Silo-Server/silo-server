@@ -50,61 +50,43 @@ function originalPlan(overrides: {
 describe("resolveOriginalPlaybackRoute", () => {
   // The stripe URL decides where the login token goes: a parallel_range_url
   // with st is authorized by that reference alone and gets no token; one
-  // without st gets the token; a proxy node never does.
+  // without st gets the token. A plan that names no media origin is not striped.
   it.each([
     {
       name: "a parallel_range_url with st carries no login token",
       parallelRangeUrl: "https://media.example.test/api/v2/stream/s?st=x",
       streamUrl: "/api/v2/stream/s?st=x&token=access",
-      navigationProtocol: "h2",
       want: "https://media.example.test/api/v2/stream/s?st=x",
     },
     {
       name: "a parallel_range_url with st keeps its other parameters and no token",
       parallelRangeUrl: "https://media.example.test/api/v2/stream/s?st=x&seek=12.5",
       streamUrl: "/api/v2/stream/s?st=x&seek=12.5&token=access",
-      navigationProtocol: "h2",
       want: "https://media.example.test/api/v2/stream/s?st=x&seek=12.5",
     },
     {
       name: "a parallel_range_url without st carries the login token",
       parallelRangeUrl: "https://media.example.test/api/v2/stream/s",
       streamUrl: "/api/v2/stream/s?token=access",
-      navigationProtocol: "h2",
       want: "https://media.example.test/api/v2/stream/s?token=access",
     },
     {
-      name: "a parallel_range_url whose origin new URL() rejects falls through to the other rules",
+      name: "a parallel_range_url whose origin new URL() rejects gives no stripe URL",
       parallelRangeUrl: "https://a<b.example/api/v2/stream/s?st=x",
       streamUrl: "/api/v2/stream/s?st=x&token=access",
-      navigationProtocol: "http/1.1",
-      want: "/api/v2/stream/s?st=x&token=access",
-    },
-    {
-      name: "a plan without parallel_range_url reads stream.url with its token",
-      streamUrl: "/api/v2/stream/s?st=x&token=access",
-      navigationProtocol: "http/1.1",
-      want: "/api/v2/stream/s?st=x&token=access",
-    },
-    {
-      name: "a proxy node URL is striped as given, without the login token",
-      streamUrl: "https://node.example.test/stream/direct/opaque",
-      navigationProtocol: "h2",
-      want: "https://node.example.test/stream/direct/opaque",
-    },
-    {
-      name: "the page origin is striped when the page itself came over HTTP/1.1",
-      streamUrl: "/api/v2/stream/s?st=x&token=access",
-      navigationProtocol: "http/1.1",
-      want: "/api/v2/stream/s?st=x&token=access",
-    },
-    {
-      name: "the page origin is not striped over HTTP/2",
-      streamUrl: "/api/v2/stream/s?st=x&token=access",
-      navigationProtocol: "h2",
       want: undefined,
     },
-  ])("$name", ({ parallelRangeUrl, streamUrl, navigationProtocol, want }) => {
+    {
+      name: "a plan without parallel_range_url is not striped",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      want: undefined,
+    },
+    {
+      name: "a proxy node URL is not striped",
+      streamUrl: "https://node.example.test/stream/direct/opaque",
+      want: undefined,
+    },
+  ])("$name", ({ parallelRangeUrl, streamUrl, want }) => {
     const base = originalPlan({ recipe: { audio_codec: "truehd" } });
     const plan = parallelRangeUrl
       ? { ...base, stream: { ...base.stream, parallel_range_url: parallelRangeUrl } }
@@ -113,7 +95,6 @@ describe("resolveOriginalPlaybackRoute", () => {
       plan,
       streamUrl,
       accessToken: "access",
-      navigationProtocol,
       native,
       engine,
       audioTracks: [],
@@ -121,8 +102,5 @@ describe("resolveOriginalPlaybackRoute", () => {
     if (route.kind !== "engine") throw new Error(`route is ${route.kind}, want engine`);
     expect(route.source.url).toBe(streamUrl);
     expect(route.source.parallelRangeUrl).toBe(want);
-    if (streamUrl.startsWith("https://node.")) {
-      expect(new URL(route.source.parallelRangeUrl ?? "").searchParams.has("token")).toBe(false);
-    }
   });
 });

@@ -3118,12 +3118,6 @@ export function VideoPlayer({
                 engine: routeInput.browserEngine,
                 audioTracks: routeInput.audioTracks,
                 accessToken: routeInput.getAccessToken(),
-                navigationProtocol:
-                  (
-                    performance.getEntriesByType?.("navigation")[0] as
-                      | PerformanceNavigationTiming
-                      | undefined
-                  )?.nextHopProtocol ?? "",
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {
