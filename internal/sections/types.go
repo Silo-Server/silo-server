@@ -229,7 +229,19 @@ type SectionCollectionConfig struct {
 	UserCollectionID    string `json:"user_collection_id,omitempty"`
 }
 
+// The single-type media_scope values a row's type filter covers.
+const (
+	mediaScopeMovie     = "movie"
+	mediaScopeSeries    = "series"
+	mediaScopeAudiobook = "audiobook"
+	mediaScopeEbook     = "ebook"
+	mediaScopeManga     = "manga"
+)
+
 // ParseConfigFilters extracts filter_type and filter_library_id from config JSON.
+// A structured config's single-type media_scope becomes FilterType, so a row
+// keeps to the same type as its See All page. The group scope "video" spans
+// two types and is left to the callers that handle it.
 func ParseConfigFilters(config json.RawMessage) SectionConfigFilters {
 	var f SectionConfigFilters
 	if len(config) > 0 {
@@ -239,7 +251,7 @@ func ParseConfigFilters(config json.RawMessage) SectionConfigFilters {
 		def, err := ParseQueryDefinition(config)
 		if err == nil {
 			switch def.MediaScope {
-			case "movie", "series", "audiobook":
+			case mediaScopeMovie, mediaScopeSeries, mediaScopeAudiobook, mediaScopeEbook, mediaScopeManga:
 				f.FilterType = def.MediaScope
 			}
 			if len(def.LibraryIDs) > 0 {
