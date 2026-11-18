@@ -28,6 +28,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
+import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
 import { formatHeroMetadata } from "./heroMetadata";
 import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 
@@ -260,6 +261,9 @@ export default function HeroBanner({
   const overviewFallback = overviewShown ? (
     <div className="mb-7 max-w-2xl">
       <HeroOverviewText overview={current.overview} />
+      {current.machine_translated_fields?.includes("overview") && (
+        <MachineTranslatedLabel className="mt-1.5" />
+      )}
     </div>
   ) : null;
 
