@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,8 +36,12 @@ var excludedPrefixes = []string{
 	"/api/internal/nodes/",
 }
 
-// streamPrefixes are paths logged only at session-start (not per-chunk), so
-// a playback session does not write one activity row per chunk.
+// streamPrefixes are paths logged once per play, not per request. A segment or
+// manifest chunk (isStreamChunk) writes no row. A range request that continues a
+// play (isRangeContinuation) writes none either when it succeeds or its client
+// abandons it; one that fails keeps its row, so a refused or broken range stays
+// visible. A request with no Range header, or a range from byte 0, is a play's
+// start and writes a row.
 var streamPrefixes = []string{
 	"/api/v2/stream/",
 	"/api/v2/playback/transcode/",
@@ -96,11 +101,10 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 			}
 
 			// Skip per-chunk stream requests (segments, manifests after start)
-			for _, prefix := range streamPrefixes {
-				if strings.HasPrefix(path, prefix) && isStreamChunk(path) {
-					next.ServeHTTP(rw, r)
-					return
-				}
+			onStreamPath := hasAnyPrefix(path, streamPrefixes)
+			if onStreamPath && isStreamChunk(path) {
+				next.ServeHTTP(rw, r)
+				return
 			}
 
 			start := time.Now()
@@ -138,6 +142,13 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 			if skipRoute != nil && skipRoute(pathPattern) {
 				return
 			}
+			status := RecordedStatus(r, wrapped.status, wrapped.wroteHeader)
+			// A range that continues a play adds a row only by failing; an abandoned one is
+			// a seek or a stripe deadline, which the client does on purpose.
+			if onStreamPath && isRangeContinuation(r.Header.Get("Range")) &&
+				(status < http.StatusBadRequest || status == StatusClientClosedRequest) {
+				return
+			}
 			path = RedactSecretPathParams(r, path)
 
 			// After handler chain completes, auth middleware has populated lc
@@ -153,7 +164,7 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				Method:             r.Method,
 				Path:               path,
 				PathPattern:        pathPattern,
-				StatusCode:         RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
+				StatusCode:         status,
 				UserAgent:          auditmutation.BoundUserAgent(r.UserAgent()),
 				DurationMs:         int(time.Since(start).Milliseconds()),
 			}
@@ -205,6 +216,45 @@ func isStreamChunk(path string) bool {
 	return strings.Contains(path, "/segment/") ||
 		strings.Contains(path, "/master.m3u8") ||
 		strings.Contains(path, "/subtitles/")
+}
+
+func hasAnyPrefix(path string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRangeContinuation reports whether a Range header asks for bytes after a
+// play's start: a bytes range whose first range starts past byte 0, or a suffix
+// range. A value that does not parse is no continuation, so its request stays
+// visible.
+func isRangeContinuation(header string) bool {
+	spec, ok := strings.CutPrefix(header, "bytes=")
+	if !ok {
+		return false
+	}
+	first, _, _ := strings.Cut(spec, ",")
+	from, to, ok := strings.Cut(first, "-")
+	if !ok {
+		return false
+	}
+	if from == "" {
+		// bytes=-N: the last N bytes.
+		n, err := strconv.ParseUint(to, 10, 64)
+		return err == nil && n > 0
+	}
+	start, err := strconv.ParseUint(from, 10, 64)
+	if err != nil || start == 0 {
+		return false
+	}
+	if to == "" {
+		return true
+	}
+	_, err = strconv.ParseUint(to, 10, 64)
+	return err == nil
 }
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
