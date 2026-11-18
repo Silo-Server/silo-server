@@ -101,7 +101,7 @@ type recordingClaims struct {
 	slots []time.Time
 }
 
-func (c *recordingClaims) ClaimFiring(_ context.Context, _ string, slot time.Time, _ time.Duration) (bool, error) {
+func (c *recordingClaims) ClaimFiring(_ context.Context, _ string, slot time.Time, _ time.Duration, _ time.Time) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.slots = append(c.slots, slot)

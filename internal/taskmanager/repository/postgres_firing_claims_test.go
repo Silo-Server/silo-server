@@ -31,7 +31,7 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 	claim := func(t *testing.T, key string, trigger taskmanager.TriggerConfig, firedAt time.Time) bool {
 		t.Helper()
 		slot, window, _ := taskmanager.FiringSlot(trigger, firedAt) // every trigger here names a slot
-		won, err := claims.ClaimFiring(ctx, key, slot, window)
+		won, err := claims.ClaimFiring(ctx, key, slot, window, firedAt)
 		if err != nil {
 			t.Error(err) // also called off the test goroutine
 		}
@@ -75,6 +75,26 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 		boundary := now.Truncate(time.Hour)
 		if !claim(t, key, hourly, boundary.Add(-2*time.Second)) || claim(t, key, hourly, boundary.Add(3*time.Second)) {
 			t.Fatal("want the first server to win and the one firing after the slot boundary to lose")
+		}
+	})
+
+	// A server whose timer was due seconds after the winner's, across a slot
+	// boundary, and that reaches the claim long after the window has passed
+	// by the clock, is still measured from when its firing was due.
+	t.Run("interval server stalled past the window", func(t *testing.T) {
+		key := newKey("stalled")
+		hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: time.Hour.Milliseconds()}
+		boundary := now.Truncate(time.Hour).Add(-2 * time.Hour)
+		winnerDue := boundary.Add(-2 * time.Second)
+		slot, _, _ := taskmanager.FiringSlot(hourly, winnerDue)
+		if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at) VALUES ($1, $2, $3, $3::timestamptz + interval '8 days')`, key, slot, winnerDue); err != nil {
+			t.Fatal(err)
+		}
+		if claim(t, key, hourly, boundary.Add(3*time.Second)) {
+			t.Fatal("a stalled server ran a firing another server already claimed")
+		}
+		if !claim(t, key, hourly, boundary.Add(time.Hour)) {
+			t.Fatal("the next interval's firing must be claimable")
 		}
 	})
 

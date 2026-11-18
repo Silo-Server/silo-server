@@ -25,14 +25,14 @@ func NewPgFiringClaims(pool *pgxpool.Pool) *PgFiringClaims {
 
 // ClaimFiring takes a transaction-scoped advisory lock on the task, so claims
 // of one task run one at a time, then inserts the claim unless one exists at
-// slot or within window. The row, not the lock, is what a later firing on
+// slot, or taken within window of due or of now. The row, not the lock, is what a later firing on
 // another server checks, so firings a few seconds apart are caught as well as
 // concurrent ones. Each claim records when it expires, after the longer of
 // its window and firingClaimRetention, and expired claims of every task are
 // pruned in the same transaction, by one claim at a time: a task that stopped firing (an uninstalled
 // plugin's) doesn't keep its claims, and a short-interval task never prunes
 // a long-interval task's claim inside that claim's window.
-func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration) (bool, error) {
+func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration, due time.Time) (bool, error) {
 	window = max(window, 0)
 	won := false
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
@@ -44,8 +44,11 @@ func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.
 			SELECT EXISTS (
 				SELECT 1 FROM task_firing_claims
 				WHERE task_key = $1
-				  AND (slot = $2 OR claimed_at > clock_timestamp() - $3 * interval '1 microsecond')
-			)`, key, slot, window.Microseconds()).Scan(&taken); err != nil {
+				  AND (slot = $2 OR (
+				      claimed_at > LEAST(clock_timestamp(), $4::timestamptz) - $3 * interval '1 microsecond'
+				      AND (claimed_at < $4::timestamptz + $3 * interval '1 microsecond'
+				           OR claimed_at > clock_timestamp() - $3 * interval '1 microsecond')))
+			)`, key, slot, window.Microseconds(), due).Scan(&taken); err != nil {
 			return fmt.Errorf("reading task firing claims: %w", err)
 		}
 		if taken {

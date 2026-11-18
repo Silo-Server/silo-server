@@ -76,8 +76,9 @@ lock of their own.
 
 A claim is a row keyed by task and slot, inserted under a transaction-scoped
 advisory lock on the task, unless the task already has a claim at that slot or
-one newer than the firing's window. `taskmanager.FiringSlot` gives both, from
-the trigger that fired and the firing time:
+one taken within the firing's window of when the firing was due, or of now.
+`taskmanager.FiringSlot` gives both, from the trigger that fired and the time
+its timer was armed for (the wake-up time for a startup trigger):
 
 | Trigger | Slot | Window |
 | --- | --- | --- |
