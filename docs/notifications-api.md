@@ -658,12 +658,19 @@ next notification on every server.
 `POST /api/v2/notifications/plugin-destinations` (`createNotificationPluginDestination`)
 takes `plugin_id`, `capability_id`, `name` (1 to 64 characters, unique per
 account profile), `settings`, and optional `notify_next_up` and
-`notify_requests` (default on). The
+`notify_requests` (default on); `name` is required and `clear_secrets` isn't
+accepted. The
 server accepts only settings the schema or its form declares. It refuses
 keys a schema allows only through `additionalProperties`, which it could
-neither return nor keep secret. It then calls the plugin's
+neither return nor keep secret. It checks each value against the form's
+JSON Schema: its declared scalar type (an object or array is refused),
+required fields, `enum`, string length and `pattern`, and numeric bounds.
+Each failing setting answers `422` with a field error at
+`body.settings.<field>` (`unknown_field`, `required`, `invalid_type`,
+`invalid_enum`, `out_of_range` or `invalid`). It then calls the plugin's
 `ValidateDestination`. A refusal answers `422` with the plugin's
-message in the problem's error detail at `body.settings`. An unknown or
+message, with the destination's secret values masked, in the problem's
+error detail at `body.settings`. A profile deleted meanwhile answers `404`. An unknown or
 unreachable channel answers `503 dependency_unavailable` with `Retry-After`; ten
 destinations answer `422`. Success is `201` with the destination and its
 `ETag`. The operation is non-retryable: a replay can create a second
@@ -677,7 +684,10 @@ fields stay unchanged. `settings` merges over the stored settings: a
 non-secret field sent as `null` is removed, a secret field sent blank or left
 out keeps its stored value, and `clear_secrets` removes named secrets. A
 stored setting the channel's current form no longer declares, after a plugin
-update, is dropped on the next update.
+update, is dropped on the next update. Merged settings are checked as on
+create; a stored secret left blank counts as present for `required`. When
+the server can't decrypt the stored settings, a settings change answers
+`409 conflict` and nothing is written.
 Changed settings are checked by the plugin again and, like a changed webhook
 URL, clear the failure streak and the disable reason; so does re-enabling.
 Missing preconditions answer `428`, stale validators `412`. The validator
