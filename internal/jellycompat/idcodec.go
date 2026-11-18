@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -136,8 +137,24 @@ func (c *ResourceIDCodec) EncodeStringID(kind EncodedIDType, value string) strin
 }
 
 // EncodeIntID encodes a native integer ID into a Jellyfin UUID string.
+// Media-source ids take Jellyfin's Guid form (see jellyfinGUID): Infuse cuts a
+// dashed MediaSourceId at its first dash when it echoes it in a PlaybackInfo
+// body, so PlaybackInfo could not tell which version was picked.
 func (c *ResourceIDCodec) EncodeIntID(kind EncodedIDType, value int64) string {
-	return EncodeNumericID(kind, uint64(value)).String()
+	id := EncodeNumericID(kind, uint64(value))
+	if kind == EncodedIDMediaSource {
+		return jellyfinGUID(id)
+	}
+	return id.String()
+}
+
+// jellyfinGUID formats an id as Jellyfin serializes a Guid in JSON: 32
+// lowercase hex digits without dashes. Only user and media-source ids take this
+// form; item and server ids keep theirs, because clients key their stored
+// library by those and a format change would orphan the stored copies. Every
+// route and comparison parses ids with uuid.Parse, which accepts both forms.
+func jellyfinGUID(id uuid.UUID) string {
+	return hex.EncodeToString(id[:])
 }
 
 // DecodeStringID decodes a compat UUID back to the original native string ID.
@@ -252,10 +269,10 @@ func (c *ResourceIDCodec) ResolveMediaSourceOwner(ctx context.Context, fileID in
 }
 
 // mediaSourceIDsEqual reports whether two media-source IDs refer to the same
-// source, tolerating UUID format differences. Silo exposes the canonical
-// dashed compat UUID (e.g. "03000000-0000-0000-0000-00000019e8c2"), but some
-// Jellyfin clients (e.g. Wholphin) echo it back in the compact 32-char hex
-// form ("0300000000000000000000000019e8c2"). Both parse to the same UUID, so
+// source, tolerating UUID format differences. Silo sends the compact 32-char
+// hex form ("0300000000000000000000000019e8c2"), but clients that stored an id
+// before that still send the dashed form
+// ("03000000-0000-0000-0000-00000019e8c2"). Both parse to the same UUID, so
 // matching must compare the parsed values rather than the raw strings.
 func mediaSourceIDsEqual(a, b string) bool {
 	if a == b {
