@@ -458,6 +458,7 @@ function S3Group({
                     hint={t("web.admin.settings.storage.s3.tokenSecretHint")}
                     disabled={secrets.disabled}
                     restartRequired={restartKeys.has("s3.public_token_secret")}
+                    managedByEnv={form.envVar("s3.public_token_secret")}
                   />
                   <SettingField
                     label={t("web.admin.settings.storage.s3.tokenParam")}
@@ -465,6 +466,7 @@ function S3Group({
                     value={form.getValue("s3.public_token_param") || "verify"}
                     onChange={(v) => form.setValue("s3.public_token_param", v)}
                     restartRequired={restartKeys.has("s3.public_token_param")}
+                    managedByEnv={form.envVar("s3.public_token_param")}
                   />
                   <SettingField
                     label={t("web.admin.settings.storage.s3.tokenTtl")}
@@ -473,6 +475,7 @@ function S3Group({
                     value={form.getValue("s3.public_token_ttl") || "10800"}
                     onChange={(v) => form.setValue("s3.public_token_ttl", v)}
                     restartRequired={restartKeys.has("s3.public_token_ttl")}
+                    managedByEnv={form.envVar("s3.public_token_ttl")}
                   />
                 </>
               )}

@@ -295,12 +295,14 @@ function S3Fields({
                 value={form.getValue("s3.public_token_secret")}
                 onChange={(v) => form.setValue("s3.public_token_secret", v)}
                 sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+                managedByEnv={form.envVar("s3.public_token_secret")}
               />
               <SettingField
                 label={t("web.setup.storage.tokenParamLabel")}
                 description={t("web.setup.storage.tokenParamDescription")}
                 value={form.getValue("s3.public_token_param") || "verify"}
                 onChange={(v) => form.setValue("s3.public_token_param", v)}
+                managedByEnv={form.envVar("s3.public_token_param")}
               />
               <SettingField
                 label={t("web.setup.storage.tokenTtlLabel")}
@@ -308,6 +310,7 @@ function S3Fields({
                 unit={t("web.setup.storage.seconds")}
                 value={form.getValue("s3.public_token_ttl") || "10800"}
                 onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+                managedByEnv={form.envVar("s3.public_token_ttl")}
               />
             </>
           ) : null}
