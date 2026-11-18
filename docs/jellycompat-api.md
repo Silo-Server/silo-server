@@ -603,6 +603,16 @@ answers `404`. `PlaybackInfo` answers `503` instead of
 returning a `PlaySessionId` it could not store, since other API servers could
 not resolve it.
 
+The HLS master playlist (`/Videos/{id}/master.m3u8` and its `audio-v2`,
+`hevc-v1`, `remux-v1`, `remux-ts-v1` and `remux-dv-v1` forms) answers HEAD as
+well as GET, as Jellyfin does for its master playlists; DLNA controllers check
+a `TranscodingUrl` with HEAD before handing it to a TV. A HEAD answers `200`
+with the playlist content type and no body, `404` when the media file is gone,
+`410` when the play's upstream session has ended, or a retryable `503` when the
+file lookup fails, and starts no transcode;
+the GET starts it, so a HEAD's `200` does not promise the GET a route or
+capacity. Variant playlists and segments are GET only, as in Jellyfin.
+
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA
 and MA), or `dtse` (DTS Express). HE-AACv2 is `mp4a.40.29` (RFC 6381), where
