@@ -149,10 +149,23 @@ UPDATE public.media_items
 			return total, fmt.Errorf("re-deriving the age of content rating %q: %w", raw, err)
 		}
 		total += n
-		// Only an empty batch ends the loop: a row a concurrent write
-		// changed under a full batch is skipped, so a short batch can leave
-		// rows it never selected.
-		if n == 0 {
+		if n > 0 {
+			continue
+		}
+		// A row a concurrent write changed under the batch is skipped, so
+		// even an empty batch can leave rows it never selected. Stop only
+		// once none is left.
+		var remaining bool
+		if err := db.QueryRowContext(ctx, `
+SELECT EXISTS (
+        SELECT 1
+          FROM public.media_items
+         WHERE content_rating = $1
+           AND content_rating_age = $2)`,
+			raw, access.UnrecognizedRatingAge).Scan(&remaining); err != nil {
+			return total, fmt.Errorf("re-deriving the age of content rating %q: %w", raw, err)
+		}
+		if !remaining {
 			return total, nil
 		}
 	}
