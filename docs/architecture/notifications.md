@@ -557,6 +557,12 @@ destination-side WAF/CDN blips intermittently 4xx valid webhooks. 429 honors
 notice to the profile's inbox — a type that is itself excluded from webhook
 dispatch so a broken webhook cannot loop.
 
+Inbox retention keeps a delivery while one of its webhook or plugin
+destination attempts is still pending or retrying and was touched in the
+last week: deleting the delivery would cascade to the attempt and cancel a
+retry still on its schedule. The week bound lets a stranded attempt (webhooks
+turned off server-wide, for example) release its row.
+
 ## Plugin destinations
 
 A plugin's `notification_channel.v1` capability provides a channel that
@@ -570,16 +576,32 @@ to the plugin service, so neither package imports the other.
 - **Rows.** `notification_plugin_destinations` names a channel by `plugin_id`
   and `capability_id`, which survive plugin upgrades and reinstalls. Settings
   are one `enc:v1:` envelope bound to the row id
-  (`notification_plugin_destination:<id>:config`). Secret fields, classified
-  by `plugins.ConfigSchemaFieldSets` as for plugin configuration, are never
-  returned; a write that leaves one blank keeps the stored value. Only fields
-  the current schema classifies as public are returned, so a stored field a
-  plugin upgrade stopped declaring stays hidden.
+  (`notification_plugin_destination:<id>:config`) holding
+  `{"settings": {...}, "secret_keys": [...]}`; an envelope written before
+  `secret_keys` existed is the bare settings object (its values are flat
+  scalars, so a top-level `settings` object marks the newer shape). Secret
+  fields, classified by `plugins.ConfigSchemaFieldSets` as for plugin
+  configuration, are never returned; a write that leaves one blank keeps the
+  stored value. `secret_keys` records which keys were saved as secret, and
+  they stay write-only (never returned, listed in `secret_settings_set`)
+  whatever a later manifest says, until the owner replaces or clears them, so
+  a plugin upgrade that drops a secret marking can't expose a credential.
+  Redaction of plugin text counts them as secret too. An old envelope follows
+  the current schema alone until its next settings write. Only fields the
+  current schema classifies as public are returned, so a stored field a
+  plugin upgrade stopped declaring stays hidden. Names are unique per account
+  profile under a `DEFERRABLE` constraint, checked at the end of each
+  statement, so restoring a backup can carry two destinations whose names
+  were swapped since in one upsert; webhook names use the same kind of
+  constraint.
 - **Flat forms.** A destination form is one object of scalar fields; the
   SDK's `manifest.ValidateDestinationSchema` refuses anything else, and plugin
   install and upgrade run it through `manifest.Validate`. `NotificationChannels`
   also skips a stored capability whose form fails it, so a record from before
-  the rule reads as unavailable instead of reaching every client.
+  the rule reads as unavailable instead of reaching every client. The API
+  sends clients `PluginChannel.FormFields`: one flat field list with each
+  field's control, value type, secret flag, default, select options and the
+  checks below, never the JSON Schema or the admin form descriptor.
 - **Settings checks.** Before the plugin's `ValidateDestination` sees them,
   the host checks merged settings against the form's JSON Schema with the
   SDK's `config.ValidateValue`, as for plugin configuration: declared fields
@@ -592,7 +614,11 @@ to the plugin service, so neither package imports the other.
   `plugins.NotificationChannels` lists each channel once, from the oldest
   enabled installation that provides it, and `NotificationChannelClientFor`
   calls that same installation, so settings are checked against the schema
-  the client was shown and sent to the plugin that declared it.
+  the client was shown and sent to the plugin that declared it. A channel no
+  enabled installation provides is `ErrPluginChannelNotProvided`, which the
+  API answers with `422` on create and `409` on update: waiting won't fix
+  it. A plugin that provides the channel but fails to answer is
+  `ErrPluginChannelUnavailable` alone, a `503` with `Retry-After`.
 - **Revision.** `revision` guards the owner's edits and backs the ETag. Owner
   edits and auto-disable bump it; recording a send's success or failure
   doesn't, so a send finishing never turns an edit in progress into a `412`.
@@ -617,7 +643,13 @@ to the plugin service, so neither package imports the other.
   exist and key-share locks them until the delivery commits, so a
   destination deleted after it was listed drops its attempt instead of
   aborting the delivery, inbox row and other channels included, on the
-  foreign key; webhooks enqueue the same way. Nothing is enqueued until the plugin runtime is wired,
+  foreign key; webhooks enqueue the same way. All of a transaction's attempts
+  go in one `INSERT ... SELECT FROM unnest(...)` with four parameters, so a
+  fanout of any size stays under the protocol's parameter limit. A delivery
+  that got a plugin attempt is marked (`InsertedDelivery.pluginAttempts`), and
+  only those reach the plugin destination dispatcher, so other deliveries
+  cost no claim query; the retry sweep picks up any missed hand-off.
+  Nothing is enqueued until the plugin runtime is wired,
   or for a destination whose channel no enabled plugin provides: it lists as
   unavailable and gets nothing until its plugin is back. Availability comes
   from the enabled installations' `notification_channel.v1` capabilities,
@@ -641,9 +673,18 @@ to the plugin service, so neither package imports the other.
   with `retry_after_seconds` (capped at 6 hours) as a minimum wait that can
   push an attempt later than the schedule, never earlier; `FAILED` drops the message;
   `DESTINATION_INVALID` drops it and disables the destination at once. An
-  exhausted schedule disables it too, unless the plugin was off, removed or
-  unreachable for the last attempt: the message is then dropped and the
-  destination stays enabled for when the plugin is back. Disabling applies
+  exhausted schedule drops the message, and disables the destination only
+  when it had no successful send (`last_success_at`) and no owner edit
+  (`updated_at`) since the message was queued, so one stuck message, or one
+  that failed before its owner fixed the settings, doesn't turn off a
+  destination that works; the attempt then reads `failed`, not
+  `auto_disabled`. When no plugin answered the last attempt (it was off,
+  removed or unreachable, its process exited during the call, or the call
+  ran out of time: `ErrPluginChannelUnavailable`, gRPC `Unavailable`,
+  `DeadlineExceeded` or `Canceled`, or an error that isn't a gRPC status),
+  the message is dropped and the destination stays enabled for when the
+  plugin is back; an error status the plugin returned is its answer and
+  counts like `RETRY`. Disabling applies
   only while the destination still has the settings the failed send used,
   so an owner who fixes them during that send isn't disabled; a failure is
   counted under the same condition. Disabling

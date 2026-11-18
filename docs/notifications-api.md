@@ -626,15 +626,22 @@ same ID, answers `404`.
 `GET /api/v2/notifications/plugin-channels` (`listNotificationPluginChannels`)
 returns the channels enabled plugins provide now, unpaginated. Each names its
 `plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
-`display_name` and `description`, and `settings_form`, the plugin's settings
-schema and form (`PluginSettingsForm`, the shape of an admin plugin config
-schema). The form is flat: its JSON Schema is one object of string, integer,
-number and boolean fields, with no `$ref`, combinators, conditionals, nested
-objects or arrays. The SDK's `manifest.ValidateDestinationSchema` enforces
-this, and the server refuses to install or upgrade a plugin whose form breaks
-it. Settings are write-only when the form marks them `secret` or gives them a
-password control, or when their JSON Schema property is `writeOnly` or has
-`format: password`, as for plugin configuration.
+`display_name` and `description`, and `settings_form`
+(`NotificationPluginSettingsForm`): one flat list of `fields`, rendered in
+order. Each field has its `key` in `settings`, `label`, `description` and
+`placeholder` (the plugin's text, empty when it gives none), `control`
+(`text`, `password`, `number`, `switch` or `select`), `type`, the JSON type the
+value is sent as (`string`, `integer`, `number` or `boolean`), `required`,
+`secret`, `default_value` (absent when there is none), `options` (a select
+field's `value` and `label` pairs, values as strings, sent as `type`), and
+the checks the server applies on save: `minimum`/`maximum` (inclusive),
+`min_length`/`max_length` and `pattern`, each null or empty when unset. The
+SDK's `manifest.ValidateDestinationSchema` keeps a destination form to this
+shape, and the server refuses to install or upgrade a plugin whose form
+breaks it. A setting is write-only (`secret: true`) when the plugin marks
+its form field `secret`, gives it a password control, or gives its schema
+property `format: password`; the SDK refuses `writeOnly` in a destination
+schema.
 
 ### List destinations
 
@@ -646,6 +653,10 @@ is cursor-paginated in creation order. Each item carries its `etag`,
 fields that have a stored value. `settings` holds only the fields the channel's
 current schema declares and doesn't mark secret: a stored field the schema no
 longer declares, such as a secret a plugin upgrade renamed, is never returned.
+A setting saved as secret stays write-only after a plugin upgrade drops its
+secret marking: it is listed in `secret_settings_set`, not returned in
+`settings`, until the owner replaces or clears it. Clients treat a field
+named in `secret_settings_set` as secret whatever its form field says.
 `available`
 is false, `channel_name` empty and `settings` empty while no enabled plugin
 provides the destination's channel; nothing is sent or queued then. Whether
@@ -670,11 +681,14 @@ Each failing setting answers `422` with a field error at
 `invalid_enum`, `out_of_range` or `invalid`). It then calls the plugin's
 `ValidateDestination`. A refusal answers `422` with the plugin's
 message, with the destination's secret values masked, in the problem's
-error detail at `body.settings`. A profile deleted meanwhile answers `404`. An unknown or
-unreachable channel answers `503 dependency_unavailable` with `Retry-After`; ten
-destinations answer `422`. Success is `201` with the destination and its
-`ETag`. The operation is non-retryable: a replay can create a second
-destination.
+error detail at `body.settings`. A profile deleted meanwhile answers `404`.
+A channel no enabled plugin provides answers `422` with a field error at
+`body.capability_id`. A plugin that provides it but fails to answer (it
+returns an error, times out or can't start) answers `503
+dependency_unavailable` with `Retry-After`; ten destinations answer `422`.
+Success is `201` with the destination and its `ETag`. The operation is
+non-retryable: a replay with the same name answers `422`, since names are
+unique per profile.
 
 ### Update a destination
 
@@ -686,8 +700,10 @@ out keeps its stored value, and `clear_secrets` removes named secrets. A
 stored setting the channel's current form no longer declares, after a plugin
 update, is dropped on the next update. Merged settings are checked as on
 create; a stored secret left blank counts as present for `required`. When
-the server can't decrypt the stored settings, a settings change answers
-`409 conflict` and nothing is written.
+the server can't decrypt the stored settings, or no enabled plugin provides
+the destination's channel any more, a settings change answers `409
+conflict` and nothing is written; a plugin that fails to answer its check
+answers `503` with `Retry-After`.
 Changed settings are checked by the plugin again and, like a changed webhook
 URL, clear the failure streak and the disable reason; so does re-enabling.
 Missing preconditions answer `428`, stale validators `412`. The validator
