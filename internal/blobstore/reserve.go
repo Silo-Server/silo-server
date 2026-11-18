@@ -58,10 +58,13 @@ func reserveFor(total int64) int64 {
 
 // lowSpaceState records whether a store is refusing writes, so the warning is
 // logged when that starts (and hourly while it lasts), and the recovery once
-// space is back.
+// space is back. pending counts the bytes of writes in flight, which share one
+// budget: each write's statfs reading misses what the others have yet to
+// write.
 type lowSpaceState struct {
 	low      atomic.Bool
 	lastWarn atomic.Int64
+	pending  atomic.Int64
 }
 
 // writeBudget returns how many bytes a write may add before it would cut into
@@ -119,21 +122,45 @@ func (f *Filesystem) noteWriteError(err error) {
 	f.warnFull(available, reserveFor(total))
 }
 
-// budgetWriter fails a write that would take the filesystem into the reserve.
-// The temporary file is discarded on error, so nothing partial is published.
+// claim takes n bytes of budget for a write in flight, or returns
+// ErrStorageFull when the writes in flight would together cut into the
+// reserve. The caller gives the bytes back with release once the write is
+// published or discarded; by then statfs counts what was published. A
+// negative budget (an unknown size) claims nothing.
+func (f *Filesystem) claim(n, budget, reserve int64) error {
+	if budget < 0 {
+		return nil
+	}
+	if pending := f.space.pending.Add(n); pending > budget {
+		f.space.pending.Add(-n)
+		return f.refuse(budget+reserve-(pending-n), reserve)
+	}
+	return nil
+}
+
+func (f *Filesystem) release(n int64) {
+	if n != 0 {
+		f.space.pending.Add(-n)
+	}
+}
+
+// budgetWriter claims budget for each chunk of a stream before writing it, so
+// a stream stops at the reserve. The temporary file is discarded on error, so
+// nothing partial is published.
 type budgetWriter struct {
 	f       *Filesystem
 	w       io.Writer
 	budget  int64
 	reserve int64
+	claimed int64
 }
 
 func (b *budgetWriter) Write(p []byte) (int, error) {
+	if err := b.f.claim(int64(len(p)), b.budget, b.reserve); err != nil {
+		return 0, err
+	}
 	if b.budget >= 0 {
-		if int64(len(p)) > b.budget {
-			return 0, b.f.refuse(b.budget+b.reserve, b.reserve)
-		}
-		b.budget -= int64(len(p))
+		b.claimed += int64(len(p))
 	}
 	return b.w.Write(p)
 }

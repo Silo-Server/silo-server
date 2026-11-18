@@ -213,8 +213,9 @@ func (c *contextReader) Read(p []byte) (int, error) {
 // with ErrExists when the key exists.
 //
 // A write that would leave less than the free-space reserve (reserveFor)
-// available fails with ErrStorageFull, before any directory is created when
-// size is known, and otherwise as soon as the data reaches the reserve.
+// available, counting the other writes in flight, fails with ErrStorageFull:
+// before any directory is created when size is known, and otherwise as soon
+// as the data reaches the reserve.
 func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclusive bool, write func(io.Writer) error) (err error) {
 	defer func() { f.noteWriteError(err) }()
 	if err := ValidateKey(key); err != nil {
@@ -235,9 +236,19 @@ func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclus
 	if err != nil {
 		return err
 	}
-	if budget >= 0 && size > budget {
-		return f.refuse(budget+reserve, reserve)
+	// A write of known size claims its bytes before creating anything; a
+	// stream claims them as it writes.
+	writer := &budgetWriter{f: f, budget: budget, reserve: reserve}
+	if size >= 0 {
+		if err = f.claim(size, budget, reserve); err != nil {
+			return err
+		}
+		if budget >= 0 {
+			defer f.release(size)
+		}
+		writer.budget = -1
 	}
+	defer func() { f.release(writer.claimed) }()
 	created, err := mkdirAllTracked(root, path.Dir(key))
 	if err != nil {
 		return err
@@ -257,7 +268,8 @@ func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclus
 		close(closed)
 	})
 	if err = tmp.Chmod(0644); err == nil {
-		err = write(&budgetWriter{f: f, w: tmp, budget: budget, reserve: reserve})
+		writer.w = tmp
+		err = write(writer)
 	}
 	if err == nil {
 		err = tmp.Sync()

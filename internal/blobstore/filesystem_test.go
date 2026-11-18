@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -458,10 +459,31 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("refused stream left files behind: %v %v", entries, err)
 	}
+	// Writes in flight share the budget: a stream that has written 8 of the
+	// 10 bytes leaves no room for a 5-byte write that statfs alone allows.
+	pr, pw := io.Pipe()
+	streamed := make(chan error, 1)
+	go func() { streamed <- s.PutStream(ctx, "kept/stream.jpg", pr, "") }()
+	if _, err = pw.Write(make([]byte, 8)); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); s.space.pending.Load() != 8; {
+		if time.Now().After(deadline) {
+			t.Fatalf("stream never claimed its bytes: %d", s.space.pending.Load())
+		}
+		runtime.Gosched()
+	}
+	if err = s.Put(ctx, "kept/during.jpg", make([]byte, 5)); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("put while a stream holds the budget: %v", err)
+	}
+	_ = pw.Close()
+	if err = <-streamed; err != nil || s.space.pending.Load() != 0 {
+		t.Fatalf("stream within the budget: %v, %d bytes still claimed", err, s.space.pending.Load())
+	}
 	if err = s.Put(ctx, "kept/small.jpg", make([]byte, 10)); err != nil {
 		t.Fatalf("put within the budget: %v", err)
 	}
-	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/small.jpg"}); err != nil || n != 2 {
+	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/stream.jpg", "kept/small.jpg"}); err != nil || n != 3 {
 		t.Fatalf("delete while full: %d %v", n, err)
 	}
 }
