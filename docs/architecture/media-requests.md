@@ -311,9 +311,10 @@ seasons on Sonarr). So the request also carries each requested season's TMDB
 first air date and episode count (`RequestDescriptor.season_details`), stored
 with the request when it is made (`media_requests.season_details`). A plugin
 matches the season as the first `episode_count` regular episodes, in airing
-order, that its service lists as airing on or after `first_air_date`, and
-falls back to the season number when the detail has no date or count. Requests made before the details
-were kept carry none and are matched by number.
+order, that its service lists as airing on or after `first_air_date`. When
+fewer match, it uses the ones it finds; it falls back to the season number
+when the detail has no date or count, or when no episode matches. Requests
+made before the details were kept carry none and are matched by number.
 
 A series in the library can be requested for the seasons it lacks (aired and
 incomplete, or not aired yet) when no download server takes series, in which
