@@ -9,10 +9,11 @@
  * ranges use the stripe URL at once; a fourth goes to the plan's own URL, whose
  * connection is already open, so no range waits on a cold fourth stripe connection. The first
  * answer other than a readable 206 that matches its request, or transport failure (fetch, body
- * read, early end, or no byte for `STRIPE_INACTIVITY_MS`), from the stripe URL ends its use:
- * the rest of that range and every later range go to the plan's own URL, with no retry spent on the
- * stripe URL. A plan URL whose first answer is a whole-file `200` ignores `Range`: the source
- * then becomes the stock `UrlSource`, which reads the file sequentially.
+ * read, early end, a body longer than its range, or no byte for `STRIPE_INACTIVITY_MS`), from the
+ * stripe URL ends its use: the rest of that range and every later range go to the plan's own URL,
+ * with no retry spent on the stripe URL. A plan URL whose first answer is a whole-file `200`
+ * ignores `Range`: the source then becomes the stock `UrlSource`, which reads the file
+ * sequentially.
  *
  * It subclasses `UrlSource` and overrides its private `_runWorker`, so
  * Mediabunny keeps its read orchestrator, its cache, its read workers and its
@@ -354,7 +355,8 @@ export class ParallelRangeSource extends InternalUrlSource {
    * plan's URL that ends early after sending bytes is asked for again with no
    * retry counted. A body-read error after the response's last expected byte ends the
    * response as complete, with no retry. An answer that is not a readable 206 matching the request, a
-   * transport failure, or a stripe request silent for `STRIPE_INACTIVITY_MS`, from
+   * transport failure, a body longer than its range, or a stripe request silent for
+   * `STRIPE_INACTIVITY_MS`, from
    * the stripe URL is no retry: it switches the source to the plan's URL, which
    * then serves the rest of the range. A response from the plan's URL that breaks
    * the byte checks fails the range at once. Any failure ends up in
@@ -444,6 +446,14 @@ export class ParallelRangeSource extends InternalUrlSource {
             if (result.done) break;
             if (position + result.value.length > responseEnd) {
               void reader.cancel().catch(() => {});
+              // On the stripe URL this is the stripe failing, like any other answer that is not
+              // the bytes asked for: the chunk is dropped whole and the plan's URL serves the
+              // range from `position`.
+              if (onStripe) {
+                this.stripeFailed = true;
+                bodyFailed = true;
+                break;
+              }
               throw new Error(
                 `Response for bytes=${range.start}-${range.end - 1} is longer than its range`,
               );

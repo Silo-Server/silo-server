@@ -49,6 +49,8 @@ type Fault =
   | { kind: "fetchError" }
   | { kind: "bodyError"; afterBytes: number }
   | { kind: "short"; bytes: number }
+  /** One chunk with the range's bytes and the `extra` bytes of the file that follow them. */
+  | { kind: "long"; extra: number }
   | { kind: "ignoreRange" }
   | { kind: "holdBody" }
   | { kind: "holdBodyUntilAbort" }
@@ -141,6 +143,8 @@ class FakeServer {
     // A server that ignores Range sends the whole file from byte 0, with its length.
     if (fault?.kind === "ignoreRange") payload = this.bytes;
     if (fault?.kind === "short") payload = payload.subarray(0, fault.bytes);
+    if (fault?.kind === "long")
+      payload = this.bytes.subarray(request.start, last + 1 + fault.extra);
     const total = fault?.kind === "total" ? fault.total : size;
     const modified = fault?.kind === "lastModified" ? fault.value : MODIFIED;
     const contentRange =
@@ -179,7 +183,7 @@ class FakeServer {
           controller.close();
           return;
         }
-        const chunk = payload.slice(sent, sent + 512 * KIB);
+        const chunk = payload.slice(sent, sent + (fault?.kind === "long" ? Infinity : 512 * KIB));
         sent += chunk.length;
         controller.enqueue(chunk);
       },
@@ -552,6 +556,7 @@ describe("ParallelRangeSource failures", () => {
     ],
     ["a changed total", { kind: "total", total: SIZE + 1 }],
     ["a changed Last-Modified", { kind: "lastModified", value: "Tue, 10 Nov 2026 10:00:00 GMT" }],
+    ["a body longer than its range", { kind: "long", extra: 1 }],
   ] satisfies Array<[string, Fault]>)("fails the source on %s", async (_name, fault) => {
     const server = new FakeServer(pattern(SIZE));
     server.fault = (request) => (request.start === FIRST_STRIPE ? fault : undefined);
@@ -681,6 +686,7 @@ describe("ParallelRangeSource failures", () => {
     ["a network error", { kind: "fetchError" }],
     ["a body-read error", { kind: "bodyError", afterBytes: 512 * KIB }],
     ["a short body", { kind: "short", bytes: 256 * KIB }],
+    ["a body longer than its range", { kind: "long", extra: 1 }],
   ] satisfies Array<[string, Fault]>)(
     "sends every range to the head URL after the stripe URL fails with %s",
     async (_name, fault) => {
