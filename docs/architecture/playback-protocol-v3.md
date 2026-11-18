@@ -997,23 +997,26 @@ parameter, and never carries a parameter across families.
 | Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
 | Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8); `original=1` on an original-SRT `.srt` URL (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
 
-A plan may also carry `stream.parallel_range_url` beside `stream.url`. It is the same
-API stream on the media origin an administrator set (`server.web_media_url`):
-`{web_media_url}/api/v2/stream/{session_id}` plus the same query as `stream.url`
-(`seek`, `st`). The server sets it only for an attempt started by a login
-session whose `client_features` listed `parallel_range_origin_v1` and did not
-list `header_authenticated_media_v1` (that feature's stream URL carries no
-`st`, and the media origin's preflight allows only `Range`, so the field is
-absent), on an `original_http` plan the API serves itself, while the setting is
-non-empty. A client that negotiated `parallel_range_origin_v1` reads the file
-from `parallel_range_url` when the plan has one. When that URL carries `st`, the
-reference alone authorizes each range request and the client sends no account
-token; when it carries no `st`, the client sends its account access token. A
-plan without `parallel_range_url` is read from `stream.url`. `stream.url` stays
-valid; a client may also read the warm head, overflow ranges, or a natively
-played file from it. A client sends its
-account token to no other absolute URL, including a proxy-node URL, which
-authenticates itself.
+A plan may also carry `stream.parallel_range_url` beside `stream.url`. It is the
+same API stream on the media origin an administrator set
+(`server.web_media_url`): `{web_media_url}/api/v2/stream/{session_id}` plus the
+same query as `stream.url` (`seek`, `st`). The server sets it only for an
+attempt a login session started, when the start or replan request's
+`client_features` listed `parallel_range_origin_v1`, on an `original_http` plan
+the API serves itself, while the setting is non-empty. It is absent when the
+attempt negotiated `header_authenticated_media_v1`: that feature's stream URL
+carries no `st`, and the media origin's preflight allows only `Range`. The
+attempt keeps `header_authenticated_media_v1` as the start negotiated it, so a
+replan request's own list cannot add or drop it, while
+`parallel_range_origin_v1` follows each start or replan request. A client that
+negotiated `parallel_range_origin_v1` reads the file from `parallel_range_url`
+when the plan has one. When that URL carries `st`, the reference alone
+authorizes each range request and the client sends no account token; when it
+carries no `st`, the client sends its account access token. A plan without
+`parallel_range_url` is read from `stream.url`. `stream.url` stays valid; a
+client may also read the warm head, overflow ranges, or a natively played file
+from it. A client sends its account token to no other absolute URL, including a
+proxy-node URL, which authenticates itself.
 
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session
 already names the file it plays, and the media timeline is anchored by `seek`
