@@ -105220,6 +105220,12 @@
       "value": "Koleksiyon"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Kitaplık"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -105268,6 +105274,12 @@
     {
       "type": 0,
       "value": "Henüz koleksiyon yok. Önce Koleksiyonlar sayfasında bir tane oluşturun."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Bu kitaplıkta bu türde koleksiyon yok."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

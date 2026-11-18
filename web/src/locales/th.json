@@ -97821,6 +97821,12 @@
       "value": "คอลเลกชัน"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "คลัง"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -97865,6 +97871,12 @@
     {
       "type": 0,
       "value": "ยังไม่มีคอลเลกชัน โปรดสร้างคอลเลกชันในหน้าคอลเลกชันก่อน"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "ไม่มีคอลเลกชันประเภทนี้ในคลังนี้"
     }
   ],
   "web.home.addRow.collection.noneOfType": [

@@ -96497,6 +96497,12 @@
       "value": "コレクション"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "ライブラリ"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -96545,6 +96551,12 @@
     {
       "type": 0,
       "value": "コレクションはまだありません。先にコレクションで作成してください。"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "このライブラリにはこの種類のコレクションはありません。"
     }
   ],
   "web.home.addRow.collection.noneOfType": [

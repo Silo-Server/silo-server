@@ -116435,6 +116435,12 @@
       "value": "Kolekcija"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Medijateka"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -116479,6 +116485,12 @@
     {
       "type": 0,
       "value": "Još nema kolekcija. Najprije izradite kolekciju u odjeljku Kolekcije."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "U ovoj medijateci nema kolekcija ove vrste."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

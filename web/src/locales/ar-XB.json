@@ -111770,6 +111770,12 @@
       "value": "\u200F\u202ECollection\u202C"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibrary\u202C"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -111818,6 +111824,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ENo collections yet. Make one in Collections first.\u202C"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo collections of this type in this library.\u202C"
     }
   ],
   "web.home.addRow.collection.noneOfType": [

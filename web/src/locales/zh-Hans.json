@@ -97397,6 +97397,12 @@
       "value": "合集"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "媒体库"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -97445,6 +97451,12 @@
     {
       "type": 0,
       "value": "还没有合集。请先在合集中创建一个。"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "此媒体库中没有此类型的合集。"
     }
   ],
   "web.home.addRow.collection.noneOfType": [

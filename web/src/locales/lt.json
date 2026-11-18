@@ -127596,6 +127596,12 @@
       "value": "Kolekcija"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Biblioteka"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -127644,6 +127650,12 @@
     {
       "type": 0,
       "value": "Kolekcijų dar nėra. Pirmiausia sukurkite ją skiltyje „Kolekcijos“."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Šioje bibliotekoje šio tipo kolekcijų nėra."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

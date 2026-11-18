@@ -116483,6 +116483,12 @@
       "value": "Colecție"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Bibliotecă"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -116527,6 +116533,12 @@
     {
       "type": 0,
       "value": "Nu există încă nicio colecție. Creați mai întâi una în Colecții."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Nu există colecții de acest tip în această bibliotecă."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

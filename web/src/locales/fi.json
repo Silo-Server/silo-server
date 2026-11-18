@@ -106490,6 +106490,12 @@
       "value": "Kokoelma"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Kirjasto"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106534,6 +106540,12 @@
     {
       "type": 0,
       "value": "Ei vielä kokoelmia. Luo ensin kokoelma Kokoelmat-sivulla."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Tässä kirjastossa ei ole tämäntyyppisiä kokoelmia."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

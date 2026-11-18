@@ -126146,6 +126146,12 @@
       "value": "Zbirka"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Knjižnica"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -126190,6 +126196,12 @@
     {
       "type": 0,
       "value": "Ni še nobene zbirke. Najprej jo ustvarite na strani Zbirke."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "V tej knjižnici ni zbirk te vrste."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

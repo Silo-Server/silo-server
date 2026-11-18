@@ -126910,6 +126910,12 @@
       "value": "Kolekcja"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Biblioteka"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -126954,6 +126960,12 @@
     {
       "type": 0,
       "value": "Nie masz jeszcze kolekcji. Najpierw utwórz ją w sekcji Kolekcje."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Brak kolekcji tego typu w tej bibliotece."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

@@ -117819,6 +117819,12 @@
       "value": "Kolekcija"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Bibliotēka"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -117867,6 +117873,12 @@
     {
       "type": 0,
       "value": "Vēl nav kolekciju. Vispirms izveidojiet kolekciju sadaļā „Kolekcijas”."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Šajā bibliotēkā nav šāda veida kolekciju."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

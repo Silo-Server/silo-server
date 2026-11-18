@@ -105742,6 +105742,12 @@
       "value": "कलेक्शन"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "लाइब्रेरी"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -105790,6 +105796,12 @@
     {
       "type": 0,
       "value": "अभी कोई कलेक्शन नहीं है। पहले कलेक्शन पेज में एक कलेक्शन बनाएँ।"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "इस लाइब्रेरी में इस प्रकार का कोई कलेक्शन नहीं है।"
     }
   ],
   "web.home.addRow.collection.noneOfType": [

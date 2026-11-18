@@ -106752,6 +106752,12 @@
       "value": "Bộ sưu tập"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Thư viện"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106796,6 +106802,12 @@
     {
       "type": 0,
       "value": "Chưa có bộ sưu tập nào. Tạo bộ sưu tập trong Bộ sưu tập trước."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Không có bộ sưu tập nào thuộc loại này trong thư viện này."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

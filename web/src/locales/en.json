@@ -106434,6 +106434,12 @@
       "value": "Collection"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Library"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106478,6 +106484,12 @@
     {
       "type": 0,
       "value": "No collections yet. Make one in Collections first."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "No collections of this type in this library."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

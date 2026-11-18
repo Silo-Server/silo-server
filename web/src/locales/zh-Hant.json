@@ -97705,6 +97705,12 @@
       "value": "合輯"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "媒體庫"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -97749,6 +97755,12 @@
     {
       "type": 0,
       "value": "尚無合輯。請先在合輯頁面建立一個。"
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "此媒體庫中沒有此類型的合輯。"
     }
   ],
   "web.home.addRow.collection.noneOfType": [

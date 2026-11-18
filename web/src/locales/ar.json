@@ -143586,6 +143586,12 @@
       "value": "المجموعة"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "المكتبة"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -143630,6 +143636,12 @@
     {
       "type": 0,
       "value": "لا توجد مجموعات بعد. أنشئ مجموعة في «المجموعات» أولًا."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "لا توجد مجموعات من هذا النوع في هذه المكتبة."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

@@ -105902,6 +105902,12 @@
       "value": "Sammlung"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Mediathek"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -105946,6 +105952,12 @@
     {
       "type": 0,
       "value": "Noch keine Sammlungen. Erstelle zuerst eine unter „Sammlungen“."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Keine Sammlungen dieses Typs in dieser Mediathek."
     }
   ],
   "web.home.addRow.collection.noneOfType": [

@@ -21,7 +21,13 @@ function adminCollectionOptions(
   return collections
     .filter((collection) => collection.visibility === "visible")
     .map((collection) => {
-      const libraryName = names.get(collection.library_id) ?? "";
+      const ids =
+        collection.library_ids.length > 0 ? collection.library_ids : [collection.library_id];
+      const libraries = ids.map((id) => ({ id, name: names.get(id) ?? "" }));
+      const libraryName = libraries
+        .map((library) => library.name)
+        .filter(Boolean)
+        .join(", ");
       return {
         id: collection.id,
         title: collection.title,
@@ -29,6 +35,7 @@ function adminCollectionOptions(
         group: libraryName,
         library_id: collection.library_id,
         library_name: libraryName,
+        libraries,
         collection_type: collection.collection_type,
         item_count: collection.item_count,
         poster_url: collection.poster_url,
