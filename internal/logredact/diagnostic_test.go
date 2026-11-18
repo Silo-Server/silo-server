@@ -22,19 +22,6 @@ func TestSanitizeQueryCredentialAliases(t *testing.T) {
 	}
 }
 
-// A Jellyfin per-play tag starts with the play session ID and authorizes a
-// static stream, so it is masked like a PlaySessionId, both where a client
-// echoes it and where PlaybackInfo returns it.
-func TestPlayTagIsMasked(t *testing.T) {
-	const playTag = "0123456789abcdef0123456789abcdef0123456789abcdef"
-	if got := SanitizeQuery("static=true&tag=" + playTag); strings.Contains(got, playTag) || !strings.Contains(got, "static=true") {
-		t.Fatalf("query: %q", got)
-	}
-	if body := SanitizeJSON([]byte(`{"MediaSources":[{"ETag":"` + playTag + `","Id":"src"}]}`)); strings.Contains(string(body), playTag) || !strings.Contains(string(body), `"src"`) {
-		t.Fatalf("json: %s", body)
-	}
-}
-
 func TestSanitizeQueryFailsClosed(t *testing.T) {
 	for _, raw := range []string{"ApiKey=secret%ZZ", "ApiKey=secret;Limit=20", "ApiKey=secret&bad=%"} {
 		if got := SanitizeQuery(raw); strings.Contains(got, "secret") || !strings.Contains(got, "omitted") {

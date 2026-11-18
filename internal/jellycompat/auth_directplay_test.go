@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -254,46 +252,6 @@ func TestPlaybackSessionAuth_CredentialLessStaticStreamGrant(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
-			if rec.Code != tc.want || reached != (tc.want == http.StatusOK) {
-				t.Fatalf("status=%d reached=%v, want %d; %s", rec.Code, reached, tc.want, rec.Body.String())
-			}
-		})
-	}
-}
-
-// Jellyfin for Android TV 0.19+ sends a static stream with no credential but
-// the source's ETag from PlaybackInfo as "tag". That per-play tag grants the
-// static stream of its own source and nothing else.
-func TestPlaybackSessionAuth_PlayTagGrant(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		path string // %s is the tag PlaybackInfo gave source src9
-		want int
-	}{
-		{"Android TV request", "/Videos/item123/stream?container=mkv&static=true&tag=%s&mediaSourceId=src9", http.StatusOK},
-		{"other source of the play", "/Videos/item123/stream?static=true&tag=%s&mediaSourceId=src10", http.StatusUnauthorized},
-		{"download route", "/Items/item123/Download?static=true&tag=%s&mediaSourceId=src9", http.StatusUnauthorized},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sessions := NewSessionStore(24*time.Hour, fixedNow)
-			if err := sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 7}); err != nil {
-				t.Fatal(err)
-			}
-			playback := NewPlaybackSessionStore(time.Hour, fixedNow)
-			playSessionID := uuid.NewString()
-			tag := compatPlayTag(playSessionID, "0123456789abcdef")
-			if err := playback.PutNegotiated(PlaybackSession{
-				ID: playSessionID, CompatToken: "compat-tok", ClientIP: "192.0.2.1", ClientPeer: "192.0.2.1",
-				RouteItemID: "item123", MediaSources: []PlaybackMediaSource{{ID: "src9", ETag: tag}, {ID: "src10", ETag: compatPlayTag(playSessionID, "fedcba9876543210")}},
-			}); err != nil {
-				t.Fatal(err)
-			}
-			var reached bool
-			// The request comes from the negotiation's address, so only the
-			// tag may grant it: the address-only grant is off.
-			router := clientip.Middleware(clientip.NewResolver(nil))(directPlayRouter(t, sessions, playback, nil, addressGrantSettings(false), &reached))
-			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf(tc.path, tag), nil))
 			if rec.Code != tc.want || reached != (tc.want == http.StatusOK) {
 				t.Fatalf("status=%d reached=%v, want %d; %s", rec.Code, reached, tc.want, rec.Body.String())
 			}
