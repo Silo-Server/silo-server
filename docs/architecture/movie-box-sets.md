@@ -25,9 +25,10 @@ its own card. This note records the invariants; the wire contract is in
 - One row serves every library. It is fetched in the metadata language of
   the first enabled library, in library order, that holds one of the
   collection's movies with box sets on, and `language` records which. TMDB
-  leaves the name or overview empty where its translation lacks them; those
-  come from TMDB's English answer. TMDB picks the poster for the language
-  itself.
+  leaves the overview (and possibly the name) empty where its translation
+  lacks it; those come from its answer in `metadata.fallback_language`, as
+  item metadata does, and stay empty when that is the original language.
+  TMDB picks the poster for the language itself.
 - The stored name is TMDB's. Reads show it through `catalog.BoxSetTitle`
   ("… Collection" becomes "… Box Set"). Search matches the name without that
   suffix (`boxSetStemSQL`, the same rule in SQL; change the two together),

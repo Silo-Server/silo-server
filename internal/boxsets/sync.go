@@ -69,18 +69,29 @@ type Syncer struct {
 	// images returns the image cacher, or nil while artwork is served from
 	// the provider (no artwork store, or metadata.cache_images off).
 	images func() metadata.ImageCacher
-	now    func() time.Time
+	// fallbackLanguage returns metadata.fallback_language, empty when off.
+	fallbackLanguage func() string
+	now              func() time.Time
 }
 
-// NewSyncer returns a syncer over store and client.
+// NewSyncer returns a syncer over store and client. Until WithFallbackLanguage
+// says otherwise, it falls back to English, the setting's default.
 func NewSyncer(store Store, client TMDB) *Syncer {
-	return &Syncer{store: store, tmdb: client, now: time.Now}
+	return &Syncer{store: store, tmdb: client, fallbackLanguage: func() string { return "en" }, now: time.Now}
 }
 
 // WithImages caches collection artwork through the cacher images returns,
 // the way item artwork is cached.
 func (s *Syncer) WithImages(images func() metadata.ImageCacher) *Syncer {
 	s.images = images
+	return s
+}
+
+// WithFallbackLanguage fills the text a collection's translation lacks in the
+// language fallback returns (metadata.fallback_language), the way item
+// metadata falls back; empty fills nothing.
+func (s *Syncer) WithFallbackLanguage(fallback func() string) *Syncer {
+	s.fallbackLanguage = fallback
 	return s
 }
 
@@ -212,26 +223,28 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 }
 
 // fetchCollection fetches a collection in the language it is due in. TMDB
-// leaves the name or overview empty where its translation lacks them, so
-// those come from its English answer, the way item metadata falls back.
-// TMDB falls back for artwork itself. When that English answer fails, the
-// translation is kept as it is unless it has no name to show.
+// leaves the overview empty where its translation lacks one (and may do the
+// same for the name), so those come from its answer in the fallback language,
+// the way item metadata falls back. TMDB falls back for artwork itself. When
+// that answer fails, the translation is kept as it is unless it has no name to
+// show.
 func (s *Syncer) fetchCollection(ctx context.Context, fetch catalog.CollectionFetch) (*tmdb.Collection, error) {
 	c, err := s.tmdb.GetCollection(ctx, int(fetch.ID), fetch.Language)
-	if err != nil || fetch.Language == "en" || (c.Name != "" && c.Overview != "") {
+	fallback := s.fallbackLanguage()
+	if err != nil || fallback == "" || fallback == fetch.Language || (c.Name != "" && c.Overview != "") {
 		return c, err
 	}
-	english, err := s.tmdb.GetCollection(ctx, int(fetch.ID), "")
+	other, err := s.tmdb.GetCollection(ctx, int(fetch.ID), fallback)
 	if err != nil {
 		if c.Name != "" {
-			slog.WarnContext(ctx, "box sets: English collection fallback failed; storing the translation as it is", "component", "boxsets", "tmdb_collection_id", fetch.ID, "error", err)
+			slog.WarnContext(ctx, "box sets: fallback language collection fetch failed; storing the translation as it is", "component", "boxsets", "tmdb_collection_id", fetch.ID, "fallback_language", fallback, "error", err)
 			return c, nil
 		}
 		return nil, err
 	}
 	localized := *c
-	localized.Name = cmp.Or(c.Name, english.Name)
-	localized.Overview = cmp.Or(c.Overview, english.Overview)
+	localized.Name = cmp.Or(c.Name, other.Name)
+	localized.Overview = cmp.Or(c.Overview, other.Overview)
 	return &localized, nil
 }
 

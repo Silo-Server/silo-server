@@ -109,12 +109,12 @@ type fakeTMDB struct {
 	lookups map[int]int
 	// onCollection runs on each collection fetch.
 	onCollection func()
-	// translated answers collection requests that ask for a language;
-	// collections answers the others, as TMDB answers in English.
+	// translated answers collection requests in a language other than
+	// English; collections answers the others.
 	translated map[int]*tmdb.Collection
 	// languages records the languages each collection was asked for in.
 	languages map[int][]string
-	// englishErr answers collection requests that ask for no language.
+	// englishErr answers collection requests in English.
 	englishErr error
 }
 
@@ -139,11 +139,12 @@ func (f *fakeTMDB) GetCollection(_ context.Context, id int, language string) (*t
 	if f.onCollection != nil {
 		f.onCollection()
 	}
-	if language == "" && f.englishErr != nil {
+	english := language == "" || language == "en"
+	if english && f.englishErr != nil {
 		return nil, f.englishErr
 	}
 	c, ok := f.collections[id]
-	if t, translated := f.translated[id]; translated && language != "" {
+	if t, translated := f.translated[id]; translated && !english {
 		c, ok = t, true
 	}
 	if !ok {
@@ -201,8 +202,9 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 	}
 	stored := store.collections[1241]
 	// The collection is stored in the language it is due in, and the
-	// overview the translation lacks comes from TMDB's English answer.
-	if !slices.Equal(client.languages[1241], []string{"de", ""}) || stored.Language != "de" {
+	// overview the translation lacks comes from the fallback language,
+	// English by default.
+	if !slices.Equal(client.languages[1241], []string{"de", "en"}) || stored.Language != "de" {
 		t.Fatalf("fetched in %q, stored as %q; want de, then the English fallback", client.languages[1241], stored.Language)
 	}
 	if stored.Name != "Harry Potter Filmreihe" || stored.Overview != "The wizarding saga." {
@@ -232,6 +234,25 @@ func TestRunKeepsTheTranslationWhenTheEnglishFallbackFails(t *testing.T) {
 	}
 	if stored, ok := store.collections[1241]; !ok || stored.Name != "Harry Potter Filmreihe" || res.Failures != 0 {
 		t.Fatalf("stored = %+v, %v; failures = %d; want the German collection stored without a failure", stored, ok, res.Failures)
+	}
+}
+
+// With the fallback language set to the original language, the text a
+// translation lacks stays empty, as it does for item metadata.
+func TestRunFillsNothingWhenTheFallbackIsOff(t *testing.T) {
+	store := newFakeStore(catalog.MovieCollectionLookup{ContentID: "hp1", TMDBID: 671})
+	store.language = "de"
+	client := &fakeTMDB{
+		languages:   map[int][]string{},
+		movies:      map[int]*tmdb.CollectionRef{671: {ID: 1241}},
+		translated:  map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Filmreihe", Parts: []tmdb.CollectionPart{{ID: 671}}}},
+		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection", Overview: "The wizarding saga.", Parts: []tmdb.CollectionPart{{ID: 671}}}},
+	}
+	if _, err := NewSyncer(store, client).WithFallbackLanguage(func() string { return "" }).Run(t.Context(), noReport); err != nil {
+		t.Fatal(err)
+	}
+	if stored := store.collections[1241]; !slices.Equal(client.languages[1241], []string{"de"}) || stored.Overview != "" {
+		t.Fatalf("asked in %q, stored overview %q; want only de and no overview", client.languages[1241], stored.Overview)
 	}
 }
 

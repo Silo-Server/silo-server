@@ -3397,7 +3397,7 @@ func main() {
 		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
 		boxSetSyncer := boxsets.NewSyncer(catalog.NewBoxSetRepository(deps.DB), tmdbClient)
 		if metadataService != nil {
-			boxSetSyncer.WithImages(metadataService.AutoImageCacher)
+			boxSetSyncer.WithImages(metadataService.AutoImageCacher).WithFallbackLanguage(metadataService.FallbackLanguage)
 		}
 		taskMgr.Register(tasks.NewSyncMovieBoxSetsTask(deps.DB, boxSetSyncer))
 		go boxsets.Watch(appCtx, deps.EventsHub, func() {
