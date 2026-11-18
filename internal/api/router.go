@@ -3484,6 +3484,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		nodeRecipes := noderecipe.NewStore(deps.RedisClient, 0)
 		nodeControlOptions.Recipes, nodeControlOptions.Revocations = nodeRecipes, nodeRecipes
 		deps.wireNodeSources(&nodeControlOptions)
+		if nodeHandler != nil {
+			// A node's declaration goes through the admin node service, so
+			// every API server and proxy follows it as it follows an
+			// administrator's edit.
+			nodeControlOptions.Registrar = nodeHandler
+		}
 		nodeControl := nodecontrol.NewServer(nodeControlOptions)
 		r.Route("/api/internal/nodes/self", func(r chi.Router) {
 			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
@@ -3500,6 +3506,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			r.Group(func(r chi.Router) {
 				r.Use(nodeControl.LimitNode)
 				r.Get("/config", nodeControl.HandleConfig)
+				r.Put("/registration", nodeControl.HandleRegistration)
 				r.Post("/report", nodeControl.HandleReport)
 				r.Post("/logs", nodeControl.HandleLogs)
 				r.Post("/health-changed", nodeControl.HandleHealthChanged)

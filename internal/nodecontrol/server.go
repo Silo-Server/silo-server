@@ -81,6 +81,9 @@ type Options struct {
 	// granted source against; a nil one answers 503 for its kind.
 	Files  FileCatalog
 	Themes ThemeCatalog
+	// Registrar applies the declaration a node sends at startup; nil answers
+	// registration with 503.
+	Registrar Registrar
 	// Lifetime is the API server's lifetime: when it ends, as graceful
 	// shutdown begins, every source byte response in flight is cut, so a
 	// long read does not hold the shutdown. Nil never cuts them.
