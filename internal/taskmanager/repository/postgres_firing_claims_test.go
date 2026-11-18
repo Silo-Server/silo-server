@@ -95,7 +95,7 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 
 	t.Run("pruning keeps each claim for its own window", func(t *testing.T) {
 		gone, monthly, live := newKey("uninstalled"), newKey("monthly"), newKey("live")
-		if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at) VALUES ($1, $2::timestamptz, $2::timestamptz, $2::timestamptz + interval '8 days')`, gone, now.Add(-9*24*time.Hour)); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, due_at, expires_at) VALUES ($1, $2::timestamptz, $2::timestamptz, $2::timestamptz, $2::timestamptz + interval '8 days')`, gone, now.Add(-9*24*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 		thirtyDays := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: (30 * 24 * time.Hour).Milliseconds()}
@@ -123,35 +123,46 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 
 // A server whose timer was due seconds after the winner's, across a slot
 // boundary, and that reaches the claim long after the window has passed by
-// the clock, is still measured from when its firing was due.
+// the clock, is still measured from when its firing was due. So is the
+// winner: a claim written an hour late still names the firing it was due for.
 func TestPgFiringClaimsMeasureAStalledServerFromItsDueTimeDB(t *testing.T) {
 	pool := taskHistoryTestPool(t)
 	ctx := context.Background()
 	claims := NewPgFiringClaims(pool)
-	key := fmt.Sprintf("plugin:test:%s_%d", t.Name(), time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM task_firing_claims WHERE task_key = $1`, key)
-	})
 	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: time.Hour.Milliseconds()}
-	claim := func(due time.Time) bool {
-		t.Helper()
-		slot, window, _ := taskmanager.FiringSlot(hourly, due)
-		won, err := claims.ClaimFiring(ctx, key, slot, window, due)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return won
-	}
-	boundary := time.Now().Truncate(time.Hour).Add(-2 * time.Hour)
+	boundary := time.Now().Truncate(time.Hour).Add(-3 * time.Hour)
 	winnerDue := boundary.Add(-2 * time.Second)
 	slot, _, _ := taskmanager.FiringSlot(hourly, winnerDue)
-	if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at) VALUES ($1, $2, $3, $3::timestamptz + interval '8 days')`, key, slot, winnerDue); err != nil {
-		t.Fatal(err)
-	}
-	if claim(boundary.Add(3 * time.Second)) {
-		t.Fatal("a stalled server ran a firing another server already claimed")
-	}
-	if !claim(boundary.Add(time.Hour)) {
-		t.Fatal("the next interval's firing must be claimable")
+	for _, tc := range []struct {
+		name      string
+		claimedAt time.Time
+	}{
+		{name: "winner on time", claimedAt: winnerDue},
+		{name: "winner an hour late", claimedAt: winnerDue.Add(time.Hour)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := fmt.Sprintf("plugin:test:%s_%d", t.Name(), time.Now().UnixNano())
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM task_firing_claims WHERE task_key = $1`, key)
+			})
+			claim := func(due time.Time) bool {
+				t.Helper()
+				slot, window, _ := taskmanager.FiringSlot(hourly, due)
+				won, err := claims.ClaimFiring(ctx, key, slot, window, due)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return won
+			}
+			if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, due_at, expires_at) VALUES ($1, $2, $3, $4, $3::timestamptz + interval '8 days')`, key, slot, tc.claimedAt, winnerDue); err != nil {
+				t.Fatal(err)
+			}
+			if claim(boundary.Add(3 * time.Second)) {
+				t.Fatal("a stalled server ran a firing another server already claimed")
+			}
+			if !claim(boundary.Add(2 * time.Hour)) {
+				t.Fatal("a later interval's firing must be claimable")
+			}
+		})
 	}
 }

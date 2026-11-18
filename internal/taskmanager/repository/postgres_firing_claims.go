@@ -25,7 +25,8 @@ func NewPgFiringClaims(pool *pgxpool.Pool) *PgFiringClaims {
 
 // ClaimFiring takes a transaction-scoped advisory lock on the task, so claims
 // of one task run one at a time, then inserts the claim unless one exists at
-// slot, or taken within window of due or of now. The row, not the lock, is what a later firing on
+// slot, or taken within window of due or of now, or whose own firing was
+// due within window of due. The row, not the lock, is what a later firing on
 // another server checks, so firings a few seconds apart are caught as well as
 // concurrent ones. Each claim records when it expires, after the longer of
 // its window and firingClaimRetention, and expired claims of every task are
@@ -44,10 +45,12 @@ func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.
 			SELECT EXISTS (
 				SELECT 1 FROM task_firing_claims
 				WHERE task_key = $1
-				  AND (slot = $2 OR (
-				      claimed_at > LEAST(clock_timestamp(), $4::timestamptz) - $3 * interval '1 microsecond'
-				      AND (claimed_at < $4::timestamptz + $3 * interval '1 microsecond'
-				           OR claimed_at > clock_timestamp() - $3 * interval '1 microsecond')))
+				  AND (slot = $2
+				       OR (claimed_at > LEAST(clock_timestamp(), $4::timestamptz) - $3 * interval '1 microsecond'
+				           AND (claimed_at < $4::timestamptz + $3 * interval '1 microsecond'
+				                OR claimed_at > clock_timestamp() - $3 * interval '1 microsecond'))
+				       OR (due_at > $4::timestamptz - $3 * interval '1 microsecond'
+				           AND due_at < $4::timestamptz + $3 * interval '1 microsecond'))
 			)`, key, slot, window.Microseconds(), due).Scan(&taken); err != nil {
 			return fmt.Errorf("reading task firing claims: %w", err)
 		}
@@ -55,9 +58,9 @@ func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.
 			return nil
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at)
-			VALUES ($1, $2, clock_timestamp(), clock_timestamp() + $3 * interval '1 microsecond')`,
-			key, slot, max(window, firingClaimRetention).Microseconds()); err != nil {
+			INSERT INTO task_firing_claims (task_key, slot, claimed_at, due_at, expires_at)
+			VALUES ($1, $2, clock_timestamp(), LEAST(clock_timestamp(), $4::timestamptz), clock_timestamp() + $3 * interval '1 microsecond')`,
+			key, slot, max(window, firingClaimRetention).Microseconds(), due); err != nil {
 			return fmt.Errorf("claiming task firing: %w", err)
 		}
 		// Pruning touches every task's rows, so claims of different tasks

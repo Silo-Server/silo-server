@@ -73,7 +73,8 @@ firing happens on every server. A plugin task is a
 `taskmanager.ClusterFiringTask`: before its trigger loop runs a firing, the
 task manager claims it through `taskmanager.FiringClaims`
 (`repository.PgFiringClaims`, table `task_firing_claims`, migrations
-`20261106022808_add_task_firing_claims` and
+`20261106022808_add_task_firing_claims`,
+`20261118193342_add_task_firing_claim_due_at` and
 `20261106153043_add_task_firing_claim_expiry`). The server that records the claim
 runs the firing; every other server skips it and rearms its triggers from now,
 as after a skipped preflight. Manual runs (Run now) never claim. Core tasks do
@@ -82,7 +83,10 @@ lock of their own.
 
 A claim is a row keyed by task and slot, inserted under a transaction-scoped
 advisory lock on the task, unless the task already has a claim at that slot or
-one taken within the firing's window of when the firing was due, or of now.
+one taken within the firing's window of when the firing was due, or of now,
+or one whose own firing was due within that window of this one's (each claim
+records its due time, so a winner that claimed late still covers the firing
+it served).
 `taskmanager.FiringSlot` gives both, from the trigger that fired and the time
 its timer was armed for (the wake-up time for a startup trigger):
 

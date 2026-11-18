@@ -16,10 +16,11 @@ type ClusterFiringTask interface {
 // FiringClaims records which process runs a scheduled firing.
 type FiringClaims interface {
 	// ClaimFiring records a claim for the task at slot and reports true,
-	// unless a claim for the task at slot, or one taken within window of
-	// due or of now, already exists. due is when the firing was scheduled,
-	// so a server that reaches the claim late is still measured from the
-	// firing it serves. Claims of one task are serialized, so of any set
+	// unless a claim for the task at slot, one taken within window of due
+	// or of now, or one whose own firing was due within window of due,
+	// already exists. due is when the firing was scheduled, so servers that
+	// reach the claim late, the winner included, are still measured from
+	// the firing they serve. Claims of one task are serialized, so of any set
 	// of calls that would conflict exactly one reports true.
 	ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration, due time.Time) (bool, error)
 }
