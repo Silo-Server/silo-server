@@ -297,7 +297,7 @@ func TestDispatcher_NotificationReachesConsumerInItsPublicShape(t *testing.T) {
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Channel:   events.ChannelNotifications,
 		Event:     "notification.created",
-		Data:      json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","library_id":3,"series_title":"Severance","poster_thumbhash":"abc","read_at":null,"created_at":"2026-11-04T10:00:00Z"}`),
+		Data:      json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","library_id":3,"series_title":"Severance","poster_thumbhash":"abc","read_at":null,"reason_flags":{"next_up":true,"favorite":true},"created_at":"2026-11-04T10:00:00Z"}`),
 		UserID:    7,
 		ProfileID: "p1",
 	}); err != nil {
@@ -313,5 +313,9 @@ func TestDispatcher_NotificationReachesConsumerInItsPublicShape(t *testing.T) {
 		if _, leaked := payload[internal]; leaked {
 			t.Errorf("payload carries %q, which isn't in the event catalog: %v", internal, payload)
 		}
+	} // A nested object is allowlisted too.
+	flags, _ := payload["reason_flags"].(map[string]any)
+	if _, leaked := flags["favorite"]; flags["next_up"] != true || leaked {
+		t.Errorf("reason_flags = %v, want only the catalog's fields", flags)
 	}
 }

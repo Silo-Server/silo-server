@@ -47,7 +47,8 @@ becomes absent (a job the server queued itself has no `created_by_user_id`).
 because profile IDs repeat across accounts.
 
 Then `events.Project` rewrites the payload into the catalog's public shape:
-the fields of the SDK payload type and nothing else. A field the host adds
+the fields of the SDK payload type and nothing else, in nested objects too
+(a session, a history entry, a notification's `reason_flags`). A field the host adds
 for its own clients therefore stays off the plugin contract until the SDK
 type adds it. An event whose payload doesn't fit its catalog type, such as a
 number where the catalog has a string, is logged and not stored.

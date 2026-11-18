@@ -61,8 +61,8 @@ func TestEventCatalogMatchesProducers(t *testing.T) {
 		publicevents.SessionPaused:  {session, sessionCheck("Heat")},
 		publicevents.SessionResumed: {session, sessionCheck("Heat")},
 		publicevents.SessionStopped: {stopped, func(p any) bool {
-			history, err := p.(*publicevents.SessionEvent).DecodeHistory()
-			return err == nil && history != nil && history.MediaTitle == "Heat" && history.EndedAt.Equal(at.Add(time.Hour))
+			history := p.(*publicevents.SessionEvent).History
+			return history != nil && history.MediaTitle == "Heat" && history.EndedAt.Equal(at.Add(time.Hour))
 		}},
 		publicevents.ScanStarted:   {scan("running"), scanCheck},
 		publicevents.ScanCompleted: {scan("completed"), scanCheck},
@@ -108,8 +108,8 @@ func TestEventCatalogMatchesProducers(t *testing.T) {
 
 func sessionCheck(title string) func(any) bool {
 	return func(p any) bool {
-		session, err := p.(*publicevents.SessionEvent).DecodeSession()
-		return err == nil && session != nil && session.MediaTitle == title && session.UserID == "7" && p.(*publicevents.SessionEvent).Seq > 0
+		session := p.(*publicevents.SessionEvent).Session
+		return session != nil && session.MediaTitle == title && session.UserID == "7" && p.(*publicevents.SessionEvent).Seq > 0
 	}
 }
 
