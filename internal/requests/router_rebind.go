@@ -1,0 +1,103 @@
+package requests
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// unboundTargetError is the last error a live target keeps when its server is
+// deleted while no plugin installation backs it.
+const unboundTargetError = "request server deleted while its plugin was not installed"
+
+// RebindOrphanedIntegrations points every server whose plugin installation no
+// longer exists at the installation that now provides the same request router
+// capability. Uninstalling a plugin and installing it again gives it a new
+// installation id, and request_integrations.installation_id has no foreign
+// key, so without this the servers keep the old id: the editor finds no
+// settings, status checks fail, and their live requests never settle.
+//
+// A server is rebound only when exactly one installation provides its
+// capability; with two candidates the admin has to pick. The rebind advances
+// the row's revision, so an editor opened on the old id saves as stale. It is
+// idempotent and returns the ids of the servers it rebound.
+func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin rebind request integrations: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if err := lockRoutingMode(ctx, tx); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `
+		WITH candidates AS (
+			SELECT i.id, min(pc.plugin_installation_id) AS installation_id,
+				count(DISTINCT pc.plugin_installation_id) AS matches
+			FROM request_integrations i
+			JOIN plugin_capabilities pc
+				ON pc.capability_type = 'request_router.v1'
+				AND pc.capability_id = i.capability_id
+			WHERE i.installation_id IS NOT NULL
+				AND NOT EXISTS (SELECT 1 FROM plugin_installations p WHERE p.id = i.installation_id)
+			GROUP BY i.id
+		)
+		UPDATE request_integrations i
+		SET installation_id = c.installation_id, updated_at = now()
+		FROM candidates c
+		WHERE i.id = c.id AND c.matches = 1
+		RETURNING i.id`)
+	if err != nil {
+		return nil, fmt.Errorf("rebind request integrations: %w", err)
+	}
+	rebound, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("rebind request integrations: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit rebind request integrations: %w", err)
+	}
+	return rebound, nil
+}
+
+// failUnboundTargets fails the queued and downloading targets of a server no
+// plugin installation backs, so deleting it does not leave requests that no
+// plugin will ever report on. A bound server's live targets are left alone:
+// its plugin still tracks them, and the delete refuses. The caller holds the
+// server's row lock.
+func (r *Repository) failUnboundTargets(ctx context.Context, tx pgx.Tx, id string) error {
+	var unbound bool
+	if err := tx.QueryRow(ctx, `
+		SELECT NOT EXISTS (
+			SELECT 1 FROM request_integrations i
+			JOIN plugin_installations p ON p.id = i.installation_id
+			WHERE i.id = $1
+		)`, id).Scan(&unbound); err != nil {
+		return fmt.Errorf("check request integration installation: %w", err)
+	}
+	if !unbound {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		UPDATE media_request_targets
+		SET status = 'failed', last_error = $2, updated_at = now(), `+clearTargetDownload+`
+		WHERE integration_id = $1 AND status IN ('queued', 'downloading')
+		RETURNING request_id`, id, unboundTargetError)
+	if err != nil {
+		return fmt.Errorf("fail unbound integration targets: %w", err)
+	}
+	requestIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("fail unbound integration targets: %w", err)
+	}
+	slices.Sort(requestIDs)
+	for _, requestID := range slices.Compact(requestIDs) {
+		if _, err := r.recomputeAggregate(ctx, tx, requestID, Viewer{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -1271,6 +1271,9 @@ func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string
 		return fmt.Errorf("lock request integration: %w", err)
 	}
 
+	if err := r.failUnboundTargets(ctx, tx, id); err != nil {
+		return err
+	}
 	var hasLiveTargets bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
