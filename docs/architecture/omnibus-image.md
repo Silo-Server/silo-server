@@ -290,9 +290,9 @@ With `MODE=proxy`, `init-config` requires `DATABASE_URL` and `REDIS_URL`. Silo
 already keeps migrations and `POSTGRES_TUNE` to the primary modes
 (`integrated`, `api`), so a proxy never changes the shared database's schema or
 settings. Silo itself refuses to start a proxy without `SILO_NODE_URL` (or
-`NODE_URL`), its identity. A proxy that matches no row on the main server
-registers itself at that URL; an administrator can instead register it at
-another URL, which the main server checks its health at and which can differ
+`NODE_URL`), its identity. With `SILO_NODE_REGISTER=true`, a proxy that
+matches no row on the main server registers itself at that URL; an
+administrator can instead register it at another URL, which the main server checks its health at and which can differ
 from `SILO_NODE_URL` (see
 [Proxy origins by access path](../admin-api.md#proxy-origins-by-access-path)).
 

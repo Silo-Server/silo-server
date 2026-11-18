@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/nodedeclare"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
@@ -35,19 +36,25 @@ func proxyNodeIdentity(getenv func(string) string) (nodeURL, name string) {
 	return first("SILO_NODE_URL", envNodeURL), first("SILO_NODE_NAME", envNodeName)
 }
 
+// envNodeRegister lets a proxy that matches no stream node row create its
+// own. It is opt-in; see nodepool.DeclareProxy.
+const envNodeRegister = "SILO_NODE_REGISTER"
+
 // proxyDeclarationRetryInterval spaces a proxy's retries while the database
 // predates node declarations: the main server is usually still migrating.
 const proxyDeclarationRetryInterval = 30 * time.Second
 
-// declareProxyNode registers this proxy and writes the configuration it
-// declares from its environment to its row, before the configuration watcher
-// first reads it. A proxy nobody registered creates its own row. It returns
-// the row, or nil when the proxy starts on its row as the administrator left
-// it: an identity that matches a row it cannot register as while it declares
-// nothing, or a database the main server has not migrated yet, in which case
-// the declaration is retried in the background until the migration lands. An
-// error is one the proxy must not start with: a value the store refuses,
-// named by its variable, or a database that cannot take the write.
+// declareProxyNode writes the configuration this proxy declares from its
+// environment to its row, before the configuration watcher first reads it. A
+// proxy nobody registered creates its own row when SILO_NODE_REGISTER is set.
+// It returns the row, or nil when the proxy starts as it did before
+// declarations: no row and nothing declared, an identity that matches a row
+// it cannot register as while it declares nothing, or a database the main
+// server has not migrated yet, in which case the declaration is retried in
+// the background until the migration lands. An error is one the proxy must
+// not start with: a value the store refuses, named by its variable, a
+// declaration with no row to hold it, or a database that cannot take the
+// write.
 func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string) (*nodepool.Node, error) {
 	input, err := nodedeclare.FromEnv(nodepool.NodeTypeProxy, os.Getenv)
 	if err != nil {
@@ -62,6 +69,13 @@ func declareProxyNode(ctx context.Context, pool *pgxpool.Pool, eventBus cache.Ev
 			"component", "nodeconfig")
 		go retryProxyDeclaration(ctx, pool, eventBus, nodeURL, name, input)
 		return nil, nil
+	}
+	if errors.Is(err, nodepool.ErrProxyNotRegistered) {
+		if len(input.SetFields()) == 0 {
+			// As before declarations: the watcher reports the missing row.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("this proxy declares configuration but matches no node on the main server by URL (%s) or name: add it there, or set %s=true to have it add itself", nodeURL, envNodeRegister)
 	}
 	if errors.Is(err, nodepool.ErrNodeIdentityConflict) && len(input.SetFields()) == 0 {
 		slog.WarnContext(ctx, "this proxy's URL or name matches a row it cannot register as; starting without registering",
@@ -87,6 +101,9 @@ func retryProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cac
 		if predatesDeclarations(err) {
 			continue
 		}
+		if errors.Is(err, nodepool.ErrProxyNotRegistered) && len(input.SetFields()) == 0 {
+			return
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "this proxy's node declaration was not applied; fix it and restart the proxy",
 				"component", "nodeconfig", "error", err)
@@ -107,7 +124,7 @@ func predatesDeclarations(err error) bool {
 func applyProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cache.EventBus, nodeURL, name string, input nodepool.UpdateNodeInput) (*nodepool.Node, error) {
 	callCtx, cancel := context.WithTimeout(ctx, proxyDeclarationTimeout)
 	defer cancel()
-	node, created, err := nodepool.NewAdminConfigurationStore(pool).DeclareProxy(callCtx, nodeURL, name, input)
+	node, created, err := nodepool.NewAdminConfigurationStore(pool).DeclareProxy(callCtx, nodeURL, name, input, envutil.Bool(envNodeRegister))
 	if declErr, ok := errors.AsType[*nodepool.DeclarationError](err); ok {
 		variable := nodedeclare.VariableFor(nodepool.NodeTypeProxy, declErr.Field)
 		if variable == "" {
@@ -116,7 +133,7 @@ func applyProxyDeclaration(ctx context.Context, pool *pgxpool.Pool, eventBus cac
 		return nil, &nodedeclare.Error{Variable: variable, Detail: declErr.Detail}
 	}
 	if err != nil {
-		if predatesDeclarations(err) || errors.Is(err, nodepool.ErrNodeIdentityConflict) {
+		if predatesDeclarations(err) || errors.Is(err, nodepool.ErrNodeIdentityConflict) || errors.Is(err, nodepool.ErrProxyNotRegistered) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("register this proxy: %w", err)

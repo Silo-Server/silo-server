@@ -525,9 +525,14 @@ A proxy writes its declaration to the database before its configuration
 watcher first reads its row (`declareProxyNode` in `cmd/silo`), then publishes
 `node_pool_changed`. It finds its row as the watcher does, by
 `SILO_NODE_URL` (or `NODE_URL`) and then by `SILO_NODE_NAME` (or `NODE_NAME`)
-when exactly one row has that name. A proxy that matches no row registers
-itself: a new enabled proxy row at its URL, named by its name variable or, with
-none set, by the URL's host. A match on a row that is not a proxy refuses
+when exactly one row has that name. A proxy that matches no row starts as it
+always has when it declares nothing, and refuses to start when it declares
+something. With `SILO_NODE_REGISTER=true` it registers itself instead: a new
+enabled proxy row at its URL, named by its name variable or, with none set, by
+the URL's host. Registration is opt-in because a proxy can match no row and
+still have one, registered at an address clients reach it by; a second row at
+`SILO_NODE_URL` would hand clients an address they cannot reach. A match on a
+row that is not a proxy refuses
 startup when the proxy declares anything and is only logged when it does not.
 A transcode node declares through the core; see
 [transcode nodes](architecture/transcode-nodes.md#registration).
