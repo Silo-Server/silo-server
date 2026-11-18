@@ -2818,6 +2818,11 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 		}
 	} else {
 		card = playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
+		if method == string(playback.PlayTranscode) {
+			// A transcode whose recipe isn't saved yet still rebuilds as a
+			// transcode, so the user's transcode limit admits and counts it.
+			card.PlayMethod = playback.PlayTranscode
+		}
 	}
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
@@ -2943,7 +2948,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			if h.tm != nil {
 				card := h.upstreamRecipeCard(playSession, compatSession, source, method)
 				fillReconstructedClientInfo(&card, playback.ClientInfoFromContext(ctx))
-				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {
+				reconstructed, admissionErr := h.tm.ReconstructSessionWithError(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card)
+				if admissionErr != nil {
+					// The user's limits refused the play. Keep its upstream session
+					// id: replacing it here could detach a transcode that another
+					// API server is still starting, and a retry admits under it.
+					return nil, admissionErr
+				}
+				if reconstructed != nil {
 					if !playSession.ProgressPersistenceKnown ||
 						playSession.DisableProgressPersistence != reconstructed.DisableProgressPersistence {
 						h.recordCompatProgressPersistence(playSession.ID, reconstructed.DisableProgressPersistence)
