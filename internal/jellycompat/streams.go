@@ -639,6 +639,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
+		h.endPlayIfFileGone(r, playSession, err)
 		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
@@ -831,6 +832,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
+		h.endPlayIfFileGone(r, playSession, err)
 		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
@@ -4121,6 +4123,15 @@ type playSessionReadError struct {
 
 func (e *playSessionReadError) Error() string { return "reading play session: " + e.err.Error() }
 func (e *playSessionReadError) Unwrap() error { return e.err }
+
+// endPlayIfFileGone ends a play whose file row is gone, as the other terminal
+// failures of a playback start do. Any other lookup failure keeps the play so
+// the client's retry of the retryable 503 finds it.
+func (h *PlaybackHandler) endPlayIfFileGone(r *http.Request, playSession *PlaybackSession, err error) {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil)
+	}
+}
 
 // writeCompatFileLookupError answers a media route whose file lookup failed:
 // 404 only when the file row is gone. Any other failure (a database timeout,
