@@ -224,7 +224,7 @@
 # gone is marked even when its row was written meanwhile.
 ./internal/scanner TestScanBookFolderKeepsBookIndexedByConcurrentScanDB
 ./internal/scanner TestScanAudiobookFolderKeepsBookRestoredUnchangedDB
-./internal/scanner TestScanFileMarksVanishedBookDB
+./internal/scanner TestScanFileReconcilesVanishedBookDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.

@@ -2957,7 +2957,7 @@ func mediaFileGone(filePath string) (bool, error) {
 type vanishedFileOutcome int
 
 const (
-	vanishedFileMarked      vanishedFileOutcome = iota // marked missing, or left to a scan that wrote it since
+	vanishedFileNeedsSweep  vanishedFileOutcome = iota // marked missing, already missing, or left to a scan that wrote it since
 	vanishedFileRestored                               // the file is back on disk
 	vanishedFileUncataloged                            // no row records the path
 )
@@ -2974,10 +2974,10 @@ func (s *Scanner) markVanishedFile(ctx context.Context, folder *models.MediaFold
 	for attempt := 1; ; attempt++ {
 		checkedAt, err := s.scanInventoryTime(ctx)
 		if err != nil {
-			return vanishedFileMarked, fmt.Errorf("reconcile vanished file: %w", err)
+			return vanishedFileNeedsSweep, fmt.Errorf("reconcile vanished file: %w", err)
 		}
 		if gone, err := mediaFileGone(filePath); err != nil {
-			return vanishedFileMarked, err
+			return vanishedFileNeedsSweep, err
 		} else if !gone {
 			return vanishedFileRestored, nil
 		}
@@ -2986,22 +2986,22 @@ func (s *Scanner) markVanishedFile(ctx context.Context, folder *models.MediaFold
 			return vanishedFileUncataloged, nil
 		}
 		if err != nil {
-			return vanishedFileMarked, fmt.Errorf("loading vanished media file %s: %w", filePath, err)
+			return vanishedFileNeedsSweep, fmt.Errorf("loading vanished media file %s: %w", filePath, err)
 		}
 		if file.MediaFolderID != folder.ID {
-			return vanishedFileMarked, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
+			return vanishedFileNeedsSweep, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
 		}
 		if file.MissingSince != nil {
-			return vanishedFileMarked, nil
+			return vanishedFileNeedsSweep, nil
 		}
 		err = s.fileRepo.MarkMissingWrittenBefore(ctx, file.ID, file.FilePath, time.Now().UTC(), checkedAt)
 		if errors.Is(err, ErrFileNotFound) && attempt < 2 {
 			continue
 		}
 		if err != nil && !errors.Is(err, ErrFileNotFound) {
-			return vanishedFileMarked, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
+			return vanishedFileNeedsSweep, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
 		}
-		return vanishedFileMarked, nil
+		return vanishedFileNeedsSweep, nil
 	}
 }
 

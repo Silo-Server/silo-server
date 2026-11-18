@@ -129,13 +129,13 @@ func TestScanBookFolderKeepsBookIndexedByConcurrentScanDB(t *testing.T) {
 	}
 }
 
-// TestScanFileMarksVanishedBookDB covers a single-file scan of a book that is
-// gone from disk, with another write to its row between that scan's disk
-// check and its mark. When the write is another single-file scan that found
+// TestScanFileReconcilesVanishedBookDB covers a single-file scan of a book
+// that is gone from disk, with another write to its row between that scan's
+// disk check and its mark. When the write is another single-file scan that found
 // the book back with its old size and modification time and skipped it as
 // unchanged, the book stays present. When the file is still gone, the scan
 // checks again and marks it missing.
-func TestScanFileMarksVanishedBookDB(t *testing.T) {
+func TestScanFileReconcilesVanishedBookDB(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		restore bool
