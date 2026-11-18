@@ -49,6 +49,7 @@ type Fault =
   | { kind: "short"; bytes: number }
   | { kind: "holdBody" }
   | { kind: "holdBodyUntilAbort" }
+  | { kind: "slowBody"; intervalMs: number }
   | { kind: "holdHeaders" };
 
 /** The parts of a `Response` the reader reads. */
@@ -145,6 +146,9 @@ class FakeServer {
     const body = new ReadableStream<Uint8Array>({
       pull: async (controller) => {
         if (fault?.kind === "holdBody") await this.held;
+        if (fault?.kind === "slowBody") {
+          await new Promise<void>((resolve) => setTimeout(resolve, fault.intervalMs));
+        }
         if (fault?.kind === "holdBodyUntilAbort" && !request.signal.aborted) {
           await new Promise<void>((resolve) =>
             request.signal.addEventListener("abort", () => resolve(), { once: true }),
@@ -635,6 +639,61 @@ describe("ParallelRangeSource failures", () => {
       expect(server.requests.filter((r) => r.url === STRIPE_URL).length).toBe(stripeBefore);
     },
   );
+
+  // A stripe whose body stops without closing would hold the in-order delivery until the page's
+  // 20 s stall timeout. Fake timers stand in for the wait.
+  it("sends the range to the head URL when a stripe body goes silent", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = new FakeServer(pattern(SIZE));
+      server.fault = (request) =>
+        request.url === STRIPE_URL ? { kind: "holdBodyUntilAbort" } : undefined;
+      const getRetryDelay = vi.fn(() => 0);
+      const { source } = makeSource(server, { getRetryDelay });
+      let bytes: Uint8Array | undefined;
+      const reading = read(source, 0, 20 * MIB).then((read) => (bytes = read));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(bytes, "the read finished within 10 s of stripe silence").toBeDefined();
+      await reading;
+      expect(same(bytes as Uint8Array, server.bytes.subarray(0, 20 * MIB))).toBe(true);
+      expect(getRetryDelay).not.toHaveBeenCalled();
+      // Only the silent stripe request is aborted; the plan's URL requests are not.
+      const stripes = server.requests.filter((r) => r.url === STRIPE_URL);
+      expect(stripes.length).toBeGreaterThan(0);
+      expect(stripes.every((r) => r.signal.aborted)).toBe(true);
+      expect(server.requests.filter((r) => r.url === HEAD_URL).some((r) => r.signal.aborted)).toBe(
+        false,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The deadline is for silence, not for the whole answer: a stripe that keeps sending chunks
+  // finishes on the stripe URL, however long that takes in total.
+  it("keeps a stripe body that sends a chunk before each deadline on the stripe URL", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = new FakeServer(pattern(SIZE));
+      // 4 chunks of 512 KiB, 5 s apart: 20 s in total, past the 8 s deadline, never silent for it.
+      server.fault = (request) =>
+        request.url === STRIPE_URL ? { kind: "slowBody", intervalMs: 5_000 } : undefined;
+      const getRetryDelay = vi.fn(() => 0);
+      const { source } = makeSource(server, { getRetryDelay });
+      let bytes: Uint8Array | undefined;
+      const reading = read(source, 0, 20 * MIB).then((read) => (bytes = read));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(bytes, "the read finished within 30 s").toBeDefined();
+      await reading;
+      expect(same(bytes as Uint8Array, server.bytes.subarray(0, 20 * MIB))).toBe(true);
+      expect(getRetryDelay).not.toHaveBeenCalled();
+      // The read's two stripe ranges, 16-20 MiB, stayed on the stripe URL: none went to the plan's.
+      const inRead = server.requests.filter((r) => r.start >= FIRST_STRIPE && r.start < 20 * MIB);
+      expect(inRead.map((r) => r.url)).toEqual([STRIPE_URL, STRIPE_URL]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("retries the rest of a range after a body failure", async () => {
     const server = new FakeServer(pattern(SIZE));

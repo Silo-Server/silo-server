@@ -8,7 +8,8 @@
  * until the page seeks, while the stripes warm their connections. At most 3 other
  * ranges use the stripe URL at once; a fourth goes to the plan's own URL, whose
  * connection is already open, so no range waits on a cold fourth stripe connection. The first
- * answer other than a readable 206, or transport failure (fetch, body read, early end), from the stripe URL ends its use:
+ * answer other than a readable 206 that matches its request, or transport failure (fetch, body
+ * read, early end, or no byte for `STRIPE_INACTIVITY_MS`), from the stripe URL ends its use:
  * the rest of that range and every later range go to the plan's own URL, with no retry spent on the
  * stripe URL.
  *
@@ -44,6 +45,14 @@ const READ_AHEAD_BYTES = 32 * 2 ** 20;
 const WARM_HEAD_BYTES = 16 * 2 ** 20;
 /** The most non-head ranges in flight on the stripe URL; the next one goes to the plan's own URL. */
 const MAX_STRIPE_URL_RANGES = MAX_RANGES_IN_FLIGHT - 1;
+
+/**
+ * How long a stripe request may go without a byte, from the request until its first chunk and
+ * between chunks, before it counts as failed. A cold connection on a lossy link answers within a
+ * few seconds, so this leaves the plan's URL 12 s of the page's 20 s stall timeout
+ * (`STALL_TIMEOUT_MS` in `EnginePlayer.ts`) to take the read over.
+ */
+const STRIPE_INACTIVITY_MS = 8_000;
 
 /** A `Content-Range` that names the range and the file's size. */
 const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/;
@@ -330,11 +339,12 @@ export class ParallelRangeSource extends InternalUrlSource {
    * of the range through `getRetryDelay`, counted from 1 since the range last
    * received bytes, and fails the range when the delay is null. A body from the
    * plan's URL that ends early after sending bytes is asked for again with no
-   * retry counted. An answer other than a readable 206, or a transport failure,
-   * from the stripe URL is no retry: it switches the source to the plan's URL, which
-   * then serves the rest of the range. A response that breaks the byte checks
-   * fails it at once. Any failure ends up in `range.failure`; the range's slot
-   * is freed at its end.
+   * retry counted. An answer that is not a readable 206 matching the request, a
+   * transport failure, or a stripe request silent for `STRIPE_INACTIVITY_MS`, from
+   * the stripe URL is no retry: it switches the source to the plan's URL, which
+   * then serves the rest of the range. A response from the plan's URL that breaks
+   * the byte checks fails the range at once. Any failure ends up in
+   * `range.failure`; the range's slot is freed at its end.
    */
   private async readRange(
     range: StripeRange,
@@ -353,75 +363,93 @@ export class ParallelRangeSource extends InternalUrlSource {
           ...this._requestInit.headers,
           Range: `bytes=${position}-${range.end - 1}`,
         };
-        let response: Response;
+        // A stripe request has its own signal, which a worker abort also aborts, so the inactivity
+        // deadline can end that request alone. The plan's URL has no deadline.
+        const stripe = onStripe ? this.stripeRequestSignal(signal) : null;
         try {
-          response = await this.metered.fetch(url, { ...this._requestInit, headers, signal }, run);
-        } catch (error) {
-          failures = await this.failed(failures, error, url, signal, onStripe);
-          continue;
-        }
-        let responseEnd: number;
-        try {
-          responseEnd = this.checkResponse(response, position, range.end) + 1;
-        } catch (error) {
-          // Any answer from the stripe URL that is not a readable 206 for these bytes of this
-          // file is the stripe URL failing: a refusal there says nothing about the plan's URL,
-          // which serves the range and is checked the same way.
-          if (!onStripe) throw error;
-          void response.body?.cancel().catch(() => {});
-          this.stripeFailed = true;
-          continue;
-        }
-        if (!response.body) {
-          throw new Error(
-            "Missing HTTP response body stream. The used fetch function must provide the response body as a ReadableStream.",
-          );
-        }
-        const reader = response.body.getReader();
-        // A response that delivered bytes made progress: its failure starts the count again,
-        // as the stock source does, so a link that keeps dropping still finishes the range.
-        let received = 0;
-        let bodyFailed = false;
-        while (true) {
-          let result: ReadableStreamReadResult<Uint8Array>;
+          let response: Response;
           try {
-            result = await reader.read();
-          } catch (error) {
-            failures = await this.failed(received > 0 ? 0 : failures, error, url, signal, onStripe);
-            bodyFailed = true;
-            break;
-          }
-          if (result.done) break;
-          if (position + result.value.length > responseEnd) {
-            void reader.cancel().catch(() => {});
-            throw new Error(
-              `Response for bytes=${range.start}-${range.end - 1} is longer than its range`,
+            response = await this.metered.fetch(
+              url,
+              { ...this._requestInit, headers, signal: stripe?.signal ?? signal },
+              run,
             );
-          }
-          range.chunks.push(result.value);
-          position += result.value.length;
-          received += result.value.length;
-          notify();
-        }
-        if (bodyFailed) continue;
-        if (position < responseEnd) {
-          // The plan's URL ended its answer early after sending bytes: ask for the rest, as the
-          // stock source does, without a retry or a stall report.
-          if (received > 0 && !onStripe) {
-            failures = 0;
+          } catch (error) {
+            failures = await this.failed(failures, error, url, signal, onStripe);
             continue;
           }
-          failures = await this.failed(
-            failures,
-            new Error(`Response for bytes=${range.start}-${range.end - 1} ended early`),
-            url,
-            signal,
-            onStripe,
-          );
-          continue;
+          let responseEnd: number;
+          try {
+            responseEnd = this.checkResponse(response, position, range.end) + 1;
+          } catch (error) {
+            // Any answer from the stripe URL that is not a readable 206 for these bytes of this
+            // file is the stripe URL failing: a refusal there says nothing about the plan's URL,
+            // which serves the range and is checked the same way.
+            if (!onStripe) throw error;
+            void response.body?.cancel().catch(() => {});
+            this.stripeFailed = true;
+            continue;
+          }
+          if (!response.body) {
+            throw new Error(
+              "Missing HTTP response body stream. The used fetch function must provide the response body as a ReadableStream.",
+            );
+          }
+          const reader = response.body.getReader();
+          // A response that delivered bytes made progress: its failure starts the count again,
+          // as the stock source does, so a link that keeps dropping still finishes the range.
+          let received = 0;
+          let bodyFailed = false;
+          while (true) {
+            let result: ReadableStreamReadResult<Uint8Array>;
+            try {
+              result = await reader.read();
+            } catch (error) {
+              failures = await this.failed(
+                received > 0 ? 0 : failures,
+                error,
+                url,
+                signal,
+                onStripe,
+              );
+              bodyFailed = true;
+              break;
+            }
+            if (result.done) break;
+            if (position + result.value.length > responseEnd) {
+              void reader.cancel().catch(() => {});
+              throw new Error(
+                `Response for bytes=${range.start}-${range.end - 1} is longer than its range`,
+              );
+            }
+            stripe?.touch();
+            range.chunks.push(result.value);
+            position += result.value.length;
+            received += result.value.length;
+            notify();
+          }
+          if (bodyFailed) continue;
+          if (position < responseEnd) {
+            // The plan's URL ended its answer early after sending bytes: ask for the rest, as the
+            // stock source does, without a retry or a stall report.
+            if (received > 0 && !onStripe) {
+              failures = 0;
+              continue;
+            }
+            failures = await this.failed(
+              failures,
+              new Error(`Response for bytes=${range.start}-${range.end - 1} ended early`),
+              url,
+              signal,
+              onStripe,
+            );
+            continue;
+          }
+          // A range that reached past the end of the file ends at its last byte.
+          range.end = Math.min(range.end, responseEnd);
+        } finally {
+          stripe?.dispose();
         }
-        // A range that reached past the end of the file ends at its last byte.
-        range.end = Math.min(range.end, responseEnd);
       }
     } catch (error) {
       range.failure = { error };
@@ -432,6 +460,36 @@ export class ParallelRangeSource extends InternalUrlSource {
     if (range.stripe) this.stripesInFlight--;
     this.releaseSlot();
     notify();
+  }
+
+  /**
+   * A signal for one stripe request: it aborts when `signal` (the worker's) aborts, and when the
+   * request goes `STRIPE_INACTIVITY_MS` without `touch()`, which a received chunk calls. The timer
+   * starts here, before the fetch. `dispose()` ends the timer and the link to `signal`, and aborts
+   * the request's signal, which frees a response that nobody read to its end.
+   * A deadline abort ends only this request; `failed` then moves the read to the plan's URL.
+   */
+  private stripeRequestSignal(signal: AbortSignal): {
+    signal: AbortSignal;
+    touch: () => void;
+    dispose: () => void;
+  } {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    let timer: ReturnType<typeof setTimeout>;
+    const touch = () => {
+      clearTimeout(timer);
+      timer = setTimeout(abort, STRIPE_INACTIVITY_MS);
+    };
+    const dispose = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      abort();
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    touch();
+    return { signal: controller.signal, touch, dispose };
   }
 
   /**
