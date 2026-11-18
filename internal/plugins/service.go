@@ -314,14 +314,25 @@ func (s *Service) InstallRemote(ctx context.Context, req InstallArchiveRequest) 
 }
 
 func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest) (*InstallResult, error) {
+	return s.installCatalog(ctx, req, nil)
+}
+
+// installCatalog installs req. A non-nil expected is the installation the
+// caller chose req for: the replacement is prepared against it, so another
+// install that lands while the catalog resolves refuses it rather than being
+// replaced by an older release.
+func (s *Service) installCatalog(ctx context.Context, req InstallCatalogRequest, expected *Installation) (*InstallResult, error) {
 	target, err := s.catalog.ResolveInstall(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	existing, err := s.existingInstallationByPluginID(ctx, req.PluginID)
-	if err != nil {
-		return nil, err
+	existing := expected
+	if existing == nil {
+		existing, err = s.existingInstallationByPluginID(ctx, req.PluginID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var result *InstallResult
 	switch {
@@ -364,11 +375,11 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 		return nil, fmt.Errorf("plugin %q has no repository_id, cannot update from catalog", installation.PluginID)
 	}
 
-	_, err = s.InstallCatalog(ctx, InstallCatalogRequest{
+	_, err = s.installCatalog(ctx, InstallCatalogRequest{
 		RepositoryID: *installation.RepositoryID,
 		PluginID:     installation.PluginID,
 		Version:      targetVersion,
-	})
+	}, installation)
 	if err != nil {
 		return nil, fmt.Errorf("update plugin %q to %s: %w", installation.PluginID, targetVersion, err)
 	}
@@ -471,7 +482,9 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 
 // replaceStopped stops the existing installation's process and runs replace.
 // Callers check the new package before calling it, so a refused package
-// never stops the running plugin. When replace fails the row still names the
+// never stops the running plugin, and an installation another install or
+// update changed while the package downloaded is refused before its newer
+// process is stopped; replace itself refuses one changed after this check. When replace fails the row still names the
 // old release but its process is gone: a lazily started plugin comes back on
 // its next RPC, while a resident only restarts on a lifecycle reconcile, so
 // the hooks run before the error is returned. On success the caller runs them
@@ -479,6 +492,11 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 // alone, so an admin's switch made while the package downloaded stands, and
 // the result reports the flag as stored.
 func (s *Service) replaceStopped(ctx context.Context, existing *Installation, replace func() (*InstallResult, error)) (*InstallResult, error) {
+	if s.installations != nil {
+		if err := checkUnchanged(ctx, s.installations.GetByID, existing); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.stopInstallationIfRunning(existing); err != nil {
 		return nil, err
 	}

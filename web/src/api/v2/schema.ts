@@ -4024,7 +4024,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry. */
+    /** Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409, as is an update that another install of the plugin replaced while its package downloaded. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry. */
     post: operations["applyAdminPluginUpdate"];
     delete?: never;
     options?: never;
@@ -72049,6 +72049,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -73933,6 +73942,15 @@ export interface operations {
       };
       /** @description Request Timeout */
       408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
