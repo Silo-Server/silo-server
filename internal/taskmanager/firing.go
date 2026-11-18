@@ -16,10 +16,12 @@ type ClusterFiringTask interface {
 // FiringClaims records which process runs a scheduled firing.
 type FiringClaims interface {
 	// ClaimFiring records a claim for the task at slot and reports true,
-	// unless a claim for the task at slot, or one taken less than window
-	// ago, already exists. Claims of one task are serialized, so of any
-	// set of calls that would conflict exactly one reports true.
-	ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration) (bool, error)
+	// unless a claim for the task at slot, or one taken within window of
+	// due or of now, already exists. due is when the firing was scheduled,
+	// so a server that reaches the claim late is still measured from the
+	// firing it serves. Claims of one task are serialized, so of any set
+	// of calls that would conflict exactly one reports true.
+	ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration, due time.Time) (bool, error)
 }
 
 // StartupClaimWindow is how long a startup firing's claim keeps other
@@ -113,14 +115,13 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 	firedAt := time.Now()
 	if fired != nil {
 		trigger = fired.Config()
-		// A daily or weekly timer that wakes many hours late (a paused
-		// process, a clock jump) still names the firing it was armed for,
-		// not the one nearest the late wake-up. A due time in the future
-		// means a run rearmed the trigger since it fired; keep the wake-up.
-		if trigger.Type == TriggerTypeDaily || trigger.Type == TriggerTypeWeekly {
-			if due := fired.NextRunTime(); !due.IsZero() && !due.After(firedAt) {
-				firedAt = due
-			}
+		// A timer that wakes late (a paused process, a clock jump) still
+		// names the firing it was armed for, not the slot of the late
+		// wake-up, which another server's claim window may no longer cover.
+		// A due time in the future means a run rearmed the trigger since it
+		// fired; keep the wake-up. A startup trigger has no due time.
+		if due := fired.NextRunTime(); !due.IsZero() && !due.After(firedAt) {
+			firedAt = due
 		}
 	}
 	slot, window, ok := FiringSlot(trigger, firedAt)
@@ -132,7 +133,7 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 			"task", w.task.Key(), "trigger", trigger.Type)
 		return false
 	}
-	won, err := claims.ClaimFiring(ctx, w.task.Key(), slot, window)
+	won, err := claims.ClaimFiring(ctx, w.task.Key(), slot, window, firedAt)
 	if err != nil {
 		m.logger.WarnContext(ctx, "claiming scheduled task firing failed; skipping it",
 			"task", w.task.Key(), "error", err)
