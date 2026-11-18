@@ -3594,6 +3594,14 @@ replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacem
 that names a different plugin ID than the installation. Both are refused as package errors
 (422) and nothing is installed.
 
+A replacement applies only to the installation it was read against. When another install,
+update or upload of the same plugin replaced the installation while this one looked up its
+catalog entry or downloaded its package, the later one is refused with 409 `conflict` and
+writes nothing: the newer release, its stored package and its files stay. It is refused
+before it stops the plugin, unless both finish at the same moment, when the newer release's
+process may be stopped and started again once. This covers catalog installs, `/update` and
+uploads; an automatic update in the same situation is skipped without recording a refusal.
+
 `PUT /api/v2/admin/plugins/installations/{id}` assigns `enabled` and/or `update_policy`
 (`auto`, `notify`, `off`, `manual`); an empty body is 422. Disabling stops the running plugin
 before the write; any enabled change rebuilds the event subscriber index. Repeating the

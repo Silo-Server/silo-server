@@ -823,6 +823,10 @@
 # after the new package passed its download and checksum checks.
 ./internal/plugins TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB
 
+# A plugin replacement that finishes after another install of the same plugin is
+# refused, and the newer release, its stored archive and its files stay.
+./internal/plugins TestInstallerReplacementRefusedAfterInstallationChangedDB
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset

@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -31,14 +32,27 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 		installedOff bool
 		toggleTo     *bool
 		wantEnabled  bool
+		// replacedBy installs that version while the package downloads, as
+		// a concurrent update would; with viaUpdate the admin applied the
+		// recorded update, and the install lands while the catalog resolves.
+		replacedBy string
+		viaUpdate  bool
+		// replacedWhileResolving lands the other install while the catalog
+		// index is fetched, before the package downloads.
+		replacedWhileResolving bool
 	}{
 		{name: "checksum mismatch", wrongSum: true, wantEvents: []string{}, wantRefusal: "SHA-256 checksum", wantVersion: "1.0.0", wantEnabled: true},
 		// A binary has nowhere to carry assets, so its stored archive is
 		// refused after the download passed its checks.
 		{name: "manifest declares an asset", withAsset: true, wantEvents: []string{}, wantVersion: "1.0.0", wantEnabled: true},
-		{name: "accepted package", wantEvents: []string{"stop", "save_archive", "update"}, wantVersion: "2.0.0", wantEnabled: true},
-		{name: "disabled during download", toggleTo: new(false), wantEvents: []string{"stop", "save_archive", "update"}, wantVersion: "2.0.0"},
-		{name: "enabled during download", installedOff: true, toggleTo: new(true), wantEvents: []string{"stop", "save_archive", "update"}, wantVersion: "2.0.0", wantEnabled: true},
+		{name: "accepted package", wantEvents: []string{"stop", "update"}, wantVersion: "2.0.0", wantEnabled: true},
+		{name: "disabled during download", toggleTo: new(false), wantEvents: []string{"stop", "update"}, wantVersion: "2.0.0"},
+		{name: "enabled during download", installedOff: true, toggleTo: new(true), wantEvents: []string{"stop", "update"}, wantVersion: "2.0.0", wantEnabled: true},
+		// The package was prepared against 1.0.0, so it must not replace the
+		// 3.0.0 another install wrote meanwhile, nor stop its process.
+		{name: "replaced during download", replacedBy: "3.0.0", wantEvents: []string{}, wantVersion: "3.0.0", wantEnabled: true},
+		{name: "replaced while an applied update resolves", viaUpdate: true, replacedBy: "3.0.0", wantEvents: []string{}, wantVersion: "3.0.0", wantEnabled: true},
+		{name: "replaced while a catalog install resolves", replacedWhileResolving: true, replacedBy: "3.0.0", wantEvents: []string{}, wantVersion: "3.0.0", wantEnabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -56,6 +70,12 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 				ID: 7, PluginID: "test.plugin", Version: "1.0.0", InstallPath: t.TempDir() + "/plugin", Enabled: !tc.installedOff,
 			})
 			store.events = &events
+			replace := func(version string) {
+				store.mu.Lock()
+				store.byID[7].Version = version
+				store.byID[7].InstallPath = t.TempDir() + "/plugin"
+				store.mu.Unlock()
+			}
 			mux := http.NewServeMux()
 			server := httptest.NewServer(mux)
 			t.Cleanup(server.Close)
@@ -65,9 +85,15 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 					store.byID[7].Enabled = *tc.toggleTo
 					store.mu.Unlock()
 				}
+				if tc.replacedBy != "" && !tc.viaUpdate && !tc.replacedWhileResolving {
+					replace(tc.replacedBy)
+				}
 				_, _ = w.Write(binary)
 			})
 			mux.HandleFunc("/index.json", func(w http.ResponseWriter, _ *http.Request) {
+				if tc.replacedBy != "" && (tc.viaUpdate || tc.replacedWhileResolving) {
+					replace(tc.replacedBy)
+				}
 				_ = json.NewEncoder(w).Encode(RepositoryIndex{Plugins: []CatalogPackage{{
 					Manifest: packageErrorTestManifest("test.plugin", "2.0.0"),
 					Binaries: map[string]PlatformBinary{"linux/amd64": {URL: server.URL + "/plugin", Checksum: checksum}},
@@ -92,8 +118,18 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 				host:          &fakeServiceHost{events: &events},
 			}
 
-			result, err := service.InstallCatalog(ctx, InstallCatalogRequest{RepositoryID: repository.ID, PluginID: "test.plugin", Version: "2.0.0"})
+			var result *InstallResult
+			if tc.viaUpdate {
+				store.byID[7].AvailableVersion = new("2.0.0")
+				_, err = service.UpdateToAvailableVersion(ctx, 7)
+			} else {
+				result, err = service.InstallCatalog(ctx, InstallCatalogRequest{RepositoryID: repository.ID, PluginID: "test.plugin", Version: "2.0.0"})
+			}
 			switch {
+			case tc.replacedBy != "":
+				if !errors.Is(err, ErrInstallationChanged) {
+					t.Fatalf("InstallCatalog() = %v, want ErrInstallationChanged", err)
+				}
 			case tc.wantRefusal != "":
 				requirePackageError(t, err, tc.wantRefusal)
 			case tc.wantVersion == "1.0.0":
