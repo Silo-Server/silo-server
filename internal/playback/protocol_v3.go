@@ -72,8 +72,9 @@ const (
 	// client sends no account token; when it carries no st, the client sends its
 	// account access token. A plan without parallel_range_url is read from
 	// stream.url. stream.url stays valid; a client may also read the warm head,
-	// overflow ranges, or a natively played file from it. Without the feature
-	// the plan carries no such field.
+	// overflow ranges, or a natively played file from it. The server also leaves
+	// the field out when the attempt negotiated header_authenticated_media_v1.
+	// Without the feature the plan carries no such field.
 	FeatureParallelRangeOriginV1 = "parallel_range_origin_v1"
 	// FeaturePlanInvalidatedV3 is the client's promise to handle the realtime
 	// plan_invalidated command: ack it, replan off the named plan with operation
