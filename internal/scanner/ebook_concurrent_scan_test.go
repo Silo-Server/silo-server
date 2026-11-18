@@ -129,64 +129,83 @@ func TestScanBookFolderKeepsBookIndexedByConcurrentScanDB(t *testing.T) {
 	}
 }
 
-// TestScanFileKeepsBookRestoredWhileVanishingDB covers a single-file scan of
-// a book that is gone from disk. The book comes back with its old size and
-// modification time after that scan checked the disk, and another single-file
-// scan sees it unchanged and skips it before the first marks it missing. The
-// book must stay present.
-func TestScanFileKeepsBookRestoredWhileVanishingDB(t *testing.T) {
-	pool := newScannerTestPool(t)
-	folderID := seedDeadRootTestFolder(t, pool, "ebooks", fmt.Sprintf("vanishing-ebook-%d", time.Now().UnixNano()))
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id IN (
-			SELECT content_id FROM media_files WHERE media_folder_id = $1
-			UNION SELECT content_id FROM media_item_libraries WHERE media_folder_id = $1)`, folderID)
-	})
-	root := t.TempDir()
-	folder := &models.MediaFolder{ID: folderID, Type: "ebooks", Paths: []string{root}}
-	book := filepath.Join(root, "Book.epub")
-	data, err := os.ReadFile(writeTestEPUB(t, []string{"urn:uuid:vanishing"}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := writeBookFile(book, data); err != nil {
-		t.Fatal(err)
-	}
-	other := NewScanner(NewFileRepository(pool), "ffprobe", nil, 2, false, time.Hour)
-	if err := other.ScanFile(t.Context(), book, folder); err != nil {
-		t.Fatalf("initial scan: %v", err)
-	}
-	info, err := os.Stat(book)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(book); err != nil {
-		t.Fatal(err)
-	}
-	var otherErr error
-	ran := false
-	// The vanished-file check loads the row after it found the file gone.
-	s := newHookedScanner(t, "ffprobe", "FROM media_files WHERE file_path = $1", func() {
-		ran = true
-		if otherErr = writeBookFile(book, data); otherErr == nil {
-			otherErr = os.Chtimes(book, info.ModTime(), info.ModTime())
-		}
-		if otherErr == nil {
-			otherErr = other.ScanFile(context.Background(), book, folder)
-		}
-	})
+// TestScanFileMarksVanishedBookDB covers a single-file scan of a book that is
+// gone from disk, with another write to its row between that scan's disk
+// check and its mark. When the write is another single-file scan that found
+// the book back with its old size and modification time and skipped it as
+// unchanged, the book stays present. When the file is still gone, the scan
+// checks again and marks it missing.
+func TestScanFileMarksVanishedBookDB(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		restore bool
+	}{
+		{name: "restored unchanged before the mark", restore: true},
+		{name: "row written while still gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := newScannerTestPool(t)
+			folderID := seedDeadRootTestFolder(t, pool, "ebooks", fmt.Sprintf("vanishing-ebook-%d", time.Now().UnixNano()))
+			t.Cleanup(func() {
+				bg := context.Background()
+				_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id IN (
+					SELECT content_id FROM media_files WHERE media_folder_id = $1
+					UNION SELECT content_id FROM media_item_libraries WHERE media_folder_id = $1)`, folderID)
+			})
+			root := t.TempDir()
+			folder := &models.MediaFolder{ID: folderID, Type: "ebooks", Paths: []string{root}}
+			book := filepath.Join(root, "Book.epub")
+			data, err := os.ReadFile(writeTestEPUB(t, []string{"urn:uuid:vanishing"}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeBookFile(book, data); err != nil {
+				t.Fatal(err)
+			}
+			other := NewScanner(NewFileRepository(pool), "ffprobe", nil, 2, false, time.Hour)
+			if err := other.ScanFile(t.Context(), book, folder); err != nil {
+				t.Fatalf("initial scan: %v", err)
+			}
+			info, err := os.Stat(book)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(book); err != nil {
+				t.Fatal(err)
+			}
+			var otherErr error
+			ran := false
+			// The vanished-file check loads the row after it found the file gone.
+			s := newHookedScanner(t, "ffprobe", "FROM media_files WHERE file_path = $1", func() {
+				ran = true
+				if !tc.restore {
+					_, otherErr = pool.Exec(context.Background(), `UPDATE media_files SET updated_at = now() WHERE file_path = $1`, book)
+					return
+				}
+				if otherErr = writeBookFile(book, data); otherErr == nil {
+					otherErr = os.Chtimes(book, info.ModTime(), info.ModTime())
+				}
+				if otherErr == nil {
+					otherErr = other.ScanFile(context.Background(), book, folder)
+				}
+			})
 
-	if err := s.ScanFile(t.Context(), book, folder); err != nil {
-		t.Fatalf("ScanFile: %v", err)
+			if err := s.ScanFile(t.Context(), book, folder); err != nil {
+				t.Fatalf("ScanFile: %v", err)
+			}
+			if !ran {
+				t.Fatal("the other write never ran; the vanished file's row was not loaded")
+			}
+			if otherErr != nil {
+				t.Fatalf("other write: %v", otherErr)
+			}
+			if tc.restore {
+				requirePresentFilePaths(t, pool, folderID, book)
+			} else {
+				requirePresentFilePaths(t, pool, folderID)
+			}
+		})
 	}
-	if !ran {
-		t.Fatal("the other scan never ran; the vanished file's row was not loaded")
-	}
-	if otherErr != nil {
-		t.Fatalf("other scan: %v", otherErr)
-	}
-	requirePresentFilePaths(t, pool, folderID, book)
 }
 
 // requirePresentFilePaths compares the library's present files with want.

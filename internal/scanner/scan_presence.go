@@ -139,7 +139,8 @@ func withScopedScan(ctx context.Context, fullScan bool) context.Context {
 // the rows present (ConfirmPresent), which leaves them to it
 // (ListScanPresenceWrittenBefore, MarkMissingWrittenBefore). A full scan
 // writes nothing: only one runs per library on a server, and touching every
-// unchanged row would add a write per book to each library scan.
+// unchanged row would add a write per book to each library scan. A scoped
+// scan pays one small write per unchanged book it skips.
 //
 // It reports false when the book must not be skipped: a row was marked
 // missing or moved since the caller read it, so the book is indexed again. A
