@@ -2845,9 +2845,11 @@ func buildRecentlyReleasedQuery(s ResolvedSection, libraryID *int, libraryIDs []
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
+	// Same order as the library's Release Date sort, so the row matches its
+	// See All page. Titles with no date trail the dated ones by year.
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s %s ORDER BY mi.year DESC, mi.created_at DESC LIMIT $%d`,
-		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, argIdx,
+		`SELECT %s FROM %s %s ORDER BY %s DESC NULLS LAST, mi.year DESC, mi.created_at DESC, mi.content_id ASC LIMIT $%d`,
+		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, catalog.ReleaseDateSortSQL("mi"), argIdx,
 	)
 	args = append(args, s.ItemLimit)
 	return query, args
