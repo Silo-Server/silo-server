@@ -1127,23 +1127,24 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		writeDownloadPrepareResult(w, result)
 		return
 	}
-	if err := invalidateDownloadArtifactReceipt(outputPath); err != nil {
-		http.Error(w, "failed to invalidate download artifact receipt", http.StatusInternalServerError)
-		return
-	}
-
 	if slot == nil {
 		// Admission was skipped because this artifact looked prepared or
 		// in preparation, but what is there does not answer this request
-		// (another recipe), so the node has to encode after all.
-		admitted, ok := s.admitJob()
-		if !ok {
-			writeAtCapacity(w)
+		// (another recipe), so the node has to encode after all. Admitted
+		// before the receipt goes, so a refusal leaves the artifact that is
+		// there usable for the recipe it answers.
+		admitted, refused := s.admitNewPreparation(w)
+		if refused {
 			return
 		}
 		slot = admitted
 		defer slot.release()
 	}
+	if err := invalidateDownloadArtifactReceipt(outputPath); err != nil {
+		http.Error(w, "failed to invalidate download artifact receipt", http.StatusInternalServerError)
+		return
+	}
+
 	jobCtx, cancelJob := sourceContext(r.Context(), source)
 	defer cancelJob()
 	s.countJob(slot)

@@ -157,6 +157,12 @@ func (s *Server) admitPreparation(w http.ResponseWriter, req downloadprepare.Req
 	if _, prepared := existingDownloadPrepareResult(filepath.Join(s.artifactRoot, req.ArtifactID+".mp4"), req); prepared {
 		return nil, false
 	}
+	return s.admitNewPreparation(w)
+}
+
+// admitNewPreparation admits a preparation the node has to encode, under the
+// declared budget and the job cap, and writes the refusal when it is refused.
+func (s *Server) admitNewPreparation(w http.ResponseWriter) (slot *jobSlot, refused bool) {
 	if s.artifactBudgetReached() {
 		setRefusal(w, nodepool.RefusalStorageFull)
 		http.Error(w, errNodeStorageFull, http.StatusServiceUnavailable)
