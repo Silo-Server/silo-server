@@ -3585,9 +3585,13 @@ authority or a duplicated identifier fails the read rather than merging pages.
 `archive_url`; mixing the two or supplying neither is a 422 naming the field. Both paths
 fetch over the network. An installation with the same manifest `plugin_id` is stopped and
 replaced rather than duplicated, and metadata-provider capabilities are appended to the
-library chains. Success is 201 with the installation. There is no replay identity
-and no database uniqueness, so the row is non-retryable: a lost response may follow a
-committed install and the client reconciles from the installation list.
+library chains. Success is 201 with the installation. There is no replay identity, so the
+row is non-retryable: a lost response may follow a committed install and the client
+reconciles from the installation list. A plugin has at most one installation, enforced in
+the database: when two installs or uploads of a plugin that isn't installed yet run at once,
+or an automatic install of a default plugin runs alongside one, the one that finishes second
+is refused with 409 `conflict` and installs nothing. An automatic install that loses is
+skipped.
 
 A manifest whose ID or version maps to an empty, `.` or `..` directory name (after the host
 replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacement package

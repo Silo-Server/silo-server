@@ -103,7 +103,7 @@ func registerAdminPluginUploads(reg *Registry) {
 	op := func(method, path, id, summary string, safety RetrySafety) Operation {
 		return Operation{Operation: humaOp(method, Prefix+"/admin/plugins/uploads"+path, id, "admin-plugins", summary), Class: ClassActingAdmin, DemoRestricted: isMutatingMethod(method), ServiceBacked: true, RetrySafety: safety}
 	}
-	direct := op(http.MethodPost, "", "uploadAdminPluginInstallation", "Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; there is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry.", RetrySafetyNonRetryable)
+	direct := op(http.MethodPost, "", "uploadAdminPluginInstallation", "Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; an upload that finds none but loses the race to create it is 409. There is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry.", RetrySafetyNonRetryable)
 	direct.DefaultStatus = http.StatusCreated
 	direct.MaxBodyBytes = maxPluginUploadBytes + pluginUploadFormOverhead
 	direct.Errors = append(direct.Errors, http.StatusRequestTimeout, http.StatusConflict, http.StatusRequestEntityTooLarge, http.StatusUnsupportedMediaType)

@@ -302,6 +302,7 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
+./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -827,6 +828,10 @@
 # A plugin replacement that finishes after another install of the same plugin is
 # refused, and the newer release, its stored archive and its files stay.
 ./internal/plugins TestInstallerReplacementRefusedAfterInstallationChangedDB
+
+# A plugin has one installation: an archive link for an installed plugin
+# replaces it, and a second create for the same plugin is refused.
+./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset

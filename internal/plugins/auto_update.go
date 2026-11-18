@@ -425,6 +425,11 @@ func (s *AutoUpdateService) handleNewPlugin(ctx context.Context, pluginID string
 	if err == nil {
 		_, err = s.installResolvedCatalogTarget(ctx, target)
 	}
+	if errors.Is(err, ErrPluginAlreadyInstalled) {
+		// Another server or an admin installed it first.
+		s.logger.InfoContext(ctx, "plugin already installed; skipping auto-install", "plugin_id", pluginID)
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
