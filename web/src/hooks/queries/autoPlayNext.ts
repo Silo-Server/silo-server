@@ -69,6 +69,8 @@ export function useAutoPlayNextSetting() {
 
   return {
     enabled,
+    /** True until the first answer arrives; `enabled` is only the default then. */
+    isLoading: query.isPending,
     hasDeviceOverride,
     setEnabled,
     isSaving: setValue.isPending || clearValue.isPending,
