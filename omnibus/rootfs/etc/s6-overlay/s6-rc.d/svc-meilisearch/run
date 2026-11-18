@@ -18,6 +18,18 @@ export HOME=/config/meilisearch
 # Meilisearch logs every request at INFO, and Silo polls it, which would bury
 # Silo's own lines in the shared container log.
 : "${MEILI_LOG_LEVEL:=WARN}"
+# Meilisearch indexes with up to two thirds of the memory it sees, which here
+# it shares with PostgreSQL, Redis, Silo and ffmpeg. Give it a quarter of the
+# container's memory, at least 512 MiB, read as POSTGRES_TUNE reads it. The
+# value is in bytes, a form Meilisearch documents for this option.
+if [[ -z "${MEILI_MAX_INDEXING_MEMORY:-}" ]]; then
+  if memory="$(s6-setuidgid silo silo memory-limit)"; then
+    MEILI_MAX_INDEXING_MEMORY=$((memory / 4 > 536870912 ? memory / 4 : 536870912))
+    export MEILI_MAX_INDEXING_MEMORY
+  else
+    warn "cannot detect the container's memory; Meilisearch indexes with its own default of two thirds of RAM. Set MEILI_MAX_INDEXING_MEMORY to limit it."
+  fi
+fi
 MEILI_MASTER_KEY="$(<"$STATE_DIR/meili-master-key")"
 export MEILI_DB_PATH MEILI_DUMP_DIR MEILI_SNAPSHOT_DIR MEILI_HTTP_ADDR MEILI_ENV MEILI_NO_ANALYTICS MEILI_LOG_LEVEL MEILI_MASTER_KEY
 exec_clean '^MEILI_' s6-notifyoncheck -d -n 0 -w 1000 \
