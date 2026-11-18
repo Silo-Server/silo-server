@@ -67,6 +67,18 @@ export function sendingOffline(): boolean {
 }
 
 /**
+ * Sends a background preference write and reports it as not saved when it was
+ * sent offline and fails. Other failures stay with the shared mutation's
+ * handling. Reads the connection state before sending, like sendingOffline.
+ */
+export function saveReportingOffline(send: () => Promise<unknown>): void {
+  const offline = sendingOffline();
+  send().catch(() => {
+    if (offline) reportOfflineSettingFailure();
+  });
+}
+
+/**
  * For appearance preferences applied before they are saved: shows the change
  * and caches it, then saves it. When the newest change to a preference was
  * sent offline and fails, it puts back the last value known stored, with its
@@ -107,8 +119,8 @@ export function useShowThenSave(cacheOwner: string | null) {
           if (pending.latest !== token) return;
           unsettled.current.delete(entryKey);
           if (!offline || !reportOfflineSettingFailure()) return;
-          if (currentOwner.current !== cacheOwner) return;
-          show(pending.stored.value as T);
+          if (currentOwner.current === cacheOwner) show(pending.stored.value as T);
+          // The cache is the original owner's either way, read on its next load.
           if (pending.stored.cached === null) appearanceCache.remove(cacheKey, cacheOwner);
           else appearanceCache.set(cacheKey, pending.stored.cached, cacheOwner);
         },

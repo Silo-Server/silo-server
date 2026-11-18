@@ -363,18 +363,23 @@ function SettingControl({ step }: { step: OnboardingStep }) {
     // differ only in the scope the value is stored at.
     const identity: SettingIdentity =
       spec.target === "device_setting" ? { scope: "profile_device" } : { scope: "profile" };
-    setSettingValue.mutate(
-      { key: spec.key as SettingKey, value: settingValueFromString(spec.key, next), identity },
-      {
-        onSuccess: () => {
+    // mutateAsync settles each save on its own; mutate's per-call callbacks run
+    // only for the newest call, so an earlier save that landed would be missed.
+    setSettingValue
+      .mutateAsync({
+        key: spec.key as SettingKey,
+        value: settingValueFromString(spec.key, next),
+        identity,
+      })
+      .then(
+        () => {
           stored.current = next;
         },
-        // Sent offline, nothing was stored, so show the stored choice again.
-        onError: () => {
+        () => {
+          // Sent offline, nothing was stored, so show the stored choice again.
           if (offline && reportOfflineSettingFailure()) setValue(stored.current);
         },
-      },
-    );
+      );
   }
 
   if (spec.control === "segmented") {

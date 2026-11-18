@@ -2,7 +2,7 @@ import { useCallback } from "react";
 
 import { useSettingValue, useSetSettingValue } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
+import { saveReportingOffline } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { CATALOG_REQUEST_PAGE_PARAM } from "@/pages/catalogSearchParams";
 
@@ -34,9 +34,13 @@ export function useSearchMediaScope() {
     (next: SearchMediaScope) => {
       // Attached to the request, so the failure is still reported if the page
       // unmounts first; a per-call mutate callback would not run then.
-      setSetting
-        .mutateAsync({ key: SETTING_KEYS.SEARCH_MEDIA_SCOPE, value: next, identity: PROFILE_SCOPE })
-        .catch(reportOfflineSettingFailure);
+      saveReportingOffline(() =>
+        setSetting.mutateAsync({
+          key: SETTING_KEYS.SEARCH_MEDIA_SCOPE,
+          value: next,
+          identity: PROFILE_SCOPE,
+        }),
+      );
     },
     [setSetting],
   );
