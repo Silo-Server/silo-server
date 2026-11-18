@@ -668,12 +668,21 @@ func (d *EventDispatcher) handleEvent(ctx context.Context, delivery EventDeliver
 	if _, deliverable := publicevents.AccessOf(delivery.EventName); !deliverable {
 		return fmt.Errorf("%w: %q is not in the event catalog", errUndeliverable, delivery.EventName)
 	}
+	// The payload is converted again here. A row this build stored is already
+	// public and comes out unchanged; one an older build stored carries the
+	// host's internal payload, which must not reach the plugin as it is.
 	var payload *structpb.Struct
 	if len(delivery.Payload) > 0 {
-		payload = &structpb.Struct{}
-		if err := payload.UnmarshalJSON(delivery.Payload); err != nil {
-			return fmt.Errorf("%w: decode payload: %w", errUndeliverable, err)
+		converted, err := publicPayload(events.Envelope{Event: delivery.EventName, Data: delivery.Payload})
+		if err != nil {
+			return fmt.Errorf("%w: %w", errUndeliverable, err)
 		}
+		// An older build's notification names a profile and no account, and
+		// profile IDs repeat across accounts.
+		if delivery.EventName == publicevents.NotificationCreated && converted.GetFields()["user_id"].GetStringValue() == "" {
+			return fmt.Errorf("%w: stored %s names no account", errUndeliverable, delivery.EventName)
+		}
+		payload = converted
 	}
 	resolveCtx, cancel := context.WithTimeout(ctx, eventResolveTimeout)
 	client, err := d.resolveClient(resolveCtx, delivery)
