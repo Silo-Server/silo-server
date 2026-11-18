@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -2254,31 +2255,48 @@ func (h *ItemsHandler) episodeOnlyBrowser(query itemsQuery) (episodeBrowser, boo
 // library). An episode's Jellyfin SortName is its season and episode number,
 // so a SortName sort keeps the series, season and episode order.
 func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, repo episodeBrowser) {
-	access, filters := h.episodeBrowseFilters(r.Context(), session, query)
+	limit := query.limit
+	if query.countOnly {
+		limit = 0
+	}
+	listItems, targets, total, ok, err := h.browseEpisodeItems(r.Context(), session, query, repo, query.startIndex, limit)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+	h.writeListItemsPage(w, r, session, query, "", listItems, targets, total)
+}
+
+// browseEpisodeItems pages the episodes of every series (or of the ParentId
+// library) that match query, from offset for up to limit rows; a zero limit
+// only counts them. ok is false when the ParentId library is outside the
+// session's libraries, so no episode can match.
+func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, offset, limit int) ([]upstreamListItem, map[string]compatEpisodeTarget, int, bool, error) {
+	access, filters := h.episodeBrowseFilters(ctx, session, query)
 	// The access filter checks each episode's series, so a ParentId library is
 	// intersected with the session's libraries before episodes are matched to it.
 	if query.parentLibraryID > 0 && !narrowAccessToLibrary(&access, query.parentLibraryID) {
-		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
-		return
+		return nil, nil, 0, false, nil
 	}
 	filters.LibraryID = query.parentLibraryID
 	// Name still sorts by episode title, as Jellyfin's NameComparer does.
 	if filters.Sort == catalog.BrowseSortTitle && query.sortByKey == sortKeySortName {
 		filters.Sort = ""
 	}
-	if query.countOnly {
-		filters.Limit = 0
-	}
-	episodes, total, err := h.browseEpisodes(r.Context(), session, repo, "", "", nil, "", filters, access, query.enableTotalRecordCount)
+	filters.Offset = offset
+	filters.Limit = limit
+	episodes, total, err := h.browseEpisodes(ctx, session, repo, "", "", nil, "", filters, access, query.enableTotalRecordCount)
 	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
+		return nil, nil, 0, false, err
 	}
 	contentIDs := contentIDsFromEpisodes(episodes)
-	targets, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(r.Context(), session, contentIDs, nil)
+	targets, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(ctx, session, contentIDs, nil)
 	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
+		return nil, nil, 0, false, err
 	}
 	listItems := make([]upstreamListItem, 0, len(contentIDs))
 	for _, contentID := range contentIDs {
@@ -2286,7 +2304,18 @@ func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Reques
 			listItems = append(listItems, target.Item)
 		}
 	}
-	h.writeListItemsPage(w, r, session, query, "", listItems, targets, total)
+	return listItems, targets, total, true, nil
+}
+
+// mixedEpisodeBrowser returns the episode browse when query lists Episode
+// beside other types, such as IncludeItemTypes=Episode,Movie, and no Ids. The
+// media_items browse serves the other types but holds no episodes (#4257).
+func (h *ItemsHandler) mixedEpisodeBrowser(query itemsQuery) (episodeBrowser, bool) {
+	if len(query.specificIDs) > 0 || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || (query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
+		return nil, false
+	}
+	repo, ok := h.episodeRepo.(episodeBrowser)
+	return repo, ok
 }
 
 // writeEpisodeModelsPage maps a resolved set of episode models to Jellyfin
@@ -2842,21 +2871,61 @@ func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Sessio
 	return details
 }
 
+// appendEpisodePage adds to result, the media_items page of the types beside
+// Episode, the episodes that follow them on query's page, and sets result.Total
+// to both parts. It returns the episodes' targets, keyed by content ID.
+func (h *ItemsHandler) appendEpisodePage(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, result *upstreamBrowseResponse) (map[string]compatEpisodeTarget, error) {
+	episodeLimit := 0
+	if query.countOnly {
+		result.Items = nil
+	} else {
+		episodeLimit = max(query.limit-len(result.Items), 0)
+	}
+	otherTotal := result.Total
+	episodeItems, targets, episodeTotal, _, err := h.browseEpisodeItems(ctx, session, query, repo, max(query.startIndex-otherTotal, 0), episodeLimit)
+	if err != nil {
+		return nil, err
+	}
+	result.Items = append(slices.Clip(result.Items), episodeItems...)
+	result.Total = 0
+	if query.enableTotalRecordCount {
+		result.Total = otherTotal + episodeTotal
+	}
+	return targets, nil
+}
+
 func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	if repo, ok := h.episodeOnlyBrowser(query); ok {
 		h.handleEpisodeBrowse(w, r, session, query, repo)
 		return
 	}
+	// A list naming Episode beside other types browses the other types here and
+	// pages the episodes after them, in the requested sort within each part.
+	browseQuery := query
+	episodeRepo, mixed := h.mixedEpisodeBrowser(query)
+	if mixed {
+		browseQuery.itemTypes = slices.DeleteFunc(slices.Clone(query.itemTypes), func(t string) bool { return t == compatEpisodeType })
+		browseQuery.itemType = browseQuery.itemTypes[0]
+		// The episode page starts after the other types, so they are counted.
+		browseQuery.enableTotalRecordCount = true
+	}
 	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
 	// catalog treats a zero limit as its default page, so fetch one row.
 	countOnly := query.countOnly
 	if countOnly {
-		query.limit = 1
+		browseQuery.limit = 1
 	}
-	result, err := h.content.BrowseItems(r.Context(), session, buildBrowseParams(query))
+	result, err := h.content.BrowseItems(r.Context(), session, buildBrowseParams(browseQuery))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
+	}
+	var mixedTargets map[string]compatEpisodeTarget
+	if mixed {
+		if mixedTargets, err = h.appendEpisodePage(r.Context(), session, query, episodeRepo, result); err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
 	}
 	if countOnly {
 		total := result.Total
@@ -2874,13 +2943,23 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, episodeContentIDsFromListItems(result.Items), libraryIDPtr(query.parentLibraryID))
+	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, episodeContentIDsFromListItems(slices.DeleteFunc(slices.Clone(result.Items), func(item upstreamListItem) bool {
+		_, paged := mixedTargets[item.ContentID]
+		return paged
+	})), libraryIDPtr(query.parentLibraryID))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	if len(mixedTargets) > 0 {
+		if episodeTargets == nil {
+			episodeTargets = make(map[string]compatEpisodeTarget, len(mixedTargets))
+		}
+		maps.Copy(episodeTargets, mixedTargets)
+	}
 
-	// Encode library ID for the ParentId field on each item.
+	// Encode library ID for the ParentId field on each item. A paged episode
+	// keeps its season as parent, as the Episode-only browse returns it.
 	var libraryParentID string
 	if query.parentLibraryID > 0 {
 		libraryParentID = h.codec.EncodeIntID(EncodedIDLibrary, int64(query.parentLibraryID))
@@ -2897,7 +2976,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 			if detail, ok := detailsByID[item.ContentID]; ok && detail != nil {
 				h.rememberDetailImages(*detail)
 				dto := h.mapper.itemFromDetailWithFields(*detail, favorites[detail.ContentID], progress[detail.ContentID], query.requestedFields)
-				if libraryParentID != "" {
+				if _, paged := mixedTargets[detail.ContentID]; libraryParentID != "" && !paged {
 					dto.ParentID = libraryParentID
 				}
 				if target, ok := episodeTargets[detail.ContentID]; ok {
@@ -2908,7 +2987,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 			}
 		}
 		dto := h.mapper.itemFromList(item, favorites[item.ContentID], progress[item.ContentID], query.requestedFields)
-		if libraryParentID != "" {
+		if _, paged := mixedTargets[item.ContentID]; libraryParentID != "" && !paged {
 			dto.ParentID = libraryParentID
 		}
 		if target, ok := episodeTargets[item.ContentID]; ok {
