@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,6 +26,22 @@ func seedWebSeekSources(t *testing.T, root string) {
 		if err := os.WriteFile(target, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestManagedWebSeekPatchBehavior(t *testing.T) {
+	root := t.TempDir()
+	seedWebSeekSources(t, root)
+	if err := patchManagedWebSources(root); err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js required to execute upstream Jellyfin Web seek logic")
+	}
+	cmd := exec.CommandContext(t.Context(), node, "testdata/web-seek-reanchor/behavior.cjs", filepath.Join(root, webPlaybackManagerSource), filepath.Join(root, webHTMLVideoPlayerSource))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("patched upstream behavior: %v\n%s", err, out)
 	}
 }
 
