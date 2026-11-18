@@ -111,9 +111,17 @@ func (f *Filesystem) noteWritten() {
 	if !f.space.low.Load() {
 		return
 	}
+	// Read settled first, as writeBudget does: a byte settled between the
+	// two reads is then counted twice, which keeps the low state longer.
+	base := f.space.settled.Load()
 	available, total, err := statSpace(f.root)
-	known := err == nil && total > 0
-	if known && available-reserveFor(total)-(f.space.claimed.Load()-f.space.settled.Load()) < lowSpaceRecoveryMargin {
+	if err != nil {
+		// No reading confirms the room; a later write checks again.
+		return
+	}
+	// A filesystem that reports no size can never show the margin, so a
+	// successful write is all the evidence there is.
+	if total > 0 && available-reserveFor(total)-(f.space.claimed.Load()-base) < lowSpaceRecoveryMargin {
 		return
 	}
 	if f.space.low.CompareAndSwap(true, false) {

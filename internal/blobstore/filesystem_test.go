@@ -433,12 +433,11 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err = s.Put(ctx, "kept/poster.jpg", []byte("image")); err != nil {
-		t.Fatal(err)
-	}
 	// A 100 GiB filesystem with 10 bytes above the reserve, less whatever is
-	// written to the store from here on, temporary files included. The
-	// reserve is the 2 GiB cap, which a tenth of 100 GiB exceeds.
+	// written to the store after the seed below, temporary files included.
+	// The reserve is the 2 GiB cap, which a tenth of 100 GiB exceeds. The
+	// fake goes in before the seed, so the real disk's free space never
+	// decides the test.
 	const total, reserve = 100 << 30, 2 << 30
 	stored := func() int64 {
 		var n int64
@@ -452,10 +451,14 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 		})
 		return n
 	}
-	start := stored()
+	var start int64
 	realStat := statSpace
 	statSpace = func(string) (int64, int64, error) { return reserve + 10 - (stored() - start), total, nil }
 	t.Cleanup(func() { statSpace = realStat })
+	if err = s.Put(ctx, "kept/poster.jpg", []byte("image")); err != nil {
+		t.Fatal(err)
+	}
+	start = stored()
 
 	// A write that would cut into the reserve is refused before it creates
 	// anything, and one whose length is unknown stops when it reaches it.
