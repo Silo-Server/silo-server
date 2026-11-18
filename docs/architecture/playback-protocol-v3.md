@@ -2579,6 +2579,16 @@ client repeats its kept step-down estimate on later replans, records nothing.
 A seek reanchor reuses the playing recipe and a seek failure recovery replays
 the stored start request; neither records nor clears a limit.
 
+A lowering more than 10 times below the connection's current reading (the
+higher of the probe and the playback sample within the reading lifetime) still
+plans at its own figure, but records nothing and leaves any earlier limit as it
+was. A client cannot tell a stall the server caused from a slow link: a start
+that waited on a disk spinning up recorded a 2174 kbps limit on a link measured
+at 114 Mbps, and the next title played at 540p. Without a stored limit, that
+plan carries no `bandwidth_limit`. A link that really falls this far below its
+reading lowers again on each title until a **Test speed** result or the
+reading's age brings the reading down.
+
 An Auto start or replan without `bandwidth_estimate_kbps` plans with the
 connection's current reading, the one `GET /api/v2/playback/connection`
 reports, as a `probe` estimate, so a client that starts before it has read its

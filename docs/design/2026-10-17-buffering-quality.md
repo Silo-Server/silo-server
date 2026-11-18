@@ -517,6 +517,10 @@ A limit is recorded when a start or replan carries
   `observed_throughput_kbps`, which is also what the request plans with. A
   later lowering on the same key replaces it, and it is lower by
   construction, because Auto was already planning under the old limit.
+- **Contradicted lowerings**: a lowering more than 10 times below the
+  connection's current reading plans at its own figure but is not recorded,
+  so a stall the server caused (a disk spinning up) does not cap the next
+  titles. See [playback protocol v3](../architecture/playback-protocol-v3.md#buffering-quality-native-v2).
 - **Lifetime**: `LEARNED_LIMIT_TTL = 24 hours` from the most recent
   observation, so one bad evening does not cap a week. A changed home IP
   address simply starts a new key. That fails toward the source, and a new
