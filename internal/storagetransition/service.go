@@ -288,12 +288,36 @@ type Service struct {
 	memoryMu                sync.Mutex
 	memoryObjects           map[string]objectCheckpoint
 	memoryCursors           map[string]prefixCursor
+	// envManaged names the environment variable that sets each storage key
+	// this process locks; see SetEnvironmentManaged.
+	envManaged map[string]string
 }
 
 // SetNodeAdmission connects the transition to the API process's storage
 // admission lock. Production API processes install it before opening storage.
 func (s *Service) SetNodeAdmission(admission *pglock.NodeAdmission) {
 	s.nodeAdmission = admission
+}
+
+// SetEnvironmentManaged records the settings the environment sets on this
+// API server, keyed by setting with the variable as value. A transition
+// commits new storage settings, which the environment would replace on the
+// next start, so Start refuses while any storage setting is among them.
+func (s *Service) SetEnvironmentManaged(vars map[string]string) {
+	s.envManaged = vars
+}
+
+// environmentManagedStorageVars returns the sorted variables that set a
+// storage setting here.
+func (s *Service) environmentManagedStorageVars() []string {
+	var out []string
+	for _, key := range storageKeys() {
+		if name := s.envManaged[key]; name != "" {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func New(pool *pgxpool.Pool, settings Settings, jobs JobRepository, source, private blobstore.Store) *Service {
@@ -441,6 +465,9 @@ func (s *Service) Start(ctx context.Context, userID int, req StartRequest) (*mod
 	}
 	if !validPolicy(req.Policy) {
 		return nil, Preflight{}, validationErrorf("unknown migration policy %q", req.Policy)
+	}
+	if vars := s.environmentManagedStorageVars(); len(vars) > 0 {
+		return nil, Preflight{}, validationErrorf("storage is set by the environment (%s); unset those variables and restart before a managed storage transition", strings.Join(vars, ", "))
 	}
 	// Stage selection and job admission must have one owner. The job index
 	// alone cannot prevent a losing request from changing the winner's stage.

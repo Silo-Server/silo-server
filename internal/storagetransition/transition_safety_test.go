@@ -171,3 +171,18 @@ func TestNestedPublicSourceCannotAliasPrivateArtifactPrefix(t *testing.T) {
 		t.Fatalf("ambiguous public source prefix error = %v", err)
 	}
 }
+
+// The environment would put its storage settings back on the next start, so
+// a transition cannot be staged while it sets any.
+func TestStartRefusesStorageSetByTheEnvironment(t *testing.T) {
+	settings := &memorySettings{values: map[string]string{settingArtworkBackend: blobstore.BackendLocal, settingArtworkLocalPath: t.TempDir()}}
+	service := New(nil, settings, memoryJobs{}, &memoryStore{identity: "local|source", objects: map[string][]byte{}}, nil)
+	service.SetEnvironmentManaged(map[string]string{settingArtworkLocalPath: "SILO_ARTWORK_PATH", "server.log_level": "SILO_LOG_LEVEL"})
+	_, _, err := service.Start(t.Context(), 1, StartRequest{Policy: PolicyFresh, Values: map[string]string{settingArtworkLocalPath: t.TempDir()}})
+	if _, ok := errors.AsType[*ValidationError](err); !ok || !strings.Contains(err.Error(), "SILO_ARTWORK_PATH") || strings.Contains(err.Error(), "SILO_LOG_LEVEL") {
+		t.Fatalf("Start = %v, want a validation error naming SILO_ARTWORK_PATH only", err)
+	}
+	if settings.values[StagedTargetSettingKey] != "" {
+		t.Error("a refused transition was staged")
+	}
+}
