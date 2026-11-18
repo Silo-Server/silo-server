@@ -4784,6 +4784,54 @@ func forgetKeptProbedRelease(byNeutral map[string][]*models.MediaFile, kept *mod
 	}
 }
 
+// rememberKeptProbedRelease records a row the liveness rule promoted into a
+// listed slot, so the neutral-key rule sees the probe evidence it now carries.
+func rememberKeptProbedRelease(byNeutral map[string][]*models.MediaFile, f *models.MediaFile) {
+	if f == nil || f.ProbeUpdatedAt == nil {
+		return
+	}
+	if key := virtualNeutralReleaseKey(f); key != "" {
+		byNeutral[key] = append(byNeutral[key], f)
+	}
+}
+
+// virtualKeptDuplicateAction decides what a row naming an already-listed
+// concrete provider candidate does to the survivor: replace it, be folded into
+// it, be dropped, or fall through to the ordinary path.
+//
+// Liveness comes before probe evidence. Two rows naming one candidate are the
+// same bytes, so the one that can play must be the one listed: a failed row
+// never displaces a live one, whatever its probe evidence says. Between two live
+// rows the probed copy wins, as before.
+type virtualDuplicateAction int
+
+const (
+	// virtualDuplicateFallThrough leaves the row to the ordinary path (a
+	// contradictory durable identity, or two probed rows the concrete id cannot
+	// settle).
+	virtualDuplicateFallThrough virtualDuplicateAction = iota
+	virtualDuplicateReplace
+	virtualDuplicateDrop
+	virtualDuplicateFold
+)
+
+func virtualKeptDuplicateAction(kept, f *models.MediaFile) virtualDuplicateAction {
+	if virtualConcreteRowsConflict(kept, f) {
+		return virtualDuplicateFallThrough
+	}
+	switch {
+	case virtualRowFailed(kept) && !virtualRowFailed(f):
+		return virtualDuplicateReplace
+	case virtualRowFailed(f) && !virtualRowFailed(kept):
+		return virtualDuplicateDrop
+	case f.ProbeUpdatedAt != nil && kept.ProbeUpdatedAt == nil:
+		return virtualDuplicateReplace
+	case f.ProbeUpdatedAt == nil:
+		return virtualDuplicateFold
+	}
+	return virtualDuplicateFallThrough
+}
+
 // collapseDuplicateVirtualVersionFiles drops duplicate virtual catalog rows so
 // one release lists once. Duplicate rows for a release share a candidate URI
 // (and, for a neutral row, its provider-neutral key) and differ only by the
@@ -4820,45 +4868,33 @@ func collapseDuplicateVirtualVersionFiles(files []*models.MediaFile) []*models.M
 		concrete := virtualConcreteReleaseKey(f)
 		if slot, ok := keptConcrete[concrete]; ok && concrete != "" {
 			kept := out[slot]
-			conflict := virtualConcreteRowsConflict(kept, f)
-			switch {
-			case conflict:
-				// A contradictory durable identity: the candidate id alone is not
-				// proof enough, so the row takes the ordinary path below.
-			case virtualRowFailed(kept) && !virtualRowFailed(f):
-				// The listed survivor is the failed copy of these bytes. A live
-				// duplicate takes the slot whatever its probe evidence: a dead row
-				// must never keep a playable one off the list, and the compat
-				// filter drops a candidate whose only surviving row is failed.
+			switch virtualKeptDuplicateAction(kept, f) {
+			case virtualDuplicateReplace:
+				// The survivor is the failed copy of these bytes. A live duplicate
+				// takes the slot whatever its probe evidence: a dead row must never
+				// keep a playable one off the list, and the compat filter drops a
+				// candidate whose only surviving row is failed.
 				forgetKeptProbedRelease(keptProbedByNeutral, kept)
 				out[slot] = f
-				if f.ProbeUpdatedAt != nil {
-					if key := virtualNeutralReleaseKey(f); key != "" {
-						keptProbedByNeutral[key] = append(keptProbedByNeutral[key], f)
-					}
-				}
+				rememberKeptProbedRelease(keptProbedByNeutral, f)
 				continue
-			case virtualRowFailed(f) && !virtualRowFailed(kept):
-				// A failed duplicate never displaces a live survivor: same candidate,
-				// same bytes, and the survivor is the one that can play.
+			case virtualDuplicateDrop:
+				// A failed duplicate never displaces a live survivor: same
+				// candidate, same bytes, and the survivor is the one that can play.
 				continue
-			case f.ProbeUpdatedAt != nil && kept.ProbeUpdatedAt == nil:
-				// The duplicate carries probe evidence: it is the authoritative row for
-				// these bytes and replaces the unprobed survivor.
-				out[slot] = f
-				continue
-			case f.ProbeUpdatedAt == nil:
-				// An unprobed duplicate of these bytes: fold it in. A probed survivor
-				// already holds the measured inventory; an unprobed survivor takes the
-				// union of the declarations.
+			case virtualDuplicateFold:
+				// An unprobed duplicate of these bytes: fold it in. A probed
+				// survivor already holds the measured inventory; an unprobed
+				// survivor takes the union of the declarations.
 				if kept.ProbeUpdatedAt == nil {
 					out[slot] = virtualFileWithMergedDeclaredTracks(kept, f)
 				}
 				continue
 			}
-			// Two probed rows naming one candidate under different neutral paths: the
-			// concrete id alone cannot settle which inventory is the file's, so keep both
-			// and let the neutral-path rule below decide (it keeps them apart).
+			// virtualDuplicateFallThrough: two probed rows naming one candidate
+			// under different neutral paths, so the concrete id alone cannot
+			// settle which inventory is the file's; keep both and let the
+			// neutral-path rule below decide (it keeps them apart).
 		}
 		if f.ProbeUpdatedAt != nil {
 			key := virtualNeutralReleaseKey(f)
