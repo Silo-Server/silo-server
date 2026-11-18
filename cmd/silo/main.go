@@ -1207,8 +1207,8 @@ func main() {
 		}()
 	}
 
-	// The plugin event dispatcher observes what this process publishes, so
-	// each event reaches plugins once however many nodes receive it.
+	// Observers see what this process publishes, so work that must happen once
+	// per event runs on the node that produced it, with or without Redis.
 	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
 	// Tell the servers already running that the environment changed stored
 	// settings, as an admin save does, so they reload now rather than at the
@@ -2195,7 +2195,6 @@ func main() {
 		if err := dispatcher.Start(appCtx); err != nil {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
-		eventBus.ObservePublishes(dispatcher.ObservePublish)
 		defer dispatcher.Stop()
 		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
 		// before PublishLifecycleChanges was registered, so this call is the
@@ -3385,6 +3384,7 @@ func main() {
 		triggerRepo := taskrepository.NewPgTriggerRepository(deps.DB)
 		historyRepo := taskrepository.NewPgExecutionRepository(deps.DB)
 		taskMgr := taskmanager.New(triggerRepo, historyRepo, triggers.New, slog.Default())
+		taskMgr.SetFiringClaims(taskrepository.NewPgFiringClaims(deps.DB))
 		if deps.EventsHub != nil {
 			taskMgr.AddObserver(evt.NewTaskObserver(deps.EventsHub))
 		}

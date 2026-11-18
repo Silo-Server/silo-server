@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { v2ErrorText } from "@/api/v2/request";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
@@ -77,10 +78,6 @@ function menuItemLabel(
   const name = pinLabel(menuItemPinRef(item));
   if (item.type === "section") return t("web.settings.interface.menuSection", { name });
   return t("web.settings.interface.menuCollection", { name });
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
 }
 
 export default function InterfaceSettings() {
@@ -195,7 +192,7 @@ function PosterSettings() {
         identity: CLIENT_SCOPE,
       });
     } catch (error) {
-      toast.error(errorMessage(error, t("web.settings.interface.posterSaveFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.posterSaveFailed")));
     }
   }
 
@@ -203,7 +200,7 @@ function PosterSettings() {
     try {
       await clearValue.mutateAsync({ key: SETTING_KEYS.UI_CARD_PRESENTATION, identity });
     } catch (error) {
-      toast.error(errorMessage(error, t("web.settings.interface.posterResetFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.posterResetFailed")));
     }
   }
 
@@ -314,7 +311,7 @@ function MenuSettings() {
       });
     } catch (error) {
       setSaved(null);
-      toast.error(errorMessage(error, t("web.settings.interface.menuSaveFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.menuSaveFailed")));
     }
   }
 
@@ -323,7 +320,7 @@ function MenuSettings() {
       await clearValue.mutateAsync({ key: SETTING_KEYS.NAV_PRIMARY_MENU, identity });
       setSaved(null);
     } catch (error) {
-      toast.error(errorMessage(error, t("web.settings.interface.menuResetFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.menuResetFailed")));
     }
   }
 

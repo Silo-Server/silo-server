@@ -1,4 +1,4 @@
-import { v2 } from "@/api/v2/request";
+import { v2, v2ErrorText } from "@/api/v2/request";
 import { requireNotificationAuthority } from "@/api/v2/notifications";
 import { useRef } from "react";
 import { testNotificationDestination } from "@/api/v2/notificationDestinationTests";
@@ -226,11 +226,7 @@ export function useRotateNotificationWebhookSecret() {
       } catch {
         return;
       }
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t("web.common.toast.notificationWebhooks.rotateFailed"),
-      );
+      toast.error(v2ErrorText(error, t("web.common.toast.notificationWebhooks.rotateFailed")));
     },
   });
   return {
