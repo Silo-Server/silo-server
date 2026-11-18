@@ -2957,7 +2957,7 @@ func mediaFileGone(filePath string) (bool, error) {
 type vanishedFileOutcome int
 
 const (
-	vanishedFileNeedsSweep  vanishedFileOutcome = iota // marked missing, already missing, or left to a scan that wrote it since
+	vanishedFileNeedsSweep  vanishedFileOutcome = iota // marked missing or already missing
 	vanishedFileRestored                               // the file is back on disk
 	vanishedFileUncataloged                            // no row records the path
 )
@@ -2969,9 +2969,11 @@ const (
 // writes the row (confirmUnchangedFiles), so only a row written before the
 // check is marked. Any other write since the check also leaves the row
 // unmarked, so the check runs once more with a new time: a file still gone
-// is then marked.
+// is then marked. If the row is written again before that mark too, the scan
+// fails rather than report success with the file still listed.
 func (s *Scanner) markVanishedFile(ctx context.Context, folder *models.MediaFolder, filePath string) (vanishedFileOutcome, error) {
-	for attempt := 1; ; attempt++ {
+	const attempts = 2
+	for attempt := 1; attempt <= attempts; attempt++ {
 		checkedAt, err := s.scanInventoryTime(ctx)
 		if err != nil {
 			return vanishedFileNeedsSweep, fmt.Errorf("reconcile vanished file: %w", err)
@@ -2995,14 +2997,15 @@ func (s *Scanner) markVanishedFile(ctx context.Context, folder *models.MediaFold
 			return vanishedFileNeedsSweep, nil
 		}
 		err = s.fileRepo.MarkMissingWrittenBefore(ctx, file.ID, file.FilePath, time.Now().UTC(), checkedAt)
-		if errors.Is(err, ErrFileNotFound) && attempt < 2 {
+		if errors.Is(err, ErrFileNotFound) {
 			continue
 		}
-		if err != nil && !errors.Is(err, ErrFileNotFound) {
+		if err != nil {
 			return vanishedFileNeedsSweep, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
 		}
 		return vanishedFileNeedsSweep, nil
 	}
+	return vanishedFileNeedsSweep, fmt.Errorf("marking vanished media file %s missing: its row changed during each of %d attempts", filePath, attempts)
 }
 
 func (s *Scanner) syncVanishedVideoQueues(ctx context.Context, folderID int, filePath string) error {
