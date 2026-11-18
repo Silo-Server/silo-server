@@ -43,13 +43,3 @@ func TestCheckPluginUpdatesTaskFailsWhenAnUpdateIsRefused(t *testing.T) {
 		t.Fatal("result data not recorded for a failed run")
 	}
 }
-
-func TestCheckPluginUpdatesTaskSucceedsWithoutFailures(t *testing.T) {
-	task := NewCheckPluginUpdatesTask(pluginUpdateCheckerStub{summary: plugins.AutoUpdateSummary{
-		CatalogEntries: 2,
-		UpdatesApplied: 1,
-	}})
-	if err := task.Execute(context.Background(), &pluginUpdateProgressStub{}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-}

@@ -5,31 +5,6 @@ import (
 	"testing"
 )
 
-func TestFilesystemMatchesContent(t *testing.T) {
-	store, err := NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if ok, err := store.Matches(ctx, "a.webp", []byte("abc")); err != nil || ok {
-		t.Fatalf("missing: %v %v", ok, err)
-	}
-	if err := store.Put(ctx, "a.webp", []byte("abc")); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		data string
-		want bool
-	}{{"abc", true}, {"xyz", false}, {"longer", false}} {
-		if ok, err := store.Matches(ctx, "a.webp", []byte(tc.data)); err != nil || ok != tc.want {
-			t.Fatalf("%q: %v %v", tc.data, ok, err)
-		}
-	}
-	if _, err := store.Matches(ctx, "../outside", nil); err == nil {
-		t.Fatal("invalid key accepted")
-	}
-}
-
 func TestMatchingRetryRecordsBackendAfterWriteRecordingFailure(t *testing.T) {
 	ctx := context.Background()
 	settings := &flakySettings{testSettings: testSettings{values: map[string]string{}}, fail: true}

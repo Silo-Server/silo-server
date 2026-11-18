@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Outlet } from "react-router";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-let appInitialEntries = ["/catalog?source=query&q=heat"];
+let appInitialEntries = ["/catalog?source=favorites"];
 let latestNavigateTo: string | null = null;
 let appProfile: { id: string; is_primary?: boolean } | null = { id: "profile-1" };
 let appUser: { id: number; username: string; role: string } = {
@@ -17,9 +17,6 @@ let appUser: { id: number; username: string; role: string } = {
 const mockUseCatalogWindow = vi.fn();
 const mockUseCatalogFilters = vi.fn();
 const mockItemGrid = vi.fn();
-const mockUseCanRequest = vi.fn();
-const mockUseRequestSearch = vi.fn();
-const mockUsePersonSearch = vi.fn();
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -59,39 +56,12 @@ vi.mock("@/hooks/queries/shuffles", () => ({
   useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
 }));
 
-vi.mock("@/hooks/queries/personSearch", () => ({
-  usePersonSearch: (...args: unknown[]) => mockUsePersonSearch(...args),
-}));
-
-vi.mock("@/hooks/useCanRequest", () => ({
-  useCanRequest: () => mockUseCanRequest(),
-}));
-
 vi.mock("@/hooks/queries/useRequests", () => ({
-  useRequestSearch: (...args: unknown[]) => mockUseRequestSearch(...args),
   useRequestFeatureStatus: () => ({ data: undefined }),
 }));
 
 vi.mock("@/hooks/queries/watchlistTitles", () => ({
   useWatchlistTitles: () => ({ data: undefined, isLoading: false, isError: false }),
-}));
-
-vi.mock("@/components/RequestToAddSection", () => ({
-  RequestToAddSection: ({
-    variant,
-    query,
-    libraryHadHits,
-    libraryResultsKnown,
-  }: {
-    variant: string;
-    query: string;
-    libraryHadHits: boolean;
-    libraryResultsKnown?: boolean;
-  }) => (
-    <div data-testid="request-section">
-      {`variant="${variant}" query="${query}" libraryHadHits="${String(libraryHadHits)}" libraryResultsKnown="${String(libraryResultsKnown)}"`}
-    </div>
-  ),
 }));
 
 vi.mock("@/hooks/useAuth", () => {
@@ -232,43 +202,8 @@ function appTree(client = new QueryClient()) {
 
 const staticApp = () => renderToStaticMarkup(appTree());
 
-function canRequest(discoveryEnabled: boolean, isResolving = false) {
-  mockUseCanRequest.mockReturnValue({ discoveryEnabled, isResolving, submitDisabledReason: null });
-}
-
-/** The library search for "heat" found nothing. */
-function noLocalHits(extra: Record<string, unknown> = {}) {
-  mockUseCatalogWindow.mockReturnValue({
-    data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
-    isLoading: false,
-    ...extra,
-  });
-}
-
-/** TMDB found one title the library is missing. */
-function tmdbHasMissingTitle() {
-  mockUseRequestSearch.mockReturnValue({
-    data: {
-      page: 1,
-      total_pages: 1,
-      total_results: 1,
-      results: [
-        {
-          media_type: "movie",
-          tmdb_id: 1,
-          title: "X",
-          availability: "missing",
-          request: { requestable: true },
-        },
-      ],
-    },
-    isLoading: false,
-    isError: false,
-  });
-}
-
 function resetCatalogMocks() {
-  appInitialEntries = ["/catalog?source=query&q=heat"];
+  appInitialEntries = ["/catalog?source=favorites"];
   latestNavigateTo = null;
   appProfile = { id: "profile-1" };
   appUser = { id: 1, username: "alex", role: "admin" };
@@ -276,12 +211,6 @@ function resetCatalogMocks() {
   mockUseCatalogWindow.mockReset();
   mockUseCatalogFilters.mockReset();
   mockItemGrid.mockReset();
-  mockUseCanRequest.mockReset();
-  mockUseRequestSearch.mockReset();
-  mockUsePersonSearch.mockReset();
-  mockUsePersonSearch.mockReturnValue({ data: [], isLoading: false, isError: false });
-  canRequest(false);
-  mockUseRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
 
   mockUseCatalogWindow.mockReturnValue({
     data: {
@@ -315,56 +244,6 @@ describe("Catalog page", () => {
 
   beforeEach(() => {
     resetCatalogMocks();
-  });
-
-  it("offers actor and director results with exact person links when no titles match", () => {
-    mockUseCatalogWindow.mockReturnValue({
-      data: { totalItems: 0, pages: new Map() },
-      isLoading: false,
-      isError: false,
-    });
-    mockUsePersonSearch.mockReturnValue({
-      data: [
-        { id: "137101642343383042", name: "Tom Hanks", photo_url: "/actor.jpg" },
-        { id: "137101697843200002", name: "Christopher Nolan" },
-      ],
-      isLoading: false,
-      isError: false,
-    });
-
-    const markup = staticApp();
-
-    expect(markup).toContain("People");
-    expect(markup).toContain('href="/person/137101642343383042"');
-    expect(markup).toContain('href="/person/137101697843200002"');
-    expect(markup).toContain("Tom Hanks");
-    expect(markup).toContain("Christopher Nolan");
-    expect(markup).toContain('src="/actor.jpg"');
-    expect(markup).toContain(">CN<");
-    expect(mockItemGrid).not.toHaveBeenCalled();
-  });
-
-  it("keeps title results visible when people search fails and offers a retry", async () => {
-    const userEvent = (await import("@testing-library/user-event")).default;
-    const refetch = vi.fn();
-    mockUsePersonSearch.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: true,
-      refetch,
-    });
-    render(appTree());
-    expect(await screen.findByText("Could not load people results.")).toBeDefined();
-    expect(mockItemGrid).toHaveBeenCalledWith(expect.objectContaining({ totalItems: 1 }));
-    await userEvent.click(screen.getByRole("button", { name: "Retry people search" }));
-    expect(refetch).toHaveBeenCalledOnce();
-  });
-
-  it("does not search people when browsing a personal list", () => {
-    appInitialEntries = ["/catalog?source=favorites"];
-    const markup = staticApp();
-    expect(mockUsePersonSearch).toHaveBeenCalledWith("", 20, false, undefined);
-    expect(markup).not.toContain('aria-label="People"');
   });
 
   it("browses an explicit library without requiring search text", () => {
@@ -434,158 +313,6 @@ describe("Catalog page", () => {
     staticApp();
 
     expect(latestNavigateTo).toBe(to);
-  });
-
-  it("renders the request grid variant when source=query and library has results", () => {
-    canRequest(true);
-    tmdbHasMissingTitle();
-
-    const markup = staticApp();
-
-    expect(markup).toContain('data-testid="request-section"');
-    expect(markup).toContain("variant=&quot;grid&quot;");
-    expect(markup).toContain("libraryHadHits=&quot;true&quot;");
-    expect(markup).toContain("libraryResultsKnown=&quot;true&quot;");
-  });
-
-  it("renders the request grid variant with libraryHadHits=false when library has 0 hits", () => {
-    canRequest(true);
-    noLocalHits();
-    tmdbHasMissingTitle();
-
-    const markup = staticApp();
-
-    expect(markup).toContain("libraryHadHits=&quot;false&quot;");
-    expect(markup).toContain("libraryResultsKnown=&quot;true&quot;");
-  });
-
-  it("marks library results unknown when the local search failed", () => {
-    canRequest(true);
-    noLocalHits({ isError: true, isPlaceholderData: false, refetch: vi.fn() });
-
-    const markup = staticApp();
-
-    expect(markup).toContain("libraryHadHits=&quot;false&quot;");
-    expect(markup).toContain("libraryResultsKnown=&quot;false&quot;");
-  });
-
-  it("does not render the request section when source is not query", () => {
-    appInitialEntries = ["/catalog?source=favorites"];
-    canRequest(true);
-    mockUseCatalogWindow.mockReturnValue({
-      data: { title: "Favorites", totalItems: 0, pages: new Map() },
-      isLoading: false,
-    });
-
-    expect(staticApp()).not.toContain('data-testid="request-section"');
-  });
-
-  it("does not render the request section when discovery is disabled", () => {
-    expect(staticApp()).not.toContain('data-testid="request-section"');
-  });
-
-  it("hides ItemGrid when library is empty and TMDB is still loading (request section will rescue)", () => {
-    canRequest(true);
-    noLocalHits();
-    mockUseRequestSearch.mockReturnValue({ data: undefined, isLoading: true, isError: false });
-
-    // Previously this case forced ItemGrid into loading=true, rendering 24 fake
-    // skeletons forever above the section. Now ItemGrid is hidden entirely.
-    expect(staticApp()).not.toContain('data-kind="item-grid"');
-  });
-
-  it("hides ItemGrid when library is empty and TMDB has missing results", () => {
-    canRequest(true);
-    noLocalHits();
-    tmdbHasMissingTitle();
-
-    const markup = staticApp();
-
-    expect(markup).not.toContain('data-kind="item-grid"');
-    expect(markup).toContain('data-testid="request-section"');
-  });
-
-  it("hides ItemGrid when library is empty and discovery feature status is still resolving", () => {
-    canRequest(false, true);
-    noLocalHits();
-
-    // Avoids the empty-state flash before the feature status resolves and TMDB
-    // either rescues with results or confirms there are none.
-    expect(staticApp()).not.toContain('data-kind="item-grid"');
-  });
-
-  it("renders the normal ItemGrid empty state when both library and TMDB are empty", () => {
-    canRequest(true);
-    noLocalHits();
-    mockUseRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 0, results: [] },
-      isLoading: false,
-      isError: false,
-    });
-
-    const markup = staticApp();
-
-    expect(markup).toContain('data-loading="false"');
-    expect(markup).toContain('data-total="0"');
-  });
-
-  it("hides stale results and explains a bounded search failure", () => {
-    mockUseCatalogWindow.mockReturnValue({
-      data: {
-        title: "Old Search",
-        totalItems: 1,
-        pages: new Map([[0, [{ content_id: "old", title: "Stale Result", type: "movie" }]]]),
-      },
-      isLoading: false,
-      isError: true,
-      refetch: vi.fn(),
-    });
-
-    const markup = staticApp();
-
-    expect(markup).toContain("Could not load search results.");
-    expect(markup).toContain("Retry search");
-    expect(markup).not.toContain('data-kind="item-grid"');
-    expect(markup).not.toContain("Stale Result");
-  });
-
-  it.each([
-    [
-      "applies the preferred media scope (default: video) when the URL has no type param",
-      "/catalog?source=query&q=heat",
-      "video",
-    ],
-    [
-      "respects an explicit type=all scope instead of the preferred default",
-      "/catalog?source=query&q=heat&type=all",
-      undefined,
-    ],
-  ])("%s", (_name, entry, scope) => {
-    appInitialEntries = [entry];
-
-    staticApp();
-
-    expect(mockUseCatalogWindow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: "query",
-        q: "heat",
-        query_definition: expect.objectContaining({ media_scope: scope }),
-      }),
-      expect.anything(),
-    );
-    expect(mockUsePersonSearch).toHaveBeenCalledWith("heat", 20, true, scope);
-  });
-
-  it("uses approximate totals for interactive query searches", () => {
-    staticApp();
-
-    expect(mockUseCatalogWindow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: "query",
-        q: "heat",
-      }),
-      expect.objectContaining({ includeTotal: false }),
-    );
   });
 });
 

@@ -39,9 +39,14 @@ type hungNode struct {
 	released chan struct{}
 }
 
-func newHungNode(t *testing.T, freezeAt string) *hungNode {
+func newHungNode(t *testing.T, freezeAt string, freezeDuringBody bool) *hungNode {
 	t.Helper()
-	node := &hungNode{freezeAt: freezeAt, arrival: make(chan struct{}), released: make(chan struct{})}
+	node := &hungNode{
+		freezeAt:         freezeAt,
+		freezeDuringBody: freezeDuringBody,
+		arrival:          make(chan struct{}),
+		released:         make(chan struct{}),
+	}
 	node.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		segment := strings.TrimPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/")
 		node.mu.Lock()
@@ -159,10 +164,11 @@ func fetchSegment(t *testing.T, api *httptest.Server, f *rehomeFixture, name str
 // numbering must continue at the requested segment, the frozen node must stop
 // being selected, and it must be told to drop the transport.
 func TestRelayMovesTranscodeOffHungNode(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"headers", "body"} {
 		t.Run(phase, func(t *testing.T) {
-			hung := newHungNode(t, "seg_00003.ts")
-			hung.freezeDuringBody = phase == "body"
+			t.Parallel()
+			hung := newHungNode(t, "seg_00003.ts", phase == "body")
 			healthy := newFakeRehomeNode(t, false)
 			f := newRehomeFixture(t, []*nodepool.Node{
 				pooledNode(1, hung.server.URL),
@@ -230,7 +236,8 @@ func TestRelayMovesTranscodeOffHungNode(t *testing.T) {
 // once the node is found hung instead of holding the request until the player
 // gives up.
 func TestRelayFailsPromptlyWhenNoNodeReplacesHungNode(t *testing.T) {
-	hung := newHungNode(t, "seg_00003.ts")
+	t.Parallel()
+	hung := newHungNode(t, "seg_00003.ts", false)
 	f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, hung.server.URL)}, writePlaybackTestFFmpegSleep(t, "30"))
 	previous := f.handler.PlaybackConfig
 	f.handler.PlaybackConfig = func() config.PlaybackConfig {
@@ -260,6 +267,7 @@ func TestRelayFailsPromptlyWhenNoNodeReplacesHungNode(t *testing.T) {
 // than the liveness grace to answer, as during a rebuild, but still answers its
 // health endpoint, is waited on and keeps the session.
 func TestRelayWaitsOnSlowLiveNode(t *testing.T) {
+	t.Parallel()
 	// The segment is answered only once the watch has probed twice, after the
 	// grace and one interval, so the relay has had every chance to give up.
 	answer := make(chan struct{})

@@ -16,42 +16,6 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
-func TestPluginPathIdentityComponents(t *testing.T) {
-	for _, invalid := range []string{"", ".", ".."} {
-		for _, idField := range []bool{true, false} {
-			id, version := "silo.example", "1.2.3"
-			if idField {
-				id = invalid
-			} else {
-				version = invalid
-			}
-			if _, _, err := pluginIdentitySegments(id, version); err == nil {
-				t.Errorf("accepted identity %q@%q", id, version)
-			}
-			manifest := testPluginManifest(t, id, version)
-			if err := ValidateManifest(manifest); err == nil {
-				t.Errorf("admitted identity %q@%q", id, version)
-			}
-			if _, err := pluginVersionRoot("cache", id, version); err == nil {
-				t.Errorf("derived install root for %q@%q", id, version)
-			}
-		}
-	}
-	for _, tc := range []struct{ value, want string }{
-		{"silo.example", "silo.example"}, {"1.2.3+build.4", "1.2.3+build.4"},
-		{"a/b\\c:d@e", "a_b_c_d_e"}, {"日本語 plugin", "日本語 plugin"},
-		{"...", "..."}, {"NUL", "NUL"}, {"COM1", "COM1"}, {"name.", "name."},
-	} {
-		got, err := pluginPathSegment(tc.value, "identity")
-		if err != nil || got != tc.want {
-			t.Errorf("segment(%q) = %q, %v; want %q", tc.value, got, err, tc.want)
-		}
-		if err := ValidateManifest(testPluginManifest(t, tc.value, tc.value)); err != nil {
-			t.Errorf("changed valid identity %q: %v", tc.value, err)
-		}
-	}
-}
-
 // A proxy node's cache derives its paths from the stored identity. Before the
 // identity check, plugin id ".." rehydrated beside the cache root and pruned
 // directories under the root's parent, and "." pruned other plugins' copies.

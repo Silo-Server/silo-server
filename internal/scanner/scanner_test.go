@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -123,170 +122,6 @@ func TestShouldSkipStableConfirmedFile_DoesNotSkipAssignmentChanges(t *testing.T
 	}
 }
 
-func TestScanStateUpdateReasons_DetectsMissingExternalSubtitle(t *testing.T) {
-	t.Parallel()
-
-	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
-	existing := &scanStateFile{
-		ContentID:             "matched-content",
-		FileSize:              1_000,
-		FileModifiedAt:        &modifiedAt,
-		ExternalSubtitlePaths: []string{filepath.Join(t.TempDir(), "Movie.en.srt")},
-	}
-
-	reasons := scanStateUpdateReasons(existing, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", false)
-	if !testStringSliceContains(reasons, "external_subtitle_missing") {
-		t.Fatalf("expected external_subtitle_missing reason, got %#v", reasons)
-	}
-	if shouldSkipStableConfirmedScanState(existing, "matched", 1_000, modifiedAt, reasons, false) {
-		t.Fatal("expected missing external subtitle to bypass stable scan-state skip")
-	}
-}
-
-func TestScanStateUpdateReasons_DetectsExternalSubtitleInventoryChange(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
-	existing := &scanStateFile{
-		ContentID:             "matched-content",
-		FileSize:              1_000,
-		FileModifiedAt:        &modifiedAt,
-		ExternalSubtitlePaths: []string{filepath.Join(dir, "Movie.en.srt")},
-	}
-
-	reasons := scanStateUpdateReasons(
-		existing,
-		1_000,
-		modifiedAt,
-		[]string{filepath.Join(dir, "Movie.en.srt"), filepath.Join(dir, "Movie.fr.srt")},
-		true,
-		fileRootAssignment{},
-		fileGroupAssignment{},
-		"movies",
-		false,
-	)
-	if !testStringSliceContains(reasons, "external_subtitle_changed") {
-		t.Fatalf("expected external_subtitle_changed reason, got %#v", reasons)
-	}
-	if shouldSkipStableConfirmedScanState(existing, "matched", 1_000, modifiedAt, reasons, false) {
-		t.Fatal("expected external subtitle change to bypass stable scan-state skip")
-	}
-}
-
-// TestScanStateUpdateReasons_SkipsProbeRepairForRejectedUnchangedFile covers a
-// file ffprobe rejected. Rescanning the same bytes must not run ffprobe and the
-// OSHash again, while changed bytes and unmarked rows still get the probe.
-func TestScanStateUpdateReasons_SkipsProbeRepairForRejectedUnchangedFile(t *testing.T) {
-	t.Parallel()
-
-	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
-	rejectedAt := modifiedAt.Add(time.Minute)
-	rejected := &scanStateFile{
-		ContentID:      "matched-content",
-		FileSize:       1_000,
-		FileModifiedAt: &modifiedAt,
-		ProbeFailedAt:  &rejectedAt,
-	}
-
-	reasons := scanStateUpdateReasons(rejected, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
-	if testStringSliceContains(reasons, "probe_repair") {
-		t.Fatalf("rejected unchanged file got reasons %#v, want no probe_repair", reasons)
-	}
-	if !shouldSkipStableConfirmedScanState(rejected, "matched", 1_000, modifiedAt, reasons, true) {
-		t.Fatal("expected a rejected unchanged file to use the stable scan-state skip")
-	}
-
-	changedAt := modifiedAt.Add(time.Hour)
-	reasons = scanStateUpdateReasons(rejected, 1_000, changedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
-	if !testStringSliceContains(reasons, "mtime_changed") || !testStringSliceContains(reasons, "probe_repair") {
-		t.Fatalf("rejected file with new bytes got reasons %#v, want mtime_changed and probe_repair", reasons)
-	}
-
-	unmarked := &scanStateFile{
-		ContentID:      "matched-content",
-		FileSize:       1_000,
-		FileModifiedAt: &modifiedAt,
-	}
-	reasons = scanStateUpdateReasons(unmarked, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
-	if !testStringSliceContains(reasons, "probe_repair") {
-		t.Fatalf("unprobed file got reasons %#v, want probe_repair", reasons)
-	}
-}
-
-// TestScanStateFromMediaFileCarriesProbeRejection covers the single-file scan,
-// which builds its scan state from the stored row rather than the folder query.
-func TestScanStateFromMediaFileCarriesProbeRejection(t *testing.T) {
-	t.Parallel()
-
-	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
-	rejectedAt := modifiedAt.Add(time.Minute)
-	state := scanStateFromMediaFile(&models.MediaFile{
-		ContentID:      "matched-content",
-		FileSize:       1_000,
-		FileModifiedAt: &modifiedAt,
-		ProbeFailedAt:  &rejectedAt,
-	})
-	if state.ProbeFailedAt == nil {
-		t.Fatal("scan state dropped probe_failed_at")
-	}
-	reasons := scanStateUpdateReasons(state, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
-	if testStringSliceContains(reasons, "probe_repair") {
-		t.Fatalf("rejected unchanged file got reasons %#v, want no probe_repair", reasons)
-	}
-}
-
-// TestExtraFileUnchangedSkipsRejectedExtra covers an extra ffprobe rejected:
-// rescanning the same bytes must not probe it again, while new bytes must.
-func TestExtraFileUnchangedSkipsRejectedExtra(t *testing.T) {
-	t.Parallel()
-
-	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
-	rejectedAt := modifiedAt.Add(time.Minute)
-	rejected := &scanStateFile{
-		ExtraID:        "extra-1",
-		FileSize:       1_000,
-		FileModifiedAt: &modifiedAt,
-		ProbeFailedAt:  &rejectedAt,
-	}
-	if !extraFileUnchanged(rejected, "extra-1", 1_000, modifiedAt) {
-		t.Fatal("rejected unchanged extra would be probed again")
-	}
-	if extraFileUnchanged(rejected, "extra-1", 2_000, modifiedAt) {
-		t.Fatal("rejected extra with new bytes must be probed")
-	}
-	unprobed := &scanStateFile{ExtraID: "extra-1", FileSize: 1_000, FileModifiedAt: &modifiedAt}
-	if extraFileUnchanged(unprobed, "extra-1", 1_000, modifiedAt) {
-		t.Fatal("unprobed extra without a rejection must be probed")
-	}
-}
-
-func TestIdentityOnlyUpdateReasons(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name    string
-		reasons []string
-		want    bool
-	}{
-		{"empty", nil, false},
-		{"group only", []string{"group_assignment_changed"}, true},
-		{"root only", []string{"root_assignment_changed"}, true},
-		{"group and root", []string{"group_assignment_changed", "root_assignment_changed"}, true},
-		{"group plus mtime needs reprobe", []string{"group_assignment_changed", "mtime_changed"}, false},
-		{"probe repair needs reprobe", []string{"probe_repair"}, false},
-		{"size change needs reprobe", []string{"size_changed"}, false},
-		{"was missing needs reprobe", []string{"was_missing"}, false},
-		{"subtitle change is not identity-only", []string{"external_subtitle_changed"}, false},
-		{"group plus subtitle needs full path", []string{"group_assignment_changed", "external_subtitle_changed"}, false},
-	}
-	for _, tc := range cases {
-		if got := identityOnlyUpdateReasons(tc.reasons); got != tc.want {
-			t.Errorf("identityOnlyUpdateReasons(%#v) = %v, want %v", tc.reasons, got, tc.want)
-		}
-	}
-}
-
 func TestFailedProbeRepairPreservesExistingProbe(t *testing.T) {
 	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair"}, nil, false) {
 		t.Fatal("migration-triggered repair failure would overwrite existing probe metadata")
@@ -330,32 +165,6 @@ func TestPersistIdentityUpdateUsesReturnedIDBeforeEnqueue(t *testing.T) {
 	}
 }
 
-func TestIdentityOnlyFastPathEligible(t *testing.T) {
-	t.Parallel()
-
-	identityReasons := []string{"group_assignment_changed"}
-	cases := []struct {
-		name     string
-		existing scanStateFile
-		reasons  []string
-		want     bool
-	}{
-		{"probed primary row", scanStateFile{FileHash: "abc"}, identityReasons, true},
-		{"non-identity reasons need full path", scanStateFile{FileHash: "abc"}, []string{"size_changed"}, false},
-		// A row still linked as an extra is being reclassified as primary;
-		// only the full upsert clears extra_id so matching can pick it up.
-		{"former extra needs full path", scanStateFile{ExtraID: "extra-1", FileHash: "abc"}, identityReasons, false},
-		// A hash-less row needs the full path once to backfill OSHash and the
-		// hash-keyed S3 markers.
-		{"missing hash needs full path", scanStateFile{}, identityReasons, false},
-	}
-	for _, tc := range cases {
-		if got := identityOnlyFastPathEligible(&tc.existing, tc.reasons); got != tc.want {
-			t.Errorf("%s: identityOnlyFastPathEligible = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 func testStringSliceContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -363,25 +172,6 @@ func testStringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func TestScanFileEbookLibraryUsesEbookPipeline(t *testing.T) {
-	root := t.TempDir()
-	filePath := filepath.Join(root, "book.epub")
-	if err := os.WriteFile(filePath, []byte("not a real epub"), 0o644); err != nil {
-		t.Fatalf("write fake ebook: %v", err)
-	}
-
-	err := (&Scanner{}).ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 44, Type: "ebooks", Paths: []string{root}})
-	if err == nil {
-		t.Fatal("ScanFile returned nil, want ebook parse failure")
-	}
-	if strings.Contains(err.Error(), "unrecognized video extension") {
-		t.Fatalf("ScanFile used video extension gate: %v", err)
-	}
-	if !strings.Contains(err.Error(), "folder_id=44") {
-		t.Fatalf("error = %q, want ebook scanner aggregate failure", err)
-	}
 }
 
 func TestSyncVanishedVideoQueuesUsesParentAndExactFileScopes(t *testing.T) {

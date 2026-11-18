@@ -22955,6 +22955,270 @@
       "value": "Yhteyden tarkistus epäonnistui."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Kirjaudu sisään ChatGPT-tilillä Tekoälypalvelut-asetuksissa."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Upotusyhteys toimii. Malli palauttaa "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Upotukset luotiin vektoreilla, joissa on "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta, mutta malli palauttaa nyt "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta. Nollaa upotukset ennen mallin vaihtamista."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Upotuslukitukseen on tallennettu vektorit, joissa on "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta; Silo tallentaa 1–"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta. Nollaa upotukset ja käytä mallia, joka palauttaa enintään "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Tallennettua upotuslukitusta ei voi lukea. Tyhjennä se nollaamalla upotukset."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Upotukset luotiin mallilla ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, ei mallilla ”"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Nollaa upotukset ennen mallin vaihtamista."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Upotuspalvelu ei palauttanut vektoria testitekstille."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Upotukset tallennettiin "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuudella; tämä palvelin tallentaa "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta. Nollaa upotukset."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Malli palauttaa "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta; Silo tallentaa enintään "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Yhteyden tarkistus epäonnistui. Tarkista lähetetyt asetukset ja palvelun saatavuus."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList-API-avain vahvistettu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch-yhteys toimii"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch hylkäsi API-avaimen tai vaatii sellaisen. Anna avain, jolla voi hallita indeksejä ja dokumentteja, kuten Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch ohjasi tarkistuksen toiseen osoitteeseen. Anna osoite, johon se ohjaa, kuten sen https://-URL, ja anna API-avain uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis-yhteys toimii."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-yhteys sekä objektien luku-, kirjoitus- ja poisto-oikeudet vahvistettu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Puheentunnistusyhteys toimii: aikaleimattu puhe vastaanotettu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Pääsy puheentunnistukseen estettiin. Tarkista API-avaimen oikeudet ja sallitut palvelut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Puheentunnistusmalli ei palauta aikaleimattuja segmenttejä, joita Silo tarvitsee tekstitysten luomiseen. Valitse malli, joka tukee segmenttien aikaleimoja, kuten OpenAI:n whisper-1."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuksen päätepiste tai malli ei ole käytettävissä. Tarkista palvelun perus-URL, malli ja sallitut palvelut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelu vaatii maksun. Tarkista palvelun saldo ja kulutusraja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelun kiintiö on käytetty loppuun. Tarkista palvelun saldo ja rajat."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelu rajoittaa pyyntöjen määrää. Yritä myöhemmin uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuksen yhteyden tarkistus aikakatkaistiin. Tarkista palvelun saatavuus ja yritä uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuksen todennus epäonnistui. Vaihda palvelun API-avain kohdassa Tekoälypalvelut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelu ei ole tilapäisesti käytettävissä. Yritä myöhemmin uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälyn yhteys toimii."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälyn yhteys epäonnistui. Tarkista malli, päättelytaso, palvelutaso, tiliyhteys ja palvelun käyttörajat."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -52495,6 +52759,20 @@
       "value": "Yhteyden tarkistus epäonnistui."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Upotuspalvelua ei ole valittu. Valitse palvelu, joka tarjoaa mallin ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, tai nollaa upotukset, jotta voit käyttää toista mallia."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -58559,6 +58837,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Toisto ilman kirjautumista samasta osoitteesta"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Jotkin Jellyfin-sovellukset, kuten Findroid, avaavat suoran toiston linkkejä ja latauslinkkejä kirjautumatta sisään. Kun tämä on päällä, Silo käsittelee tällaisen pyynnön, jos samassa verkko-osoitteessa oleva kirjautunut sovellus on pyytänyt kyseisen tiedoston toistoa viimeisten kahden tunnin aikana. Silloin kuka tahansa, jolla on sama osoite, kuten saman kotiverkon, mobiilioperaattorin tai VPN:n käyttäjät, voi myös toistaa kyseisen tiedoston. Ota tämä käyttöön vain, jos käytät jotakin näistä sovelluksista."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -89350,6 +89640,12 @@
       "value": "Järjestys"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Osuvuus"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -106194,6 +106490,12 @@
       "value": "Kokoelma"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Kirjasto"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -106238,6 +106540,12 @@
     {
       "type": 0,
       "value": "Ei vielä kokoelmia. Luo ensin kokoelma Kokoelmat-sivulla."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Tässä kirjastossa ei ole tämäntyyppisiä kokoelmia."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -122065,6 +122373,12 @@
       "value": "Voit tauottaa ja jatkaa toistoa"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party vaatii Redisin, jota ei ole määritetty tälle palvelimelle. Pyydä palvelimen ylläpitäjää määrittämään se."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -126015,6 +126329,86 @@
     {
       "type": 0,
       "value": "Hae kirjastosta tai etsi pyydettäviä nimikkeitä…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Kaikki tulokset kirjastossasi"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Palaa osuvuusjärjestykseen"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Parhaat osumat"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Kirjastossasi"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Lisää tuloksia"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Ei kirjastossasi"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Yleiskatsaus"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Pyydä lisättäväksi"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Näytä kaikki tulokset"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Lajitteluperuste: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Tulosnäkymät"
     }
   ],
   "web.search.resultsLabel": [

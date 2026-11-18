@@ -22867,6 +22867,270 @@
       "value": "Verbindungsprüfung fehlgeschlagen."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Melde dich in den Einstellungen unter KI-Dienste mit ChatGPT an."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Embedding-Verbindung erfolgreich. Das Modell liefert "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Die Embeddings wurden mit Vektoren mit "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen erstellt, aber das Modell liefert jetzt "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Setze die Embeddings zurück, bevor du das Modell wechselst."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Die Embedding-Sperre verzeichnet Vektoren mit "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen; Silo speichert 1 bis "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Setze die Embeddings zurück und verwende ein Modell, das höchstens "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen liefert."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Die gespeicherte Embedding-Sperre kann nicht gelesen werden. Setze die Embeddings zurück, um sie zu entfernen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Die Embeddings wurden mit dem Modell „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“ erstellt, nicht mit „"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "“. Setze die Embeddings zurück, bevor du das Modell wechselst."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Der Embedding-Anbieter hat für den Testtext keinen Vektor geliefert."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Die Embeddings wurden mit "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen gespeichert; dieser Server speichert "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Setze die Embeddings zurück."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Das Modell liefert "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen; Silo speichert höchstens "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Verbindungsprüfung fehlgeschlagen. Prüfe die gesendeten Einstellungen und die Verfügbarkeit des Anbieters."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList-API-Schlüssel bestätigt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch-Verbindung erfolgreich"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch hat den API-Schlüssel abgelehnt oder verlangt einen. Gib einen Schlüssel ein, der Indizes und Dokumente verwalten kann, etwa den Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch hat die Prüfung an eine andere Adresse weitergeleitet. Gib die Zieladresse der Weiterleitung ein, etwa die https://-URL, und gib den API-Schlüssel erneut ein."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis-Verbindung erfolgreich."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-Verbindung sowie Lese-, Schreib- und Löschrechte für Objekte bestätigt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Spracherkennungsverbindung erfolgreich: Sprache mit Zeitstempeln empfangen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Der Zugriff auf die Spracherkennung wurde verweigert. Prüfe die Berechtigungen deines API-Schlüssels und die erlaubten Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Das Spracherkennungsmodell liefert keine Segmente mit Zeitstempeln, die Silo zum Erstellen von Untertiteln braucht. Wähle ein Modell, das Zeitstempel für Segmente unterstützt, etwa whisper-1 bei OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Endpunkt oder Modell der Spracherkennung ist nicht verfügbar. Prüfe die Basis-URL des Anbieters, das Modell und die erlaubten Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Der Spracherkennungsanbieter verlangt eine Zahlung. Prüfe dein Guthaben und dein Ausgabenlimit beim Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Das Kontingent beim Spracherkennungsanbieter ist aufgebraucht. Prüfe dein Guthaben und deine Limits beim Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Der Spracherkennungsanbieter begrenzt die Anzahl der Anfragen. Versuche es später erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Zeitüberschreitung bei der Verbindungsprüfung der Spracherkennung. Prüfe die Verfügbarkeit des Anbieters und versuche es erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Authentifizierung bei der Spracherkennung fehlgeschlagen. Ersetze den API-Schlüssel des Anbieters unter KI-Dienste."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Der Spracherkennungsanbieter ist vorübergehend nicht verfügbar. Versuche es später erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Text-KI-Verbindung erfolgreich."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Text-KI-Verbindung fehlgeschlagen. Prüfe das Modell, die Reasoning-Stufe, die Service-Stufe, die Kontoverbindung und die Nutzungslimits des Anbieters."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -52263,6 +52527,20 @@
       "value": "Verbindungsprüfung fehlgeschlagen."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Es ist kein Embedding-Anbieter ausgewählt. Wähle einen Anbieter, der „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“ bereitstellt, oder setze die Embeddings zurück, um ein anderes Modell zu verwenden."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -58331,6 +58609,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Ohne Anmeldung von derselben Adresse abspielen"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Einige Jellyfin-Apps wie Findroid öffnen Links zur Direktwiedergabe und zum Download ohne Anmeldung. Ist diese Option aktiviert, bedient Silo eine solche Anfrage, sofern eine angemeldete App unter derselben Netzwerkadresse in den letzten zwei Stunden angefragt hat, diese Datei abzuspielen. Alle, die diese Adresse teilen, etwa Personen im selben Heimnetz, beim selben Mobilfunkanbieter oder im selben VPN, können diese Datei dann ebenfalls abspielen. Aktiviere die Option nur, wenn du eine dieser Apps verwendest."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -89124,6 +89414,12 @@
       "value": "Reihenfolge"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Relevanz"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -105606,6 +105902,12 @@
       "value": "Sammlung"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Mediathek"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -105650,6 +105952,12 @@
     {
       "type": 0,
       "value": "Noch keine Sammlungen. Erstelle zuerst eine unter „Sammlungen“."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Keine Sammlungen dieses Typs in dieser Mediathek."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -121349,6 +121657,12 @@
       "value": "Du kannst pausieren & fortsetzen"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party braucht Redis, das auf diesem Server nicht eingerichtet ist. Bitte die Person, die deinen Server verwaltet, es zu konfigurieren."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -125268,6 +125582,86 @@
     {
       "type": 0,
       "value": "Mediathek durchsuchen oder Titel zum Anfragen finden …"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Alle Ergebnisse in deiner Mediathek"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Zurück zur Relevanz"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Beste Treffer"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "In deiner Mediathek"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Weitere Ergebnisse"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Nicht in deiner Mediathek"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Übersicht"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Zum Hinzufügen anfragen"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Alle Ergebnisse anzeigen"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Sortiert nach "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Ergebnisansichten"
     }
   ],
   "web.search.resultsLabel": [

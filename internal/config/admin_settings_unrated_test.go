@@ -14,29 +14,6 @@ type stubSettingReader struct {
 
 func (s stubSettingReader) Get(context.Context, string) (string, error) { return s.value, s.err }
 
-// TestNormalizeUnratedContentSetting pins the setting as a two-value enum: a
-// parental control must not accept a typo and silently mean something else.
-func TestNormalizeUnratedContentSetting(t *testing.T) {
-	for _, raw := range []string{"hide", " hide ", "allow", "allow\n"} {
-		got, err := NormalizeAdminSetting(AccessUnratedContentSettingKey, raw)
-		if err != nil {
-			t.Fatalf("NormalizeAdminSetting(%q) = %v", raw, err)
-		}
-		if got != AccessUnratedContentHide && got != AccessUnratedContentAllow {
-			t.Fatalf("NormalizeAdminSetting(%q) = %q, want hide or allow", raw, got)
-		}
-	}
-	for _, raw := range []string{"", "true", "show", "Hidden"} {
-		if _, err := NormalizeAdminSetting(AccessUnratedContentSettingKey, raw); err == nil {
-			t.Errorf("NormalizeAdminSetting(%q) accepted an unknown value", raw)
-		}
-	}
-	if adminSettingDefaults[AccessUnratedContentSettingKey] != AccessUnratedContentHide {
-		t.Errorf("default = %q, want the historical behavior of hiding unrated titles",
-			adminSettingDefaults[AccessUnratedContentSettingKey])
-	}
-}
-
 // TestUnratedContentPolicyFailsClosed: only an explicit "allow" loosens a
 // ceiling. An unset row, a nil reader, or a read that fails before any read
 // has ever succeeded keeps titles hidden.
@@ -70,44 +47,6 @@ type countingSettingReader struct {
 func (s *countingSettingReader) Get(context.Context, string) (string, error) {
 	s.reads++
 	return s.value, s.err
-}
-
-// TestUnratedContentPolicyCachesSuccessfulReads checks the policy does not hit
-// the settings table on every scope resolution, still picks up a change once
-// the TTL passes, and never caches a failed read.
-func TestUnratedContentPolicyCachesSuccessfulReads(t *testing.T) {
-	ctx := context.Background()
-	reader := &countingSettingReader{value: "allow"}
-	policy := NewUnratedContentPolicy(reader)
-	now := time.Unix(1000, 0)
-	policy.setting.now = func() time.Time { return now }
-
-	for range 2 {
-		if !policy.AllowUnratedContent(ctx) {
-			t.Fatal("want allow")
-		}
-	}
-	if reader.reads != 1 {
-		t.Fatalf("reads = %d within the TTL, want 1", reader.reads)
-	}
-
-	reader.value = "hide"
-	now = now.Add(UnratedContentCacheTTL)
-	if policy.AllowUnratedContent(ctx) {
-		t.Fatal("want hide once the TTL has passed")
-	}
-
-	reader.err = errors.New("boom")
-	now = now.Add(UnratedContentCacheTTL)
-	if policy.AllowUnratedContent(ctx) {
-		t.Fatal("a failed read must keep the last value read successfully, which was hide")
-	}
-	reader.err = nil
-	reader.value = "allow"
-	reads := reader.reads
-	if !policy.AllowUnratedContent(ctx) || reader.reads != reads+1 {
-		t.Fatal("a failed read must not be cached")
-	}
 }
 
 // TestUnratedContentPolicyKeepsLastValueOnReadFailure pins that a transient

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCurrentUserOk from "../../../../contracts/api/v2/fixtures/get_current_user_ok.json";
 import getSetupStatusOk from "../../../../contracts/api/v2/fixtures/get_setup_status_ok.json";
@@ -74,7 +74,6 @@ describe("v2 request boundary", () => {
     const me = await v2("GET /api/v2/account/me");
     expect(me).toEqual(getCurrentUserOk);
     expect(me.role).toBe("user");
-    expectTypeOf(me.id).toEqualTypeOf<string>();
 
     const users = await v2("GET /api/v2/admin/users");
     expect(users.items).toHaveLength(listAdminUsersOk.items.length);

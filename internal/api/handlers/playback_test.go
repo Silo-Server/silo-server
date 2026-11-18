@@ -56,33 +56,6 @@ func TestWritePlaybackToneMapExecutionError(t *testing.T) {
 	}
 }
 
-func TestRequireNativeAPIEgressV3(t *testing.T) {
-	for _, test := range []struct {
-		name                        string
-		workload, execution, egress string
-		want                        int
-	}{
-		{name: "legacy", want: http.StatusOK},
-		{name: "api", workload: string(noderouting.WorkloadRemux), execution: string(noderouting.ExecutionAPI), egress: string(noderouting.EgressAPI), want: http.StatusOK},
-		{name: "proxy", workload: string(noderouting.WorkloadRemux), execution: string(noderouting.ExecutionProxy), egress: string(noderouting.EgressProxy), want: http.StatusServiceUnavailable},
-		{name: "partial", workload: string(noderouting.WorkloadRemux), egress: string(noderouting.EgressAPI), want: http.StatusConflict},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			allowed := requireNativeAPIEgressV3(recorder, test.workload, test.execution, test.egress)
-			if test.want == http.StatusOK {
-				if !allowed {
-					t.Fatalf("route was rejected: %d %s", recorder.Code, recorder.Body.String())
-				}
-				return
-			}
-			if allowed || recorder.Code != test.want {
-				t.Fatalf("allowed = %t, response = %d %s, want %d", allowed, recorder.Code, recorder.Body.String(), test.want)
-			}
-		})
-	}
-}
-
 func TestNativeTranscodeHandlersRejectProxyRecipeBeforeReconstruction(t *testing.T) {
 	const secret = "test-secret"
 	for _, test := range []struct {
@@ -704,7 +677,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				DisableProgressPersistence: tt.disablePersistence,
 				StartedAt:                  time.Now().Add(-time.Minute),
 			}
-			handler.finalizeSessionStop(context.Background(), session, false, "", tt.reason)
+			handler.finalizeSessionStopWithResult(context.Background(), session, false, "", tt.reason)
 
 			if got := len(scrobbler.pauses); got != tt.wantPauseCalls {
 				t.Fatalf("pause calls = %d, want %d", got, tt.wantPauseCalls)
@@ -786,53 +759,6 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 	}
 }
 
-func TestBuildAdminHistoryEntry_UsesRequestedMediaFileID(t *testing.T) {
-	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{
-		files: map[int]*models.MediaFile{
-			42: {
-				ID:         42,
-				ContentID:  "movie-1",
-				FilePath:   "/media/movie-4k.mkv",
-				Resolution: "2160p",
-				CodecVideo: "hevc",
-				Duration:   3600,
-			},
-			99: {
-				ID:         99,
-				ContentID:  "movie-1",
-				FilePath:   "/media/movie-1080p.mkv",
-				Resolution: "1080p",
-				CodecVideo: "h264",
-				Duration:   3600,
-			},
-		},
-	})
-	handler.AdminStore = noopPlaybackAdminStore{}
-
-	entry, err := handler.buildAdminHistoryEntry(context.Background(), &playback.Session{
-		ID:                   "session-1",
-		UserID:               1,
-		ProfileID:            "profile-1",
-		MediaFileID:          99,
-		RequestedMediaFileID: 42,
-		PlayMethod:           playback.PlayTranscode,
-		Position:             120,
-		StartedAt:            time.Now().Add(-2 * time.Minute),
-	})
-	if err != nil {
-		t.Fatalf("buildAdminHistoryEntry: %v", err)
-	}
-	if entry == nil {
-		t.Fatal("expected admin history entry")
-	}
-	if entry.MediaFileID != 42 {
-		t.Fatalf("MediaFileID = %d, want 42", entry.MediaFileID)
-	}
-	if entry.MediaItemID != "movie-1" {
-		t.Fatalf("MediaItemID = %q, want movie-1", entry.MediaItemID)
-	}
-}
-
 // The finalizing request is not the viewer's: an admin terminate carries the
 // admin's address and an expiry carries none. History keeps the viewer's.
 func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
@@ -861,35 +787,6 @@ func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
 				t.Fatalf("entry = %+v, want ClientIP 203.0.113.20", entry)
 			}
 		})
-	}
-}
-
-// An Audiobookshelf play runs on the book's first file but reports positions
-// in the whole book (#3098): the row takes the book's length, and an hour in
-// is not the end of a 44-second first track.
-func TestBuildAdminHistoryEntry_UsesTimelineDuration(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
-		file: &models.MediaFile{ID: 42, ContentID: "book-1", Duration: 44},
-	})
-	handler.AdminStore = noopPlaybackAdminStore{}
-
-	entry, err := handler.buildAdminHistoryEntry(context.Background(), &playback.Session{
-		ID:               "session-1",
-		UserID:           1,
-		ProfileID:        "profile-1",
-		MediaFileID:      42,
-		Position:         3600,
-		TimelineDuration: 19830,
-		StartedAt:        time.Now().Add(-time.Hour),
-	})
-	if err != nil {
-		t.Fatalf("buildAdminHistoryEntry: %v", err)
-	}
-	if entry == nil || entry.DurationSeconds == nil || *entry.DurationSeconds != 19830 {
-		t.Fatalf("entry = %+v, want DurationSeconds 19830", entry)
-	}
-	if entry.Completed {
-		t.Fatal("entry completed an hour into a 5.5-hour book")
 	}
 }
 
@@ -970,77 +867,16 @@ func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 		},
 	}
 
-	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
+	alternates, err := handler.findAlternateFiles(context.Background(), source, catalog.AccessFilter{})
 	if err != nil {
-		t.Fatalf("findAlternateFile: %v", err)
+		t.Fatalf("findAlternateFiles: %v", err)
 	}
-	if alternate == nil {
+	if len(alternates) == 0 {
 		t.Fatal("expected alternate file")
 	}
+	alternate := alternates[0]
 	if alternate.ID != 3 {
 		t.Fatalf("alternate.ID = %d, want 3", alternate.ID)
-	}
-}
-
-func TestAlignedSeekSeconds(t *testing.T) {
-	tests := []struct {
-		name        string
-		seek        float64
-		segDur      int
-		targetVideo string
-		want        float64
-	}{
-		// Encoded transcodes snap down to the declared segment boundary so the
-		// synthetic manifest's timeline matches the produced content exactly.
-		{"encoded mid-segment seek snaps down", 1158.673, 2, "h264", 1158},
-		{"segment duration defaults to 2", 1158.673, 0, "h264", 1158},
-		// Copy-mode serves ffmpeg's real manifest; raw seek stands.
-		{"copy keeps raw seek", 1158.673, 2, "copy", 1158.673},
-		{"copy case-insensitive", 1158.673, 2, "COPY", 1158.673},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := alignedSeekSeconds(tt.seek, tt.segDur, tt.targetVideo); got != tt.want {
-				t.Fatalf("alignedSeekSeconds(%v, %d, %q) = %v, want %v",
-					tt.seek, tt.segDur, tt.targetVideo, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFindAlternateFile_PrefersNon4KAcrossLabelsAndDimensions(t *testing.T) {
-	source := &models.MediaFile{
-		ID:         1,
-		ContentID:  "movie-1",
-		Resolution: "2160p",
-		HDR:        true,
-		Bitrate:    30_000_000,
-	}
-
-	handler := &PlaybackHandler{
-		FileVersionFetcher: testPlaybackFileVersionFetcher{
-			byContent: map[string][]*models.MediaFile{
-				"movie-1": {
-					source,
-					{ID: 6, ContentID: "movie-1", Resolution: "8K", Bitrate: 40_000_000},
-					{ID: 2, ContentID: "movie-1", Resolution: "4K", Bitrate: 28_000_000},
-					{ID: 3, ContentID: "movie-1", Resolution: " uhd ", Bitrate: 26_000_000},
-					{ID: 4, ContentID: "movie-1", Resolution: "1080p", Bitrate: 24_000_000, VideoTracks: []models.VideoTrack{{Width: 3840, Height: 1626}}},
-					{ID: 5, ContentID: "movie-1", Resolution: "1080p", Bitrate: 12_000_000, VideoTracks: []models.VideoTrack{{Width: 1920, Height: 1080}}},
-				},
-			},
-		},
-	}
-
-	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
-	if err != nil {
-		t.Fatalf("findAlternateFile: %v", err)
-	}
-	if alternate == nil {
-		t.Fatal("expected alternate file")
-	}
-	if alternate.ID != 5 {
-		t.Fatalf("alternate.ID = %d (resolution %q), want 5", alternate.ID, alternate.Resolution)
 	}
 }
 

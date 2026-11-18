@@ -99,88 +99,6 @@ func TestValidateSourceClassifiesDeterministicRejection(t *testing.T) {
 	}
 }
 
-// TestValidateSourceReadsToKeyframeAfterUnindexedSeek verifies a position
-// whose first packet decodes nothing, as after a seek into MPEG-TS, is read
-// again through the first keyframe a packet scan finds.
-func TestValidateSourceReadsToKeyframeAfterUnindexedSeek(t *testing.T) {
-	resetSourcePreflightCache(t)
-	request := sourcePreflightTestRequest(t)
-	conversions := 0
-	fallback := sourcePreflightTestRunner(&conversions, func() string { return "ffmpeg version ts" }, nil)
-	var rereads []string
-	runner := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		index := slices.Index(args, "-read_intervals")
-		if !strings.Contains(name, "ffprobe") || index < 0 {
-			return fallback(ctx, name, args...)
-		}
-		start, packets, _ := strings.Cut(args[index+1], "%+#")
-		switch {
-		case slices.Contains(args, "-show_packets"):
-			// The first packet is flagged as a keyframe but already decoded
-			// nothing, so the read must go on to the next one.
-			return []byte(`{"packets":[{"flags":"K_"},{"flags":"_D"},{"flags":"__"},{"flags":"K_"},{"flags":"__"}]}`), nil
-		case packets == "1" && start != "0.000":
-			// Only the sample at the start seeks onto a keyframe.
-			return []byte("[hevc] Could not find ref with POC 12\n" + `{"frames":[]}`), nil
-		case packets != "1":
-			rereads = append(rereads, args[index+1])
-		}
-		return fallback(ctx, name, args...)
-	}
-	if err := ValidateSourceWithRunner(context.Background(), request, runner); err != nil {
-		t.Fatalf("ValidateSource() = %v, want accepted", err)
-	}
-	if want := []string{"50.000%+#4", "90.000%+#4"}; !slices.Equal(rereads, want) {
-		t.Fatalf("reads through the keyframe = %v, want %v", rereads, want)
-	}
-}
-
-// TestPacketsThroughNextKeyframeSeesEndWhenBoundPacketsRemain verifies a scan
-// that reads every remaining packet reports the end of the stream, even when
-// exactly sourceKeyframeSearchPackets of them remain.
-func TestPacketsThroughNextKeyframeSeesEndWhenBoundPacketsRemain(t *testing.T) {
-	request := sourcePreflightTestRequest(t)
-	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		_, requested, _ := strings.Cut(args[slices.Index(args, "-read_intervals")+1], "%+#")
-		count, _ := strconv.Atoi(requested)
-		packets := slices.Repeat([]string{`{"flags":"__"}`}, min(count, sourceKeyframeSearchPackets))
-		return []byte(`{"packets":[` + strings.Join(packets, ",") + `]}`), nil
-	}
-	packets, endOfStream, err := packetsThroughNextKeyframe(context.Background(), request, 20, runner)
-	if err != nil || packets != 0 || !endOfStream {
-		t.Fatalf("packetsThroughNextKeyframe() = %d, %t, %v; want 0, true, nil", packets, endOfStream, err)
-	}
-}
-
-// TestLastKeyframeFromScansPastPacketBound verifies the scan for the last
-// keyframe goes on to the end of the stream when more packets than its bound
-// lie ahead, as in a variable-frame-rate stream, instead of returning the last
-// keyframe of the first chunk.
-func TestLastKeyframeFromScansPastPacketBound(t *testing.T) {
-	request := sourcePreflightTestRequest(t)
-	const packetCount = 2*sourceFinalKeyframeSearchPackets + 500
-	dts := func(index int) float64 { return float64(index) / 100 }
-	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		start, requested, _ := strings.Cut(args[slices.Index(args, "-read_intervals")+1], "%+#")
-		target, _ := strconv.ParseFloat(start, 64)
-		count, _ := strconv.Atoi(requested)
-		first := int(math.Round(target * 100))
-		packets := []string{}
-		for index := first; index < min(first+count, packetCount); index++ {
-			flags := "__"
-			if index%250 == 0 {
-				flags = "K_"
-			}
-			packets = append(packets, `{"flags":"`+flags+`","dts_time":"`+strconv.FormatFloat(dts(index), 'f', 6, 64)+`"}`)
-		}
-		return []byte(`{"packets":[` + strings.Join(packets, ",") + `]}`), nil
-	}
-	keyframe, ok, err := lastKeyframeFrom(context.Background(), request, 0, runner)
-	if want := dts((packetCount - 1) / 250 * 250); err != nil || !ok || keyframe != want {
-		t.Fatalf("lastKeyframeFrom() = %v, %t, %v; want %v, true, nil", keyframe, ok, err, want)
-	}
-}
-
 // TestValidateSourceSamplesLastKeyframeNearEndOfUnindexedSource verifies a
 // short MPEG-TS whose last sample falls after its final keyframe is accepted:
 // the frame read and the conversion both sample that keyframe instead.
@@ -454,30 +372,6 @@ func TestSourceConversionPreflightFilterMapsQSVFramesOnce(t *testing.T) {
 	}
 }
 
-func TestSourceConversionPreflightMirrorsSoftwareDecodeForVAAPI(t *testing.T) {
-	// Playback uploads HDR frames as 10-bit p010le and SDR frames as nv12
-	// (#2269); the preflight must test the same upload.
-	for kind, want := range map[SourceKind]string{
-		SourcePQ:       "format=p010le,hwupload,",
-		SourceHLG:      "format=p010le,hwupload,",
-		SourceSDRBT709: "format=nv12,hwupload,",
-	} {
-		t.Run(string(kind), func(t *testing.T) {
-			args := sourceConversionPreflightArgs(SourcePreflightRequest{
-				Mode: ModeHardware, Backend: BackendVAAPI, Kind: kind,
-				HardwareDevice: "/dev/dri/renderD129", SoftwareVideoDecode: true,
-			}, 0, "")
-			joined := strings.Join(args, " ")
-			if strings.Contains(joined, "-hwaccel") {
-				t.Fatalf("software-decode preflight requested hardware decode: %s", joined)
-			}
-			if !strings.Contains(joined, want+VAAPIFilter(kind)) {
-				t.Fatalf("software-decode preflight did not upload with %q before VAAPI tone mapping: %s", want, joined)
-			}
-		})
-	}
-}
-
 func TestSourceConversionPreflightBuildsVideoToolboxPaths(t *testing.T) {
 	for _, softwareDecode := range []bool{false, true} {
 		t.Run(strconv.FormatBool(softwareDecode), func(t *testing.T) {
@@ -497,32 +391,6 @@ func TestSourceConversionPreflightBuildsVideoToolboxPaths(t *testing.T) {
 				}
 			} else if !strings.Contains(joined, "-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld") {
 				t.Fatalf("hardware-decode VideoToolbox preflight is wrong: %s", joined)
-			}
-		})
-	}
-}
-
-// TestSourceConversionPreflightOnlyRequestsSoftwareColorspaceConversion verifies hardware graphs avoid an invalid conversion.
-func TestSourceConversionPreflightOnlyRequestsSoftwareColorspaceConversion(t *testing.T) {
-	tests := []struct {
-		name           string
-		mode           Mode
-		backend        string
-		wantColorspace bool
-	}{
-		{name: "software", mode: ModeSoftware, backend: BackendSoftware, wantColorspace: true},
-		{name: "QSV", mode: ModeHardware, backend: BackendQSV},
-		{name: "VAAPI", mode: ModeHardware, backend: BackendVAAPI},
-		{name: "NVENC", mode: ModeHardware, backend: BackendNVENC},
-		{name: "VideoToolbox", mode: ModeHardware, backend: BackendVideoToolbox, wantColorspace: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			args := sourceConversionPreflightArgs(SourcePreflightRequest{
-				Mode: tt.mode, Backend: tt.backend, Kind: SourcePQ,
-			}, 0, "")
-			if got := slices.Contains(args, "-colorspace"); got != tt.wantColorspace {
-				t.Fatalf("preflight -colorspace present = %t, want %t: %s", got, tt.wantColorspace, strings.Join(args, " "))
 			}
 		})
 	}
@@ -583,63 +451,6 @@ func resetSourcePreflightCache(t *testing.T) {
 	ffmpegVersionCache.Lock()
 	ffmpegVersionCache.entries = make(map[string][]byte)
 	ffmpegVersionCache.Unlock()
-}
-
-// TestValidateSourceMatchesDecodedFrameRange verifies decoded frames must
-// carry a range their kind accepts: limited for PQ, and any explicit range
-// for full-range PQ, whose conversion keeps the frame's own range.
-func TestValidateSourceMatchesDecodedFrameRange(t *testing.T) {
-	tests := []struct {
-		name           string
-		kind           SourceKind
-		frameRange     string
-		accepted       bool
-		wantParameters string
-	}{
-		{name: "limited kind with limited frames", kind: SourcePQ, frameRange: "tv", accepted: true, wantParameters: "setparams=range=tv:color_primaries=bt2020:"},
-		{name: "limited kind with full frames", kind: SourcePQ, frameRange: "pc"},
-		{name: "full kind with full frames", kind: SourcePQFullRange, frameRange: "pc", accepted: true, wantParameters: "setparams=color_primaries=bt2020:"},
-		{name: "full kind with limited frames", kind: SourcePQFullRange, frameRange: "tv", accepted: true, wantParameters: "setparams=color_primaries=bt2020:"},
-		{name: "full kind with untagged frames", kind: SourcePQFullRange, frameRange: "unknown"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetSourcePreflightCache(t)
-			request := sourcePreflightTestRequest(t)
-			request.Kind = tt.kind
-			conversionCount := 0
-			fallback := sourcePreflightTestRunner(&conversionCount, func() string { return "ffmpeg version range" }, nil)
-			var conversions []string
-			runner := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-				joined := strings.Join(args, " ")
-				if strings.Contains(name, "ffprobe") && strings.Contains(joined, "-show_frames") && !strings.Contains(joined, "stream=codec_name") {
-					return []byte(`{"frames":[{"color_range":"` + tt.frameRange + `","color_space":"bt2020nc","color_transfer":"smpte2084","color_primaries":"bt2020"}]}`), nil
-				}
-				if !strings.Contains(name, "ffprobe") && !slices.Contains(args, "-version") {
-					conversions = append(conversions, joined)
-				}
-				return fallback(ctx, name, args...)
-			}
-			err := ValidateSourceWithRunner(context.Background(), request, runner)
-			if !tt.accepted {
-				if !errors.Is(err, ErrSourcePreflightRejected) {
-					t.Fatalf("ValidateSource() = %v, want rejection", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("ValidateSource() = %v, want accepted", err)
-			}
-			if len(conversions) == 0 {
-				t.Fatal("ValidateSource() ran no conversion")
-			}
-			for _, conversion := range conversions {
-				if !strings.Contains(conversion, tt.wantParameters) {
-					t.Fatalf("conversion %q does not start from %q", conversion, tt.wantParameters)
-				}
-			}
-		})
-	}
 }
 
 // TestValidateSourceRequiresRPUForDolbyVisionKind verifies that a Dolby

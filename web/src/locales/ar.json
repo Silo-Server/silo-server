@@ -31687,6 +31687,270 @@
       "value": "فشل فحص الاتصال."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "سجّل الدخول باستخدام ChatGPT في إعدادات خدمات الذكاء الاصطناعي."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "نجح اتصال التضمين. عدد الأبعاد التي يُرجعها النموذج: "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "أُنشئت التضمينات بمتجهات عدد أبعادها "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "، لكن النموذج يُرجع الآن "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". أعد تعيين التضمينات قبل تبديل النماذج."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "يسجّل قفل التضمين متجهات عدد أبعادها "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "؛ بينما يخزّن Silo متجهات عدد أبعادها من 1 إلى "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". أعد تعيين التضمينات واستخدم نموذجًا لا يتجاوز عدد أبعاده "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "تعذّرت قراءة قفل التضمين المخزَّن. أعد تعيين التضمينات لمسحه."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "أُنشئت التضمينات بالنموذج «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "»، وليس «"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "». أعد تعيين التضمينات قبل تبديل النماذج."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "لم يُرجع مزود التضمين أي متجه لنص الاختبار."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "خُزّنت التضمينات بمتجهات عدد أبعادها "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "؛ بينما يخزّن هذا الخادم "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". أعد تعيين التضمينات."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "يُرجع النموذج متجهات عدد أبعادها "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "؛ والحد الأقصى الذي يخزّنه Silo هو "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "فشل فحص الاتصال. تحقق من الإعدادات المُرسلة ومن توفر المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "تم التحقق من مفتاح API الخاص بـ MDBList."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "نجح الاتصال بـ Meilisearch"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "رفض Meilisearch مفتاح API، أو يتطلب مفتاحًا. أدخل مفتاحًا يمكنه إدارة الفهارس والمستندات، مثل Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "أعاد Meilisearch توجيه الفحص إلى عنوان آخر. أدخل العنوان الذي يعيد التوجيه إليه، مثل عنوان URL الذي يبدأ بـ https://، ثم أدخل مفتاح API مرة أخرى."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "نجح الاتصال بـ Redis."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "تم التحقق من اتصال S3 ومن أذونات قراءة الكائنات وكتابتها وحذفها."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "نجح اتصال تحويل الكلام إلى نص: استُلم كلام مع طوابع زمنية."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "رُفض الوصول إلى تحويل الكلام إلى نص. تحقق من أذونات مفتاح API والمزودين المسموح بهم."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "لا يُرجع نموذج تحويل الكلام إلى نص مقاطع ذات طوابع زمنية، وهي ما يحتاجه Silo لإنشاء الترجمة. اختر نموذجًا يدعم الطوابع الزمنية للمقاطع، مثل whisper-1 من OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "نقطة نهاية تحويل الكلام إلى نص أو النموذج غير متاحة. تحقق من عنوان URL الأساسي للمزود والنموذج والمزودين المسموح بهم."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "يتطلب مزود تحويل الكلام إلى نص الدفع. تحقق من رصيدك لدى المزود وحد الإنفاق."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "نفدت الحصة لدى مزود تحويل الكلام إلى نص. تحقق من رصيدك وحدودك لدى المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "يحدّ مزود تحويل الكلام إلى نص من معدل الطلبات. حاول مرة أخرى لاحقًا."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "انتهت مهلة فحص اتصال تحويل الكلام إلى نص. تحقق من توفر المزود وحاول مرة أخرى."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "فشلت مصادقة تحويل الكلام إلى نص. استبدل مفتاح API الخاص بالمزود في خدمات الذكاء الاصطناعي."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "مزود تحويل الكلام إلى نص غير متاح مؤقتًا. حاول مرة أخرى لاحقًا."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "نجح اتصال الذكاء الاصطناعي النصي."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "فشل اتصال الذكاء الاصطناعي النصي. تحقق من النموذج ومستوى الاستدلال وفئة الخدمة واتصال الحساب وحدود الاستخدام لدى المزود."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -75147,6 +75411,20 @@
       "value": "فشل التحقق من الاتصال."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "لم يُختر أي مزود تضمين. اختر مزود تضمين يقدّم «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "»، أو أعد تعيين التضمينات لاستخدام نموذج آخر."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -83476,6 +83754,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "التشغيل دون تسجيل الدخول من العنوان نفسه"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "تفتح بعض تطبيقات Jellyfin، مثل Findroid، روابط التشغيل المباشر والتنزيل دون تسجيل الدخول. عند تفعيل هذا الخيار، يلبّي Silo مثل هذا الطلب إذا طلب تطبيقٌ مسجَّل الدخول على عنوان الشبكة نفسه تشغيل ذلك الملف خلال الساعتين الماضيتين. ويمكن عندئذٍ لأي شخص يشارك ذلك العنوان، مثل الأشخاص على الشبكة المنزلية نفسها أو لدى مشغّل شبكة الهاتف المحمول نفسه أو على شبكة VPN نفسها، تشغيل ذلك الملف أيضًا. لا تفعّله إلا إذا كنت تستخدم أحد تلك التطبيقات."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -119110,6 +119400,12 @@
       "value": "الترتيب"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "الصلة"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -143290,6 +143586,12 @@
       "value": "المجموعة"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "المكتبة"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -143334,6 +143636,12 @@
     {
       "type": 0,
       "value": "لا توجد مجموعات بعد. أنشئ مجموعة في «المجموعات» أولًا."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "لا توجد مجموعات من هذا النوع في هذه المكتبة."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -162438,6 +162746,12 @@
       "value": "يمكنك الإيقاف المؤقت والاستئناف"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "يحتاج Watch Party إلى Redis، وهو غير مُعدّ على هذا الخادم. اطلب من مسؤول الخادم إعداده."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -167177,6 +167491,86 @@
     {
       "type": 0,
       "value": "ابحث في المكتبة أو اعثر على عناوين لطلبها..."
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "كل النتائج في مكتبتك"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "العودة إلى الترتيب حسب الصلة"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "أفضل التطابقات"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "في مكتبتك"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "المزيد من النتائج"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "غير موجود في مكتبتك"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "نظرة عامة"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "طلب إضافة"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "عرض كل النتائج"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "مرتّب حسب "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "طرق عرض النتائج"
     }
   ],
   "web.search.resultsLabel": [

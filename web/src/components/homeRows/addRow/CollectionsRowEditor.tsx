@@ -385,6 +385,9 @@ function Chooser({
           onQueryChange={search.setQuery}
           filter={search.filter}
           onFilterChange={search.setFilter}
+          libraries={search.libraries}
+          library={search.library}
+          onLibraryChange={search.setLibrary}
         />
         {search.shown.length > 0 ? (
           <ul
@@ -404,7 +407,7 @@ function Chooser({
           </ul>
         ) : (
           <p role="status" className="text-muted-foreground px-4 py-6 text-sm">
-            {collectionEmptyText(t, collections, search.query.trim())}
+            {collectionEmptyText(t, collections, search.query.trim(), search.library !== "all")}
           </p>
         )}
       </div>

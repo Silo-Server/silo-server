@@ -9,7 +9,7 @@ import { useState } from "react";
  * saving `min` on a stray clear is how a subtitle opacity field would jump to
  * nearly invisible with no confirmation.
  */
-export function parsePercent(raw: string, min: number): number | null {
+function parsePercent(raw: string, min: number): number | null {
   const trimmed = raw.trim().replace(/%$/, "").trim();
   if (trimmed === "") return null;
   const parsed = Math.round(Number(trimmed));

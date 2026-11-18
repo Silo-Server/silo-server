@@ -13,16 +13,10 @@ type fakeAutoscanStore struct {
 	listConnectionsFn  func() ([]autoscan.Connection, error)
 	createConnectionFn func(autoscan.Connection) (autoscan.Connection, error)
 	updateConnectionFn func(autoscan.Connection) (autoscan.Connection, error)
-	deleteConnectionFn func(string) error
 	listSourcesFn      func() ([]autoscan.Source, error)
 	getSourceFn        func(string) (autoscan.Source, error)
 	createSourceFn     func(autoscan.Source) (autoscan.Source, error)
 	updateSourceFn     func(autoscan.Source) (autoscan.Source, error)
-	deleteSourceFn     func(string) error
-	listScansFn        func(autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error)
-	countScansFn       func(autoscan.ScanListFilter) (int, error)
-	listEventsFn       func(autoscan.EventListFilter) ([]autoscan.EventWithRuns, error)
-	countEventsFn      func(autoscan.EventListFilter) (int, error)
 	listRunningFn      func() ([]autoscan.Event, error)
 	queueSummaryFn     func() (autoscan.QueueSummary, error)
 	latestEventAtFn    func() (*time.Time, error)
@@ -73,12 +67,7 @@ func (f *fakeAutoscanStore) UpdateConnection(_ context.Context, c autoscan.Conne
 	return c, nil
 }
 
-func (f *fakeAutoscanStore) DeleteConnection(_ context.Context, id string) error {
-	if f.deleteConnectionFn != nil {
-		return f.deleteConnectionFn(id)
-	}
-	return nil
-}
+func (f *fakeAutoscanStore) DeleteConnection(context.Context, string) error { return nil }
 
 func (f *fakeAutoscanStore) ListSources(context.Context) ([]autoscan.Source, error) {
 	if f.listSourcesFn != nil {
@@ -108,38 +97,21 @@ func (f *fakeAutoscanStore) UpdateSource(_ context.Context, s autoscan.Source) (
 	return s, nil
 }
 
-func (f *fakeAutoscanStore) DeleteSource(_ context.Context, id string) error {
-	if f.deleteSourceFn != nil {
-		return f.deleteSourceFn(id)
-	}
-	return nil
-}
+func (f *fakeAutoscanStore) DeleteSource(context.Context, string) error { return nil }
 
-func (f *fakeAutoscanStore) ListAutoscanScans(_ context.Context, filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
-	if f.listScansFn != nil {
-		return f.listScansFn(filter)
-	}
+func (f *fakeAutoscanStore) ListAutoscanScans(context.Context, autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
 	return nil, nil
 }
 
-func (f *fakeAutoscanStore) CountAutoscanScans(_ context.Context, filter autoscan.ScanListFilter) (int, error) {
-	if f.countScansFn != nil {
-		return f.countScansFn(filter)
-	}
+func (f *fakeAutoscanStore) CountAutoscanScans(context.Context, autoscan.ScanListFilter) (int, error) {
 	return 0, nil
 }
 
-func (f *fakeAutoscanStore) ListEvents(_ context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
-	if f.listEventsFn != nil {
-		return f.listEventsFn(filter)
-	}
+func (f *fakeAutoscanStore) ListEvents(context.Context, autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
 	return nil, nil
 }
 
-func (f *fakeAutoscanStore) CountEvents(_ context.Context, filter autoscan.EventListFilter) (int, error) {
-	if f.countEventsFn != nil {
-		return f.countEventsFn(filter)
-	}
+func (f *fakeAutoscanStore) CountEvents(context.Context, autoscan.EventListFilter) (int, error) {
 	return 0, nil
 }
 

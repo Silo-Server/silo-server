@@ -250,7 +250,7 @@ function upsertJob(existing: AdminJob[] | undefined, nextJob: AdminJob, limit = 
   return sortJobs(jobs).slice(0, limit);
 }
 
-export function applyJellyfinCompatOperationUpdate(
+function applyJellyfinCompatOperationUpdate(
   queryClient: QueryClient,
   operation: JellyfinCompatOperationStatus,
   authority: ProfileRequestContextSnapshot | null,

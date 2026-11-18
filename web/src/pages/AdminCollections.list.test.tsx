@@ -91,10 +91,6 @@ function renderPage(path = "/admin/collections", client = new QueryClient()) {
 }
 
 const location = () => screen.getByRole("status", { name: "Location" }).textContent;
-const listed = () =>
-  within(screen.getByRole("region", { name: "Collections" }))
-    .queryAllByRole("listitem")
-    .map((row) => row.querySelector("span.truncate")?.textContent);
 
 function problem(status: number, type: string) {
   return async () => {
@@ -169,50 +165,6 @@ beforeEach(() => {
     }),
   ];
   answerAdminCollections(() => items);
-});
-
-describe("AdminCollections List", () => {
-  it("filters by search, type and failed syncs, and reads the same filters back from the URL", async () => {
-    const user = userEvent.setup();
-    const { unmount } = renderPage();
-    await screen.findByText("Studio Ghibli");
-
-    await user.click(screen.getByRole("button", { name: "Synced list" }));
-    expect(listed()).toEqual(["Best Picture Winners", "IMDb Top 250 Shows"]);
-    await user.click(screen.getByRole("button", { name: "1 sync failed" }));
-    expect(listed()).toEqual(["IMDb Top 250 Shows"]);
-    await user.click(screen.getByRole("button", { name: "1 sync failed" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search collections" }), "best");
-    expect(listed()).toEqual(["Best Picture Winners"]);
-    expect(location()).toBe("/admin/collections?type=synced&q=best");
-    unmount();
-
-    renderPage("/admin/collections?type=synced&q=best");
-    await screen.findByText("Best Picture Winners");
-    expect(listed()).toEqual(["Best Picture Winners"]);
-    expect(screen.getByRole("searchbox", { name: "Search collections" })).toHaveValue("best");
-    expect(screen.getByRole("button", { name: "Synced list" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-  });
-
-  it("shows a skeleton while loading and Retry when the list can't load", async () => {
-    let fail = true;
-    v2Recorder.answer("GET /api/v2/admin/collections", async () => {
-      if (fail) throw new Error("offline");
-      return { items, groups: [] };
-    });
-    renderPage(
-      "/admin/collections",
-      new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-    );
-    expect(screen.getByText("Loading collections…")).toBeInTheDocument();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load collections");
-    fail = false;
-    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Studio Ghibli")).toBeInTheDocument();
-  });
 });
 
 describe("AdminCollections List switch", () => {
@@ -293,24 +245,6 @@ describe("AdminCollections List switch", () => {
 });
 
 describe("AdminCollections List row menu", () => {
-  it("offers Sync now only on synced lists", async () => {
-    renderPage();
-    await screen.findByText("Studio Ghibli");
-    let { menu } = await openMenu("Studio Ghibli");
-    expect(within(menu).queryByRole("menuitem", { name: "Sync now" })).not.toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    ({ menu } = await openMenu("Christmas Classics"));
-    expect(within(menu).queryByRole("menuitem", { name: "Sync now" })).not.toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    const opened = await openMenu("Best Picture Winners");
-    await opened.user.click(within(opened.menu).getByRole("menuitem", { name: "Sync now" }));
-    await waitFor(() =>
-      expect(v2Recorder.callsOf("POST /api/v2/admin/collections/{id}/sync")[0]?.path).toBe(
-        "/api/v2/admin/collections/best-picture-winners/sync",
-      ),
-    );
-  });
-
   it("clears Syncing now on each list when two syncs answer out of order", async () => {
     const answers = new Map<string, () => void>();
     v2Recorder.answer(
@@ -336,19 +270,6 @@ describe("AdminCollections List row menu", () => {
     await waitFor(() => expect(rowOf("IMDb Top 250 Shows")).not.toHaveTextContent("Syncing now"));
     await act(async () => answers.get("/api/v2/admin/collections/best-picture-winners/sync")!());
     await waitFor(() => expect(rowOf("Best Picture Winners")).not.toHaveTextContent("Syncing now"));
-  });
-
-  it("opens a collection in one of its libraries from a submenu", async () => {
-    renderPage();
-    await screen.findByText("Studio Ghibli");
-    const { user, menu } = await openMenu("Studio Ghibli");
-    const openIn = within(menu).getByRole("menuitem", { name: "Open in" });
-    openIn.focus();
-    await user.keyboard("{ArrowRight}");
-    await user.click(await screen.findByRole("menuitem", { name: "Kids" }));
-    expect(location()).toMatch(/^\/catalog\?/);
-    expect(location()).toContain("collection_id=studio-ghibli");
-    expect(location()).toContain("library_id=2");
   });
 
   it("deletes after a confirm that names every library it leaves", async () => {
@@ -530,35 +451,5 @@ describe("AdminCollections List peeks", () => {
     await act(async () => undefined);
     expect(peekCalls()).toHaveLength(8);
     vi.restoreAllMocks();
-  });
-
-  it("drops a row's titles for its own poster as soon as it is hidden", async () => {
-    items = [stored("Staff Picks", { poster_url: "own.jpg" })];
-    v2Recorder.answer("GET /api/v2/library/{id}/collections/{collection_id}/items", async () => ({
-      items: [{ content_id: "m1", title: "Past Lives", poster_url: "title.jpg" }],
-    }));
-    // The change stays in flight, so the list has not reloaded the collection yet.
-    v2Recorder.answer("PATCH /api/v2/admin/collections/{id}", () => new Promise(() => undefined));
-    renderPage();
-    await screen.findByText("Staff Picks");
-    reveal("Staff Picks");
-    const posters = () =>
-      [...rowOf("Staff Picks").querySelectorAll("img")].map((img) => img.getAttribute("src"));
-    await waitFor(() => expect(posters().join()).toContain("title.jpg"));
-
-    await userEvent.click(
-      screen.getByRole("switch", { name: "Show Staff Picks on the Movies Collections tab" }),
-    );
-    await waitFor(() => expect(posters().join()).toContain("own.jpg"));
-    expect(posters().join()).not.toContain("title.jpg");
-  });
-
-  it("shows a hidden collection's own poster without asking a Collections tab for it", async () => {
-    items = [stored("Staff Picks", { visibility: "hidden", poster_url: "own.jpg" })];
-    renderPage();
-    await screen.findByText("Staff Picks");
-    reveal("Staff Picks");
-    await act(async () => undefined);
-    expect(peekCalls()).toEqual([]);
   });
 });

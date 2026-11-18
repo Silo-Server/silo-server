@@ -226,6 +226,10 @@ func runLimitsImport(t *testing.T, repo *Repository, input CreateRunInput, disco
 	defer stop()
 	service := NewService(ctx, repo, pgstore.NewPostgresProvider(repo.pool))
 	service.SetLocalNetworkAccess(NewLocalNetworkAccess(nil, repo))
+	// These runs check response limits and persistence against local fixtures.
+	service.emby.limiter = nil
+	service.jellyfin.limiter = nil
+	service.plex.limiter = nil
 	service.plex.discoverBaseURL = discoverURL
 	service.SetStableIdentityResolver(watchstate.NewStableIdentityResolver(startupIdentityItems{}, nil, startupIdentityProviders{}))
 	observed := make(chan Run, 64)

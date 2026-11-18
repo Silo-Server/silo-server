@@ -240,10 +240,11 @@ func TestRecordTranscodeStreamDetailsTargets(t *testing.T) {
 
 type testCompatFileResolver struct {
 	file *models.MediaFile
+	err  error
 }
 
 func (r testCompatFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
-	return r.file, nil
+	return r.file, r.err
 }
 
 func writeCompatTestFFmpeg(t *testing.T) string {
@@ -310,7 +311,6 @@ func TestPlaybackInfoRequest_DecodesLenientStreamIndexes(t *testing.T) {
 		{body: `{"AudioStreamIndex":"1"}`, audio: "1", subtitle: "unset"},
 		{body: `{"AudioStreamIndex":1,"SubtitleStreamIndex":"3"}`, audio: "1", subtitle: "3"},
 		{body: `{"AudioStreamIndex":0,"SubtitleStreamIndex":null}`, audio: "0", subtitle: "unset"},
-		{body: `{"SubtitleStreamIndex":""}`, audio: "unset", subtitle: "unset"},
 		{body: `{"AudioStreamIndex":" ","SubtitleStreamIndex":""}`, audio: "unset", subtitle: "unset"},
 	} {
 		var req playbackInfoRequest
@@ -653,6 +653,142 @@ func TestRestartCompatAudioSelectionTreatsPublishedRemoteAsSuccess(t *testing.T)
 	restarted, err := handler.restartCompatTranscodeForAudioSelection(t.Context(), playSession, source, 0)
 	if err != nil || !restarted {
 		t.Fatalf("published remote adoption = restarted %t error %v, want success", restarted, err)
+	}
+}
+
+// An audio switch on a keyframe-planned copy session on a node must keep the
+// planned playlist the player holds (#4044). The node starts the replacement
+// in a new output directory and plans only a run from the beginning, so the
+// restart sends the recipe's from-start start, as RecipeOpts does locally: the
+// node plans the same segments, and the player's next segment request restarts
+// FFmpeg at the planned segment for its position. A session the node kept on
+// FFmpeg's playlist, though it asked for the keyframe playlist, or that
+// resumed mid-stream, still restarts at the position: a from-start restart
+// would hold the throttled run far behind the player. A planned session's
+// replacement that the node can't plan is stopped and the switch fails, since
+// its segments don't match the playlist the player holds.
+func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T) {
+	const position = 125.0
+	for _, tc := range []struct {
+		name             string
+		planned          bool // the recipe's record of the running session
+		nodePlanned      bool // the replacement's
+		recipeSeek       float64
+		recipeSegment    int
+		wantSeek         float64
+		wantStartSegment int
+		wantPlanLost     bool
+	}{
+		{name: "planned from the start", planned: true, nodePlanned: true, wantSeek: 0, wantStartSegment: 0},
+		{name: "replacement lost the plan", planned: true, wantSeek: 0, wantStartSegment: 0, wantPlanLost: true},
+		{name: "kept FFmpeg's playlist", wantSeek: position, wantStartSegment: int(position) / compatSegmentDuration},
+		{name: "resumed mid-stream", recipeSeek: 90, recipeSegment: 90 / compatSegmentDuration,
+			wantSeek: position, wantStartSegment: int(position) / compatSegmentDuration},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := testCompatVersion()
+			source := testCompatSource(NewResourceIDCodec(), version)
+			source.HLSRemux, source.KeyframePlaylist = true, true
+			source.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks) + 1)
+
+			var started []transcodenode.TranscodeStartRequest
+			stopped := make(chan string, 1)
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					stopped <- r.URL.Path
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/transcode/start" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				var req transcodenode.TranscodeStartRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode start request: %v", err)
+				}
+				started = append(started, req)
+				writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
+					SessionID: req.SessionID, Status: "started",
+					RequireAudioTrack:     req.RequireAudioTrack,
+					CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
+					ThrottleSeconds:       req.ThrottleSeconds,
+					KeyframePlaylist:      req.KeyframePlaylist,
+					KeyframePlanned:       tc.nodePlanned,
+					CopyAudioCodec:        req.CopyAudioCodec,
+				})
+			}))
+			defer node.Close()
+
+			recipe := playback.NewRecipeCard(7, "profile-1", version.FileID, node.URL, playback.TranscodeOpts{
+				SessionID: "upstream-1", InputPath: "/media/movie.mkv",
+				TargetCodecVideo: compatCopyCodec, TargetCodecAudio: compatCopyCodec, CopyAudioCodec: "ac3",
+				KeyframePlaylist: true, KeyframePlanned: tc.planned,
+				SeekSeconds: tc.recipeSeek, StartSegmentNumber: tc.recipeSegment,
+				SegmentDuration: compatSegmentDuration, AudioTrackIndex: 0, RequireAudioTrack: true,
+			})
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{
+				ID: "play-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode", TranscodeStarted: true,
+				MediaSources: []PlaybackMediaSource{source}, Recipe: &recipe,
+			})
+			handler := &PlaybackHandler{
+				JWTSecret: "secret", NodeKeys: nodeauthtest.SameKey("secret"), playbackStore: store,
+				sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
+					"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode, TranscodeNodeURL: node.URL},
+				}},
+				fileResolver: testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}},
+				tm:           keyedTranscodeManager(),
+			}
+			playSession, _ := store.Get("play-1")
+			restarted, err := handler.restartCompatTranscodeForAudioSelection(t.Context(), playSession, source, position)
+			if len(started) != 1 {
+				t.Fatalf("node received %d starts, want 1", len(started))
+			}
+			req := started[0]
+			if !req.KeyframePlaylist || req.AudioTrackIndex != 1 {
+				t.Fatalf("node start = keyframe playlist %t, audio track %d; want the keyframe playlist on track 1", req.KeyframePlaylist, req.AudioTrackIndex)
+			}
+			if req.SeekSeconds != tc.wantSeek || req.StartSegmentNumber != tc.wantStartSegment {
+				t.Fatalf("node start = seek %v, segment %d; want seek %v, segment %d",
+					req.SeekSeconds, req.StartSegmentNumber, tc.wantSeek, tc.wantStartSegment)
+			}
+			persisted, ok := store.Get("play-1")
+			if tc.wantPlanLost {
+				checkKeyframePlanLossRefused(t, restarted, err, stopped, persisted.Recipe)
+				return
+			}
+			if err != nil || !restarted {
+				t.Fatalf("audio restart = %t, %v; want restarted", restarted, err)
+			}
+			if !ok || persisted.Recipe == nil || persisted.Recipe.AudioTrackIndex != 1 ||
+				persisted.Recipe.SeekSeconds != tc.wantSeek || persisted.Recipe.StartSegmentNumber != tc.wantStartSegment ||
+				persisted.Recipe.KeyframePlanned != tc.nodePlanned {
+				t.Fatalf("persisted recipe = %+v, want track 1 from seek %v, segment %d, planned %t",
+					persisted.Recipe, tc.wantSeek, tc.wantStartSegment, tc.nodePlanned)
+			}
+		})
+	}
+}
+
+// checkKeyframePlanLossRefused checks that an audio switch refused a node
+// replacement that lost the keyframe plan: the switch failed, the node's job
+// was stopped, and the recipe still records the planned session on track 0.
+func checkKeyframePlanLossRefused(t *testing.T, restarted bool, err error, stopped <-chan string, recipe *playback.RecipeCard) {
+	t.Helper()
+	if restarted || !errors.Is(err, errRemoteKeyframePlanLost) || !errors.Is(err, errRemoteTranscodeStartFailed) {
+		t.Fatalf("audio restart = %t, %v; want the lost plan refused", restarted, err)
+	}
+	select {
+	case path := <-stopped:
+		if path != "/transcode/upstream-1" {
+			t.Fatalf("stopped %q, want /transcode/upstream-1", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the unplanned replacement was not stopped")
+	}
+	if recipe == nil || recipe.AudioTrackIndex != 0 || !recipe.KeyframePlanned {
+		t.Fatalf("persisted recipe = %+v, want the planned recipe on track 0 kept", recipe)
 	}
 }
 

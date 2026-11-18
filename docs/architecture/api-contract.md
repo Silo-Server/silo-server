@@ -739,7 +739,7 @@ does for the Apple display token. The link authorizes the start of a request; a 
 began in time may run longer.
 
 The playback delivery routes (`getPlaybackMedia`, `getPlaybackManifest`, `getPlaybackSegment`,
-`getPlaybackSubtitle` and their HEAD forms) accept the plan's signed stream reference `st` the
+`getPlaybackSubtitle` and the HEAD forms of the media, manifest and subtitle routes) accept the plan's signed stream reference `st` the
 same way, for a receiver such as a Google Cast device that is handed only the plan URL. A request
 with an `Authorization` header or a `token` parameter takes the account path unchanged. Without
 either, a valid `st` that names a playback session (not a download, theme song or bandwidth

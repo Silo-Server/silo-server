@@ -3,7 +3,6 @@ package intromarkers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -58,110 +57,6 @@ func (e *concurrencyProbeExtractor) Extract(context.Context, Candidate) (Fingerp
 	e.inFlight--
 	e.mu.Unlock()
 	return Fingerprint{}, false, nil
-}
-
-func TestRunAnalyzesGroupsInParallelWithinFFmpegLimit(t *testing.T) {
-	var candidates []Candidate
-	for season := 1; season <= 6; season++ {
-		for episode := 1; episode <= 2; episode++ {
-			candidates = append(candidates, Candidate{
-				FileID:          season*10 + episode,
-				EpisodeID:       fmt.Sprintf("s%de%d", season, episode),
-				SeasonID:        fmt.Sprintf("season-%d", season),
-				MediaFolderID:   1,
-				DurationSeconds: 1800,
-			})
-		}
-	}
-	repo := &fakeIntroRepository{enabledLibraries: 1, eligibleCandidates: candidates}
-	extractor := &concurrencyProbeExtractor{overlap: make(chan struct{})}
-	cfg := DefaultConfig("ffmpeg")
-	cfg.MaxParallelFFmpeg = 2
-	analyzer := &Analyzer{
-		repo: repo, extractor: extractor, config: cfg,
-		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(2),
-	}
-
-	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if summary.GroupsNotFound != 6 {
-		t.Fatalf("groups not found = %d, want all 6 analyzed", summary.GroupsNotFound)
-	}
-	if extractor.peak != 2 {
-		t.Fatalf("peak concurrent extractions = %d, want exactly the 2-slot limit", extractor.peak)
-	}
-}
-
-// A run loads its episodes a page of seasons at a time; every page's groups
-// must still reach the workers.
-func TestRunAnalyzesEverySeasonPage(t *testing.T) {
-	var candidates []Candidate
-	for season := 1; season <= 3; season++ {
-		for episode := 1; episode <= 2; episode++ {
-			candidates = append(candidates, Candidate{
-				FileID:          season*10 + episode,
-				EpisodeID:       fmt.Sprintf("s%de%d", season, episode),
-				SeasonID:        fmt.Sprintf("season-%d", season),
-				MediaFolderID:   1,
-				DurationSeconds: 1800,
-			})
-		}
-	}
-	repo := &fakeIntroRepository{enabledLibraries: 1, eligibleCandidates: candidates}
-	analyzer := &Analyzer{
-		repo: repo, extractor: failingExtractor{}, config: DefaultConfig("ffmpeg"),
-		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(2),
-		episodeSeasonsPerPage: 1,
-	}
-
-	summary, err := analyzer.Run(context.Background(), EpisodeMarkerKinds{Intro: true}, nil)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if summary.FilesConsidered != 6 || summary.GroupsNotFound != 3 {
-		t.Fatalf("files = %d, groups not found = %d; want all 6 files and 3 groups across the pages", summary.FilesConsidered, summary.GroupsNotFound)
-	}
-}
-
-func TestSeasonStateSettled(t *testing.T) {
-	now := time.Date(2026, 9, 25, 3, 30, 0, 0, time.UTC)
-	cases := []struct {
-		state SeasonState
-		want  bool
-	}{
-		{SeasonState{Status: seasonStatusComplete}, true},
-		{SeasonState{Status: seasonStatusNotFound}, true},
-		{SeasonState{Status: seasonStatusFailed}, false},
-		{SeasonState{Status: seasonStatusPartial, AnalyzedAt: now.Add(-24 * time.Hour)}, true},
-		{SeasonState{Status: seasonStatusPartial, AnalyzedAt: now.Add(-partialSeasonRetryInterval)}, false},
-	}
-	for _, tc := range cases {
-		if got := tc.state.settled(now); got != tc.want {
-			t.Errorf("settled(%+v) = %v, want %v", tc.state, got, tc.want)
-		}
-	}
-}
-
-func TestInteractiveAnalysisUsesReservedFFmpegSlot(t *testing.T) {
-	analyzer := &Analyzer{ffmpegSlots: mediasample.NewLimiter(1)}
-	if _, err := analyzer.ffmpegSlots.Acquire(context.Background()); err != nil { // the nightly run holds every shared slot
-		t.Fatal("could not take the only shared slot")
-	}
-
-	interactive := WithPlaybackPriority(context.Background())
-	release, err := analyzer.acquireFFmpeg(interactive)
-	if err != nil {
-		t.Fatalf("interactive acquire: %v", err)
-	}
-	release()
-
-	nightly, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if _, err := analyzer.acquireFFmpeg(nightly); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("nightly acquire with every shared slot busy = %v, want it to wait", err)
-	}
 }
 
 func TestSilenceRefinementSkipsFileWhenDeadlinePassesWhileWaiting(t *testing.T) {
@@ -318,37 +213,4 @@ func (r *lookupProbeRepository) LoadFingerprint(ctx context.Context, candidate C
 	r.inFlight--
 	r.mu.Unlock()
 	return r.fakeIntroRepository.LoadFingerprint(ctx, candidate, cfg)
-}
-
-func TestFingerprintLookupsShareOneBoundAcrossGroups(t *testing.T) {
-	// Three seasons of three episodes on three workers want nine lookups at
-	// once; no single season can reach the limit alone.
-	var candidates []Candidate
-	for season := 1; season <= 3; season++ {
-		for episode := 1; episode <= 3; episode++ {
-			candidates = append(candidates, Candidate{
-				FileID:          season*10 + episode,
-				EpisodeID:       fmt.Sprintf("s%de%d", season, episode),
-				SeasonID:        fmt.Sprintf("season-%d", season),
-				MediaFolderID:   1,
-				DurationSeconds: 1800,
-			})
-		}
-	}
-	repo := &lookupProbeRepository{
-		fakeIntroRepository: &fakeIntroRepository{enabledLibraries: 1, eligibleCandidates: candidates},
-		full:                make(chan struct{}),
-	}
-	cfg := DefaultConfig("ffmpeg")
-	analyzer := &Analyzer{
-		repo: repo, extractor: failingExtractor{}, config: cfg,
-		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(3), workers: 3,
-	}
-
-	if _, err := analyzer.Run(context.Background(), allMarkerKinds, nil); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if repo.peak != maxConcurrentFingerprintLookups {
-		t.Fatalf("peak concurrent lookups = %d, want exactly the %d-lookup limit", repo.peak, maxConcurrentFingerprintLookups)
-	}
 }

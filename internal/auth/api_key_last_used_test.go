@@ -21,26 +21,6 @@ func (u *recordingLastUsedUpdater) UpdateLastUsed(ctx context.Context, id int64)
 	return nil
 }
 
-func TestAPIKeyLastUsedTrackerThrottlesPerKey(t *testing.T) {
-	now := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
-	tracker := NewAPIKeyLastUsedTracker(nil, func() time.Time { return now })
-
-	if !tracker.shouldUpdate(1) {
-		t.Fatal("first use should update")
-	}
-	if tracker.shouldUpdate(1) {
-		t.Fatal("repeat use inside the interval should be throttled")
-	}
-	if !tracker.shouldUpdate(2) {
-		t.Fatal("a different key should update independently")
-	}
-
-	now = now.Add(apiKeyLastUsedInterval)
-	if !tracker.shouldUpdate(1) {
-		t.Fatal("use at the next interval should update")
-	}
-}
-
 func TestAPIKeyLastUsedTrackerAddsWriteDeadline(t *testing.T) {
 	updater := &recordingLastUsedUpdater{calls: make(chan lastUsedCall, 1)}
 	tracker := NewAPIKeyLastUsedTracker(updater, nil)

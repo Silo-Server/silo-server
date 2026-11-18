@@ -67,6 +67,12 @@ instance, fails with a message asking for another key. The check does not
 prove the key can write documents.
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
+The result's `message` is English. `message_key` names its entry in the shared
+translation catalog (`web.admin.common.connectionCheck.result.*`) and
+`message_args` fills that entry's placeholders by name, as decimal strings for
+counts. A client shows the catalog's translation when its language has the key
+and every argument, and `message` otherwise. Both fields are absent when
+`message` has no catalog entry.
 
 ## AI providers
 

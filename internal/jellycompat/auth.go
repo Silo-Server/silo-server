@@ -15,10 +15,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logredact"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
@@ -331,14 +333,18 @@ func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *Ad
 	return nil, false, nil
 }
 
-// PlaybackSessionAuth accepts a login/API token or an unexpired PlaySessionId
-// scoped to the negotiated item and source. Catalog IDs are not credentials:
-// the one credential-less path is a static video stream of a source that the
-// same client address negotiated through an authenticated PlaybackInfo that
-// is still live (staticStreamGrantIdle). Clients behind one shared address
-// (a household NAT, carrier-grade NAT) can therefore reuse each other's live
-// negotiation for that exact source.
-func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator) func(next http.Handler) http.Handler {
+// PlaybackSessionAuth accepts a login/API token, an unexpired PlaySessionId
+// scoped to the negotiated item and source, or, on a static video stream
+// only, the per-play tag PlaybackInfo handed out as the source's ETag (see
+// compatPlayTag). Catalog IDs are not credentials. The one credential-less
+// path is the address-only grant, which runs only while the administrator
+// turns on config.JellyfinCompatAddressStreamGrantSettingKey: a static video
+// stream of a source that the same client address negotiated through an
+// authenticated PlaybackInfo that is still live (staticStreamGrantIdle).
+// Clients behind one shared address (a household NAT, carrier-grade NAT) can
+// then reuse each other's live negotiation for that exact source. settings
+// may be nil, which refuses the address-only grant.
+func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator, settings SettingsReader) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Try standard token auth first — a compat session token or an sa_
@@ -375,18 +381,39 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 				}
 			}
 
-			// Jellyfin for Android TV and Findroid open static direct-play and
-			// download URLs with no credentials at all (upstream Jellyfin serves
-			// them anonymously). Grant only a static stream of a source the same
-			// client address negotiated through an authenticated PlaybackInfo
-			// that is still live and recently active, so an item or source id is
-			// never a credential on its own. Of several such negotiations, the
-			// most recent one whose caller is still signed in grants it.
-			if playbackStore != nil && isStaticStreamRequest(r) {
-				itemID := chi.URLParam(r, "id")
-				sourceID := newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId")
-				clientIP := clientip.FromContext(r.Context())
-				for _, grant := range playbackStore.FindStreamGrants(itemID, sourceID, clientIP, requestPeerHost(r), staticStreamGrantIdle) {
+			staticStream := playbackStore != nil && isStaticStreamRequest(r)
+
+			// Jellyfin for Android TV 0.19+ and its Kotlin forks open static
+			// direct-play URLs with no auth header, api_key or PlaySessionId,
+			// but echo the source's ETag from the PlaybackInfo response as
+			// "tag" (upstream Jellyfin ignores it). That ETag names the play,
+			// so it grants exactly what that PlaySessionId would.
+			var tagSessionID string
+			var tagErr error
+			if staticStream {
+				var handled bool
+				if handled, tagSessionID, tagErr = servePlayTagGrant(next, w, r, sessions, playbackStore, keyAuth); handled {
+					return
+				}
+			}
+
+			// Findroid, and Jellyfin for Android TV when the tag does not
+			// grant, open static direct-play URLs with no credential at all
+			// (upstream Jellyfin serves them anonymously). Only while the
+			// administrator allows it, grant a static stream of a source the
+			// same client address negotiated through an authenticated
+			// PlaybackInfo that is still live and recently active, so an item
+			// or source id is never a credential on its own. Of several such
+			// negotiations, the most recent one whose caller is still signed
+			// in grants it. The setting is read only here, and only for a
+			// request FindStreamGrants could match, so requests that carry a
+			// credential or name no source never pay for it.
+			itemID := chi.URLParam(r, "id")
+			sourceID := newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId")
+			clientIP := clientip.FromContext(r.Context())
+			peer := requestPeerHost(r)
+			if staticStream && itemID != "" && sourceID != "" && clientIP != "" && peer != "" && addressStreamGrantEnabled(r.Context(), settings) {
+				for _, grant := range playbackStore.FindStreamGrants(itemID, sourceID, clientIP, peer, staticStreamGrantIdle) {
 					session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, grant.CompatToken)
 					if err != nil {
 						writeSessionLookupFailed(w, r, grant.CompatToken, err)
@@ -394,7 +421,8 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 					}
 					if ok {
 						slog.InfoContext(r.Context(), "jellycompat static stream granted without credentials",
-							"play_session", playSessionFingerprint(grant.ID), "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
+							"play_session", playSessionFingerprint(grant.ID), "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", peer, "negotiated_peer", grant.ClientPeer,
+							"client_name", grant.ClientName, "client_version", grant.ClientVersion)
 						// This grant infers an owner from a shared address; the
 						// caller supplied no credential. Keep source/global
 						// protection without spending that owner's account budget.
@@ -410,9 +438,26 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 				writePlaySessionLookupFailed(w, r, playSessionID, playSessionErr)
 				return
 			}
+			if tagErr != nil {
+				// Likewise for the play session a per-play tag names.
+				writePlaySessionLookupFailed(w, r, tagSessionID, tagErr)
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		})
 	}
+}
+
+// addressStreamGrantEnabled reads the setting that allows the address-only
+// stream grant on every request that reaches it, so a change applies without
+// a restart and every API node reads the same stored row. An unset row is the
+// configured default; no settings reader, or an unreadable setting, refuses.
+func addressStreamGrantEnabled(ctx context.Context, settings SettingsReader) bool {
+	if settings == nil {
+		return false
+	}
+	value, err := settings.Get(ctx, config.JellyfinCompatAddressStreamGrantSettingKey)
+	return err == nil && config.AdminSettingEnabled(config.JellyfinCompatAddressStreamGrantSettingKey, value)
 }
 
 // servePlaySessionGrant answers a request through the play session that
@@ -438,6 +483,78 @@ func servePlaySessionGrant(
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
 	}
 	return true, nil
+}
+
+// servePlayTagGrant answers a static video stream through the play session a
+// per-play tag names, under the same rules as a PlaySessionId grant. The
+// request must name its source and carry one tag value in the per-play
+// shape. Only the play session ID in the tag is checked: whoever holds a tag
+// holds that ID, which already covers every source of the play. It returns
+// the play session ID it looked up so a store error can be logged against it.
+func servePlayTagGrant(
+	next http.Handler, w http.ResponseWriter, r *http.Request,
+	sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator,
+) (bool, string, error) {
+	query := r.URL.Query()
+	if sourceID, ok := queryMediaSourceID(query); !ok || sourceID == "" {
+		return false, "", nil
+	}
+	tag, ok := singleQueryValue(query, "tag")
+	if !ok {
+		return false, "", nil
+	}
+	tag = strings.ToLower(tag)
+	playSessionID, ok := playTagSessionID(tag)
+	if !ok {
+		return false, "", nil
+	}
+	handled, err := servePlaySessionGrant(next, w, r, sessions, playbackStore, keyAuth, playSessionID)
+	return handled, playSessionID, err
+}
+
+// compatPlayTagSessionHexLen is the length of the compact play session ID
+// that starts a per-play tag; mediaSourceETag's 16 hex digits follow it.
+const compatPlayTagSessionHexLen = 32
+
+// compatPlayTag is the ETag PlaybackInfo gives a source: the play session ID
+// in compact form (32 lowercase hex digits) followed by the source's
+// item-detail ETag. Clients that echo it as "tag" on a static stream (Jellyfin
+// for Android TV) authenticate with it; the suffix keeps the ETags of one
+// response distinct per source, which Swiftfin relies on.
+func compatPlayTag(playSessionID, sourceETag string) string {
+	return strings.ToLower(strings.ReplaceAll(playSessionID, "-", "")) + sourceETag
+}
+
+// playTagSessionID recovers the play session ID from a lowercase per-play
+// tag, and false for any other value, such as an item-detail ETag.
+func playTagSessionID(tag string) (string, bool) {
+	if len(tag) != compatPlayTagSessionHexLen+16 || strings.Trim(tag, "0123456789abcdef") != "" {
+		return "", false
+	}
+	id, err := uuid.Parse(tag[:compatPlayTagSessionHexLen])
+	if err != nil {
+		return "", false
+	}
+	return id.String(), true
+}
+
+// singleQueryValue is the value of the query parameter name, matched
+// case-insensitively, and false when it is absent or repeated with
+// different values.
+func singleQueryValue(query url.Values, name string) (string, bool) {
+	value, found := "", false
+	for key, values := range query {
+		if !strings.EqualFold(key, name) {
+			continue
+		}
+		for _, v := range values {
+			if found && v != value {
+				return "", false
+			}
+			value, found = v, true
+		}
+	}
+	return value, found
 }
 
 // staticStreamGrantIdle bounds how long after its last activity (PlaybackInfo,

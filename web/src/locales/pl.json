@@ -27985,6 +27985,270 @@
       "value": "Nie udało się sprawdzić połączenia."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Zaloguj się przez ChatGPT w ustawieniach usług AI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie do tworzenia embeddingów działa. Model zwraca wektory o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi utworzono z wektorów o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": ", ale model zwraca teraz wymiar "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Przed zmianą modelu zresetuj embeddingi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Blokada embeddingów zapisuje wektory o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "; Silo przechowuje wymiary od 1 do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Zresetuj embeddingi i użyj modelu zwracającego wymiar co najwyżej "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Nie można odczytać zapisanej blokady embeddingów. Zresetuj embeddingi, aby ją wyczyścić."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi utworzono modelem „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, a nie „"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Przed zmianą modelu zresetuj embeddingi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Dostawca embeddingów nie zwrócił wektora dla tekstu testowego."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi zapisano z wymiarem "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "; ten serwer przechowuje wymiar "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Zresetuj embeddingi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Model zwraca wektory o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "; Silo przechowuje wymiar co najwyżej "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić połączenia. Sprawdź przesłane ustawienia i dostępność dostawcy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "Zweryfikowano klucz API MDBList."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z Meilisearch działa"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch odrzucił klucz API albo go wymaga. Wpisz klucz, który może zarządzać indeksami i dokumentami, np. Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch przekierował sprawdzanie na inny adres. Wpisz adres docelowy przekierowania, np. adres URL https://, i ponownie wpisz klucz API."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z Redis działa."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "Zweryfikowano połączenie z S3 oraz uprawnienia do odczytu, zapisu i usuwania obiektów."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z zamianą mowy na tekst działa: odebrano transkrypcję ze znacznikami czasu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Odmówiono dostępu do zamiany mowy na tekst. Sprawdź uprawnienia klucza API i dozwolonych dostawców."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Model zamiany mowy na tekst nie zwraca segmentów ze znacznikami czasu, których Silo potrzebuje do tworzenia napisów. Wybierz model obsługujący znaczniki czasu segmentów, np. whisper-1 w OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Punkt końcowy lub model zamiany mowy na tekst jest niedostępny. Sprawdź bazowy adres URL dostawcy, model i dozwolonych dostawców."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Dostawca zamiany mowy na tekst wymaga płatności. Sprawdź saldo i limit wydatków u dostawcy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Wyczerpano limit u dostawcy zamiany mowy na tekst. Sprawdź saldo i limity u dostawcy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Dostawca zamiany mowy na tekst ogranicza liczbę żądań. Spróbuj ponownie później."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Upłynął limit czasu sprawdzania połączenia z zamianą mowy na tekst. Sprawdź dostępność dostawcy i spróbuj ponownie."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Nie udało się uwierzytelnić w usłudze zamiany mowy na tekst. Zastąp klucz API dostawcy w sekcji Usługi AI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Dostawca zamiany mowy na tekst jest tymczasowo niedostępny. Spróbuj ponownie później."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z tekstową AI działa."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się połączyć z tekstową AI. Sprawdź model, poziom rozumowania, poziom usługi, połączenie konta i limity użycia u dostawcy."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -65153,6 +65417,20 @@
       "value": "Sprawdzenie połączenia nie powiodło się."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Nie wybrano dostawcy embeddingów. Wybierz dostawcę obsługującego model „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” lub zresetuj embeddingi, aby użyć innego modelu."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -72497,6 +72775,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Odtwarzanie bez logowania z tego samego adresu"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Niektóre aplikacje Jellyfin, takie jak Findroid, otwierają linki do odtwarzania bezpośredniego i pobierania bez logowania. Gdy ta opcja jest włączona, Silo obsługuje takie żądanie, jeśli zalogowana aplikacja z tego samego adresu sieciowego poprosiła o odtworzenie tego pliku w ciągu ostatnich dwóch godzin. Wtedy ten plik może odtworzyć również każda osoba korzystająca z tego adresu, np. w tej samej sieci domowej, u tego samego operatora komórkowego lub w tej samej sieci VPN. Włącz tę opcję tylko wtedy, gdy używasz jednej z tych aplikacji."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -106040,6 +106330,12 @@
       "value": "Kolejność"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Trafność"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -126614,6 +126910,12 @@
       "value": "Kolekcja"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Biblioteka"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -126658,6 +126960,12 @@
     {
       "type": 0,
       "value": "Nie masz jeszcze kolekcji. Najpierw utwórz ją w sekcji Kolekcje."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Brak kolekcji tego typu w tej bibliotece."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -144361,6 +144669,12 @@
       "value": "Możesz wstrzymywać i wznawiać"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party wymaga usługi Redis, której ten serwer nie ma skonfigurowanej. Poproś administratora serwera o jej skonfigurowanie."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -148743,6 +149057,86 @@
     {
       "type": 0,
       "value": "Szukaj w bibliotece lub znajdź tytuły, o które możesz poprosić…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Wszystkie wyniki w twojej bibliotece"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Wróć do sortowania według trafności"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Najlepsze dopasowania"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "W twojej bibliotece"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Więcej wyników"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Brak w twojej bibliotece"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Przegląd"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Poproś o dodanie"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Pokaż wszystkie wyniki"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Sortowanie: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Widoki wyników"
     }
   ],
   "web.search.resultsLabel": [

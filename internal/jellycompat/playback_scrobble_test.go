@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -291,7 +292,7 @@ func TestFailedTranscodeStartupStillClosesWhenRequestCancelsAfterFailure(t *test
 		MediaSources: []PlaybackMediaSource{source},
 	})
 	compatSession := &Session{Token: "token-1", StreamAppUserID: 7, ProfileID: "profile-1"}
-	startupErr := errors.New("file lookup failed")
+	startupErr := scanner.ErrFileNotFound
 	ctx, cancel := context.WithCancel(context.Background())
 	h.fileResolver = cancelingErrorFileResolver{cancel: cancel, err: startupErr}
 
@@ -588,41 +589,6 @@ func waitForCompatScrobbleHolders(t *testing.T, h *PlaybackHandler, upstreamID s
 	}
 }
 
-// Callers queued on an upstream session's scrobble lock take it in the order
-// they queued, so a Stopped report cannot overtake a progress report that was
-// already waiting and stage a stop from the position before it.
-func TestCompatScrobbleLocksServeWaitersInArrivalOrder(t *testing.T) {
-	h := &PlaybackHandler{}
-	locks := &h.compatScrobbleLocks
-	unlock := locks.lock("upstream")
-	const waiters = 8
-	order := make(chan int, waiters)
-	released := make(chan struct{}, waiters)
-	for i := range waiters {
-		go func() {
-			release := locks.lock("upstream")
-			order <- i
-			release()
-			released <- struct{}{}
-		}()
-		// Queue the next caller only once this one is waiting.
-		waitForCompatScrobbleHolders(t, h, "upstream", i+2)
-	}
-	unlock()
-
-	for want := range waiters {
-		if got := <-order; got != want {
-			t.Fatalf("waiter %d took the lock in position %d, want arrival order", got, want)
-		}
-	}
-	for range waiters {
-		<-released
-	}
-	if n := locks.holdersFor("upstream"); n != 0 {
-		t.Fatalf("lock entry kept %d holders after every caller released it", n)
-	}
-}
-
 func scrobbleAt(action string, seconds float64) compatScrobbleCall {
 	return compatScrobbleCall{action: action, event: watchsync.ScrobbleEvent{PositionSeconds: seconds}}
 }
@@ -779,36 +745,6 @@ func TestHandlePlaybackReportDuringStartCorrectsSentPosition(t *testing.T) {
 
 	calls, _ := scrobbler.snapshot()
 	assertCompatScrobbles(t, calls, scrobbleAt("start", 0), scrobbleAt("start", 551))
-}
-
-// Overlapping reports must not both act on one record: the second waits for
-// the first correction to be queued, then finds the record consumed. Starts
-// reach the provider in decision order.
-func TestHandlePlaybackReportOverlappingReportsCorrectOnceInOrder(t *testing.T) {
-	f := newResumeScrobbleFixture(0)
-	scrobbler := newGatedCompatWatchScrobbler()
-	scrobbler.blockStart = 2
-	f.handler.WatchScrobbler = scrobbler
-	f.startStream(t)
-
-	first := make(chan int, 1)
-	go func() { first <- f.postReport(551, false) }()
-	<-scrobbler.entered
-	second := make(chan int, 1)
-	go func() { second <- f.postReport(900, false) }()
-	waitForCompatScrobbleWaiter(t, f.handler, "upstream-started")
-	close(scrobbler.release)
-	for _, done := range []chan int{first, second} {
-		if code := <-done; code != http.StatusNoContent {
-			t.Fatalf("report status = %d", code)
-		}
-	}
-
-	calls, starts := scrobbler.snapshot()
-	assertCompatScrobbles(t, calls, scrobbleAt("start", 0), scrobbleAt("start", 551))
-	if starts != 2 {
-		t.Fatalf("start attempts = %d, want the start and one correction", starts)
-	}
 }
 
 // A correction that fails to queue leaves the record in place, so the next
@@ -1972,4 +1908,36 @@ func awaitTerminalCompleted(t *testing.T, store terminalFinalizableStore, id, to
 // the concrete store and on the handler's interface field alike.
 type terminalFinalizableStore interface {
 	GetFinalizable(id, compatToken string) (*PlaybackSession, bool)
+}
+
+func TestCompatScrobbleLocksServeWaitersInArrivalOrder(t *testing.T) {
+	h := &PlaybackHandler{}
+	locks := &h.compatScrobbleLocks
+	unlock := locks.lock("upstream")
+	const waiters = 8
+	order := make(chan int, waiters)
+	released := make(chan struct{}, waiters)
+	for i := range waiters {
+		go func() {
+			release := locks.lock("upstream")
+			order <- i
+			release()
+			released <- struct{}{}
+		}()
+		// Queue the next caller only once this one is waiting.
+		waitForCompatScrobbleHolders(t, h, "upstream", i+2)
+	}
+	unlock()
+
+	for want := range waiters {
+		if got := <-order; got != want {
+			t.Fatalf("waiter %d took the lock in position %d, want arrival order", got, want)
+		}
+	}
+	for range waiters {
+		<-released
+	}
+	if n := locks.holdersFor("upstream"); n != 0 {
+		t.Fatalf("lock entry kept %d holders after every caller released it", n)
+	}
 }

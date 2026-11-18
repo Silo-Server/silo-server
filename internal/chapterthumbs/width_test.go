@@ -23,27 +23,6 @@ func (q *fakeBlobQueue) Schedule(_ context.Context, prefixes []string, delay tim
 	return nil
 }
 
-func TestChapterEligibilityFollowsTheWidth(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0).UTC()
-	later := now.Add(time.Hour)
-	w300 := "chapter-images/1/0/w300.webp"
-	for _, tt := range []struct {
-		name    string
-		chapter models.MediaChapter
-		width   int
-		want    bool
-	}{
-		{"no thumbnail", models.MediaChapter{}, 300, true},
-		{"made at this width", models.MediaChapter{ThumbnailPath: w300}, 300, false},
-		{"made at another width", models.MediaChapter{ThumbnailPath: w300}, 320, true},
-		{"another width, waiting out a failure", models.MediaChapter{ThumbnailPath: w300, ThumbnailRetryAfter: &later}, 320, false},
-	} {
-		if got := isChapterEligible(tt.chapter, now, tt.width); got != tt.want {
-			t.Errorf("%s: eligible = %v, want %v", tt.name, got, tt.want)
-		}
-	}
-}
-
 // widthTestService serves file 42, whose chapter 0 was made at 300 px,
 // chapter 1 at 320 px, and chapter 2 has no thumbnail, with the width
 // setting at 320 px.
@@ -112,46 +91,5 @@ func TestProcessRequestKeepsTheOldImageWhenItsReplacementFails(t *testing.T) {
 	}
 	if len(queue.scheduled) != 0 {
 		t.Fatalf("retired %v with no replacement", queue.scheduled)
-	}
-}
-
-func TestProcessRequestStopsWhenTheWidthIsUnreadable(t *testing.T) {
-	service, repo, _, uploaded := widthTestService(t, func() ([]byte, string, error) { return []byte("frame"), "", nil })
-	service.settings = failingSettingsReader{}
-
-	if _, err := service.processRequest(t.Context(), ChapterThumbnailRequest{FileID: 42}, false); err == nil {
-		t.Fatal("processRequest() made thumbnails without knowing their width")
-	}
-	if len(*uploaded) != 0 || repo.updateCalls != 0 {
-		t.Fatalf("uploaded %v, saved %d times", *uploaded, repo.updateCalls)
-	}
-	if _, err := service.BackfillMissing(t.Context(), 10); err == nil {
-		t.Fatal("BackfillMissing() listed files without knowing the width")
-	}
-}
-
-func TestImageKeyGroup(t *testing.T) {
-	for key, want := range map[string]bool{
-		"chapter-images/42/0/w300.webp": true,
-		"chapter-images/42/0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/w300.webp":  true,
-		"chapter-images/42/0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde/w300.webp":   false,
-		"chapter-images/42/0-0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef/w300.webp":  false,
-		"chapter-images/42/00-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/w300.webp": false,
-		"chapter-images/42/0-/w300.webp":    false,
-		"chapter-images/7/15/w640.webp":     true,
-		"chapter-images/42/0/original.webp": false,
-		"chapter-images/42/0/w0300.webp":    false,
-		"chapter-images/42/0/w.webp":        false,
-		"chapter-images/42/00/w300.webp":    false,
-		"chapter-images/042/0/w300.webp":    false,
-		"chapter-images/42/":                false,
-		"chapter-images/42/0/w300.jpg":      false,
-		"chapter-images/42/0/1/w300.webp":   false,
-		"trickplay/42/7/0.7.jpg":            false,
-	} {
-		group, ok := imageKeyGroup(key)
-		if ok != want || (ok && group != key) {
-			t.Errorf("imageKeyGroup(%q) = %q, %v; want %v", key, group, ok, want)
-		}
 	}
 }

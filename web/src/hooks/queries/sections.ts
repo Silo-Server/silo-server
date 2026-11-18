@@ -84,7 +84,7 @@ export function profileSectionOverridesFromV2(
  * trip; the server leaves out any row that is not ready in time and Home
  * fetches those, and every later row, on its own.
  */
-export const HOME_LAYOUT_INCLUDED_ROWS = 3;
+const HOME_LAYOUT_INCLUDED_ROWS = 3;
 
 /**
  * The home layout query. Rows the server included, capped at

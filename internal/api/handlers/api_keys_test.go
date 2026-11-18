@@ -80,9 +80,8 @@ func TestCreateAdminAPIKeyApplicationValidatesBeforeStorage(t *testing.T) {
 	}
 }
 
-// The v2 surface is the canonical editor, so the shared creation method
-// validates against the full catalog; the frozen v1 transports keep the v1
-// catalog.
+// The shared creation method accepts every scope in the catalog and refuses
+// an unknown one before storage.
 func TestCreateAdminAPIKeyAcceptsFullScopeCatalog(t *testing.T) {
 	for _, scope := range auth.APIKeyScopeCatalog() {
 		store := &fakeAPIKeyStore{}

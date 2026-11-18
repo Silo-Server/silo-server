@@ -834,6 +834,13 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "memory-limit" {
+		if err := runMemoryLimitCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("memory-limit: %v", err)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
 		if err := runBackupMain(os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			log.Fatalf("backup: %v", err)

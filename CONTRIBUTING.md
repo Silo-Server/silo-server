@@ -211,6 +211,13 @@ When a change makes a test redundant, delete it in the same change. Reviewers,
 human or agent, should ask for a test only when its absence lets a regression
 these rules cover go unnoticed.
 
+### Verify affected behavior in the pull request
+
+Use the [PR verification guide](docs/architecture/pr-verification.md) to choose
+cases for the behavior your change can affect. Run the relevant automated
+checks and exercise the affected cases with disposable data. Record what you
+observed in the [pull request evidence](#show-visible-changes).
+
 ## Development setup
 
 [DEVELOPMENT.md](DEVELOPMENT.md) covers prerequisites, local services, builds,

@@ -967,7 +967,8 @@ flag and send `video` when it is absent.
 responding server's current ranking-availability checks and, for
 Meilisearch, `result_window_limit`, `session_ttl_seconds`, and
 `max_sessions_per_account`. While Meilisearch is configured but its index is
-unbuilt, unreachable, or on an incompatible schema, searches fall back to
+unbuilt, missing from Meilisearch, unreachable, or on an incompatible schema,
+searches fall back to
 PostgreSQL and the read reports `provider: postgres` without the Meilisearch
 limits. These provider and limit fields are an explicit exception to the usual
 configuration-only capability contract: changes in availability affect the
@@ -993,6 +994,9 @@ returns `invalid_cursor` after a restart or when another replica handles it.
 The configured window must be between 1 and 1,000 candidates; a larger runtime
 index setting returns `capability_unsupported` before serving a partial ranking.
 This is the provider's reachable window, not an exact global match count.
+Keyword matches in it stop at the first one that matches the search worse than
+its best keyword match, so a search can return far fewer candidates than the
+window holds.
 At most 16 ranking sessions are retained per account; starting another discards
 the oldest retained session. Session requests do not extend expiry.
 

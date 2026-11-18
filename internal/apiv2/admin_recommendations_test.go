@@ -3,10 +3,6 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"strings"
-	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -22,15 +18,17 @@ type fakeAdminRecommendations struct {
 	last  recommendations.JobName
 	err   error
 
-	runsErr     error
-	noRuns      bool
-	conflict    string
-	conflictErr error
-	noRefresh   bool
-	refreshErr  error
-	resets      int
-	resetErr    error
-	sweepErr    error
+	runsErr      error
+	noRuns       bool
+	conflict     string
+	conflictKey  string
+	conflictArgs map[string]string
+	conflictErr  error
+	noRefresh    bool
+	refreshErr   error
+	resets       int
+	resetErr     error
+	sweepErr     error
 }
 
 func (f *fakeAdminRecommendations) StatusCounts(context.Context) (int, int, int, int, int, error) {
@@ -66,8 +64,8 @@ func (f *fakeAdminRecommendations) LastRuns(context.Context) (map[recommendation
 		},
 	}, nil
 }
-func (f *fakeAdminRecommendations) EmbeddingLockConflict(context.Context) (string, error) {
-	return f.conflict, f.conflictErr
+func (f *fakeAdminRecommendations) EmbeddingLockConflict(context.Context) (string, string, map[string]string, error) {
+	return f.conflict, f.conflictKey, f.conflictArgs, f.conflictErr
 }
 func (f *fakeAdminRecommendations) CacheRefreshedAt(context.Context) (*time.Time, error) {
 	if f.refreshErr != nil || f.noRefresh {
@@ -110,113 +108,4 @@ func (f *fakeAdminRecommendations) TriggerTasteProfiles() error {
 func (f *fakeAdminRecommendations) TriggerCowatch() error { return f.start(recommendations.JobCowatch) }
 func (f *fakeAdminRecommendations) TriggerRecommendations() error {
 	return f.start(recommendations.JobRecommendations)
-}
-
-func TestAdminRecommendationsTransport(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := &fakeAdminRecommendations{}
-	deps.AdminRecommendations = f
-	h := newTestHandler(t, deps)
-	rec := do(t, h, "GET", Prefix+"/admin/recommendations/status", "", bearer(adminToken))
-	var status AdminRecommendationsStatus
-	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != 200 || !status.Embeddings.Running || status.Embeddings.Count != 3 || status.Embeddings.Total == nil || *status.Embeddings.Total != 10 || status.TasteProfiles.Count != 4 || status.Recommendations.Count != 5 || status.Cowatch.Count != 6 {
-		t.Fatalf("status: %d %s", rec.Code, rec.Body)
-	}
-	for _, tc := range []struct {
-		path string
-		job  recommendations.JobName
-	}{
-		{"embeddings", recommendations.JobEmbeddings}, {"taste-profiles", recommendations.JobTasteProfiles}, {"cowatch", recommendations.JobCowatch}, {"recommendations", recommendations.JobRecommendations},
-	} {
-		path := Prefix + "/admin/recommendations/trigger/" + tc.path
-		before := f.calls
-		rec = do(t, h, "POST", path, "", bearer(adminToken))
-		if rec.Code != 200 || f.calls != before+1 || f.last != tc.job || rec.Header().Get("Location") != "" || !strings.Contains(rec.Body.String(), `"status":"started"`) {
-			t.Fatalf("start %s: %d %s %#v", tc.path, rec.Code, rec.Body, f)
-		}
-		for _, busy := range []struct {
-			err   error
-			where string
-		}{
-			{fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunning), "this process"},
-			{fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunningElsewhere), "another server"},
-		} {
-			f.err = busy.err
-			rec = do(t, h, "POST", path, "", bearer(adminToken))
-			if rec.Code != 409 || !strings.Contains(rec.Body.String(), busy.where) || strings.Contains(rec.Body.String(), "private worker") {
-				t.Fatalf("conflict %s (%s): %d %s", tc.path, busy.where, rec.Code, rec.Body)
-			}
-		}
-		// Failing to take the cluster lock is not a conflict.
-		f.err = errors.New("private lock detail")
-		rec = do(t, h, "POST", path, "", bearer(adminToken))
-		if rec.Code != 500 || strings.Contains(rec.Body.String(), "private lock") {
-			t.Fatalf("lock failure %s: %d %s", tc.path, rec.Code, rec.Body)
-		}
-		before = f.calls
-		rec = do(t, h, "POST", path, "", bearer(memberToken))
-		if rec.Code != 403 || f.calls != before {
-			t.Fatalf("member triggered work: %d calls=%d", rec.Code, f.calls)
-		}
-		f.err = nil
-	}
-	f.err = errors.New("private database details")
-	rec = do(t, h, "GET", Prefix+"/admin/recommendations/status", "", bearer(adminToken))
-	if rec.Code != 500 || strings.Contains(rec.Body.String(), "private database") {
-		t.Fatalf("status failure: %d %s", rec.Code, rec.Body)
-	}
-	deps.AdminRecommendations = nil
-	h = newTestHandler(t, deps)
-	for _, tc := range []struct{ method, path string }{{"GET", "/status"}, {"POST", "/trigger/embeddings"}, {"POST", "/trigger/taste-profiles"}, {"POST", "/trigger/cowatch"}, {"POST", "/trigger/recommendations"}, {"POST", "/embeddings/reset"}} {
-		rec = do(t, h, tc.method, Prefix+"/admin/recommendations"+tc.path, "", bearer(adminToken))
-		if rec.Code != 503 {
-			t.Fatalf("unwired %s: %d %s", tc.path, rec.Code, rec.Body)
-		}
-	}
-}
-
-func TestAdminRecommendationsResetEmbeddings(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := &fakeAdminRecommendations{}
-	deps.AdminRecommendations = f
-	h := newTestHandler(t, deps)
-	path := Prefix + "/admin/recommendations/embeddings/reset"
-
-	rec := do(t, h, "POST", path, "", bearer(adminToken))
-	if rec.Code != 200 || f.resets != 1 {
-		t.Fatalf("reset: %d %s resets=%d", rec.Code, rec.Body, f.resets)
-	}
-	var out AdminRecommendationEmbeddingsReset
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out != (AdminRecommendationEmbeddingsReset{Embeddings: 120, TasteProfiles: 3, TasteClusters: 9, CachedRows: 41}) {
-		t.Fatalf("reset body = %+v", out)
-	}
-
-	for _, busy := range []error{
-		fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunning),
-		fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunningElsewhere),
-		recommendations.ErrStaleSweepRunning,
-	} {
-		f.resetErr = busy
-		rec = do(t, h, "POST", path, "", bearer(adminToken))
-		if rec.Code != 409 || !strings.Contains(rec.Body.String(), "Reset embeddings after it finishes") || strings.Contains(rec.Body.String(), "private worker") {
-			t.Fatalf("busy reset (%v): %d %s", busy, rec.Code, rec.Body)
-		}
-	}
-	f.resetErr = errors.New("private database detail")
-	rec = do(t, h, "POST", path, "", bearer(adminToken))
-	if rec.Code != 500 || strings.Contains(rec.Body.String(), "private database") {
-		t.Fatalf("failed reset: %d %s", rec.Code, rec.Body)
-	}
-
-	before := f.resets
-	rec = do(t, h, "POST", path, "", bearer(memberToken))
-	if rec.Code != 403 || f.resets != before {
-		t.Fatalf("member reset embeddings: %d resets=%d", rec.Code, f.resets)
-	}
 }

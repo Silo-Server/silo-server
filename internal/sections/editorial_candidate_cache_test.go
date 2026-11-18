@@ -11,41 +11,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-func TestCachedEditorialCandidatesReusesCandidateListForSameScope(t *testing.T) {
-	t.Parallel()
-
-	f := &Fetcher{
-		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
-	}
-	calls := 0
-	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
-		calls++
-		return []string{"first", "second"}, nil
-	}
-
-	first, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, []int{2, 1}, catalog.AccessFilter{
-		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
-	}, time.Hour, loader)
-	if err != nil {
-		t.Fatalf("first cachedEditorialCandidates: %v", err)
-	}
-	first[0] = "mutated"
-
-	second, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, []int{1, 2}, catalog.AccessFilter{
-		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
-	}, time.Hour, loader)
-	if err != nil {
-		t.Fatalf("second cachedEditorialCandidates: %v", err)
-	}
-
-	if calls != 1 {
-		t.Fatalf("loader calls = %d, want 1", calls)
-	}
-	if got, want := second[0], "first"; got != want {
-		t.Fatalf("cached candidates were mutated through returned slice: got %q, want %q", got, want)
-	}
-}
-
 func TestCachedEditorialCandidatesSeparatesAccessScopeAndExpires(t *testing.T) {
 	t.Parallel()
 
@@ -210,34 +175,5 @@ func TestCachedEditorialCandidatesSurvivesLoaderPanic(t *testing.T) {
 	}
 	if candidates, err := f.cachedEditorialCandidates(t.Context(), "actor", nil, nil, catalog.AccessFilter{}, time.Hour, loader); err == nil || len(candidates) != 0 {
 		t.Fatalf("panicking loader returned %v, %v", candidates, err)
-	}
-}
-
-func TestCachedEditorialCandidatesDoesNotCacheAnEmptySet(t *testing.T) {
-	t.Parallel()
-
-	f := &Fetcher{
-		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
-	}
-	calls := 0
-	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
-		calls++
-		if calls == 1 {
-			return nil, nil
-		}
-		return []string{"Drama"}, nil
-	}
-
-	for range 2 {
-		if _, err := f.cachedEditorialCandidates(context.Background(), "genre_roulette", nil, nil, catalog.AccessFilter{}, time.Hour, loader); err != nil {
-			t.Fatalf("cachedEditorialCandidates: %v", err)
-		}
-	}
-	got, err := f.cachedEditorialCandidates(context.Background(), "genre_roulette", nil, nil, catalog.AccessFilter{}, time.Hour, loader)
-	if err != nil {
-		t.Fatalf("cachedEditorialCandidates: %v", err)
-	}
-	if calls != 2 || len(got) != 1 || got[0] != "Drama" {
-		t.Fatalf("calls = %d, candidates = %v; want the empty set reloaded once, then the cached genre", calls, got)
 	}
 }

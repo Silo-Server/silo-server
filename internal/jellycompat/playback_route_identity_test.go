@@ -46,7 +46,7 @@ func TestVideoStreamTokenAuthRouteIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			router := chi.NewRouter()
-			router.With(PlaybackSessionAuth(sessions, h.playbackStore, nil)).Get("/Videos/{id}/stream", h.HandleVideoStream)
+			router.With(PlaybackSessionAuth(sessions, h.playbackStore, nil, nil)).Get("/Videos/{id}/stream", h.HandleVideoStream)
 			query := url.Values{"Static": {"true"}, "MediaSourceId": {ids[tc.source]}, "PlaySessionId": {tc.psid}}
 			req := httptest.NewRequest("GET", "/Videos/"+ids[tc.route]+"/stream?"+query.Encode(), nil)
 			req.Header.Set("X-Emby-Token", "token-1")
@@ -90,7 +90,7 @@ func TestSubtitleTokenAuthRouteIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := chi.NewRouter()
-	router.With(PlaybackSessionAuth(sessions, store, nil)).Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", h.HandleSubtitleStream)
+	router.With(PlaybackSessionAuth(sessions, store, nil, nil)).Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", h.HandleSubtitleStream)
 	for _, tc := range []struct {
 		item, source string
 		status       int

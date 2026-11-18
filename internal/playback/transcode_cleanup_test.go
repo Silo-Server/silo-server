@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// An active session owns a dir only when the name is the session id exactly or
-// the id followed by the generation separator ('-', see transportGenerationV3).
-// A foreign session whose id merely shares the active id as a raw string
-// prefix must not have its dirs retained.
 func TestCleanupOrphanedTranscodeDirsRequiresSeparatorBoundary(t *testing.T) {
 	root := t.TempDir()
 	keep := []string{"session-1", "session-1-plan-abc-generation"}

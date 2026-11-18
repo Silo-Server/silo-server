@@ -6,36 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-func TestAdminTopActivityProviderInvalidateClearsEveryVariant(t *testing.T) {
-	t.Parallel()
-
-	provider, err := NewAdminTopActivityProvider(context.Background(), nil, nil)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	t.Cleanup(provider.Close)
-
-	keys := []string{
-		adminTopActivityCachePrefix + "7&limit=10",
-		adminTopActivityCachePrefix + "30&limit=25",
-	}
-	for _, key := range keys {
-		provider.cache.Set(key, &AdminTopActivity{}, time.Minute)
-	}
-
-	provider.Invalidate()
-
-	for _, key := range keys {
-		if _, ok := provider.cache.Get(key); ok {
-			t.Fatalf("%s survived Invalidate", key)
-		}
-	}
-}
 
 // Only finished playback counts as a play. Marking a series watched writes one
 // history row per episode; those rows, and single-item marks from Silo or

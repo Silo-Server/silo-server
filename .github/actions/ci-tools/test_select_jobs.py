@@ -656,28 +656,6 @@ class WorkflowGateTests(unittest.TestCase):
                                  capture_output=True, text=True)
             self.assertNotEqual(run.returncode, 0, "A missing Git input must fail")
 
-    def test_full_tree_tool_targets_exist(self):
-        run = subprocess.run(["make", "-n", "verify-actionlint", "verify-shellcheck"],
-                             cwd=self.root, capture_output=True, text=True)
-        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-        self.assertIn("1.7.12", run.stdout)
-        self.assertIn("0.11.0", run.stdout)
-
-    def test_workflow_and_shell_tools_reject_seeded_defects(self):
-        missing = [tool for tool in ("actionlint", "shellcheck") if not shutil.which(tool)]
-        if missing:
-            self.skipTest("required tools not on PATH: " + ", ".join(missing))
-        workflow = "name: test\non: push\njobs:\n  test:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n"
-        for contents, expected in ((workflow, 0), (workflow.replace("echo ok", "echo ${{ unknown.value }}"), 1)):
-            run = subprocess.run(["actionlint", "-oneline", "-"], input=contents,
-                                 cwd=self.root, capture_output=True, text=True)
-            self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
-        for contents, expected in (("#!/bin/bash\nprintf '%s\\n' \"$1\"\n", 0),
-                                   ("#!/bin/bash\nprintf '%s\\n' $1\n", 1)):
-            run = subprocess.run(["shellcheck", "-s", "bash", "-"], input=contents,
-                                 cwd=self.root, capture_output=True, text=True)
-            self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

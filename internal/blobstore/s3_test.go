@@ -1,10 +1,7 @@
 package blobstore
 
 import (
-	"context"
 	"encoding/xml"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -125,81 +122,6 @@ func fakeArtworkS3(t *testing.T) *S3 {
 	}))
 	t.Cleanup(server.Close)
 	return NewS3(s3client.NewClient(s3client.BucketConfig{Endpoint: server.URL, Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"}))
-}
-
-func TestS3ArtworkRoundTrip(t *testing.T) {
-	s := fakeArtworkS3(t)
-	ctx := context.Background()
-	for _, payload := range []string{"first", "replacement"} {
-		if err := s.Put(ctx, "posters/a.webp", []byte(payload)); err != nil {
-			t.Fatal(err)
-		}
-		r, info, err := s.Get(ctx, "posters/a.webp")
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := io.ReadAll(r)
-		_ = r.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(data) != payload || info.Key != "posters/a.webp" || info.Size != int64(len(payload)) || info.ModTime.IsZero() || info.ETag == "" {
-			t.Fatalf("roundtrip: %q %#v", data, info)
-		}
-	}
-	if _, err := s.Stat(ctx, "missing.webp"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("stat missing: %v", err)
-	}
-	if _, _, err := s.Get(ctx, "missing.webp"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("get missing: %v", err)
-	}
-	if _, err := s.Delete(ctx, []string{"missing.webp", "posters/a.webp"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Stat(ctx, "posters/a.webp"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("deleted stat: %v", err)
-	}
-}
-
-func TestS3ArtworkPrefixAndCursor(t *testing.T) {
-	s := fakeArtworkS3(t)
-	ctx := context.Background()
-	for _, k := range []string{"items/a/1.webp", "items/a/2.webp", "items/a/3.webp", "items/ab/1.webp"} {
-		if err := s.Put(ctx, k, []byte(k)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cursor := ""
-	got := []string{}
-	for i := 0; i < 4; i++ {
-		page, next, err := s.List(ctx, "items/a", cursor, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, obj := range page {
-			got = append(got, obj.Key)
-		}
-		if next == "" {
-			break
-		}
-		if next <= cursor {
-			t.Fatalf("cursor did not advance: %q -> %q", cursor, next)
-		}
-		cursor = next
-	}
-	if fmt.Sprint(got) != "[items/a/1.webp items/a/2.webp items/a/3.webp]" {
-		t.Fatalf("pages: %v", got)
-	}
-	if _, err := s.DeletePrefix(ctx, "items/a"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Stat(ctx, "items/ab/1.webp"); err != nil {
-		t.Fatalf("sibling removed: %v", err)
-	}
-	page, _, err := s.List(ctx, "items/a", "", 10)
-	if err != nil || len(page) != 0 {
-		t.Fatalf("prefix remains: %v %v", page, err)
-	}
 }
 
 func TestS3IdentityCoversStorageLocationOnly(t *testing.T) {

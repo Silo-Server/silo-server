@@ -264,6 +264,21 @@ describe("StorageStep", () => {
     expect(buildConnectionCheckRequest).toHaveBeenCalledWith(["redis.url", "redis.db"]);
   });
 
+  it.each([
+    ["public", 1],
+    ["private", 2],
+  ])("stages the %s bucket region and checks the connection with it", async (scope, toggle) => {
+    const { setValue, buildConnectionCheckRequest } = setup();
+    render(<StorageStep />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Set up" })[toggle]!);
+    fireEvent.change(screen.getByLabelText("Region"), { target: { value: "eu-central-1" } });
+    expect(setValue).toHaveBeenCalledWith(`s3.${scope}_region`, "eu-central-1");
+    expect(formMock.mock.calls[0]?.[0].keys).toContain(`s3.${scope}_region`);
+    expect(buildConnectionCheckRequest).toHaveBeenCalledWith(
+      expect.arrayContaining([`s3.${scope}_region`, `s3.${scope}_path_style`]),
+    );
+  });
+
   it("shows the Redis database number in use and stages it with a new URL", async () => {
     // No redis.db is saved: the server reports the 3 in the saved URL.
     const { setValue } = setup({ saved: { "redis.db": "3" } });

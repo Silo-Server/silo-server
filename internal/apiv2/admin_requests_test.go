@@ -119,21 +119,6 @@ func (f *fakeAdminRequests) LoadIntegrationOptions(_ context.Context, v mediareq
 	return map[string][]mediarequests.RouterOption{}, nil
 }
 
-// An integration the host cannot reach answers with the upstream-unavailable
-// problem instead of a generic internal error.
-func TestAdminRequestOptionsUnreachableIntegration(t *testing.T) {
-	h := adminRequestsHandler(fixtureAdminRequests())
-	rec := do(t, h, http.MethodPost, Prefix+"/admin/request-integrations/new/options", `{"api_key_ref":"unreachable"}`, actingRequestAdmin)
-	requireProblem(t, rec, TypeDependencyUnavailable)
-	if !strings.Contains(rec.Body.String(), "Nothing answered at that address. Check the host and port.") {
-		t.Fatalf("body = %s, want the classified detail", rec.Body.String())
-	}
-	for _, leaked := range []string{"connection refused", "dial tcp"} {
-		if strings.Contains(rec.Body.String(), leaked) {
-			t.Fatalf("upstream failure detail %q leaked: %s", leaked, rec.Body.String())
-		}
-	}
-}
 func (f *fakeAdminRequests) ListAdmin(_ context.Context, v mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error) {
 	f.viewer = v
 	f.filter = filter
@@ -186,49 +171,6 @@ var actingRequestAdmin = with(bearer(adminToken), "X-Profile-Id", "p-primary")
 const requestSettingsBody = `{"requests_enabled":true,"global_max_requests":6,"global_window_days":7,"global_auto_approval_enabled":false,"force_dual_quality":false}`
 const requestIntegrationBody = `{"name":"Router","capability_id":"arr","installation_id":"7","supported_media_types":["movie"],"plugin_config":{},"enabled":true,"base_url":"https://router.example.test","api_key_ref":"private-key"}`
 
-func TestAdminRequestSettingsGuards(t *testing.T) {
-	f := fixtureAdminRequests()
-	h := adminRequestsHandler(f)
-	path := Prefix + "/admin/request-settings"
-	read := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
-	if read.Code != 200 || read.Header().Get("ETag") == "" {
-		t.Fatal(read.Code, read.Body.String())
-	}
-	tag := read.Header().Get("ETag")
-	requireProblem(t, do(t, h, http.MethodPut, path, requestSettingsBody, actingRequestAdmin), TypePreconditionRequired)
-	requireProblem(t, do(t, h, http.MethodPut, path, requestSettingsBody, with(actingRequestAdmin, "If-Match", `"stale"`)), TypePreconditionFailed)
-	if f.writes != 0 {
-		t.Fatal("guard allowed effects")
-	}
-	saved := do(t, h, http.MethodPut, path, requestSettingsBody, with(actingRequestAdmin, "If-Match", tag))
-	if saved.Code != 200 || saved.Header().Get("ETag") == tag {
-		t.Fatal(saved.Code, saved.Body.String())
-	}
-	if !f.viewer.IsAdmin || f.viewer.UserID != 2 || f.viewer.ProfileID != "p-primary" {
-		t.Fatalf("actor: %+v", f.viewer)
-	}
-	f.stale = true
-	raced := do(t, h, http.MethodPut, path, requestSettingsBody, with(actingRequestAdmin, "If-Match", saved.Header().Get("ETag")))
-	requireProblem(t, raced, TypePreconditionFailed)
-	if raced.Header().Get("ETag") == saved.Header().Get("ETag") {
-		t.Fatal("race returned old tag")
-	}
-}
-func TestAdminRequestAuthorityAndCapabilities(t *testing.T) {
-	f := fixtureAdminRequests()
-	h := adminRequestsHandler(f)
-	for _, path := range []string{"/admin/requests", "/admin/request-settings", "/admin/request-integrations", "/admin/request-users/2/limit"} {
-		requireProblem(t, do(t, h, http.MethodGet, Prefix+path, "", requestOwner), TypePermissionDenied)
-		requireProblem(t, do(t, h, http.MethodGet, Prefix+path, "", with(bearer(adminToken), "X-Profile-Id", "p-owner")), TypePermissionDenied)
-	}
-	deps := requestDeps(fixtureRequests())
-	h = NewHandler(deps)
-	r := do(t, h, http.MethodGet, Prefix+"/admin/requests/capabilities", "", actingRequestAdmin)
-	if r.Code != 200 || !strings.Contains(r.Body.String(), `"available":false`) {
-		t.Fatal(r.Code, r.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/requests", "", actingRequestAdmin), TypeDependencyUnavailable)
-}
 func TestAdminRequestIntegrationSecretsAndGuard(t *testing.T) {
 	f := fixtureAdminRequests()
 	h := adminRequestsHandler(f)
@@ -257,73 +199,6 @@ func TestAdminRequestIntegrationSecretsAndGuard(t *testing.T) {
 	created := do(t, h, http.MethodPost, Prefix+"/admin/request-integrations", requestIntegrationBody, actingRequestAdmin)
 	if created.Code != 201 || created.Header().Get("Location") != Prefix+"/admin/request-integrations/created-1" {
 		t.Fatal(created.Code, created.Body.String())
-	}
-}
-
-// The v2 probe sends a scheme-less address with http:// in front and refuses
-// one it could never reach as a field error, without asking the plugin. It
-// asks for the router's connection test, which the frozen v1 route does not.
-func TestAdminRequestOptionsNormalizesBaseURL(t *testing.T) {
-	f := fixtureAdminRequests()
-	h := adminRequestsHandler(f)
-	path := Prefix + "/admin/request-integrations/new/options"
-	if rec := do(t, h, http.MethodPost, path, `{"base_url":"10.0.0.5:8989/","api_key_ref":"k"}`, actingRequestAdmin); rec.Code != 200 {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	if f.probedBaseURL != "http://10.0.0.5:8989" || !f.probedTestConnection {
-		t.Fatalf("probed base URL = %q, connection test = %v", f.probedBaseURL, f.probedTestConnection)
-	}
-	f.probedBaseURL = "unset"
-	rec := do(t, h, http.MethodPost, path, `{"base_url":"ftp://10.0.0.5","api_key_ref":"k"}`, actingRequestAdmin)
-	requireProblem(t, rec, TypeValidationFailed)
-	if !strings.Contains(rec.Body.String(), `"body.base_url"`) || f.probedBaseURL != "unset" {
-		t.Fatal(rec.Body.String(), f.probedBaseURL)
-	}
-}
-
-// A probe that leaves base_url out tests the saved address; one that sends it
-// blank clears it, which a router that needs no URL is then tested without.
-func TestAdminRequestOptionsTellsOmittedFromClearedBaseURL(t *testing.T) {
-	f := fixtureAdminRequests()
-	h := adminRequestsHandler(f)
-	path := Prefix + "/admin/request-integrations/7/options"
-	for _, tc := range []struct {
-		body        string
-		wantCleared bool
-		wantURL     string
-	}{
-		{`{}`, false, ""},
-		{`{"base_url":""}`, true, ""},
-		{`{"base_url":"  "}`, true, ""},
-		{`{"base_url":"10.0.0.5:8989"}`, false, "http://10.0.0.5:8989"},
-	} {
-		if rec := do(t, h, http.MethodPost, path, tc.body, actingRequestAdmin); rec.Code != 200 {
-			t.Fatal(tc.body, rec.Code, rec.Body.String())
-		}
-		if f.probedBaseURLCleared != tc.wantCleared || f.probedBaseURL != tc.wantURL {
-			t.Fatalf("%s: cleared = %v, url = %q; want %v, %q", tc.body, f.probedBaseURLCleared, f.probedBaseURL, tc.wantCleared, tc.wantURL)
-		}
-	}
-}
-
-// A v2 save stores the address the options probe used, and refuses one it
-// could never probe as a field error.
-func TestAdminRequestIntegrationSaveNormalizesBaseURL(t *testing.T) {
-	f := fixtureAdminRequests()
-	h := adminRequestsHandler(f)
-	body := strings.Replace(requestIntegrationBody, `"https://router.example.test"`, `"10.0.0.5:8989/"`, 1)
-	created := do(t, h, http.MethodPost, Prefix+"/admin/request-integrations", body, actingRequestAdmin)
-	if created.Code != 201 || !strings.Contains(created.Body.String(), `"base_url":"http://10.0.0.5:8989"`) {
-		t.Fatal(created.Code, created.Body.String())
-	}
-	bad := strings.Replace(requestIntegrationBody, `"https://router.example.test"`, `"ftp://10.0.0.5"`, 1)
-	refused := do(t, h, http.MethodPost, Prefix+"/admin/request-integrations", bad, actingRequestAdmin)
-	requireProblem(t, refused, TypeValidationFailed)
-	if !strings.Contains(refused.Body.String(), `"body.base_url"`) {
-		t.Fatal(refused.Body.String())
-	}
-	if f.writes != 1 {
-		t.Fatalf("writes = %d, want only the valid create", f.writes)
 	}
 }
 

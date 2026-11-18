@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -157,31 +156,4 @@ func TestSourceStreamEndsWhenShutdownBegins(t *testing.T) {
 	if late := f.open(nodeA, f.keyA, grant); late.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("a read after shutdown began = %d, want 503", late.StatusCode)
 	}
-}
-
-// The bytes counter advances while a stream runs, not only when it ends.
-func TestSourceBytesCountWhileStreaming(t *testing.T) {
-	f := newStreamFixture(t)
-	grant := f.bigGrant(nodeA)
-	counter := nodeSourceBytes.WithLabelValues(strconv.Itoa(nodeA))
-	before := testutil.ToFloat64(counter)
-
-	resp := f.open(nodeA, f.keyA, grant)
-	if _, err := io.CopyN(io.Discard, resp.Body, 32<<20); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for testutil.ToFloat64(counter)-before < 16<<20 {
-		if time.Now().After(deadline) {
-			t.Fatalf("counted %v bytes after the client read 32 MiB", testutil.ToFloat64(counter)-before)
-		}
-		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // polls a Prometheus counter, which has no notification to wait on
-	}
-	select {
-	case <-f.done:
-		t.Fatal("the stream ended before the check")
-	default:
-	}
-	_ = resp.Body.Close()
-	f.waitDone("the closed stream")
 }

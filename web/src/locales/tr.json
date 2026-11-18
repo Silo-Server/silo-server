@@ -22791,6 +22791,270 @@
       "value": "Bağlantı kontrolü başarısız oldu."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Yapay zekâ hizmetleri ayarlarından ChatGPT ile oturum açın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Gömme bağlantısı başarılı. Model "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " boyut döndürüyor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Gömmeler "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " boyutlu vektörlerle oluşturuldu, ancak model artık "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " boyut döndürüyor. Model değiştirmeden önce gömmeleri sıfırlayın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Gömme kilidi "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " boyutlu vektörleri kaydediyor; Silo 1 ile "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " arasında boyut saklar. Gömmeleri sıfırlayın ve en fazla "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " boyut döndüren bir model kullanın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Saklanan gömme kilidi okunamıyor. Kilidi temizlemek için gömmeleri sıfırlayın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Gömmeler “"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "” modeliyle değil, “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” modeliyle oluşturuldu. Model değiştirmeden önce gömmeleri sıfırlayın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Gömme sağlayıcısı test metni için vektör döndürmedi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Gömmeler "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " boyutla saklandı; bu sunucu "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": " boyut saklıyor. Gömmeleri sıfırlayın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Model "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " boyut döndürüyor; Silo en fazla "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " boyut saklar."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Bağlantı kontrolü başarısız oldu. Gönderilen ayarları ve sağlayıcının erişilebilir olup olmadığını doğrulayın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList API anahtarı doğrulandı."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch bağlantısı başarılı"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch API anahtarını reddetti veya bir anahtar gerektiriyor. Dizinleri ve belgeleri yönetebilen bir anahtar girin, örneğin Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch kontrolü başka bir adrese yönlendirdi. Yönlendirdiği adresi, örneğin https:// URL’sini girin ve API anahtarını yeniden girin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis bağlantısı başarılı."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3 bağlantısı ve nesne okuma/yazma/silme izinleri doğrulandı."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme bağlantısı başarılı: zaman damgalı konuşma alındı."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme erişimi reddedildi. API anahtarınızın izinlerini ve izin verilen sağlayıcıları kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme modeli zaman damgalı kesitler döndürmüyor; Silo’nun altyazı oluşturmak için bunlara ihtiyacı var. Kesit zaman damgalarını destekleyen bir model seçin, örneğin OpenAI’daki whisper-1."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme uç noktası veya modeli kullanılamıyor. Sağlayıcının temel URL’sini, modeli ve izin verilen sağlayıcıları kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme sağlayıcısı ödeme gerektiriyor. Sağlayıcı bakiyenizi ve harcama sınırınızı kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme sağlayıcısının kotası doldu. Sağlayıcı bakiyenizi ve sınırlarınızı kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme sağlayıcısı istekleri hız sınırlamasına tabi tutuyor. Daha sonra tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme bağlantı kontrolü zaman aşımına uğradı. Sağlayıcının erişilebilir olup olmadığını kontrol edip tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme kimlik doğrulaması başarısız oldu. Yapay zekâ hizmetleri kısmında sağlayıcının API anahtarını değiştirin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Konuşmayı metne dönüştürme sağlayıcısı geçici olarak kullanılamıyor. Daha sonra tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı bağlantısı başarılı."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı bağlantısı başarısız oldu. Modeli, akıl yürütme düzeyini, hizmet katmanını, hesap bağlantısını ve sağlayıcı kullanım sınırlarını kontrol edin."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
@@ -51891,6 +52155,20 @@
       "value": "Bağlantı denetimi başarısız oldu."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Gömme sağlayıcısı seçilmedi. “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” modelini sunan bir sağlayıcı seçin veya başka bir model kullanmak için gömmeleri sıfırlayın."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -57967,6 +58245,18 @@
     {
       "type": 0,
       "value": "Autoscan"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
+    {
+      "type": 0,
+      "value": "Aynı adresten oturum açmadan oynat"
+    }
+  ],
+  "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
+    {
+      "type": 0,
+      "value": "Findroid gibi bazı Jellyfin uygulamaları, doğrudan oynatma ve indirme bağlantılarını oturum açmadan açar. Bu seçenek açıkken Silo, aynı ağ adresindeki oturum açmış bir uygulama son iki saat içinde o dosyayı oynatmak istediyse böyle bir isteği karşılar. Bu durumda o adresi paylaşan herkes, örneğin aynı ev ağındaki, aynı mobil operatördeki veya aynı VPN’deki kişiler de o dosyayı oynatabilir. Yalnızca bu uygulamalardan birini kullanıyorsanız açın."
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -88588,6 +88878,12 @@
       "value": "Sıralama"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Alaka düzeyi"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -104924,6 +105220,12 @@
       "value": "Koleksiyon"
     }
   ],
+  "web.home.addRow.collection.library": [
+    {
+      "type": 0,
+      "value": "Kitaplık"
+    }
+  ],
   "web.home.addRow.collection.loading": [
     {
       "type": 0,
@@ -104972,6 +105274,12 @@
     {
       "type": 0,
       "value": "Henüz koleksiyon yok. Önce Koleksiyonlar sayfasında bir tane oluşturun."
+    }
+  ],
+  "web.home.addRow.collection.noneInLibrary": [
+    {
+      "type": 0,
+      "value": "Bu kitaplıkta bu türde koleksiyon yok."
     }
   ],
   "web.home.addRow.collection.noneOfType": [
@@ -120513,6 +120821,12 @@
       "value": "Duraklatıp sürdürebilirsiniz"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party için Redis gerekiyor ancak bu sunucuda Redis ayarlanmamış. Sunucu yöneticinizden Redis’i yapılandırmasını isteyin."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -124407,6 +124721,86 @@
     {
       "type": 0,
       "value": "Kitaplıkta ara veya istenecek içerik bul…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Kitaplığınızdaki tüm sonuçlar"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Alaka düzeyine dön"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "En iyi eşleşmeler"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Kitaplığınızda"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Diğer sonuçlar"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Kitaplığınızda yok"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Genel bakış"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Eklenmesini iste"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Tüm sonuçları göster"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Sıralama: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Sonuç görünümleri"
     }
   ],
   "web.search.resultsLabel": [
