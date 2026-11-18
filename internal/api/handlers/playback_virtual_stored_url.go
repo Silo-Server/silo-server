@@ -432,6 +432,12 @@ func virtualResolveContextWithPersistedTrust(ctx context.Context, row *models.Me
 	if row == nil {
 		return ctx
 	}
+	// A caller that dropped the trust for a delisted automatic selection must
+	// not have it re-established here: the degraded retry exists precisely to
+	// let the resolver serve a live sibling.
+	if virtuallibrary.PersistedCandidateTrustSuppressed(ctx) {
+		return ctx
+	}
 	insecure := false
 	if len(allowInsecure) > 0 {
 		insecure = allowInsecure[0]

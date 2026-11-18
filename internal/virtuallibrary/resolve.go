@@ -102,6 +102,11 @@ func PersistedCandidateIdentityFromContext(ctx context.Context) (PersistedCandid
 
 type persistedCandidateTrustContextKey struct{}
 
+// persistedCandidateTrustSuppressedContextKey marks a resolve whose caller has
+// deliberately dropped the trust for a delisted automatic selection, so a seam
+// that recomputes trust per candidate cannot put it back.
+type persistedCandidateTrustSuppressedContextKey struct{}
+
 // WithPersistedCandidateTrust marks a resolve as allowed to keep trusting the
 // persisted candidate even when the provider's current list omits it. The caller
 // sets it only when the catalog row is inside the configured candidate store
@@ -131,6 +136,31 @@ func persistedCandidateTrustFromContext(ctx context.Context) bool {
 	return trusted
 }
 
+// WithoutPersistedCandidateTrust clears the trust flag on a resolve and keeps any
+// inner seam from re-establishing it (the handler recomputes trust per candidate
+// from the row, so a cleared flag alone would be re-threaded on the next
+// attempt). It is the escape hatch for the one caller that may replace a trusted
+// pin: an automatic selection whose candidate is gone from the listing and
+// cannot be re-served from its own stored URL (see the replan rehydration). An
+// explicit pick never clears it.
+func WithoutPersistedCandidateTrust(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	ctx = context.WithValue(ctx, persistedCandidateTrustContextKey{}, false)
+	return context.WithValue(ctx, persistedCandidateTrustSuppressedContextKey{}, true)
+}
+
+// persistedCandidateTrustSuppressed reports whether a resolve must not
+// re-establish trust for the persisted candidate.
+func persistedCandidateTrustSuppressed(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	suppressed, _ := ctx.Value(persistedCandidateTrustSuppressedContextKey{}).(bool)
+	return suppressed
+}
+
 // PersistedCandidateTrusted reports whether a resolve was marked to keep
 // trusting a persisted same-identity candidate inside the candidate store
 // window. It is the read counterpart of WithPersistedCandidateTrust for callers
@@ -138,6 +168,13 @@ func persistedCandidateTrustFromContext(ctx context.Context) bool {
 // server-internal and never client-visible.
 func PersistedCandidateTrusted(ctx context.Context) bool {
 	return persistedCandidateTrustFromContext(ctx)
+}
+
+// PersistedCandidateTrustSuppressed reports whether the caller dropped the trust
+// for this resolve (see WithoutPersistedCandidateTrust). Seams that recompute
+// trust per candidate read it so a degraded automatic selection stays rotatable.
+func PersistedCandidateTrustSuppressed(ctx context.Context) bool {
+	return persistedCandidateTrustSuppressed(ctx)
 }
 
 // providerOutageRelistContextKey marks a resolve as a retry of a transient

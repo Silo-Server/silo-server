@@ -2572,7 +2572,17 @@ func (h *PlaybackHandler) resolveRehydratedVirtualSourceWithAttemptV3(
 	chainIdentity := virtualRotationExclusionIdentity(pinnedFile)
 	excludedCandidateIDs = h.unionVirtualRotationExclusionsWithRecord(excludedCandidateIDs, pinnedFile, chainIdentity, record)
 	resolved, err := h.resolveVirtualPlaybackSource(r, pinnedFile, profileID, false, excludedCandidateIDs, preferredCandidateID, qualityPreference, bandwidthCapKbps, false, opts)
-	if err == nil || opts.rotateCandidates || !isRehydratedVirtualSourceRotatableV3(err) {
+	// A trusted pin absent from the listing is normally a refusal: the resolver
+	// will not stand a sibling in for the persisted candidate. That is right for
+	// an explicit pick, which the viewer chose. An automatic selection chose
+	// nothing, and the trust window keys on the row's own updated_at rather than
+	// on the listing, so a candidate dropped today stays "trusted" for up to
+	// candidate_store_hours: every replan refuses, forever, and the viewer sits
+	// on a retry loop with no way out. Once the bounded forced relist below has
+	// also failed, the pin degrades to rotatable — but only for an automatic
+	// selection; an explicit pin keeps the refusal.
+	autoTrustedPin := !h.explicitVirtualPinV3(record) && errors.Is(err, virtuallibrary.ErrPersistedCandidateTrusted)
+	if err == nil || opts.rotateCandidates || (!isRehydratedVirtualSourceRotatableV3(err) && !autoTrustedPin) {
 		return resolved, err
 	}
 	if len(excludedCandidateIDs) == 0 {
@@ -2582,6 +2592,9 @@ func (h *PlaybackHandler) resolveRehydratedVirtualSourceWithAttemptV3(
 	}
 	rotatedOpts := opts
 	rotatedOpts.rotateCandidates = true
+	// Set when the pin was degraded from trusted to rotatable for an automatic
+	// selection; the same-release assertion below stands down for it.
+	degradedToRotatable := false
 	// Thread the anchor's durable identity so the resolver can re-identify a
 	// renumbered same-release candidate rather than mistake it for a sibling.
 	// A row with no durable identity is unchanged and the assertion below then
@@ -2592,6 +2605,21 @@ func (h *PlaybackHandler) resolveRehydratedVirtualSourceWithAttemptV3(
 	// the same release the session is actually serving.
 	retryReq := r.WithContext(virtualResolveContextWithPersistedIdentity(r.Context(), pinnedFile))
 	rotated, rotateErr := h.resolveVirtualPlaybackSource(retryReq, pinnedFile, profileID, false, excludedCandidateIDs, preferredCandidateID, qualityPreference, bandwidthCapKbps, true, rotatedOpts)
+	if rotateErr != nil && autoTrustedPin {
+		// The bounded forced relist ran and still does not carry the pin: the
+		// listing is answering, and the pin is simply gone. Clear the trust so
+		// the resolver serves a live sibling instead of refusing again, which is
+		// what an automatic selection does once the trust window lapses. The
+		// row's own stored URL was already tried by the resolve above, so there
+		// is nothing left to re-serve.
+		slog.WarnContext(r.Context(), "trusted pin could not be relisted; rotating an automatic selection",
+			"component", "api", "session_anchor", pinnedFile.FilePath,
+			"status", "trusted_pin_degraded", "old_candidate_id", virtualResultCandidateID(pinnedFile.FilePath),
+			"error", logredact.SanitizeURLError(rotateErr))
+		degradedReq := retryReq.WithContext(virtuallibrary.WithoutPersistedCandidateTrust(retryReq.Context()))
+		rotated, rotateErr = h.resolveVirtualPlaybackSource(degradedReq, pinnedFile, profileID, false, excludedCandidateIDs, preferredCandidateID, qualityPreference, bandwidthCapKbps, true, rotatedOpts)
+		degradedToRotatable = rotateErr == nil
+	}
 	if rotateErr != nil {
 		slog.WarnContext(r.Context(), "virtual replan candidate rotation failed",
 			"component", "api", "session_anchor", pinnedFile.FilePath,
@@ -2606,8 +2634,10 @@ func (h *PlaybackHandler) resolveRehydratedVirtualSourceWithAttemptV3(
 	// Same-release assertion, mirroring the transport anchor refusal. A
 	// rotation that resolves a genuinely different release must not anchor the
 	// rehydrated plan on sibling bytes; return the original absent/marked-failed
-	// cause so the caller keeps its terminal/rotation policy.
-	if !rotated.IdentityRematched && !rehydratedMatchesPersistedIdentity(rotated, pinnedFile) {
+	// cause so the caller keeps its terminal/rotation policy. A pin that just
+	// degraded for an automatic selection is the exception: the different
+	// release is the point, and the viewer never chose the dead one.
+	if !degradedToRotatable && !rotated.IdentityRematched && !rehydratedMatchesPersistedIdentity(rotated, pinnedFile) {
 		slog.WarnContext(r.Context(), "virtual replan candidate rotation resolved a different release; refusing a silent release swap",
 			"component", "api", "session_anchor", pinnedFile.FilePath,
 			"status", "rotation_refused", "old_candidate_id", virtualResultCandidateID(pinnedFile.FilePath),
@@ -4174,7 +4204,24 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 				// the verdict is unknowable, so stop instead of rotating.
 				return resolvedVirtualPlaybackSource{}, err
 			}
-			if err != nil && errors.Is(err, virtuallibrary.ErrPersistedCandidateTrusted) {
+			if err != nil && errors.Is(err, virtuallibrary.ErrPersistedCandidateTrusted) && !explicitSelection {
+				// Inside the trust window a delisted persisted candidate is still
+				// treated as the selection, which is right for an explicit pick:
+				// the viewer chose this release and a sibling must not replace it.
+				// For an auto selection the pin is not a choice. The trust window
+				// keys on the row's own updated_at, not on presence in the
+				// listing, so a candidate dropped today stays "trusted" for up to
+				// candidate_store_hours and the start has no way out: the listing
+				// already answered (this resolve listed the provider), the row's
+				// own stored URL was already tried and is unusable, and every
+				// remaining candidate is refused by this same rule. Degrade the
+				// pin to rotatable so the loop tries the next release, exactly as
+				// it would once the window lapsed.
+				slog.WarnContext(r.Context(), "auto-selected virtual candidate is delisted and has no usable stored URL; rotating",
+					"component", "api", "signal", "trusted_pin_rotated_for_auto_selection",
+					"file_id", file.ID, "candidate_uri", candidate.URI,
+					"error", logredact.SanitizeURLError(err))
+			} else if err != nil && errors.Is(err, virtuallibrary.ErrPersistedCandidateTrusted) {
 				// Inside the trust window a delisted persisted candidate is
 				// still the viewer's selection. Stop instead of substituting a
 				// sibling the loop would otherwise try next.
