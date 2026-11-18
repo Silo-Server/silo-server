@@ -807,6 +807,12 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
+	// A DLNA controller checks the URL with HEAD before handing it to a TV.
+	// Like Jellyfin's, that HEAD starts nothing; the GET that follows does.
+	if r.Method == http.MethodHead {
+		h.headMasterManifest(w, r, playSession, source.FileID)
+		return
+	}
 	// Attach BEFORE ensureUpstreamPlayback below: this route can start a
 	// transcode before it writes a byte, which is the whole reason §4.2 enrolls
 	// manifest routes. A cut has to be able to act here, not after the side
@@ -1436,6 +1442,32 @@ func (h *PlaybackHandler) remoteCompatDenied(ctx context.Context, playSession *P
 	}
 	sessionID := playSession.Recipe.SessionID
 	return sessionID != "" && sessionID != transportID && h.StreamDeny.Denied(ctx, sessionID)
+}
+
+// headMasterManifest answers a HEAD on a master playlist without starting
+// playback: 410 when the play's upstream session was denied, 404 for a missing
+// file, a retryable 503 when the file lookup fails, and otherwise the
+// playlist's headers with no body.
+func (h *PlaybackHandler) headMasterManifest(w http.ResponseWriter, r *http.Request, playSession *PlaybackSession, fileID int) {
+	if h.remoteCompatDenied(r.Context(), playSession) {
+		writeCompatSessionEnded(w)
+		return
+	}
+	if h.fileResolver == nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
+		return
+	}
+	if _, err := h.fileResolver.GetByID(r.Context(), fileID); errors.Is(err, scanner.ErrFileNotFound) {
+		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		return
+	} else if err != nil {
+		// A failed lookup says nothing about the file; the controller may retry.
+		writeSessionCheckUnavailable(w)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.WriteHeader(http.StatusOK)
 }
 
 // writeCompatSessionEnded answers a relay request for a denied session: 410,
