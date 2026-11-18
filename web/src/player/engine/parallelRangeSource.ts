@@ -360,18 +360,18 @@ export class ParallelRangeSource extends InternalUrlSource {
           failures = await this.failed(failures, error, url, signal, onStripe);
           continue;
         }
-        // Any answer from the stripe URL that is not a readable 206 is the stripe URL failing:
-        // a refusal there says nothing about the plan's URL.
-        if (
-          onStripe &&
-          (response.status !== 206 ||
-            !CONTENT_RANGE.test(response.headers.get("Content-Range") ?? ""))
-        ) {
+        let responseEnd: number;
+        try {
+          responseEnd = this.checkResponse(response, position, range.end) + 1;
+        } catch (error) {
+          // Any answer from the stripe URL that is not a readable 206 for these bytes of this
+          // file is the stripe URL failing: a refusal there says nothing about the plan's URL,
+          // which serves the range and is checked the same way.
+          if (!onStripe) throw error;
           void response.body?.cancel().catch(() => {});
           this.stripeFailed = true;
           continue;
         }
-        const responseEnd = this.checkResponse(response, position, range.end) + 1;
         if (!response.body) {
           throw new Error(
             "Missing HTTP response body stream. The used fetch function must provide the response body as a ReadableStream.",

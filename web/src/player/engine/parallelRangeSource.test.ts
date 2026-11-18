@@ -599,6 +599,11 @@ describe("ParallelRangeSource failures", () => {
     ["a 502", { kind: "status", status: 502 }],
     ["a 404", { kind: "status", status: 404 }],
     ["a Content-Range without the file's size", { kind: "contentRange", value: "bytes 0-1/*" }],
+    [
+      "a Content-Range that names other bytes",
+      { kind: "contentRange", value: `bytes 1-2/${SIZE}` },
+    ],
+    ["a Content-Range that names another file size", { kind: "total", total: SIZE + 1 }],
     ["a network error", { kind: "fetchError" }],
     ["a body-read error", { kind: "bodyError", afterBytes: 512 * KIB }],
     ["a short body", { kind: "short", bytes: 256 * KIB }],
