@@ -78,26 +78,6 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 		}
 	})
 
-	// A server whose timer was due seconds after the winner's, across a slot
-	// boundary, and that reaches the claim long after the window has passed
-	// by the clock, is still measured from when its firing was due.
-	t.Run("interval server stalled past the window", func(t *testing.T) {
-		key := newKey("stalled")
-		hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: time.Hour.Milliseconds()}
-		boundary := now.Truncate(time.Hour).Add(-2 * time.Hour)
-		winnerDue := boundary.Add(-2 * time.Second)
-		slot, _, _ := taskmanager.FiringSlot(hourly, winnerDue)
-		if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at) VALUES ($1, $2, $3, $3::timestamptz + interval '8 days')`, key, slot, winnerDue); err != nil {
-			t.Fatal(err)
-		}
-		if claim(t, key, hourly, boundary.Add(3*time.Second)) {
-			t.Fatal("a stalled server ran a firing another server already claimed")
-		}
-		if !claim(t, key, hourly, boundary.Add(time.Hour)) {
-			t.Fatal("the next interval's firing must be claimable")
-		}
-	})
-
 	t.Run("startup once per cluster start", func(t *testing.T) {
 		key := newKey("startup")
 		startup := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeStartup}
@@ -139,4 +119,39 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 			t.Fatal("the live task's prune dropped a monthly claim aged past eight days but inside its window")
 		}
 	})
+}
+
+// A server whose timer was due seconds after the winner's, across a slot
+// boundary, and that reaches the claim long after the window has passed by
+// the clock, is still measured from when its firing was due.
+func TestPgFiringClaimsMeasureAStalledServerFromItsDueTimeDB(t *testing.T) {
+	pool := taskHistoryTestPool(t)
+	ctx := context.Background()
+	claims := NewPgFiringClaims(pool)
+	key := fmt.Sprintf("plugin:test:%s_%d", t.Name(), time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM task_firing_claims WHERE task_key = $1`, key)
+	})
+	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: time.Hour.Milliseconds()}
+	claim := func(due time.Time) bool {
+		t.Helper()
+		slot, window, _ := taskmanager.FiringSlot(hourly, due)
+		won, err := claims.ClaimFiring(ctx, key, slot, window, due)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return won
+	}
+	boundary := time.Now().Truncate(time.Hour).Add(-2 * time.Hour)
+	winnerDue := boundary.Add(-2 * time.Second)
+	slot, _, _ := taskmanager.FiringSlot(hourly, winnerDue)
+	if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at) VALUES ($1, $2, $3, $3::timestamptz + interval '8 days')`, key, slot, winnerDue); err != nil {
+		t.Fatal(err)
+	}
+	if claim(boundary.Add(3 * time.Second)) {
+		t.Fatal("a stalled server ran a firing another server already claimed")
+	}
+	if !claim(boundary.Add(time.Hour)) {
+		t.Fatal("the next interval's firing must be claimable")
+	}
 }
