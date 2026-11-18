@@ -97,8 +97,10 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * and Navigation & Cards screens, which already edit them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
+ * `playback.next_up_enabled` stays off until the web player applies it.
  */
 const HIDDEN_KEYS = new Set<string>([
+  "playback.next_up_enabled",
   "ui.app_language",
   "ui.theme",
   "ui.text_scale",
