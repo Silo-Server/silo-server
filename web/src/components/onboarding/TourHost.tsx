@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { onlineManager } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import {
   Bell,
@@ -22,8 +23,16 @@ import { useAuth } from "@/hooks/useAuth";
 import { useOnboardingProgress } from "@/hooks/queries/onboarding";
 import { useUpdateProfile } from "@/hooks/queries/profiles";
 import { settingValueFromString } from "@/hooks/queries/admin/users";
-import { useSetSettingValue, type SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
+import {
+  isDefinitiveSettingMutationRejection,
+  useSetSettingValue,
+  type SettingIdentity,
+} from "@/hooks/queries/settingValues";
+import {
+  reportOfflineSettingFailure,
+  SettingWriteOfflineError,
+  useShowThenSave,
+} from "@/hooks/queries/settingWriteOffline";
 import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
@@ -342,43 +351,53 @@ function SettingControl({ step }: { step: OnboardingStep }) {
       ? ((profile as unknown as Record<string, unknown>)[spec.key] as string | undefined)
       : undefined;
   const [value, setValue] = useState<string>(currentValue || spec.default || "");
-  // The last choice known stored, which a failed offline save puts back; a
-  // choice still being saved is not one.
-  const stored = useRef(value);
+  const showThenSave = useShowThenSave(null);
 
   function save(next: string) {
-    setValue(next);
     if (spec.target === "profile_field") {
-      if (!profile) return;
-      updateProfile.mutate(
-        { id: profile.id, body: { [spec.key]: next } },
-        {
-          onSuccess: (updated) => selectProfile(updated, getProfileToken() ?? undefined),
-        },
-      );
+      if (!profile) {
+        setValue(next);
+        return;
+      }
+      showThenSave({
+        key: spec.key,
+        value: next,
+        previous: value,
+        show: setValue,
+        // Refused unsent while offline, like a setting write, so the choice
+        // can't be replayed later or land after a failure was shown.
+        save: (v) =>
+          onlineManager.isOnline()
+            ? updateProfile.mutateAsync(
+                { id: profile.id, body: { [spec.key]: v } },
+                { onSuccess: (updated) => selectProfile(updated, getProfileToken() ?? undefined) },
+              )
+            : Promise.reject(new SettingWriteOfflineError()),
+        // The mutation reports its own errors; a refusal never reached it.
+        unsaved: (error) =>
+          reportOfflineSettingFailure(error) || isDefinitiveSettingMutationRejection(error),
+      });
       return;
     }
     // "setting" and "device_setting" write the same canonical mutation; they
     // differ only in the scope the value is stored at.
     const identity: SettingIdentity =
       spec.target === "device_setting" ? { scope: "profile_device" } : { scope: "profile" };
-    // mutateAsync settles each save on its own; mutate's per-call callbacks run
-    // only for the newest call, so an earlier save that landed would be missed.
-    setSettingValue
-      .mutateAsync({
-        key: spec.key as SettingKey,
-        value: settingValueFromString(spec.key, next),
-        identity,
-      })
-      .then(
-        () => {
-          stored.current = next;
-        },
-        (error: unknown) => {
-          // Refused offline, nothing was stored, so show the stored choice again.
-          if (reportOfflineSettingFailure(error)) setValue(stored.current);
-        },
-      );
+    showThenSave({
+      key: spec.key,
+      value: next,
+      previous: value,
+      show: setValue,
+      // mutateAsync settles each save on its own; mutate's per-call callbacks
+      // run only for the newest call, so an earlier save that landed would be
+      // missed.
+      save: (v) =>
+        setSettingValue.mutateAsync({
+          key: spec.key as SettingKey,
+          value: settingValueFromString(spec.key, v),
+          identity,
+        }),
+    });
   }
 
   if (spec.control === "segmented") {
