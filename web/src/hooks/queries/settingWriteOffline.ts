@@ -93,6 +93,8 @@ interface UnsettledPreference {
   latest: object;
   /** The last value known stored, and its cache entry, to restore. */
   stored: { value: unknown; cached: string | null };
+  /** Whether a failure of the newest change already put back `stored`. */
+  restored?: boolean;
 }
 
 /**
@@ -125,7 +127,7 @@ export function useShowThenSave(cacheOwner: string | null) {
       const token = {};
       // Per owner: another profile's unsettled change says nothing about this one's.
       const entryKey = `${cacheOwner ?? ""}\u0000${key}`;
-      const pending = unsettled.current.get(entryKey) ?? {
+      const pending: UnsettledPreference = unsettled.current.get(entryKey) ?? {
         latest: token,
         stored: {
           value: previous,
@@ -141,12 +143,18 @@ export function useShowThenSave(cacheOwner: string | null) {
           // Even an older change that lands moves the value a failure restores.
           pending.stored = { value, cached: String(value) };
           if (pending.latest === token) unsettled.current.delete(entryKey);
+          // It landed after a newer change failed and put back an older value.
+          // With no change made since, show what is stored now.
+          if (!pending.restored || unsettled.current.has(entryKey)) return;
+          if (currentOwner.current === cacheOwner) show(value);
+          if (cacheKey) appearanceCache.set(cacheKey, String(value), cacheOwner);
         },
         (error: unknown) => {
           // A newer change to this preference settles it instead.
           if (pending.latest !== token) return;
           unsettled.current.delete(entryKey);
           if (!unsaved(error)) return;
+          pending.restored = true;
           if (currentOwner.current === cacheOwner) show(pending.stored.value as T);
           // The cache is the original owner's either way, read on its next load.
           if (!cacheKey) return;

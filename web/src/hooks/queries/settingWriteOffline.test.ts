@@ -32,8 +32,15 @@ describe("useShowThenSave after an online failure", () => {
     appearanceCache.set(CACHE_KEY, "normal", null);
   });
 
-  /** Makes each change in turn, then settles their saves in order: an Error rejects. */
-  async function change(values: string[], outcomes: unknown[]) {
+  /**
+   * Makes each change in turn, then settles save i with outcomes[i] (an Error
+   * rejects), in the given order of indexes or else in order.
+   */
+  async function change(
+    values: string[],
+    outcomes: unknown[],
+    order: Iterable<number> = outcomes.keys(),
+  ) {
     const settles: Array<(outcome: unknown) => void> = [];
     const { result } = renderHook(() => useShowThenSave(null));
     let current = "normal";
@@ -52,8 +59,8 @@ describe("useShowThenSave after an online failure", () => {
           ),
       });
     }
-    for (const [i, outcome] of outcomes.entries()) {
-      settles[i]!(outcome);
+    for (const i of order) {
+      settles[i]!(outcomes[i]);
       await settled();
     }
     return { shown: current, cached: appearanceCache.get(CACHE_KEY, null) };
@@ -77,6 +84,13 @@ describe("useShowThenSave after an online failure", () => {
 
   it("puts back an earlier change that saved", async () => {
     expect(await change(["large", "x-large"], ["saved", REJECTED])).toEqual({
+      shown: "large",
+      cached: "large",
+    });
+  });
+
+  it("shows an earlier change that saved after a newer one was rejected", async () => {
+    expect(await change(["large", "x-large"], ["saved", problem(429)], [1, 0])).toEqual({
       shown: "large",
       cached: "large",
     });
