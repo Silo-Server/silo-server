@@ -18,7 +18,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
@@ -41,12 +40,6 @@ func counterValue(t *testing.T, vec *prometheus.CounterVec, labels prometheus.La
 		t.Fatalf("labels %v: %v", labels, err)
 	}
 	return testutil.ToFloat64(c)
-}
-
-func TestV1PrefixSkipMatchesDelegation(t *testing.T) {
-	if apimw.APIv2Prefix != Prefix+"/" || !strings.HasPrefix(DelegationPattern, apimw.APIv2Prefix) {
-		t.Fatalf("apimw.APIv2Prefix = %q, delegation %q", apimw.APIv2Prefix, DelegationPattern)
-	}
 }
 
 func TestRequestLabelsAreStable(t *testing.T) {

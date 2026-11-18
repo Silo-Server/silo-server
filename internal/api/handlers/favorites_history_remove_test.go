@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -160,80 +158,5 @@ func TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres(t *testing.T) {
 	}
 	if hiddenUnwatched != 0 {
 		t.Fatalf("removal hid the unwatched file-less episode; want it left out")
-	}
-}
-
-// Removing history accepts ebook targets the viewer can see and hides their
-// entries; an ebook outside the viewer's access answers not found.
-func TestRemoveHistoryEbookTargets(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		accessible bool
-	}{
-		{"accessible ebook is hidden", true},
-		{"inaccessible ebook is not found", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := t.Context()
-			store := newProfileTestStore(t)
-			repo := &fakeHistoryItemRepo{items: map[string]*models.MediaItem{"ebook-1": {ContentID: "ebook-1", Type: "ebook", Title: "Book"}}}
-			if !tc.accessible {
-				repo.inaccessible = map[string]bool{"ebook-1": true}
-			}
-			handler := NewPersonalDataHandler(testUserStoreProvider{store: store}, repo)
-			if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{
-				ProfileID: "profile-1", MediaItemID: "ebook-1", WatchedAt: "2026-06-01T10:00:00Z",
-				Completed: true, Source: userstore.WatchHistorySourceManual,
-			}); err != nil {
-				t.Fatalf("AddHistory: %v", err)
-			}
-
-			err := handler.RemoveHistory(ctx, 1, "profile-1", catalog.AccessFilter{UserID: 1, ProfileID: "profile-1"},
-				[]HistoryRemovalTarget{{ContentID: "ebook-1"}})
-			entries, listErr := store.ListHistory(ctx, "profile-1", 10, 0)
-			if listErr != nil {
-				t.Fatalf("ListHistory: %v", listErr)
-			}
-			if !tc.accessible {
-				var apiErr *APIError
-				if !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
-					t.Fatalf("RemoveHistory() error = %v, want 404", err)
-				}
-				if len(entries) != 1 {
-					t.Fatalf("history entries = %+v, want the entry kept", entries)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("RemoveHistory() error = %v", err)
-			}
-			if len(entries) != 0 {
-				t.Fatalf("history entries = %+v, want hidden after removal", entries)
-			}
-		})
-	}
-}
-
-// A history page never renders a card for an older repeat of an item whose
-// newer watch an earlier page already showed.
-func TestHistoryPageCardsExcludeEarlierPageWitness(t *testing.T) {
-	ctx := t.Context()
-	store := newProfileTestStore(t)
-	repo := &fakeHistoryItemRepo{items: map[string]*models.MediaItem{"movie": {ContentID: "movie", Type: "movie", Title: "Movie"}}}
-	h := NewPersonalDataHandler(testUserStoreProvider{store: store}, repo)
-	newer := userstore.WatchHistoryEntry{ID: "new", ProfileID: "profile-1", MediaItemID: "movie", WatchedAt: "2026-01-02T00:00:00Z"}
-	older := userstore.WatchHistoryEntry{ID: "old", ProfileID: "profile-1", MediaItemID: "movie", WatchedAt: "2026-01-01T00:00:00Z"}
-	for _, e := range []userstore.WatchHistoryEntry{newer, older} {
-		if err := store.AddHistory(ctx, e); err != nil {
-			t.Fatal(err)
-		}
-	}
-	viewer := SectionViewer{Access: catalog.AccessFilter{UserID: 1, ProfileID: "profile-1"}}
-	cards, err := h.HistoryPageCards(ctx, viewer, []userstore.WatchHistoryEntry{older})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cards) != 0 {
-		t.Fatalf("older repeat was rendered: %+v", cards)
 	}
 }

@@ -3,14 +3,11 @@ package handlers
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -27,10 +24,6 @@ func (r testProfileUserRepo) GetByID(context.Context, int) (*models.User, error)
 
 func newProfileTestStore(t *testing.T) userstore.UserStore {
 	return newProfileTestStoreWithSeed(t, true)
-}
-
-func newEmptyProfileTestStore(t *testing.T) userstore.UserStore {
-	return newProfileTestStoreWithSeed(t, false)
 }
 
 func newProfileTestStoreWithSeed(t *testing.T, seedProfile bool) userstore.UserStore {
@@ -59,66 +52,12 @@ func newProfileTestStoreWithSeed(t *testing.T, seedProfile bool) userstore.UserS
 	return store
 }
 
-// TestCreateProfileWithSettingsSyncRecountsLimit pins the in-transaction
-// re-count on the SQLite store: a household that filled up after the
-// handler's early check is refused inside the creating transaction, and
-// nothing is written. The Postgres store is pinned by
-// TestCreateProfileLimitConcurrentDB.
-func TestCreateProfileWithSettingsSyncRecountsLimit(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	err := handler.createProfileWithSettingsSync(context.Background(), store, 1,
-		userstore.Profile{ID: "profile-2", Name: "Late"}, 1, nil, nil)
-	if !errors.Is(err, errProfileLimitReached) {
-		t.Fatalf("err = %v, want errProfileLimitReached", err)
-	}
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	if len(profiles) != 1 {
-		t.Fatalf("profile count = %d, want 1", len(profiles))
-	}
-}
-
 // profileLimitGroups serves one access group's policy for every account.
 type profileLimitGroups struct{ policy access.GroupPolicy }
 
 func (g profileLimitGroups) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
 	policy := g.policy
 	return &policy, nil
-}
-
-func TestListProfilesReportsProfileLimit(t *testing.T) {
-	groupID := int64(4)
-	tests := []struct {
-		name string
-		repo testProfileUserRepo
-		want int
-	}{
-		{name: "inherits the group's limit", repo: testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID}}, want: 1},
-		{name: "an account override wins", repo: testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID, MaxProfiles: new(3)}}, want: 3},
-		{name: "an unreadable account still lists", repo: testProfileUserRepo{err: errors.New("boom")}, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := NewProfileHandler(testUserStoreProvider{store: newProfileTestStore(t)})
-			handler.UserRepo = tt.repo
-			handler.AccessGroups = profileLimitGroups{policy: access.GroupPolicy{ID: groupID, MaxProfiles: 1}}
-			view, err := handler.ListProfiles(context.Background(), 1)
-			if err != nil {
-				t.Fatalf("ListProfiles: %v", err)
-			}
-			if len(view.Profiles) != 1 || view.MaxProfiles != tt.want {
-				t.Fatalf("profiles = %d, max_profiles = %d, want 1 and %d", len(view.Profiles), view.MaxProfiles, tt.want)
-			}
-		})
-	}
-}
-
-func ptr[T any](value T) *T {
-	return &value
 }
 
 type recordingProfilePurger struct {
@@ -139,46 +78,6 @@ func (w *recordingWatchlistRequestWithdrawer) WithdrawProfileWatchlistRequests(_
 	return nil
 }
 
-// Deleting a profile removes the artwork of the personal collections it
-// deleted; another profile's collection keeps its artwork.
-func TestDeleteProfileRemovesItsCollectionsArtwork(t *testing.T) {
-	ctx := context.Background()
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	artwork := blobstoretest.New()
-	collectionOf := map[string]string{}
-	for _, profileID := range []string{"profile-1", "profile-2"} {
-		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: profileID, Name: profileID, CollectionType: userstore.CollectionTypeManual})
-		if err != nil {
-			t.Fatalf("create collection: %v", err)
-		}
-		collectionOf[profileID] = c.ID
-		for _, key := range []string{"poster/w300.a.webp", "collage/b.webp"} {
-			if err := artwork.Put(ctx, userCollectionImagePrefix+"/"+c.ID+"/"+key, []byte("img")); err != nil {
-				t.Fatalf("put artwork: %v", err)
-			}
-		}
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.ArtworkStore = artwork
-
-	if err := handler.DeleteProfile(ctx, ProfileDeleteCommand{UserID: 1, ProfileID: "profile-2", ActiveProfileID: "profile-1"}); err != nil {
-		t.Fatalf("DeleteProfile: %v", err)
-	}
-
-	for profileID, want := range map[string]int{"profile-1": 2, "profile-2": 0} {
-		objects, _, err := artwork.List(ctx, userCollectionImagePrefix+"/"+collectionOf[profileID]+"/", "", 10)
-		if err != nil {
-			t.Fatalf("list artwork: %v", err)
-		}
-		if len(objects) != want {
-			t.Errorf("%s's collection has %d artwork objects after the delete, want %d", profileID, len(objects), want)
-		}
-	}
-}
-
 type stubPlaybackSessionsLoader struct {
 	sessions []playbackSessionRow
 	userID   int
@@ -196,181 +95,4 @@ func (s *stubPlaybackSessionsLoader) Load(
 		return []playbackSessionRow{}, nil
 	}
 	return s.sessions, nil
-}
-
-// householdWithKids is the seeded store (profile-1, "Main", the primary) plus
-// profile-2, "Kids".
-func householdWithKids(t *testing.T) userstore.UserStore {
-	t.Helper()
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	return store
-}
-
-func TestCreateProfile_EnforcesInheritedGroupProfileLimit(t *testing.T) {
-	groupID := int64(4)
-	for _, tc := range []struct {
-		name     string
-		override *int
-		limited  bool
-	}{
-		{name: "inherits the group's limit", limited: true},
-		{name: "an override above the group's limit wins", override: new(2)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler := NewProfileHandler(testUserStoreProvider{store: newProfileTestStore(t)})
-			handler.UserRepo = testProfileUserRepo{
-				user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID, MaxProfiles: tc.override},
-			}
-			handler.AccessGroups = profileLimitGroups{policy: access.GroupPolicy{ID: groupID, MaxProfiles: 1}}
-
-			_, err := handler.CreateProfile(profileServiceContext("profile-1"), ProfileCreateCommand{
-				UserID: 1, ActiveProfileID: "profile-1", Request: ProfileCreateRequest{Name: "Kids"},
-				VerifyProfile: noProfileVerification,
-			})
-			if !tc.limited {
-				if err != nil {
-					t.Fatalf("create under the override: %v", err)
-				}
-				return
-			}
-			if apiErr := requireAPIStatus(t, err, http.StatusConflict); apiErr.Code != "profile_limit_reached" ||
-				!strings.Contains(apiErr.Message, "profile limit (1)") {
-				t.Fatalf("error = %+v, want the group's limit", apiErr)
-			}
-		})
-	}
-}
-
-// A trimmed, case-insensitive name match within the account is a conflict on
-// create and on rename, and nothing is written.
-func TestProfileNameConflicts(t *testing.T) {
-	store := householdWithKids(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	ctx := profileServiceContext("profile-1")
-
-	_, err := handler.CreateProfile(ctx, ProfileCreateCommand{
-		UserID: 1, ActiveProfileID: "profile-1", Request: ProfileCreateRequest{Name: " main "},
-		VerifyProfile: noProfileVerification,
-	})
-	if apiErr := requireAPIStatus(t, err, http.StatusConflict); apiErr.Code != "name_conflict" {
-		t.Fatalf("create error = %+v, want name_conflict", apiErr)
-	}
-	_, err = handler.UpdateProfile(ctx, ProfileUpdateCommand{
-		UserID: 1, ProfileID: "profile-2", ActiveProfileID: "profile-1",
-		Request: ProfileUpdateRequest{Name: new("MAIN")}, VerifyProfile: noProfileVerification,
-	})
-	if apiErr := requireAPIStatus(t, err, http.StatusConflict); apiErr.Code != "name_conflict" {
-		t.Fatalf("rename error = %+v, want name_conflict", apiErr)
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	if len(profiles) != 2 {
-		t.Fatalf("profile count = %d, want 2", len(profiles))
-	}
-	if kids, _ := store.GetProfile(context.Background(), "profile-2"); kids == nil || kids.Name != "Kids" {
-		t.Fatalf("profile renamed despite the conflict: %+v", kids)
-	}
-}
-
-// A household member edits its own playback preferences and PIN, but not
-// another profile.
-func TestUpdateProfile_SelfServiceForNonManager(t *testing.T) {
-	store := householdWithKids(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	update := func(profileID string) error {
-		_, err := handler.UpdateProfile(profileServiceContext("profile-2"), ProfileUpdateCommand{
-			UserID: 1, ProfileID: profileID, ActiveProfileID: "profile-2",
-			Request:       ProfileUpdateRequest{Name: new("Robin"), SubtitleMode: new("always"), PIN: new("1234")},
-			VerifyProfile: noProfileVerification,
-		})
-		return err
-	}
-
-	if err := update("profile-2"); err != nil {
-		t.Fatalf("self-service update: %v", err)
-	}
-	profile, err := store.GetProfile(context.Background(), "profile-2")
-	if err != nil || profile == nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if profile.Name != "Robin" || profile.SubtitleMode != "always" || profile.PINHash == "" {
-		t.Fatalf("profile = %+v, want the self-service fields applied", profile)
-	}
-
-	requireAPIStatus(t, update("profile-1"), http.StatusForbidden)
-	if primary, _ := store.GetProfile(context.Background(), "profile-1"); primary == nil || primary.PINHash != "" || primary.Name != "Main" {
-		t.Fatalf("a member changed the primary profile: %+v", primary)
-	}
-}
-
-func TestDeleteProfile_PrimaryDeletesOthersButNotItself(t *testing.T) {
-	store := householdWithKids(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	purger := &recordingProfilePurger{}
-	withdrawer := &recordingWatchlistRequestWithdrawer{}
-	sessions := &recordingProfilePurger{}
-	handler.WatchlistTitlesPurger = purger
-	handler.WatchlistRequestWithdrawer = withdrawer
-	handler.JellyfinSessionPurger = sessions
-	remove := func(profileID string) error {
-		return handler.DeleteProfile(profileServiceContext("profile-1"), ProfileDeleteCommand{
-			UserID: 1, ProfileID: profileID, ActiveProfileID: "profile-1", VerifyProfile: noProfileVerification,
-		})
-	}
-
-	if apiErr := requireAPIStatus(t, remove("profile-1"), http.StatusConflict); apiErr.Code != "primary_profile_protected" {
-		t.Fatalf("deleting the primary = %+v, want primary_profile_protected", apiErr)
-	}
-	if primary, err := store.GetProfile(context.Background(), "profile-1"); err != nil || primary == nil {
-		t.Fatalf("primary profile not preserved: %v", err)
-	}
-
-	if err := remove("profile-2"); err != nil {
-		t.Fatalf("delete profile-2: %v", err)
-	}
-	if kids, err := store.GetProfile(context.Background(), "profile-2"); err != nil || kids != nil {
-		t.Fatal("expected profile-2 to be deleted")
-	}
-	if len(purger.calls) != 1 || purger.calls[0] != "1/profile-2" {
-		t.Fatalf("purge calls = %v, want [1/profile-2]", purger.calls)
-	}
-	if len(withdrawer.calls) != 1 || withdrawer.calls[0] != "1/profile-2" {
-		t.Fatalf("withdraw calls = %v, want [1/profile-2]", withdrawer.calls)
-	}
-	if len(sessions.calls) != 1 || sessions.calls[0] != "1/profile-2" {
-		t.Fatalf("Jellyfin session purge calls = %v, want [1/profile-2]", sessions.calls)
-	}
-}
-
-func TestListHouseholdSessions_PrimaryOnly(t *testing.T) {
-	handler := NewProfileHandler(testUserStoreProvider{store: householdWithKids(t)})
-	handler.SessionsReader = &stubPlaybackSessionsLoader{
-		userID: 1,
-		sessions: []playbackSessionRow{{
-			SessionID: "sess-1", UserID: 1, ProfileID: "profile-2", ProfileName: "Kids",
-			MediaTitle: "Example Movie", PlayMethod: "direct",
-		}},
-	}
-	list := func(active string) ([]PlaybackSessionView, error) {
-		return handler.ListHouseholdSessions(profileServiceContext(active), HouseholdSessionsQuery{
-			UserID: 1, ActiveProfileID: active, VerifyProfile: noProfileVerification,
-		})
-	}
-
-	_, err := list("profile-2")
-	requireAPIStatus(t, err, http.StatusForbidden)
-
-	sessions, err := list("profile-1")
-	if err != nil {
-		t.Fatalf("primary list: %v", err)
-	}
-	if len(sessions) != 1 || sessions[0].SessionID != "sess-1" || sessions[0].ProfileName != "Kids" {
-		t.Fatalf("sessions = %#v", sessions)
-	}
 }

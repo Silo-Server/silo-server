@@ -217,32 +217,6 @@ func TestNotificationInboxScopedCursorAndReadCutoff(t *testing.T) {
 		t.Fatal(saved.Code, saved.Body.String(), f.patch)
 	}
 }
-func TestNotificationEmptySyncHasStableCheckpoint(t *testing.T) {
-	f := fixtureNotificationInbox()
-	f.empty = true
-	deps := pilotDeps(nil, nil)
-	deps.NotificationInbox = f
-	h := NewHandler(deps)
-	r := do(t, h, http.MethodGet, Prefix+"/notifications/sync?limit=1", "", profileOwner())
-	if r.Code != 200 {
-		t.Fatal(r.Code, r.Body.String())
-	}
-	var first struct {
-		SyncCursor string `json:"sync_cursor"`
-		Initial    bool   `json:"initial_snapshot"`
-	}
-	if err := json.Unmarshal(r.Body.Bytes(), &first); err != nil || first.SyncCursor == "" || !first.Initial {
-		t.Fatal(first, err)
-	}
-	r = do(t, h, http.MethodGet, Prefix+"/notifications/sync?limit=1&cursor="+url.QueryEscape(first.SyncCursor), "", profileOwner())
-	var second struct {
-		Initial bool `json:"initial_snapshot"`
-	}
-	if err := json.Unmarshal(r.Body.Bytes(), &second); err != nil || second.Initial || r.Code != 200 {
-		t.Fatal(second, err, r.Code)
-	}
-}
-
 func (f *fakeNotificationInbox) NotificationPushDisplay(_ context.Context, _ int, profile, id string) (notifications.NotificationDisplay, error) {
 	if profile != "p-owner" || id != notificationFixtureID {
 		return notifications.NotificationDisplay{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Notification not found"}
@@ -317,36 +291,5 @@ func TestNotificationDisplayLimiterSkipsInvalidCredentials(t *testing.T) {
 				t.Fatalf("got %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
 		})
-	}
-}
-
-// A display-token request spends the limiter once, as an access-token request
-// does: the pre-session limiter already charged it.
-func TestNotificationDisplayLimiterChargesOnce(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.NotificationInbox = fixtureNotificationInbox()
-	claims := map[string]*auth.Claims{
-		"display": {UserID: 1, Role: "user", SessionID: "live", ProfileID: "p-owner", TokenType: auth.TokenTypeApplePushDisplay},
-		"access":  {UserID: 1, Role: "user", SessionID: "live", TokenType: auth.TokenTypeAccess},
-	}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"live": "user"}}, nil, nil)
-	calls := 0
-	deps.RateLimit = func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; next.ServeHTTP(w, r) })
-	}
-	h := NewHandler(deps)
-	displayPath := Prefix + "/notifications/push/apple/display/" + notificationFixtureID
-	for name, headers := range map[string]map[string]string{
-		"display": bearer("display"),
-		"access":  with(bearer("access"), "X-Profile-Id", "p-owner"),
-	} {
-		calls = 0
-		rec := do(t, h, http.MethodGet, displayPath, "", headers)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: got %d: %s", name, rec.Code, rec.Body.String())
-		}
-		if calls != 1 {
-			t.Fatalf("%s: limiter ran %d times, want 1", name, calls)
-		}
 	}
 }

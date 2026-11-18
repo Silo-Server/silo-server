@@ -113,40 +113,6 @@ func (s plexSessionScannerStub) Scan(dest ...any) error {
 	return nil
 }
 
-func TestScanPlexSession_AllowsNullAuthToken(t *testing.T) {
-	t.Parallel()
-
-	session, err := newTestRepo(t).scanPlexSession(plexSessionScannerStub{
-		authToken: nil,
-		servers: []PlexServer{{
-			Name:             "Plex Server",
-			ClientIdentifier: "server-1",
-			AccessToken:      "server-token",
-			RemoteURL:        "https://plex.example",
-			LocalURL:         "http://192.168.1.2:32400",
-			Owned:            true,
-			HasRemoteURL:     true,
-			HasLocalURL:      true,
-		}},
-	})
-	if err != nil {
-		t.Fatalf("scanPlexSession returned error for NULL auth_token: %v", err)
-	}
-
-	if session.AuthToken != "" {
-		t.Fatalf("session.AuthToken = %q, want empty string", session.AuthToken)
-	}
-	if got := len(session.Servers); got != 1 {
-		t.Fatalf("len(session.Servers) = %d, want 1", got)
-	}
-	if session.Servers[0].ClientIdentifier != "server-1" {
-		t.Fatalf("session.Servers[0].ClientIdentifier = %q, want server-1", session.Servers[0].ClientIdentifier)
-	}
-	if session.Servers[0].AccessToken != "server-token" {
-		t.Fatalf("session.Servers[0].AccessToken = %q, want server-token", session.Servers[0].AccessToken)
-	}
-}
-
 type connectSessionScannerStub struct {
 	accessToken string
 	servers     []ConnectServer

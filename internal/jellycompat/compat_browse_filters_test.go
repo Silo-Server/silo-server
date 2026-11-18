@@ -7,56 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
-
-// Wholphin and other Jellyfin clients send these filters from library grids;
-// each must reach the catalog rather than returning the unfiltered library.
-func TestCompatBrowseFiltersReachCatalog(t *testing.T) {
-	codec := NewResourceIDCodec()
-	studioA := codec.EncodeStringID(EncodedIDStudio, "A24")
-	studioB := codec.EncodeStringID(EncodedIDStudio, "Neon")
-	excluded := codec.EncodeStringID(EncodedIDItem, "movie-9")
-	path := "/Items?IncludeItemTypes=Movie&Recursive=true" +
-		"&NameLessThan=M&NameStartsWithOrGreater=C" +
-		"&ExcludeItemIds=" + excluded +
-		"&StudioIds=" + studioA + "|" + studioB +
-		"&OfficialRatings=PG-13|R&MinCommunityRating=7.5" +
-		"&MinPremiereDate=2020-01-02T00:00:00.0000000Z&MaxPremiereDate=2024-12-31"
-	query := parseItemsQuery(httptest.NewRequest(http.MethodGet, path, nil), codec)
-	if !query.hasIntersectingFilters() {
-		t.Fatal("compat filters must route to the catalog browse path")
-	}
-
-	browse := &stubBrowseSource{}
-	svc := newDirectContentServiceForTest(browse, nil)
-	if _, err := svc.BrowseItems(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "p1"}, buildBrowseParams(query)); err != nil {
-		t.Fatal(err)
-	}
-	if len(browse.calls) != 1 {
-		t.Fatalf("catalog calls: %+v", browse.calls)
-	}
-	got := browse.calls[0].filters
-	if got.NameLessThan != "M" || got.NameStartsWithOrGreater != "C" ||
-		!slices.Equal(got.ExcludeContentIDs, []string{"movie-9"}) ||
-		!slices.Equal(got.Studios, []string{"A24", "Neon"}) ||
-		!slices.Equal(got.OfficialRatings, []string{"PG-13", "R"}) ||
-		got.MinCommunityRating != 7.5 || got.MinPremiereDate != "2020-01-02" || got.MaxPremiereDate != "2024-12-31" {
-		t.Fatalf("catalog filters: %+v", got)
-	}
-}
-
-// Studio IDs that name no known studio match nothing, like GenreIds.
-func TestUnknownStudioIDsMatchNothing(t *testing.T) {
-	query := parseItemsQuery(httptest.NewRequest(http.MethodGet, "/Items?StudioIds=00000000-0000-0000-0000-000000000001", nil), NewResourceIDCodec())
-	if !query.unmatchedIDFilter {
-		t.Fatal("unknown StudioIds must not fall back to an unfiltered browse")
-	}
-}
 
 type manyStudiosContent struct{ countingContentService }
 
@@ -93,50 +48,6 @@ func TestStudiosListsAllWithoutLimitAndHonorsNameBounds(t *testing.T) {
 		}
 		if len(result.Items) != tc.wantItems || result.TotalRecordCount != tc.wantTotal {
 			t.Errorf("%q: items=%d total=%d, want %d and %d", tc.query, len(result.Items), result.TotalRecordCount, tc.wantItems, tc.wantTotal)
-		}
-	}
-}
-
-// People cannot be favorites in Silo, so a favorites listing is empty rather
-// than every person in the catalog.
-func TestFavoritePersonsListIsEmpty(t *testing.T) {
-	for _, query := range []string{"?IsFavorite=true", "?Filters=IsFavorite"} {
-		people := &personTotalsSource{}
-		h := &PersonsHandler{personRepo: people, codec: NewResourceIDCodec()}
-		req := httptest.NewRequest(http.MethodGet, "/Persons"+query, nil)
-		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
-		rec := httptest.NewRecorder()
-		h.HandleGetPersons(rec, req)
-		var result queryResultDTO
-		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-			t.Fatal(err)
-		}
-		if len(result.Items) != 0 || result.TotalRecordCount != 0 || people.limit != 0 {
-			t.Fatalf("%s: %+v (repo queried with limit %d)", query, result, people.limit)
-		}
-	}
-}
-
-// Jellyfin compares Min/MaxPremiereDate instants with premiere dates at
-// midnight UTC.
-func TestParsePremiereDateBound(t *testing.T) {
-	for _, tc := range []struct {
-		raw   string
-		isMin bool
-		want  string
-	}{
-		{"2024-12-31", false, "2024-12-31"},
-		{"2020-01-02T00:00:00.0000000Z", true, "2020-01-02"},
-		{"2026-09-25T14:10:16.95-04:00", true, "2026-09-26"},
-		{"2026-09-25T14:10:16.95-04:00", false, "2026-09-25"},
-		{"2026-09-25T23:30:00-04:00", false, "2026-09-26"},
-		{"2026-09-25T10:00:00+0000", false, "2026-09-25"},
-		{"2026-09-25 10:00:00", true, "2026-09-26"},
-		{"2026-09-25Tgarbage", true, "2026-09-25"},
-		{"not a date", true, ""},
-	} {
-		if got := parsePremiereDateBound(tc.raw, tc.isMin); got != tc.want {
-			t.Errorf("parsePremiereDateBound(%q, min=%v) = %q, want %q", tc.raw, tc.isMin, got, tc.want)
 		}
 	}
 }

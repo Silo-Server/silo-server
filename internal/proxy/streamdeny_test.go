@@ -61,30 +61,6 @@ func TestStreamDenyRefusesTokenRoutesBeforeServing(t *testing.T) {
 	}
 }
 
-// The grant outlives the session it describes, so /stream/v3 needs the same
-// marker check — with the JSON error shape that route family answers with.
-func TestStreamDenyRefusesGrantRoutes(t *testing.T) {
-	path := writeGrantMedia(t, "0123456789")
-	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{
-		"session-1": {SessionID: "session-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: path},
-	})
-	deny := unreachableStreamDeny(t)
-	srv.SetStreamDeny(deny)
-	deny.Deny(t.Context(), "session-1")
-
-	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "login-1"))
-	if rr.Code != http.StatusGone {
-		t.Fatalf("status = %d, want 410 (body %s)", rr.Code, rr.Body.String())
-	}
-	var body grantErrorResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("error body %q is not the API's error shape: %v", rr.Body.String(), err)
-	}
-	if body.Error != "playback_session_ended" {
-		t.Fatalf("error code = %q, want playback_session_ended", body.Error)
-	}
-}
-
 // The relays, not the nodes, enforce the deny marker: every proxy route that
 // relays to a transcode node checks it before it signs the node request. A
 // denied session gets 410 although the node runtime is alive (its stop
@@ -161,5 +137,27 @@ func TestStreamDenyRefusesEveryTranscodeNodeRelay(t *testing.T) {
 	}
 	if got := nodeHits.Load(); got != served {
 		t.Fatalf("node hits = %d after the deny, want %d: a relay forwarded a denied session", got, served)
+	}
+}
+
+func TestStreamDenyRefusesGrantRoutes(t *testing.T) {
+	path := writeGrantMedia(t, "0123456789")
+	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{
+		"session-1": {SessionID: "session-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: path},
+	})
+	deny := unreachableStreamDeny(t)
+	srv.SetStreamDeny(deny)
+	deny.Deny(t.Context(), "session-1")
+
+	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "login-1"))
+	if rr.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410 (body %s)", rr.Code, rr.Body.String())
+	}
+	var body grantErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body %q is not the API's error shape: %v", rr.Body.String(), err)
+	}
+	if body.Error != "playback_session_ended" {
+		t.Fatalf("error code = %q, want playback_session_ended", body.Error)
 	}
 }

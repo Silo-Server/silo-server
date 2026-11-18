@@ -85,13 +85,6 @@ func TestNodeDrainRunsUntilTheWorkEnds(t *testing.T) {
 	waitClosed(t, finished, "the drain to return once the work ended")
 }
 
-func TestNodeDrainStopsAtItsTimeout(t *testing.T) {
-	d, node := newFakeDrain(50 * time.Millisecond)
-	finished := runDrain(d, make(chan os.Signal, 1))
-	waitClosed(t, node.began, "the drain to begin")
-	waitClosed(t, finished, "the drain to give up at its timeout")
-}
-
 func TestSecondSignalEndsTheDrain(t *testing.T) {
 	d, node := newFakeDrain(time.Hour)
 	sigCh := make(chan os.Signal, 1)

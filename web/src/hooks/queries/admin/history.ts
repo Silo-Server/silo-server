@@ -29,7 +29,7 @@ export interface AdminPlaybackHistoryParams {
  * filter and "all" both list every finalized attempt; an unset limit asks for
  * the v2 page ceiling so the views keep their single-page reading.
  */
-export function buildAdminPlaybackHistoryQuery(
+function buildAdminPlaybackHistoryQuery(
   params: AdminPlaybackHistoryParams,
 ): AdminPlaybackHistoryQuery {
   const query: AdminPlaybackHistoryQuery = {

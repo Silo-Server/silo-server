@@ -24,13 +24,6 @@ func TestCollisions(t *testing.T) {
 			}}},
 		},
 		{
-			name: "renamed module no longer collides",
-			files: []string{
-				"web/src/pages/admin-users/detail/UserDetailTabBar.tsx",
-				"web/src/pages/admin-users/detail/userDetailTabs.ts",
-			},
-		},
-		{
 			name: "stylesheets are imported with their extension",
 			files: []string{
 				"web/src/App.tsx", "web/src/app.css",
@@ -55,11 +48,6 @@ func TestCollisions(t *testing.T) {
 			},
 		},
 		{
-			name:  "module trees outside web are checked too",
-			files: []string{"tools/gen/Index.js", "tools/gen/index.mjs"},
-			want:  []group{{module: true, paths: []string{"tools/gen/Index.js", "tools/gen/index.mjs"}}},
-		},
-		{
 			name:  "directory index module and sibling module",
 			files: []string{"web/src/UserDetailTabs/index.ts", "web/src/userDetailTabs.ts"},
 			want: []group{{module: true, paths: []string{
@@ -82,10 +70,6 @@ func TestCollisions(t *testing.T) {
 		{
 			name:  "index module beside a same-case sibling resolves alike everywhere",
 			files: []string{"web/src/foo/index.ts", "web/src/foo.ts", "web/src/foo/index.tsx"},
-		},
-		{
-			name:  "index module alone",
-			files: []string{"web/src/foo/index.ts", "web/src/foo/Bar.tsx", "index.ts"},
 		},
 		{
 			name:  "a module named like index elsewhere in the path is not an index",

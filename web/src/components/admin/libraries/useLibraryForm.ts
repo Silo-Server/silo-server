@@ -28,7 +28,7 @@ export type LevelChainItem = {
 // plugin" empty state. Built-in host providers (NFO) appear in the server
 // response without any plugin installation, so this gate must not depend on
 // installed plugins.
-export function hasChainProviders(chains: Record<string, LevelChainItem[]>): boolean {
+function hasChainProviders(chains: Record<string, LevelChainItem[]>): boolean {
   return Object.values(chains).some((items) => items.length > 0);
 }
 
@@ -44,7 +44,7 @@ export interface UseLibraryFormOptions {
   resetAfterCreate?: boolean;
 }
 
-export function contentLevelsForType(libraryType: string): string[] {
+function contentLevelsForType(libraryType: string): string[] {
   switch (libraryType) {
     case "series":
       return ["series", "season", "episode"];
@@ -92,7 +92,7 @@ export function contentLevelLabel(level: string): string {
 // saved chain, or the server-computed defaults for a library type) into the
 // editor's per-level item lists, preserving server priority order with the
 // local metadata entry first, where the server always runs it.
-export function levelChainsFromResponse(
+function levelChainsFromResponse(
   response: LibraryProviderChainResponse | null | undefined,
 ): Record<string, LevelChainItem[]> {
   const mapped: Record<string, LevelChainItem[]> = {};
@@ -146,7 +146,7 @@ function withLocalFirst(items: LevelChainItem[], remote: LevelChainItem[]): Leve
 // mergeChainWithDefaults fills content levels the saved chain doesn't cover
 // (e.g. a library created before a level existed) with the server-computed
 // defaults, without touching levels the chain already defines.
-export function mergeChainWithDefaults(
+function mergeChainWithDefaults(
   chain: Record<string, LevelChainItem[]>,
   defaults: Record<string, LevelChainItem[]>,
   libraryType: string,

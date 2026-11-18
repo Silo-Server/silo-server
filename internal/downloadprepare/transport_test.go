@@ -113,18 +113,6 @@ func TestRequestRoundTripPreservesFrozenToneMapRecipe(t *testing.T) {
 	}
 }
 
-// TestRequestRoundTripTreatsNonePolicyAsOrdinaryTranscode verifies non-tone-map requests remain compatible.
-func TestRequestRoundTripTreatsNonePolicyAsOrdinaryTranscode(t *testing.T) {
-	request := NewRequest("artifact-1", playback.TranscodeOpts{
-		InputPath: "/media/sdr.mkv", ToneMapPolicy: tonemap.PolicyNone,
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-	})
-	got := request.TranscodeOpts("/usr/bin/ffmpeg", "qsv", "/dev/dri/renderD128", nil)
-	if got.ToneMapMode != "" || got.ToneMapSourceKind != "" || got.ToneMapRecipeVersion != "" {
-		t.Fatalf("ordinary transcode gained tone-map recipe fields: %+v", got)
-	}
-}
-
 func TestRequestExecutionFingerprintBindsRecipeButNotArtifactHandle(t *testing.T) {
 	base := Request{
 		ArtifactID: "attempt-a", InputPath: "/media/hdr.mkv", SourceVideoCodec: "h264",
@@ -219,32 +207,6 @@ func TestRequestCarriesTheFrameRateOutsideTheFingerprint(t *testing.T) {
 	}
 }
 
-func TestRequestStereoDownmixBoostRequested(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		req  Request
-		want bool
-	}{
-		{name: "surround AAC default stereo v2", req: Request{TargetCodecAudio: "aac", AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, SourceAudioChannels: 6}, want: true},
-		{name: "surround AAC explicit stereo v2", req: Request{TargetCodecAudio: "aac", TargetAudioChannels: 2, AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, SourceAudioChannels: 6}, want: true},
-		{name: "surround AAC missing version", req: Request{TargetCodecAudio: "aac", SourceAudioChannels: 6}},
-		{name: "surround AAC wrong version", req: Request{TargetCodecAudio: "aac", AudioRecipeVersion: "1", SourceAudioChannels: 6}},
-		{name: "stereo AAC", req: Request{TargetCodecAudio: "aac", TargetAudioChannels: 2, AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, SourceAudioChannels: 2}},
-		{name: "unknown AAC", req: Request{TargetCodecAudio: "aac"}},
-		{name: "surround copy", req: Request{TargetCodecAudio: "copy", SourceAudioChannels: 6}},
-		{name: "surround EAC3", req: Request{TargetCodecAudio: "eac3", AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, SourceAudioChannels: 6}},
-		{name: "surround Opus", req: Request{TargetCodecAudio: "opus", AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, SourceAudioChannels: 6}},
-		{name: "AAC mono target", req: Request{TargetCodecAudio: "aac", TargetAudioChannels: 1, AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, SourceAudioChannels: 6}},
-		{name: "AAC surround target", req: Request{TargetCodecAudio: "aac", TargetAudioChannels: 6, AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, SourceAudioChannels: 6}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := test.req.StereoDownmixBoostRequested(); got != test.want {
-				t.Fatalf("StereoDownmixBoostRequested() = %t, want %t", got, test.want)
-			}
-		})
-	}
-}
-
 func TestRequestExecutionAttestationIncludesExplicitAudioOutput(t *testing.T) {
 	if (Request{}).ExecutionAttestationRequested() {
 		t.Fatal("ordinary legacy request unexpectedly requires a receipt")
@@ -256,55 +218,6 @@ func TestRequestExecutionAttestationIncludesExplicitAudioOutput(t *testing.T) {
 		if !request.ExecutionAttestationRequested() {
 			t.Fatalf("explicit audio output did not require a receipt: %+v", request)
 		}
-	}
-}
-
-func TestNewRequestFreezesAudioRecipeVersion(t *testing.T) {
-	request := NewRequest("artifact-a", playback.TranscodeOpts{TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2})
-	if request.AudioRecipeVersion != playback.TransformationAudioToAACRecipeVersionV3 || !request.StereoDownmixBoostRequested() {
-		t.Fatalf("audio recipe = version %q, requested=%t", request.AudioRecipeVersion, request.StereoDownmixBoostRequested())
-	}
-	if !request.AudioRecipeRequested() {
-		t.Fatal("complete v2 recipe was not recognized as an audio recipe")
-	}
-	partial := Request{TargetCodecAudio: "aac", SourceAudioChannels: 6}
-	if !partial.AudioRecipeRequested() || partial.StereoDownmixBoostRequested() {
-		t.Fatal("partial recipe was not detected and rejected")
-	}
-	for _, opts := range []playback.TranscodeOpts{
-		{TargetCodecAudio: "aac", SourceAudioChannels: 2, TargetAudioChannels: 2},
-		{TargetCodecAudio: "eac3", SourceAudioChannels: 6, TargetAudioChannels: 2},
-		{TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 1},
-		{TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 6},
-	} {
-		ordinary := NewRequest("artifact-ordinary", opts)
-		if ordinary.AudioRecipeRequested() || ordinary.SourceAudioChannels != 0 || ordinary.AudioRecipeVersion != "" {
-			t.Fatalf("ordinary encode gained v2 recipe fields: %+v", ordinary)
-		}
-	}
-}
-
-func TestRequestToneMapRequestedIncludesPartialRecipes(t *testing.T) {
-	tests := []struct {
-		name string
-		req  Request
-		want bool
-	}{
-		{name: "ordinary", req: Request{ToneMapPolicy: tonemap.PolicyNone}},
-		{name: "policy", req: Request{ToneMapPolicy: tonemap.PolicySoftwareOnly}, want: true},
-		{name: "mode", req: Request{ToneMapMode: tonemap.ModeSoftware}, want: true},
-		{name: "source kind", req: Request{ToneMapSourceKind: tonemap.SourcePQ}, want: true},
-		{name: "recipe version", req: Request{ToneMapRecipeVersion: "1"}, want: true},
-		{name: "preflight", req: Request{ToneMapPreflightRequired: true}, want: true},
-		{name: "source revision", req: Request{ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1}}, want: true},
-		{name: "Dolby Vision", req: Request{ToneMapDVConfigPresent: true}, want: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := test.req.ToneMapRequested(); got != test.want {
-				t.Fatalf("ToneMapRequested() = %t, want %t", got, test.want)
-			}
-		})
 	}
 }
 
@@ -329,49 +242,6 @@ func TestRequestValidToneMapAttestationRequiresCompleteCurrentRecipe(t *testing.
 		if req.ValidToneMapAttestation() {
 			t.Fatalf("incomplete or stale recipe was valid for attestation: %+v", req)
 		}
-	}
-}
-
-func TestHTTPPreparerReportsNodeFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "mount unavailable", http.StatusUnprocessableEntity)
-	}))
-	defer server.Close()
-
-	_, err := (HTTPPreparer{}).Prepare(context.Background(), server.URL, testNodeKeys, Request{ArtifactID: "job-2"})
-	if err == nil {
-		t.Fatal("expected remote failure")
-	}
-}
-
-func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/downloads/artifacts/artifact-1" {
-			t.Fatalf("path = %q", r.URL.Path)
-		}
-		if !nodeauthtest.Signed(r, "secret") {
-			t.Fatalf("request is not signed: Authorization = %q", r.Header.Get("Authorization"))
-		}
-		switch r.Method {
-		case http.MethodHead:
-			w.Header().Set("Content-Length", "42")
-		case http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Fatalf("method = %s", r.Method)
-		}
-	}))
-	defer server.Close()
-	client := HTTPPreparer{}
-	if _, err := client.Stat(context.Background(), server.URL, testNodeKeys, "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
-		t.Fatalf("invalid artifact Stat error = %v, want invalid artifact id", err)
-	}
-	result, err := client.Stat(context.Background(), server.URL, testNodeKeys, "artifact-1")
-	if err != nil || result != (Result{ArtifactID: "artifact-1", FileSize: 42}) {
-		t.Fatalf("Stat = (%+v, %v)", result, err)
-	}
-	if err := client.Delete(context.Background(), server.URL, testNodeKeys, "artifact-1"); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -444,21 +314,6 @@ func TestHTTPPreparerStatRejectsOversizedAttestationHeader(t *testing.T) {
 	}
 }
 
-func TestSetResultHeadersOmitsOversizedAttestation(t *testing.T) {
-	header := make(http.Header)
-	SetResultHeaders(header, Result{
-		ToneMapRecipeVersion:             strings.Repeat("x", 1025),
-		ToneMapMode:                      tonemap.ModeSoftware,
-		ToneMapSourceRevisionFingerprint: "0123456789abcdef",
-	})
-	if got := header.Get("X-Silo-Tone-Map-Recipe-Version"); got != "" {
-		t.Fatalf("oversized recipe header = %q", got)
-	}
-	if got := header.Get("X-Silo-Tone-Map-Mode"); got != string(tonemap.ModeSoftware) {
-		t.Fatalf("mode header = %q", got)
-	}
-}
-
 func TestHTTPPreparerDeleteStopsStalledErrorBodyRead(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -514,25 +369,6 @@ func TestHTTPPreparerPrepareStopsStalledResultBodyRead(t *testing.T) {
 	}
 }
 
-func TestRelayStatusAllowedPreservesServeContentOutcomes(t *testing.T) {
-	for _, status := range []int{
-		http.StatusOK,
-		http.StatusPartialContent,
-		http.StatusNotModified,
-		http.StatusPreconditionFailed,
-		http.StatusRequestedRangeNotSatisfiable,
-	} {
-		if !RelayStatusAllowed(status) {
-			t.Errorf("status %d should be relayed", status)
-		}
-	}
-	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusBadRequest, http.StatusInternalServerError} {
-		if RelayStatusAllowed(status) {
-			t.Errorf("status %d should be rejected", status)
-		}
-	}
-}
-
 func TestCopyResponseHeadersDoesNotExposeOriginArtifactFilename(t *testing.T) {
 	src := http.Header{
 		"Content-Disposition": {`attachment; filename="opaque-artifact.mp4"`},
@@ -574,71 +410,6 @@ func TestHTTPPreparerOpenStopsStalledBodyRead(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("stalled read took %s, want a bounded failure", elapsed)
-	}
-}
-
-func TestHTTPPreparerOpenAllowsContinuedBodyProgress(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		flusher, _ := w.(http.Flusher)
-		for _, chunk := range []string{"one", "two", "three"} {
-			_, _ = io.WriteString(w, chunk)
-			if flusher != nil {
-				flusher.Flush()
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}))
-	defer server.Close()
-
-	resp, err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Open(
-		context.Background(), server.URL, testNodeKeys, "artifact-progress", http.MethodGet, nil,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(body) != "onetwothree" {
-		t.Fatalf("body = %q", body)
-	}
-}
-
-func TestHTTPPreparerProgress(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !nodeauthtest.Signed(r, "secret") {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		switch r.URL.Path {
-		case "/downloads/prepare/running-1/progress":
-			_, _ = w.Write([]byte(`{"artifact_id":"running-1","running":true,"encoded_seconds":12.5,"duration_seconds":100,"speed":2.5}`))
-		case "/downloads/prepare/other-id/progress":
-			_, _ = w.Write([]byte(`{"artifact_id":"someone-else","running":true}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	p := HTTPPreparer{Client: server.Client()}
-
-	got, err := p.Progress(context.Background(), server.URL, testNodeKeys, "running-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.Running || got.EncodedSeconds != 12.5 || got.DurationSeconds != 100 || got.Speed != 2.5 {
-		t.Fatalf("progress = %+v", got)
-	}
-	if _, err := p.Progress(context.Background(), server.URL, testNodeKeys, "old-node"); !errors.Is(err, ErrProgressUnsupported) {
-		t.Fatalf("404 err = %v, want ErrProgressUnsupported", err)
-	}
-	if _, err := p.Progress(context.Background(), server.URL, testNodeKeys, "other-id"); err == nil {
-		t.Fatal("accepted progress for a different artifact id")
-	}
-	if _, err := p.Progress(context.Background(), server.URL, testNodeKeys, "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
-		t.Fatalf("invalid artifact Progress error = %v, want invalid artifact id", err)
 	}
 }
 

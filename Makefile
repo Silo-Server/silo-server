@@ -109,8 +109,9 @@ embed-stub:
 test: test-go test-web
 
 # The queryattr concurrency tests prove nothing without the race detector.
+GO_TEST_PACKAGES ?= ./...
 test-go: embed-stub
-	go test ./...
+	go test $(GO_TEST_PACKAGES)
 	go test -race -count=1 ./internal/database/queryattr/
 
 # Run the DB-backed query-budget pins listed in $(DB_PINS) and the database

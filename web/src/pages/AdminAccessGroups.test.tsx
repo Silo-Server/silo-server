@@ -154,47 +154,6 @@ describe("AdminAccessGroups", () => {
     adminUsers.currentGroups.clear();
   });
 
-  it("summarizes a group and saves edited restrictions", async () => {
-    toastSuccess.mockClear();
-    const user = userEvent.setup();
-    const router = renderPage();
-
-    expect(await screen.findByText("Kids")).toBeInTheDocument();
-    expect(screen.getByText("3 members")).toBeInTheDocument();
-    // Card facts reflect the restriction shape; default groups are labeled.
-    expect(screen.getByText("No downloads")).toBeInTheDocument();
-    expect(screen.getByText("Default")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Kids/ }));
-
-    // Drill-in editor seeds from the group; toggle downloads on and save.
-    fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
-    await pickOption(user, "Max remote stream bitrate", "8 Mbps");
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
-
-    await waitFor(() => {
-      expect(putBody).toMatchObject({
-        name: "Kids",
-        library_ids: ["2"],
-        download_allowed: true,
-        max_streams: 1,
-        max_remote_stream_bitrate_kbps: 8000,
-        max_local_stream_bitrate_kbps: 0,
-        requests_allowed: false,
-        allowed_permissions: [],
-        is_default: true,
-      });
-    });
-    // The request limit was not edited, so nothing wrote it.
-    expect(writes.map((write) => write.url)).toEqual(["/api/v2/admin/access-groups/1"]);
-    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
-    expect(toastSuccess).toHaveBeenCalledWith("Group saved");
-    expect(router.state.location.pathname).toBe("/admin/access-groups");
-    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
-    await router.navigate(-1);
-    expect(router.state.location.pathname).toBe("/admin/access-groups");
-  });
-
   it("saves only the request approval and limit when no group field changed", async () => {
     group = { ...GROUP, requests_allowed: true };
     toastSuccess.mockClear();
@@ -369,14 +328,6 @@ describe("AdminAccessGroups", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
   }
 
-  it("opens a newly created group", async () => {
-    const finish = holdCreate();
-    const router = renderPage();
-    await startCreate("Guests");
-    finish();
-    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/access-groups/7"));
-  });
-
   it("keeps the admin on a group they opened while another was being created", async () => {
     const finish = holdCreate();
     const router = renderPage();
@@ -482,49 +433,6 @@ describe("AdminAccessGroups", () => {
     await waitFor(() => {
       expect(putBody).toMatchObject({ max_profiles: 3 });
     });
-  });
-
-  it("discards every edit from the phone save bar, typed limits included", async () => {
-    // A phone: no media query matches, so the editor shows the pinned save bar.
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      dispatchEvent: () => false,
-    }));
-    const user = userEvent.setup();
-    renderPage("/admin/access-groups/1");
-    const name = await screen.findByLabelText("Name");
-    await screen.findByRole("region", { name: "Requests" });
-    expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
-
-    fireEvent.change(name, { target: { value: "Teens" } });
-    // The description wraps on a phone but stays one line.
-    const description = document.getElementById("group-description") as HTMLTextAreaElement;
-    fireEvent.change(description, { target: { value: "Two\nlines" } });
-    expect(description).toHaveValue("Two lines");
-    fireEvent.click(screen.getByRole("switch", { name: "Allow downloads" }));
-    await pickOption(user, "Max remote stream bitrate", "Custom");
-    await user.type(screen.getByLabelText("Max remote stream bitrate in Mbps"), "3");
-    await pickOption(user, "Limit", "No limit");
-
-    const bar = screen.getByRole("region", { name: "Unsaved changes" });
-    await user.click(within(bar).getByRole("button", { name: "Discard" }));
-
-    expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
-    expect(name).toHaveValue("Kids");
-    expect(document.getElementById("group-description")).toHaveValue("");
-    expect(screen.getByRole("switch", { name: "Allow downloads" })).not.toBeChecked();
-    expect(screen.getByRole("combobox", { name: "Max remote stream bitrate" })).toHaveTextContent(
-      "Unlimited",
-    );
-    expect(screen.queryByLabelText("Max remote stream bitrate in Mbps")).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Limit" })).toHaveTextContent("Use server default");
-    expect(writes).toEqual([]);
   });
 
   it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {

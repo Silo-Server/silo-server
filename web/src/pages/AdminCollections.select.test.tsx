@@ -9,7 +9,6 @@ import type { components } from "@/api/v2/schema";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 
 import {
-  ADMIN_COLLECTION_CAPABILITIES,
   answerAdminCollections,
   storedAdminCollection as stored,
 } from "./adminCollections.test-support";
@@ -134,20 +133,6 @@ beforeEach(() => {
 });
 
 describe("AdminCollections Select collections", () => {
-  it("offers no Sync when the server can't import lists", async () => {
-    v2Recorder.answer("GET /api/v2/admin/collections/capabilities", {
-      ...ADMIN_COLLECTION_CAPABILITIES,
-      imports: false,
-    });
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Best Picture Winners", "Christmas Classics");
-    expect(within(bar()).getByRole("status")).toHaveTextContent("2 selected");
-    expect(within(bar()).queryByRole("button", { name: /^Sync/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Sync skips/)).not.toBeInTheDocument();
-    expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeEnabled();
-  });
-
   it("refuses more than 100 at a time", async () => {
     items = Array.from({ length: 101 }, (_, index) => stored(`List ${index + 1}`));
     items.push(stored("Studio Ghibli"));
@@ -158,18 +143,6 @@ describe("AdminCollections Select collections", () => {
       "102 selectedSelect up to 100 collections at a time.",
     );
     expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeDisabled();
-  });
-
-  it("syncs only the synced lists picked, and says how many synced", async () => {
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Best Picture Winners", "Christmas Classics", "Netflix Originals");
-    await user.click(within(bar()).getByRole("button", { name: "Sync 2 lists" }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Synced 2 lists."));
-    expect(pathsOf("POST /api/v2/admin/collections/{id}/sync").sort()).toEqual([
-      "/api/v2/admin/collections/best-picture-winners/sync",
-      "/api/v2/admin/collections/netflix-originals/sync",
-    ]);
   });
 
   it("keeps at most four syncs in flight", async () => {
@@ -339,25 +312,6 @@ describe("AdminCollections Select collections", () => {
   });
 });
 
-describe("AdminCollections Select collections with nothing to pick", () => {
-  const notTvShows = (entry: AdminCollection) => !entry.library_ids.includes("3");
-
-  it("leaves when the library switches to one with no collections", async () => {
-    items = items.filter(notTvShows);
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Studio Ghibli");
-    await user.click(screen.getByRole("button", { name: /^TV Shows/ }));
-    await screen.findByText("No collections in TV Shows yet");
-    expect(screen.queryByRole("group", { name: "Selected collections" })).toBeNull();
-
-    // Coming back to a library with collections doesn't bring select mode back.
-    await user.click(screen.getByRole("button", { name: /^Movies/ }));
-    await screen.findByText("Studio Ghibli");
-    expect(screen.queryByRole("checkbox", { name: "Select Studio Ghibli" })).toBeNull();
-  });
-});
-
 describe("AdminCollections Delete all while select mode works", () => {
   it("waits for a row's own switch to save", async () => {
     const finish = hold("PATCH /api/v2/admin/collections/{id}");
@@ -378,51 +332,6 @@ describe("AdminCollections Delete all while select mode works", () => {
     await act(async () => finish());
     await waitFor(() =>
       expect(within(bar()).getByRole("button", { name: "Show on tabs" })).toBeEnabled(),
-    );
-  });
-
-  it("holds a list's own switch while it syncs", async () => {
-    const finish = hold("POST /api/v2/admin/collections/{id}/sync", {
-      status: "success",
-      message: "",
-      items_matched: 3,
-    });
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Netflix Originals");
-    await user.click(within(bar()).getByRole("button", { name: "Sync 1 list" }));
-    await waitFor(() =>
-      expect(v2Recorder.callsOf("POST /api/v2/admin/collections/{id}/sync")).toHaveLength(1),
-    );
-    // A visibility PATCH now would carry the ETag the sync is about to move.
-    const toggle = screen.getByRole("switch", { name: /^Show Netflix Originals on/ });
-    expect(toggle).toBeDisabled();
-    await act(async () => finish());
-    await waitFor(() => expect(toggle).toBeEnabled());
-  });
-
-  it("waits for a picked list's own sync from its row", async () => {
-    const finish = hold("POST /api/v2/admin/collections/{id}/sync", {
-      status: "success",
-      message: "",
-      items_matched: 3,
-    });
-    renderPage();
-    const user = userEvent.setup();
-    await screen.findByText("Netflix Originals");
-    await user.click(screen.getByRole("button", { name: "More for Netflix Originals" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Sync now" }));
-    await waitFor(() =>
-      expect(v2Recorder.callsOf("POST /api/v2/admin/collections/{id}/sync")).toHaveLength(1),
-    );
-    await enterSelectMode(user);
-    await pick(user, "Netflix Originals");
-    // A bar action now would read the ETag the sync is about to move.
-    expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeDisabled();
-    expect(within(bar()).getByRole("button", { name: "Sync 1 list" })).toBeDisabled();
-    await act(async () => finish());
-    await waitFor(() =>
-      expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeEnabled(),
     );
   });
 

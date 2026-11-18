@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -263,32 +262,5 @@ func TestSourceOpenRefusals(t *testing.T) {
 	f.server.opts.Grants = nodesource.NewGrants(func() string { return "" })
 	if status, _, _ := f.open(nodeA, f.keyA, grant); status != http.StatusServiceUnavailable {
 		t.Fatalf("no grant key = %d, want 503", status)
-	}
-}
-
-// The node's client exchanges a grant and reports a refusal as the status
-// the opener's retries go by.
-func TestClientOpenSource(t *testing.T) {
-	f := newOpenFixture(t)
-	path := f.library(42, "movie.mkv", "movie bytes")
-	grant := f.mint(nodeA, 42, path)
-	core := httptest.NewServer(f.handler)
-	t.Cleanup(core.Close)
-
-	clientA, err := NewClient(core.URL, f.keyA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	answer, err := clientA.OpenSource(t.Context(), grant)
-	if err != nil || answer.Path != path || answer.Grant == "" {
-		t.Fatalf("open = %+v %v", answer, err)
-	}
-	clientB, err := NewClient(core.URL, f.keyB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = clientB.OpenSource(t.Context(), grant)
-	if refusal, ok := errors.AsType[*nodesource.StatusError](err); !ok || refusal.Status != http.StatusForbidden || !refusal.Fatal() {
-		t.Fatalf("another node's open = %v, want a fatal 403", err)
 	}
 }

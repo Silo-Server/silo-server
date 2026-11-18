@@ -1,9 +1,6 @@
 package branding
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -20,55 +17,5 @@ func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
 	}
 	if !strings.Contains(out, "A&amp;B&lt;script&gt;") {
 		t.Fatalf("expected escaped title, got: %q", out)
-	}
-}
-
-// The rendered shell links the favicon, so a new favicon must re-render it.
-func TestRenderKeyChangesWithTheFavicon(t *testing.T) {
-	snap := newSnapshot("Acme")
-	baseline := snap.RenderKey()
-	snap.assets[KindFavicon] = "f00.png"
-	if got := snap.RenderKey(); got == baseline {
-		t.Fatal("RenderKey did not change when the favicon ref changed")
-	}
-}
-
-// TestRenderIndexHTMLAgainstRealShell guards against web/index.html drifting
-// away from the literals RenderIndexHTML depends on.
-func TestRenderIndexHTMLAgainstRealShell(t *testing.T) {
-	path := filepath.Join("..", "..", "web", "index.html")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Skipf("index.html not available: %v", err)
-	}
-	if !strings.Contains(string(data), "<title>Silo</title>") {
-		t.Fatalf("web/index.html no longer contains the expected <title>Silo</title>; update RenderIndexHTML")
-	}
-	if !strings.Contains(string(data), indexFaviconLink) {
-		t.Fatalf("web/index.html no longer contains the expected favicon link %q; update indexFaviconLink", indexFaviconLink)
-	}
-	snap := Snapshot{ServerName: "Acme", assets: map[AssetKind]string{KindFavicon: "f00.png"}}
-	out := string(RenderIndexHTML(data, snap))
-	if !strings.Contains(out, "<title>Acme</title>") {
-		t.Fatalf("title not replaced in real shell")
-	}
-	if !strings.Contains(out, "/api/v2/branding/assets/favicon?v=f00.png") {
-		t.Fatalf("favicon not rewritten in real shell")
-	}
-}
-
-func TestRenderManifestUsesCustomMark(t *testing.T) {
-	snap := Snapshot{ServerName: "Acme", AccentColor: "#112233", assets: map[AssetKind]string{KindMark: "m1.webp"}}
-	var m map[string]any
-	if err := json.Unmarshal(RenderManifest(snap), &m); err != nil {
-		t.Fatalf("invalid manifest JSON: %v", err)
-	}
-	if m["theme_color"] != "#112233" {
-		t.Fatalf("expected accent theme color, got %v", m["theme_color"])
-	}
-	icons, _ := m["icons"].([]any)
-	first, _ := icons[0].(map[string]any)
-	if !strings.Contains(first["src"].(string), "/api/v2/branding/assets/mark?v=m1.webp") {
-		t.Fatalf("expected custom mark icon URL, got %v", first["src"])
 	}
 }

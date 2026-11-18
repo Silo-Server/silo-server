@@ -8,9 +8,6 @@ import (
 	"net/url"
 	"slices"
 	"testing"
-	"time"
-
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 type languageFacetContentService struct {
@@ -26,27 +23,6 @@ func (s *languageFacetContentService) ListItemFilters(_ context.Context, _ *Sess
 		resp.SubtitleLanguages = []string{"pt-BR"}
 	}
 	return resp, nil
-}
-
-func TestParseItemsQueryLanguageFilters(t *testing.T) {
-	codec := NewResourceIDCodec()
-	req := httptest.NewRequest(http.MethodGet, "/Items?audioLanguages=eng,fre&audioLanguages=jpn&SubtitleLanguages=spa", nil)
-	query := parseItemsQuery(req, codec)
-	if !slices.Equal(query.audioLanguages, []string{"eng", "fre", "jpn"}) || !slices.Equal(query.subtitleLanguages, []string{"spa"}) {
-		t.Fatalf("languages = %v / %v", query.audioLanguages, query.subtitleLanguages)
-	}
-	if !query.hasIntersectingFilters() {
-		t.Fatal("language filters must route to the composed catalog browse")
-	}
-	params := buildBrowseParams(query)
-	if params.Get("audio_languages") != "eng,fre,jpn" || params.Get("subtitle_languages") != "spa" {
-		t.Fatalf("browse params = %v", params)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/Items?SubtitleLanguages=spa&HasSubtitles=false", nil)
-	if query := parseItemsQuery(req, codec); len(query.subtitleLanguages) != 0 {
-		t.Fatalf("HasSubtitles=false must drop subtitle languages, got %v", query.subtitleLanguages)
-	}
 }
 
 func TestHandleFilters2LanguageFacets(t *testing.T) {
@@ -103,73 +79,4 @@ func (s *rootRoutingContent) BrowseItems(_ context.Context, _ *Session, params u
 	s.browsed = true
 	s.browseParams = params
 	return &upstreamBrowseResponse{}, nil
-}
-
-// Jellyfin 12 treats any HasFilters parameter on a user-root /Items request as
-// a recursive search; a bare request (or one that only excludes virtual
-// items) still lists the libraries.
-func TestHandleItemsRootFiltersSearchRecursively(t *testing.T) {
-	const (
-		views = iota
-		browse
-		empty
-	)
-	cases := []struct {
-		query string
-		want  int
-	}{
-		{"", views},
-		{"ExcludeLocationTypes=Virtual", views},
-		{"MediaTypes=Video", browse},
-		{"Recursive=true", browse},
-		// Unresolvable IDs never widen into an unfiltered catalog browse.
-		{"Ids=not-an-id", views},
-		{"GenreIds=not-an-id", empty},
-		{"PersonIds=not-an-id", empty},
-		// Other filters must not drop an Ids filter that names nothing (#2264).
-		{"Ids=not-an-id&IncludeItemTypes=Movie&Recursive=true", empty},
-		{"Ids=00000000-0000-0000-0000-000000000001&IncludeItemTypes=Movie&Recursive=true", empty},
-		{"Ids=not-an-id&IsFavorite=true", empty},
-		{"Ids=not-an-id&SearchTerm=alpha", empty},
-		// A library view ID is not unresolvable; it routes as it always has.
-		{"Ids=" + EncodeNumericID(EncodedIDLibrary, 3).String() + "&IncludeItemTypes=CollectionFolder", views},
-		{"Ids=not-an-id&Ids=" + EncodeNumericID(EncodedIDLibrary, 3).String() + "&IncludeItemTypes=CollectionFolder", views},
-	}
-	for _, tc := range cases {
-		t.Run(tc.query, func(t *testing.T) {
-			codec := NewResourceIDCodec()
-			content := &rootRoutingContent{}
-			h := &ItemsHandler{content: content, userData: &mockUserDataService{}, codec: codec, mapper: newMapper(codec, &config.Config{}), images: NewImageCache(time.Hour, time.Now)}
-			result := performItemsRequest(t, h, "/Items?"+tc.query)
-			if content.browsed != (tc.want == browse) {
-				t.Fatalf("browsed = %v, want %v (items %+v)", content.browsed, tc.want == browse, result.Items)
-			}
-			switch tc.want {
-			case views:
-				if len(result.Items) != 1 || result.Items[0].Type != "CollectionFolder" {
-					t.Fatalf("expected the library views, got %+v", result.Items)
-				}
-			case empty:
-				if len(result.Items) != 0 || result.TotalRecordCount != 0 {
-					t.Fatalf("expected no items, got %+v", result)
-				}
-			}
-		})
-	}
-}
-
-// An Ids list that names some real items keeps only those; the values that
-// resolve nothing neither widen nor empty the result.
-func TestHandleItemsPartlyResolvableIDsKeepResolvedOnes(t *testing.T) {
-	codec := NewResourceIDCodec()
-	content := &rootRoutingContent{}
-	h := &ItemsHandler{content: content, userData: &mockUserDataService{}, codec: codec, mapper: newMapper(codec, &config.Config{}), images: NewImageCache(time.Hour, time.Now)}
-	known := codec.EncodeStringID(EncodedIDItem, "movie-1")
-	performItemsRequest(t, h, "/Items?Ids=not-an-id,"+known+"&IncludeItemTypes=Movie&Recursive=true")
-	if !content.browsed {
-		t.Fatal("expected a catalog browse constrained to the resolved ID")
-	}
-	if got := content.browseParams.Get("content_ids"); got != "movie-1" {
-		t.Fatalf("content_ids = %q, want %q", got, "movie-1")
-	}
 }

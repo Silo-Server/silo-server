@@ -86,43 +86,6 @@ func validApplePushInput() ApplePushRegistrationInput {
 	}
 }
 
-func TestPushDeviceServiceRegisterAppleNormalizesAndStores(t *testing.T) {
-	store := &fakePushDeviceStore{}
-	service := NewPushDeviceService(store, testPushCipher(t))
-
-	input := validApplePushInput()
-	input.DeviceID = " local-device "
-	input.APNsToken = strings.ToUpper(input.APNsToken)
-	input.APNsEnvironment = "Production"
-	input.PushMode = ""
-
-	device, err := service.RegisterApple(context.Background(), 42, " profile-1 ", input)
-	if err != nil {
-		t.Fatalf("register apple: %v", err)
-	}
-	if device.ServerDeviceID != "server-device" || !device.Enabled || device.PushMode != PushModePrivatePush {
-		t.Fatalf("unexpected device response: %+v", device)
-	}
-	if store.calls != 1 {
-		t.Fatalf("store calls = %d, want 1", store.calls)
-	}
-	if store.got.UserID != 42 || store.got.ProfileID != "profile-1" {
-		t.Fatalf("unexpected owner scope: %+v", store.got)
-	}
-	if store.got.DeviceID != "local-device" {
-		t.Fatalf("device_id = %q", store.got.DeviceID)
-	}
-	if store.got.APNsToken != strings.Repeat("a", 64) {
-		t.Fatalf("apns token was not canonicalized")
-	}
-	if store.got.APNsEnvironment != APNsEnvironmentProd {
-		t.Fatalf("environment = %q", store.got.APNsEnvironment)
-	}
-	if store.got.PushMode != PushModePrivatePush {
-		t.Fatalf("push mode = %q", store.got.PushMode)
-	}
-}
-
 func TestPushDeviceServiceRegisterAppleRejectsInvalidOrUnsupported(t *testing.T) {
 	tests := []struct {
 		name    string

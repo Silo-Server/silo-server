@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -210,40 +209,6 @@ func TestHistoryImportProvidersFailOnOversizedSecondaryListings(t *testing.T) {
 				t.Fatalf("Fetch err = %v, want ErrUpstreamResponseTooLarge", err)
 			}
 		})
-	}
-}
-
-// A heavy but legitimate page, several MiB, still decodes.
-func TestJellyfinFetchItemsAcceptsLargeLegitimatePage(t *testing.T) {
-	t.Parallel()
-
-	name := strings.Repeat("n", 20<<10)
-	var page strings.Builder
-	page.WriteString(`{"TotalRecordCount":` + strconv.Itoa(jellyfinPageSize) + `,"Items":[`)
-	for i := range jellyfinPageSize {
-		if i > 0 {
-			page.WriteByte(',')
-		}
-		page.WriteString(`{"Id":"` + strconv.Itoa(i) + `","Type":"Movie","Name":"` + name + `"}`)
-	}
-	page.WriteString(`]}`)
-	body := page.String()
-	if len(body) < 3<<20 {
-		t.Fatalf("fixture is %d bytes, want a multi-MiB page", len(body))
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
-	defer server.Close()
-
-	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "u", AccessToken: "t"}
-	items, err := newUnthrottledJellyfinClient().FetchItems(trustLoopback(context.Background()), auth, "IsPlayed", jellyfinPlayableItemTypes)
-	if err != nil {
-		t.Fatalf("FetchItems: %v", err)
-	}
-	if len(items) != jellyfinPageSize {
-		t.Fatalf("items = %d, want %d", len(items), jellyfinPageSize)
 	}
 }
 

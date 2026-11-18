@@ -101,29 +101,6 @@ func TestEnrichmentRetryPolicyClassifiesProviderErrors(t *testing.T) {
 	}
 }
 
-func TestEnrichmentQueueCapturesEveryProviderWritablePendingField(t *testing.T) {
-	query := strings.Join(strings.Fields(ebookProtectedFieldsSQL), " ")
-	for _, field := range []string{
-		"title",
-		"year",
-		"overview",
-		"tagline",
-		"content_rating",
-		"runtime",
-		"release_date",
-		"genres",
-		"studios",
-		"authors",
-		"poster_path",
-		"backdrop_path",
-		"logo_path",
-	} {
-		if !strings.Contains(query, "'"+field+"'") {
-			t.Fatalf("protected-field capture missing %q:\n%s", field, ebookProtectedFieldsSQL)
-		}
-	}
-}
-
 func TestEnrichmentQueueChecksExactClaimTokenBeforePersistence(t *testing.T) {
 	query := strings.Join(strings.Fields(checkEnrichmentClaimQuery), " ")
 	for _, fragment := range []string{

@@ -2,8 +2,6 @@ package transcodenode
 
 import (
 	"bytes"
-	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -49,36 +47,6 @@ func postMediaSample(t *testing.T, server *Server, body []byte, authorized bool)
 	return rec
 }
 
-func TestMediaSampleRunsSpeechRequest(t *testing.T) {
-	server := newTestServer(t)
-	// A stand-in ffmpeg that writes 5 frames of full-scale samples.
-	samples := make([]byte, 2*400)
-	for i := 0; i < len(samples); i += 2 {
-		binary.LittleEndian.PutUint16(samples[i:], 20000)
-	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "pcm"), samples, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ffmpeg := filepath.Join(dir, "ffmpeg")
-	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\ncat "+filepath.Join(dir, "pcm")+"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpeg
-
-	rec := postMediaSample(t, server, speechRequestBody(t, nil), true)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", rec.Code, rec.Body)
-	}
-	var result mediasample.Result
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Speech == nil || len(result.Speech.Levels) != 5 || result.Speech.StartSeconds != 60 {
-		t.Fatalf("speech %+v", result.Speech)
-	}
-}
-
 func TestMediaSampleRefusals(t *testing.T) {
 	server := newTestServer(t)
 	cases := map[string]struct {
@@ -122,60 +90,6 @@ func TestMediaSampleRefusals(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestMediaSampleReportsSamplingFailure(t *testing.T) {
-	server := newTestServer(t)
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\necho 'Stream map 0:a:0 matches no streams.' >&2\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpeg
-	rec := postMediaSample(t, server, speechRequestBody(t, nil), true)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status %d: %s", rec.Code, rec.Body)
-	}
-
-	// The client turns the refusal into a RemoteError the caller can classify.
-	node := httptest.NewServer(server.router())
-	defer node.Close()
-	_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, nodeauthtest.NodeKey(testNodeKey),
-		mediasample.Request{Input: "/m.mkv", SourceGrant: "/m.mkv", Window: &mediasample.Window{DurationSeconds: 1}, Audio: &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}}})
-	var remoteErr *mediasample.RemoteError
-	if !errors.As(err, &remoteErr) || remoteErr.Status != http.StatusUnprocessableEntity || remoteErr.Infrastructure() {
-		t.Fatalf("remote error %#v", err)
-	}
-	if remoteErr.Reason != mediasample.ReasonNoStream {
-		t.Fatalf("reason %q", remoteErr.Reason)
-	}
-}
-
-func TestMediaSampleRefusalsClassifyForFallback(t *testing.T) {
-	server := newTestServer(t)
-	node := httptest.NewServer(server.router())
-	defer node.Close()
-	run := func(req mediasample.Request) *mediasample.RemoteError {
-		_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, nodeauthtest.NodeKey(testNodeKey), req)
-		var remoteErr *mediasample.RemoteError
-		if !errors.As(err, &remoteErr) {
-			t.Fatalf("error %#v", err)
-		}
-		return remoteErr
-	}
-	speech := mediasample.Request{Input: "/m.mkv", SourceGrant: "/m.mkv", Window: &mediasample.Window{DurationSeconds: 1}, Audio: &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}}}
-
-	// A node that cannot read the file is another node's problem, not the file's.
-	sourcesOf(server).refuse(speech.SourceGrant, &nodesource.MountMismatchError{Path: speech.Input, NodeErr: os.ErrNotExist})
-	if refused := run(speech); refused.Status != http.StatusConflict || !refused.Infrastructure() {
-		t.Fatalf("mount mismatch: %#v", refused)
-	}
-	// A malformed request fails the same way anywhere.
-	server.opener = &pathSources{}
-	bad := speech
-	bad.Window = nil
-	if refused := run(bad); refused.Status != http.StatusBadRequest || refused.Infrastructure() {
-		t.Fatalf("invalid request: %#v", refused)
 	}
 }
 

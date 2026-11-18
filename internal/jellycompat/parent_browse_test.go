@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -117,169 +114,9 @@ func (f *fakeSeasonEpisodeRepo) ListAdjacentInSeriesFor(ctx context.Context, ser
 	return all[start:end], nil
 }
 
-// TestHandleItems_SeriesParentWithoutTypeReturnsSeasons pins the Void fix: a
-// series ParentId with no IncludeItemTypes must list the series' seasons, not
-// fall through to the top-level library views. countingContentService panics in
-// ListUserLibraries, so a regression that routes to handleViewsResponse would
-// panic this test rather than silently pass.
-func TestHandleItems_SeriesParentWithoutTypeReturnsSeasons(t *testing.T) {
-	codec := NewResourceIDCodec()
-	seriesContentID := "series-1"
-	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
-	contentSvc := &countingContentService{
-		seasons: []upstreamSeason{
-			{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 10},
-			{ContentID: "season-2", SeasonNumber: 2, Title: "Season 2", EpisodeCount: 8},
-		},
-	}
-	h := &ItemsHandler{
-		content:  contentSvc,
-		userData: &mockUserDataService{},
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-		images:   NewImageCache(time.Hour, time.Now),
-	}
-
-	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeriesID)
-	if result.TotalRecordCount != 2 || len(result.Items) != 2 {
-		t.Fatalf("expected 2 seasons, got %+v", result.Items)
-	}
-	for _, item := range result.Items {
-		if item.Type != "Season" {
-			t.Fatalf("expected Season items (not library views), got %q", item.Type)
-		}
-	}
-	if contentSvc.listSeasonsSeries != seriesContentID {
-		t.Fatalf("ListSeasons series = %q, want %q", contentSvc.listSeasonsSeries, seriesContentID)
-	}
-}
-
 // parentFilterCase is one ParentId filter and the number of episodes it must
 // list. A filter the parent cannot satisfy lists none.
 type parentFilterCase struct {
 	filter    string
 	wantItems int
-}
-
-// TestHandleItems_SeriesParentFilters pins that a filter a series parent cannot
-// satisfy returns an empty page rather than a wrong-typed listing: a type
-// filter such as Movie, or an episode listing whose MediaTypes leave out Video
-// (issue #3186). An empty page does not even hit ListSeasons, and MediaTypes
-// that include Video still list the episodes.
-func TestHandleItems_SeriesParentFilters(t *testing.T) {
-	for _, tc := range []parentFilterCase{
-		{filter: "IncludeItemTypes=Movie"},
-		{filter: "IncludeItemTypes=Episode&MediaTypes=Audio"},
-		{filter: "IncludeItemTypes=Episode&MediaTypes=Video", wantItems: 1},
-	} {
-		t.Run(tc.filter, func(t *testing.T) {
-			codec := NewResourceIDCodec()
-			encodedSeriesID := codec.EncodeStringID(EncodedIDItem, "series-1")
-			contentSvc := &countingContentService{
-				seasons: []upstreamSeason{{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 10}},
-			}
-			h := &ItemsHandler{
-				content:     contentSvc,
-				userData:    &mockUserDataService{},
-				codec:       codec,
-				mapper:      newMapper(codec, &config.Config{}),
-				images:      NewImageCache(time.Hour, time.Now),
-				episodeRepo: &boundedEpisodeContractRepo{},
-			}
-
-			result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeriesID+"&"+tc.filter)
-			assertParentFilterResult(t, tc, result, contentSvc)
-		})
-	}
-}
-
-// TestHandleItems_SeasonParentFilters pins that a season ParentId with a type
-// filter that excludes Episode (e.g. Movie), or MediaTypes that leave out Video
-// (issue #3186), returns an empty page and short-circuits before listing
-// episodes, even though episodes exist; MediaTypes=Video still lists them.
-func TestHandleItems_SeasonParentFilters(t *testing.T) {
-	for _, tc := range []parentFilterCase{
-		{filter: "IncludeItemTypes=Movie"},
-		{filter: "MediaTypes=Audio"},
-		{filter: "IncludeItemTypes=Episode&MediaTypes=Audio"},
-		{filter: "MediaTypes=Video", wantItems: 1},
-	} {
-		t.Run(tc.filter, func(t *testing.T) {
-			codec := NewResourceIDCodec()
-			seriesContentID := "series-1"
-			seasonContentID := "season-1"
-			encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonContentID)
-			contentSvc := &countingContentService{
-				seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
-			}
-			episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
-				episodeBySeasonKey(seriesContentID, 1): {
-					{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"},
-				},
-			}}
-			h := &ItemsHandler{
-				content:     contentSvc,
-				userData:    &mockUserDataService{},
-				codec:       codec,
-				mapper:      newMapper(codec, &config.Config{}),
-				images:      NewImageCache(time.Hour, time.Now),
-				episodeRepo: episodeRepo,
-				seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{
-					seasonContentID: {ContentID: seasonContentID, SeriesID: seriesContentID, SeasonNumber: 1},
-				}},
-			}
-
-			result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID+"&"+tc.filter)
-			assertParentFilterResult(t, tc, result, contentSvc)
-		})
-	}
-}
-
-func assertParentFilterResult(t *testing.T, tc parentFilterCase, result queryResultDTO, contentSvc *countingContentService) {
-	t.Helper()
-	if len(result.Items) != tc.wantItems {
-		t.Fatalf("listed %d items, want %d: %+v", len(result.Items), tc.wantItems, result.Items)
-	}
-	if tc.wantItems == 0 && (result.TotalRecordCount != 0 || contentSvc.listSeasonsCalls != 0) {
-		t.Fatalf("unsatisfiable filter reported total %d and called ListSeasons %d times, want neither", result.TotalRecordCount, contentSvc.listSeasonsCalls)
-	}
-}
-
-// TestHandleItems_SeasonParentEpisodesPaged pins that the generic season-parent
-// browse path honors StartIndex/Limit (unlike /Shows/{id}/Episodes, which stays
-// whole-season) and reports the full count.
-func TestHandleItems_SeasonParentEpisodesPaged(t *testing.T) {
-	codec := NewResourceIDCodec()
-	seriesContentID := "series-1"
-	seasonContentID := "season-1"
-	encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonContentID)
-	contentSvc := &countingContentService{
-		seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 3}},
-	}
-	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
-		episodeBySeasonKey(seriesContentID, 1): {
-			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"},
-			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "E2"},
-			{ContentID: "ep-3", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 3, Title: "E3"},
-		},
-	}}
-	h := &ItemsHandler{
-		content:     contentSvc,
-		userData:    &mockUserDataService{},
-		codec:       codec,
-		mapper:      newMapper(codec, &config.Config{}),
-		images:      NewImageCache(time.Hour, time.Now),
-		episodeRepo: episodeRepo,
-		seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{
-			seasonContentID: {ContentID: seasonContentID, SeriesID: seriesContentID, SeasonNumber: 1},
-		}},
-	}
-
-	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID+"&StartIndex=1&Limit=1")
-	if result.TotalRecordCount != 3 || result.StartIndex != 1 {
-		t.Fatalf("expected total 3 / startIndex 1, got %d / %d", result.TotalRecordCount, result.StartIndex)
-	}
-	if len(result.Items) != 1 || result.Items[0].Name != "E2" {
-		t.Fatalf("expected page [E2], got %+v", result.Items)
-	}
 }

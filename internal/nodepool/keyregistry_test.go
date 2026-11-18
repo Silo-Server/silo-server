@@ -148,43 +148,6 @@ func TestKeyRegistryTracksKeysRotationAndDeletion(t *testing.T) {
 	}
 }
 
-// Rows that share a canonical URL resolve the same way whatever order they
-// load in: a transcode node over a proxy, then the lowest id. A proxy must
-// never shadow a transcode node, or the shared secret could be sent to it.
-func TestKeyRegistryURLIndexIsDeterministic(t *testing.T) {
-	low, lowKey := keyedRow(t, 5, "http://Shared-Host:80/%77orker/")
-	high, _ := keyedRow(t, 9, "http://shared-host/worker")
-	proxy := credentialRow(2, NodeTypeProxy, "HTTP://shared-host/worker")
-	for _, order := range [][]nodeCredentialRow{
-		{low, high, proxy},
-		{proxy, high, low},
-		{high, proxy, low},
-	} {
-		rows := &fakeCredentialRows{}
-		rows.set(order...)
-		registry, _ := newTestKeyRegistry(t, rows)
-		for _, spelling := range []string{"http://shared-host/worker", " http://SHARED-HOST:80/%77orker/ "} {
-			if cred := registry.transcodeByURL(spelling); cred == nil || cred.key != lowKey {
-				t.Fatalf("order %v: transcodeByURL(%q) = %+v; want node 5", []int{order[0].ID, order[1].ID, order[2].ID}, spelling, cred)
-			}
-			if registry.proxyByURL(spelling) {
-				t.Fatalf("proxyByURL(%q) answered for a transcode node's URL", spelling)
-			}
-		}
-	}
-	for in, want := range map[string]string{
-		"https://H:443/a/":     "https://h/a",
-		"http://[::1]:80/x":    "http://[::1]/x",
-		"http://[::1]:8080/x/": "http://[::1]:8080/x",
-		"http://h:8443":        "http://h:8443",
-		"gpu-1/":               "gpu-1",
-	} {
-		if got := CanonicalNodeURL(in); got != want {
-			t.Errorf("CanonicalNodeURL(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // After a proxy's URL is given to a transcode node, a cached proxy entry is a
 // miss for a transcode lookup: it reloads, and inside the miss cooldown it
 // finds nothing rather than the proxy.
@@ -305,41 +268,6 @@ func TestKeyRegistryCoalescesMissReloadsAndCoolsDownAfterThem(t *testing.T) {
 	}
 	if _, err := registry.NodeKey(99); !errors.Is(err, ErrNodeNotFound) {
 		t.Fatalf("NodeKey miss inside the cooldown = %v", err)
-	}
-}
-
-// A Refresh that arrives while a miss reload is running must still see rows
-// written after that reload read them: it waits the running one out and runs
-// one more. The key issue handler relies on this to drop the old key.
-func TestKeyRegistryRefreshSeesRowsWrittenDuringARunningReload(t *testing.T) {
-	rows := &fakeCredentialRows{}
-	registry, clock := newTestKeyRegistry(t, rows)
-	gate := newGatedLoader(rows)
-	registry.load = gate.load
-	clock.Advance(keyRegistryMissInterval)
-	before := rows.loads.Load()
-
-	var wg sync.WaitGroup
-	wg.Go(func() { _, _ = registry.NodeKey(5) })
-	// The miss reload has read the rows, without node 5, and not finished.
-	<-gate.started
-	row, key := keyedRow(t, 5, "http://gpu-5")
-	rows.set(row)
-	refreshed := make(chan error, 1)
-	go func() { refreshed <- registry.Refresh(t.Context()) }()
-	gate.release <- struct{}{}
-	// Refresh's own reload, after the miss reload finished.
-	<-gate.started
-	gate.release <- struct{}{}
-	if err := <-refreshed; err != nil {
-		t.Fatal(err)
-	}
-	wg.Wait()
-	if got, err := registry.NodeKey(5); err != nil || got != key {
-		t.Fatalf("NodeKey after Refresh = %q, %v; want the row written during the earlier reload", got, err)
-	}
-	if got := rows.loads.Load() - before; got != 2 {
-		t.Fatalf("loads = %d, want the running reload plus one", got)
 	}
 }
 

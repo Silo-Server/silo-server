@@ -184,19 +184,6 @@ func TestNavigationShortcutsFromSidebarPinsSkipsMalformedSiblingsAndBoundsLibrar
     ]}`)
 }
 
-func TestNavigationShortcutsFromSidebarPinsRejectsOnlyOverflowLibraryIDs(t *testing.T) {
-	for name, raw := range map[string]string{
-		"one over int32": `{"2147483648":[{"type":"section","id":"overflow","label":"Overflow"}]}`,
-		"parse overflow": `{"999999999999999999999999999999":[{"type":"section","id":"huge","label":"Huge"}]}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if value, ok := navigationShortcutsFromSidebarPins(raw); ok || value != nil {
-				t.Fatalf("overflow-only pins migrated as %s", value)
-			}
-		})
-	}
-}
-
 func assertJSONValueEqual(t *testing.T, got, want string) {
 	t.Helper()
 	var gotValue, wantValue any

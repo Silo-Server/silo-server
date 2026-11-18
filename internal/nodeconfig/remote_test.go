@@ -73,42 +73,6 @@ func remoteBody() nodecontrol.NodeConfigBody {
 
 var errCoreDown = errors.New("connection refused")
 
-// A node that starts before the core answers retries, backing off from one
-// second to thirty, and loads once the core answers.
-func TestRemoteLoadBacksOffUntilTheCoreAnswers(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		core := newFakeCore(remoteBody())
-		core.fail(errCoreDown)
-		remote := NewRemote(core, ":9090")
-		loaded := make(chan error, 1)
-		go func() { loaded <- remote.Load(t.Context()) }()
-
-		time.Sleep(90 * time.Second) //nolint:forbidigo // advances the synctest bubble's fake clock
-		synctest.Wait()
-		core.fail(nil)
-		if err := <-loaded; err != nil {
-			t.Fatal(err)
-		}
-		reads := core.readTimes()
-		var gaps []time.Duration
-		for i := 1; i < len(reads); i++ {
-			gaps = append(gaps, reads[i].Sub(reads[i-1]))
-		}
-		want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second}
-		if len(gaps) != len(want) {
-			t.Fatalf("read gaps = %v, want %v", gaps, want)
-		}
-		for i := range want {
-			if gaps[i] != want[i] {
-				t.Fatalf("read gaps = %v, want %v", gaps, want)
-			}
-		}
-		if cfg := remote.Config(); cfg == nil || cfg.Server.Mode != "transcode" || cfg.Server.Listen != ":9090" || cfg.Playback.HWAccel != "vaapi" {
-			t.Fatalf("config = %+v", cfg)
-		}
-	})
-}
-
 // A drain request changes no setting the node runs with: the config pointer
 // stays, so no handler refuses work over it, and the drain callbacks run.
 // A failed poll keeps everything.

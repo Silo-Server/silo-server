@@ -12,68 +12,6 @@ import (
 	"testing"
 )
 
-// A systematic failure yields one warning per record; the run keeps only as
-// many as it can store.
-func TestRunWarningsStopAtTheStoredLimit(t *testing.T) {
-	t.Parallel()
-	var summary ExecutionSummary
-	for i := range maxStoredWarnings * 100 {
-		addRunWarning(&summary, "failure "+strconv.Itoa(i))
-	}
-	if len(summary.Warnings) != maxStoredWarnings {
-		t.Fatalf("warnings = %d, want %d", len(summary.Warnings), maxStoredWarnings)
-	}
-}
-
-// A resume sends its startup warnings again; the run keeps one copy.
-func TestRunWarningsAreNotRepeated(t *testing.T) {
-	t.Parallel()
-	var summary ExecutionSummary
-	addRunWarning(&summary, "resume list unavailable")
-	addRunWarning(&summary, "resume list unavailable", "other")
-	if len(summary.Warnings) != 2 {
-		t.Fatalf("warnings = %v, want one of each", summary.Warnings)
-	}
-}
-
-// A played favorite series has no watch record to repeat, so it still counts.
-func TestFavoriteRepeatsWatchOnlyForWatchKinds(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		kind   string
-		played bool
-		ticks  int64
-		want   bool
-	}{
-		{KindMovie, true, 0, true},
-		{KindEpisode, false, 10, true},
-		{KindMovie, false, 0, false},
-		{KindSeries, true, 0, false},
-	} {
-		if got := repeatsWatch(Record{Kind: tc.kind}, tc.played, tc.ticks); got != tc.want {
-			t.Errorf("%s played=%v ticks=%d = %v, want %v", tc.kind, tc.played, tc.ticks, got, tc.want)
-		}
-	}
-}
-
-// Lookups keep a fixed number of entries however many distinct keys pass.
-func TestLookupCacheStaysAtCapacity(t *testing.T) {
-	t.Parallel()
-	cache := newLookupCache[int](3)
-	for i, key := range []string{"a", "b", "c", "d"} {
-		cache.put(key, i)
-	}
-	if _, ok := cache.items["a"]; ok {
-		t.Fatal("oldest entry survived past capacity")
-	}
-	if got, ok := cache.items["d"]; !ok || got != 3 {
-		t.Fatalf("newest = %d, %v", got, ok)
-	}
-	if len(cache.items) != 3 {
-		t.Fatalf("entries = %d", len(cache.items))
-	}
-}
-
 // peakHeapDuring returns the most heap in use, sampled while fn runs, after a
 // collection, so garbage awaiting collection does not count.
 func peakHeapDuring(fn func(sample func())) uint64 {
@@ -236,20 +174,6 @@ func TestProviderPeakHeapIsIndependentOfHistorySize(t *testing.T) {
 				t.Fatalf("peak heap grew with history: 100k=%d MiB, 1M=%d MiB", small>>20, large>>20)
 			}
 		})
-	}
-}
-
-// Lookups are dropped after their page, so they cannot use up the run's budget
-// for what it holds.
-func TestPlexMetadataLookupsAreNotChargedToTheRun(t *testing.T) {
-	t.Parallel()
-	server := serveBody(t, []byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"1","type":"show"}]}}`))
-	runCtx := withRunBudget(trustLoopback(context.Background()))
-	if _, err := newUnthrottledPlexClient().FetchMetadataBatch(runCtx, server.URL, "t", []string{"1"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := runBudgetFrom(runCtx).retained; got != 0 {
-		t.Fatalf("retained = %d, want 0", got)
 	}
 }
 

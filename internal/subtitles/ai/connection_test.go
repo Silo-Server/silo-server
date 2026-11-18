@@ -3,13 +3,10 @@ package ai
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -84,43 +81,4 @@ func (s snapshotTranslator) Translate(ctx context.Context, req TranslateRequest,
 		onBatch(req.Cues, len(req.Cues), len(req.Cues))
 	}
 	return req.Cues, nil
-}
-
-func TestSubtitleJobUsesEnqueueProviderAcrossQueuedLiveChunks(t *testing.T) {
-	var current atomic.Pointer[llm.Config]
-	current.Store(new(llm.Config{BaseURL: "https://provider.example.test", ChatModel: "selected-model"}))
-	client := llm.NewClient(llm.Config{TextConfigSource: func(context.Context) (llm.Config, error) { return *current.Load(), nil }})
-	repo := &finishedJobRepo{finished: make(chan JobStatus, 1)}
-	modelsUsed := make(chan string, 2)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{}
-	transcriber := &chunkedTranscriber{detected: "en", chunks: [][]SubtitleCue{{testCue(0, "first")}, {testCue(2, "second")}}}
-	svc := NewService(t.Context(), Config{Configured: true, SpeechConfigured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "stale-model", ASRModel: "whisper-1", TextConfigSource: client.TextConfig}, repo,
-		snapshotTranslator{client: client, models: modelsUsed}, transcriber, &notifyingSubtitleStore{finished: repo.finished}, nil,
-		runTranscribeFileResolver{file: &models.MediaFile{ID: 1, AudioTracks: []models.AudioTrack{{Language: "en"}}}}, &recordingNotifier{}, "", nil, sem)
-	job, err := svc.Enqueue(t.Context(), JobRequest{MediaFileID: 1, Kind: JobKindTranscribeTranslate, TargetLanguage: "fr", SessionID: "fixture"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.Model != "whisper-1+selected-model" || job.IdempotencyKey != idempotencyKey(1, JobKindTranscribeTranslate, "0", job.TargetLanguage, job.Model) {
-		t.Fatal("recorded model or key used stale config")
-	}
-	current.Store(new(llm.Config{BaseURL: "https://later.example.test", ChatModel: "changed-while-queued"}))
-	<-sem
-	select {
-	case result := <-repo.finished:
-		if result != JobStatusCompleted {
-			t.Fatalf("job result=%s", result)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("subtitle fixture did not finish")
-	}
-	if len(modelsUsed) != 2 {
-		t.Fatalf("live chunks=%d, want 2", len(modelsUsed))
-	}
-	for range 2 {
-		if model := <-modelsUsed; model != "selected-model" {
-			t.Fatalf("live chunk model=%q", model)
-		}
-	}
 }

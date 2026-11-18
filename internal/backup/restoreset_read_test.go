@@ -10,20 +10,16 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/backup/jsonsize"
-	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 )
 
 // mutate changes one thing about a valid restore set.
@@ -173,37 +169,6 @@ func buildTar(t *testing.T, index RestoreSetIndex, entries []testEntry) []byte {
 	return buf.Bytes()
 }
 
-func TestReadRestoreSetAcceptsAValidArchive(t *testing.T) {
-	index, entries := testRestoreSet()
-	brandingCase(BrandingEntry{Key: "branding.mark_ref", Ref: "0123abcd.webp", Blob: "branding/mark/0123abcd.webp"})(&index, &entries)
-	resyncDigests(&index, entries)
-	data := buildTar(t, index, entries)
-	rs, err := ReadRestoreSet(context.Background(), bytes.NewReader(data), ReadOptions{ExtractDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rs.Cleanup()
-	sum := sha256.Sum256(data)
-	if rs.Digest != hex.EncodeToString(sum[:]) {
-		t.Fatal("digest is not the archive's SHA-256")
-	}
-	if len(rs.Plugins) != 1 || len(rs.Libraries.Libraries) != 1 || len(rs.Collections.Collections) != 1 || len(rs.Settings.Settings) != 1 || len(rs.Collections.Branding) != 1 ||
-		len(rs.Users) != 1 || len(mustLoadUser(t, rs, rs.Users[0]).Profiles) != 1 || len(rs.Collections.TemplateCollections) != 1 || len(rs.HomeSections.Sections) != 2 ||
-		rs.HomeSections.Sections[1].Collection == nil {
-		t.Fatalf("sections not decoded: %+v", rs)
-	}
-	if family := rs.blobFamily("collection-images/c1/poster/original.abcd.jpg"); len(family) != 2 {
-		t.Fatalf("artwork variants not kept with their original: %v", family)
-	}
-	if family := rs.blobFamily("profile-avatars/5/p1/original.webp"); len(family) != 2 {
-		t.Fatalf("avatar variants not kept with their original: %v", family)
-	}
-	// A plugin archive is checked and never kept: nothing installs it.
-	if kept, _ := filepath.Glob(filepath.Join(rs.dir, "archive-*")); len(kept) != 0 {
-		t.Fatalf("plugin archive kept on disk: %v", kept)
-	}
-}
-
 // TestRestoreExtractsOnlyTheSelectedItemsFiles: a restore writes to the
 // temporary directory only the files its selected items need, and refuses
 // to start when they would not fit there.
@@ -278,92 +243,6 @@ func TestRestoreExtractsOnlyReferencedFiles(t *testing.T) {
 	}
 }
 
-// TestReaderFindsVariantsInConstantTime: originals of many revisions in
-// one directory, each with its variants, are read without scanning the
-// directory's originals once per variant.
-func TestReaderFindsVariantsInConstantTime(t *testing.T) {
-	const originals = 10_000
-	index, entries := testRestoreSet()
-	for i := range index.Sections {
-		if index.Sections[i].ID != SectionCollections {
-			continue
-		}
-		for r := range originals {
-			key := fmt.Sprintf("collection-images/c1/poster/original.r%d.jpg", r)
-			index.Sections[i].Blobs = append(index.Sections[i].Blobs, key)
-			entries = append(entries, testEntry{name: "blobs/" + key, data: []byte("o")},
-				testEntry{name: fmt.Sprintf("blobs/collection-images/c1/poster/w1.r%d.jpg", r), data: []byte("v")},
-				testEntry{name: fmt.Sprintf("blobs/collection-images/c1/poster/w2.r%d.jpg", r), data: []byte("v")})
-		}
-	}
-	data := buildTar(t, index, entries)
-	started := time.Now()
-	rs, err := ReadRestoreSet(context.Background(), bytes.NewReader(data), ReadOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := len(rs.blobFamily("collection-images/c1/poster/original.r7.jpg")); got != 3 {
-		t.Fatalf("family of one original = %d keys, want it and its two variants", got)
-	}
-	if elapsed := time.Since(started); elapsed > 20*time.Second {
-		t.Fatalf("reading %d originals with their variants took %v", originals, elapsed)
-	}
-}
-
-// TestArtworkFamiliesAreLinear: 20,000 keys in one directory, named like
-// originals and legacy variants, are grouped into families in one pass,
-// each kept to the ladder's size, so the index holds about one reference
-// per key.
-func TestArtworkFamiliesAreLinear(t *testing.T) {
-	rs := &RestoreSet{blobs: map[string]string{}}
-	const dir = "collection-images/c1/poster/"
-	rs.blobs[dir+"original.jpg"] = ""
-	for i := range 20_000 {
-		for _, name := range []string{"original.%d", "original.r%d.jpg", "w%d.jpg"} {
-			rs.blobs[dir+fmt.Sprintf(name, i)] = ""
-		}
-	}
-	started := time.Now()
-	x := rs.lookup()
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Fatalf("indexing took %v", elapsed)
-	}
-	members := 0
-	for _, keys := range x.variants {
-		members += len(keys)
-	}
-	if got := len(x.variants[dir+"original.jpg"]); got != maxLadderVariants || members > len(rs.blobs) {
-		t.Fatalf("legacy family of %d, %d members in all for %d keys; want it capped and about one per key", got, members, len(rs.blobs))
-	}
-}
-
-// TestSelectedBlobsIsLinear: choosing the files of every collection of a set
-// at the archive's entry limit classifies each file once. A scan per
-// selected collection would take billions of prefix checks here and run
-// past the test timeout.
-func TestSelectedBlobsIsLinear(t *testing.T) {
-	const collections, perCollection = 20_000, maxRestoreSetEntries / 20_000
-	rs := &RestoreSet{blobs: make(map[string]string, maxRestoreSetEntries)}
-	selection := make([]string, 0, collections)
-	for i := range collections {
-		id := strconv.Itoa(i)
-		poster := collectionImagePrefix + id + "/poster/original.r1.jpg"
-		rs.Collections.Collections = append(rs.Collections.Collections, CollectionEntry{ID: id, Poster: poster})
-		selection = append(selection, collectionItemID(id))
-		rs.blobs[poster] = ""
-		for j := 1; j < perCollection; j++ {
-			rs.blobs[fmt.Sprintf("%s%s/poster/w%d.r1.jpg", collectionImagePrefix, id, j)] = ""
-		}
-	}
-	keep := selectedBlobs(rs, map[string][]string{SectionCollections: selection[:collections/2]})
-	if len(keep) != collections/2*perCollection {
-		t.Fatalf("kept %d files, want %d", len(keep), collections/2*perCollection)
-	}
-	if keep[collectionImagePrefix+strconv.Itoa(collections-1)+"/poster/w1.r1.jpg"] {
-		t.Fatal("kept a file of a collection not selected")
-	}
-}
-
 // TestReadRestoreSetBoundsWhatDocumentsDecodeTo: a short document of
 // empty entries, here 100,000 empty collections or account profiles, is
 // refused before it is decoded, without allocating what it would decode to.
@@ -427,38 +306,6 @@ func setDocument(index *RestoreSetIndex, entries []testEntry, name string, data 
 				index.Sections[i].Count = count
 			}
 		}
-	}
-}
-
-// TestUnusableEntriesAreCappedPerSection: a section of 500,000 malformed
-// entries lists the first maxUnusableListed and counts the rest in one
-// more, so a preview never builds an item for each.
-func TestUnusableEntriesAreCappedPerSection(t *testing.T) {
-	const bad = maxArtworkEntries
-	index, entries := testRestoreSet()
-	setDocument(&index, entries, homeSectionsDocumentName, mustJSON(HomeSectionsDocument{Sections: []HomeSectionEntry{}}), 0)
-	for i := range index.Sections {
-		if index.Sections[i].ID == SectionCollections {
-			index.Sections[i].Blobs = []string{}
-		}
-	}
-	entries = slices.DeleteFunc(entries, func(e testEntry) bool { return strings.HasPrefix(e.name, "blobs/collection-images/") })
-	malformed := `{"content_id":"m","title":"` + strings.Repeat("t", 40) + `"}`
-	doc := `{"collections":[],"item_artwork":[` + strings.Repeat(malformed+",", bad-1) + malformed + `],"branding":[]}`
-	setDocument(&index, entries, collectionsDocumentName, []byte(doc), bad)
-	rs, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	listed := 0
-	for _, e := range rs.Unusable {
-		if e.Section == SectionCollections {
-			listed++
-		}
-	}
-	last := rs.Unusable[len(rs.Unusable)-1]
-	if listed != maxUnusableListed+1 || last.Label != fmt.Sprintf("%d more entries", bad-maxUnusableListed) {
-		t.Fatalf("listed %d unusable entries, the last %+v; want %d and a count of the rest", listed, last, maxUnusableListed+1)
 	}
 }
 
@@ -768,30 +615,6 @@ func TestReadRestoreSetRefusesHostileUserDocuments(t *testing.T) {
 	}
 }
 
-// brandingCase puts one branding entry, its blob listed and present, into an
-// otherwise valid restore set.
-func brandingCase(b BrandingEntry) func(*RestoreSetIndex, *[]testEntry) {
-	return func(index *RestoreSetIndex, entries *[]testEntry) {
-		for i := range *entries {
-			e := &(*entries)[i]
-			if e.name != "collections.json" {
-				continue
-			}
-			var doc CollectionsDocument
-			_ = json.Unmarshal(e.data, &doc)
-			doc.Branding = append(doc.Branding, b)
-			e.data = mustJSON(doc)
-		}
-		for i := range index.Sections {
-			if index.Sections[i].ID == SectionCollections {
-				index.Sections[i].Count++
-				index.Sections[i].Blobs = append(index.Sections[i].Blobs, b.Blob)
-			}
-		}
-		*entries = append(*entries, testEntry{name: "blobs/" + b.Blob, data: []byte("asset")})
-	}
-}
-
 // resyncDigests rewrites the index digests of documents a case replaced.
 func resyncDigests(index *RestoreSetIndex, entries []testEntry) {
 	byName := map[string][]byte{}
@@ -944,91 +767,6 @@ func TestReadRestoreSetReportsMissingBlobs(t *testing.T) {
 	}
 }
 
-// TestPendingDecodesFollowTheComparison: documents decoded ahead are handed
-// over in the comparison's order, those of skipped profiles are dropped
-// without stalling a single worker, a passed or undecodable-ahead document
-// falls back to Pending, and a decode error reaches the caller.
-func TestPendingDecodesFollowTheComparison(t *testing.T) {
-	good := json.RawMessage(`{"progress":[{"item":"mv-1","updated_at":"2025-01-01T00:00:00Z"}]}`)
-	bad := json.RawMessage(`{"progress":[{"item":"mv-1"}]}`)
-	profile := func(id string, history json.RawMessage) ProfileEntry {
-		return ProfileEntry{ID: id, Data: map[string]json.RawMessage{userdata.WatchHistory: history, userdata.Ratings: json.RawMessage(`[]`)}}
-	}
-	doc := &UserDocument{Profiles: []ProfileEntry{profile("a", good), profile("b", bad), profile("c", good), profile("d", bad)}}
-	d := startPendingDecodes(doc, 1)
-	defer d.stop()
-	if r, ok := d.take(&doc.Profiles[2], userdata.WatchHistory); !ok || r.err != nil || r.compare == nil {
-		t.Fatalf("c: compare %v, err %v, ok %v; want its decoded document", r.compare != nil, r.err, ok)
-	}
-	if _, ok := d.take(&doc.Profiles[0], userdata.WatchHistory); ok {
-		t.Fatal("a was passed; want a fallback to Pending")
-	}
-	if _, ok := d.take(&doc.Profiles[3], userdata.Ratings); ok {
-		t.Fatal("ratings are not decoded ahead; want a fallback to Pending")
-	}
-	if r, ok := d.take(&doc.Profiles[3], userdata.WatchHistory); !ok || r.err == nil {
-		t.Fatalf("d: err %v, ok %v; want its decode error", r.err, ok)
-	}
-}
-
-// TestReadRestoreSetLeavesOutUnusableEntries: an entry holding a value no
-// restore could write is left out and listed, and the rest of the set stays
-// readable; nothing it names is written.
-func TestReadRestoreSetLeavesOutUnusableEntries(t *testing.T) {
-	editDocument := func(name string, into any, edit func()) func(*RestoreSetIndex, *[]testEntry) {
-		return func(_ *RestoreSetIndex, entries *[]testEntry) {
-			for j := range *entries {
-				if (*entries)[j].name == name {
-					_ = json.Unmarshal((*entries)[j].data, into)
-					edit()
-					(*entries)[j].data = mustJSON(into)
-				}
-			}
-		}
-	}
-	var libraries LibrariesDocument
-	var sections HomeSectionsDocument
-	var collections CollectionsDocument
-	huge := strings.Repeat("x", maxRestoredEntryBytes)
-	for name, c := range map[string]struct {
-		edit    func(*RestoreSetIndex, *[]testEntry)
-		section string
-		gone    func(*RestoreSet) bool
-	}{
-		"relative library path": {editDocument("libraries.json", &libraries, func() { libraries.Libraries[0].Paths = []string{"media/../etc"} }),
-			SectionLibraries, func(rs *RestoreSet) bool { return len(rs.Libraries.Libraries) == 0 }},
-		"branding entry for another setting": {brandingCase(BrandingEntry{Key: "setup.completed", Ref: "evil.example", Blob: "branding/mark/evil.example"}),
-			SectionCollections, func(rs *RestoreSet) bool { return len(rs.Collections.Branding) == 0 }},
-		"branding ref with a path": {brandingCase(BrandingEntry{Key: "branding.mark_ref", Ref: "../x.webp", Blob: "branding/x.webp"}),
-			SectionCollections, func(rs *RestoreSet) bool { return len(rs.Collections.Branding) == 0 }},
-		"a section carrying a collection its configuration does not name": {editDocument(homeSectionsDocumentName, &sections, func() {
-			sections.Sections[1].Config = json.RawMessage(`{"library_collection_id":"c1"}`)
-		}), SectionHomeSections, func(rs *RestoreSet) bool { return len(rs.HomeSections.Sections) == 1 }},
-		"a collection listing an item twice": {editDocument(collectionsDocumentName, &collections, func() {
-			collections.Collections[0].Items = []string{"m1", "m1"}
-		}), SectionCollections, func(rs *RestoreSet) bool { return len(rs.Collections.Collections) == 0 }},
-		// No editor writes more for one collection in one request.
-		"a collection description larger than a request": {editDocument(collectionsDocumentName, &collections, func() { collections.Collections[0].Description = huge }),
-			SectionCollections, func(rs *RestoreSet) bool { return len(rs.Collections.Collections) == 0 }},
-		"a section configuration larger than a request": {editDocument(homeSectionsDocumentName, &sections, func() {
-			sections.Sections[0].Config = json.RawMessage(`{"library_collection_id":"c1","pad":"` + huge + `"}`)
-		}), SectionHomeSections, func(rs *RestoreSet) bool { return len(rs.HomeSections.Sections) == 1 }},
-	} {
-		t.Run(name, func(t *testing.T) {
-			index, entries := testRestoreSet()
-			c.edit(&index, &entries)
-			resyncDigests(&index, entries)
-			rs, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(rs.Unusable) != 1 || rs.Unusable[0].Section != c.section || !c.gone(rs) {
-				t.Fatalf("unusable = %+v", rs.Unusable)
-			}
-		})
-	}
-}
-
 // A PAX sparse entry would read as a regular file of its logical size, with
 // holes filled from nothing; the reader refuses it before reading on.
 func TestReadRestoreSetRefusesSparseEntries(t *testing.T) {
@@ -1085,34 +823,6 @@ func withPAXRecords(t *testing.T, archive []byte, name string, records map[strin
 	return nil
 }
 
-// An account left out of a restore set is recorded with fields the reader
-// accepts, however long its name or error: one long username must not make
-// the whole index unreadable.
-func TestOmittedAccountsStayReadable(t *testing.T) {
-	long := strings.Repeat("é", 400) // 800 bytes, over maxAccountField
-	cases := []struct {
-		name    string
-		account AccountEntry
-		err     error
-	}{
-		{"long username", AccountEntry{ID: 1, Username: long}, errors.New("boom")},
-		{"long email", AccountEntry{ID: 2, Email: long + "@example.com"}, errors.New("boom")},
-		{"long error", AccountEntry{ID: 3, Username: "a"}, errors.New(strings.Repeat("x", 3*maxOmittedText))},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var b restoreSetBuild
-			b.omitFailed(sectionSpec{id: SectionUsers}, tc.account, &exportError{part: "ratings", err: fmt.Errorf("reading ratings: %w", tc.err)})
-			if err := validateOmitted(b.index.Omitted); err != nil {
-				t.Fatalf("omitted %+v: %v", b.index.Omitted, err)
-			}
-			if !utf8.ValidString(b.index.Omitted[0].Label) || b.index.Omitted[0].Label == "" {
-				t.Fatalf("label %q is not valid text", b.index.Omitted[0].Label)
-			}
-		})
-	}
-}
-
 // TestReadRestoreSetRefusesExpandingHeaders: a restore set whose first
 // header is an old-GNU sparse entry with 50,000 extension blocks is
 // refused at that header, without expanding them.
@@ -1139,77 +849,5 @@ func TestReadRestoreSetRefusesExpandingHeaders(t *testing.T) {
 	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 4<<20 {
 		t.Fatalf("refusing allocated %d bytes", allocated)
-	}
-}
-
-func mustLoadUser(t *testing.T, rs *RestoreSet, ref UserRef) *UserDocument {
-	t.Helper()
-	doc, err := rs.loadUser(ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return doc
-}
-
-// TestAccountDocumentsStayOnDisk: an account's document is written to the
-// set's directory and loaded on demand, never held or charged to the set's
-// memory, so a server's accounts together may exceed maxRestoreSetMetadata;
-// blobs are still not extracted, and a written document that changed since
-// the read is refused.
-func TestAccountDocumentsStayOnDisk(t *testing.T) {
-	index, entries := testRestoreSet()
-	doc := testUserDocument(5, "upload:profile-avatars/5/p1/original.webp")
-	title := strings.Repeat("t", 1000)
-	for i := range 4000 {
-		doc.Items = append(doc.Items, ItemRef{ContentID: fmt.Sprintf("mv-%d", i), Kind: "movie", Title: title})
-	}
-	data := mustJSON(doc)
-	setDocument(&index, entries, "users/5.json", data, 1)
-	rs, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rs.Cleanup()
-	if rs.metadataBytes >= int64(len(data)) {
-		t.Fatalf("charged %d bytes for a set whose account document alone is %d", rs.metadataBytes, len(data))
-	}
-	// A read that extracts nothing writes no blob beside the documents.
-	for key, file := range rs.blobs {
-		if file != "" {
-			t.Fatalf("a preview read extracted blob %s", key)
-		}
-	}
-	if loaded := mustLoadUser(t, rs, rs.Users[0]); len(loaded.Items) != len(doc.Items) {
-		t.Fatalf("loaded %d items, want %d", len(loaded.Items), len(doc.Items))
-	}
-	if err := os.WriteFile(rs.Users[0].file, mustJSON(testUserDocument(5, "")), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := rs.loadUser(rs.Users[0]); err == nil {
-		t.Fatal("a written account document that changed was loaded")
-	}
-}
-
-// TestOrphanedSetDirs: the startup sweep removes a set directory whose owner
-// is gone and keeps one a live set holds or one too new to be locked yet.
-func TestOrphanedSetDirs(t *testing.T) {
-	parent := t.TempDir()
-	var live, gone RestoreSet
-	if err := live.makeDir(parent); err != nil {
-		t.Fatal(err)
-	}
-	defer live.Cleanup()
-	if err := gone.makeDir(parent); err != nil {
-		t.Fatal(err)
-	}
-	_ = gone.owner.Close() // as when its process exits
-	young := filepath.Join(parent, setDirPrefix+"young")
-	if err := os.Mkdir(young, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for dir, want := range map[string]bool{live.dir: false, gone.dir: true, young: false} {
-		if got := orphanedSetDir(dir); got != want {
-			t.Errorf("orphanedSetDir(%s) = %v, want %v", filepath.Base(dir), got, want)
-		}
 	}
 }

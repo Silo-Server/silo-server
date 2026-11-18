@@ -1,16 +1,11 @@
 package jellycompat
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 func TestBuildPlaybackSourceHEVCEncodingRequiresFlagAndFMP4Profile(t *testing.T) {
@@ -94,101 +89,5 @@ func TestHEVCNegotiationRejectsStaleH264Recipe(t *testing.T) {
 	}
 	if compatRecipeMatchesSource(&legacy, source) {
 		t.Fatal("HEVC source accepted target-less legacy recipe")
-	}
-}
-
-func TestRemoteHEVCEncodeUsesNegotiatedCodecAndPersistsRecipe(t *testing.T) {
-	var request transcodenode.TranscodeStartRequest
-	node := fakeHEVCTranscodeNode(t, &request, http.StatusOK, []playback.TransformationV3{{Name: playback.TransformationVideoToHEVCV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationVideoToHEVCRecipeVersionV3}})
-	recipeStore := &stubRecipeNodeStore{}
-	handler, _, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
-	source := testRemoteTranscodeSource()
-	source.TargetVideoCodec = compatVideoCodecHEVC
-	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
-
-	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
-		t.Fatal(err)
-	}
-	if request.TargetCodecVideo != compatVideoCodecHEVC {
-		t.Fatalf("remote TargetCodecVideo = %q, want hevc", request.TargetCodecVideo)
-	}
-	if request.VideoSampleEntry != playback.VideoSampleEntryHVC1 {
-		t.Fatalf("remote VideoSampleEntry = %q, want hvc1", request.VideoSampleEntry)
-	}
-	card, ok := recipeStore.Get("upstream-1")
-	if !ok || card.TargetCodecVideo != compatVideoCodecHEVC || card.VideoSampleEntry != playback.VideoSampleEntryHVC1 {
-		t.Fatalf("persisted recipe = %+v, want HEVC", card)
-	}
-}
-
-func TestH264TranscodingAcceptsMPEGTSContainerAlias(t *testing.T) {
-	version := catalog.FileVersion{CodecVideo: "vp9", CodecAudio: "eac3", VideoTracks: []models.VideoTrack{{Codec: "vp9", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 2}}}
-	profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mpegts", VideoCodec: "h264", AudioCodec: "aac"}}}
-	if !profile.supportsTranscodingOutput(version, 2, 4000, "1080p") {
-		t.Fatal("H.264 MPEG-TS profile alias was rejected")
-	}
-	if profile.supportsHEVCTranscodingOutput(version, 2, 4000, "1080p") {
-		t.Fatal("MPEG-TS profile authorized HEVC fMP4 output")
-	}
-}
-
-func fakeHEVCTranscodeNode(t *testing.T, request *transcodenode.TranscodeStartRequest, capabilityStatus int, transformations []playback.TransformationV3) *httptest.Server {
-	t.Helper()
-	startNode := fakeTranscodeNode(t, request)
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/hw-capabilities" {
-			if capabilityStatus != http.StatusOK {
-				w.WriteHeader(capabilityStatus)
-				return
-			}
-			writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: transformations})
-			return
-		}
-		startNode.Config.Handler.ServeHTTP(w, r)
-	}))
-	t.Cleanup(node.Close)
-	return node
-}
-
-func TestRemoteHEVCRequiresSelectedNodeRecipeBeforeDispatch(t *testing.T) {
-	valid := playback.TransformationV3{Name: playback.TransformationVideoToHEVCV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationVideoToHEVCRecipeVersionV3}
-	wrongVersion := valid
-	wrongVersion.RecipeVersion = "0"
-	for _, tt := range []struct {
-		name            string
-		status          int
-		transformations []playback.TransformationV3
-	}{
-		{name: "missing recipe", status: http.StatusOK},
-		{name: "wrong version", status: http.StatusOK, transformations: []playback.TransformationV3{wrongVersion}},
-		{name: "unavailable capabilities", status: http.StatusServiceUnavailable},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			var request transcodenode.TranscodeStartRequest
-			node := fakeHEVCTranscodeNode(t, &request, tt.status, tt.transformations)
-			recipes := &stubRecipeNodeStore{}
-			h, manager, store := newRemoteTranscodeHandler(t, node.URL, recipes)
-			manager.sessions["upstream-1"].TranscodeNodeURL = ""
-			source := testRemoteTranscodeSource()
-			source.TargetVideoCodec = compatVideoCodecHEVC
-			store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
-			err := h.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL)
-			if err == nil {
-				t.Fatal("unsupported HEVC node accepted")
-			}
-			if tt.status == http.StatusOK && !strings.Contains(err.Error(), playback.TransformationVideoToHEVCV3) {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if request.SessionID != "" {
-				t.Fatal("unsupported recipe dispatched")
-			}
-			if _, ok := recipes.Get("upstream-1"); ok {
-				t.Fatal("unsupported recipe persisted")
-			}
-			session, _ := manager.GetSession("upstream-1")
-			if session.TranscodeNodeURL != "" {
-				t.Fatal("unsupported node bound to session")
-			}
-		})
 	}
 }

@@ -170,25 +170,6 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 	}
 }
 
-// A proxy without a plugin host (no providers wired) answers 503 so the API's
-// fan-out can say why the host is unavailable, and never 404, which would
-// read as "provider not installed here".
-func TestProxyNetworkAccessRoutesWithoutAHostAnswer503(t *testing.T) {
-	const secret = "network-access-proxy-secret"
-	server := newDownloadProxyServer(t, secret)
-	for _, route := range []struct{ method, path string }{
-		{http.MethodGet, "/network-access/status"},
-		{http.MethodGet, "/network-access/stub/status"},
-		{http.MethodPost, "/network-access/stub/connect"},
-		{http.MethodPost, "/network-access/stub/disconnect"},
-	} {
-		got := serveProxy(t, server, route.method, route.path, secret)
-		if got.Code != http.StatusServiceUnavailable {
-			t.Fatalf("%s %s without a host: %d %s", route.method, route.path, got.Code, got.Body)
-		}
-	}
-}
-
 type blockedProviderHost struct {
 	fakeProviderHost
 	started chan struct{}

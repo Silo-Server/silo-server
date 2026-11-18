@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -16,67 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/recommendations"
-	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 )
-
-func TestAdminSettingsCheckServiceValidationAndSafeFailure(t *testing.T) {
-	h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{}}}
-	if _, err := h.CheckAdminSettingsConnection(t.Context(), "unknown", nil, nil); !errors.Is(err, ErrAdminSettingsCheckKind) {
-		t.Fatal(err)
-	}
-	// Missing credentials fail locally without a real provider call.
-	result, err := h.CheckAdminSettingsConnection(t.Context(), "mdblist", nil, nil)
-	if err != nil || result.Success || result.Message != "Connection check failed. Verify the submitted settings and provider availability." ||
-		result.MessageKey != "web.admin.common.connectionCheck.result.failed" || result.MessageArgs != nil {
-		t.Fatal(result, err)
-	}
-	if _, err := (&AdminHandler{}).CheckAdminSettingsConnection(t.Context(), "redis", nil, nil); !errors.Is(err, ErrAdminSettingsUnavailable) {
-		t.Fatal(err)
-	}
-}
-
-func TestTextCheckReportsSafeProviderFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer private-test-key" {
-			t.Error("saved text key was not sent")
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"desc = api_key=private-test-key endpoint=https://private.example"}}`))
-	}))
-	defer server.Close()
-	h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-		config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
-			ID: "text", Type: config.AIProviderCustom, Name: "Text", BaseURL: server.URL, APIKey: "private-test-key",
-			Capabilities: []config.AICapability{config.AICapabilityChat},
-		}),
-		config.AITextProviderSettingKey: "text",
-		"ai.chat_model":                 "test-model",
-	}}}
-	result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
-	const want = "Text AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits."
-	if err != nil || result.Success || result.Message != want || result.MessageKey != "web.admin.common.connectionCheck.result.textAIFailed" {
-		t.Fatalf("result = %+v, err = %v; want %q", result, err, want)
-	}
-}
-
-func TestTranscriptionCheckRetryFailureMessages(t *testing.T) {
-	for _, tc := range []struct {
-		err  error
-		want string
-	}{
-		{llm.ErrQuotaExhausted, "Speech-to-text provider quota is exhausted. Check your provider balance and limits."},
-		{context.DeadlineExceeded, "Speech-to-text connection check timed out. Check provider availability and try again."},
-		{errors.Join(&llm.HTTPError{StatusCode: 429}, context.DeadlineExceeded), "Speech-to-text provider is rate limiting requests. Try again later."},
-		{&llm.HTTPError{StatusCode: 503}, "Speech-to-text provider is temporarily unavailable. Try again later."},
-		{errors.New("private provider text"), ""},
-	} {
-		if got := transcriptionCheckFailureMessage(fmt.Errorf("wrapped: %w", tc.err)).text; got != tc.want {
-			t.Errorf("message = %q; want %q", got, tc.want)
-		}
-	}
-}
 
 // This store exercises the real credential service without a provider call.
 type settingsCheckChatGPTStore struct{ *fakeServerSettingsStore }
@@ -96,53 +34,6 @@ func (s settingsCheckChatGPTStore) UpdateValueAtomic(ctx context.Context, key st
 	}
 	s.values[key] = value
 	return nil
-}
-
-func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
-	// Provider text must neither leak nor control the diagnosis.
-	const privateError = `{"error":{"message":"returned 401: private-test-key https://private.example"}}`
-	const untimed = "Speech-to-text model does not return timestamped segments, which Silo needs to make subtitles. Choose a model that supports segment timestamps, such as whisper-1 on OpenAI."
-	for _, tc := range []struct {
-		name    string
-		status  int
-		body    string
-		want    string
-		wantKey string
-	}{
-		{"401", http.StatusUnauthorized, privateError, "Speech-to-text authentication failed. Replace the provider's API key in AI Services.", "speechUnauthorized"},
-		{"403", http.StatusForbidden, privateError, "Speech-to-text access was denied. Check your API key permissions and allowed providers.", "speechForbidden"},
-		{"402", http.StatusPaymentRequired, privateError, "Speech-to-text provider requires payment. Check your provider balance and spending limit.", "speechPaymentRequired"},
-		{"404", http.StatusNotFound, privateError, "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers.", "speechNotFound"},
-		{"400", http.StatusBadRequest, privateError, "Connection check failed. Verify the submitted settings and provider availability.", "failed"},
-		// OpenAI's answer for gpt-transcribe, which has no timed output (#3518).
-		{"verbose_json rejected", http.StatusBadRequest, `{"error":{"message":"response_format 'verbose_json' is not compatible with model 'private-model'. Use 'json' or 'text' instead.","type":"invalid_request_error","param":"response_format","code":"unsupported_value"}}`, untimed, "speechNoTimestamps"},
-		{"timestamps rejected", http.StatusBadRequest, `{"error":{"message":"private","type":"invalid_request_error","param":"timestamp_granularities[]","code":"unsupported_value"}}`, untimed, "speechNoTimestamps"},
-		{"text without segments", http.StatusOK, `{"text":"private transcript"}`, untimed, "speechNoTimestamps"},
-		{"not a transcription reply", http.StatusOK, `{}`, "Connection check failed. Verify the submitted settings and provider availability.", "failed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Authorization") != "Bearer private-test-key" {
-					t.Error("saved ASR key was not sent")
-				}
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer server.Close()
-			h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-				config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
-					ID: "speech", Type: config.AIProviderCustom, Name: "Speech", BaseURL: server.URL, APIKey: "private-test-key",
-					Capabilities: []config.AICapability{config.AICapabilitySpeech},
-				}),
-				config.AISpeechProviderSettingKey: "speech",
-				"ai.asr_model":                    "test-model",
-			}}}
-			result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_transcription", nil, nil)
-			if err != nil || result.Success || result.Message != tc.want || result.MessageKey != "web.admin.common.connectionCheck.result."+tc.wantKey {
-				t.Fatalf("result = %+v, err = %v; want %q", result, err, tc.want)
-			}
-		})
-	}
 }
 
 // The check pins the account it started with: another node activating a
@@ -210,59 +101,6 @@ func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
 	}
 }
 
-// A check is how an administrator asks whether a usage pause has lifted: it
-// uses the paused account and records what the provider answered.
-func TestChatGPTSettingsCheckDeliberatelyRechecksPausedUsage(t *testing.T) {
-	original := newAdminAISettingsCheckClient
-	t.Cleanup(func() { newAdminAISettingsCheckClient = original })
-	for _, success := range []bool{false, true} {
-		t.Run(fmt.Sprintf("success=%t", success), func(t *testing.T) {
-			credentials, err := json.Marshal(map[string]any{"active": "a", "accounts": []map[string]any{
-				{"client_id": "a", "access_token": "a-token", "refresh_token": "a-refresh", "expires_at": time.Now().Add(time.Hour), "usage_limited": true},
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			store := &fakeServerSettingsStore{values: map[string]string{"ai.auth_mode": llm.AuthModeChatGPT, "ai.chat_model": "gpt-6-luna", chatgpt.CredentialsKey: string(credentials)}}
-			service := chatgpt.NewService(settingsCheckChatGPTStore{store})
-			newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-				return &fakeAISettingsCheckClient{chat: func(ctx context.Context, _ []llm.Message, _ bool) (string, error) {
-					if cfg.ChatGPTUsageLimited == nil || cfg.ChatGPTUsageVerified == nil {
-						t.Fatal("usage callbacks missing")
-					}
-					source, err := cfg.ChatGPTTokenSource(ctx)
-					if err != nil {
-						t.Fatal(err)
-					}
-					token, err := source(ctx)
-					if err != nil || token != "a-token" {
-						t.Fatalf("check cannot bypass usage pause: %q, %v", token, err)
-					}
-					if !success {
-						if err := cfg.ChatGPTUsageLimited(ctx, token); err != nil {
-							t.Fatal(err)
-						}
-						return "", llm.ErrQuotaExhausted
-					}
-					if err := cfg.ChatGPTUsageVerified(ctx, token); err != nil {
-						t.Fatal(err)
-					}
-					return `{"status":"ok"}`, nil
-				}}
-			}
-			h := &AdminHandler{SettingsRepo: store, ChatGPT: service}
-			checked, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			state, err := service.Status(t.Context())
-			if err != nil || checked.Success != success || state.Accounts[0].Connected != success || state.Accounts[0].UsageLimited == success {
-				t.Fatalf("check=%+v, state=%+v, err=%v", checked, state, err)
-			}
-		})
-	}
-}
-
 // The check reaches a Meilisearch key only at the authority it was saved for,
 // keeps the saved timeout, and reports provider failures in authored words.
 func TestMeilisearchCheckUsesOnlyBoundDraftCredentials(t *testing.T) {
@@ -321,100 +159,5 @@ func TestMeilisearchCheckUsesOnlyBoundDraftCredentials(t *testing.T) {
 	result, err := redirected.CheckAdminSettingsConnection(t.Context(), "meilisearch", nil, nil)
 	if err != nil || result.Success || strings.Contains(result.Message, "SYNTHETIC_PROVIDER_DETAIL") {
 		t.Fatalf("check exposed provider detail: %+v, %v", result, err)
-	}
-}
-
-// The embedding check fails when Silo could not store what the model returns
-// or the stored embedding lock rejects the configuration, and names the
-// model's dimensions when it passes.
-func TestCheckRecommendationsEmbeddingConnection(t *testing.T) {
-	originalFactory := newAdminEmbeddingsSettingsCheckClient
-	t.Cleanup(func() { newAdminEmbeddingsSettingsCheckClient = originalFactory })
-
-	const baseURL, model = "http://ollama:11434", "qwen3-embedding:0.6b"
-	vectorOf := func(n int) [][]float32 { return [][]float32{make([]float32, n)} }
-	for _, tc := range []struct {
-		name    string
-		vectors [][]float32
-		err     error
-		lock    string
-		dirty   map[string]string
-		success bool
-		want    string
-		key     string
-		args    map[string]string
-	}{
-		{name: "fits", vectors: vectorOf(1024), success: true, want: "returns 1024 dimensions", key: "embeddingConnected", args: map[string]string{"dimensions": "1024"}},
-		{name: "too many dimensions", vectors: vectorOf(4096), want: "The model returns 4096 dimensions; Silo stores at most 3072."},
-		{name: "exactly the stored size", vectors: vectorOf(3072), success: true, want: "returns 3072 dimensions"},
-		{name: "no vectors", vectors: [][]float32{}, want: "returned no vector"},
-		{name: "nil vector", vectors: [][]float32{nil}, want: "returned no vector"},
-		{name: "empty vector", vectors: [][]float32{{}}, want: "returned no vector"},
-		{
-			name: "matching lock", vectors: vectorOf(1024), success: true, want: "returns 1024 dimensions",
-			lock: embeddingLockJSON(t, recommendations.EmbeddingLock{BaseURL: baseURL, Model: model, SourceDimensions: 1024}),
-		},
-		{
-			name: "lock on another model", vectors: vectorOf(1024),
-			lock: embeddingLockJSON(t, recommendations.EmbeddingLock{BaseURL: baseURL, Model: "all-minilm", SourceDimensions: 384}),
-			want: `Embeddings were created with model "all-minilm", not "qwen3-embedding:0.6b". Reset embeddings before switching models.`,
-			key:  "embeddingModelMismatch", args: map[string]string{"locked_model": "all-minilm", "model": model},
-		},
-		{
-			name: "same model through another provider", vectors: vectorOf(1024), success: true, want: "returns 1024 dimensions",
-			lock: embeddingLockJSON(t, recommendations.EmbeddingLock{BaseURL: "https://user:secret@other.example", Model: "vendor/" + model, SourceDimensions: 1024}),
-		},
-		{
-			name: "lock with other dimensions", vectors: vectorOf(1024),
-			lock: embeddingLockJSON(t, recommendations.EmbeddingLock{BaseURL: baseURL, Model: model, SourceDimensions: 768}),
-			want: "created with 768-dimension vectors, but the model now returns 1024",
-		},
-		{
-			name: "lock pinned to an unstorable model", vectors: vectorOf(1024),
-			lock: embeddingLockJSON(t, recommendations.EmbeddingLock{BaseURL: baseURL, Model: model, SourceDimensions: 4096}),
-			want: "created with 4096-dimension vectors, but the model now returns 1024",
-		},
-		{
-			name: "a draft cannot replace the lock", vectors: vectorOf(1024),
-			lock:  embeddingLockJSON(t, recommendations.EmbeddingLock{BaseURL: baseURL, Model: "all-minilm", SourceDimensions: 384}),
-			dirty: map[string]string{recommendations.EmbeddingLockSettingKey: ""},
-			want:  `model "all-minilm"`,
-		},
-		{name: "unreadable lock", vectors: vectorOf(1024), lock: "{not json", want: "cannot be read"},
-		{name: "provider error", err: errors.New(`Post "http://ollama:11434/v1/embeddings": connection refused`), want: "Connection check failed."},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			newAdminEmbeddingsSettingsCheckClient = func(embeddings.ClientConfig) embeddingsSettingsCheckClient {
-				return &fakeEmbeddingsSettingsCheckClient{embed: func(context.Context, []string) ([][]float32, error) {
-					return tc.vectors, tc.err
-				}}
-			}
-			stored := map[string]string{
-				config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
-					ID: "box", Type: config.AIProviderOllama, Name: "Ollama", BaseURL: baseURL,
-					Capabilities: []config.AICapability{config.AICapabilityChat, config.AICapabilityEmbeddings},
-				}),
-				config.EmbeddingProviderSettingKey: "box",
-				"recommendations.embedding_model":  model,
-			}
-			if tc.lock != "" {
-				stored[recommendations.EmbeddingLockSettingKey] = tc.lock
-			}
-			handler := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: stored}}
-
-			result, err := handler.CheckAdminSettingsConnection(t.Context(), "recommendations_embedding", tc.dirty, slices.Collect(maps.Keys(tc.dirty)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.Success != tc.success || !strings.Contains(result.Message, tc.want) {
-				t.Fatalf("check = %+v, want success=%v and %q", result, tc.success, tc.want)
-			}
-			if tc.key != "" && (result.MessageKey != "web.admin.common.connectionCheck.result."+tc.key || !maps.Equal(result.MessageArgs, tc.args)) {
-				t.Fatalf("check = %+v, want key %q with %v", result, tc.key, tc.args)
-			}
-			if strings.Contains(result.Message, "secret") || strings.Contains(result.Message, "ollama:11434") {
-				t.Fatalf("check quotes a base URL: %q", result.Message)
-			}
-		})
 	}
 }

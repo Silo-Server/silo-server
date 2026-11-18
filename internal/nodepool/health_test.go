@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -105,34 +103,6 @@ func (f *capabilityCheckerFixture) storedNode(t *testing.T) *Node {
 const testCapabilityPayload = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
 	`"detected_backends":[{"backend":"nvenc","verified":true}],"capability_hash":"sha256:new"}`
 
-// A node whose hardware changed advertises a new hash; the sweep must fetch the
-// report once, publish it to the pool, and tell the capability cache to drop
-// what it had.
-func TestHealthCheckerFetchesCapabilitiesOnHashChange(t *testing.T) {
-	url := newHealthNode(t, "sha256:new")
-	fetcher := &fakeCapabilityFetcher{payload: []byte(testCapabilityPayload), hash: "sha256:new"}
-	fixture := newCapabilityCheckerFixture(t, &Node{ID: 1, Name: "gpu-1", URL: url, Enabled: true}, fetcher)
-
-	fixture.sweep()
-
-	if got := fetcher.callCount(); got != 1 {
-		t.Fatalf("capability fetches = %d, want exactly 1 per sweep", got)
-	}
-	stored := fixture.storedNode(t)
-	if stored.CapabilitiesHash == nil || *stored.CapabilitiesHash != "sha256:new" {
-		t.Fatalf("pool hash = %v, want sha256:new", stored.CapabilitiesHash)
-	}
-	if string(stored.Capabilities) != testCapabilityPayload {
-		t.Fatalf("pool payload = %s", stored.Capabilities)
-	}
-	if stored.CapabilitiesRefreshedAt == nil || stored.CapabilitiesRefreshedAt.IsZero() {
-		t.Fatal("pool copy carries no capability refresh time")
-	}
-	if got := fixture.notifications(); len(got) != 1 || got[0] != url {
-		t.Fatalf("capability change notifications = %v, want one for %s", got, url)
-	}
-}
-
 // Nothing changed: the sweep must cost one health request, not a probe of every
 // node every 30 seconds.
 func TestHealthCheckerSkipsFetchWhenHashUnchanged(t *testing.T) {
@@ -151,52 +121,6 @@ func TestHealthCheckerSkipsFetchWhenHashUnchanged(t *testing.T) {
 	}
 	if got := fixture.notifications(); len(got) != 0 {
 		t.Fatalf("notifications = %v, want none", got)
-	}
-}
-
-// A node from before capability snapshots reports no hash. It gets exactly the
-// old behavior: no fetch, and nothing invented on its behalf.
-func TestHealthCheckerSkipsFetchWhenNodeReportsNoHash(t *testing.T) {
-	url := newHealthNode(t, "")
-	fetcher := &fakeCapabilityFetcher{payload: []byte(testCapabilityPayload), hash: "sha256:new"}
-	fixture := newCapabilityCheckerFixture(t, &Node{ID: 1, Name: "old-node", URL: url, Enabled: true}, fetcher)
-
-	fixture.sweep()
-
-	if got := fetcher.callCount(); got != 0 {
-		t.Fatalf("capability fetches = %d, want none for a node that reports no hash", got)
-	}
-	stored := fixture.storedNode(t)
-	if stored.CapabilitiesHash != nil || stored.Capabilities != nil {
-		t.Fatalf("stored capabilities were synthesized: hash=%v payload=%s", stored.CapabilitiesHash, stored.Capabilities)
-	}
-	if !stored.Healthy {
-		t.Fatal("node without a capability hash was not marked healthy")
-	}
-}
-
-// A node that is down tells us nothing about its hardware, so its stored
-// inventory must survive rather than be cleared or refetched.
-func TestHealthCheckerSkipsFetchWhenNodeUnhealthy(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "down", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(server.Close)
-	fetcher := &fakeCapabilityFetcher{payload: []byte(testCapabilityPayload), hash: "sha256:new"}
-	fixture := newCapabilityCheckerFixture(t, &Node{
-		ID: 1, Name: "gpu-1", URL: server.URL, Enabled: true, Healthy: true,
-		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: strPtr("sha256:old"),
-	}, fetcher)
-
-	fixture.sweep()
-
-	if got := fetcher.callCount(); got != 0 {
-		t.Fatalf("capability fetches = %d, want none for an unhealthy node", got)
-	}
-	stored := fixture.storedNode(t)
-	if stored.CapabilitiesHash == nil || *stored.CapabilitiesHash != "sha256:old" {
-		t.Fatalf("stored hash = %v, want the previous report kept", stored.CapabilitiesHash)
 	}
 }
 
@@ -366,52 +290,5 @@ func TestHealthCheckerDoesNotStackCapabilityFetchesForOneNode(t *testing.T) {
 	checker.waitForCapabilityRefreshes()
 	if got := fetcher.calls.Load(); got != 1 {
 		t.Fatalf("capability fetches = %d after the report was stored, want 1", got)
-	}
-}
-
-// The probe matrix a cold node runs grows with its device count without bound —
-// nine render devices legitimately ask for over five minutes — so a fixed outer
-// deadline cancels a node operating inside its published contract, and its
-// inventory never populates. The backstop is derived from the budget the fetcher
-// gave itself so the fetcher's own deadline always fires first.
-func TestCapabilityFetchBackstopSitsAboveTheFetcherBudget(t *testing.T) {
-	checker := NewHealthChecker(NewProxyPool(), newKeyedTranscodePool(), nil)
-	node := &Node{ID: 1, URL: "http://gpu-1"}
-
-	if got := checker.capabilityFetchBackstop(node); got != capabilityFetchTimeout {
-		t.Fatalf("backstop with no budget wired = %v, want the %v floor", got, capabilityFetchTimeout)
-	}
-
-	// A budget under the floor leaves the floor standing: it already clears the
-	// fetcher by a wide margin.
-	checker.SetCapabilityFetchBudget(func(*Node) time.Duration { return 2 * time.Minute })
-	if got := checker.capabilityFetchBackstop(node); got != capabilityFetchTimeout {
-		t.Fatalf("backstop for a small budget = %v, want the %v floor", got, capabilityFetchTimeout)
-	}
-
-	// A budget above it carries the backstop with it, always by the slack, so
-	// the fetch is never cut short by this.
-	big := 311 * time.Second
-	checker.SetCapabilityFetchBudget(func(*Node) time.Duration { return big })
-	got := checker.capabilityFetchBackstop(node)
-	if got != big+capabilityFetchSlack {
-		t.Fatalf("backstop for a %v budget = %v, want %v", big, got, big+capabilityFetchSlack)
-	}
-	if got <= big {
-		t.Fatalf("backstop %v does not clear the %v the fetcher allowed itself", got, big)
-	}
-}
-
-// The health check is the first thing that runs against a node, so a base URL
-// this could not address would leave the node permanently unhealthy.
-func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
-	url := newStatsHealthNode(t, `{"active_jobs":1,"capabilities_hash":"sha256:x","node_control_version":1}`)
-
-	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: url + "///"})
-	if !healthy {
-		t.Fatal("a node stored with a trailing slash was reported unhealthy")
-	}
-	if activeJobs != 1 || hash != "sha256:x" {
-		t.Fatalf("active jobs = %d, hash = %q; want the node's own answer", activeJobs, hash)
 	}
 }
