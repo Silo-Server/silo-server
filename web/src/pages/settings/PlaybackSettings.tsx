@@ -775,10 +775,6 @@ export default function PlaybackSettings() {
           )}
           control={(id) => {
             const seconds = read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS);
-            // A value another client stored outside the list still shows as itself.
-            const choices = NEXT_UP_PROMPT_CHOICES.includes(seconds)
-              ? NEXT_UP_PROMPT_CHOICES
-              : [...NEXT_UP_PROMPT_CHOICES, seconds].sort((a, b) => a - b);
             return (
               <Select
                 value={String(seconds)}
@@ -788,10 +784,12 @@ export default function PlaybackSettings() {
                 }
               >
                 <SelectTrigger id={id} className="w-full sm:w-[220px]">
-                  <SelectValue />
+                  {/* Named here, so a value another client stored off the list
+                      (the device slider allows any second) still reads as itself. */}
+                  <SelectValue>{nextUpPromptLabel(t, seconds)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {choices.map((choice) => (
+                  {NEXT_UP_PROMPT_CHOICES.map((choice) => (
                     <SelectItem key={choice} value={String(choice)}>
                       {nextUpPromptLabel(t, choice)}
                     </SelectItem>

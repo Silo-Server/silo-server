@@ -662,7 +662,7 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
     );
-  const { data: effectivePlaybackSettings } = useEffectiveSettings({
+  const { data: effectivePlaybackSettings, isError: settingsReadFailed } = useEffectiveSettings({
     keys: [
       ...(supportsBufferingQualityMode ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
@@ -970,12 +970,17 @@ function WatchPlaybackHostContent() {
   const requestKeyValue = activeRequest?.requestKey ?? "";
 
   // -- Early post-roll trigger (the viewer's Show Next Up lead time) --
-  // Until the setting loads the contract default applies; 0 means "At end",
-  // which leaves post-roll to the `ended` fallback below.
-  const nextUpPromptSeconds = Number(
-    effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS]?.value ??
-      SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS].defaultValue,
-  );
+  // 0 means "At end", which leaves post-roll to the `ended` fallback below.
+  // Until the setting loads nothing opens early, so an "At end" viewer who
+  // starts near the end is not shown Next Up on the default; a failed read
+  // falls back to the contract default.
+  const nextUpPromptSeconds =
+    effectivePlaybackSettings === undefined && !settingsReadFailed
+      ? 0
+      : Number(
+          effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS]?.value ??
+            SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS].defaultValue,
+        );
   const nextUpPromptSecondsRef = useRef(nextUpPromptSeconds);
   useEffect(() => {
     nextUpPromptSecondsRef.current = nextUpPromptSeconds;
