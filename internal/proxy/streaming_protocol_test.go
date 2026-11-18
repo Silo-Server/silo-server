@@ -40,6 +40,10 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 				w.Header().Set("Content-Type", "application/x-origin-fixture")
 				w.Header().Set("X-Origin-Fixture", "preserved")
 				w.Header().Set(transcodeproxy.GenerationHeader, "private")
+				if tc.method == http.MethodHead {
+					// The node drops the connection mid-body; a HEAD never needed the body.
+					w.Header().Set("Content-Length", "100")
+				}
 				w.WriteHeader(418)
 				_, _ = io.WriteString(w, "origin refusal")
 			}))
@@ -52,7 +56,7 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 				t.Fatal(response.status, response.header)
 			}
 			if tc.method == http.MethodHead {
-				if response.body != "" || response.header.Get("Content-Length") != "14" {
+				if response.body != "" || response.header.Get("Content-Length") != "100" {
 					t.Fatal("HEAD bytes or length", response.body, response.header)
 				}
 			} else if response.body != "origin refusal" {
