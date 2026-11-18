@@ -662,6 +662,12 @@ func (d *EventDispatcher) deliver(ctx context.Context, delivery EventDelivery) {
 var errUndeliverable = errors.New("undeliverable")
 
 func (d *EventDispatcher) handleEvent(ctx context.Context, delivery EventDelivery) error {
+	// A row an older build stored can name an event outside the catalog, such
+	// as a profile's watch state. It is dropped here, since the catalog check
+	// in store never saw it.
+	if _, deliverable := publicevents.AccessOf(delivery.EventName); !deliverable {
+		return fmt.Errorf("%w: %q is not in the event catalog", errUndeliverable, delivery.EventName)
+	}
 	var payload *structpb.Struct
 	if len(delivery.Payload) > 0 {
 		payload = &structpb.Struct{}

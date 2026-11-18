@@ -247,6 +247,24 @@ func TestUndeliverablePayloadIsDropped(t *testing.T) {
 	}
 }
 
+// A row stored by a build from before the catalog, naming an internal event
+// with per-profile data, never reaches the plugin.
+func TestStoredEventOutsideTheCatalogIsDropped(t *testing.T) {
+	ctx := t.Context()
+	client := &flakyClient{}
+	d, deliveries := newDeliveryFixture(client)
+	if err := deliveries.Enqueue(ctx, []EventDelivery{{EventID: "e", EventName: "user_state.changed", Payload: []byte(`{"profile_id":"p1"}`), InstallationID: 1, CapabilityID: "events"}}); err != nil {
+		t.Fatal(err)
+	}
+	d.deliverDue(ctx)
+	if got := len(client.get()); got != 0 {
+		t.Fatalf("deliveries of an event outside the catalog = %d, want 0", got)
+	}
+	if pending := deliveries.pending(); len(pending) != 0 {
+		t.Fatalf("outbox = %+v, want empty", pending)
+	}
+}
+
 // TestPayloadOffTheCatalogIsNotQueued: a payload that doesn't fit its
 // catalog type is dropped, not queued without its data.
 func TestPayloadOffTheCatalogIsNotQueued(t *testing.T) {
