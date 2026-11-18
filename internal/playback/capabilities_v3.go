@@ -565,7 +565,7 @@ func clientDVBaseLayerFallbackV3(source SourceDescriptorV3, request StartRequest
 	switch {
 	case source.DVProfile == 8:
 		claim = ClaimClientDV8BaseLayerFallbackV3
-	case source.DVProfile == 10 && strings.EqualFold(source.VideoCodec, "av1"):
+	case source.DVProfile == 10 && strings.EqualFold(source.VideoCodec, codecAV1):
 		claim = ClaimClientDV10BaseLayerFallbackV3
 	default:
 		return false, ""

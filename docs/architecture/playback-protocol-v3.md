@@ -701,7 +701,8 @@ ordinary AV1 decoder. It is a separate claim because the Profile 8 claim
 promises an HEVC decoder, and neither claim covers the other profile. The
 server applies the same gates to an AV1 source tagged Profile 10, with the
 same compatibility ids (`1`, `4`, and `2`; Profile 10.0 has no compatible
-base layer and fails closed) and an AV1 decode entry that fits the source.
+base layer and fails closed), and the AV1 stream must fit the client's decode
+bounds.
 The plan carries `decision_reason: client_dv10_base_layer`,
 `dolby_vision_reason: base_layer_compatible_av1`, and the same
 `dolby_vision_base_layer_only` warning, and the executor reports
