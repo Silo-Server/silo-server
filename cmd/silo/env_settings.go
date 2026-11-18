@@ -39,12 +39,13 @@ func applyEnvSettings(ctx context.Context, repo *catalog.EncryptedSettingsRepo, 
 	normalizedRedis, redisErr := config.NormalizeRedisURL(redisBootstrapURL)
 	redisBootstrapAvailable := normalizedRedis != "" && redisErr == nil
 	var checked config.EnvSettings
-	var changed map[string]string
+	var changed, snapshot map[string]string
 	var checkErr error
 	err := repo.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
 		if checked, checkErr = handlers.CheckEnvironmentSettings(current, env, redisBootstrapAvailable); checkErr != nil {
 			return nil, checkErr
 		}
+		snapshot = maps.Clone(current)
 		changed = map[string]string{}
 		for key, value := range checked.Values(config.EnvScopeStored) {
 			if current[key] != value {
@@ -60,6 +61,10 @@ func applyEnvSettings(ctx context.Context, repo *catalog.EncryptedSettingsRepo, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("storing settings from the environment: %w", err)
 	}
+	// Startup builds its config from the rows the check ran against, not from
+	// the earlier read, which another server may have changed since.
+	clear(settings)
+	maps.Copy(settings, snapshot)
 	maps.Copy(settings, checked.All())
 	return checked, slices.Sorted(maps.Keys(changed)), nil
 }
