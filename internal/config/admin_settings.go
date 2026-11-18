@@ -1547,9 +1547,13 @@ func normalizeWebMediaURL(value string) (string, error) {
 	if !strings.HasPrefix(normalized, "https://") {
 		return "", fmt.Errorf("%s must use https", WebMediaURLSettingKey)
 	}
-	// url.Parse accepts any digits as a port. A browser does not, and the web
-	// player parses this origin before it plays anything.
-	if _, port, err := net.SplitHostPort(strings.TrimPrefix(normalized, "https://")); err == nil {
+	// url.Parse accepts an empty hostname and any digits as a port. A browser
+	// accepts neither, and the web player parses this origin before it plays
+	// anything.
+	if host, port, err := net.SplitHostPort(strings.TrimPrefix(normalized, "https://")); err == nil {
+		if host == "" {
+			return "", fmt.Errorf("%s must include a hostname", WebMediaURLSettingKey)
+		}
 		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 			return "", fmt.Errorf("%s must use a port from 1 to 65535", WebMediaURLSettingKey)
 		}
