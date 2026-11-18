@@ -2,8 +2,8 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import type { ReactNode } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
-import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
-import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { useShowThenSave } from "@/hooks/queries/settingWriteOffline";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { appearanceCache, storage } from "@/utils/storage";
 import type { StorageKey } from "@/utils/storage";
 import {
@@ -228,62 +228,54 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, [cacheOwner]);
 
-  // Shows a choice at once, then saves it. A save that failed offline leaves
-  // the stored choice unchanged, and the effects above only re-run when that
-  // changes, so the previous choice and cache entry are put back here. An
-  // offline failure is immediate, so the profile can't have changed since.
-  const showAndSave = useCallback(
-    <T,>(key: SettingKey, cacheKey: StorageKey, value: T, previous: T, show: (v: T) => void) => {
-      const cached = appearanceCache.get(cacheKey, cacheOwner);
-      show(value);
-      appearanceCache.set(cacheKey, String(value), cacheOwner);
-      saveProfileDefault(key, value).catch(() => {
-        if (!reportOfflineSettingFailure()) return;
-        show(previous);
-        if (cached === null) appearanceCache.remove(cacheKey, cacheOwner);
-        else appearanceCache.set(cacheKey, cached, cacheOwner);
-      });
-    },
-    [saveProfileDefault, cacheOwner],
-  );
+  const showThenSave = useShowThenSave(cacheOwner);
 
   const setTextScale = useCallback(
     (value: TextScale) =>
-      showAndSave(SETTING_KEYS.UI_TEXT_SCALE, storage.KEYS.UI_TEXT_SCALE, value, textScale, (v) => {
-        setTextScalePreference(v);
-        applyTextScaleToDOM(v);
+      showThenSave({
+        key: SETTING_KEYS.UI_TEXT_SCALE,
+        cacheKey: storage.KEYS.UI_TEXT_SCALE,
+        value,
+        previous: textScale,
+        show: (v) => {
+          setTextScalePreference(v);
+          applyTextScaleToDOM(v);
+        },
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, v),
       }),
-    [showAndSave, textScale],
+    [saveProfileDefault, showThenSave, textScale],
   );
 
   const setTextWeight = useCallback(
     (value: TextWeight) =>
-      showAndSave(
-        SETTING_KEYS.UI_TEXT_WEIGHT,
-        storage.KEYS.UI_TEXT_WEIGHT,
+      showThenSave({
+        key: SETTING_KEYS.UI_TEXT_WEIGHT,
+        cacheKey: storage.KEYS.UI_TEXT_WEIGHT,
         value,
-        textWeight,
-        (v) => {
+        previous: textWeight,
+        show: (v) => {
           setTextWeightPreference(v);
           applyTextWeightToDOM(v);
         },
-      ),
-    [showAndSave, textWeight],
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, v),
+      }),
+    [saveProfileDefault, showThenSave, textWeight],
   );
 
   const setHighContrast = useCallback(
     (value: boolean) =>
-      showAndSave(
-        SETTING_KEYS.UI_HIGH_CONTRAST,
-        storage.KEYS.UI_HIGH_CONTRAST,
+      showThenSave({
+        key: SETTING_KEYS.UI_HIGH_CONTRAST,
+        cacheKey: storage.KEYS.UI_HIGH_CONTRAST,
         value,
-        highContrast,
-        (v) => {
+        previous: highContrast,
+        show: (v) => {
           setHighContrastPreference(v);
           applyHighContrastToDOM(v);
         },
-      ),
-    [showAndSave, highContrast],
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, v),
+      }),
+    [saveProfileDefault, showThenSave, highContrast],
   );
 
   return (

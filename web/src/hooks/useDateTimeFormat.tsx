@@ -15,7 +15,7 @@ import type {
 } from "@/lib/datetime";
 import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
+import { useShowThenSave } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import { appearanceCache, storage } from "@/utils/storage";
@@ -96,38 +96,44 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
     }
   }, [dateFormat, timeFormat, apiLoaded, cacheOwner]);
 
-  // The shown format was applied before the save. When an offline save fails,
-  // the stored values are unchanged, so the effect above never re-runs: put
-  // them back here. An online failure may have saved, and its re-read decides.
-  const restoreStoredFormats = useCallback(() => {
-    if (!reportOfflineSettingFailure() || !apiLoaded) return;
-    setDateTimeFormatPreferences({ dateFormat, timeFormat });
-    appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, dateFormat, cacheOwner);
-    appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, timeFormat, cacheOwner);
-  }, [apiLoaded, dateFormat, timeFormat, cacheOwner]);
+  const showThenSave = useShowThenSave(cacheOwner);
 
   const setDateFormat = useCallback(
-    (value: DateFormatPreference) => {
-      setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), dateFormat: value });
-      appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, value, cacheOwner);
-      settingMutation.mutate(
-        { key: SETTING_KEYS.UI_DATE_FORMAT, value, identity: PROFILE_SCOPE },
-        { onError: restoreStoredFormats },
-      );
-    },
-    [settingMutation, cacheOwner, restoreStoredFormats],
+    (value: DateFormatPreference) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_DATE_FORMAT,
+        cacheKey: storage.KEYS.UI_DATE_FORMAT,
+        value,
+        previous: getDateTimeFormatPreferences().dateFormat,
+        show: (v) =>
+          setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), dateFormat: v }),
+        save: (v) =>
+          settingMutation.mutateAsync({
+            key: SETTING_KEYS.UI_DATE_FORMAT,
+            value: v,
+            identity: PROFILE_SCOPE,
+          }),
+      }),
+    [settingMutation, showThenSave],
   );
 
   const setTimeFormat = useCallback(
-    (value: TimeFormatPreference) => {
-      setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), timeFormat: value });
-      appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, value, cacheOwner);
-      settingMutation.mutate(
-        { key: SETTING_KEYS.UI_TIME_FORMAT, value, identity: PROFILE_SCOPE },
-        { onError: restoreStoredFormats },
-      );
-    },
-    [settingMutation, cacheOwner, restoreStoredFormats],
+    (value: TimeFormatPreference) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_TIME_FORMAT,
+        cacheKey: storage.KEYS.UI_TIME_FORMAT,
+        value,
+        previous: getDateTimeFormatPreferences().timeFormat,
+        show: (v) =>
+          setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), timeFormat: v }),
+        save: (v) =>
+          settingMutation.mutateAsync({
+            key: SETTING_KEYS.UI_TIME_FORMAT,
+            value: v,
+            identity: PROFILE_SCOPE,
+          }),
+      }),
+    [settingMutation, showThenSave],
   );
 
   return (

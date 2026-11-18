@@ -9,6 +9,7 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
 
@@ -416,6 +417,8 @@ export function useLibraryPageStatePreference() {
           return result;
         },
         (error: unknown) => {
+          // A sent write that failed offline isn't retried, so the view isn't remembered.
+          if (mutationStarted) reportOfflineSettingFailure();
           settlePreferenceWrite(
             queue,
             pendingWrite,
