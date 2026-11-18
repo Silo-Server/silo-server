@@ -690,8 +690,8 @@ describe("VideoPlayer source timeline", () => {
 
     // Plays the first transport, asks for a quality change, and seeks back
     // to 30 s while the replan is in flight. The old stream completes the seek.
-    async function seekDuringReplan() {
-      const rendered = renderPlayer({ plan });
+    async function seekDuringReplan(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+      const rendered = renderPlayer({ plan, ...overrides });
       const video = rendered.container.querySelector("video")!;
       await waitFor(() =>
         expect(video.src !== "" || hlsJS.constructed.mock.calls.length > 0).toBe(true),
@@ -718,19 +718,6 @@ describe("VideoPlayer source timeline", () => {
       });
     }
 
-    it("starts the hls.js stream at the seek", async () => {
-      hlsJS.supported = true;
-      const { rerenderPlayer } = await seekDuringReplan();
-      hlsJS.constructed.mockClear();
-
-      newStream(rerenderPlayer);
-
-      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
-      expect(hlsJS.constructed).toHaveBeenCalledWith(
-        expect.objectContaining({ startPosition: 30 }),
-      );
-    });
-
     it("starts the native HLS stream at the seek", async () => {
       const { video, rerenderPlayer } = await seekDuringReplan();
 
@@ -741,26 +728,63 @@ describe("VideoPlayer source timeline", () => {
       expect(video.currentTime).toBe(30);
     });
 
-    it("resumes another quality change at the seek before the new stream plays", async () => {
-      hlsJS.supported = true;
-      const onQualitySelect = vi.fn();
-      const { rerenderPlayer } = await seekDuringReplan();
-      rerenderPlayer({
-        plan,
-        replanning: false,
-        planRevision: 2,
-        streamUrl: "/api/v1/stream/session-1?revision=2",
-        onQualitySelect,
-      });
-      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
-
-      const selectQuality = (
-        controls.current as unknown as { onQualitySelect: (id: string) => void }
-      ).onQualitySelect;
-      act(() => selectQuality("480p"));
-
-      expect(onQualitySelect).toHaveBeenCalledWith("480p", 30, undefined, expect.any(Function));
+    // An original file whose metadata has not loaded: the seek waits for the
+    // metadata handler instead of reaching the element.
+    const originalPlan = fixturePlanV3({
+      delivery: "original_http",
+      stream: {
+        url: "/stream/session-1",
+        protocol: "http_progressive",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: { ...plan.timeline },
     });
+    async function seekBeforeMetadata(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+      const rendered = renderPlayer({ plan: originalPlan, ...overrides });
+      const video = rendered.container.querySelector("video")!;
+      await waitFor(() => expect(video.src).toContain("/stream/session-1"));
+      rendered.rerenderPlayer({ plan: originalPlan, replanning: true });
+      act(() => {
+        controls.current!.onSeek(30);
+      });
+      return rendered;
+    }
+
+    it.each([
+      ["a playing stream", seekDuringReplan],
+      ["an original file whose metadata has not loaded", seekBeforeMetadata],
+    ])(
+      "after a seek on %s, starts the new stream and a queued or later quality change at it",
+      async (_, seek) => {
+        hlsJS.supported = true;
+        const onSeek = vi.fn();
+        const onQualitySelect = vi.fn();
+        const { rerenderPlayer } = await seek({ onSeek });
+        // The session moves a change queued behind the replan to the seek.
+        expect(onSeek).toHaveBeenCalledWith(30);
+        hlsJS.constructed.mockClear();
+
+        rerenderPlayer({
+          plan,
+          replanning: false,
+          planRevision: 2,
+          streamUrl: "/api/v1/stream/session-1?revision=2",
+          onQualitySelect,
+        });
+        await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+        expect(hlsJS.constructed).toHaveBeenCalledWith(
+          expect.objectContaining({ startPosition: 30 }),
+        );
+
+        const selectQuality = (
+          controls.current as unknown as { onQualitySelect: (id: string) => void }
+        ).onQualitySelect;
+        act(() => selectQuality("480p"));
+
+        expect(onQualitySelect).toHaveBeenCalledWith("480p", 30, undefined, expect.any(Function));
+      },
+    );
 
     it("forgets the seek when the replan settles without a new stream", async () => {
       hlsJS.supported = true;

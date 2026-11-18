@@ -1670,21 +1670,27 @@ export function VideoPlayer({
 
       resetRoomCatchupRate();
 
-      if (directPlayOriginPendingRef.current) {
+      // A seek this stream takes: the replan in flight, and a change queued
+      // behind it, resume there too.
+      const takeSeek = () => {
         rememberPendingSeek(seconds);
+        replanSeekRef.current = replanningRef.current
+          ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
+          : null;
+        onSeek?.(seconds);
         setCurrentTime(seconds);
+      };
+
+      // The original's metadata handler seeks there once the clock's origin
+      // is known.
+      if (directPlayOriginPendingRef.current) {
+        takeSeek();
         return true;
       }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
-        rememberPendingSeek(seconds);
-        replanSeekRef.current = replanningRef.current
-          ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
-          : null;
-        // A change queued behind the replan in flight resumes here too.
-        onSeek?.(seconds);
-        setCurrentTime(seconds);
+        takeSeek();
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;
