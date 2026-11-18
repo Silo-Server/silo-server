@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -291,7 +292,7 @@ func TestFailedTranscodeStartupStillClosesWhenRequestCancelsAfterFailure(t *test
 		MediaSources: []PlaybackMediaSource{source},
 	})
 	compatSession := &Session{Token: "token-1", StreamAppUserID: 7, ProfileID: "profile-1"}
-	startupErr := errors.New("file lookup failed")
+	startupErr := scanner.ErrFileNotFound
 	ctx, cancel := context.WithCancel(context.Background())
 	h.fileResolver = cancelingErrorFileResolver{cancel: cancel, err: startupErr}
 

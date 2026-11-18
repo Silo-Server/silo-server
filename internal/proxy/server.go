@@ -1230,12 +1230,19 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	isSegmentRoute := strings.Contains(path, "/segment/")
 	_, segmentParseErr := playback.ParseSegmentNumber(filepath.Base(path))
 	isMediaSegment := segmentParseErr == nil
+	// The node serves the playlist on GET only. A HEAD (a DLNA controller
+	// checking the URL) asks it with GET and answers with the node's status
+	// and headers, Content-Length included, without its body.
+	method := r.Method
+	if method == http.MethodHead && strings.HasSuffix(path, "/master.m3u8") {
+		method = http.MethodGet
+	}
 	relay := func(nodeURL string) (*http.Response, string, error) {
 		targetURL := nodeURL + path
 		if rawQuery := r.URL.RawQuery; rawQuery != "" {
 			targetURL = fmt.Sprintf("%s?%s", targetURL, rawQuery)
 		}
-		req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, nil)
+		req, err := http.NewRequestWithContext(r.Context(), method, targetURL, nil)
 		if err != nil {
 			return nil, targetURL, fmt.Errorf("%w: %w", errBuildNodeRequest, err)
 		}
@@ -1313,6 +1320,11 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	transcodeproxy.CopyResponseHeaders(w.Header(), resp.Header)
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
+	if r.Method == http.MethodHead {
+		// A HEAD answer has no body. For a manifest the node was asked with
+		// GET, and its body would only be dropped, so neither read nor meter it.
+		return
+	}
 	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
 		if r.Context().Err() == nil && errors.Is(copyErr, nodepool.ErrNodeNotAnswering) {
 			slog.WarnContext(r.Context(), "transcode node stopped answering during relay body read", "component", "proxy", "error", logredact.SanitizeText(copyErr.Error()), "node", logredact.SanitizeURL(nodeURL), "playback_session_id", claims.SessionID)

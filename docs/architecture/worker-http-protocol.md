@@ -575,9 +575,12 @@ specific media; finite native/raw registration rules are unchanged. Only segment
 requests forward range/conditional headers and mark the private proxy hop.
 Completion acknowledgment is attempted only after a complete downstream media
 segment response; failure is logged, and no durable receipt is promised.
-Proxy manifest HEAD is forwarded as HEAD, while the current node manifest route
-registers GET only and returns 405. This description does not manufacture working
-manifest HEAD support or ratify a consumer that depends on it.
+The node manifest route registers GET only, so the proxy asks the node with GET
+for a manifest HEAD and answers with the node's status and headers,
+`Content-Length` included, without reading the body. The API relay also asks
+the node with GET; it rewrites a playlist it re-tokenizes and recomputes its
+`Content-Length`. Segment routes take GET only, and remux HEAD is still
+forwarded as HEAD.
 
 The proxy `/stream/v3` family remains a separate header-authenticated protocol.
 Each request requires an access JWT, a live login session and a stored grant owned
