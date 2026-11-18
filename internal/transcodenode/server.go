@@ -2455,13 +2455,21 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}
 	// A GET for a playback session this node serves, or served within the
 	// idle lifetime, is a viewer seeking or coming back: it continues a job
-	// the node holds. Any other is new work, checked here before the source
-	// opens so a refusal costs the core no open, and admitted below.
+	// the node holds. Any other is new work and takes its slot here, before
+	// the source opens, so a refusal costs the core no open, and before the
+	// remux is registered, so a request the cap turns away is never what
+	// another request for the same playback session continues.
 	overlap, continues := s.claimContinuation(playbackSessionID, time.Now())
 	defer overlap.release()
-	if r.Method != http.MethodHead && !continues && s.atJobCap() {
-		writeAtCapacity(w)
-		return
+	var slot *jobSlot
+	if r.Method != http.MethodHead && !continues {
+		admitted, ok := s.admitJob()
+		if !ok {
+			writeAtCapacity(w)
+			return
+		}
+		slot = admitted
+		defer slot.release()
 	}
 	// A GET opens its source once, before admission, and holds it for the
 	// request; a source the core withdraws ends it. HEAD reads no media.
@@ -2564,14 +2572,10 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		close(done)
 	}()
 
-	if continues {
-		// The remux is registered above, so it counts as running from here.
-		s.countJob(nil)
-		overlap.release()
-	} else if !s.claimJob() {
-		writeAtCapacity(w)
-		return
-	}
+	// The remux is registered above, so it counts as running from here: its
+	// slot when it was new work, the overlap allowance when it continued.
+	s.countJob(slot)
+	overlap.release()
 	defer s.activeJobs.Add(-1)
 	s.noteRemux(playbackSessionID, time.Now())
 	defer func() { s.noteRemux(playbackSessionID, time.Now()) }()

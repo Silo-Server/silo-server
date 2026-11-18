@@ -83,8 +83,11 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	}
 	s.countJob(admitted[0])
 	admitted[0].release()
-	if s.activeJobs.Load() != 3 || s.admitted != 0 || !s.atJobCap() {
+	if s.activeJobs.Load() != 3 || s.admitted != 0 {
 		t.Fatalf("after counting the slot: active %d, admitted %d", s.activeJobs.Load(), s.admitted)
+	}
+	if _, ok := s.admitJob(); ok {
+		t.Fatal("a job was admitted at the cap")
 	}
 }
 

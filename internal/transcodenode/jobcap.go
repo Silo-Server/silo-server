@@ -106,24 +106,6 @@ func (slot *jobSlot) release() {
 	}
 }
 
-// claimJob admits and counts one job at once, for work that starts as it is
-// admitted.
-func (s *Server) claimJob() bool {
-	slot, ok := s.admitJob()
-	if ok {
-		s.countJob(slot)
-	}
-	return ok
-}
-
-// atJobCap reports whether new work would be refused now. It is a hint that
-// saves the core a call; admitJob decides.
-func (s *Server) atJobCap() bool {
-	s.admission.Lock()
-	defer s.admission.Unlock()
-	return s.fullLocked()
-}
-
 // fullLocked reports whether the counted and admitted jobs fill the cap. The
 // caller holds s.admission.
 func (s *Server) fullLocked() bool {

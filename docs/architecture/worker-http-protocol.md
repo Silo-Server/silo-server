@@ -505,9 +505,10 @@ budgets but under a per-node cap on concurrent responses (`429` with
 graceful shutdown.
 
 [Transcode nodes](transcode-nodes.md) is the authority for what each route
-checks, its statuses, the two per-node request budgets (one for config,
-registration, report, logs, health-changed and revoke-recipes, one for resolve and sources/open, both
-answering `429` with `Retry-After`), and how the node calls them.
+checks, its statuses, the three per-node request budgets (one for config,
+report, logs, health-changed and revoke-recipes, one for resolve and
+sources/open, and a much smaller one for registration, all answering `429`
+with `Retry-After`), and how the node calls them.
 
 ### Source grants
 
