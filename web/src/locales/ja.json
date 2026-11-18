@@ -329,6 +329,12 @@
       "value": "リクエストを読み取れませんでした。"
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "ノードの環境で設定されています。そこで変更してから、ノードを再起動してください。"
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -43098,6 +43104,12 @@
       "value": "のレンダーパスではなくCUDAの識別子で指定するため、デバイスピッカーは適用されません。空欄にするとクラスター全体のデバイス設定を継承しますが、NVENCで使用するにはその設定自体がCUDAの識別子である必要があります。クラスターがレンダーパスで設定されている場合は、ここで指定してください。"
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "このノードの環境で設定されています。そこで変更してから、ノードを再起動してください。"
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53260,6 +53272,20 @@
     {
       "type": 0,
       "value": "設定を読み込み中"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "サーバーの環境で"
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "によって設定されています。"
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

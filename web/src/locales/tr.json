@@ -329,6 +329,12 @@
       "value": "İstek okunamadı."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Düğümün ortamı tarafından ayarlanır. Orada değiştirip düğümü yeniden başlatın."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48050,6 +48056,12 @@
       "value": " render yoluyla değil CUDA kimliğiyle adresler, bu yüzden cihaz seçici bunun için geçerli değildir. Boş bırakılırsa küme genelindeki cihaz ayarı devralınır; NVENC tarafından kullanılabilmesi için bu ayarın da bir CUDA kimliği olması gerekir — küme render yollarıyla yapılandırılmışsa burada bir kimlik belirleyin."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Bu düğümün ortamı tarafından ayarlanır. Orada değiştirip düğümü yeniden başlatın."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -58999,6 +59011,20 @@
     {
       "type": 0,
       "value": "Ayarlar yükleniyor"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Sunucunun ortamındaki "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " değişkeni tarafından ayarlanır."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

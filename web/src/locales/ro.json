@@ -329,6 +329,12 @@
       "value": "Nu s-a putut citi cererea."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Setat de mediul nodului. Modificați-l acolo și reporniți nodul."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -54309,6 +54315,12 @@
       "value": ", așa că selectorul de dispozitive nu se aplică. Dacă lăsați câmpul gol, se moștenește setarea de dispozitiv la nivelul clusterului, care trebuie să fie ea însăși o identitate CUDA pentru ca NVENC să o folosească — setați una aici când clusterul este configurat cu căi de randare."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Setat de mediul acestui nod. Modificați-l acolo și reporniți nodul."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -66213,6 +66225,20 @@
     {
       "type": 0,
       "value": "Se încarcă setările…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Setat prin variabila "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " din mediul serverului."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

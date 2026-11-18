@@ -329,6 +329,12 @@
       "value": "Nepavyko nuskaityti užklausos."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Nustatyta mazgo aplinkoje. Pakeiskite tai ten ir paleiskite mazgą iš naujo."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -60667,6 +60673,12 @@
       "value": " atvaizdavimo kelią, todėl įrenginių parinkiklis jam netaikomas. Palikus tuščią, perimamas viso klasterio įrenginių nustatymas, kuris pats turi būti CUDA tapatybė, kad NVENC galėtų jį naudoti – nurodykite ją čia, jei klasteris sukonfigūruotas su atvaizdavimo keliais."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Nustatyta šio mazgo aplinkoje. Pakeiskite tai ten ir paleiskite mazgą iš naujo."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -73590,6 +73602,20 @@
     {
       "type": 0,
       "value": "Įkeliami nustatymai…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Nustatyta serverio aplinkos kintamuoju "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

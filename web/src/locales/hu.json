@@ -329,6 +329,12 @@
       "value": "A kérést nem sikerült beolvasni."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "A csomópont környezete állítja be. Ott módosítsa, majd indítsa újra a csomópontot."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48406,6 +48412,12 @@
       "value": " alatti renderelési útvonal szerint, ezért az eszközválasztó nem vonatkozik rá. Ha üresen hagyja, a csomópont a fürtszintű eszközbeállítást örökli, amelynek szintén CUDA-azonosítónak kell lennie, hogy az NVENC használhassa – adjon meg itt egyet, ha a fürt renderelési útvonalakkal van beállítva."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ennek a csomópontnak a környezete állítja be. Ott módosítsa, majd indítsa újra a csomópontot."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59399,6 +59411,20 @@
     {
       "type": 0,
       "value": "Beállítások betöltése…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "A szerver környezetében beállítva: "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

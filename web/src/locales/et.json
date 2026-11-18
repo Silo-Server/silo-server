@@ -329,6 +329,12 @@
       "value": "Päringut ei õnnestunud lugeda."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Selle määrab sõlme keskkond. Muutke seda seal ja taaskäivitage sõlm."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -49066,6 +49072,12 @@
       "value": " järgi, seega seadmevalija sellele ei kehti. Kui jätate selle tühjaks, päritakse kogu klastri seadmeseadistus, mis peab NVENC-i jaoks ise olema CUDA identiteet – määrake see siin, kui klaster on seadistatud renderdusteedega."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Selle määrab selle sõlme keskkond. Muutke seda seal ja taaskäivitage sõlm."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -60163,6 +60175,20 @@
     {
       "type": 0,
       "value": "Seadete laadimine…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Selle määrab serveri keskkonnas muutuja "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

@@ -329,6 +329,12 @@
       "value": "Forespørselen kunne ikke leses."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Angitt av nodens miljø. Endre det der og start noden på nytt."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48630,6 +48636,12 @@
       "value": ", så enhetsvelgeren gjelder ikke for den. Lar du feltet stå tomt, arves enhetsinnstillingen for hele klyngen, og den må selv være en CUDA-identitet for at NVENC skal kunne bruke den – angi en her når klyngen er konfigurert med renderbaner."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Angitt av miljøet til denne noden. Endre det der og start noden på nytt."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59599,6 +59611,20 @@
     {
       "type": 0,
       "value": "Laster inn innstillinger"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Angitt av "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " i serverens miljø."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

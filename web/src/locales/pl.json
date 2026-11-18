@@ -329,6 +329,12 @@
       "value": "Nie udało się odczytać żądania."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ustawione w środowisku węzła. Zmień je tam i uruchom węzeł ponownie."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -60662,6 +60668,12 @@
       "value": ", więc wybór urządzeń go nie dotyczy. Puste pole oznacza dziedziczenie ustawienia urządzeń dla całego klastra, które samo musi być tożsamością CUDA, aby NVENC mogło go użyć — ustaw ją tutaj, gdy klaster skonfigurowano ze ścieżkami renderowania."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ustawione w środowisku tego węzła. Zmień je tam i uruchom węzeł ponownie."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -73529,6 +73541,20 @@
     {
       "type": 0,
       "value": "Wczytywanie ustawień"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Ustawione przez zmienną "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " w środowisku serwera."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [

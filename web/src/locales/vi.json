@@ -329,6 +329,12 @@
       "value": "Không thể đọc yêu cầu."
     }
   ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Được đặt bởi môi trường của node. Thay đổi giá trị ở đó rồi khởi động lại node."
+    }
+  ],
   "error.field.out_of_range": [
     {
       "type": 0,
@@ -48726,6 +48732,12 @@
       "value": ", nên bộ chọn thiết bị không áp dụng cho NVENC. Để trống sẽ kế thừa cài đặt thiết bị chung của cụm, và cài đặt đó cũng phải là danh tính CUDA thì NVENC mới dùng được — đặt giá trị ở đây khi cụm được cấu hình bằng đường dẫn render."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Được đặt bởi môi trường của node này. Thay đổi giá trị ở đó rồi khởi động lại node."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -59799,6 +59811,20 @@
     {
       "type": 0,
       "value": "Đang tải cài đặt…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Được đặt bởi "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " trong môi trường của máy chủ."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
