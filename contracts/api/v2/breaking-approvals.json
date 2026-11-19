@@ -1,3 +1,25 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "listHouseholdSessions",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "d9257e44a77278fef5a03dffebab8382c6ca90a2acb2c96ce5c2496df9af1627",
+      "reason": "Live session rows named the item content_id where playback history says media_item_id for the same value; the row takes history's name before the lock. No first-party client decodes household session rows (silo-apple, silo-android and silo-roku main checked); the web app is updated in the same change.",
+      "approved_in": "#4561"
+    },
+    {
+      "operation_id": "listHouseholdSessions",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "d4eba71ca30e6838ee02e089ea947aab802bf38cccfcb5d9ce19d721058b2589",
+      "reason": "Live session rows carried the episode's title in episode_name; it moves to media_title, as playback history has it, before the lock. No first-party client decodes household session rows (silo-apple, silo-android and silo-roku main checked); the web app is updated in the same change.",
+      "approved_in": "#4561"
+    },
+    {
+      "operation_id": "listHouseholdSessions",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "19ecc36183af7b5163dda9088add1ac06a9c2e9599422e0c9197c2c5a88f020a",
+      "reason": "Live session rows carried the show in series_name; it becomes series_title, as playback history and the rest of v2 have it, before the lock. No first-party client decodes household session rows (silo-apple, silo-android and silo-roku main checked); the web app is updated in the same change.",
+      "approved_in": "#4561"
+    }
+  ]
 }
