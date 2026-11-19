@@ -44,6 +44,8 @@ type CollectionCard struct {
 	BackdropThumbhash string
 	// ItemCount is the number of titles the viewer sees in it.
 	ItemCount int
+	// ItemCountStatus says whether ItemCount is usable; empty means available.
+	ItemCountStatus string
 	// LibraryID is, for a server collection, a library the viewer can open
 	// that holds it, so a client can build the collection's page link.
 	LibraryID *int

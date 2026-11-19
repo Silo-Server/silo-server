@@ -34366,6 +34366,11 @@ export interface components {
        */
       item_count: number;
       /**
+       * @description available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible
+       * @example available
+       */
+      item_count_status: string;
+      /**
        * @description Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library
        * @example 1
        */

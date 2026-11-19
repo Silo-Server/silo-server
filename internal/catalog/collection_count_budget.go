@@ -54,12 +54,31 @@ type collectionCountBudget struct {
 // renews the deadline. Its two workers and bounded queue are request-local;
 // statement admission is shared by this process, not distributed across nodes.
 func WithCollectionCountBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	if b, ok := ctx.Value(collectionCountBudgetKey{}).(*collectionCountBudget); ok {
+		// A shared ledger's deadline binds only count work, so a reuse takes
+		// it on rather than inheriting it from ctx.
+		deadline, _ := b.ctx.Deadline()
+		return context.WithDeadlineCause(ctx, deadline, ErrCollectionCountBudget)
+	}
+	b, cancel := newCollectionCountBudget(ctx)
+	return context.WithValue(b.ctx, collectionCountBudgetKey{}, b), cancel
+}
+
+// WithSharedCollectionCountBudget puts one ledger on ctx for a request that
+// reads collection counts in several places, such as a page of sections with
+// more than one row of collections. Its deadline starts now and binds only the
+// count work; the rest of the request keeps ctx's own deadline.
+func WithSharedCollectionCountBudget(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Value(collectionCountBudgetKey{}).(*collectionCountBudget); ok {
 		return context.WithCancel(ctx)
 	}
-	ctx, cancel := context.WithTimeoutCause(ctx, collectionCountTimeout, ErrCollectionCountBudget)
-	b := &collectionCountBudget{ctx: ctx, entries: make(map[[32]byte]*collectionCountResult), jobs: make(chan collectionCountJob, collectionCountMaxDefinitions)}
+	b, cancel := newCollectionCountBudget(ctx)
 	return context.WithValue(ctx, collectionCountBudgetKey{}, b), cancel
+}
+
+func newCollectionCountBudget(ctx context.Context) (*collectionCountBudget, context.CancelFunc) {
+	ctx, cancel := context.WithTimeoutCause(ctx, collectionCountTimeout, ErrCollectionCountBudget)
+	return &collectionCountBudget{ctx: ctx, entries: make(map[[32]byte]*collectionCountResult), jobs: make(chan collectionCountJob, collectionCountMaxDefinitions)}, cancel
 }
 
 func collectionCountContextError(ctx context.Context) error {

@@ -78,7 +78,8 @@ a collection page uses, so a client can draw it as the hero backdrop while the c
 a backdrop set to other artwork, such as the collection's poster, has no wide variant and comes
 at card thumbnail size, as on the collection page; absent otherwise, and always absent on a
 personal collection), `item_count` (the titles
-the viewer sees), `library_id` on a server collection (a library the viewer can open that holds
+the viewer sees) with `item_count_status` (see
+[Count availability](collections-api.md#count-availability-and-query-admission)), `library_id` on a server collection (a library the viewer can open that holds
 it, for the collection page link; on a library page, that library), and `creator_profile_id` on
 a personal collection.
 

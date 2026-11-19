@@ -135,6 +135,7 @@ type SectionCollectionCard struct {
 	BackdropURL       string  `json:"backdrop_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived backdrop of a server collection that has one, for a hero backdrop while the card is focused: the page-width variant, or the card thumbnail when the backdrop is set to another artwork such as the collection's poster. Absent when none and on personal collections"`
 	BackdropThumbhash string  `json:"backdrop_thumbhash,omitempty"`
 	ItemCount         int     `json:"item_count" doc:"The titles the acting profile sees in the collection" example:"12"`
+	ItemCountStatus   string  `json:"item_count_status" doc:"available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible" example:"available"`
 	LibraryID         *ID     `json:"library_id,omitempty" doc:"Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library" example:"1"`
 	CreatorProfileID  *string `json:"creator_profile_id,omitempty" doc:"Present on a personal collection: the profile that made it"`
 }
@@ -148,7 +149,7 @@ func sectionCollectionCardsOf(cards []sections.CollectionCard) []SectionCollecti
 	out := make([]SectionCollectionCard, 0, len(cards))
 	for _, c := range cards {
 		card := SectionCollectionCard{ID: c.ID, Source: c.Source, Title: c.Title, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash,
-			PosterIsCollage: c.PosterIsCollage && c.PosterURL != "", BackdropURL: c.BackdropURL, BackdropThumbhash: c.BackdropThumbhash, ItemCount: c.ItemCount, CreatorProfileID: c.CreatorProfileID}
+			PosterIsCollage: c.PosterIsCollage && c.PosterURL != "", BackdropURL: c.BackdropURL, BackdropThumbhash: c.BackdropThumbhash, ItemCount: c.ItemCount, ItemCountStatus: countStatusOf(c.ItemCountStatus), CreatorProfileID: c.CreatorProfileID}
 		if c.LibraryID != nil {
 			card.LibraryID = new(IDFromInt(int64(*c.LibraryID)))
 		}

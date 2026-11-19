@@ -51364,6 +51364,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "library_id": {
             "description": "Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library",
             "examples": [
@@ -51411,7 +51418,8 @@
           "title",
           "poster_url",
           "poster_is_collage",
-          "item_count"
+          "item_count",
+          "item_count_status"
         ],
         "type": "object"
       },

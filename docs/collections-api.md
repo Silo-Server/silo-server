@@ -65,7 +65,7 @@ A smart collection needs at least one complete rule: `createCollection`, and an
 
 `getCollectionCapabilities` reports `count_availability: true`. Personal collection
 responses, personal collections returned by `listLibraryUserCollections`, administrator
-and curated collection responses, and library and server collection cards carry
+and curated collection responses, library and server collection cards, and the cards on a row of collections carry
 `item_count_status`:
 
 - `available`: `item_count` is usable, including a genuine zero.

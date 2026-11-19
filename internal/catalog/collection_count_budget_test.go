@@ -55,6 +55,26 @@ func TestCollectionCountBudgetSharedLedger(t *testing.T) {
 	}
 }
 
+func TestSharedCollectionCountBudgetBindsOnlyCounts(t *testing.T) {
+	ctx, cancel := WithSharedCollectionCountBudget(t.Context())
+	defer cancel()
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("the shared ledger put its deadline on the whole request")
+	}
+	shared := ctx.Value(collectionCountBudgetKey{}).(*collectionCountBudget)
+	for range 2 { // two rows of collections in one request
+		row, rowCancel := WithCollectionCountBudget(ctx)
+		if row.Value(collectionCountBudgetKey{}) != shared {
+			t.Fatal("a row started its own ledger")
+		}
+		deadline, ok := row.Deadline()
+		if want, _ := shared.ctx.Deadline(); !ok || !deadline.Equal(want) {
+			t.Fatalf("row count deadline = %v, want the shared %v", deadline, want)
+		}
+		rowCancel()
+	}
+}
+
 func TestCollectionCountEffectiveDeduplication(t *testing.T) {
 	c := PersonalCollectionDefinition{ID: "one", CollectionType: "smart", QueryDefinition: `{"media_scope":"movie","library_ids":[2,1,1],"groups":[{"rules":[{"field":" YEAR ","op":"GTE","value":2000}]}]}`}
 	key, rules, err := effectiveCollectionCountKey(1, c, AccessFilter{ProfileID: "one"})

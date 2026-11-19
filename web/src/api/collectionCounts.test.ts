@@ -4,7 +4,8 @@ import personalCollection from "../../../contracts/api/v2/fixtures/get_collectio
 import libraryTab from "../../../contracts/api/v2/fixtures/get_library_collections_ok.json";
 import { adminCollectionFromV2 } from "./adminCollections";
 import { collectionFromV2, serverCollectionsFromV2 } from "./personalCollections";
-import { libraryCollectionFromV2, userCollectionFromV2 } from "./v2/catalog";
+import collectionsRow from "../../../contracts/api/v2/fixtures/get_home_section_items_collections_ok.json";
+import { libraryCollectionFromV2, sectionFromV2, userCollectionFromV2 } from "./v2/catalog";
 import { collectionOptionMeta } from "@/components/homeRows/addRow/collectionSearch";
 import { adminCollectionOptions } from "@/hooks/queries/homeRows/useRowCollectionOptions";
 import { buildAllUserCollectionOptions } from "@/hooks/queries/useAllUserCollections";
@@ -43,6 +44,11 @@ it.each(["available", "unavailable", "future-status"])(
       ],
     } as unknown as Parameters<typeof serverCollectionsFromV2>[0]);
     expect(libraries[0]?.collections[0]).toMatchObject(counts);
+    const row = sectionFromV2({
+      ...collectionsRow,
+      collections: collectionsRow.collections.map((card) => ({ ...card, ...counts })),
+    } as Parameters<typeof sectionFromV2>[0]);
+    for (const card of row.collections ?? []) expect(card).toMatchObject(counts);
     // The Home row pickers show the same count, never the stale number.
     expect(collectionOptionMeta({ collection_type: "smart", ...counts })).toBe(
       status === "available" ? "Smart · 91 titles" : "Smart · Count unavailable",

@@ -4664,6 +4664,7 @@ export interface SectionCollectionCard {
   poster_thumbhash?: string;
   poster_is_collage: boolean;
   item_count: number;
+  item_count_status?: string;
   /** A server collection's library, for its page link. */
   library_id?: number;
   /** A personal collection's owner. */

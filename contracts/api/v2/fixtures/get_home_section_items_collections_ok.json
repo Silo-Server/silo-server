@@ -18,6 +18,7 @@
       "backdrop_url": "https://s3.example.test/marvel-backdrop.jpg",
       "backdrop_thumbhash": "3OcRJYB4d3h/iIeHeEh3eIhw+j2w",
       "item_count": 12,
+      "item_count_status": "available",
       "library_id": "1"
     },
     {
@@ -27,6 +28,7 @@
       "poster_url": "https://s3.example.test/collage.jpg",
       "poster_is_collage": true,
       "item_count": 5,
+      "item_count_status": "available",
       "creator_profile_id": "p-owner"
     }
   ]

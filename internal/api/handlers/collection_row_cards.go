@@ -104,6 +104,7 @@ func (c *CollectionRowCards) libraryCards(ctx context.Context, ids []string, sco
 			BackdropURL:       h.presignBackdropURLCtx(ctx, collection.BackdropURL),
 			BackdropThumbhash: collection.BackdropThumbhash,
 			ItemCount:         tab.ItemCount,
+			ItemCountStatus:   tab.ItemCountStatus,
 			LibraryID:         &library,
 		}
 	}
@@ -181,6 +182,7 @@ func (c *CollectionRowCards) userCards(ctx context.Context, ids []string, scope 
 			PosterThumbhash:  view.PosterThumbhash,
 			PosterIsCollage:  view.PosterIsCollage,
 			ItemCount:        view.ItemCount,
+			ItemCountStatus:  view.ItemCountStatus,
 			CreatorProfileID: &creator,
 		}
 	}

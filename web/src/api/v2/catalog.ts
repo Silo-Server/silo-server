@@ -129,6 +129,7 @@ export function sectionFromV2(section: SectionV2): ResolvedSection {
         poster_thumbhash: card.poster_thumbhash,
         poster_is_collage: card.poster_is_collage,
         item_count: card.item_count,
+        item_count_status: card.item_count_status,
         ...(card.library_id !== undefined && { library_id: Number(card.library_id) }),
         ...(card.creator_profile_id && { creator_profile_id: card.creator_profile_id }),
       })),

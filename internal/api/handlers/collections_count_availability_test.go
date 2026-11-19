@@ -7,6 +7,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -56,6 +58,11 @@ func TestCollectionCountAvailabilityRecoveryDB(t *testing.T) {
 	tab, err := library.LibraryCollectionsTab(ctx, f.library, f.account, "owner")
 	if err != nil || len(tab.Groups) != 1 || len(tab.Groups[0].Collections) != 1 || tab.Groups[0].Collections[0].ItemCountStatus != CollectionCountUnavailable {
 		t.Fatalf("library tab: %+v, %v", tab, err)
+	}
+	// A Home row of collections shows the same status, not a usable zero.
+	row, err := (&CollectionRowCards{Personal: h}).CollectionCards(ctx, []recipes.CollectionRef{{UserCollectionID: legacy.ID}}, sections.CollectionCardScope{UserID: f.account, ProfileID: "owner"})
+	if err != nil || len(row) != 1 || row[0].ItemCountStatus != CollectionCountUnavailable {
+		t.Fatalf("row of collections: %+v, %v", row, err)
 	}
 	name := "Still editable"
 	edited, err := h.UpdatePersonalCollection(ctx, PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{Name: &name}})
