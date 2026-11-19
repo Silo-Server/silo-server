@@ -148,7 +148,7 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 		_, err := h.Room.Service.GetRoom(checkCtx, roomID)
 		return err
 	})
-	h.Room.serveRoomConnection(ctx, conn, roomID, claims.UserID, credential.Session.ProfileID)
+	h.Room.serveRoomConnection(ctx, conn, roomID, claims.UserID, credential.Session.ProfileID, func() { closer.close(context.Cause(ctx)) })
 }
 
 func (h *WatchTogetherSocketV2) currentPublicOrigin() string {

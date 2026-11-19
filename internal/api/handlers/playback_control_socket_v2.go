@@ -447,6 +447,11 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			return
 		}
+		if ctx.Err() != nil {
+			// The connection is ending: keep reading for the peer's close
+			// reply, but act on nothing more it sends.
+			continue
+		}
 		if !h.owns(sessionID, lane) {
 			// A newer registration for the same owner took the lane; frames
 			// from this connection no longer belong to the session.

@@ -263,9 +263,15 @@ func (h *WatchTogetherHandler) buildRoomResponse(
 }
 
 // serveRoomConnection preserves the existing room message and disconnect loop.
-func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn *websocket.Conn, roomID string, userID int, profileID string) {
+// closeTransport ends the connection on the way out, before the room's own
+// writer is torn down, so a close frame the caller owes the peer is sent
+// while the transport is still open.
+func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn *websocket.Conn, roomID string, userID int, profileID string, closeTransport func()) {
 	realtimeConn := newWatchTogetherRoomConn(conn)
-	defer func() { _ = realtimeConn.Close() }()
+	defer func() {
+		closeTransport()
+		_ = realtimeConn.Close()
+	}()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -303,6 +309,11 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			return
+		}
+		if ctx.Err() != nil {
+			// The connection is ending: keep reading for the peer's close
+			// reply, but act on nothing more it sends.
+			continue
 		}
 
 		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, userID, profileID, data); err != nil {
