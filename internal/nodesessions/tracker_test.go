@@ -127,6 +127,23 @@ func TestHoldLingeringCountsOnlyDeliveredRequests(t *testing.T) {
 	if got := redisStub.ttl(key); got <= 0 || got > sessionTTL/2 {
 		t.Fatalf("record TTL after it = %s, want the linger's remaining time, at most %s", got, sessionTTL/2)
 	}
+
+	// A range that delivered media can end while a probe for the same session
+	// is still open. The probe ends last and must not take the linger with it.
+	tracker.Remove(ctx, info.SessionID)
+	get, probe := tracker.HoldLingering(ctx, info), tracker.HoldLingering(ctx, info)
+	get(ctx, true)
+	probe(ctx, false)
+	if got := tracker.ActiveCount(); got != 1 || !redisStub.exists(key) {
+		t.Fatalf("after a probe outlived a range that delivered media: ActiveCount = %d, record exists = %t, want 1 and a record", got, redisStub.exists(key))
+	}
+
+	// A replan to remux on the same node keeps the session ID. When the remux
+	// ends, the direct play's linger must not come back.
+	tracker.Hold(ctx, SessionInfo{SessionID: info.SessionID, Type: "remux"})(ctx)
+	if got := tracker.ActiveCount(); got != 0 || redisStub.exists(key) {
+		t.Fatalf("after a remux that followed a lingering direct play ended: ActiveCount = %d, record exists = %t, want 0 and none", got, redisStub.exists(key))
+	}
 }
 
 // An authoritative Remove ends the session; a hold taken before it must not
@@ -210,10 +227,12 @@ func TestRefreshDoesNotRestoreSessionReleasedMidRefresh(t *testing.T) {
 			info := SessionInfo{SessionID: "play-1", Type: "direct_play"}
 			key := tracker.redisKey(info.SessionID)
 
-			release := tracker.Hold(ctx, info)
+			var release func(context.Context)
 			if tc.lingerRelease {
 				lingering := tracker.HoldLingering(ctx, info)
 				release = func(ctx context.Context) { lingering(ctx, true) }
+			} else {
+				release = tracker.Hold(ctx, info)
 			}
 			redisStub.beforeNextSet(func() {
 				release(ctx)
