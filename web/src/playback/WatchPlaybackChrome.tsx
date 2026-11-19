@@ -6,7 +6,6 @@ import {
   resetStillWatchingStreak,
 } from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
-import { useAutoPlayNextEnabled } from "@/hooks/queries/autoPlayNext";
 import {
   lazy,
   Suspense,
@@ -65,6 +64,7 @@ import type {
   PlaybackExitState,
   PlaybackStartTrigger,
   PlayerPictureInPictureChange,
+  PlayerPlaybackStateChange,
 } from "@/player/types";
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
 import { formatTime } from "@/player/utils/formatTime";
@@ -91,6 +91,7 @@ import {
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
 import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { isInNextUpPromptWindow, resolveNextUp } from "./nextUpPrompt";
 import { playbackQualitySettings } from "./playbackQualitySettings";
 
 const WatchPage = lazy(() =>
@@ -650,6 +651,14 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
     );
+  // Whether Next Up can be turned off: a server below revision 30 does not
+  // define the key and rejects the whole batch for it.
+  const supportsNextUpEnabled =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -665,14 +674,17 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
     );
-  const { data: effectivePlaybackSettings } = useEffectiveSettings({
+  const { data: effectivePlaybackSettings, isError: settingsReadFailed } = useEffectiveSettings({
     keys: [
       ...(supportsBufferingQualityMode ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
       SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
-      SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
+      // How long before the end of the file Next Up opens, and whether it
+      // opens at all.
+      SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
+      ...(supportsNextUpEnabled ? [SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED] : []),
       // The resolution cap, which the quality picker writes canonically and
       // no longer mirrors into the profile column playback used to read.
       SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
@@ -694,9 +706,6 @@ function WatchPlaybackHostContent() {
     ],
     enabled: signedIn,
   });
-  // Shares the post-roll switch's query, so the credits card and the post-roll
-  // screen agree. Until the server answers, the card holds its countdown.
-  const autoPlayNext = useAutoPlayNextEnabled({ enabled: signedIn }) === true;
   const loadedBufferingMode = supportsBufferingQualityMode
     ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
         | BufferingMode
@@ -974,8 +983,23 @@ function WatchPlaybackHostContent() {
 
   const requestKeyValue = activeRequest?.requestKey ?? "";
 
-  // -- Early post-roll trigger (30s before end) --
-  const POST_ROLL_SECONDS_BEFORE_END = 30;
+  // -- Next Up: the early post-roll trigger and what the end of the file does --
+  // A promptSeconds of 0 never opens post-roll early: "At end" leaves it to
+  // the `ended` handler below, and Off closes the player there instead. Until capabilities say whether the read includes
+  // next_up_enabled, the settings count as still loading: a read without the
+  // key would otherwise open Next Up early for a viewer who turned it off.
+  const capabilitiesPending = settingsCapabilities.isPending;
+  const nextUp = resolveNextUp({
+    settings: capabilitiesPending ? undefined : effectivePlaybackSettings,
+    readFailed: !capabilitiesPending && settingsReadFailed,
+    shuffled: Boolean(shuffleId),
+  });
+  const nextUpPromptSecondsRef = useRef(nextUp.promptSeconds);
+  const nextUpAtEndRef = useRef(nextUp.atEnd);
+  useEffect(() => {
+    nextUpPromptSecondsRef.current = nextUp.promptSeconds;
+    nextUpAtEndRef.current = nextUp.atEnd;
+  }, [nextUp.promptSeconds, nextUp.atEnd]);
   const postRollEnteredRef = useRef(false);
   const [postRollVideoEnded, setPostRollVideoEnded] = useState(false);
 
@@ -988,14 +1012,15 @@ function WatchPlaybackHostContent() {
   // on the detail page.
   const hasPostRollRef = useRef(false);
   const shuffledRef = useRef(false);
-  // A shuffled item with a later part plays that part before the shuffle
-  // moves on, so its post-roll waits for the last part.
-  const awaitsLaterPartRef = useRef(false);
+  // An item with a later part plays that part when this one ends, so its
+  // post-roll waits for the last part rather than offering to skip the rest.
+  const activeItemRef = useRef(activeItem);
+  const requestFileIdRef = useRef(activeRequest?.fileId);
   useEffect(() => {
     hasPostRollRef.current = Boolean(episodeSeriesId || shuffleId);
     shuffledRef.current = Boolean(shuffleId);
-    awaitsLaterPartRef.current =
-      Boolean(shuffleId) && hasLaterPart(activeItem ?? undefined, activeRequest?.fileId);
+    activeItemRef.current = activeItem;
+    requestFileIdRef.current = activeRequest?.fileId;
   }, [activeItem, activeRequest?.fileId, episodeSeriesId, shuffleId]);
 
   // Reset post-roll tracking when the playback session changes.
@@ -1003,6 +1028,20 @@ function WatchPlaybackHostContent() {
     postRollEnteredRef.current = false;
     setPostRollVideoEnded(false);
   }, [requestKeyValue]);
+
+  const handlePostRollClose = useCallback(() => {
+    if (activeRequest) {
+      stopPlayback();
+      // A shuffle returns to the library, series, or collection it started
+      // from rather than to whichever item happened to play last.
+      navigate(
+        activeRequest.shuffleId
+          ? buildPlaybackReturnHref(activeRequest)
+          : buildWatchItemHref(activeRequest),
+        { up: true },
+      );
+    }
+  }, [activeRequest, stopPlayback, navigate]);
 
   // -- Handle video ended → enter post-roll or exit --
   const handleEnded = useCallback(
@@ -1040,6 +1079,17 @@ function WatchPlaybackHostContent() {
         return;
       }
 
+      // With Next Up off a series episode ends as the player's Close does:
+      // no card, no countdown, no automatic next episode. A card that opened
+      // before the viewer turned it off closes as its own Close does. A
+      // minimized or picture-in-picture player leaves the page the viewer is
+      // browsing alone, as post-roll does there.
+      if (episodeSeriesId && nextUpAtEndRef.current === "close") {
+        if (modeRef.current === "foreground") void handleExit(exitState);
+        else if (modeRef.current === "post-roll") handlePostRollClose();
+        return;
+      }
+
       // If post-roll was shown before the video ended, wait for the real
       // `ended` event before starting the autoplay countdown.
       if (modeRef.current === "post-roll") {
@@ -1068,7 +1118,8 @@ function WatchPlaybackHostContent() {
         }
         return;
       }
-      // Fallback: enter post-roll on ended if 30s threshold was missed.
+      // Enter post-roll on ended: with Show Next Up set to "At end", or when
+      // the early window was missed (a seek past it, a short file).
       // Applies whether or not a next episode exists; the screen renders an
       // end-of-series state when nextEpisodeRef is null.
       postRollEnteredRef.current = true;
@@ -1085,22 +1136,10 @@ function WatchPlaybackHostContent() {
       stopPlayback,
       navigate,
       controller,
+      handleExit,
+      handlePostRollClose,
     ],
   );
-
-  const handlePostRollClose = useCallback(() => {
-    if (activeRequest) {
-      stopPlayback();
-      // A shuffle returns to the library, series, or collection it started
-      // from rather than to whichever item happened to play last.
-      navigate(
-        activeRequest.shuffleId
-          ? buildPlaybackReturnHref(activeRequest)
-          : buildWatchItemHref(activeRequest),
-        { up: true },
-      );
-    }
-  }, [activeRequest, stopPlayback, navigate]);
 
   const handlePictureInPictureChange = useCallback(
     (change: PlayerPictureInPictureChange) => {
@@ -1111,7 +1150,7 @@ function WatchPlaybackHostContent() {
   );
   const inRoom = Boolean(activeRequest?.roomId && activeRequest.roomToken);
   const handlePlaybackStateChange = useCallback(
-    (snapshot: WatchPlaybackSnapshot) => {
+    (snapshot: PlayerPlaybackStateChange) => {
       if (!requestKeyValue) return;
       updatePlaybackSnapshot(requestKeyValue, snapshot);
 
@@ -1122,7 +1161,8 @@ function WatchPlaybackHostContent() {
         prefetchPlayingNextScreen(shuffledRef.current);
       }
 
-      // Enter post-roll early when approaching end of a series episode.
+      // Enter post-roll early when the episode reaches the viewer's Show Next
+      // Up window before the end of the file.
       // Fires regardless of whether a next episode exists so the end-of-
       // series case still gets a graceful overlay instead of an HLS tail loop.
       // A Watch Together room decides what follows for everyone: it returns to
@@ -1133,11 +1173,18 @@ function WatchPlaybackHostContent() {
         !postRollEnteredRef.current &&
         !inRoom &&
         hasPostRollRef.current &&
-        !awaitsLaterPartRef.current &&
         modeRef.current === "foreground" &&
-        snapshot.duration > 0 &&
-        snapshot.currentTime > 0 &&
-        snapshot.duration - snapshot.currentTime <= POST_ROLL_SECONDS_BEFORE_END
+        isInNextUpPromptWindow(
+          snapshot.currentTime,
+          snapshot.duration,
+          nextUpPromptSecondsRef.current,
+        ) &&
+        // The player's file decides, since without one on the request the
+        // item may hold both single- and multi-part versions.
+        !hasLaterPart(
+          activeItemRef.current ?? undefined,
+          snapshot.fileId ?? requestFileIdRef.current,
+        )
       ) {
         postRollEnteredRef.current = true;
         setPostRollVideoEnded(false);
@@ -1258,10 +1305,6 @@ function WatchPlaybackHostContent() {
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
   );
-  const autoPlayNextPreview = resolvedBool(
-    SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
-    watchPageProps.autoPlayNextPreview,
-  );
   // Opt-in, and both default off: an untouched profile's prompt is unchanged.
   // A server that cannot answer either key leaves them false, which is the same
   // shape it would show if the viewer had turned them off.
@@ -1283,8 +1326,6 @@ function WatchPlaybackHostContent() {
           showMarkerSource={showMarkerSource}
           bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
-          autoPlayNextPreview={autoPlayNextPreview}
-          autoPlayNext={autoPlayNext}
           canEditMarkers={canEditMarkers}
           playbackRequestKey={requestKeyValue}
           onNavigateEpisode={handleNavigateEpisode}

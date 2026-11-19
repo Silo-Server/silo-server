@@ -2016,6 +2016,74 @@
       "value": "アプリの言語"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "終了時"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "終了の"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "分前"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "終了の"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "秒前"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "次のエピソードを表示"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "オフ"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -47066,6 +47134,12 @@
     {
       "type": 0,
       "value": "オフ。実行時は古いタイトルの削除のみ行います。"
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "生成は停止しました。保存済みのおすすめは、サーバーが再起動するまでディスカバーに表示されます。"
     }
   ],
   "web.admin.recommendations.external.rowsBuilt": [
@@ -114119,34 +114193,6 @@
       "value": "をウォッチリストに追加"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "を視聴したあなたに"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "と"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "を視聴したあなたに"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -114205,6 +114251,34 @@
     {
       "type": 0,
       "value": "のリクエストを送信中"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "に類似"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "に類似"
     }
   ],
   "web.requests.discoverSection.empty": [

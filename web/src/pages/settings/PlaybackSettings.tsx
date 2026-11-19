@@ -34,6 +34,7 @@ import {
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
+import { NextUpPromptSetting } from "./NextUpPromptSetting";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -49,9 +50,9 @@ import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
  * surfaces cannot land on different scopes.
  */
 const BASE_PLAYBACK_KEYS: SettingKey[] = [
-  SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
+  SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
 ];
 
 const BUFFERING_MODE_SETTING = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE];
@@ -523,9 +524,14 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
   );
+  const supportsNextUpOff = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED,
+  );
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
+      ...(supportsNextUpOff ? [SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED] : []),
       ...(supportsBuffering ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       ...(supportsMarkerProvenance
         ? [SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE]
@@ -534,9 +540,11 @@ export default function PlaybackSettings() {
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode, supportsBuffering, supportsMarkerProvenance],
+    [supportsIntroSkipMode, supportsBuffering, supportsMarkerProvenance, supportsNextUpOff],
   );
-  const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
+  const { data: effective, isPending: effectivePending } = useEffectiveSettings({
+    keys: playbackKeys,
+  });
   const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
 
   // The effective endpoint resolves an unset key to the contract default, so
@@ -741,19 +749,12 @@ export default function PlaybackSettings() {
           than on the admin plugin page, which is server-wide. */}
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
-        <SettingRow
-          label={t("web.settings.playback.nextEpisode.previewLabel")}
-          description={t("web.settings.playback.nextEpisode.previewDescription")}
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW, checked)
-              }
-            />
-          )}
+        <NextUpPromptSetting
+          enabled={read<boolean>(SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED)}
+          seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
+          offOffered={supportsNextUpOff}
+          disabled={pending || capabilities.isPending || effectivePending}
+          save={saveProfileDefault}
         />
 
         <AutoPlayNextSetting />

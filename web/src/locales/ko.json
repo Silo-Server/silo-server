@@ -2016,6 +2016,74 @@
       "value": "앱 언어"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "종료 시"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "종료 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "분 전"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "종료 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "초 전"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "다음 에피소드 표시"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "끔"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -47342,6 +47410,12 @@
     {
       "type": 0,
       "value": "꺼져 있어요. 실행하면 오래된 작품만 정리해요."
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "생성이 중지됐어요. 저장된 추천은 서버를 다시 시작할 때까지 둘러보기에 계속 표시돼요."
     }
   ],
   "web.admin.recommendations.external.rowsBuilt": [
@@ -114987,34 +115061,6 @@
       "value": " 추가"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " 시청 기반 추천"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": ", "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " 시청 기반 추천"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -115077,6 +115123,34 @@
     {
       "type": 0,
       "value": " 요청 보내는 중"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "와(과) 비슷한 콘텐츠"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "와(과) 비슷한 콘텐츠"
     }
   ],
   "web.requests.discoverSection.empty": [
