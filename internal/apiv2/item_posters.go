@@ -47,7 +47,18 @@ const (
 	itemPosterEnqueueTimeout = 3 * time.Second
 	// itemPosterEnqueueRetry is how soon a failed queue write is tried again.
 	itemPosterEnqueueRetry = 30 * time.Second
+	// itemPosterResolveMemo is how long a plugin's answer for a poster path
+	// is reused, so a link costs one plugin call per poster per window, not
+	// one per request. It stays well under the lifetime of a signed URL a
+	// plugin returns.
+	itemPosterResolveMemo = time.Minute
+	// itemPosterResolveMax bounds how many plugin answers are kept.
+	itemPosterResolveMax = 4096
 )
+
+// errPosterResolveBusy reports that the plugin-answer memo is full, so a new
+// poster path is refused instead of calling its plugin on every request.
+var errPosterResolveBusy = errors.New("poster resolution is busy")
 
 // itemPosterHandler serves GET /api/v2/item-posters/{content_id}.
 type itemPosterHandler struct {
@@ -56,6 +67,61 @@ type itemPosterHandler struct {
 	fetcher  RemotePosterFetcher
 	store    blobstore.Store
 	enqueued posterEnqueueMemo
+	resolved posterResolveMemo
+}
+
+// posterResolveMemo keeps what plugins answered for poster paths, by path.
+// Like posterEnqueueMemo it starts no goroutine and never forgets a live
+// entry to make room: a full memo refuses new paths until entries expire.
+type posterResolveMemo struct {
+	mu          sync.Mutex
+	urls        map[string]posterResolution
+	firstExpiry time.Time
+}
+
+type posterResolution struct {
+	url   string
+	until time.Time
+}
+
+// get returns the remembered answer for path. full reports that there is
+// none and no room to keep a new one.
+func (m *posterResolveMemo) get(path string, now time.Time) (url string, ok, full bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if entry, found := m.urls[path]; found && now.Before(entry.until) {
+		return entry.url, true, false
+	}
+	if len(m.urls) < itemPosterResolveMax {
+		return "", false, false
+	}
+	if now.Before(m.firstExpiry) {
+		return "", false, true
+	}
+	m.firstExpiry = time.Time{}
+	for key, entry := range m.urls {
+		if !now.Before(entry.until) {
+			delete(m.urls, key)
+			continue
+		}
+		if m.firstExpiry.IsZero() || entry.until.Before(m.firstExpiry) {
+			m.firstExpiry = entry.until
+		}
+	}
+	return "", false, len(m.urls) >= itemPosterResolveMax
+}
+
+func (m *posterResolveMemo) put(path, url string, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.urls == nil {
+		m.urls = make(map[string]posterResolution)
+	}
+	until := now.Add(itemPosterResolveMemo)
+	m.urls[path] = posterResolution{url: url, until: until}
+	if len(m.urls) == 1 || m.firstExpiry.IsZero() {
+		m.firstExpiry = until
+	}
 }
 
 // posterEnqueueMemo remembers which items' cache jobs this server queued
@@ -171,7 +237,11 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, unavailable("poster"))
 		return
 	}
-	target, proxy, ok := h.resolve(r.Context(), posterPath)
+	target, proxy, ok, err := h.resolve(r.Context(), posterPath)
+	if err != nil {
+		writeProblem(w, r, NewProblem(TypeDependencyUnavailable, "Poster fetches are busy.").WithRetryAfter(5))
+		return
+	}
 	if !ok {
 		notFound()
 		return
@@ -215,27 +285,38 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // resolve maps an item's stored poster path to what the route answers with:
 // a stored object's URL to redirect to, or a provider URL to fetch and proxy.
 // ok is false when the path names nothing the route serves: no poster, or a
-// local source (file://, nfo+…) that only the image-cache job reads.
-func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (target string, proxy, ok bool) {
+// local source (file://, nfo+…) that only the image-cache job reads. err is
+// errPosterResolveBusy when a plugin would have to be asked and the memo of
+// plugin answers is full.
+func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (target string, proxy, ok bool, err error) {
 	switch {
 	case posterPath == "" || posterPath == "-":
-		return "", false, false
+		return "", false, false, nil
 	case artworkurl.IsStoredArtworkPath(posterPath):
-		return h.posters.Presign(ctx, artworkurl.StoredPosterVariant(posterPath)), false, true
+		return h.posters.Presign(ctx, artworkurl.StoredPosterVariant(posterPath)), false, true, nil
 	case !metadata.IsRemoteImageSourcePath(posterPath):
-		return "", false, false
+		return "", false, false, nil
 	case isHTTPURL(posterPath):
-		return posterPath, true, true
+		return posterPath, true, true, nil
 	}
 	// A plugin path: its plugin answers with a stored artwork route or a URL.
-	resolved := h.posters.Presign(ctx, posterPath)
+	// The answer is reused for itemPosterResolveMemo, failures included, so a
+	// link cannot make the plugin work on every request.
+	resolved, known, full := h.resolved.get(posterPath, time.Now())
+	switch {
+	case full:
+		return "", false, false, errPosterResolveBusy
+	case !known:
+		resolved = h.posters.Presign(ctx, posterPath)
+		h.resolved.put(posterPath, resolved, time.Now())
+	}
 	switch {
 	case strings.HasPrefix(resolved, "/"):
-		return resolved, false, true
+		return resolved, false, true, nil
 	case isHTTPURL(resolved):
-		return resolved, true, true
+		return resolved, true, true, nil
 	default:
-		return "", false, false
+		return "", false, false, nil
 	}
 }
 

@@ -255,7 +255,7 @@ cached, answering with the redirect from then on.
 `getItemPoster` answers `404` for an invalid or expired link, an item that is
 gone or has no poster, and a download that failed or was refused; the answer
 does not say which. It answers `503` with `Retry-After` when the server's poster
-downloads are busy. The download follows the image cache's rules
+downloads or plugin poster lookups are busy. The download follows the image cache's rules
 ([outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork)):
 public addresses only, redirect hops included, the image cache's size limit, and
 only JPEG, PNG, WebP or GIF bytes, typed by their content rather than the

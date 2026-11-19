@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -182,5 +183,25 @@ func TestItemPostersURLRule(t *testing.T) {
 		if got := posters.URL(ctx, "movie-a", path); got != "" {
 			t.Fatalf("%q = %q", path, got)
 		}
+	}
+}
+
+// A link needs no credentials, so a plugin's answer for a poster path must be
+// reused, and a full memo must refuse new paths instead of forgetting one:
+// either gap lets a link holder make the plugin work on every request.
+func TestPosterResolveMemoBoundsPluginCalls(t *testing.T) {
+	var memo posterResolveMemo
+	now := time.Now()
+	for i := range itemPosterResolveMax {
+		memo.put("tmdb://poster/"+strconv.Itoa(i), "https://images.example/"+strconv.Itoa(i), now)
+	}
+	if url, ok, _ := memo.get("tmdb://poster/7", now.Add(time.Second)); !ok || url != "https://images.example/7" {
+		t.Fatalf("remembered path = %q, %v, want its answer", url, ok)
+	}
+	if _, ok, full := memo.get("tmdb://poster/new", now.Add(time.Second)); ok || !full {
+		t.Fatalf("new path with a full memo: ok=%v full=%v, want refused", ok, full)
+	}
+	if _, ok, full := memo.get("tmdb://poster/new", now.Add(itemPosterResolveMemo)); ok || full {
+		t.Fatalf("new path after expiry: ok=%v full=%v, want room", ok, full)
 	}
 }
