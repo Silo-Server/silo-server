@@ -19612,7 +19612,7 @@ export interface components {
        * @description Delivery acknowledgement deadline in milliseconds; bounded to 10000, default 3000. Ignored by message
        */
       deadline_ms?: number;
-      /** @description Free-form administrator reason. The player receives it as the realtime command's top-level reason and shows it with the notice for a stop or terminate */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
       /**
        * Format: int64
@@ -20011,7 +20011,7 @@ export interface components {
       deadline_ms?: number;
       /** @description Text displayed on the player */
       message: string;
-      /** @description Free-form administrator reason. The player receives it as the realtime command's top-level reason and shows it with the notice for a stop or terminate */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
       /**
        * Format: int64
@@ -20045,7 +20045,7 @@ export interface components {
       items: components["schemas"]["AdminPlaybackSummaryItem"][];
     };
     AdminPlaybackTerminateInputBody: {
-      /** @description Free-form administrator reason. The player receives it as the realtime command's top-level reason and shows it with the notice for a stop or terminate */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
     };
     AdminPlaybackTerminateReceipt: {

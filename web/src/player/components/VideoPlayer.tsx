@@ -435,6 +435,9 @@ function bufferedEndSeconds(media: HTMLMediaElement): number {
   return ranges.length ? ranges.end(ranges.length - 1) : 0;
 }
 const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
+// One page toast tells the viewer the session ended, whichever of the
+// administrator's command and the server's 410 arrives first.
+const SESSION_ENDED_TOAST_ID = "playback-session-ended";
 /** The buffering controller's display-only notices show for 5 seconds on every client. */
 const BUFFERING_NOTICE_VISIBLE_MS = 5_000;
 // The server returns a room to the lobby once its position is within two
@@ -2073,11 +2076,16 @@ export function VideoPlayer({
   // The server ended the session for good (an administrator stopped it while
   // this player could not be told directly): leave instead of reconnecting.
   const sessionEndedHandledRef = useRef(false);
+  // Set when an administrator's stop or terminate already showed the notice,
+  // with its reason; the exit below must still run.
+  const adminEndNoticeShownRef = useRef(false);
   useEffect(() => {
     if (connectionStatus !== "ended" && !progressSessionEnded) return;
     if (sessionEndedHandledRef.current) return;
     sessionEndedHandledRef.current = true;
-    toast.info(tRef.current("web.player.session.endedByAdmin"));
+    if (!adminEndNoticeShownRef.current) {
+      toast.info(tRef.current("web.player.session.endedByAdmin"), { id: SESSION_ENDED_TOAST_ID });
+    }
     void handleExit();
   }, [connectionStatus, handleExit, progressSessionEnded]);
 
@@ -5280,7 +5288,7 @@ export function VideoPlayer({
             readStringPayload(command.payload, "message") ?? (command.reason?.trim() || undefined);
           if (byAdmin) {
             // A later 410 from the same end must not toast a second time.
-            sessionEndedHandledRef.current = true;
+            adminEndNoticeShownRef.current = true;
           }
           if (byAdmin || message) {
             let fallbackTitle = tRef.current("web.player.session.endedByAdmin");
@@ -5291,6 +5299,8 @@ export function VideoPlayer({
                   : tRef.current("web.player.serverMessage.stoppingTitle");
             }
             toast.warning(readStringPayload(command.payload, "title") ?? fallbackTitle, {
+              // Replaces the generic notice when a 410 arrived first.
+              id: byAdmin ? SESSION_ENDED_TOAST_ID : undefined,
               description: message,
               duration: PLAYBACK_NOTICE_VISIBLE_MS,
             });

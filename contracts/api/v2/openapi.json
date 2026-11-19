@@ -15388,7 +15388,7 @@
             "type": "integer"
           },
           "reason": {
-            "description": "Free-form administrator reason. The player receives it as the realtime command's top-level reason and shows it with the notice for a stop or terminate",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           },
@@ -16400,7 +16400,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Free-form administrator reason. The player receives it as the realtime command's top-level reason and shows it with the notice for a stop or terminate",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           },
@@ -16497,7 +16497,7 @@
         "additionalProperties": false,
         "properties": {
           "reason": {
-            "description": "Free-form administrator reason. The player receives it as the realtime command's top-level reason and shows it with the notice for a stop or terminate",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           }

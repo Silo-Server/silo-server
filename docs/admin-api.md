@@ -2501,9 +2501,9 @@ Every request body carries `command_id` (a client-allocated canonical UUID) and
 client can represent it exactly, that must rise within the session), plus optional `reason` and `deadline_ms` (bounded to 10000, default
 3000; ignored by message). Message adds a required `message` and optional
 `title`. Allocate the identity once per intended command and preserve the
-whole body on retry. The player receives `reason` as the command frame's
-top-level `reason`, and shows it with the notice for a stop (and for a
-terminate, below); a message's text and title travel in the frame's payload,
+whole body on retry. A delivered command carries `reason` as the frame's
+top-level `reason`, and a player that supports it shows it with its notice
+for a stop (and for a terminate, below); a message's text and title travel in the frame's payload,
 which omits `title` when none was given
 ([control socket](architecture/playback-protocol-v3.md#25-session-liveness)).
 
