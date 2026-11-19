@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -57,6 +58,8 @@ type playbackSessionRow struct {
 	ClientLabel        string    `json:"client_label,omitempty"`
 	ClientLabelFull    string    `json:"client_label_full,omitempty"`
 	ClientUserAgent    string    `json:"client_user_agent,omitempty"`
+	// EpisodeFileItem preserves the owning catalog item for plugin events.
+	EpisodeFileItem *evt.PlaybackFileItem `json:"-"`
 	// DeviceID and DevicePlatform are native-only: the frozen v1 projection
 	// does not carry them.
 	DeviceID       string `json:"-"`
@@ -290,8 +293,9 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			s.media_file_id,
 			COALESCE(s.requested_media_file_id, s.media_file_id, 0),
 			COALESCE(mf.episode_id, mf.content_id, ''),
-			CASE WHEN e.content_id IS NOT NULL THEN COALESCE(e.title, '') ELSE COALESCE(mi.title, '') END,
-			COALESCE(CASE WHEN e.content_id IS NOT NULL THEN 'episode' ELSE mi.type END, ''),
+			COALESCE(mi.title, ''),
+			COALESCE(mi.type, ''),
+			CASE WHEN e.content_id IS NOT NULL THEN COALESCE(e.title, '') END,
 			COALESCE(series_mi.title, ''),
 			e.season_number,
 			e.episode_number,
@@ -404,6 +408,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 	for rows.Next() {
 		var s playbackSessionRow
 		var posterPath string
+		var episodeTitle *string
 		var streamBitrateKbps *int
 		var targetAudioChannels *int
 		var targetBitrateKbps *int
@@ -413,7 +418,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 		if err := rows.Scan(
 			&total,
 			&s.SessionID, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.MediaItemID,
-			&s.MediaTitle, &s.MediaType, &s.SeriesTitle, &s.SeasonNumber, &s.EpisodeNumber,
+			&s.MediaTitle, &s.MediaType, &episodeTitle, &s.SeriesTitle, &s.SeasonNumber, &s.EpisodeNumber,
 			&posterPath,
 			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.TimelineDuration, &s.StartedAt, &s.UpdatedAt,
 			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,
@@ -429,6 +434,10 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.DeviceID, &s.DevicePlatform, &s.AdaptationReasons, &s.LifecycleSeq,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
+		}
+		if episodeTitle != nil {
+			s.EpisodeFileItem = &evt.PlaybackFileItem{Title: s.MediaTitle, Type: s.MediaType}
+			s.MediaTitle, s.MediaType = *episodeTitle, itemTypeEpisode
 		}
 		if !summary {
 			s.PosterURL = l.presignPosterURL(ctx, posterPath)

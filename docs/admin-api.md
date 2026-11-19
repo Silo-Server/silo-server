@@ -2279,7 +2279,7 @@ names it, so a live row and the history entry its play leaves agree: for an
 episode, `media_type` is `episode`, `media_title` is the episode's title,
 `series_title` is the show's, and `media_item_id` is the episode's content ID,
 the value history's `media_item_id` and its filter take. The summary items, the
-household sessions listing and the row in each `session.*` event share this
+household sessions listing and the row in each `session.*` WebSocket event share this
 naming.
 
 `GET /api/v2/admin/sessions/summary` returns `{count, items}`. Optional `user_id`
