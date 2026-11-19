@@ -154,7 +154,9 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 	if result, ok := f.recent(id, time.Now()); ok {
 		return result.image, result.err
 	}
-	flight := f.group.DoChan(key, func() (value any, err error) {
+	// Shared by item and source: a request for a poster whose source just
+	// changed must not join the download of the old one.
+	flight := f.group.DoChan(id, func() (value any, err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				slog.ErrorContext(ctx, "remote image fetch panicked", "component", "imagecache",

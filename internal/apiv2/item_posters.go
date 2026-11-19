@@ -42,6 +42,9 @@ const (
 	// queue write per item per window.
 	itemPosterEnqueueMemo = 10 * time.Minute
 	itemPosterMaxIDLength = 512
+	// itemPosterEnqueueTimeout bounds the queue write a poster request makes
+	// before it fetches.
+	itemPosterEnqueueTimeout = 3 * time.Second
 )
 
 // itemPosterHandler serves GET /api/v2/item-posters/{content_id}.
@@ -234,7 +237,11 @@ func (h *itemPosterHandler) queueCache(ctx context.Context, contentID string) {
 	if !h.enqueued.claim(contentID, time.Now()) {
 		return
 	}
-	if err := h.source.EnqueueItemPosterCache(context.WithoutCancel(ctx), contentID); err != nil {
+	// Detached from the request so a client that leaves does not cancel the
+	// queue write, and bounded so a stalled database cannot hold the poster.
+	queueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), itemPosterEnqueueTimeout)
+	defer cancel()
+	if err := h.source.EnqueueItemPosterCache(queueCtx, contentID); err != nil {
 		slog.WarnContext(ctx, "queueing an item poster cache job failed", "component", "apiv2", "content_id", contentID, "error", err)
 	}
 }

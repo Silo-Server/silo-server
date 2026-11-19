@@ -5884,7 +5884,7 @@
             "type": "array"
           },
           "poster_url": {
-            "description": "Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent only when there is no poster. The URL expires; read it again from a later page or session row",
+            "description": "Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row",
             "format": "uri-reference",
             "type": "string"
           },
@@ -16039,7 +16039,7 @@
             "type": "number"
           },
           "poster_url": {
-            "description": "Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent only when there is no poster",
+            "description": "Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and for art that is not cached yet on a server that cannot issue poster links (the catalog capabilities then report item_posters false)",
             "format": "uri-reference",
             "type": "string"
           },

@@ -435,7 +435,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
 		if !summary {
-			s.PosterURL = l.Posters.URL(ctx, posterOwnerID, posterPath)
+			s.PosterURL = l.posterURL(ctx, posterOwnerID, posterPath)
 		}
 		s.StreamBitrateKbps = streamBitrateKbps
 		s.TargetAudioChannels = targetAudioChannels
@@ -461,6 +461,20 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 	}
 
 	return sessions, total, nil
+}
+
+// posterURL applies the admin poster rule. A loader built without the rule
+// (one a handler makes for itself, with no signing secret) still names cached
+// art by its stored URL, and names nothing for art that is not cached: it
+// never hands out a provider's URL.
+func (l *PlaybackSessionsLoader) posterURL(ctx context.Context, ownerID, path string) string {
+	if l.Posters != nil {
+		return l.Posters.URL(ctx, ownerID, path)
+	}
+	if l.DetailSvc != nil && artworkurl.IsStoredArtworkPath(path) {
+		return l.DetailSvc.PresignURL(ctx, artworkurl.StoredPosterVariant(path), "card")
+	}
+	return ""
 }
 
 func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {

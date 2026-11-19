@@ -66,7 +66,7 @@ type AdminCatalogItem struct {
 	AirDate          *string                   `json:"air_date,omitempty" format:"date" doc:"Air date of an episode, YYYY-MM-DD; absent when unknown and for a movie or series"`
 	Cast             []catalogpkg.CastCredit   `json:"cast,omitempty" doc:"Actors and guest stars of a movie or series in credit order, only with include_people; absent when there are none. No photos"`
 	Crew             []catalogpkg.CrewCredit   `json:"crew,omitempty" doc:"Other credits of a movie or series, only with include_people; absent when there are none. No photos"`
-	PosterURL        string                    `json:"poster_url,omitempty" format:"uri-reference" doc:"Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent only when there is no poster. The URL expires; read it again from a later page or session row"`
+	PosterURL        string                    `json:"poster_url,omitempty" format:"uri-reference" doc:"Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row"`
 }
 
 // AdminCatalogItemVersion is one present file. Video facts come from the

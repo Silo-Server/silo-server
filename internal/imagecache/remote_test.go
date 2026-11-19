@@ -63,3 +63,30 @@ func TestRemoteFetcherRemembersAnOutcome(t *testing.T) {
 		t.Fatalf("a new URL for the same item: err %v, provider requests %d, want 3", err, hits.Load())
 	}
 }
+
+// A poster whose source changed while the old source is still downloading
+// gets the new source's image, not a share of the old download.
+func TestRemoteFetcherDoesNotShareAcrossSources(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/old.png" {
+			close(started)
+			<-release
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nnew"))
+	}))
+	defer srv.Close()
+	defer close(release)
+	f := newRemoteFetcher(srv.Client())
+	ctx := netguard.WithPrivateAccess(context.Background())
+
+	go func() { _, _ = f.Fetch(ctx, "movie-1", srv.URL+"/old.png") }()
+	<-started
+	image, err := f.Fetch(ctx, "movie-1", srv.URL+"/new.png")
+	if err != nil || string(image.Data) != "\x89PNG\r\n\x1a\nnew" {
+		t.Fatalf("Fetch of the new source = %q, %v", image.Data, err)
+	}
+}
