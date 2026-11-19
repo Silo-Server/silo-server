@@ -341,9 +341,10 @@ until an administrator turns delivery on. Native clients see the effective
 state through `GET /api/v2/notifications/capabilities` and need no change.
 
 Relay errors are problem documents, with `Retry-After` retained when supplied.
-An invalid `relay_url` is a 400 (`malformed_request`), a deployment the relay
-rejects is a 422, and relay upstream failures are the shared 500
-`internal_error`. Native clients and Jellyfin compatibility do not manage relay
+A `relay_url` that is not a well-formed URI is a 422 (`validation_failed`);
+a well-formed URL the server rejects as a relay origin is a 400
+(`malformed_request`); a deployment the relay rejects is a 422; and relay
+upstream failures are the shared 500 `internal_error`. Native clients and Jellyfin compatibility do not manage relay
 credentials and need no consumer change.
 
 ### API v2 email and Discord preferences

@@ -521,9 +521,9 @@ line, which also counts items past the 10-embed cap.
 ### Generic payload and HMAC signing
 
 Generic webhooks receive canonical Silo JSON: event name, delivery and
-webhook IDs, timestamp, `version`, `test` flag, profile ID, library ID,
-delivery type, `reason_flags`, and the series/episode (or request) content
-blocks.
+webhook IDs, timestamp, `version`, `test` flag, profile ID, library ID
+(left out of request notifications), delivery type, `reason_flags`, and the
+series/episode (or request) content blocks.
 `reason_flags` is `{"next_up": <bool>}`; Next Up is the only reason an
 episode notifies for. A `watchlist.available` payload names the arrived item
 in the series block and the watchlisted title in a `watchlist` block,
