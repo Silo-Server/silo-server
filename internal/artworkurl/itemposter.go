@@ -57,8 +57,8 @@ func (p *ItemPosters) URL(ctx context.Context, ownerID, posterPath string) strin
 	if p == nil || posterPath == "" || posterPath == "-" {
 		return ""
 	}
-	if IsStoredArtworkPath(posterPath) && p.presign != nil {
-		if url := p.presign.PresignURL(ctx, StoredPosterVariant(posterPath), "card"); url != "" {
+	if IsStoredArtworkPath(posterPath) {
+		if url := p.Presign(ctx, StoredPosterVariant(posterPath)); url != "" {
 			return url
 		}
 	}

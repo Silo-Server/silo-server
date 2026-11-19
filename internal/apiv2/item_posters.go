@@ -91,50 +91,32 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	posterPath, err := h.source.ItemPosterPath(r.Context(), contentID)
-	if errors.Is(err, metadata.ErrItemNotFound) || (err == nil && (posterPath == "" || posterPath == "-")) {
+	switch {
+	case errors.Is(err, metadata.ErrItemNotFound):
 		notFound()
 		return
-	}
-	if err != nil {
+	case err != nil:
 		writeProblem(w, r, unavailable("poster"))
 		return
 	}
-
-	if artworkurl.IsStoredArtworkPath(posterPath) {
-		h.redirect(w, r, h.posters.Presign(r.Context(), artworkurl.StoredPosterVariant(posterPath)))
-		return
-	}
-	// A provider URL, or a plugin path its plugin resolves to one. Local
-	// sources (file://, nfo+…) are only ever read by the image-cache job.
-	if !metadata.IsRemoteImageSourcePath(posterPath) {
+	target, proxy, ok := h.resolve(r.Context(), posterPath)
+	if !ok {
 		notFound()
 		return
 	}
-	remote := posterPath
-	if !isHTTPURL(remote) {
-		remote = h.posters.Presign(r.Context(), posterPath)
-		if strings.HasPrefix(remote, "/") {
-			h.redirect(w, r, remote)
-			return
-		}
-		if !isHTTPURL(remote) {
-			notFound()
-			return
-		}
+	if !proxy {
+		h.redirect(w, r, target)
+		return
 	}
 	h.queueCache(r.Context(), contentID)
-
-	ctx := r.Context()
-	if h.store != nil {
-		// The artwork store's own direct URLs may sit on the local network;
-		// every other URL reaches public addresses only.
-		ctx = artworkurl.FetchContext(ctx, h.store, remote)
-	}
 	if h.fetcher == nil {
 		writeProblem(w, r, unavailable("poster"))
 		return
 	}
-	image, err := h.fetcher.Fetch(ctx, contentID, remote)
+	// The artwork store's own direct URLs may sit on the local network;
+	// every other URL reaches public addresses only.
+	ctx := artworkurl.FetchContext(r.Context(), h.store, target)
+	image, err := h.fetcher.Fetch(ctx, contentID, target)
 	switch {
 	case errors.Is(err, imagecache.ErrRemoteBusy):
 		writeProblem(w, r, NewProblem(TypeDependencyUnavailable, "Poster fetches are busy.").WithRetryAfter(5))
@@ -156,6 +138,33 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(image.Data)
+}
+
+// resolve maps an item's stored poster path to what the route answers with:
+// a stored object's URL to redirect to, or a provider URL to fetch and proxy.
+// ok is false when the path names nothing the route serves: no poster, or a
+// local source (file://, nfo+…) that only the image-cache job reads.
+func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (target string, proxy, ok bool) {
+	switch {
+	case posterPath == "" || posterPath == "-":
+		return "", false, false
+	case artworkurl.IsStoredArtworkPath(posterPath):
+		return h.posters.Presign(ctx, artworkurl.StoredPosterVariant(posterPath)), false, true
+	case !metadata.IsRemoteImageSourcePath(posterPath):
+		return "", false, false
+	case isHTTPURL(posterPath):
+		return posterPath, true, true
+	}
+	// A plugin path: its plugin answers with a stored artwork route or a URL.
+	resolved := h.posters.Presign(ctx, posterPath)
+	switch {
+	case strings.HasPrefix(resolved, "/"):
+		return resolved, false, true
+	case isHTTPURL(resolved):
+		return resolved, true, true
+	default:
+		return "", false, false
+	}
 }
 
 // redirect answers with the stored object's URL. The redirect itself is not
