@@ -33,26 +33,71 @@ const pluginSettingInvalid = "invalid"
 // pattern, and numeric bounds; anything more is the plugin's
 // ValidateDestination. mergePluginSettings has already refused undeclared
 // fields, and a stored secret left blank is in merged, so it counts as
-// present.
+// present. An integer beyond maxSafePluginInteger is refused too.
 func checkPluginSettings(channel PluginChannel, merged map[string]any) error {
-	err := publicconfig.ValidateValue(channel.Schema, "destination", channel.CapabilityID, merged)
-	if err == nil {
-		return nil
-	}
-	var invalid *jsonschema.ValidationError
-	if !errors.As(err, &invalid) {
-		// The schema itself doesn't compile. Install refuses such a form and
-		// the channel listing skips a stored one, so waiting won't fix it:
-		// the channel counts as not provided.
-		return fmt.Errorf("%w: %w: %w", ErrPluginChannelUnavailable, ErrPluginChannelNotProvided, err)
-	}
 	var fields []PluginSettingError
-	collectPluginSettingErrors(invalid, &fields)
+	if err := publicconfig.ValidateValue(channel.Schema, "destination", channel.CapabilityID, merged); err != nil {
+		var invalid *jsonschema.ValidationError
+		if !errors.As(err, &invalid) {
+			// The schema itself doesn't compile. Install refuses such a form
+			// and the channel listing skips a stored one, so waiting won't
+			// fix it: the channel counts as not provided.
+			return fmt.Errorf("%w: %w: %w", ErrPluginChannelUnavailable, ErrPluginChannelNotProvided, err)
+		}
+		collectPluginSettingErrors(invalid, &fields)
+		if len(fields) == 0 {
+			fields = append(fields, PluginSettingError{Code: pluginSettingInvalid, Message: "The settings don't fit this destination's form."})
+		}
+	}
+	for _, key := range unsafePluginIntegers(channel, merged) {
+		if !slices.ContainsFunc(fields, func(f PluginSettingError) bool { return f.Field == key }) {
+			fields = append(fields, PluginSettingError{Field: key, Code: "out_of_range", Message: "Out of the allowed range."})
+		}
+	}
 	if len(fields) == 0 {
-		fields = append(fields, PluginSettingError{Code: pluginSettingInvalid, Message: "The settings don't fit this destination's form."})
+		return nil
 	}
 	slices.SortFunc(fields, func(a, b PluginSettingError) int { return cmp.Compare(a.Field, b.Field) })
 	return &PluginDestinationSettingsError{Fields: fields}
+}
+
+// maxSafePluginInteger is the largest integer a JSON or protobuf number
+// carries exactly, 2^53-1. Settings reach a plugin as a protobuf Struct,
+// whose numbers are doubles, so a larger integer would arrive rounded. The
+// SDK's manifest.MaxSafeInteger, in a newer SDK than the one pinned here, is
+// the same bound for manifest options and defaults.
+const maxSafePluginInteger = 1<<53 - 1
+
+// unsafePluginIntegers returns the keys of integer fields whose value is
+// beyond maxSafePluginInteger in magnitude.
+func unsafePluginIntegers(channel PluginChannel, values map[string]any) []string {
+	var schema struct {
+		Properties map[string]pluginSchemaProperty `json:"properties"`
+	}
+	if json.Unmarshal([]byte(channel.Schema.GetJsonSchema()), &schema) != nil {
+		return nil
+	}
+	var out []string
+	for key, value := range values {
+		var valueType string
+		if json.Unmarshal(schema.Properties[key].Type, &valueType) != nil || valueType != "integer" {
+			continue
+		}
+		var unsafe bool
+		switch v := value.(type) {
+		case float64:
+			unsafe = v > maxSafePluginInteger || v < -maxSafePluginInteger
+		case int64:
+			unsafe = v > maxSafePluginInteger || v < -maxSafePluginInteger
+		case json.Number:
+			f, err := v.Float64()
+			unsafe = err == nil && (f > maxSafePluginInteger || f < -maxSafePluginInteger)
+		}
+		if unsafe {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 // collectPluginSettingErrors flattens a validation error into one entry per

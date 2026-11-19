@@ -264,6 +264,22 @@ func TestCheckPluginSettings(t *testing.T) {
 			}
 		})
 	}
+
+	// An integer a plugin can't receive exactly is refused, even where the
+	// schema sets no bound. 9007199254740993 decodes to ...992, still beyond.
+	unbounded := channel
+	unbounded.Schema = &pluginv1.ConfigSchema{JsonSchema: `{"type":"object","properties":{"count":{"type":"integer"}}}`}
+	unbounded.PublicFields, unbounded.SecretFields = []string{"count"}, nil
+	for _, value := range []any{float64(9007199254740993), float64(-9007199254740993), int64(1 << 60)} {
+		err := checkPluginSettings(unbounded, map[string]any{"count": value})
+		invalid, ok := errors.AsType[*PluginDestinationSettingsError](err)
+		if !ok || len(invalid.Fields) != 1 || invalid.Fields[0].Field != "count" || invalid.Fields[0].Code != "out_of_range" {
+			t.Fatalf("checkPluginSettings(%v) = %v, want count out_of_range", value, err)
+		}
+	}
+	if err := checkPluginSettings(unbounded, map[string]any{"count": float64(9007199254740991)}); err != nil {
+		t.Fatalf("checkPluginSettings(2^53-1) = %v, want nil", err)
+	}
 }
 
 // A plugin's text can quote a credential it was given. Every value that
