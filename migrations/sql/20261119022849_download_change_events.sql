@@ -2,8 +2,8 @@
 -- +goose StatementBegin
 
 -- Outbox for the administrator download.changed events: one row when a
--- managed (device) download is created, changes status or revision, or is
--- deleted. Triggers write it whatever code path changed the row, including
+-- managed (device) download is created, changes status or revision, moves to
+-- another title or episode (a catalog merge), or is deleted. Triggers write it whatever code path changed the row, including
 -- cascades from a deleted account, profile or title; every API server drains
 -- it (see internal/downloads/change_outbox.go). Ephemeral web rows, which no
 -- administrator route lists, are left out. A row keeps the identifiers so a
@@ -48,18 +48,19 @@ BEGIN
 END
 $$;
 
--- Row triggers with WHEN clauses: the frequent updates that change neither
--- status nor revision (transfer leases, client addresses, byte counts) cost
--- no function call.
+-- Row triggers with WHEN clauses: the frequent updates that change none of
+-- status, revision or the title the event names (transfer leases, client
+-- addresses, byte counts) cost no function call.
 CREATE TRIGGER trg_download_change_insert
 AFTER INSERT ON public.downloads
 FOR EACH ROW WHEN (NEW.device_id IS NOT NULL)
 EXECUTE FUNCTION public.download_change_queue();
 
 CREATE TRIGGER trg_download_change_update
-AFTER UPDATE OF status, revision ON public.downloads
+AFTER UPDATE OF status, revision, content_id, episode_id ON public.downloads
 FOR EACH ROW WHEN (NEW.device_id IS NOT NULL
-    AND (OLD.status IS DISTINCT FROM NEW.status OR OLD.revision IS DISTINCT FROM NEW.revision))
+    AND (OLD.status IS DISTINCT FROM NEW.status OR OLD.revision IS DISTINCT FROM NEW.revision
+        OR OLD.content_id IS DISTINCT FROM NEW.content_id OR OLD.episode_id IS DISTINCT FROM NEW.episode_id))
 EXECUTE FUNCTION public.download_change_queue();
 
 CREATE TRIGGER trg_download_change_delete

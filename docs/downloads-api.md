@@ -1889,7 +1889,8 @@ administrator route shows.
 ### Download change events (admin)
 
 Triggers on `downloads` queue a row in `download_change_events` whenever a
-managed download is inserted, changes `status` or `revision`, or is deleted,
+managed download is inserted, changes `status`, `revision`, `content_id` or
+`episode_id` (a catalog merge moving it to another title), or is deleted,
 including by cascade; every API server drains the outbox and publishes
 `download.changed` on the admin-only `downloads` realtime channel, which an
 `admin:monitor:read` key may join. The event names the download, account,

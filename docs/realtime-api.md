@@ -276,7 +276,8 @@ without this change send no lifecycle events.
 The admin-only `downloads` channel carries `download.changed` for managed
 (device) downloads: when one is registered, changes status or is registered
 again at a new revision (preparation finishing or failing, the device's own
-status reports, a revocation), and when it is removed (the device
+status reports, a revocation), when a catalog merge moves it to another
+title or episode, and when it is removed (the device
 deletes it, a revoked row is purged, or its account, profile or title is
 deleted). `GET /api/v2/admin/downloads/storage/capabilities` reports
 `change_events: true` when the server sends them. Ephemeral web downloads, which
