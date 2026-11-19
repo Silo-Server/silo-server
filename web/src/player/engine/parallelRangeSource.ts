@@ -39,6 +39,7 @@
 import type { UrlSourceOptions } from "mediabunny";
 import type { createMeteredFetch, MediaRun } from "./mediaFetch";
 import { InternalUrlSource, type PendingSlice, type ReadWorker } from "./mediabunnyInternals";
+import { inactivitySignal, responseProtocol } from "./rangeRequest";
 
 /** The size of one range. The last range of a stretch is cut at the worker's target. */
 const RANGE_BYTES = 2 * 2 ** 20;
@@ -574,7 +575,7 @@ export class ParallelRangeSource extends InternalUrlSource {
         };
         // A stripe request has its own signal, which a worker abort also aborts, so the inactivity
         // deadline can end that request alone. The plan's URL has no deadline.
-        const stripe = onStripe ? this.stripeRequestSignal(signal) : null;
+        const stripe = onStripe ? inactivitySignal(signal, STRIPE_INACTIVITY_MS) : null;
         try {
           let response: Response;
           try {
@@ -701,48 +702,13 @@ export class ParallelRangeSource extends InternalUrlSource {
   private checkProtocol(url: string | URL | Request): void {
     if (this.multiplexed || this.protocolChecks >= PROTOCOL_CHECKS) return;
     this.protocolChecks++;
-    const href = url instanceof Request ? url.url : String(url);
-    const name = typeof location === "undefined" ? href : new URL(href, location.href).href;
-    const entries = performance.getEntriesByName?.(name, "resource") as
-      | PerformanceResourceTiming[]
-      | undefined;
-    const protocol = entries?.[entries.length - 1]?.nextHopProtocol ?? "";
+    const protocol = responseProtocol(url);
     if (protocol === "") return;
     this.protocolChecks = PROTOCOL_CHECKS;
     if (protocol === "h2" || protocol === "h3") {
       this.multiplexed = true;
       this.wakeWorkers();
     }
-  }
-
-  /**
-   * A signal for one stripe request: it aborts when `signal` (the worker's) aborts, and when the
-   * request goes `STRIPE_INACTIVITY_MS` without `touch()`, which a received chunk calls. The timer
-   * starts here, before the fetch. `dispose()` ends the timer and the link to `signal`, and aborts
-   * the request's signal, which frees a response that nobody read to its end.
-   * A deadline abort ends only this request; `failed` then moves the read to the plan's URL.
-   */
-  private stripeRequestSignal(signal: AbortSignal): {
-    signal: AbortSignal;
-    touch: () => void;
-    dispose: () => void;
-  } {
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    let timer: ReturnType<typeof setTimeout>;
-    const touch = () => {
-      clearTimeout(timer);
-      timer = setTimeout(abort, STRIPE_INACTIVITY_MS);
-    };
-    const dispose = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
-      abort();
-    };
-    if (signal.aborted) abort();
-    else signal.addEventListener("abort", abort, { once: true });
-    touch();
-    return { signal: controller.signal, touch, dispose };
   }
 
   /**
