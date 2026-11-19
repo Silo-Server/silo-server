@@ -1442,6 +1442,35 @@ func TestBitmapFastStartKeepsDefaultTimelineAndSessionSegments(t *testing.T) {
 	}
 }
 
+// The admin views read the target bitrate from session state. A rebuilt
+// session reports the card's bitrate unless video is copied, so a native start
+// must report the same or the value changes across a server restart.
+func TestV3SessionStreamStateTargetBitrateMatchesReconstruction(t *testing.T) {
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
+	for _, tc := range []struct {
+		name       string
+		method     playback.PlayMethod
+		delivery   playback.DeliveryV3
+		videoCodec string
+		want       int
+	}{
+		{"video transcode", playback.PlayTranscode, playback.DeliveryTranscodeHLSV3, "h264", 4000},
+		{"audio-only transcode", playback.PlayTranscode, playback.DeliveryTranscodeHLSV3, "copy", 0},
+		{"hls remux", playback.PlayRemux, playback.DeliveryRemuxHLSV3, "copy", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := playback.PlannerResultV3{
+				Plan: &playback.PlanV3{Delivery: tc.delivery}, PlayMethod: tc.method,
+				TargetVideoCodec: tc.videoCodec, TargetAudioCodec: "aac", TargetBitrateKbps: 4000,
+			}
+			state := handler.v3SessionStreamState(context.Background(), &playback.Session{}, nil, result, preparedTransportV3{}, mediaAuthModeV3{})
+			if state.TargetBitrateKbps != tc.want {
+				t.Fatalf("target bitrate = %d, want %d", state.TargetBitrateKbps, tc.want)
+			}
+		})
+	}
+}
+
 func TestSanitizeDiagnosticsV3PreservesPlayerFailureEvidence(t *testing.T) {
 	got := sanitizeDiagnosticsV3(map[string]string{
 		"error_code":                     "2004",
