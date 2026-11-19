@@ -61,6 +61,7 @@ func TestMediaScopeRowsMatchSeeAllPostgres(t *testing.T) {
 		"ebook":   {prefix + "ebook"},
 		"manga":   {prefix + "manga"},
 	}
+	want["legacy video"] = want["video"]
 	// The profile favorites every title, including the episode the row's
 	// library does not hold.
 	profileID := prefix + "profile"
@@ -68,10 +69,13 @@ func TestMediaScopeRowsMatchSeeAllPostgres(t *testing.T) {
 
 	fetcher := NewFetcher(pool)
 	fetcher.StoreProvider = provider
-	for _, scope := range []string{"video", "episode", "ebook", "manga"} {
+	for _, scope := range []string{"video", "episode", "ebook", "manga", "legacy video"} {
 		for _, sectionType := range []SectionType{SectionRecentlyAdded, SectionRecentlyReleased, SectionRandom, SectionFavorites} {
 			t.Run(fmt.Sprintf("%s %s", sectionType, scope), func(t *testing.T) {
 				config := defaultMediaScopeConfig(scope)
+				if scope == "legacy video" {
+					config = json.RawMessage(`{"filter_type":"video"}`)
+				}
 				section := ResolvedSection{ID: "scoped", SectionType: sectionType, Title: "Row", ItemLimit: 100, Config: config}
 				row, err := fetcher.FetchOne(ctx, section, &library, nil, userID, profileID, catalog.AccessFilter{})
 				if err != nil {

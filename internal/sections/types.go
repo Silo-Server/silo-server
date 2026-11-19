@@ -257,6 +257,10 @@ func ParseConfigFilters(config json.RawMessage) SectionConfigFilters {
 	switch scope.MediaScope {
 	case mediaScopeMovie, mediaScopeSeries, mediaScopeAudiobook, mediaScopeEbook, mediaScopeManga:
 		f.FilterType = scope.MediaScope
+	case catalog.MediaScopeVideo, mediaScopeEpisode:
+		// A legacy filter_type naming a group or the episode scope is no
+		// media_items type; MediaScope carries it.
+		f.FilterType = ""
 	}
 	if len(f.LibraryIDs()) == 0 {
 		f.FilterLibraryIDs = scope.LibraryIDs
