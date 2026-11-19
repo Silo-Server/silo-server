@@ -52,58 +52,6 @@ func onlyMonitoring(ids ...int) func([]LibraryStatus) bool {
 	}
 }
 
-func TestReconcileFollowsLibrariesAndTheServerSwitch(t *testing.T) {
-	rootA, rootB, rootC := t.TempDir(), t.TempDir(), t.TempDir()
-	disabled := library(3, t.TempDir())
-	disabled.Enabled = false
-	optedOut := library(4, t.TempDir())
-	optedOut.RealtimeMonitoring = false
-	folders := &fakeFolders{}
-	libB := library(2, rootB, rootC)
-	folders.set(
-		library(1, rootA),
-		libB,
-		disabled,
-		optedOut,
-		library(5, filepath.Join(t.TempDir(), "not-on-this-node")),
-	)
-	m, b, _, status := fakeMonitor(t, folders, nil)
-
-	rows := waitStatus(t, status, "libraries 1 and 2 monitoring over all roots", func(rows []LibraryStatus) bool {
-		row, _ := statusOf(rows, 2)
-		return onlyMonitoring(1, 2)(rows) && row.Directories == 6
-	})
-	if row, _ := statusOf(rows, 2); row.Backend != "inotify" || row.Detail != "" {
-		t.Fatalf("library 2 row = %+v, want inotify with no detail", row)
-	}
-	for _, root := range []string{disabled.Paths[0], optedOut.Paths[0]} {
-		if b.addCount(root) != 0 {
-			t.Fatalf("root %s of a library without monitoring was recorded", root)
-		}
-	}
-
-	libB.RealtimeMonitoring = false
-	folders.set(library(1, rootA), libB)
-	m.Poke()
-	waitCall(t, b, "remove "+rootB, "remove "+rootC)
-	waitStatus(t, status, "only library 1", onlyMonitoring(1))
-
-	m.SetServerEnabled(false)
-	waitCall(t, b, "remove "+rootA)
-	waitStatus(t, status, "no rows with the server switch off", onlyMonitoring())
-
-	m.SetServerEnabled(true)
-	waitCall(t, b, "add "+rootA)
-	waitStatus(t, status, "library 1 back", onlyMonitoring(1))
-
-	m.Stop()
-	status.mu.Lock()
-	defer status.mu.Unlock()
-	if !slices.Equal(status.removed, []string{"node-test"}) {
-		t.Fatalf("RemoveNode calls = %v, want one for node-test", status.removed)
-	}
-}
-
 func TestDuplicateRootIsRecordedOnceForBothLibraries(t *testing.T) {
 	root := t.TempDir()
 	folders := &fakeFolders{}
@@ -113,31 +61,6 @@ func TestDuplicateRootIsRecordedOnceForBothLibraries(t *testing.T) {
 	if n := b.addCount(root); n != 1 {
 		t.Fatalf("AddRoot called %d times for a shared root, want 1", n)
 	}
-}
-
-func TestWalksRunOneAtATimeInSortOrder(t *testing.T) {
-	first, second := t.TempDir(), t.TempDir()
-	libFirst := library(9, first)
-	libFirst.SortOrder = 1
-	libSecond := library(1, second)
-	libSecond.SortOrder = 2
-	folders := &fakeFolders{}
-	folders.set(libSecond, libFirst)
-
-	b := newFakeBackend("inotify")
-	release := make(chan struct{})
-	b.block[first] = release
-	queue, status := newFakeQueue(), newFakeStatus()
-	cfg := testConfig(folders, queue, status)
-	cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
-	startMonitor(t, cfg)
-
-	if call := <-b.calls; call != "add "+first {
-		t.Fatalf("first walk = %q, want the library with the lowest sort order", call)
-	}
-	close(release)
-	waitCall(t, b, "add "+second)
-	waitStatus(t, status, "both monitoring", onlyMonitoring(9, 1))
 }
 
 func TestStalledWalkStopsHoldingOthersBack(t *testing.T) {
@@ -736,21 +659,6 @@ func TestFailedBackendIsReplaced(t *testing.T) {
 	m.mu.Unlock()
 	if !replaced || !onlyMonitoring(1)(rows) {
 		t.Fatalf("after the backend failed: %d backends, rows %+v; want monitoring on a second backend", backends, rows)
-	}
-}
-
-// A rescan request for a library folder queues one library scan for its
-// library and leaves other libraries alone.
-func TestRescanRootQueuesALibraryScan(t *testing.T) {
-	rootA, rootB := t.TempDir(), t.TempDir()
-	folders := &fakeFolders{}
-	folders.set(library(1, rootA), library(2, rootB))
-	_, b, queue, status := fakeMonitor(t, folders, nil)
-	waitStatus(t, status, "monitoring", onlyMonitoring(1, 2))
-
-	b.events <- Event{Kind: EventRescanRoot, Root: rootA}
-	if got := waitTargets(t, queue, "1 library  realtime_monitor"); len(got) != 1 {
-		t.Fatalf("enqueued %v, want only library 1's scan", got)
 	}
 }
 

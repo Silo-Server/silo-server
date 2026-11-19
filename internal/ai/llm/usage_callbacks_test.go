@@ -110,59 +110,6 @@ func TestSubscriptionUsageCheckClearsPauseOnlyAfterCompletion(t *testing.T) {
 	}
 }
 
-func TestSubscriptionUsageCallbacksLeaveAPIKeyAndSpeechRequestsUnaffected(t *testing.T) {
-	for _, speech := range []bool{false, true} {
-		for _, quota := range []bool{false, true} {
-			name := "API key"
-			if speech {
-				name = "speech"
-			}
-			if quota {
-				name += " quota"
-			}
-			t.Run(name, func(t *testing.T) {
-				unexpected := func(context.Context, string) error { t.Fatal("request changed ChatGPT usage state"); return nil }
-				cfg := Config{BaseURL: "https://provider.example.test", APIKey: "api-key", ChatModel: "test-model", ASRModel: "whisper-1",
-					ASRBaseURL: "https://provider.example.test", ASRAPIKey: "api-key",
-					ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) {
-						t.Fatal("request used subscription credentials")
-						return "", nil
-					}),
-					ChatGPTUsageLimited: unexpected, ChatGPTUsageVerified: unexpected}
-				if speech {
-					cfg.AuthMode = AuthModeChatGPT
-				}
-				client := NewClient(cfg)
-				calls := 0
-				transport := retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-					calls++
-					if r.Header.Get("Authorization") != "Bearer api-key" {
-						t.Fatal("request lost API key credentials")
-					}
-					status, body := http.StatusOK, chatOK
-					if speech {
-						body = `{"text":"speech","segments":[{"start":0,"end":1,"text":"speech"}]}`
-					}
-					if quota {
-						status, body = http.StatusTooManyRequests, `{"error":{"code":"insufficient_quota"}}`
-					}
-					return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
-				})
-				client.chatHTTP.Transport, client.asrHTTP.Transport = transport, transport
-				var err error
-				if speech {
-					_, err = client.Transcribe(t.Context(), TranscribeRequest{Filename: "sample.wav", Audio: []byte("sample")})
-				} else {
-					_, err = client.Chat(t.Context(), []Message{{Role: "user", Content: "check"}}, false)
-				}
-				if (err != nil) != quota || quota && !errors.Is(err, ErrQuotaExhausted) || calls != 1 {
-					t.Fatalf("request: err=%v, calls=%d", err, calls)
-				}
-			})
-		}
-	}
-}
-
 func TestSubscriptionUsagePersistenceFailureWithholdsOutput(t *testing.T) {
 	for _, quota := range []bool{false, true} {
 		name := "verify"

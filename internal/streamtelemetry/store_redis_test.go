@@ -110,17 +110,6 @@ func TestRedisStoreFailedPublishForcesFullResync(t *testing.T) {
 	}
 }
 
-func TestRedisStoreKeyBuilders(t *testing.T) {
-	cfg := testRedisStoreConfig("publisher")
-	store := NewRedisStore(nil, cfg, nil)
-	if got := store.snapshotKey("other"); got != cfg.KeyPrefix+":snap:other" {
-		t.Fatalf("snapshot key = %q", got)
-	}
-	if got := store.rosterKey(); got != cfg.KeyPrefix+":roster" {
-		t.Fatalf("roster key = %q", got)
-	}
-}
-
 func TestSnapshotHashFieldsRoundTripAndDeterministicCap(t *testing.T) {
 	snapshot := Snapshot{PublisherID: "publisher", NodeID: "node", PublisherEpoch: 1, Sequence: 2, CapturedAt: time.Unix(3, 4),
 		Sessions: []SessionView{

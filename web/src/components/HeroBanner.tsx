@@ -17,6 +17,7 @@ import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { HeroOverviewText } from "./HeroOverviewText";
+import { LocalErrorBoundary } from "./LocalErrorBoundary";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -27,6 +28,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
+import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
 import { formatHeroMetadata } from "./heroMetadata";
 import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 
@@ -256,6 +258,14 @@ export default function HeroBanner({
         position_seconds: current.position_seconds,
       })
     );
+  const overviewFallback = overviewShown ? (
+    <div className="mb-7 max-w-2xl">
+      <HeroOverviewText overview={current.overview} />
+      {current.machine_translated_fields?.includes("overview") && (
+        <MachineTranslatedLabel className="mt-1.5" />
+      )}
+    </div>
+  ) : null;
 
   const metadata = formatHeroMetadata(current);
 
@@ -362,21 +372,17 @@ export default function HeroBanner({
                 )}
               </div>
             )}
-            <Suspense
-              fallback={
-                overviewShown ? (
-                  <div className="mb-7 max-w-2xl">
-                    <HeroOverviewText overview={current.overview} />
-                  </div>
-                ) : null
-              }
-            >
-              <HeroOverview
-                item={overviewShown ? current : undefined}
-                pendingContentIds={pendingSlideIds}
-                onRefreshItems={onRefreshItems}
-              />
-            </Suspense>
+            {/* The plain overview stands in while the chunk loads, and for good
+              if it fails to load. */}
+            <LocalErrorBoundary fallback={overviewFallback}>
+              <Suspense fallback={overviewFallback}>
+                <HeroOverview
+                  item={overviewShown ? current : undefined}
+                  pendingContentIds={pendingSlideIds}
+                  onRefreshItems={onRefreshItems}
+                />
+              </Suspense>
+            </LocalErrorBoundary>
             <div className="flex flex-wrap items-center gap-3">
               <Link
                 to={playHref}
@@ -413,13 +419,16 @@ export default function HeroBanner({
           advance slides manually — important when `prefers-reduced-motion`
           disables autoplay, and for accessibility generally. On mobile they
           render smaller and slightly more transparent so they don't crowd
-          narrow viewports. On lg+ they fade in on hover. */}
+          narrow viewports. On lg+ with a mouse they fade in on hover; a touch
+          screen has no hover, so there they stay visible. The gate is the
+          observed pointer (lib/pointerCapability.ts), wrapped in :where() so
+          group-hover still outranks it. */}
       {slides.length > 1 && (
         <>
           <button
             type="button"
             onClick={prev}
-            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
             aria-label={t("web.home.hero.previousSlide")}
           >
             <ChevronLeft className="size-4 sm:size-5" />
@@ -427,7 +436,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={next}
-            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
             aria-label={t("web.home.hero.nextSlide")}
           >
             <ChevronRight className="size-4 sm:size-5" />

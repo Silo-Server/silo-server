@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import {
   getAccessToken,
   getAuthContextVersion,
@@ -17,7 +18,9 @@ import {
   getProfileToken,
   refreshAuthentication,
 } from "@/api/client";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useT } from "@/i18n";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import { storage } from "@/utils/storage";
@@ -64,6 +67,7 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
   const [active, setActive] = useState<AudiobookPlayerStatus | null>(null);
   const [controls, setControls] = useState<AudiobookPlayerControls | null>(null);
   const { profile } = useCurrentProfile();
+  const t = useT();
   const profileId = profile?.id ?? null;
   const playbackProfileRef = useRef<string | null>(null);
   const playerConfig = useMemo<PlayerConfig>(
@@ -96,6 +100,19 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
     setActive(null);
     setActiveRequest(null);
   }, []);
+
+  // React.lazy keeps a failed chunk import failed, so the player can't start
+  // again until the page reloads; say so instead of dropping the tap.
+  const handlePlayerFailed = useCallback(() => {
+    stopPlayback();
+    toast.error(t("web.shell.errorBoundary.title"), {
+      description: t("web.shell.errorBoundary.description"),
+      action: {
+        label: t("web.shell.errorBoundary.refresh"),
+        onClick: () => window.location.reload(),
+      },
+    });
+  }, [stopPlayback, t]);
 
   // The book belongs to the profile that started it: a profile switch must
   // not keep it playing or report its progress under the new profile.
@@ -135,23 +152,27 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       {children}
       {activeRequest && (
         <PlayerConfigProvider config={playerConfig}>
-          <Suspense fallback={null}>
-            <AudiobookPlayer
-              key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
-              contentId={activeRequest.contentId}
-              title={activeRequest.title}
-              author={activeRequest.author}
-              narrator={activeRequest.narrator}
-              posterUrl={activeRequest.posterUrl}
-              posterThumbhash={activeRequest.posterThumbhash}
-              files={activeRequest.files}
-              initialPositionSeconds={activeRequest.initialPositionSeconds}
-              autoPlay={activeRequest.autoPlay}
-              onClose={stopPlayback}
-              onPlaybackStateChange={setActive}
-              onControlsChange={setControls}
-            />
-          </Suspense>
+          {/* The player renders over every page: if its chunk fails to load,
+            end this playback and say so instead of taking the page down. */}
+          <LocalErrorBoundary onError={handlePlayerFailed}>
+            <Suspense fallback={null}>
+              <AudiobookPlayer
+                key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
+                contentId={activeRequest.contentId}
+                title={activeRequest.title}
+                author={activeRequest.author}
+                narrator={activeRequest.narrator}
+                posterUrl={activeRequest.posterUrl}
+                posterThumbhash={activeRequest.posterThumbhash}
+                files={activeRequest.files}
+                initialPositionSeconds={activeRequest.initialPositionSeconds}
+                autoPlay={activeRequest.autoPlay}
+                onClose={stopPlayback}
+                onPlaybackStateChange={setActive}
+                onControlsChange={setControls}
+              />
+            </Suspense>
+          </LocalErrorBoundary>
         </PlayerConfigProvider>
       )}
     </AudiobookPlaybackControllerContext.Provider>

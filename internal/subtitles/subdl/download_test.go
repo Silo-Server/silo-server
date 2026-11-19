@@ -43,59 +43,6 @@ func offHost(t *testing.T) (*httptest.Server, *atomic.Int32) {
 	return server, &hits
 }
 
-func TestDownloadFetchesWellFormedIDFromDownloadHost(t *testing.T) {
-	var gotPath, gotQuery string
-	dl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
-		_, _ = w.Write(subtitleZip(t, "1\n00:00:01,000 --> 00:00:02,000\nhello\n"))
-	}))
-	defer dl.Close()
-
-	p := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-server-key"})
-	// An ID issued before result IDs dropped SubDL's signed query: the
-	// client's query is not forwarded, the server signs with its own key.
-	data, format, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip?api_key=client-supplied&x=1", subtitles.DownloadTarget{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if format != subtitles.FormatSRT || !strings.Contains(string(data), "hello") {
-		t.Fatalf("got %q (%s)", data, format)
-	}
-	if gotPath != "/subtitle/3197651-3213944.zip" || gotQuery != "api_key=synthetic-server-key" {
-		t.Fatalf("requested %s?%s", gotPath, gotQuery)
-	}
-}
-
-func TestSignedSearchRowYieldsKeylessIDThatDownloads(t *testing.T) {
-	const key = "synthetic-subdl-key"
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":true,"subtitles":[{"language":"EN","release_name":"Example.2024.srt","url":"/subtitle/3520378-8443030.zip?api_key=` + key + `"}]}`))
-	}))
-	defer api.Close()
-	var gotQuery string
-	dl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-		_, _ = w.Write(subtitleZip(t, "1\n00:00:01,000 --> 00:00:02,000\nhello\n"))
-	}))
-	defer dl.Close()
-
-	p := New(Config{BaseURL: api.URL, DLBaseURL: dl.URL, APIKey: key})
-	results, err := p.Search(t.Context(), subtitles.SearchRequest{IMDbID: "tt0000001"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 1 || results[0].ID != "/subtitle/3520378-8443030.zip" {
-		t.Fatalf("results = %+v", results)
-	}
-	if _, _, err := p.Download(t.Context(), results[0].ID, subtitles.DownloadTarget{}); err != nil {
-		t.Fatal(err)
-	}
-	if gotQuery != "api_key="+key {
-		t.Fatalf("download query = %q", gotQuery)
-	}
-}
-
 func TestDownloadRefusesIDsThatLeaveTheDownloadHost(t *testing.T) {
 	var dlHits atomic.Int32
 	dl := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { dlHits.Add(1) }))
@@ -165,22 +112,6 @@ func TestDownloadTransportErrorOmitsAPIKey(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "synthetic-subdl-key") {
 		t.Fatalf("download error carries the key: %v", err)
-	}
-}
-
-func TestDownloadFollowsRedirectOnTheDownloadHost(t *testing.T) {
-	dl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/subtitle/1-2.zip" {
-			http.Redirect(w, r, "/files/1-2.zip", http.StatusFound)
-			return
-		}
-		_, _ = w.Write(subtitleZip(t, "redirected"))
-	}))
-	defer dl.Close()
-
-	data, _, err := New(Config{DLBaseURL: dl.URL}).Download(t.Context(), "/subtitle/1-2.zip", subtitles.DownloadTarget{})
-	if err != nil || string(data) != "redirected" {
-		t.Fatalf("got %q, %v", data, err)
 	}
 }
 

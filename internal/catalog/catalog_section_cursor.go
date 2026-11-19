@@ -21,7 +21,7 @@ func (r *CatalogResolver) resolveSectionOrderCursor(ctx context.Context, req Cat
 	case querySortReleaseDate:
 		// Non-TV sections use the same mixed-item expression as BrowseRepository;
 		// movie-only DATE and its ISO text ordering are equivalent.
-		expression := "COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), ''))"
+		expression := ReleaseDateSortSQL("mi")
 		kind := cursorKindText
 		if req.Query.MediaScope == playableTypeMovie {
 			expression = "mi.release_date"

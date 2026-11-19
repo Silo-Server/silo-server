@@ -79,6 +79,14 @@ export function catalogSourceSupportsSourceOrder(source: CatalogSource): boolean
   );
 }
 
+/**
+ * Whether a text search ranks by relevance: the server's default for a query
+ * until the viewer picks another sort, and `sort=relevance` itself.
+ */
+export function searchSortsByRelevance(state: CatalogSearchState): boolean {
+  return state.query_definition.sort.field === "relevance" || !state.explicit_sort;
+}
+
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
   return overlaySources.has(source);
 }
@@ -147,8 +155,13 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
     });
   }
 
-  const rawSort = readString(searchParams.get("sort"));
-  const rawOrder = readString(searchParams.get("order"));
+  // Relevance ranks search text, and the server rejects it without any. A URL
+  // that kept it after the search was cleared gets the default sort instead.
+  const sortWithoutText =
+    normalizeQuerySortField(readString(searchParams.get("sort"))) === "relevance" &&
+    !baseState.q?.trim();
+  const rawSort = sortWithoutText ? undefined : readString(searchParams.get("sort"));
+  const rawOrder = sortWithoutText ? undefined : readString(searchParams.get("order"));
   const sort = normalizeQuerySortField(rawSort);
   const hasExplicitSort = Boolean(rawSort || rawOrder);
   const queryLimit = parsePositiveInt(searchParams.get("query_limit")) ?? undefined;
@@ -222,6 +235,17 @@ export function buildCatalogFilterSearchParams(state: CatalogSearchState): URLSe
   const params = buildCatalogApiSearchParams(state);
   if (state.source === "query" && !state.type_override && !state.query_definition.media_scope) {
     params.set("type", "all");
+  }
+  // A library browse requests its Date Added default, but nobody chose it:
+  // in the URL it would read back as a choice, and a search typed from the
+  // browse would keep it instead of ranking by relevance.
+  if (
+    state.source === "query" &&
+    !state.explicit_sort &&
+    state.query_definition.sort.field === "added_at"
+  ) {
+    params.delete("sort");
+    params.delete("order");
   }
   return params;
 }
@@ -414,10 +438,11 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     !state.sort_from_server &&
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
-      // A library browse defaults to Date Added; an unscoped query only sends
-      // it when the viewer or an editor chose it, so text search keeps the
-      // server's relevance ranking.
-      (state.source === "query" && (effectiveLibraryID != null || state.explicit_sort)) ||
+      // A library browse defaults to Date Added; a text search, in a library
+      // or not, only sends it when the viewer or an editor chose it, so it
+      // keeps the server's relevance ranking.
+      (state.source === "query" &&
+        ((effectiveLibraryID != null && !state.q?.trim()) || state.explicit_sort)) ||
       // These sources default to source order, so an explicit Date Added pick
       // must be sent to distinguish it (the server maps it to list added-at).
       // Dropping it would round-trip back through parse as source order and

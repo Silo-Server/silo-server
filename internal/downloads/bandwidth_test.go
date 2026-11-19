@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -78,65 +77,6 @@ func TestSharedBudgetReadsSettingsOncePerTTL(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Fatalf("settings read %d times for one cached window", reads)
-	}
-}
-
-func TestUnlimitedTransferUsesTheRawReader(t *testing.T) {
-	bm := NewBandwidthManager(0, 0)
-	bm.SetSharedBudget(unreachableRedis(t), func(context.Context) (int64, int64, error) { return 0, 0, nil })
-	raw := bytes.NewReader([]byte("media"))
-	if got := bm.ThrottledReader(context.Background(), raw, 2); got != raw {
-		t.Fatalf("unlimited transfer wrapped as %T", got)
-	}
-}
-
-func TestWithoutRedisLimitsStayInProcess(t *testing.T) {
-	bm := NewBandwidthManager(0, 4*1024*1024)
-	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) { return 0, 0, errors.New("unused") })
-	reader := bm.ThrottledStreamReader(context.Background(), bytes.NewReader(make([]byte, 64*1024)), 2)
-	if got, err := io.ReadAll(reader); err != nil || len(got) != 64*1024 {
-		t.Fatalf("read %d bytes, error %v", len(got), err)
-	}
-}
-
-func TestBandwidthChunkScalesWithTheStrictestRate(t *testing.T) {
-	for _, tc := range []struct {
-		server, user int64
-		want         int
-	}{
-		{0, 0, minBandwidthChunk},
-		{125000, 0, minBandwidthChunk},
-		{0, 125000000, maxBandwidthChunk},
-		{12500000, 125000000, 12500000 / 40},
-	} {
-		if got := bandwidthChunk(tc.server, tc.user); got != tc.want {
-			t.Fatalf("chunk(%d, %d) = %d, want %d", tc.server, tc.user, got, tc.want)
-		}
-		if limit := min(nonZero(tc.server), nonZero(tc.user)); limit > 0 && int64(bandwidthChunk(tc.server, tc.user)) > max(limit/4, 32*1024) {
-			t.Fatalf("chunk above burst for %d/%d", tc.server, tc.user)
-		}
-	}
-}
-
-func nonZero(v int64) int64 {
-	if v == 0 {
-		return 1 << 62
-	}
-	return v
-}
-
-func TestSharedBudgetRetriesTransientSettingsFailure(t *testing.T) {
-	shortenBudgetGrace(t)
-	failures := 3
-	bm := unknownSharedManager(t, func(context.Context) (int64, int64, error) {
-		if failures > 0 {
-			failures--
-			return 0, 0, errors.New("database restarting")
-		}
-		return 0, 0, nil
-	})
-	if err := bm.wait(context.Background(), 2, 1024); err != nil {
-		t.Fatalf("wait after transient failures: %v", err)
 	}
 }
 

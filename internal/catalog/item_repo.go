@@ -2850,6 +2850,57 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	return nil
 }
 
+// UpdateProvisionalArtwork applies upd, an artwork-only update, to the item
+// read describes while that item is still pending, unmatched or ambiguous,
+// its images lock is as read had it, and each poster, backdrop or logo slot upd
+// writes still has read's source. A match, an Identify, or an admin's artwork
+// pick or lock that committed since the read wins: nothing is written and it
+// returns false.
+func (r *ItemRepository) UpdateProvisionalArtwork(ctx context.Context, read *models.MediaItem, upd *MetadataUpdate) (bool, error) {
+	contentID := read.ContentID
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin provisional artwork update tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // a no-op once committed
+
+	// A slot upd leaves alone is not compared (NULL expected source).
+	expected := func(written *string, source string) *string {
+		if written == nil {
+			return nil
+		}
+		return &source
+	}
+	var one int
+	err = tx.QueryRow(ctx, `
+		SELECT 1 FROM media_items
+		WHERE content_id = $1
+		  AND lower(trim(status)) IN ('pending', 'unmatched', 'ambiguous')
+		  AND ($2::text IS NULL OR COALESCE(poster_source_path, '') = $2)
+		  AND ($3::text IS NULL OR COALESCE(backdrop_source_path, '') = $3)
+		  AND ($4::text IS NULL OR COALESCE(logo_source_path, '') = $4)
+		  AND COALESCE(`+imagesLockedSQL("locked_fields")+`, false) = $5
+		FOR UPDATE`, contentID,
+		expected(upd.PosterSourcePath, read.PosterSourcePath),
+		expected(upd.BackdropSourcePath, read.BackdropSourcePath),
+		expected(upd.LogoSourcePath, read.LogoSourcePath),
+		slices.Contains(read.LockedFields, fieldImagesLocked),
+	).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("locking provisional item artwork: %w", err)
+	}
+	if err := r.UpdateMetadataTx(ctx, tx, contentID, upd); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit provisional artwork update tx: %w", err)
+	}
+	return true, nil
+}
+
 // UpdateMetadataTx applies the same metadata update using the caller's
 // transaction. It lets workflows that also replace durable identity keep the
 // identity, scalar metadata, search-index event, and terminal timestamp in one

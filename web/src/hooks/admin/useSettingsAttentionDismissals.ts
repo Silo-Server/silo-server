@@ -10,7 +10,7 @@ import { useSettingsAttentionState, type SettingsHealthItem } from "./useSetting
  * ids. It is server-wide: one admin deciding the server runs without mail
  * stops the notice for every admin, on every device.
  */
-export const SETTINGS_ATTENTION_HIDDEN_KEY = "ui.dashboard.hidden_attention";
+const SETTINGS_ATTENTION_HIDDEN_KEY = "ui.dashboard.hidden_attention";
 
 /**
  * Whether the admin may hide an item from the Dashboard. Only setup the admin

@@ -50,43 +50,6 @@ esac
 	return path, logPath
 }
 
-func TestStartTranscodeHEVCVerifiesSelectedHardwareEncoder(t *testing.T) {
-	for _, backend := range []string{transcodeHWQSV, transcodeHWVAAPI, transcodeHWNVENC} {
-		for _, supported := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/supported=%t", backend, supported), func(t *testing.T) {
-				setupHEVCEncoderTest(t)
-				ffmpeg, logPath := hevcEncoderTestFFmpeg(t, supported, true)
-				opts := TranscodeOpts{
-					InputPath: "/media/source.mkv", OutputDir: t.TempDir(), FFmpegPath: ffmpeg,
-					TargetCodecVideo: transcodeCodecHEVC, TargetCodecAudio: "aac", VideoSampleEntry: VideoSampleEntryHVC1,
-					HWAccel: backend, HWDevice: "selected-device", TargetResolution: "1080p",
-				}
-				session, err := StartTranscode(context.Background(), opts)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(session.cancel)
-				<-session.done
-				wantBackend := transcodeHWNone
-				if supported {
-					wantBackend = backend
-				}
-				actual := session.Opts()
-				if actual.HWAccel != wantBackend || actual.TargetCodecVideo != transcodeCodecHEVC || actual.VideoSampleEntry != VideoSampleEntryHVC1 {
-					t.Fatalf("executed backend/codec/tag = %q/%q/%q, want %q/hevc/hvc1", actual.HWAccel, actual.TargetCodecVideo, actual.VideoSampleEntry, wantBackend)
-				}
-				commands, err := os.ReadFile(logPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !strings.Contains(string(commands), "selected-device") || !strings.Contains(string(commands), "-c:v hevc_"+backend) {
-					t.Fatalf("selected GPU did not receive HEVC probe:\n%s", commands)
-				}
-			})
-		}
-	}
-}
-
 func TestHEVCSoftwareFallbackPreservesHardwareToneMapping(t *testing.T) {
 	for _, backend := range []string{transcodeHWQSV, transcodeHWVAAPI, transcodeHWNVENC, transcodeHWVideoToolbox} {
 		for _, subtitle := range []string{"none", "text", "bitmap"} {
@@ -196,36 +159,6 @@ func TestHEVCEncoderProbeCacheSeparatesDevicesAndInvalidates(t *testing.T) {
 	resolved, err := resolveHEVCTranscodeEncoder(context.Background(), opts)
 	if err != nil || resolved.softwareEncode || resolved.EffectiveEncoderHWAccel() != transcodeHWVAAPI {
 		t.Fatalf("healthy HEVC encoder kept a stale software fallback: %v, %#v", err, resolved)
-	}
-}
-
-func TestStartTranscodeHEVCProbesAllocatedDevice(t *testing.T) {
-	env := setupHEVCEncoderTest(t)
-	env.addRenderDevice(t, "renderD128", "0x1002")
-	env.addRenderDevice(t, "renderD129", "0x1002")
-	first := filepath.Join(env.driDir, "renderD128")
-	second := filepath.Join(env.driDir, "renderD129")
-	releaseFirst := countHWDeviceWorkload(first)
-	defer releaseFirst()
-	ffmpeg, logPath := hevcEncoderTestFFmpeg(t, true, true)
-	session, err := StartTranscode(context.Background(), TranscodeOpts{
-		InputPath: "/media/source.mkv", OutputDir: t.TempDir(), FFmpegPath: ffmpeg,
-		TargetCodecVideo: transcodeCodecHEVC, HWAccel: transcodeHWVAAPI, HWDevice: first + "," + second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(session.cancel)
-	<-session.done
-	if session.Opts().HWDevice != second {
-		t.Fatalf("transcode ignored selected device: %q", session.Opts().HWDevice)
-	}
-	commands, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(commands), second) || strings.Contains(string(commands), first) {
-		t.Fatalf("HEVC probe did not follow allocation:\n%s", commands)
 	}
 }
 

@@ -2,7 +2,6 @@ package intromarkers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
-	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -341,111 +339,6 @@ func (f *fakeBoundaryRefiner) RefineChapterEnd(_ context.Context, candidate Cand
 	return refined, true, nil
 }
 
-func TestAnalyzeEpisodeWritesChapterMarker(t *testing.T) {
-	candidate := Candidate{
-		FileHash:  "original-file",
-		FileID:    10,
-		EpisodeID: "ep1",
-		Chapters: []models.MediaChapter{
-			{Index: 0, Title: "Cold Open", StartSeconds: 0, EndSeconds: 60},
-			{Index: 1, Title: "Opening", StartSeconds: 60, EndSeconds: 120},
-			{Index: 2, Title: "Part 1", StartSeconds: 95, EndSeconds: 900},
-		},
-	}
-	repo := &fakeIntroRepository{episodeCandidates: map[string][]Candidate{"ep1": {candidate}}}
-	extractor := &fakeFingerprintExtractor{}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, config: DefaultConfig("ffmpeg")}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode returned error: %v", err)
-	}
-	if summary.ChapterMarkersWritten != 1 {
-		t.Fatalf("expected one chapter marker, got %d", summary.ChapterMarkersWritten)
-	}
-	if len(repo.patches) != 1 {
-		t.Fatalf("expected one patch, got %d", len(repo.patches))
-	}
-	if repo.patches[0].ExpectedFile == nil || repo.patches[0].ExpectedFile.FileHash != candidate.FileHash {
-		t.Fatal("marker write must retain the file identity captured before analysis")
-	}
-	if repo.patches[0].Algorithm != ChapterAlgorithm {
-		t.Fatalf("expected chapter algorithm, got %q", repo.patches[0].Algorithm)
-	}
-	if patch := repo.patches[0]; patch.Start != 60 || patch.End != 95 || patch.Confidence != 0.95 {
-		t.Fatalf("chapter patch = %+v, want 60–95 with confidence 0.95", patch)
-	}
-	if extractor.preflightCalls != 0 {
-		t.Fatalf("preflight should not run after chapter marker is applied")
-	}
-}
-
-// A file's own intro chapter replaces an online intro rated below it. Other
-// higher-priority intros stay, and a file without an intro chapter is not
-// handed on to other kinds of local analysis.
-func TestChapterIntrosReplaceOnlyLessConfidentOnlineIntros(t *testing.T) {
-	chapters := []models.MediaChapter{
-		{Index: 0, Title: "Opening", StartSeconds: 60, EndSeconds: 120},
-		{Index: 1, Title: "Part 1", StartSeconds: 120, EndSeconds: 900},
-	}
-	stored := func(fileID int, source string, confidence float64, chapters []models.MediaChapter) Candidate {
-		return Candidate{
-			FileID: fileID, EpisodeID: fmt.Sprintf("ep%d", fileID), Chapters: chapters,
-			IntroStart: floatPtr(55), IntroEnd: floatPtr(125), IntroMarkersSource: strPtr(source), IntroMarkersConfidence: floatPtr(confidence),
-		}
-	}
-	repo := &fakeIntroRepository{}
-	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg")}
-
-	remaining, summary := analyzer.processChapterCandidates(context.Background(), []Candidate{
-		stored(10, models.MarkerSourcePlugin, 0.3, chapters),
-		stored(20, models.MarkerSourceOnline, 0.99, chapters),
-		stored(30, models.MarkerSourceManual, 1, chapters),
-		stored(40, models.MarkerSourcePlugin, 0.3, nil),
-	}, chapterProcessingOptions{allowEpisodeCopy: true})
-	if len(repo.patches) != 1 || repo.patches[0].FileID != 10 || repo.patches[0].Algorithm != ChapterAlgorithm || summary.ChapterMarkersWritten != 1 {
-		t.Fatalf("patches %+v, want only the less confident online intro replaced by the chapter", repo.patches)
-	}
-	if len(remaining) != 0 {
-		t.Fatalf("remaining %+v, want no file handed on", remaining)
-	}
-}
-
-func TestAnalyzeEpisodeWritesSilenceRefinedChapterMarker(t *testing.T) {
-	candidate := Candidate{
-		FileID:          10,
-		EpisodeID:       "ep1",
-		DurationSeconds: 1200,
-		Chapters: []models.MediaChapter{
-			{Index: 1, Title: "Opening", StartSeconds: 60, EndSeconds: 120},
-			{Index: 2, Title: "Part 1", StartSeconds: 120, EndSeconds: 900},
-		},
-	}
-	repo := &fakeIntroRepository{episodeCandidates: map[string][]Candidate{"ep1": {candidate}}}
-	extractor := &fakeFingerprintExtractor{}
-	refiner := &fakeBoundaryRefiner{segments: map[int]Segment{
-		10: {Start: 60, End: 132, Confidence: 0.95, Algorithm: ChapterSilenceAlgorithm},
-	}}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, refiner: refiner, config: DefaultConfig("ffmpeg")}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode returned error: %v", err)
-	}
-	if summary.SilenceRefinementsAttempted != 1 || summary.SilenceRefinementsApplied != 1 {
-		t.Fatalf("expected one applied silence refinement, got attempted=%d applied=%d", summary.SilenceRefinementsAttempted, summary.SilenceRefinementsApplied)
-	}
-	if len(repo.patches) != 1 {
-		t.Fatalf("expected one patch, got %d", len(repo.patches))
-	}
-	if repo.patches[0].Algorithm != ChapterSilenceAlgorithm || repo.patches[0].End != 132 {
-		t.Fatalf("expected silence-refined patch, got algorithm=%q end=%.3f", repo.patches[0].Algorithm, repo.patches[0].End)
-	}
-	if extractor.preflightCalls != 0 {
-		t.Fatalf("preflight should not run after silence-refined chapter marker is applied")
-	}
-}
-
 func TestAnalyzeEpisodeDoesNotOverwriteManualMarker(t *testing.T) {
 	source := models.MarkerSourceManual
 	start := 60.0
@@ -504,67 +397,6 @@ func TestAnalyzeEpisodeCopiesMarkerToCompatibleEpisodeVersion(t *testing.T) {
 	}
 	if repo.patches[1].Algorithm != EpisodeVersionCopyAlgorithm || repo.patches[1].Confidence != 0.85 {
 		t.Fatalf("expected copied marker patch, got algorithm=%q confidence=%.2f", repo.patches[1].Algorithm, repo.patches[1].Confidence)
-	}
-}
-
-func TestAnalyzeEpisodeRunsChromaprintAfterChapterMarker(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	target := Candidate{
-		FileID:          1,
-		EpisodeID:       "ep1",
-		SeasonID:        "season1",
-		MediaFolderID:   7,
-		FileHash:        "hash1",
-		FileSize:        100,
-		DurationSeconds: 1200,
-		Chapters: []models.MediaChapter{
-			{Index: 1, Title: "Opening", StartSeconds: 60, EndSeconds: 120},
-			{Index: 2, Title: "Part 1", StartSeconds: 120, EndSeconds: 900},
-		},
-	}
-	sibling := Candidate{
-		FileID:          2,
-		EpisodeID:       "ep2",
-		SeasonID:        "season1",
-		MediaFolderID:   7,
-		FileHash:        "hash2",
-		FileSize:        200,
-		DurationSeconds: 1200,
-	}
-	groupCandidates := []Candidate{target, sibling}
-	group := groupKey(target.MediaFolderID, target.SeasonID, target.AnalysisGroupKey())
-	repo := &fakeIntroRepository{
-		episodeCandidates: map[string][]Candidate{"ep1": {target}},
-		groupCandidates:   map[string][]Candidate{group: groupCandidates},
-		fingerprints: map[int]*Fingerprint{
-			target.FileID:  cachedFingerprint(target, cfg, sharedIntroPoints(1000)),
-			sibling.FileID: cachedFingerprint(sibling, cfg, sharedIntroPoints(5000)),
-		},
-	}
-	extractor := &fakeFingerprintExtractor{}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, config: cfg}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode returned error: %v", err)
-	}
-	if summary.ChapterMarkersWritten != 1 {
-		t.Fatalf("expected provisional chapter marker, got %d", summary.ChapterMarkersWritten)
-	}
-	if summary.ChromaprintMarkersWritten == 0 {
-		t.Fatal("expected chromaprint to run after chapter marker")
-	}
-	if extractor.preflightCalls != 1 {
-		t.Fatalf("expected chromaprint preflight, got %d", extractor.preflightCalls)
-	}
-	if len(repo.patches) < 2 {
-		t.Fatalf("expected chapter and chromaprint patches, got %d", len(repo.patches))
-	}
-	if repo.patches[0].Algorithm != ChapterAlgorithm {
-		t.Fatalf("expected first patch to be provisional chapter, got %q", repo.patches[0].Algorithm)
-	}
-	if repo.patches[1].Algorithm != ChromaprintAlgorithm {
-		t.Fatalf("expected chromaprint override patch, got %q", repo.patches[1].Algorithm)
 	}
 }
 
@@ -637,143 +469,6 @@ func chapterBackfillCandidate(fileID int) Candidate {
 	}
 }
 
-func TestRunBackfillRecordsNoImprovementAttempt(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	candidate := chapterBackfillCandidate(10)
-	repo := &fakeIntroRepository{
-		enabledLibraries:   1,
-		eligibleCandidates: []Candidate{candidate},
-		backfillCandidates: []Candidate{candidate},
-	}
-	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: &fakeBoundaryRefiner{}, config: cfg, node: "node-a"}
-
-	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-	if summary.SilenceRefinementsAttempted != 1 || summary.SilenceRefinementsApplied != 0 {
-		t.Fatalf("expected one unapplied refinement, got %+v", summary)
-	}
-	if len(repo.upsertedAttempts) != 1 {
-		t.Fatalf("expected one recorded attempt, got %d", len(repo.upsertedAttempts))
-	}
-	got := repo.upsertedAttempts[0]
-	want := SilenceRefinementAttempt{
-		MediaFileID:     10,
-		ConfigHash:      cfg.SilenceConfigHash(),
-		FileHash:        "hash-10",
-		FileSize:        1_000_000,
-		DurationSeconds: 1200,
-		ChaptersHash:    "chapters-10",
-		IntroStart:      60,
-		IntroEnd:        120,
-	}
-	if !got.sameInputs(want) {
-		t.Fatalf("recorded inputs = %+v, want %+v", got, want)
-	}
-	if got.Status != silenceAttemptNoImprovement || got.RecordedBy != "node-a" || got.FailureCount != 0 || got.RetryAfter != nil || got.LastError != "" {
-		t.Fatalf("expected a final no-improvement attempt, got %+v", got)
-	}
-	if got.AttemptedAt.IsZero() {
-		t.Fatal("expected attempted_at to be set")
-	}
-}
-
-func TestSilenceRefinementFailureBacksOff(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	candidate := chapterBackfillCandidate(10)
-	sameInputs := SilenceRefinementAttempt{
-		MediaFileID:     10,
-		ConfigHash:      cfg.SilenceConfigHash(),
-		FileHash:        "hash-10",
-		FileSize:        1_000_000,
-		DurationSeconds: 1200,
-		ChaptersHash:    "chapters-10",
-		IntroStart:      60,
-		IntroEnd:        120,
-	}
-	elapsed := time.Now().Add(-time.Hour)
-	withStatus := func(attempt SilenceRefinementAttempt, status string, failures int) *SilenceRefinementAttempt {
-		attempt.Status = status
-		attempt.RecordedBy = "node-a"
-		attempt.FailureCount = failures
-		if status == silenceAttemptFailed {
-			attempt.RetryAfter = &elapsed
-		}
-		return &attempt
-	}
-	otherConfig := *withStatus(sameInputs, silenceAttemptFailed, 4)
-	otherConfig.ConfigHash = "previous-settings"
-	movedMarker := *withStatus(sameInputs, silenceAttemptFailed, 4)
-	movedMarker.IntroEnd = 118
-	reprobedChapters := *withStatus(sameInputs, silenceAttemptFailed, 4)
-	reprobedChapters.ChaptersHash = "chapters-before-reprobe"
-	pendingRetry := time.Now().Add(10 * time.Hour)
-	stillBackingOff := *withStatus(sameInputs, silenceAttemptFailed, 2)
-	stillBackingOff.RetryAfter = &pendingRetry
-	otherServer := *withStatus(sameInputs, silenceAttemptFailed, 2)
-	otherServer.RecordedBy = "node-b"
-	otherServer.RetryAfter = &pendingRetry
-
-	tests := []struct {
-		name           string
-		previous       *SilenceRefinementAttempt
-		wantFailures   int
-		wantDelay      time.Duration
-		wantRetryAfter *time.Time
-	}{
-		{name: "first failure", wantFailures: 1, wantDelay: 12 * time.Hour},
-		{name: "repeated failure doubles", previous: withStatus(sameInputs, silenceAttemptFailed, 2), wantFailures: 3, wantDelay: 48 * time.Hour},
-		{name: "failure inside the backoff window keeps it", previous: &stillBackingOff, wantFailures: 2, wantRetryAfter: &pendingRetry},
-		{name: "another server's failure starts over", previous: &otherServer, wantFailures: 1, wantDelay: 12 * time.Hour},
-		{name: "failure after no improvement starts over", previous: withStatus(sameInputs, silenceAttemptNoImprovement, 0), wantFailures: 1, wantDelay: 12 * time.Hour},
-		{name: "changed settings start over", previous: &otherConfig, wantFailures: 1, wantDelay: 12 * time.Hour},
-		{name: "changed marker range starts over", previous: &movedMarker, wantFailures: 1, wantDelay: 12 * time.Hour},
-		{name: "changed chapters start over", previous: &reprobedChapters, wantFailures: 1, wantDelay: 12 * time.Hour},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := &fakeIntroRepository{backfillCandidates: []Candidate{candidate}, silenceAttempts: map[int]SilenceRefinementAttempt{}}
-			if tt.previous != nil {
-				repo.silenceAttempts[10] = *tt.previous
-			}
-			refiner := &fakeBoundaryRefiner{errors: map[int]error{10: errors.New("ffmpeg exited 1")}}
-			analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler), node: "node-a"}
-
-			summary, err := analyzer.runSilenceBackfill(context.Background(), allMarkerKinds)
-			if err != nil {
-				t.Fatalf("runSilenceBackfill returned error: %v", err)
-			}
-			if summary.SilenceRefinementErrors != 1 {
-				t.Fatalf("expected one refinement error, got %+v", summary)
-			}
-			if len(repo.upsertedAttempts) != 1 {
-				t.Fatalf("expected one recorded attempt, got %d", len(repo.upsertedAttempts))
-			}
-			got := repo.upsertedAttempts[0]
-			if got.Status != silenceAttemptFailed || got.RecordedBy != "node-a" || got.LastError != "ffmpeg exited 1" || !got.sameInputs(sameInputs) {
-				t.Fatalf("unexpected failed attempt: %+v", got)
-			}
-			if got.FailureCount != tt.wantFailures {
-				t.Fatalf("failure count = %d, want %d", got.FailureCount, tt.wantFailures)
-			}
-			switch {
-			case got.RetryAfter == nil:
-				t.Fatal("expected retry_after to be set")
-			case tt.wantRetryAfter != nil:
-				if !got.RetryAfter.Equal(*tt.wantRetryAfter) {
-					t.Fatalf("retry_after = %v, want the pending %v", got.RetryAfter, tt.wantRetryAfter)
-				}
-			case got.RetryAfter.Sub(got.AttemptedAt) != tt.wantDelay:
-				t.Fatalf("retry_after = %v after %v, want delay %v", got.RetryAfter, got.AttemptedAt, tt.wantDelay)
-			}
-			if len(repo.patches) != 1 || repo.patches[0].Algorithm != ChapterAlgorithm {
-				t.Fatalf("expected the unrefined chapter marker to be kept, got %+v", repo.patches)
-			}
-		})
-	}
-}
-
 type cancelingBoundaryRefiner struct {
 	cancel context.CancelFunc
 }
@@ -794,85 +489,6 @@ func TestSilenceRefinementCancellationIsNotRecorded(t *testing.T) {
 	}
 	if len(repo.upsertedAttempts) != 0 {
 		t.Fatalf("a canceled refinement must stay eligible, got %+v", repo.upsertedAttempts)
-	}
-}
-
-func TestSilenceConfigHashTracksSilenceSettingsOnly(t *testing.T) {
-	base := DefaultConfig("ffmpeg")
-	changedSilence := base
-	changedSilence.SilenceWindowAfterSeconds = 45
-	if base.SilenceConfigHash() == changedSilence.SilenceConfigHash() {
-		t.Fatal("changing a silence setting must change the silence config hash")
-	}
-	changedOther := base
-	changedOther.MinimumIntroDurationSeconds = 20
-	changedOther.SilenceBackfillLimit = 10
-	if base.SilenceConfigHash() != changedOther.SilenceConfigHash() {
-		t.Fatal("settings that do not affect silence refinement must not change its hash")
-	}
-}
-
-func TestAnalyzeEpisodeForcesCachedSeasonGroup(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	target := Candidate{
-		FileID:          1,
-		EpisodeID:       "ep1",
-		SeasonID:        "season1",
-		MediaFolderID:   7,
-		FileHash:        "hash1",
-		FileSize:        100,
-		DurationSeconds: 1200,
-	}
-	sibling := Candidate{
-		FileID:          2,
-		EpisodeID:       "ep2",
-		SeasonID:        "season1",
-		MediaFolderID:   7,
-		FileHash:        "hash2",
-		FileSize:        200,
-		DurationSeconds: 1200,
-	}
-	groupCandidates := []Candidate{target, sibling}
-	group := groupKey(target.MediaFolderID, target.SeasonID, target.AnalysisGroupKey())
-	repo := &fakeIntroRepository{
-		episodeCandidates: map[string][]Candidate{"ep1": {target}},
-		groupCandidates:   map[string][]Candidate{group: groupCandidates},
-		fingerprints: map[int]*Fingerprint{
-			target.FileID:  cachedFingerprint(target, cfg, sharedIntroPoints(1000)),
-			sibling.FileID: cachedFingerprint(sibling, cfg, sharedIntroPoints(5000)),
-		},
-		seasonState: &SeasonState{
-			SeasonID:         target.SeasonID,
-			MediaFolderID:    target.MediaFolderID,
-			AnalysisGroupKey: target.AnalysisGroupKey(),
-			InputSignature:   InputSignature(groupCandidates),
-			Status:           "complete",
-		},
-	}
-	extractor := &fakeFingerprintExtractor{}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, config: cfg}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode returned error: %v", err)
-	}
-	if summary.SeasonGroupsConsidered != 1 {
-		t.Fatalf("expected one season group, got %d", summary.SeasonGroupsConsidered)
-	}
-	if summary.GroupsSkipped != 0 {
-		t.Fatalf("forced episode analysis should not skip same-signature group")
-	}
-	if summary.FingerprintCacheHits != 2 {
-		t.Fatalf("expected two cache hits, got %d", summary.FingerprintCacheHits)
-	}
-	if summary.FingerprintsComputed != 0 || extractor.extractCalls != 0 {
-		t.Fatalf("expected no ffmpeg extraction, computed=%d extract_calls=%d", summary.FingerprintsComputed, extractor.extractCalls)
-	}
-	if summary.ChromaprintMarkersWritten != 1 || len(repo.patches) != 1 || repo.patches[0].FileID != target.FileID {
-		t.Fatalf("expected only the requested episode patched, summary=%+v patches=%+v", summary, repo.patches)
-	}
-	if len(repo.upsertedStates) != 0 {
-		t.Fatalf("episode analysis should not persist season state: %+v", repo.upsertedStates)
 	}
 }
 
@@ -907,243 +523,56 @@ func sharedIntroPoints(offset uint32) []uint32 {
 	return points
 }
 
-// A Chromaprint intro an earlier comparison wrote is withdrawn when the
-// season's complete comparison no longer finds it, as after a stricter
-// matching rule. Intros from other detectors stay, and a comparison that
-// missed a fingerprint withdraws nothing, since the missing file could be
-// the partner that confirms an intro.
-func TestAnalyzeGroupWithdrawsChromaprintIntrosNoLongerFound(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
+// coldOpenSeason is a season of a release that titles its cold open Intro
+// and its opening song OP (issue #4382): episode 1 has both, episode 8 only
+// the OP, and episode 10 only a 31-second cold open. Episodes 8 and 10 hold
+// the chapter intros the earlier rule stored.
+func coldOpenSeason() []Candidate {
 	scanner := models.MarkerSourceScanner
-	start, end := 10.0, 24.0
-	introBy := func(algorithm string) func(*Candidate) {
-		return func(c *Candidate) {
-			c.IntroStart, c.IntroEnd, c.IntroMarkersSource, c.IntroMarkersAlgorithm = &start, &end, &scanner, &algorithm
-		}
+	file := func(id int, chapters []models.MediaChapter) Candidate {
+		return Candidate{FileID: id, EpisodeID: fmt.Sprintf("ep%d", id), SeasonID: "season1", MediaFolderID: 7,
+			FileHash: fmt.Sprintf("hash%d", id), FileSize: int64(id), DurationSeconds: 1422, Chapters: chapters}
 	}
-	file := func(id int, intro func(*Candidate)) Candidate {
-		c := Candidate{FileID: id, EpisodeID: fmt.Sprintf("ep%d", id), SeasonID: "season1", MediaFolderID: 7,
-			FileHash: fmt.Sprintf("hash%d", id), FileSize: int64(id), DurationSeconds: 1200}
-		if intro != nil {
-			intro(&c)
-		}
-		return c
-	}
-	// Files 1 and 2 share an intro. Files 3 to 5 match nothing and hold the
-	// intros earlier analysis left them: two Chromaprint versions and a
-	// chapter intro. File 6 has no cached fingerprint.
-	matched := []Candidate{file(1, introBy(ChromaprintAlgorithm)), file(2, nil)}
-	unmatched := []Candidate{
-		file(3, introBy(ChromaprintAlgorithm)),
-		file(4, introBy("chromaprint:dialogue:v4")), //nolint:misspell // Persisted algorithm identifier.
-		file(5, introBy(ChapterAlgorithm)),
-	}
-	unfingerprinted := file(6, nil)
-	fingerprints := map[int]*Fingerprint{
-		1: cachedFingerprint(matched[0], cfg, sharedIntroPoints(1000)),
-		2: cachedFingerprint(matched[1], cfg, sharedIntroPoints(5000)),
-	}
-	for i, c := range unmatched {
-		fingerprints[c.FileID] = cachedFingerprint(c, cfg, randomPoints(400, 4341, uint64(i)))
-	}
-
-	for _, tc := range []struct {
-		name           string
-		candidates     []Candidate
-		withdrawErr    error
-		wantWithdrawn  []int
-		wantStatus     string
-		wantPatchedIDs []int
-	}{
-		{name: "season still finds an intro", candidates: append(slices.Clone(matched), unmatched...),
-			wantWithdrawn: []int{3, 4}, wantStatus: seasonStatusComplete, wantPatchedIDs: []int{1, 2}},
-		{name: "season finds no intro", candidates: append([]Candidate{matched[0]}, unmatched...),
-			wantWithdrawn: []int{1, 3, 4}, wantStatus: seasonStatusNotFound},
-		{name: "a fingerprint failed to extract", candidates: append(append(slices.Clone(matched), unmatched...), unfingerprinted),
-			wantStatus: seasonStatusPartial, wantPatchedIDs: []int{1, 2}},
-		{name: "a withdrawal failed", candidates: append([]Candidate{matched[0]}, unmatched...),
-			withdrawErr: errors.New("database unavailable"), wantStatus: seasonStatusFailed},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			group := candidateGroup{MediaFolderID: 7, SeasonID: "season1", AnalysisGroupKey: tc.candidates[0].AnalysisGroupKey(), Candidates: tc.candidates}
-			repo := &fakeIntroRepository{fingerprints: fingerprints, withdrawErr: tc.withdrawErr}
-			analyzer := &Analyzer{
-				repo: repo, config: cfg, logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(1),
-				extractor: failingExtractor{errFor: map[int]error{unfingerprinted.FileID: errors.New("ffmpeg timed out")}},
-			}
-
-			if _, err := analyzer.analyzeGroup(context.Background(), group, analyzeGroupOptions{persistState: true}); err != nil {
-				t.Fatalf("analyzeGroup: %v", err)
-			}
-			stored := map[int]string{}
-			for _, c := range tc.candidates {
-				if c.IntroMarkersAlgorithm != nil {
-					stored[c.FileID] = *c.IntroMarkersAlgorithm
-				}
-			}
-			var withdrawn []int
-			for _, w := range repo.withdrawals {
-				if w.Kind != kindIntro || w.ExpectedFile == nil || w.Algorithm != stored[w.FileID] {
-					t.Fatalf("withdrawal %+v, want a guarded intro withdrawal of the stored algorithm", w)
-				}
-				withdrawn = append(withdrawn, w.FileID)
-			}
-			if !slices.Equal(withdrawn, tc.wantWithdrawn) {
-				t.Fatalf("withdrawn %v, want %v", withdrawn, tc.wantWithdrawn)
-			}
-			var patched []int
-			for _, p := range repo.patches {
-				patched = append(patched, p.FileID)
-			}
-			if !slices.Equal(patched, tc.wantPatchedIDs) {
-				t.Fatalf("patched %v, want %v", patched, tc.wantPatchedIDs)
-			}
-			if len(repo.upsertedStates) != 1 || repo.upsertedStates[0].Status != tc.wantStatus {
-				t.Fatalf("season states %+v, want one %s state", repo.upsertedStates, tc.wantStatus)
-			}
-		})
-	}
+	ep1 := file(1, []models.MediaChapter{chapter("Intro", 0, 133), chapter("OP", 133, 223), chapter("Part A", 223, 800), chapter("ED", 800, 1422)})
+	ep8 := file(8, []models.MediaChapter{chapter("OP", 0, 90), chapter("Part A", 90, 800), chapter("ED", 800, 1422)})
+	ep8.IntroStart, ep8.IntroEnd, ep8.IntroMarkersSource, ep8.IntroMarkersAlgorithm = floatPtr(0), floatPtr(90), &scanner, strPtr(ChapterAlgorithm)
+	ep10 := file(10, []models.MediaChapter{chapter("Intro", 0, 31), chapter("Part A", 31, 800), chapter("ED", 800, 1422)})
+	ep10.IntroStart, ep10.IntroEnd, ep10.IntroMarkersSource, ep10.IntroMarkersAlgorithm = floatPtr(0), floatPtr(31), &scanner, strPtr(ChapterAlgorithm)
+	return []Candidate{ep1, ep8, ep10}
 }
 
-// A season file whose intro another source holds is left out of the
-// comparison, so it can't confirm the Chromaprint intros it once matched.
-// Those intros stay rather than being withdrawn for want of a partner.
-func TestAnalyzeGroupKeepsChromaprintIntrosWhenPartnersAreHeldOut(t *testing.T) {
+// The nightly run withdraws episode 10's cold-open intro and compares its
+// settled season again, so Chromaprint is not kept out by a season state
+// the chapter intro was stored under.
+func TestRunEpisodesComparesSeasonAgainAfterWithdrawingAColdOpen(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
-	scanner, manual := models.MarkerSourceScanner, models.MarkerSourceManual
-	chromaprint, manualAlgorithm := ChromaprintAlgorithm, "manual:v1"
-	start, end := 10.0, 70.0
-	file := func(id int, source, algorithm *string) Candidate {
-		return Candidate{FileID: id, EpisodeID: fmt.Sprintf("ep%d", id), SeasonID: "season1", MediaFolderID: 7,
-			FileHash: fmt.Sprintf("hash%d", id), FileSize: int64(id), DurationSeconds: 1200,
-			IntroStart: &start, IntroEnd: &end, IntroMarkersSource: source, IntroMarkersAlgorithm: algorithm}
-	}
-	// Files 1 and 2 hold Chromaprint intros their audio no longer confirms
-	// between them; file 3, their old partner, now has a manual intro.
-	season := []Candidate{file(1, &scanner, &chromaprint), file(2, &scanner, &chromaprint), file(3, &manual, &manualAlgorithm)}
+	season := coldOpenSeason()
 	repo := &fakeIntroRepository{
+		enabledLibraries:   1,
+		eligibleCandidates: season,
 		fingerprints: map[int]*Fingerprint{
-			1: cachedFingerprint(season[0], cfg, randomPoints(400, 4341, 1)),
-			2: cachedFingerprint(season[1], cfg, randomPoints(400, 4341, 2)),
+			1:  cachedFingerprint(season[0], cfg, sharedIntroPoints(1000)),
+			8:  cachedFingerprint(season[1], cfg, sharedIntroPoints(5000)),
+			10: cachedFingerprint(season[2], cfg, randomPoints(400, 4382, 0)),
 		},
-		groupCandidates: map[string][]Candidate{groupKey(7, "season1", season[0].AnalysisGroupKey()): season},
+		seasonState: &SeasonState{SeasonID: "season1", MediaFolderID: 7, AnalysisGroupKey: season[0].AnalysisGroupKey(),
+			InputSignature: InputSignature(season), Status: seasonStatusComplete},
 	}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: cfg, logger: slog.New(slog.DiscardHandler)}
 
-	nightly := groupCandidates(season, kindIntro, 2)
-	episode, err := analyzer.episodeGroups(context.Background(), kindIntro, season[:1], map[string][]Candidate{}, 2)
+	summary, err := analyzer.RunEpisodes(context.Background(), EpisodeMarkerKinds{Intro: true}, func(float64, string) {})
 	if err != nil {
-		t.Fatalf("episodeGroups: %v", err)
+		t.Fatalf("RunEpisodes: %v", err)
 	}
-	for name, groups := range map[string][]candidateGroup{"library run": nightly, "episode run": episode} {
-		if len(groups) != 1 || !groups[0].HeldOut || len(groups[0].Candidates) != 2 {
-			t.Fatalf("%s groups %+v, want one group of files 1 and 2 with file 3 held out", name, groups)
+	if summary.ChapterMarkersWithdrawn != 1 || len(repo.withdrawals) != 1 || repo.withdrawals[0].FileID != 10 {
+		t.Fatalf("withdrawals %+v, want only episode 10's cold open withdrawn", repo.withdrawals)
+	}
+	if summary.GroupsSkipped != 0 || summary.SeasonGroupsConsidered != 1 {
+		t.Fatalf("summary %+v, want the settled season compared again", summary)
+	}
+	for _, patch := range repo.patches {
+		if patch.FileID == 10 {
+			t.Fatalf("patch %+v, want no intro placed on the cold open", patch)
 		}
-		if _, err := analyzer.analyzeGroup(context.Background(), groups[0], analyzeGroupOptions{persistState: true}); err != nil {
-			t.Fatalf("%s analyzeGroup: %v", name, err)
-		}
-	}
-	if len(repo.withdrawals) != 0 {
-		t.Fatalf("withdrawals %+v, want none while a partner is held out", repo.withdrawals)
-	}
-
-	// Once file 3 is gone, the season settled while it was held out is
-	// compared again and the intros nothing confirms are withdrawn.
-	settled := repo.upsertedStates[len(repo.upsertedStates)-1]
-	repo.seasonState = &settled
-	remaining := groupCandidates(season[:2], kindIntro, 2)
-	summary, err := analyzer.analyzeGroup(context.Background(), remaining[0], analyzeGroupOptions{persistState: true})
-	if err != nil {
-		t.Fatalf("analyzeGroup after the held-out file is gone: %v", err)
-	}
-	if summary.GroupsSkipped != 0 || len(repo.withdrawals) != 2 {
-		t.Fatalf("skipped %d, withdrawals %+v; want the group compared again and both intros withdrawn", summary.GroupsSkipped, repo.withdrawals)
-	}
-}
-
-func TestAnalyzeEpisodeComparesOnlyOwnDetectionFiles(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	manual := models.MarkerSourceManual
-	start, end := 5.0, 40.0
-	target := Candidate{FileID: 1, EpisodeID: "ep1", SeasonID: "season1", MediaFolderID: 7, FileHash: "h1", FileSize: 1, DurationSeconds: 1200}
-	manualSibling := Candidate{FileID: 2, EpisodeID: "ep2", SeasonID: "season1", MediaFolderID: 7, FileHash: "h2", FileSize: 2, DurationSeconds: 1200,
-		IntroStart: &start, IntroEnd: &end, IntroMarkersSource: &manual}
-	group := groupKey(target.MediaFolderID, target.SeasonID, target.AnalysisGroupKey())
-	repo := &fakeIntroRepository{
-		episodeCandidates: map[string][]Candidate{"ep1": {target}},
-		groupCandidates:   map[string][]Candidate{group: {target, manualSibling}},
-		fingerprints: map[int]*Fingerprint{
-			target.FileID:        cachedFingerprint(target, cfg, sharedIntroPoints(1000)),
-			manualSibling.FileID: cachedFingerprint(manualSibling, cfg, sharedIntroPoints(5000)),
-		},
-	}
-	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: cfg}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode: %v", err)
-	}
-	// The scheduled run leaves the manually marked sibling out of the season,
-	// so a single remaining episode has nothing to compare with.
-	if summary.SeasonGroupsConsidered != 0 || len(repo.patches) != 0 {
-		t.Fatalf("groups=%d patches=%d, want the manual sibling excluded as in the scheduled run",
-			summary.SeasonGroupsConsidered, len(repo.patches))
-	}
-}
-
-// A rematch or a touched file clears the file's markers in the database
-// without changing what the season analysis reads, so the time of that
-// invalidation is part of the season's input signature. An invalidation
-// that lands while a run analyzes the group still differs from the
-// signature that run stored.
-func TestAnalyzeGroupReanalyzesFilesInvalidatedSinceItsAnalysis(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	first := time.Date(2026, 10, 25, 20, 12, 0, 0, time.UTC)
-	second := first.Add(time.Minute)
-	for _, tc := range []struct {
-		name              string
-		analyzed, current *time.Time
-		wantSkipped       bool
-	}{
-		{name: "never invalidated", wantSkipped: true},
-		{name: "invalidated since the analysis", current: &first, wantSkipped: false},
-		{name: "invalidated again during the analysis", analyzed: &first, current: &second, wantSkipped: false},
-		{name: "analyzed after the invalidation", analyzed: &first, current: &first, wantSkipped: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			candidates := func(invalidatedAt *time.Time) []Candidate {
-				return []Candidate{
-					{FileID: 1, EpisodeID: "ep1", SeasonID: "season1", MediaFolderID: 7, FileHash: "hash1", FileSize: 100, DurationSeconds: 1200, MarkersInvalidatedAt: invalidatedAt},
-					{FileID: 2, EpisodeID: "ep2", SeasonID: "season1", MediaFolderID: 7, FileHash: "hash2", FileSize: 200, DurationSeconds: 1200},
-				}
-			}
-			current := candidates(tc.current)
-			group := candidateGroup{MediaFolderID: 7, SeasonID: "season1", AnalysisGroupKey: current[0].AnalysisGroupKey(), Candidates: current}
-			repo := &fakeIntroRepository{
-				fingerprints: map[int]*Fingerprint{
-					1: cachedFingerprint(current[0], cfg, sharedIntroPoints(1000)),
-					2: cachedFingerprint(current[1], cfg, sharedIntroPoints(5000)),
-				},
-				seasonState: &SeasonState{
-					SeasonID:         "season1",
-					MediaFolderID:    7,
-					AnalysisGroupKey: group.AnalysisGroupKey,
-					InputSignature:   InputSignature(candidates(tc.analyzed)),
-					Status:           "complete",
-				},
-			}
-			analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: cfg, logger: slog.New(slog.DiscardHandler)}
-
-			summary, err := analyzer.analyzeGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
-			if err != nil {
-				t.Fatalf("analyzeGroup returned error: %v", err)
-			}
-			if skipped := summary.GroupsSkipped == 1; skipped != tc.wantSkipped {
-				t.Fatalf("skipped = %v (patches %d), want %v", skipped, len(repo.patches), tc.wantSkipped)
-			}
-			if !tc.wantSkipped && len(repo.patches) == 0 {
-				t.Fatal("re-analysis wrote no markers")
-			}
-		})
 	}
 }

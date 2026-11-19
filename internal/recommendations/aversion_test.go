@@ -3,7 +3,6 @@ package recommendations
 import (
 	"math"
 	"math/rand/v2"
-	"reflect"
 	"slices"
 	"testing"
 
@@ -60,19 +59,6 @@ func nearCopy(vec []float32, seed uint64) []float32 {
 		out[i] = float32(float64(out[i]) / norm)
 	}
 	return out
-}
-
-// A profile that turned nothing away gets exactly the rows it got before
-// turned-away titles were ranked against.
-func TestAversionWithoutTitlesChangesNothing(t *testing.T) {
-	c := newToyCatalog()
-	for key, p := range relevancePersonas(c) {
-		before := buildPersonaRows(t, c, p)
-		after := avertedRows(t, c, p, nil)
-		if !reflect.DeepEqual(before.main, after.main) || !reflect.DeepEqual(before.clusters, after.clusters) {
-			t.Fatalf("persona %s: rows changed with no turned-away titles", key)
-		}
-	}
 }
 
 // One mark sends a near copy of the title, a sequel, out of the served

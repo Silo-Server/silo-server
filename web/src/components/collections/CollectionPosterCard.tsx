@@ -23,6 +23,7 @@ export function CollectionPosterCard({
   tag,
   menu,
   handle,
+  pinnable = true,
 }: {
   collection: LibraryTabCollection;
   kind: "regular" | "user_collections";
@@ -38,6 +39,8 @@ export function CollectionPosterCard({
   menu?: ReactNode;
   /** A drag handle over the poster's top-left corner. */
   handle?: ReactNode;
+  /** A server collection's card offers to pin it to the sidebar. */
+  pinnable?: boolean;
 }) {
   const t = useT();
   const { loaded, onLoad, onError } = useImageLoaded(collection.poster_url);
@@ -102,7 +105,7 @@ export function CollectionPosterCard({
       {tag ? <div className="px-0.5 pt-1.5">{tag}</div> : null}
       {menu ? <div className="absolute end-2 top-2 z-10">{menu}</div> : null}
       {handle ? <div className="absolute start-2 top-2 z-10">{handle}</div> : null}
-      {!isUserCollection && libraryId !== undefined ? (
+      {pinnable && !isUserCollection && libraryId !== undefined ? (
         <SidebarPinButton collection={collection} libraryId={libraryId} />
       ) : null}
     </div>

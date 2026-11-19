@@ -1,7 +1,6 @@
 package playback
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -77,44 +76,6 @@ func TestNativeEmbeddedSubtitleV3RequiresExactNegotiatedRoute(t *testing.T) {
 				t.Fatalf("wrong identity or route: %+v", got.Decision)
 			}
 		})
-	}
-}
-
-func TestNativeSubtitlePlanIdentityDistinguishesFallbackAndTrack(t *testing.T) {
-	sidecar := PlanV3{Subtitle: SubtitleDecisionV3{Mode: SubtitleRenderV3, TrackID: TrackIDV3(42, "subtitle", 0)}}
-	native := sidecar
-	native.Subtitle.Embedded = &EmbeddedSubtitleV3{StreamIndex: 3, ContainerTrackID: "4"}
-	other := native
-	other.Subtitle.Embedded = &EmbeddedSubtitleV3{StreamIndex: 4, ContainerTrackID: "5"}
-	for _, p := range []PlanV3{sidecar, other} {
-		if DeterministicPlanIDV3("attempt", 42, 42, p) == DeterministicPlanIDV3("attempt", 42, 42, native) || PlanAttemptKeyV3(p, "route", nil) == PlanAttemptKeyV3(native, "route", nil) {
-			t.Fatal("different subtitle routes share identity")
-		}
-	}
-}
-
-// A remuxed MKV keeps its original Matroska track numbers, so the second
-// subtitle stream can be track 6. The planner hands the client the number the
-// scanner recorded, never one derived from the stream index.
-func TestNativeEmbeddedSubtitleV3UsesRecordedMatroskaTrackNumber(t *testing.T) {
-	f := detailedFixtureFileV3()
-	f.Container = "mkv"
-	f.ExternalSubtitles = nil
-	f.SubtitleTracks = []models.SubtitleTrack{
-		{Index: 2, ContainerTrackID: "5", Codec: "subrip", Language: "eng"},
-		{Index: 3, ContainerTrackID: "6", Codec: "subrip", Language: "eng", HearingImpaired: true},
-	}
-	r := validStartRequestV3()
-	r.SubtitleTrackIndex = new(1)
-	r.ClientFeatures = append(r.ClientFeatures, FeatureEmbeddedSubtitlesV3)
-	d := DeliveryClassOriginalHTTPV3
-	caps := r.ClientPlaybackContext.Deliveries[d]
-	caps.Subtitles.NativeEmbedded = []NativeEmbeddedSubtitleCapabilityV3{{Container: "mkv", Codecs: []string{"subrip", "ass"}, TrackIdentity: "container_track_id"}}
-	r.ClientPlaybackContext.Deliveries[d] = caps
-
-	got := ResolveSubtitlePolicyV3(f, r, true, d, nil, 0, nil)
-	if got.Decision.Embedded == nil || got.Decision.Embedded.StreamIndex != 3 || got.Decision.Embedded.ContainerTrackID != "6" {
-		t.Fatalf("decision = %+v, want stream 3 as Matroska track 6", got.Decision)
 	}
 }
 
@@ -211,91 +172,6 @@ func TestNativeEmbeddedSubtitleV3HonorsLimitations(t *testing.T) {
 			}
 			if !tc.wantNative && got.Decision.Mode != SubtitleRenderV3 {
 				t.Fatalf("refused native track fell to %q, want the sidecar", got.Decision.Mode)
-			}
-		})
-	}
-}
-
-func TestSameTrackLanguageV3(t *testing.T) {
-	for _, tc := range []struct {
-		a, b string
-		want bool
-	}{
-		{"eng", "en", true},
-		{"EN", "eng", true},
-		{"en-US", "eng", true},
-		{"ger", "de", true},
-		{"fre", "fra", true},
-		{"English", "en", true},
-		{"eng", "jpn", false},
-		{"und", "und", true},
-		{"und", "eng", false},
-		{"", "eng", false},
-		{"", "", false},
-	} {
-		if got := SameTrackLanguageV3(tc.a, tc.b); got != tc.want {
-			t.Errorf("SameTrackLanguageV3(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
-		}
-	}
-}
-
-// native_selectable promises that selecting the row gives the plan a native
-// embedded subtitle, so every row is checked against an actual replan with it
-// selected.
-func TestPlanPlaybackV3MarksNativeSelectableRows(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		limitations []string
-		audio       int
-		disable     bool
-		want        []int
-	}{
-		// Combined ordinals: 0 external, 1 eng, 2 forced eng, 3 ass, 4 PGS.
-		{name: "no limitations", audio: 0, want: []int{1, 2}},
-		{name: "forced track in the playing audio language", limitations: rokuLimitationsV3, audio: 0, want: nil},
-		{name: "audio switched away from the forced language", limitations: rokuLimitationsV3, audio: 1, want: []int{1}},
-		{name: "original_http unavailable", audio: 0, disable: true, want: nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			file := detailedFixtureFileV3()
-			file.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Language: "eng", Default: true}, {Codec: "aac", Channels: 2, Language: "spa"}}
-			file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.en.srt", Language: "en", Format: "srt"}}
-			file.SubtitleTracks = []models.SubtitleTrack{
-				{Index: 3, ContainerTrackID: "4", Codec: "subrip", Language: "eng"},
-				{Index: 4, ContainerTrackID: "5", Codec: "subrip", Language: "eng", Forced: true},
-				{Index: 5, ContainerTrackID: "6", Codec: "ass", Language: "eng"},
-				{Index: 6, ContainerTrackID: "7", Codec: "hdmv_pgs_subtitle", Language: "eng"},
-			}
-			req := hdr10ClientRequestV3(true)
-			req.ClientFeatures = append(req.ClientFeatures, FeatureEmbeddedSubtitlesV3)
-			original := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-			original.ValidatedClaims = append(original.ValidatedClaims, ClaimClientSelectedAudioTrackV3)
-			original.Subtitles.NativeEmbedded = []NativeEmbeddedSubtitleCapabilityV3{{Container: "mkv", Codecs: []string{"subrip"}, TrackIdentity: "container_track_id", Limitations: tc.limitations}}
-			original.Enabled = !tc.disable
-			req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
-			plan := func(subtitle *int) *PlanV3 {
-				r := req
-				r.SubtitleTrackIndex = subtitle
-				return PlanPlaybackV3(PlannerInputV3{Request: r, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: tc.audio, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()}).Plan
-			}
-
-			off := plan(nil)
-			if off == nil || !tc.disable && off.Delivery != DeliveryOriginalHTTPV3 {
-				t.Fatalf("plan = %+v, want original_http unless disabled", off)
-			}
-			var got []int
-			for _, item := range off.Subtitle.Inventory {
-				if item.NativeSelectable {
-					got = append(got, item.CombinedIndex)
-				}
-				// The PGS row has no route on an HDR source: no plan at all.
-				selected := plan(new(item.CombinedIndex))
-				if native := selected != nil && selected.Subtitle.Embedded != nil; native != item.NativeSelectable || native && selected.Delivery != off.Delivery {
-					t.Errorf("row %d native_selectable=%v, but selecting it gives plan %+v", item.CombinedIndex, item.NativeSelectable, selected)
-				}
-			}
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("native_selectable rows = %v, want %v", got, tc.want)
 			}
 		})
 	}

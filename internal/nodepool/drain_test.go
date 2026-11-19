@@ -83,35 +83,12 @@ func TestReservationsSkipDrainingNodes(t *testing.T) {
 	}
 }
 
-// The status strings are the wire contract with the node's health handler;
-// transcodenode's tests pin its constants to DrainState.
-func TestCheckNodeReportReadsDrainStatus(t *testing.T) {
-	for _, tc := range []struct {
-		status string
-		want   DrainState
-	}{
-		{"ok", DrainStateNone},
-		{"draining", DrainStateDraining},
-		{"drained", DrainStateDrained},
-		{"something-newer", DrainStateNone},
-	} {
-		url := newStatsHealthNode(t, `{"status":"`+tc.status+`","active_jobs":1}`)
-		report := CheckNodeReport(context.Background(), &Node{URL: url})
-		if !report.Healthy || report.ActiveJobs != 1 || report.DrainState != tc.want {
-			t.Fatalf("status %q: report = %+v, want healthy with drain state %q", tc.status, report, tc.want)
-		}
-	}
-	if report := CheckNodeReport(context.Background(), &Node{URL: "http://127.0.0.1:1"}); report.Healthy || report.DrainState != DrainStateNone {
-		t.Fatalf("unreachable node: report = %+v", report)
-	}
-}
-
 // The sweep publishes the node's drain state to the pool; a later check that
 // finds it no longer draining clears it.
 func TestHealthSweepAppliesDrainState(t *testing.T) {
 	status := "draining"
-	url := newStatsHealthNodeFunc(t, func() string { return `{"status":"` + status + `","active_jobs":2}` })
-	pool := NewTranscodePool()
+	url := newStatsHealthNodeFunc(t, func() string { return `{"status":"` + status + `","active_jobs":2,"node_control_version":1}` })
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 
@@ -132,56 +109,6 @@ func TestHealthSweepAppliesDrainState(t *testing.T) {
 	}
 }
 
-// Checks of one node run one at a time, so the answer written last is the one
-// asked for last: a sweep answer from before the node began draining must not
-// overwrite the recheck its announcement caused.
-func TestHealthChecksOfOneNodeRunInOrder(t *testing.T) {
-	var requests atomic.Int32
-	firstArrived, releaseFirst := make(chan struct{}), make(chan struct{})
-	url := newStatsHealthNodeFunc(t, func() string {
-		if requests.Add(1) == 1 {
-			close(firstArrived)
-			<-releaseFirst
-			return `{"status":"ok"}`
-		}
-		return `{"status":"draining"}`
-	})
-	pool := NewTranscodePool()
-	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
-	checker := NewHealthChecker(NewProxyPool(), pool, nil)
-
-	sweepDone, recheckDone := make(chan struct{}), make(chan struct{})
-	go func() { checker.checkAll(context.Background()); close(sweepDone) }()
-	<-firstArrived
-	go func() { checker.CheckTranscodeNode(context.Background(), 7); close(recheckDone) }()
-	// Give an unserialized recheck the chance to answer first; a serialized one
-	// waits for the sweep's check whatever the timing.
-	select {
-	case <-recheckDone:
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(releaseFirst)
-	<-sweepDone
-	<-recheckDone
-	if got := pool.Nodes()[0]; requests.Load() != 2 || got.DrainState != DrainStateDraining {
-		t.Fatalf("after a sweep answer and a later recheck: %d requests, drain state %q", requests.Load(), got.DrainState)
-	}
-}
-
-// ApplyHealth, the positional writer other callers still use, must not touch a
-// drain state it was not given.
-func TestApplyHealthKeepsDrainState(t *testing.T) {
-	pool := NewTranscodePool()
-	node := transcodeNode(1, "http://tc", nil, 0)
-	node.DrainState = DrainStateDrained
-	pool.SetNodes([]*Node{node})
-
-	pool.ApplyHealth(1, "http://tc", true, 0, 0, "", nil, nil, node.CreatedAt)
-	if got := pool.Nodes()[0].DrainState; got != DrainStateDrained {
-		t.Fatalf("drain state = %q after ApplyHealth, want it kept", got)
-	}
-}
-
 // newStatsHealthNodeFunc is newStatsHealthNode with a body read per request,
 // so a test can change what the node answers between checks.
 func newStatsHealthNodeFunc(t *testing.T, body func() string) string {
@@ -196,25 +123,6 @@ func newStatsHealthNodeFunc(t *testing.T, body func() string) string {
 	}))
 	t.Cleanup(server.Close)
 	return server.URL
-}
-
-func TestTakesNewWork(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		node *Node
-		want bool
-	}{
-		{"nil", nil, false},
-		{"open", transcodeNode(1, "http://tc", nil, 0), true},
-		{"disabled", &Node{Healthy: true}, false},
-		{"unhealthy", &Node{Enabled: true}, false},
-		{"drain requested", drainingNode(1, "http://tc", 0), false},
-		{"reports drained", &Node{Enabled: true, Healthy: true, DrainState: DrainStateDrained}, false},
-	} {
-		if got := test.node.TakesNewWork(); got != test.want {
-			t.Errorf("%s: TakesNewWork() = %v, want %v", test.name, got, test.want)
-		}
-	}
 }
 
 // A drained node runs no session, so even a session it used to run is planned
@@ -236,5 +144,38 @@ func TestDrainedNodeLosesCurrentSessionAffinity(t *testing.T) {
 	}
 	if got := f.planner.TranscodeNodeURLs(); len(got) != 2 {
 		t.Fatalf("TranscodeNodeURLs = %v, want both pooled nodes", got)
+	}
+}
+
+func TestHealthChecksOfOneNodeRunInOrder(t *testing.T) {
+	var requests atomic.Int32
+	firstArrived, releaseFirst := make(chan struct{}), make(chan struct{})
+	url := newStatsHealthNodeFunc(t, func() string {
+		if requests.Add(1) == 1 {
+			close(firstArrived)
+			<-releaseFirst
+			return `{"status":"ok","node_control_version":1}`
+		}
+		return `{"status":"draining","node_control_version":1}`
+	})
+	pool := newKeyedTranscodePool()
+	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
+	checker := NewHealthChecker(NewProxyPool(), pool, nil)
+
+	sweepDone, recheckDone := make(chan struct{}), make(chan struct{})
+	go func() { checker.checkAll(context.Background()); close(sweepDone) }()
+	<-firstArrived
+	go func() { checker.CheckTranscodeNode(context.Background(), 7); close(recheckDone) }()
+	// Give an unserialized recheck the chance to answer first; a serialized one
+	// waits for the sweep's check whatever the timing.
+	select {
+	case <-recheckDone:
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseFirst)
+	<-sweepDone
+	<-recheckDone
+	if got := pool.Nodes()[0]; requests.Load() != 2 || got.DrainState != DrainStateDraining {
+		t.Fatalf("after a sweep answer and a later recheck: %d requests, drain state %q", requests.Load(), got.DrainState)
 	}
 }

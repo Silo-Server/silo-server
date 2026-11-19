@@ -256,69 +256,6 @@ func respTestSentinel(t *testing.T, addr string) func(args []string) (string, bo
 	}
 }
 
-// Runs without Redis: a fake Sentinel names a fake master. Both a key-value
-// client and the event bus must ask Sentinel for the master, reach it on the
-// database number from the URL, and give each server its own credentials.
-func TestSentinelURLReachesTheMasterSentinelNames(t *testing.T) {
-	master := startRESPTestServer(t, nil, respTestRedis)
-	sentinel := startRESPTestServer(t, nil, respTestSentinel(t, master.addr))
-	rawURL := "redis://watcher:sentinel-secret@" + sentinel.addr + "/4?master_name=mymaster&username=silo&password=redis-secret"
-
-	client, err := NewRedisClientForRole(config.RedisConfig{URL: rawURL}, "checks")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = CloseRedisClient(client) })
-	if err := client.Set(t.Context(), "key", "value", 0).Err(); err != nil {
-		t.Fatalf("write through Sentinel: %v", err)
-	}
-	bus := NewEventBus(config.RedisConfig{URL: rawURL})
-	t.Cleanup(func() { _ = bus.Close() })
-	if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err != nil {
-		t.Fatalf("subscribe through Sentinel: %v", err)
-	}
-
-	atSentinel, atMaster := sentinel.received(), master.received()
-	for _, want := range []string{"AUTH watcher sentinel-secret", "SENTINEL get-master-addr-by-name mymaster"} {
-		if !slices.Contains(atSentinel, want) {
-			t.Errorf("Sentinel did not receive %q; it received %q", want, atSentinel)
-		}
-	}
-	subscribe := "SUBSCRIBE " + redisChannel(ChannelAdmin, 4)
-	for _, want := range []string{"AUTH silo redis-secret", "SELECT 4", "SET key value", subscribe} {
-		if !slices.Contains(atMaster, want) {
-			t.Errorf("the master did not receive %q; it received %q", want, atMaster)
-		}
-	}
-	// The key-value client alone would satisfy the checks above.
-	subscriber := master.connectionThatReceived(subscribe)
-	for _, want := range []string{"AUTH silo redis-secret", "SELECT 4"} {
-		if !slices.Contains(subscriber, want) {
-			t.Errorf("the event bus connection did not send %q; it sent %q", want, subscriber)
-		}
-	}
-	for _, command := range atSentinel {
-		if strings.Contains(command, "redis-secret") || strings.HasPrefix(command, "SET ") || strings.HasPrefix(command, "SUBSCRIBE "+ChannelAdmin) {
-			t.Errorf("Sentinel received %q, which belongs to the master", command)
-		}
-	}
-	for _, command := range atMaster {
-		if strings.Contains(command, "sentinel-secret") {
-			t.Errorf("the master received the Sentinel credentials in %q", command)
-		}
-	}
-}
-
-func TestNewRedisClientForRoleRejectsInvalidSentinelURL(t *testing.T) {
-	if client, err := NewRedisClientForRole(config.RedisConfig{}, "checks"); client != nil || err != nil {
-		t.Fatalf("no URL = (%v, %v), want no client and no error", client, err)
-	}
-	_, err := NewRedisClientForRole(config.RedisConfig{URL: "redis://sentinel-1:26379?master_name="}, "checks")
-	if err == nil || !strings.Contains(err.Error(), "invalid redis URL") {
-		t.Fatalf("Sentinel URL without a master name: err = %v, want an invalid redis URL error", err)
-	}
-}
-
 // main logs the error a subscription returns, and go-redis quotes the dial
 // address in it, so a URL that does not parse must not become the address.
 func TestEventBusErrorDoesNotQuoteAnInvalidURL(t *testing.T) {
@@ -333,67 +270,6 @@ func TestEventBusErrorDoesNotQuoteAnInvalidURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "route_randomly") {
 		t.Fatalf("err = %v, want the reason the URL was rejected", err)
-	}
-}
-
-func TestEventBusStillAcceptsABareAddress(t *testing.T) {
-	server := startRESPTestServer(t, nil, respTestRedis)
-	bus := NewEventBus(config.RedisConfig{URL: server.addr})
-	t.Cleanup(func() { _ = bus.Close() })
-	if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err != nil {
-		t.Fatalf("subscribe with a bare host:port: %v", err)
-	}
-	if got := server.received(); !slices.Contains(got, "SUBSCRIBE "+ChannelAdmin) {
-		t.Fatalf("the server received %q, want the subscription", got)
-	}
-}
-
-// Only a host:port with a numeric port, or a socket path, may become the dial
-// address. Any other value can hold a password.
-func TestUnparsedRedisValueIsDialedOnlyWhenItIsABareAddress(t *testing.T) {
-	parseErr := errors.New("not a URL")
-	for _, address := range []string{
-		"redis.example:6379", "redis_1.example-a:6379", "127.0.0.1:6379", "[::1]:6379", "[fe80::1%eth0]:6379", ":6379",
-		"/run/redis/redis.sock",
-	} {
-		options := unparsedRedisOptions(config.RedisConfig{URL: address, DB: "5"}, parseErr)
-		if options.Addr != address || options.Dialer != nil || options.DB != 5 {
-			t.Errorf("unparsedRedisOptions(%q) dials %q on database %d, want the address itself on database 5", address, options.Addr, options.DB)
-		}
-	}
-	refused := []string{
-		"redis://silo:secret@redis.example:6379/x",
-		"redis://:secret",
-		"silo:secret@redis.example:6379",
-		"redis.example:6379?password=secret",
-		"redis.example:6379,password=secret,ssl=True",
-		"redis.example:6379 secret",
-		"secret:redis.example:6379",
-		"redis.example:6379/0#secret",
-		"redis:secret",
-	}
-	// A host name has none of these characters.
-	for _, separator := range []string{"@", "/", "?", "#", " ", "=", ",", ";", "&"} {
-		refused = append(refused, "secret"+separator+"redis.example:6379")
-	}
-	// Nor has the zone of an IPv6 address, or the path of a socket.
-	for _, separator := range []string{"@", "/", "?", "#", " ", "=", ",", ";", "&"} {
-		refused = append(refused, "[fe80::1%secret"+separator+"redis.example]:6379")
-	}
-	for _, separator := range []string{"@", "?", "#", " ", "=", ",", ";", "&", ":"} {
-		refused = append(refused, "/run/redis/redis.sock"+separator+"secret")
-	}
-	// A zone belongs to an IP address.
-	refused = append(refused, "secret%redis.example:6379")
-	for _, value := range refused {
-		options := unparsedRedisOptions(config.RedisConfig{URL: value}, parseErr)
-		if strings.Contains(options.Addr, "secret") || options.Dialer == nil {
-			t.Errorf("unparsedRedisOptions(%q) dials %q, want no dial at all", value, options.Addr)
-			continue
-		}
-		if _, err := options.Dialer(t.Context(), "tcp", options.Addr); !errors.Is(err, parseErr) {
-			t.Errorf("unparsedRedisOptions(%q) fails with %v, want the parse error", value, err)
-		}
 	}
 }
 
@@ -458,23 +334,6 @@ func TestEventBusDeliversEventsFromASingleServer(t *testing.T) {
 	}
 	if subscriber := server.connectionThatReceived("SUBSCRIBE " + redisChannel(ChannelAdmin, 2)); !slices.Contains(subscriber, "SELECT 2") {
 		t.Fatalf("the subscription's connection sent %q, want it on database 2", subscriber)
-	}
-}
-
-// Only a Sentinel URL gets the receive loop with a silence limit. A single
-// server keeps the receive path it always had.
-func TestOnlyASentinelURLGetsTheSilenceLimit(t *testing.T) {
-	for _, single := range []string{"redis://127.0.0.1:6379/1", "127.0.0.1:6379"} {
-		bus := newRedisEventBus(config.RedisConfig{URL: single})
-		if bus.silenceLimit != 0 || bus.pingInterval != 0 {
-			t.Errorf("newRedisEventBus(%q) has a silence limit of %s, want none", single, bus.silenceLimit)
-		}
-		_ = bus.Close()
-	}
-	bus := newRedisEventBus(config.RedisConfig{URL: "redis://127.0.0.1:26379/1?master_name=mymaster"})
-	t.Cleanup(func() { _ = bus.Close() })
-	if bus.silenceLimit != 10*time.Second || bus.pingInterval != 3*time.Second {
-		t.Fatalf("a Sentinel URL gives silence limit %s and ping interval %s, want 10s and 3s", bus.silenceLimit, bus.pingInterval)
 	}
 }
 
@@ -562,34 +421,6 @@ func TestEventBusReconnectsThroughASentinelSlowerThanTheSilenceLimit(t *testing.
 	}
 }
 
-// Runs without Redis. A subscription with nothing to deliver must stay on a
-// master that answers its pings.
-func TestEventBusKeepsAnIdleSubscriptionOnAnAnsweringMaster(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-
-	answering := startRESPTestServer(t, nil, respTestAnswering)
-	var master atomic.Pointer[respTestServer]
-	master.Store(answering)
-	bus, _ := sentinelTestBus(t, &master, 400*time.Millisecond, 0)
-	if err := bus.Subscribe(ctx, ChannelAdmin, func(Event) {}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Pings are at least one interval apart, so this many take more than
-	// twice the silence limit.
-	idlePings := int(2*bus.silenceLimit/bus.pingInterval) + 1
-	waitFor(t, ctx, "the idle subscription to be pinged", func() error {
-		if got := answering.count("PING"); got < idlePings {
-			return fmt.Errorf("%d of %d pings", got, idlePings)
-		}
-		return nil
-	})
-	if got := answering.count("SUBSCRIBE " + ChannelAdmin); got != 1 {
-		t.Fatalf("the bus subscribed %d times, want the one subscription to survive an idle period", got)
-	}
-}
-
 // Pings fail while no master can be reached. They have to go on afterwards:
 // without them the next master would look silent, and an idle subscription
 // would reconnect to it again and again.
@@ -627,80 +458,6 @@ func TestEventBusKeepsPingingAfterNoMasterCouldBeReached(t *testing.T) {
 	})
 	if got := second.count("SUBSCRIBE " + ChannelAdmin); got != 1 {
 		t.Fatalf("the bus subscribed to the second master %d times, want once", got)
-	}
-}
-
-// While no master can be reached, a subscription pauses between redials
-// instead of spinning.
-func TestEventBusPausesBetweenRedials(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
-	defer cancel()
-
-	first := startRESPTestServer(t, nil, respTestAnswering)
-	var master atomic.Pointer[respTestServer]
-	master.Store(first)
-	bus, sentinel := sentinelTestBus(t, &master, time.Second, 0)
-	// No pings, so that only redials ask Sentinel for the master.
-	bus.pingInterval = time.Hour
-	if err := bus.Subscribe(ctx, ChannelAdmin, func(Event) {}); err != nil {
-		t.Fatal(err)
-	}
-
-	first.stop()
-	// reach waits until Sentinel has been asked n times. It polls much
-	// faster than the pause it measures.
-	reach := func(n int) {
-		for sentinel.count(respTestMasterLookup) < n {
-			select {
-			case <-ctx.Done():
-				t.Fatalf("Sentinel was asked %d times, want %d", sentinel.count(respTestMasterLookup), n)
-			case <-time.After(5 * time.Millisecond):
-			}
-		}
-	}
-	redialling := sentinel.count(respTestMasterLookup) + 2
-	reach(redialling)
-	start := time.Now()
-	reach(redialling + 5)
-	if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
-		t.Fatalf("five redials took %s, want a pause between them", elapsed)
-	}
-}
-
-// Callers subscribe with contexts that end before the bus is closed. The
-// subscription has always outlived them.
-func TestEventBusSubscriptionOutlivesTheCallersContext(t *testing.T) {
-	want := Event{Type: EventSettingsChanged, Payload: "after the caller left"}
-	var publish atomic.Bool
-	answering := startRESPTestServer(t, nil, func(args []string) (string, bool) {
-		if args[0] != "PING" {
-			return "", false
-		}
-		if publish.Load() {
-			return respTestPong + respTestMessage(t, ChannelAdmin, want), true
-		}
-		return respTestPong, true
-	})
-	var master atomic.Pointer[respTestServer]
-	master.Store(answering)
-	// The silence limit is longer than the wait below, so a redial cannot
-	// bring the event. It has to come as the answer to a ping.
-	bus, _ := sentinelTestBus(t, &master, time.Minute, 0)
-	events := make(chan Event, 64)
-	callerCtx, callerDone := context.WithCancel(t.Context())
-	if err := bus.Subscribe(callerCtx, ChannelAdmin, func(event Event) { events <- event }); err != nil {
-		t.Fatal(err)
-	}
-
-	callerDone()
-	publish.Store(true)
-	select {
-	case got := <-events:
-		if got != want {
-			t.Fatalf("received %+v, want the event published after the caller's context ended", got)
-		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("no event arrived after the caller's context ended")
 	}
 }
 

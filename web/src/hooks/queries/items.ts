@@ -27,6 +27,7 @@ import {
   v2,
   type V2Result,
 } from "@/api/v2/request";
+import { StaleApiRequestContextError } from "@/api/client";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
@@ -44,6 +45,7 @@ import {
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
+import { PERSONAL_STATE_WRITE_KEY } from "./personalStateWrites";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 /** Device pixels across the screen, capped at 1080p width, for the loading backdrop. */
@@ -238,6 +240,11 @@ export function useRefreshItemMetadata() {
       }
     },
     onError: (err, _variables, context) => {
+      // Signed out or switched account while it ran: nothing failed, so say nothing.
+      if (err instanceof StaleApiRequestContextError) {
+        toast.dismiss(context?.toastID);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"), {
         id: context?.toastID,
       });
@@ -433,6 +440,7 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: PERSONAL_STATE_WRITE_KEY,
     mutationFn: (nextPlayed: boolean) =>
       // Marking a series expands to every episode server-side. keepalive
       // lets the browser finish the request after a navigation or tab close,

@@ -26,7 +26,6 @@ export function ServerStep() {
   );
   const prefilled = useRef(false);
 
-  const proxiesManaged = form.sensitiveManagedByEnv.includes("clientip.trusted_proxies");
   const serverName = form.getValue("branding.server_name");
 
   // Offer the URL the admin is looking at as the public URL. It is staged,
@@ -61,6 +60,7 @@ export function ServerStep() {
           hint="Silo"
           value={serverName}
           onChange={(v) => form.setValue("branding.server_name", v)}
+          managedByEnv={form.envVar("branding.server_name")}
         />
         <SettingField
           label={t("web.setup.server.publicUrlLabel")}
@@ -69,6 +69,7 @@ export function ServerStep() {
           hint="https://silo.example.com"
           value={form.getValue("server.public_url")}
           onChange={(v) => form.setValue("server.public_url", v)}
+          managedByEnv={form.envVar("server.public_url")}
         />
         <AdvancedSection
           id="setup.server"
@@ -78,16 +79,12 @@ export function ServerStep() {
         >
           <SettingField
             label={t("web.setup.server.trustedProxiesLabel")}
-            description={
-              proxiesManaged
-                ? t("web.setup.server.trustedProxiesManaged")
-                : t("web.setup.server.trustedProxiesDescription")
-            }
+            description={t("web.setup.server.trustedProxiesDescription")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
             value={form.getValue("clientip.trusted_proxies")}
             onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
-            disabled={proxiesManaged}
+            managedByEnv={form.envVar("clientip.trusted_proxies")}
           />
         </AdvancedSection>
       </StepSection>

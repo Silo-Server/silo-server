@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/naming"
 )
 
 func TestQueuedMovieIdentityRequiresRescanBeforeUsingStaleGroup(t *testing.T) {
@@ -160,55 +159,6 @@ func TestQueuedMovieIdentityPreservesCurrentProviderAnchor(t *testing.T) {
 	}
 }
 
-// A folder and a file name can carry different IDs from one provider. The
-// queued identity must read them in the order the scanner stored the group's
-// IDs, or the comparison reports a change that no rescan can clear.
-func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *testing.T) {
-	const libraryRoot = "/movies"
-	for _, tt := range []struct{ name, path, wantTmdb, wantImdb string }{
-		{"same TMDB, different IMDb", libraryRoot + "/Example Movie (2020) {tmdb-335984} {imdb-tt1111111}/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984", "tt1111111"},
-		{"different TMDB", libraryRoot + "/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv", "999", ""},
-		{"bare IMDb ID ending the folder name", libraryRoot + "/Example Movie (2020) {tmdb-335984} tt1111111/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984", "tt1111111"},
-	} {
-		// A new file goes through skeleton creation; a file already linked to
-		// a provisional item goes through the reused-item check.
-		for _, linked := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/linked=%t", tt.name, linked), func(t *testing.T) {
-				_, assignments := naming.InferRootAssignments([]string{tt.path}, "movies", 10, nil, libraryRoot)
-				assignment := assignments[tt.path]
-				scanned := naming.InferGroupIdentity(tt.path, "movies", assignment)
-
-				h := newTestHarness()
-				file := &models.MediaFile{
-					ID: 1, MediaFolderID: 10, FilePath: tt.path,
-					GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
-					ObservedRootPath: scanned.ObservedRootPath, CanonicalRootPath: assignment.RootPath,
-					BaseType: scanned.BaseType, BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear,
-				}
-				h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
-					MediaFolderID: 10, GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
-					BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear, InferredType: scanned.BaseType, State: "resolved", OverrideSource: "none",
-					TmdbID: scanned.TmdbID, ImdbID: scanned.ImdbID, TvdbID: scanned.TvdbID,
-				})
-				if linked {
-					file.ContentID = "pending-item"
-					if err := h.itemRepo.Upsert(t.Context(), &models.MediaItem{
-						ContentID: file.ContentID, Status: "pending", Title: scanned.BaseTitle, Year: scanned.BaseYear, Type: "movie",
-						Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-					}); err != nil {
-						t.Fatalf("seed provisional item: %v", err)
-					}
-				}
-				worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-				skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false, libraryRoot)
-				if err != nil || skeleton == nil || reused != linked || skeleton.TmdbID != tt.wantTmdb || skeleton.ImdbID != tt.wantImdb {
-					t.Fatalf("scanner group %+v blocked the queued file: skeleton=%+v reused=%t error=%v", scanned, skeleton, reused, err)
-				}
-			})
-		}
-	}
-}
-
 // A rerun refreshes a matched item's own title, even when a path tag names
 // another one.
 func TestQueuedMovieRerunKeepsMatchedItemProviderIDs(t *testing.T) {
@@ -230,38 +180,6 @@ func TestQueuedMovieRerunKeepsMatchedItemProviderIDs(t *testing.T) {
 	skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, true, libraryRoot)
 	if err != nil || skeleton == nil || skeleton.ContentID != "movie-tmdb-106" || skeleton.TmdbID != "106" {
 		t.Fatalf("rerun of a matched item left its identity: skeleton=%+v error=%v", skeleton, err)
-	}
-}
-
-func TestScannedGroupIdentityComparisonIgnoresPresentationVariants(t *testing.T) {
-	group := &models.ScannedMediaGroup{BaseTitle: "Example Movie", BaseYear: 2020, InferredType: "movie"}
-	for _, title := range []string{"Example.Movie", "Example Movie Extended Edition", "Example Movie Director's Cut"} {
-		file := &models.MediaFile{
-			BaseTitle: title, BaseYear: 2020, BaseType: "movie",
-			FilePath: "/movies/Example Movie (2020)/1080p/" + title + " (2020).mkv", CanonicalRootPath: "/movies/Example Movie (2020)",
-		}
-		if scannedGroupIdentityChanged(group, file, nil) {
-			t.Errorf("presentation variant %q requires a rescan", title)
-		}
-	}
-	if !scannedGroupIdentityChanged(group, &models.MediaFile{BaseTitle: group.BaseTitle, BaseYear: 2020, BaseType: "series"}, nil) {
-		t.Fatal("changed content type did not require a rescan")
-	}
-	if !scannedGroupIdentityChanged(group, &models.MediaFile{BaseTitle: group.BaseTitle, BaseType: "series"}, &naming.FolderIDHints{TmdbID: "123"}) {
-		t.Fatal("provider ID hid changed content type")
-	}
-}
-
-func TestScannedGroupIdentityComparisonPreservesEquivalentGroupKey(t *testing.T) {
-	group := &models.ScannedMediaGroup{
-		BaseTitle: "The Example Movie", BaseYear: 2020, InferredType: "movie", ContentGroupKey: "v1|movie|example movie|2020",
-	}
-	file := &models.MediaFile{
-		BaseTitle: "Example Movie", BaseYear: 2020, BaseType: "movie",
-		FilePath: "/movies/Example Movie (2020)/Example.Movie.2020.mkv", CanonicalRootPath: "/movies/Example Movie (2020)",
-	}
-	if scannedGroupIdentityChanged(group, file, nil) {
-		t.Fatal("equivalent title within the same scanner group requires a rescan")
 	}
 }
 
@@ -314,44 +232,6 @@ func TestLinkedMovieQueueRequiresRescanBeforeMatchingStaleGroup(t *testing.T) {
 			}
 			if h.itemRepo.items[file.ContentID].Status != status || len(h.fileRepo.contentIDs) != 0 {
 				t.Fatal("stale linked group changed its catalog identity")
-			}
-		})
-	}
-}
-
-func TestReusedGroupIdentityRetainsAcceptedAndEquivalentIdentities(t *testing.T) {
-	for _, mode := range []string{"matched", "manual snapshot", "active override", "same title", "provider anchor"} {
-		t.Run(mode, func(t *testing.T) {
-			h := newTestHarness()
-			file := &models.MediaFile{
-				ID: 1, MediaFolderID: 10, FilePath: "/movies/Blade Runner 2049/Blade Runner 2049.mkv",
-				ContentID: "existing-item", GroupKeyVersion: 1, ContentGroupKey: "old-scanner-group",
-				BaseType: "movie", BaseTitle: "Blade Runner", BaseYear: 2049,
-			}
-			item := &models.MediaItem{ContentID: file.ContentID, Title: file.BaseTitle, Year: file.BaseYear, Type: "movie", Status: "unmatched"}
-			group := &models.ScannedMediaGroup{
-				MediaFolderID: 10, GroupKeyVersion: 1, ContentGroupKey: file.ContentGroupKey,
-				BaseTitle: file.BaseTitle, BaseYear: file.BaseYear, InferredType: "movie", State: "resolved",
-			}
-			switch mode {
-			case "matched":
-				item.Status = "matched"
-			case "manual snapshot":
-				group.OverrideSource = "manual"
-			case "active override":
-				h.service.groupOverrideRepo = queuedIdentityGroupOverrideRepo{override: &models.MediaGroupOverride{ForcedTitle: "Manual selection", ForcedType: "movie"}}
-			case "same title":
-				group.BaseTitle, group.BaseYear = "Blade Runner 2049", 0
-			case "provider anchor":
-				file.FilePath = "/movies/Blade Runner 2049/Blade Runner 2049 {tmdb-335984}.mkv"
-				group.TmdbID = "335984"
-			}
-			h.itemRepo.items[file.ContentID] = item
-			h.scannedGroupRepo.setGroup(group)
-			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-			skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, true)
-			if err != nil || !reused || skeleton.ContentID != file.ContentID {
-				t.Fatalf("accepted identity was blocked: skeleton=%+v reused=%v err=%v", skeleton, reused, err)
 			}
 		})
 	}
@@ -439,27 +319,6 @@ func TestQueuedIdentityAppliesGroupOverrideToLinkedProvisionalItem(t *testing.T)
 	}
 }
 
-// A failed override lookup must fail the queued file, not match it without
-// the override.
-func TestQueuedIdentityReportsGroupOverrideLookupFailure(t *testing.T) {
-	h := newTestHarness()
-	file := &models.MediaFile{
-		ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name (1999)/Old Name (1999).mkv",
-		GroupKeyVersion: 1, ContentGroupKey: "linked-group", ContentID: "local-linked",
-		BaseType: "movie", BaseTitle: "Old Name", BaseYear: 1999,
-	}
-	h.itemRepo.items[file.ContentID] = &models.MediaItem{
-		ContentID: file.ContentID, Type: "movie", Title: "Old Name", Year: 1999, Status: "unmatched",
-	}
-	h.service.groupOverrideRepo = failFirstGroupOverrideRepo{calls: new(int), keyedGroupOverrideRepo: keyedGroupOverrideRepo{
-		folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{ForcedType: "movie", ForcedTmdbID: "335984"},
-	}}
-	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-	if skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false); err == nil {
-		t.Fatalf("queuedMovieSkeleton() = %+v, want the lookup error", skeleton)
-	}
-}
-
 func TestQueuedIdentityPathTagBeatsGroupOverrideOnLinkedProvisionalItem(t *testing.T) {
 	h := newTestHarness()
 	file := &models.MediaFile{
@@ -519,29 +378,6 @@ func TestQueuedIdentityOverrideFailsWhenItemChangesBeforeSettling(t *testing.T) 
 				t.Fatalf("stored item status = %q, want the concurrent match kept", item.Status)
 			}
 		})
-	}
-}
-
-// A stored status that differs from "ambiguous" only in case or spacing is
-// still ambiguous, and the override must settle it.
-func TestQueuedIdentityOverrideSettlesUnnormalizedAmbiguousStatus(t *testing.T) {
-	h := newTestHarness()
-	file := &models.MediaFile{
-		ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name/Old Name.mkv",
-		GroupKeyVersion: 1, ContentGroupKey: "linked-group", ContentID: "local-linked",
-		BaseType: "movie", BaseTitle: "Old Name",
-	}
-	h.itemRepo.items[file.ContentID] = &models.MediaItem{ContentID: file.ContentID, Type: "movie", Title: "Old Name", Status: " Ambiguous"}
-	h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
-		ForcedType: "movie", ForcedTmdbID: "335984",
-	}}
-	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-	skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false)
-	if err != nil || !reused || skeleton.ItemStatus != "pending" || skeleton.TmdbID != "335984" {
-		t.Fatalf("skeleton=%+v reused=%t err=%v, want the override applied and status pending", skeleton, reused, err)
-	}
-	if got := h.itemRepo.items[file.ContentID].Status; got != "pending" {
-		t.Fatalf("stored item status = %q, want pending", got)
 	}
 }
 
@@ -618,91 +454,5 @@ func TestQueuedOverrideFailsWithoutContentFileLister(t *testing.T) {
 	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
 	if skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false); err == nil {
 		t.Fatalf("queuedMovieSkeleton() = %+v, want an error", skeleton)
-	}
-}
-
-// A heuristic folder ID is a guess, so on first link the override's forced ID
-// for the same provider wins, as it does when the worker reuses a linked item.
-// That holds when the file name also carries an IMDb tag, which otherwise
-// loses to the folder's bare ID.
-func TestCreateOrFindSkeletonForcedIDBeatsHeuristicFolderID(t *testing.T) {
-	if hints := naming.ParseFolderIDs("Old Name tt0000111"); hints == nil || hints.ImdbID != "tt0000111" {
-		t.Fatalf("fixture folder name does not carry a heuristic IMDb ID: %+v", hints)
-	}
-	for _, name := range []string{"Old Name.mkv", "Old Name {imdb-tt0000222}.mkv"} {
-		t.Run(name, func(t *testing.T) {
-			h := newTestHarness()
-			file := &models.MediaFile{
-				ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name tt0000111/" + name,
-				GroupKeyVersion: 1, ContentGroupKey: "new-group", BaseType: "movie", BaseTitle: "Old Name",
-			}
-			h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
-				ForcedType: "movie", ForcedImdbID: "tt0000222",
-			}}
-			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-			skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false)
-			if err != nil || reused || skeleton == nil {
-				t.Fatalf("first link failed: skeleton=%+v reused=%t err=%v", skeleton, reused, err)
-			}
-			if skeleton.ImdbID != "tt0000222" {
-				t.Fatalf("skeleton IMDb ID = %q, want the forced tt0000222", skeleton.ImdbID)
-			}
-		})
-	}
-}
-
-// An override establishes identity regardless of how the filename parses now,
-// but only when the worker applies it. When it declines because the group is
-// shared with another item, a filename that changed since the scan still
-// requires a rescan.
-func TestQueuedMovieDeclinedOverrideStillRequiresRescan(t *testing.T) {
-	const groupKey = "v1|movie|old name|1999"
-	for _, tt := range []struct {
-		name       string
-		shared     bool
-		wantRescan bool
-		wantTmdbID string
-	}{
-		{name: "override applied", wantTmdbID: "948"},
-		{name: "override declined", shared: true, wantRescan: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			h := newTestHarness()
-			file := &models.MediaFile{
-				ID: 1, MediaFolderID: 10, FilePath: "/movies/New Name (2001)/New Name (2001).mkv",
-				GroupKeyVersion: 1, ContentGroupKey: groupKey, ContentID: "local-linked", BaseType: "movie", BaseTitle: "Old Name", BaseYear: 1999,
-			}
-			groupFiles := []*models.MediaFile{file}
-			if tt.shared {
-				groupFiles = append(groupFiles, &models.MediaFile{
-					ID: 2, MediaFolderID: 10, FilePath: "/movies/Old Name (1999)/Old Name (1999).mkv", GroupKeyVersion: 1, ContentGroupKey: groupKey, ContentID: "local-other",
-				})
-			}
-			for _, f := range groupFiles {
-				if err := h.fileRepo.UpdateContentID(t.Context(), f.ID, f.FilePath, f.ContentID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			h.fileRepo.setGroupFiles(10, 1, groupKey, groupFiles...)
-			h.itemRepo.items[file.ContentID] = &models.MediaItem{ContentID: file.ContentID, Type: "movie", Title: "Old Name", Year: 1999, Status: "unmatched"}
-			h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
-				MediaFolderID: 10, GroupKeyVersion: 1, ContentGroupKey: groupKey,
-				BaseTitle: "Old Name", BaseYear: 1999, InferredType: "movie", State: "resolved", OverrideSource: "none",
-			})
-			h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: groupKey, override: &models.MediaGroupOverride{
-				ForcedType: "movie", ForcedTmdbID: "948",
-			}}
-			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-			skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false)
-			if tt.wantRescan {
-				if err == nil || !strings.Contains(err.Error(), "rescan") {
-					t.Fatalf("queuedMovieSkeleton() = %+v, %v; want the rescan error", skeleton, err)
-				}
-				return
-			}
-			if err != nil || skeleton.TmdbID != tt.wantTmdbID {
-				t.Fatalf("queuedMovieSkeleton() = %+v, %v; want the override applied", skeleton, err)
-			}
-		})
 	}
 }

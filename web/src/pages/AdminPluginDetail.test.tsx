@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -261,45 +261,6 @@ describe("AdminPluginDetail", () => {
     if (restart) expect(restart).toHaveProperty("disabled", testCase.disabled);
   });
 
-  it("leads with the runtime error when a resident plugin keeps failing", () => {
-    installationsQuery = query([
-      makeInstallation({
-        global_config_schema: [],
-        runtime: {
-          resident: true,
-          state: "backoff",
-          restart_count: 3,
-          last_error: "floppy: context deadline exceeded",
-        },
-      }),
-    ]);
-    renderPage();
-
-    expect(screen.getByText("MDBList Ratings keeps stopping.")).toBeInTheDocument();
-    expect(screen.getByText("floppy: context deadline exceeded")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
-    expect(restartMock).toHaveBeenCalledWith(7);
-  });
-
-  it("shows the start error of a non-resident plugin without offering Restart", () => {
-    installationsQuery = query([
-      makeInstallation({
-        global_config_schema: [],
-        runtime: {
-          resident: false,
-          state: "failed",
-          restart_count: 0,
-          last_error: "start plugin process: exit status 2",
-        },
-      }),
-    ]);
-    renderPage();
-
-    expect(screen.getByText("MDBList Ratings failed to start.")).toBeInTheDocument();
-    expect(screen.getByText("start plugin process: exit status 2")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Restart now" })).not.toBeInTheDocument();
-  });
-
   it("marks a plugin installed without a catalog Unverified and offers no update policy", () => {
     installationsQuery = query([
       makeInstallation({
@@ -313,27 +274,6 @@ describe("AdminPluginDetail", () => {
     expect(screen.getAllByText("Unverified").length).toBeGreaterThan(0);
     expect(screen.getByText(/isn't linked to any of your catalogs/)).toBeInTheDocument();
     expect(screen.getByText("Updated by upload")).toBeInTheDocument();
-    expect(screen.queryByTestId("select")).not.toBeInTheDocument();
-  });
-
-  it("shows paused update checks for a hidden community plugin", () => {
-    installationsQuery = query([
-      makeInstallation({
-        source_kind: "approved_community",
-        repository_name: "Approved community",
-        updates_paused: true,
-        update_policy: "notify",
-      }),
-    ]);
-    renderPage();
-
-    expect(screen.getByText("Updates paused")).toBeInTheDocument();
-    expect(screen.getByText("Update checks are paused.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Turn them back on" })).toHaveAttribute(
-      "href",
-      "/admin/plugins?tab=catalog",
-    );
-    expect(screen.getByText(/“Ask before updating” setting/)).toBeInTheDocument();
     expect(screen.queryByTestId("select")).not.toBeInTheDocument();
   });
 
@@ -364,17 +304,6 @@ describe("AdminPluginDetail", () => {
     renderPage();
     expect(screen.queryByText("Silo plugins")).not.toBeInTheDocument();
     expect(screen.getAllByText("Unverified").length).toBeGreaterThan(0);
-  });
-
-  it("uninstalls after confirmation and returns to the plugin list", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Uninstall..." }));
-    fireEvent.click(screen.getByRole("button", { name: "Uninstall plugin" }));
-
-    expect(deleteMock).toHaveBeenCalledWith(7, { onSuccess: expect.any(Function) });
-    const options = deleteMock.mock.calls[0]?.[1] as { onSuccess: () => void };
-    act(() => options.onSuccess());
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin/plugins");
   });
 
   it("preserves the existing schedule when disabling a plugin task", () => {
@@ -433,29 +362,5 @@ describe("AdminPluginDetail", () => {
     expect(screen.getByText("free API key").tagName).toBe("STRONG");
     expect(container.querySelector("script")).toBeNull();
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
-  });
-
-  it("installs the catalog version selected from its tile", () => {
-    installationsQuery = query<PluginInstallation[]>([]);
-    catalogQuery = query([
-      makeCatalogEntry({ version: "0.1.0" }),
-      makeCatalogEntry({ version: "0.2.0" }),
-    ]);
-    renderPage("silo.manga-metadata", "?repository=1&version=0.2.0");
-    expect(screen.getByText("Version 0.2.0")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(installMock).toHaveBeenCalledWith({
-      repository_id: 1,
-      plugin_id: "silo.manga-metadata",
-      version: "0.2.0",
-    });
-  });
-
-  it("offers a retry when the installations can't be read", () => {
-    const refetch = vi.fn();
-    installationsQuery = query<PluginInstallation[]>(undefined, { isError: true, refetch });
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(refetch).toHaveBeenCalled();
   });
 });

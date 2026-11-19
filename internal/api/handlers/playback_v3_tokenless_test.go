@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -21,8 +22,9 @@ import (
 // The call-site checks are defense in depth; the builders themselves must
 // refuse, so a future caller cannot mint a credential by forgetting to ask.
 func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-stream-signing-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-stream-signing-secret")
 	file := v3HandlerFixtureFile(t)
 	proxy := &nodepool.Node{ID: 71, URL: "http://proxy.example"}
 
@@ -140,7 +142,7 @@ func copyOnlyEscalationFixtureV3(t *testing.T) (*PlaybackHandler, playback.Plann
 // remux before any escalation runs.
 func progressiveRemuxFixtureV3(t *testing.T, file *models.MediaFile, hlsCapable bool) (*PlaybackHandler, playback.PlannerInputV3, playback.PlannerResultV3) {
 	t.Helper()
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
 		"allow_4k_transcode": "true",
 	}}
@@ -281,8 +283,9 @@ func TestEscalateRefusedProgressiveRemuxV3LeavesExecutableRoutesAlone(t *testing
 // server and the stream-token tnode claim dial. A split-network proxy
 // registered by its private address must never leak that address to a player.
 func TestProxyURLBuildersUseThePublicURLWhenSet(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-stream-signing-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-stream-signing-secret")
 	file := v3HandlerFixtureFile(t)
 	public := "https://cdn.example.com"
 	proxy := &nodepool.Node{URL: "http://10.0.0.9:8083", PublicURL: &public}
@@ -312,7 +315,7 @@ func TestPlayableStartAudioV3JudgesTheEscalatedRoute(t *testing.T) {
 		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
 		{Language: "en", Codec: "eac3", Channels: 6, Layout: "5.1(side)"},
 	}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	requireWorkerRoutingV3(handler)
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
@@ -347,8 +350,9 @@ func TestStartPlaybackV2HeaderAuthenticatedResponseCarriesNoStreamToken(t *testi
 	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "movie.eng.srt"), Language: "eng", Format: "srt"}}
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "subrip", Language: "fra"}}
 	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 	handler.JWTSecret = "test-stream-signing-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-stream-signing-secret")
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 
@@ -400,8 +404,9 @@ func TestStartPlaybackV2HeaderAuthenticatedResponseCarriesNoStreamToken(t *testi
 // convert a direct route into a transcode.
 func TestReplanPlaybackV2PinsAttemptStickyFeatures(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.JWTSecret = "test-stream-signing-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-stream-signing-secret")
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 

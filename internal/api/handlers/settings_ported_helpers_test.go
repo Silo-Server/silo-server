@@ -66,19 +66,6 @@ func seamSet(t *testing.T, ctx context.Context, h *SettingValuesHandler, req Set
 	return view
 }
 
-// seamEffective resolves exactly one key and fails the test on error.
-func seamEffective(t *testing.T, ctx context.Context, h *SettingValuesHandler, q EffectiveSettingsQuery) EffectiveSettingValueView {
-	t.Helper()
-	views, err := h.ResolveEffectiveSettings(ctx, seamUserID, q)
-	if err != nil {
-		t.Fatalf("resolve %v: %v", q.Keys, err)
-	}
-	if len(views) != 1 {
-		t.Fatalf("resolved %d settings, want 1", len(views))
-	}
-	return views[0]
-}
-
 // setShortcut applies one navigation shortcut edit for profile-1.
 func setShortcut(t *testing.T, h *SettingValuesHandler, item string, present bool) (SettingValueView, navigationShortcutDocument, error) {
 	t.Helper()
@@ -115,21 +102,4 @@ type adminSeamEnv struct {
 	handler     *SettingValuesHandler
 	adminStore  userstore.UserStore
 	targetStore userstore.UserStore
-}
-
-func newAdminSeamEnv(t *testing.T) adminSeamEnv {
-	t.Helper()
-	adminStore := newIsolatedProfileTestStore(t, "admin")
-	targetStore := newIsolatedProfileTestStore(t, "target")
-	contract, err := settingscontract.Load()
-	if err != nil {
-		t.Fatalf("loading contract: %v", err)
-	}
-	handler := NewSettingValuesHandler(mappedTestUserStoreProvider{
-		stores: map[int]userstore.UserStore{
-			adminValuesAdminID:  adminStore,
-			adminValuesTargetID: targetStore,
-		},
-	}, contract)
-	return adminSeamEnv{handler: handler, adminStore: adminStore, targetStore: targetStore}
 }

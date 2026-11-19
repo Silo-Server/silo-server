@@ -87,6 +87,10 @@ type meilisearchSearchRequest struct {
 	MatchingStrategy     string                    `json:"matchingStrategy,omitempty"`
 	Vector               []float32                 `json:"vector,omitempty"`
 	Hybrid               *meilisearchHybridRequest `json:"hybrid,omitempty"`
+	ShowRankingScore     bool                      `json:"showRankingScore,omitempty"`
+	// ShowRankingScoreDetails is set on keyword and people queries only,
+	// whose hits meilisearchKeywordMatchCount compares.
+	ShowRankingScoreDetails bool `json:"showRankingScoreDetails,omitempty"`
 }
 
 type meilisearchHybridRequest struct {
@@ -96,6 +100,41 @@ type meilisearchHybridRequest struct {
 
 type meilisearchSearchHit struct {
 	ContentID string `json:"content_id"`
+	// RankingScore is set only when the request asked for showRankingScore.
+	RankingScore float64 `json:"_rankingScore"`
+	// RankingScoreDetails is set only when the request asked for
+	// showRankingScoreDetails.
+	RankingScoreDetails *meilisearchRankingScoreDetails `json:"_rankingScoreDetails,omitempty"`
+}
+
+// meilisearchRankingScoreDetails is the part of a hit's _rankingScoreDetails
+// that meilisearchKeywordMatchCount reads. Meilisearch omits a rule's object
+// when the rule did not rank the hit, for example words under matchingStrategy
+// all, where every hit matches every word.
+type meilisearchRankingScoreDetails struct {
+	Words     *meilisearchWordsDetail     `json:"words,omitempty"`
+	Typo      *meilisearchTypoDetail      `json:"typo,omitempty"`
+	Proximity *meilisearchProximityDetail `json:"proximity,omitempty"`
+}
+
+type meilisearchWordsDetail struct {
+	MatchingWords    int `json:"matchingWords"`
+	MaxMatchingWords int `json:"maxMatchingWords"`
+}
+
+// missed is how many of the query's words the hit does not match. Hits of
+// different queries compare by it, not by MatchingWords, because a quoted
+// phrase need not count as many words as the same words unquoted.
+func (d *meilisearchWordsDetail) missed() int {
+	return d.MaxMatchingWords - d.MatchingWords
+}
+
+type meilisearchTypoDetail struct {
+	TypoCount int `json:"typoCount"`
+}
+
+type meilisearchProximityDetail struct {
+	Score float64 `json:"score"`
 }
 
 type meilisearchSearchResponse struct {
@@ -107,31 +146,19 @@ type meilisearchSearchResponse struct {
 	Query              string                 `json:"query"`
 }
 
-type meilisearchFederatedSearchRequest struct {
-	Federation meilisearchFederationOptions `json:"federation"`
-	Queries    []meilisearchFederatedQuery  `json:"queries"`
+// meilisearchMultiSearchQuery is one search in a non-federated /multi-search
+// request: an ordinary search request plus the index it runs on.
+type meilisearchMultiSearchQuery struct {
+	IndexUID string `json:"indexUid"`
+	meilisearchSearchRequest
 }
 
-type meilisearchFederationOptions struct {
-	Offset int `json:"offset"`
-	Limit  int `json:"limit"`
+type meilisearchMultiSearchRequest struct {
+	Queries []meilisearchMultiSearchQuery `json:"queries"`
 }
 
-type meilisearchFederatedQuery struct {
-	IndexUID             string                    `json:"indexUid"`
-	Query                string                    `json:"q"`
-	Filter               string                    `json:"filter,omitempty"`
-	AttributesToRetrieve []string                  `json:"attributesToRetrieve"`
-	AttributesToSearchOn []string                  `json:"attributesToSearchOn,omitempty"`
-	MatchingStrategy     string                    `json:"matchingStrategy,omitempty"`
-	Vector               []float32                 `json:"vector,omitempty"`
-	Hybrid               *meilisearchHybridRequest `json:"hybrid,omitempty"`
-	// RankingScoreThreshold drops this query's hits that score below it. Only
-	// the meaning-only query sets one; see meilisearchSemanticScoreFloor.
-	RankingScoreThreshold float64 `json:"rankingScoreThreshold,omitempty"`
-	FederationOptions     struct {
-		Weight float64 `json:"weight"`
-	} `json:"federationOptions"`
+type meilisearchMultiSearchResponse struct {
+	Results []meilisearchSearchResponse `json:"results"`
 }
 
 type meilisearchStatsResponse struct {
@@ -324,18 +351,27 @@ func (c *meilisearchClient) Search(ctx context.Context, uid string, req meilisea
 	return out, err
 }
 
-func (c *meilisearchClient) FederatedSearch(ctx context.Context, req meilisearchFederatedSearchRequest) (meilisearchSearchResponse, error) {
-	var out meilisearchSearchResponse
-	err := c.do(ctx, http.MethodPost, "/multi-search", req, &out)
-	return out, err
+// MultiSearch runs queries in one /multi-search request and returns one
+// response per query, in query order.
+func (c *meilisearchClient) MultiSearch(ctx context.Context, queries []meilisearchMultiSearchQuery) ([]meilisearchSearchResponse, error) {
+	var out meilisearchMultiSearchResponse
+	if err := c.do(ctx, http.MethodPost, "/multi-search", meilisearchMultiSearchRequest{Queries: queries}, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Results) != len(queries) {
+		return nil, &meilisearchDecodeError{Err: fmt.Errorf("multi-search returned %d results for %d queries", len(out.Results), len(queries))}
+	}
+	return out.Results, nil
 }
 
-func (c *meilisearchClient) AddDocuments(ctx context.Context, uid string, docs []catalogSearchDocument) (meilisearchTaskRef, error) {
-	if len(docs) == 0 {
+// AddDocuments sends payload, a JSON array of documents already encoded (see
+// forEachCatalogSearchDocumentPayload), as it is.
+func (c *meilisearchClient) AddDocuments(ctx context.Context, uid string, payload json.RawMessage) (meilisearchTaskRef, error) {
+	if len(payload) == 0 {
 		return meilisearchTaskRef{}, nil
 	}
 	var task meilisearchTask
-	if err := c.do(ctx, http.MethodPost, "/indexes/"+url.PathEscape(uid)+"/documents", docs, &task); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/indexes/"+url.PathEscape(uid)+"/documents", payload, &task); err != nil {
 		return meilisearchTaskRef{}, err
 	}
 	return newMeilisearchTaskRef(task.TaskUID), nil
@@ -455,7 +491,13 @@ func (c *meilisearchClient) do(ctx context.Context, method, endpoint string, bod
 	}
 
 	var reader io.Reader
-	if body != nil {
+	switch body := body.(type) {
+	case nil:
+	case json.RawMessage:
+		// Already encoded. json.Marshal would validate and copy it, which for
+		// a documents payload means scanning and duplicating tens of MiB.
+		reader = bytes.NewReader(body)
+	default:
 		data, err := json.Marshal(body)
 		if err != nil {
 			return err

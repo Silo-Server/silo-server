@@ -93,11 +93,6 @@
       "count": 1
     }
   },
-  "src/hooks/queries/useRequests.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/hooks/useIntersectionObserver.ts": {
     "react-hooks/refs": {
       "count": 1
@@ -153,11 +148,6 @@
       "count": 1
     }
   },
-  "src/pages/settings/HistoryImportSettings.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/pages/setup-wizard/steps/SubtitlesStep.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -174,11 +164,6 @@
   "src/pages/watchtogether/hooks/useRecentRooms.ts": {
     "react-hooks/set-state-in-effect": {
       "count": 1
-    }
-  },
-  "src/pages/watchtogether/room/browse/BrowseShelf.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 2
     }
   },
   "src/pages/watchtogether/room/picker/SeriesDrilldown.tsx": {
@@ -212,11 +197,6 @@
   "src/player/components/SubtitleTranslateModal.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 1
-    }
-  },
-  "src/player/hooks/useASSSubtitles.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 3
     }
   },
   "src/player/hooks/useNextEpisode.ts": {

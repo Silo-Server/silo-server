@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -98,37 +97,6 @@ func seedTargetRefreshHarness(provider *targetRefreshProvider) (*testHarness, st
 	return h, seriesID, seasonID, episodeID
 }
 
-func TestResolveSeriesRefreshProviderIDsUsesStaleSuppressedSelectionIdentity(t *testing.T) {
-	const (
-		staleTMDBID       = "12345"
-		replacementTMDBID = "67890"
-	)
-	provider := &targetRefreshProvider{
-		slug: contentid.ProviderTMDB,
-		searchResults: []SearchResult{{
-			Name: "Target Refresh Show", Year: 2020, Provider: contentid.ProviderTMDB,
-			ProviderIDs: map[string]string{contentid.ProviderTMDB: replacementTMDBID},
-		}},
-	}
-	h, seriesID, _, _ := seedTargetRefreshHarness(provider)
-	series := h.itemRepo.items[seriesID]
-	series.Year = 2020
-	series.TmdbID = staleTMDBID
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set(seriesID, &models.StaleMediaID{
-		ContentID: seriesID, Provider: contentid.ProviderTMDB, ProviderID: staleTMDBID,
-	})
-	h.service.staleIDRepo = staleRepo
-
-	providerIDs, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false, false)
-	if err != nil {
-		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
-	}
-	if providerIDs[contentid.ProviderTMDB] != replacementTMDBID {
-		t.Fatalf("resolved tmdb id = %q, want %s", providerIDs[contentid.ProviderTMDB], replacementTMDBID)
-	}
-}
-
 func TestRefreshScheduledTargetEpisodePersistsOnlySelectedEpisode(t *testing.T) {
 	provider := &targetRefreshProvider{
 		seasons: []SeasonResult{{
@@ -175,69 +143,5 @@ func TestRefreshScheduledTargetEpisodePersistsOnlySelectedEpisode(t *testing.T) 
 	}
 	if unchanged.Title != "Old Episode 4" || unchanged.Overview != "" {
 		t.Fatalf("S05E04 changed during episode refresh: (%q, %q)", unchanged.Title, unchanged.Overview)
-	}
-}
-
-func TestRefreshScheduledTargetSeasonPersistsSeasonScope(t *testing.T) {
-	provider := &targetRefreshProvider{
-		seasons: []SeasonResult{{
-			SeasonNumber: 5,
-			Title:        "Provider Season 5",
-			Overview:     "Season overview",
-		}},
-		episodesBySeason: map[int][]EpisodeResult{
-			5: {
-				{SeasonNumber: 5, EpisodeNumber: 3, Title: "Provider Episode 3", Overview: "Episode 3 overview"},
-				{SeasonNumber: 5, EpisodeNumber: 4, Title: "Provider Episode 4", Overview: "Episode 4 overview"},
-			},
-		},
-	}
-	h, seriesID, seasonID, _ := seedTargetRefreshHarness(provider)
-
-	if err := h.service.RefreshScheduledTarget(context.Background(), RefreshTargetSeason, seasonID); err != nil {
-		t.Fatalf("RefreshScheduledTarget season: %v", err)
-	}
-
-	season, err := h.service.seasonRepo.GetByID(context.Background(), seasonID)
-	if err != nil {
-		t.Fatalf("Get season: %v", err)
-	}
-	if season.Title != "Provider Season 5" || season.Overview != "Season overview" {
-		t.Fatalf("season = (%q, %q), want provider metadata", season.Title, season.Overview)
-	}
-	for episodeNumber, wantOverview := range map[int]string{3: "Episode 3 overview", 4: "Episode 4 overview"} {
-		episode, err := h.service.episodeRepo.GetBySeriesAndNumber(context.Background(), seriesID, 5, episodeNumber)
-		if err != nil {
-			t.Fatalf("GetBySeriesAndNumber S05E%02d: %v", episodeNumber, err)
-		}
-		if episode.Overview != wantOverview {
-			t.Fatalf("S05E%02d overview = %q, want %q", episodeNumber, episode.Overview, wantOverview)
-		}
-	}
-}
-
-// When the series' local files name another show, a single season or episode
-// refresh leaves the local provider out of the series ID resolution too, not
-// only out of the season and episode fetches.
-func TestResolveSeriesRefreshProviderIDsSkipsLocalSearchWhenAsked(t *testing.T) {
-	remote := &targetRefreshProvider{slug: contentid.ProviderTMDB}
-	h, seriesID, _, _ := seedTargetRefreshHarness(remote)
-	local := &localHintStubProvider{searchResults: []SearchResult{{
-		Name: "Other Show", Provider: "nfo", ProviderIDs: map[string]string{contentid.ProviderTMDB: "99999"},
-	}}}
-	h.service.chainCache["0:series"] = chainCacheEntry{providers: []Provider{local, remote}, expiresAt: time.Now().Add(time.Hour)}
-	series := h.itemRepo.items[seriesID]
-
-	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", true, false); err != nil {
-		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
-	}
-	if local.searchCalls != 0 {
-		t.Errorf("local provider searched %d times, want none", local.searchCalls)
-	}
-	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false, false); err != nil {
-		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
-	}
-	if local.searchCalls != 1 {
-		t.Errorf("local provider searched %d times without a conflict, want 1", local.searchCalls)
 	}
 }

@@ -23,7 +23,9 @@
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
+./internal/sections TestRecentlyReleasedOrdersByReleaseDate
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestBookMediaScopeRowsKeepTheirTypePostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
 ./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
@@ -91,6 +93,7 @@
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
+./internal/catalog TestBoxSetCollectionLanguageDB
 
 # Audiobook Series, Authors, and Narrators browse: group counts and durations,
 # cover order, the viewer's own progress, count-sorted cursor pages, the search
@@ -105,6 +108,10 @@
 
 # A corrected match empties an item's localized text, keeping locks and manual translations.
 ./internal/catalog TestClearMatchTextDB
+
+# Sidecar artwork saved on an unmatched item does not overwrite a match or an
+# artwork change that committed after the read.
+./internal/catalog TestUpdateProvisionalArtworkIsCompareAndSetDB
 
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
@@ -213,8 +220,14 @@
 ./internal/scanner TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB
 
 # An ebook or manga library scan does not mark missing a book that a scan of
-# that file indexed after the library scan's walk or while it marked the book.
+# that file indexed after the library scan's walk or while it marked the book,
+# or saw unchanged after it was restored with its old modification time. The
+# same holds for an audiobook library scan, and for a single-file scan of a
+# book that vanished and came back before that scan marked it; a book still
+# gone is marked even when its row was written meanwhile.
 ./internal/scanner TestScanBookFolderKeepsBookIndexedByConcurrentScanDB
+./internal/scanner TestScanAudiobookFolderKeepsBookRestoredUnchangedDB
+./internal/scanner TestScanFileReconcilesVanishedBookDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
@@ -285,9 +298,11 @@
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
+./internal/auth TestUserRepositoryUsernameChangeRenamesPrimaryProfileDB
 ./internal/auth TestUserWithoutEmailOrUsernameDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
+./internal/auth TestCreatePersonalAPIKeyDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -348,6 +363,12 @@
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
 
+# A plugin scheduled task's firing runs on one API server: of claims taken at
+# once one wins, a server whose timer fires seconds later (across an interval
+# slot boundary too) loses, and a startup firing runs once per cluster start.
+./internal/taskmanager/repository TestPgFiringClaimsRunEachFiringOnceDB
+./internal/taskmanager/repository TestPgFiringClaimsMeasureAStalledServerFromItsDueTimeDB
+
 # Autoscan event retention deletes old finished events in bounded batches and keeps recent and running ones.
 ./internal/autoscan TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB
 
@@ -382,6 +403,10 @@
 # addresses, and the upgrade resets a row they shared instead of guessing.
 ./internal/notifications TestEmailPrefsStayOnTheAccountDB
 ./internal/notifications TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB
+
+# One server runs the notification interest rebuild at a time, and a rebuild
+# that loses its lock session stops before it completes the checkpoint.
+./internal/notifications TestInterestRebuildRunsOnOneServerAtATimeDB
 
 # Legacy mobile registration protects account ownership under the installation lock.
 ./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
@@ -519,21 +544,45 @@
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres
 ./internal/notifications TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres
-./internal/notifications TestRecomputeSeriesContinueWatchingKeepsWholeSecondSupersedePostgres
+./internal/notifications TestRecomputeSeriesNextUpCursorPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestSendPushTestStaysOnTheCallersAccount
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
+./internal/notifications TestPluginDestinationsStayOnTheirAccountDB
+./internal/notifications TestPluginDestinationDeliveryOutcomesDB
+./internal/notifications TestPluginDestinationStaleSendsDontWinDB
+./internal/notifications TestPluginDestinationValidationHoldsNoRowLockDB
+./internal/notifications TestPluginDestinationsOfAMissingPluginGetNothingQueuedDB
+./internal/notifications TestPluginDestinationEnqueueSurvivesADeleteDB
+./internal/notifications TestPluginDestinationFinishIsAtomicDB
+./internal/notifications TestPluginDestinationUnreadableSettingsDB
+./internal/notifications TestPluginDestinationTextNeverCarriesSecretsDB
+./internal/notifications TestPluginDestinationExhaustedScheduleDB
+./internal/notifications TestPluginDestinationRetryOutlivesInboxRetentionDB
+./internal/notifications TestFanoutQueuesPluginDestinationAttemptsDB
+./internal/notifications TestPluginDestinationCreateAndAccountDeletionDontDeadlockDB
+./internal/notifications TestPluginDestinationCreateRechecksTheProfileDB
+./internal/notifications TestPluginDestinationAutoDisableOnAOneConnectionPoolDB
+./internal/notifications TestPluginDestinationSendRereadsTheDestinationDB
+./internal/notifications TestPluginDestinationNULMessageIsStoredDB
+./internal/notifications TestPluginDestinationAttemptAgeCapDB
+./internal/notifications TestPluginDestinationPurgeWaitsForADeliveryDB
+./internal/notifications TestPluginDestinationTakenNameAtTheLimitDB
+./internal/notifications TestPluginDestinationAutoDisableAndAccountDeletionDontDeadlockDB
+./internal/notifications TestPluginDestinationAutoDisableAndProfilePurgeDontDeadlockDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
+./internal/notifications TestFanoutNotifiesOnlyTheNextUpEpisode
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
+./internal/notifications TestWatchlistArrivalTellsEachWatcherOnce
 ./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
 ./internal/notifications TestSeriesMutesList
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
@@ -608,6 +657,8 @@
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresJellycompatPlayedByDate
 ./internal/userstore/pgstore TestPostgresPersonalListPage
+./internal/userstore/pgstore TestPostgresCompletedHistoryPage
+./internal/userstore/pgstore TestPostgresProgressPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
 ./internal/userstore/pgstore TestPostgresRemoveHistoryItemsDeletesTheirPlaysDB
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWaitsOutADelete
@@ -774,6 +825,15 @@
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
 
+# Plugin instance state versions: a write at a stale version, or a create-only
+# write on an existing key, changes nothing; of several writers at one version
+# exactly one lands; the key budget still refuses a new key; an update that
+# leaves the version column alone (an older release's write during a rolling
+# deploy) still advances it, and one that sets it (a restore's carry) never
+# moves it back.
+./internal/plugins TestInstanceStateConditionalWritesPostgres
+./internal/plugins TestInstanceStateVersionAdvancesOnAnyUpdatePostgres
+
 # A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.
@@ -792,6 +852,10 @@
 # Updating an installed plugin from its catalog stops the running plugin only
 # after the new package passed its download and checksum checks.
 ./internal/plugins TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB
+
+# A plugin replacement that finishes after another install of the same plugin is
+# refused, and the newer release, its stored archive and its files stay.
+./internal/plugins TestInstallerReplacementRefusedAfterInstallationChangedDB
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
@@ -860,13 +924,15 @@
 ./internal/recommendations TestTasteProfileSubjectsSkipDeletedProfilesPostgres
 ./internal/recommendations TestTasteSeedCandidatesHonourAccessPostgres
 ./internal/recommendations TestProgressReadsMatchStoreWalkPostgres
+./internal/recommendations TestRewatchCountsReadTheWholeHistoryPostgres
 ./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
 ./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
 ./migrations TestPurgeOrphanedRecommendationRowsPostgres
 
 # Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
 # order, taste levels, per-interest anchors, quality prior, rubric leakage,
-# media types of personal rows.
+# media types of personal rows, Because You Watched anchors per library.
+./internal/recommendations TestBecauseYouWatchedAnchorsEachLibraryOnItsOwnWatchesPostgres
 ./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
 ./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
 ./internal/recommendations TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
@@ -903,6 +969,7 @@
 # folder-delete reference check over the new columns, provider backfill and
 # repair of the new slots, and Jellyfin recommendations listing every backdrop.
 ./migrations TestItemExtraArtworkMigrationUpAndDownPostgres
+./migrations TestRatingsTenPointScoresMigrationUpAndDownPostgres
 ./internal/catalog TestItemExtraArtworkSlotsRoundTripDB
 ./internal/catalog TestItemBackdropRepositoryDB
 ./internal/catalog TestItemBackdropReplaceWaitsForCacheWriteDB
@@ -996,6 +1063,9 @@
 # Server collections show a restricted viewer only the members it can open, and
 # leave out a collection whose members it can open none of (#2828).
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+./internal/api/handlers TestCollectionRowCardsFollowTheViewerDB
+./internal/api/handlers TestCollectionRowCardsShowVisiblePersonalCollectionsDB
+./internal/sections TestRowOfCollectionsReferencesItsCollectionsPostgres
 
 # A scan that adds or removes titles refreshes the stored counts of the smart
 # collections drawing from that library, and only those (#3697).
@@ -1184,6 +1254,7 @@
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
 ./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
+./internal/backup TestCarryDropsAProfileKeyItCannotBindDB
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
@@ -1191,6 +1262,7 @@
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
 ./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
+./internal/backup TestCarrySwapsDestinationNamesDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
 ./internal/backup TestLostLockSessionCancelsWorkDB
@@ -1205,6 +1277,7 @@
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
 ./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
 ./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB
+./internal/backup TestRowOfCollectionsIsRestoredDB
 ./internal/backup TestSelectiveRestoreOnOneConnectionDB
 ./internal/backup TestUnverifiedRestoreLeavesCostlyWorkOffDB
 ./internal/backup TestRestoreItemWritesDoNotGrowDB
@@ -1303,6 +1376,54 @@
 # kept, which the title's deleted aliases no longer give.
 ./internal/watchlist TestWatchSyncFindsThePromotedItemByKeptIDsDB
 
+# A watchlist read that promoted an entry before the notification fanout ran,
+# on a user store outside PostgreSQL, still leaves the profile for the arrival
+# notice through the promotion record; past the horizon it no longer counts.
+./internal/watchlist TestArrivalFindsAnEntryPromotedOutsidePostgresDB
+
 # Smart collection collage records: a refresh deletes the collection's records
 # nobody refreshed for a week, with or without a collage, and keeps the rest.
 ./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB
+
+# Transcode node keys: issuing stores only ciphertext and moves neither the
+# admin revision nor the pool generation, proxies and missing rows are
+# refused, and the credential registry loads disabled nodes and rotations.
+# Two transcode nodes cannot share a canonical URL.
+./internal/nodepool TestIssueNodeKeyDB
+./internal/nodepool TestTranscodeNodeURLsAreUniqueDB
+
+# Transcode node source access: local or core is stored configuration that
+# moves the admin revision and pool generation; a proxy can only hold local,
+# refused by the store and by the check constraint.
+./internal/nodepool TestSourceAccessIsTranscodeConfigurationDB
+
+# Node declarations: a declaration writes its fields and sets env_managed to
+# exactly their names without moving the admin revision or pool generation on
+# its own; administrator updates that change a declared field are refused and
+# ones that restate it pass; a taken URL is refused. A proxy registers itself
+# only when asked to, and a node cannot declare a proxy's address.
+./internal/nodepool TestNodeDeclarationsLockFieldsDB
+./internal/nodepool TestProxyDeclarationsDB
+
+# Admin node writes reach every credential registry: the writing API server's
+# before it answers (a deleted node's key is refused at once, a moved node is
+# signable at its new URL, a disabled one keeps its key), a proxy's through
+# node_pool_changed, and another API server's through its reconciliation.
+./cmd/silo TestNodeWritesReachEveryCredentialRegistryDB
+
+# Transcode node control plane: the core authenticates node calls against the
+# real credential registry (a disabled node keeps its access; a proxy row, a
+# keyless or deleted node is refused), and stores a node's shipped log entries
+# under the authenticated node with timestamps clamped to the core's window and
+# a client_ip that is not an address cleared, so the batch stores in one insert.
+./internal/nodecontrol TestRequireNodeWithTheCredentialRegistryDB
+./internal/opslog TestInsertNodeBatchStampsTheNodeAndClearsABadAddressDB
+./internal/opslog TestInsertNodeBatchClampsTimestampsDB
+
+# A transcode node's source grant is honored only while the catalog has its
+# exact media file: the row id, at exactly the granted path, not missing.
+./internal/scanner TestFileRepositoryIsActiveFileDB
+
+# Frame posters list only movies whose poster slot is empty with nothing on its
+# way, and a frame is saved only while the slot is still empty with the source read.
+./internal/catalog TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB

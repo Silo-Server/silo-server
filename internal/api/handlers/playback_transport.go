@@ -46,7 +46,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpRequest, nodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(httpRequest, nodeURL, h.NodeKeys); err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err
 	}
 	response, err := transcodeproxy.DoNode(transcodeproxy.NodeClient(), httpRequest, nodeURL, "transcode_start")
@@ -59,6 +59,12 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		// Drain the (small) error body so the transport can reuse the
 		// connection instead of tearing it down on every failed start.
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		// A node at its own job cap takes no new work from here until its
+		// next health check; the caller tries another executor, as it does
+		// after any refused start.
+		if nodepool.RefusedAtCapacity(response) {
+			nodepool.ReportAtCapacity(h.NodePlanner, nodeURL)
+		}
 		if request.ToneMapMode != "" {
 			if validationErr := transcodenode.ToneMapExecutionErrorForResponse(
 				response.StatusCode,
@@ -123,8 +129,11 @@ func remoteHardwareRetryPossibleV3(request transcodenode.TranscodeStartRequest) 
 		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy")
 }
 
-func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, jwtSecret)
+// fetchRemoteNodeCapabilities reads the capability report of the worker of
+// kind target at nodeURL. Proxies serve the same route as transcode nodes, so
+// the caller names the kind it holds the URL as, never inferred from the URL.
+func fetchRemoteNodeCapabilities(ctx context.Context, target nodeauth.Target, nodeURL string, nodeKeys nodeauth.Keyring) (playback.HWAccelInfo, error) {
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, target, nodeKeys)
 	if err != nil {
 		return playback.HWAccelInfo{}, err
 	}

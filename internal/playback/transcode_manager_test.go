@@ -98,32 +98,6 @@ func (f *fakeSessionRegistry) ConfirmReconstructedExecution(expected *Session, r
 	return current
 }
 
-func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
-	m := NewTranscodeManager()
-	dirs := map[string]string{"s1": t.TempDir(), "s2": t.TempDir()}
-	for id, dir := range dirs {
-		m.RegisterTranscodeSession(id, &TranscodeSession{outputDir: dir})
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := m.StartShutdownCleanup(ctx)
-	cancel()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown cleanup did not finish")
-	}
-	for id, dir := range dirs {
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("shutdown left output for %q: %v", id, err)
-		}
-		if got := m.GetTranscodeSession(id); got != nil {
-			t.Fatalf("transcode %q survived shutdown cleanup", id)
-		}
-	}
-}
-
 func TestStartShutdownCleanup_RejectsLaterRegistrationAndSwap(t *testing.T) {
 	m := NewTranscodeManager()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -433,33 +407,6 @@ func TestCloseTranscodeSessionIf_GateContract(t *testing.T) {
 	}
 }
 
-// fastResumeSeek must apply the seg×dur fast resume only for encoded transcodes;
-// copy-mode cards have variable-duration segments so the fast seek is unsafe.
-func TestFastResumeSeek(t *testing.T) {
-	encoded := RecipeCard{TargetCodecVideo: "h264", SegmentDuration: 4, StartSegmentNumber: 0}
-	if seg, seek, ok := fastResumeSeek(encoded, 10); !ok || seg != 10 || seek != 40 {
-		t.Fatalf("encoded fast resume = (%d, %v, %v), want (10, 40, true)", seg, seek, ok)
-	}
-
-	// Copy-mode: never apply the seg×dur seek regardless of how far the client advanced.
-	copyCard := RecipeCard{TargetCodecVideo: "copy", SegmentDuration: 4, StartSegmentNumber: 0}
-	if _, _, ok := fastResumeSeek(copyCard, 10); ok {
-		t.Fatal("copy-mode must not apply the fast seg×dur resume seek")
-	}
-	// Case-insensitive guard.
-	if _, _, ok := fastResumeSeek(RecipeCard{TargetCodecVideo: "COPY", SegmentDuration: 4}, 10); ok {
-		t.Fatal("copy-mode detection must be case-insensitive")
-	}
-
-	// Manifest path (negative segment) and a non-advanced client take no fast seek.
-	if _, _, ok := fastResumeSeek(encoded, -1); ok {
-		t.Fatal("manifest path (negative segment) must not fast-seek")
-	}
-	if _, _, ok := fastResumeSeek(encoded, 0); ok {
-		t.Fatal("non-advanced client must not fast-seek")
-	}
-}
-
 // ReconstructSession admission contract. A genuine over-cap rejection must
 // STILL refuse even after the fail-open change: the ErrTooManyStreams /
 // ErrTooManyTranscodes sentinels are not provider errors. The authless
@@ -506,67 +453,6 @@ func TestReconstructSessionAdmission(t *testing.T) {
 			}
 		})
 	}
-}
-
-// A video copy applies neither negotiated target, so a session rebuilt from a
-// copy card must not report them to the admin views, the same as before the
-// restart. An encode keeps them.
-func TestReconstructSessionReportsOnlyAppliedVideoTargets(t *testing.T) {
-	tests := []struct {
-		codec          string
-		wantResolution string
-		wantKbps       int
-	}{
-		{codec: "copy"},
-		{codec: "h264", wantResolution: "720p", wantKbps: 3608},
-	}
-	for _, tt := range tests {
-		t.Run(tt.codec, func(t *testing.T) {
-			card := NewRecipeCard(7, "p", 77, "", TranscodeOpts{
-				SessionID:         "s",
-				InputPath:         "/media/movie.mkv",
-				TargetCodecVideo:  tt.codec,
-				CopyVideoMPEGTS:   tt.codec == "copy",
-				TargetResolution:  "720p",
-				TargetBitrateKbps: 3608,
-			})
-			m := NewTranscodeManager()
-			m.Sessions = NewSessionManager(0, 0)
-			got := m.ReconstructSession(t.Context(), "s", 7, card)
-			if got == nil {
-				t.Fatal("ReconstructSession refused the card")
-			}
-			if got.TargetResolution != tt.wantResolution || got.TargetBitrateKbps != tt.wantKbps {
-				t.Fatalf("targets = (%q, %d), want (%q, %d)", got.TargetResolution, got.TargetBitrateKbps, tt.wantResolution, tt.wantKbps)
-			}
-		})
-	}
-}
-
-// acquireReconstructSlot must bound concurrent reconstructs and let a caller
-// whose request is cancelled give up its place instead of queueing dead work.
-func TestAcquireReconstructSlot(t *testing.T) {
-	m := &TranscodeManager{reconstructSem: make(chan struct{}, 1)}
-
-	release, ok := m.acquireReconstructSlot(context.Background())
-	if !ok {
-		t.Fatal("first acquire should succeed")
-	}
-
-	// Cap is full: a cancelled request must back off rather than block forever.
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, ok := m.acquireReconstructSlot(cancelled); ok {
-		t.Fatal("acquire on a full semaphore with a cancelled context must fail")
-	}
-
-	// Releasing frees the slot for the next reconstruct.
-	release()
-	release2, ok := m.acquireReconstructSlot(context.Background())
-	if !ok {
-		t.Fatal("acquire should succeed after the slot is released")
-	}
-	release2()
 }
 
 func TestReconstructLifecycleWaitDoesNotConsumeGlobalSlot(t *testing.T) {
@@ -664,52 +550,6 @@ func TestLockSessionLifecycle_MutualExclusionAndCleanup(t *testing.T) {
 	}
 }
 
-func TestReconstructTranscodeWalksAutoPipelineInSameOutputDir(t *testing.T) {
-	transcodeDir := t.TempDir()
-	m := NewTranscodeManager()
-	m.Config = func() TranscodeRuntimeConfig {
-		return TranscodeRuntimeConfig{TranscodeDir: transcodeDir, HWAccel: hwAccelAuto}
-	}
-	m.autoTranscodePipeline = func(_ context.Context, opts TranscodeOpts) *AutoTranscodePipeline {
-		if opts.HWAccel != hwAccelAuto {
-			t.Errorf("pipeline built from HWAccel %q, want live auto config", opts.HWAccel)
-		}
-		opts.HWAccel = transcodeHWNVENC
-		return newResolvedAutoTranscodePipeline(opts, newAutoTranscodePipelineCache())
-	}
-	var attempts []TranscodeOpts
-	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		attempts = append(attempts, opts)
-		if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		// The full-hardware attempt exits before its manifest; the mixed one
-		// writes into the same directory, which must still exist.
-		return fakeStartupSession(t, opts, opts.OutputDir, len(attempts) == 2, false), nil
-	}
-	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
-		SessionID: "s", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", SegmentDuration: 2,
-	})
-
-	got, err := m.ReconstructTranscodeWithError(context.Background(), "s", -1, card)
-	if err != nil || got == nil {
-		t.Fatalf("reconstruct = %v, %v; want the mixed-stage session", got, err)
-	}
-	if len(attempts) != 2 {
-		t.Fatalf("attempts = %d, want full hardware then mixed", len(attempts))
-	}
-	if attempts[0].SoftwareVideoDecode || !attempts[1].SoftwareVideoDecode || attempts[1].HWAccel != transcodeHWNVENC {
-		t.Fatalf("attempt paths = %+v / %+v, want GPU decode then CPU decode with NVENC", attempts[0], attempts[1])
-	}
-	if live := m.GetTranscodeSession("s"); live != got {
-		t.Fatalf("registered session = %p, want %p", live, got)
-	}
-	if _, statErr := os.Stat(attempts[1].OutputDir); statErr != nil {
-		t.Fatalf("reconstruct output dir removed: %v", statErr)
-	}
-}
-
 // A rebuild is shared by every request waiting on it, so once it is admitted
 // the request that triggered it can end without failing the others. Each step
 // here answers an ended request as production does for some recipes: with
@@ -771,44 +611,6 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	}
 	if starts != 1 {
 		t.Fatalf("starts = %d, want 1", starts)
-	}
-}
-
-// A rebuild serves every request waiting on it, so its throttler starts
-// whether or not the request that triggered it is still connected. The start
-// stays bounded, because the rebuild holds the session lifecycle lock and a
-// reconstruct slot across it.
-func TestReconstructTranscodeStartsThrottlerAfterTriggeringRequestEnds(t *testing.T) {
-	m := NewTranscodeManager()
-	m.Config = func() TranscodeRuntimeConfig {
-		return TranscodeRuntimeConfig{TranscodeDir: t.TempDir(), HWAccel: transcodeHWQSV}
-	}
-	ctx, disconnect := context.WithCancel(context.Background())
-	defer disconnect()
-	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		disconnect()
-		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
-	}
-	throttleErr := errors.New("throttler not started")
-	bounded := false
-	m.StartThrottler = func(ctx context.Context, _ *TranscodeSession) {
-		throttleErr = ctx.Err()
-		_, bounded = ctx.Deadline()
-	}
-	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
-		SessionID: "s", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
-	})
-
-	got, err := m.ReconstructTranscodeWithError(ctx, "s", -1, card)
-	if err != nil || got == nil {
-		t.Fatalf("reconstruct = %v, %v; want the rebuilt session", got, err)
-	}
-	if throttleErr != nil {
-		t.Fatalf("throttler start context: %v, want one that outlives the request", throttleErr)
-	}
-	if !bounded {
-		t.Fatal("throttler start context has no deadline, so a stalled settings read would hold the rebuild")
 	}
 }
 

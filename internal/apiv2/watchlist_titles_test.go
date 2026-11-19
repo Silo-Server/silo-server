@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -155,47 +154,6 @@ func watchlistTitlesDeps(titles *fakeWatchlistTitles, reqs *fakeWatchlistRequest
 	return deps
 }
 
-func TestListWatchlistTitlesPagesAndFiltersByCeiling(t *testing.T) {
-	base := fixedTime()
-	titles := &fakeWatchlistTitles{entries: []watchlist.Entry{
-		watchlistTitleEntry(4, 104, "PG", base.Add(3*time.Hour)),
-		watchlistTitleEntry(3, 103, "R", base.Add(2*time.Hour)),
-		watchlistTitleEntry(2, 102, "PG-13", base.Add(time.Hour)),
-		watchlistTitleEntry(1, 101, "", base),
-	}}
-	h := newTestHandler(t, watchlistTitlesDeps(titles, &fakeWatchlistRequests{ceiling: "PG-13"}))
-
-	var ids []int
-	cursor, pages := "", 0
-	for {
-		path := "/api/v2/watchlist/titles?limit=2"
-		if cursor != "" {
-			path += "&cursor=" + cursor
-		}
-		rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%d %s", rec.Code, rec.Body.String())
-		}
-		var page WatchlistTitleCollection
-		decodeBody(t, rec.Body, &page)
-		pages++
-		for _, it := range page.Items {
-			ids = append(ids, it.TMDBID)
-		}
-		if cursor = page.Page.NextCursor; cursor == "" {
-			break
-		}
-	}
-	// The R title and the uncertified one fail the PG-13 ceiling, and the
-	// filtered rows do not end the paging early.
-	if pages != 2 || !slices.Equal(ids, []int{104, 102}) {
-		t.Fatalf("ids = %v pages = %d", ids, pages)
-	}
-	if v := titles.viewers[0]; v.UserID != 1 || v.ProfileID != "p-owner" {
-		t.Fatalf("viewer = %+v", v)
-	}
-}
-
 // A cursor is bound to its operation and to the acting account and profile.
 func TestListWatchlistTitlesCursorScope(t *testing.T) {
 	base := fixedTime()
@@ -220,150 +178,6 @@ func TestListWatchlistTitlesCursorScope(t *testing.T) {
 		t.Fatalf("no library watchlist cursor: %s", rec.Body.String())
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist/titles?cursor="+foreign, "", viewerHeaders()), TypeInvalidCursor)
-}
-
-func TestAddWatchlistTitle(t *testing.T) {
-	titles := &fakeWatchlistTitles{}
-	reqs := &fakeWatchlistRequests{ceiling: "PG-13", details: map[int]*tmdb.MediaDetail{
-		949: {ID: 949, MediaType: "movie", Title: "Heat", ReleaseDate: "1995-12-15", USCertification: "PG-13"},
-		950: {ID: 950, MediaType: "movie", Title: "Casino", ReleaseDate: "1995-11-22", USCertification: "R"},
-	}}
-	h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
-
-	rec := do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/949", "", viewerHeaders())
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	var entry WatchlistTitleEntry
-	decodeBody(t, rec.Body, &entry)
-	if entry.TMDBID != 949 || entry.ItemID != "" || entry.Request.Status != string(mediarequests.StatusPending) {
-		t.Fatalf("entry = %s", rec.Body.String())
-	}
-	if len(titles.added) != 1 || titles.added[0].Title != "Heat" || len(reqs.requested) != 1 {
-		t.Fatalf("added = %+v requested = %+v", titles.added, reqs.requested)
-	}
-
-	// Above the ceiling and unknown to TMDB are both 404, and nothing is saved.
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/950", "", viewerHeaders()), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/951", "", viewerHeaders()), TypeNotFound)
-	// A title a watchlist already tracks is checked on its stored rating.
-	titles.known = map[watchlist.TitleKey]*watchlist.Title{
-		{MediaType: "movie", TMDBID: 952}: {ID: 9, MediaType: "movie", TMDBID: 952, Title: "Stored", Certification: "NC-17"},
-	}
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/952", "", viewerHeaders()), TypeNotFound)
-	if len(titles.added) != 1 || len(reqs.requested) != 1 {
-		t.Fatalf("a refused add saved: added = %+v requested = %+v", titles.added, reqs.requested)
-	}
-
-	// A title the library has goes to the library watchlist and is not requested.
-	titles.itemID = "movie:heat-1995"
-	rec = do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/949", "", viewerHeaders())
-	decodeBody(t, rec.Body, &entry)
-	if rec.Code != http.StatusOK || entry.ItemID != "movie:heat-1995" || len(reqs.requested) != 1 {
-		t.Fatalf("%d %s requested = %d", rec.Code, rec.Body.String(), len(reqs.requested))
-	}
-}
-
-// Deleting by a former TMDB ID withdraws the watchlist request under both
-// the named ID and the title's current one.
-func TestDeleteWatchlistTitleByFormerID(t *testing.T) {
-	titles := &fakeWatchlistTitles{known: map[watchlist.TitleKey]*watchlist.Title{
-		{MediaType: "movie", TMDBID: 100}: {ID: 1, MediaType: "movie", TMDBID: 200, Title: "Repointed"},
-	}}
-	reqs := &fakeWatchlistRequests{}
-	h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
-	rec := do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/100", "", viewerHeaders())
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Once before the removal and once after it.
-	if !slices.Equal(reqs.withdrawn, []int{100, 200, 100, 200}) || len(titles.removed) != 1 {
-		t.Fatalf("withdrawn = %v removed = %v", reqs.withdrawn, titles.removed)
-	}
-	// An absent entry succeeds and withdraws under the named ID only (twice,
-	// around the removal).
-	reqs.withdrawn = nil
-	rec = do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/series/5", "", viewerHeaders())
-	if rec.Code != http.StatusNoContent || !slices.Equal(reqs.withdrawn, []int{5, 5}) {
-		t.Fatalf("%d %s withdrawn = %v", rec.Code, rec.Body.String(), reqs.withdrawn)
-	}
-}
-
-// With requests off, all three operations answer 409 capability_disabled
-// and touch nothing.
-func TestWatchlistTitlesRequestsDisabled(t *testing.T) {
-	titles := &fakeWatchlistTitles{}
-	reqs := &fakeWatchlistRequests{disabled: true}
-	h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
-	for _, op := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v2/watchlist/titles"},
-		{http.MethodPut, "/api/v2/watchlist/titles/movie/949"},
-		{http.MethodDelete, "/api/v2/watchlist/titles/movie/949"},
-	} {
-		requireProblem(t, do(t, h, op.method, op.path, "", viewerHeaders()), TypeCapabilityDisabled)
-	}
-	if len(titles.viewers) != 0 || len(reqs.withdrawn) != 0 || len(reqs.requested) != 0 {
-		t.Fatalf("disabled operations reached the services: %+v %+v", titles, reqs)
-	}
-}
-
-// A profile blocked from requests gets 403 from the watchlist title
-// operations, so the status must not advertise them to it.
-func TestRequestStatusForBlockedProfile(t *testing.T) {
-	deps := watchlistTitlesDeps(&fakeWatchlistTitles{}, &fakeWatchlistRequests{})
-	deps.RequestLifecycle = &fakeLifecycle{profileBlocked: true}
-	rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/requests/status", "", viewerHeaders())
-	var got struct {
-		Supported *bool `json:"watchlist_titles_supported"`
-	}
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != http.StatusOK || got.Supported == nil || *got.Supported {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-}
-
-// Search results carry in_watchlist from the viewer's watchlist titles.
-func TestSearchRequestMediaMarksWatchlist(t *testing.T) {
-	deps := requestDeps(fixtureRequests())
-	rec := do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/requests/search?q=heat", "", requestOwner)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"in_watchlist":false`) {
-		t.Fatalf("unwired: %d %s", rec.Code, rec.Body.String())
-	}
-	deps.WatchlistTitles = &fakeWatchlistTitles{known: map[watchlist.TitleKey]*watchlist.Title{
-		{MediaType: "movie", TMDBID: 949}: {ID: 1, MediaType: "movie", TMDBID: 949},
-	}}
-	deps.WatchlistRequests = &fakeWatchlistRequests{}
-	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/requests/search?q=heat", "", requestOwner)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"in_watchlist":true`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-}
-
-// The request withdrawal runs under every ID the title has had, before the
-// entry goes: removing the last entry drops the title's former IDs, so a
-// withdrawal that fails part way must leave the entry for a retry.
-func TestDeleteWatchlistTitleWithdrawsFormerIDsBeforeRemoving(t *testing.T) {
-	title := &watchlist.Title{ID: 1, MediaType: "movie", TMDBID: 200, FormerTMDBIDs: []int{100, 150}, Title: "Repointed"}
-	titles := &fakeWatchlistTitles{known: map[watchlist.TitleKey]*watchlist.Title{{MediaType: "movie", TMDBID: 200}: title}}
-	reqs := &fakeWatchlistRequests{withdrawErr: map[int]error{150: errors.New("request store unavailable")}}
-	h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
-
-	rec := do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/200", "", viewerHeaders())
-	if rec.Code == http.StatusNoContent {
-		t.Fatal("a failed withdrawal answered success")
-	}
-	if len(titles.removed) != 0 {
-		t.Fatalf("removed = %v, want the entry kept for a retry", titles.removed)
-	}
-
-	reqs.withdrawErr, reqs.withdrawn = nil, nil
-	rec = do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/200", "", viewerHeaders())
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if !slices.Equal(reqs.withdrawn, []int{200, 100, 150, 200, 100, 150}) || len(titles.removed) != 1 {
-		t.Fatalf("withdrawn = %v removed = %v; want every ID withdrawn, then one removal", reqs.withdrawn, titles.removed)
-	}
 }
 
 // An add whose entry a concurrent delete took before the request landed

@@ -34,7 +34,7 @@ func TestStartConfiguredTranscodeThrottler(t *testing.T) {
 		settings   playback.TranscodeThrottleSettings
 		thresholds []int
 	}{
-		{name: "unset uses the default", settings: throttleSettings{}, thresholds: []int{playback.DefaultTranscodeThrottleSeconds}},
+		{name: "unset uses the default", settings: throttleSettings{}, thresholds: []int{300}},
 		{name: "unreadable setting disables", settings: failingThrottleSettings{}},
 		{name: "disabled", settings: throttleSettings{"enable_transcode_throttle": "false"}},
 		{name: "positive value below executor minimum is clamped", settings: throttleSettings{"enable_transcode_throttle": "true", "transcode_throttle_seconds": "30"}, thresholds: []int{60}},

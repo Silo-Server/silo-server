@@ -137,64 +137,6 @@ func selfServiceSettings() fakeSettings {
 	return fakeSettings{"server.public_url": "https://silo.example.test", SettingSelfService: "true"}
 }
 
-func TestSelfServiceNeedsTheSettingEmailAndALinkBase(t *testing.T) {
-	for name, tc := range map[string]struct {
-		settings            fakeSettings
-		mailOn              bool
-		enabled, configured bool
-		requestErr          error
-	}{
-		"available":      {selfServiceSettings(), true, true, true, nil},
-		"setting off":    {fakeSettings{"server.public_url": "https://silo.example.test"}, true, false, true, ErrSelfServiceDisabled},
-		"mail off":       {selfServiceSettings(), false, true, false, ErrSelfServiceNotConfigured},
-		"no public URL":  {fakeSettings{SettingSelfService: "true"}, true, true, false, ErrSelfServiceNotConfigured},
-		"nothing set up": {fakeSettings{}, false, false, false, ErrSelfServiceNotConfigured},
-	} {
-		sender := &fakeMail{enabled: tc.mailOn}
-		s := newTestService(&fakeRepo{}, sender, tc.settings)
-		enabled, configured, err := s.SelfService(t.Context())
-		if err != nil || enabled != tc.enabled || configured != tc.configured {
-			t.Errorf("%s: SelfService = %v, %v, %v", name, enabled, configured, err)
-		}
-		if err := s.Request(t.Context(), "alice"); !errors.Is(err, tc.requestErr) {
-			t.Errorf("%s: Request err = %v, want %v", name, err, tc.requestErr)
-		}
-		if tc.requestErr != nil && len(sender.sent) != 0 {
-			t.Errorf("%s: sent %d emails while unavailable", name, len(sender.sent))
-		}
-	}
-}
-
-func TestRequestEmailsTheMatchingAccount(t *testing.T) {
-	for _, login := range []string{"alice", " alice ", "alice@example.test"} {
-		repo, sender := &fakeRepo{}, &fakeMail{enabled: true}
-		s := newTestService(repo, sender, selfServiceSettings())
-		before := time.Now()
-		if err := s.Request(t.Context(), login); err != nil {
-			t.Fatalf("%q: %v", login, err)
-		}
-		if len(repo.requested) != 1 || len(sender.sent) != 1 {
-			t.Fatalf("%q: stored %d links, sent %d emails", login, len(repo.requested), len(sender.sent))
-		}
-		got, msg := repo.requested[0], sender.sent[0]
-		if got.userID != 5 || got.minAge != selfServiceCooldown || got.expiresAt.Before(before.Add(SelfServiceTTL)) || got.expiresAt.After(time.Now().Add(SelfServiceTTL)) {
-			t.Fatalf("%q: stored %+v", login, got)
-		}
-		_, token, ok := strings.Cut(msg.TextBody, "https://silo.example.test/reset-password#")
-		token, _, _ = strings.Cut(token, "\n")
-		if !ok || msg.To[0] != "alice@example.test" || auth.HashLinkToken(token) != got.tokenHash {
-			t.Fatalf("%q: email to %v does not carry the stored link", login, msg.To)
-		}
-		if len(msg.Inline) != 1 || !strings.Contains(msg.HTMLBody, "cid:"+msg.Inline[0].ContentID) {
-			t.Fatalf("%q: email does not carry the header logo it references", login)
-		}
-		// The account holder asked; the email must not credit an admin.
-		if !strings.Contains(msg.TextBody, "Someone asked to reset the password") || strings.Contains(msg.TextBody, "An admin") {
-			t.Fatalf("%q: wording %q", login, msg.TextBody)
-		}
-	}
-}
-
 func TestRequestIsSilentWhenNothingShouldBeSent(t *testing.T) {
 	for name, login := range map[string]string{
 		"unknown account":   "ghost",

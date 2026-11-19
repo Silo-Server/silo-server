@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -16,8 +17,8 @@ func SanitizeQuery(raw string) string {
 	if err != nil {
 		return "[query omitted: invalid encoding]"
 	}
-	for key := range query {
-		if diagnosticSecretKey(key) {
+	for key, values := range query {
+		if diagnosticSecretKey(key) || slices.ContainsFunc(values, func(value string) bool { return playTagPair(key, value) }) {
 			query[key] = []string{Placeholder}
 		}
 	}
@@ -69,18 +70,38 @@ func SanitizeJSON(body []byte) []byte {
 func diagnosticSecretKey(key string) bool {
 	// Pw is the Jellyfin login alias. PlaySessionId is the Jellyfin play
 	// session ID, which on its own authorizes that play's media requests.
-	// Normalisation covers the casing and separators used by compatibility
-	// clients without changing auth parsing.
-	key = strings.ToLower(strings.TrimSpace(key))
-	key = strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", "")
+	key = normalizeDiagnosticKey(key)
 	return key == "pw" || key == "playsessionid" || SecretKey(key)
+}
+
+// normalizeDiagnosticKey covers the casing and separators used by
+// compatibility clients without changing auth parsing.
+func normalizeDiagnosticKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	return strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", "")
+}
+
+// playTagHexLen is the length of a Jellyfin per-play tag: the compact play
+// session ID followed by the source's 16-hex ETag.
+const playTagHexLen = 48
+
+// playTagPair reports a Jellyfin per-play tag: the MediaSources[].ETag that
+// PlaybackInfo returns and that a client echoes as the tag query parameter on
+// a static stream. It starts with the play session ID and authorizes that
+// stream, so it is masked like PlaySessionId. Other values under those keys,
+// such as image tags and item ETags, are harmless and stay readable.
+func playTagPair(key, value string) bool {
+	if key = normalizeDiagnosticKey(key); key != "tag" && key != "etag" {
+		return false
+	}
+	return len(value) == playTagHexLen && strings.Trim(value, "0123456789abcdefABCDEF") == ""
 }
 
 func sanitizeDiagnosticValue(value any) any {
 	switch v := value.(type) {
 	case map[string]any:
 		for key, child := range v {
-			if diagnosticSecretKey(key) {
+			if text, ok := child.(string); diagnosticSecretKey(key) || ok && playTagPair(key, text) {
 				v[key] = Placeholder
 			} else {
 				v[key] = sanitizeDiagnosticValue(child)
@@ -142,11 +163,12 @@ func RedactSecretAssignments(text string) string {
 	var out strings.Builder
 	last := 0
 	for _, m := range assignmentKey.FindAllStringIndex(text, -1) {
-		if m[0] < last || !diagnosticSecretKey(text[m[0]:m[1]-1]) {
+		if m[0] < last {
 			continue
 		}
+		key := text[m[0] : m[1]-1]
 		start, end := assignmentValue(text, m[1])
-		if start == end {
+		if start == end || !diagnosticSecretKey(key) && !playTagPair(key, text[start:end]) {
 			continue
 		}
 		out.WriteString(text[last:start])

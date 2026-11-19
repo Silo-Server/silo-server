@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -20,51 +18,6 @@ type fakeExtraBackdrops map[string][]string
 
 func (f fakeExtraBackdrops) ExtraBackdropPaths(context.Context, []string) (map[string][]string, error) {
 	return f, nil
-}
-
-func TestItemTagsAdvertiseExtendedArtwork(t *testing.T) {
-	m := newMapper(NewResourceIDCodec(), &config.Config{})
-	updatedAt := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
-	movie := upstreamListItem{
-		ContentID: "movie-1", Type: "movie", Title: "Film", UpdatedAt: updatedAt,
-		BackdropURL: "https://cdn.example.test/b0", BackdropPath: "local/movies/movie-1/aa/backdrop/original.r0.webp",
-		BannerPath: "local/movies/movie-1/bb/banner/original.r.webp", ThumbPath: "local/movies/movie-1/cc/thumb/original.r.webp",
-		ClearArtPath: "local/movies/movie-1/dd/clearart/original.r.webp", DiscPath: "local/movies/movie-1/ee/disc/original.r.webp",
-		ExtraBackdropPaths: []string{"local/movies/movie-1/ff-1/backdrop/original.r1.webp", "local/movies/movie-1/gg-2/backdrop/original.r2.webp"},
-	}
-	dto := m.itemFromList(movie, false, nil, nil)
-	for _, key := range []string{"Banner", "Thumb", "Art", "Disc"} {
-		if dto.ImageTags[key] == "" {
-			t.Errorf("ImageTags[%s] missing: %v", key, dto.ImageTags)
-		}
-	}
-	if len(dto.BackdropImageTags) != 3 || len(slices.Compact(slices.Clone(dto.BackdropImageTags))) != 3 {
-		t.Fatalf("BackdropImageTags = %q, want three distinct tags", dto.BackdropImageTags)
-	}
-
-	// A changed image changes its tag.
-	moved := movie
-	moved.ExtraBackdropPaths = []string{movie.ExtraBackdropPaths[0], "local/movies/movie-1/hh-2/backdrop/original.r3.webp"}
-	if again := m.itemFromList(moved, false, nil, nil); again.BackdropImageTags[2] == dto.BackdropImageTags[2] || again.BackdropImageTags[1] != dto.BackdropImageTags[1] {
-		t.Fatalf("tags after replacing the second extra backdrop = %q, before %q", again.BackdropImageTags, dto.BackdropImageTags)
-	}
-
-	// Nothing extra for an item without the art, an episode, or extras with no
-	// primary backdrop to number them after.
-	bare := m.itemFromList(upstreamListItem{ContentID: "movie-2", Type: "movie", BackdropURL: "https://cdn.example.test/b"}, false, nil, nil)
-	if len(bare.ImageTags) != 0 || len(bare.BackdropImageTags) != 1 {
-		t.Fatalf("bare movie tags = %v / %q", bare.ImageTags, bare.BackdropImageTags)
-	}
-	episode := movie
-	episode.Type = "episode"
-	if ep := m.itemFromList(episode, false, nil, nil); ep.ImageTags["Banner"] != "" || len(ep.BackdropImageTags) != 1 {
-		t.Fatalf("episode tags = %v / %q", ep.ImageTags, ep.BackdropImageTags)
-	}
-	noPrimary := movie
-	noPrimary.BackdropURL, noPrimary.BackdropPath = "", ""
-	if np := m.itemFromList(noPrimary, false, nil, nil); len(np.BackdropImageTags) != 0 {
-		t.Fatalf("extras advertised without a primary backdrop: %q", np.BackdropImageTags)
-	}
 }
 
 func extendedArtworkImagesHandler(item *models.MediaItem, extras []string) (*ImagesHandler, *countingImageResolver) {

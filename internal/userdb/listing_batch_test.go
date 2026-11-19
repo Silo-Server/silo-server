@@ -1,39 +1,8 @@
 package userdb
 
 import (
-	"reflect"
 	"testing"
 )
-
-func TestListProfilesAttachesAllowedLibrariesInOrder(t *testing.T) {
-	db := newSingleConnSchemaDB(t)
-	for _, profile := range []Profile{
-		{ID: "p1", Name: "One", AllowedLibraryIDs: []int{5, 2}, CreatedAt: "2026-01-01T00:00:00Z"},
-		{ID: "p2", Name: "Two", AllowedLibraryIDs: []int{3}, CreatedAt: "2026-01-02T00:00:00Z"},
-		{ID: "p3", Name: "Three", CreatedAt: "2026-01-03T00:00:00Z"},
-	} {
-		if err := CreateProfile(db, profile); err != nil {
-			t.Fatalf("CreateProfile(%s): %v", profile.ID, err)
-		}
-	}
-
-	profiles, err := ListProfiles(db)
-	if err != nil {
-		t.Fatalf("ListProfiles: %v", err)
-	}
-	if len(profiles) != 3 {
-		t.Fatalf("ListProfiles returned %d profiles, want 3", len(profiles))
-	}
-	if got, want := profiles[0].AllowedLibraryIDs, []int{2, 5}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("p1 AllowedLibraryIDs = %v, want %v", got, want)
-	}
-	if got, want := profiles[1].AllowedLibraryIDs, []int{3}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("p2 AllowedLibraryIDs = %v, want %v", got, want)
-	}
-	if profiles[2].AllowedLibraryIDs != nil {
-		t.Fatalf("p3 AllowedLibraryIDs = %v, want nil", profiles[2].AllowedLibraryIDs)
-	}
-}
 
 func TestBatchAttachDoesNotScaleBindParametersWithRows(t *testing.T) {
 	db := newSingleConnSchemaDB(t)

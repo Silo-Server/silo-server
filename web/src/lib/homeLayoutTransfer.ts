@@ -1,5 +1,6 @@
 import type { components } from "@/api/v2/schema";
 import { t, type MessageKey } from "@/i18n";
+import { collectionRefsOf } from "@/lib/homeRows/collectionList";
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
 
 // Home layout export and import: a profile's saved section overrides for the
@@ -235,7 +236,11 @@ export function fileReferences(file: HomeLayoutFile): HomeLayoutReferences {
     for (const override of page.overrides) {
       for (const config of [override.config, override.user_config]) {
         if (!config) continue;
-        if (nonEmptyString(config.user_collection_id)) refs.personalCollections = true;
+        if (
+          nonEmptyString(config.user_collection_id) ||
+          collectionRefsOf(config).some((ref) => ref.source === "user")
+        )
+          refs.personalCollections = true;
         if (nonEmptyString(config.profile_id)) refs.profiles = true;
       }
     }
@@ -394,7 +399,11 @@ function sectionSkipReason(
 
   const config = effectiveConfig(override);
   if (sameServer) return sameServerReferenceProblem(config, target, libraries);
-  if (nonEmptyString(config.library_collection_id) || nonEmptyString(config.user_collection_id)) {
+  if (
+    nonEmptyString(config.library_collection_id) ||
+    nonEmptyString(config.user_collection_id) ||
+    collectionRefsOf(config).length > 0
+  ) {
     return "collection";
   }
   if (nonEmptyString(config.profile_id)) return "profile";
@@ -419,6 +428,15 @@ function sameServerReferenceProblem(
   if (
     nonEmptyString(config.user_collection_id) &&
     !target.personalCollectionIds.has(config.user_collection_id)
+  ) {
+    return "collection";
+  }
+  // A row of collections, like a collection row, needs every personal
+  // collection it lists to be one the profile sees.
+  if (
+    collectionRefsOf(config).some(
+      (ref) => ref.source === "user" && !target.personalCollectionIds.has(ref.id),
+    )
   ) {
     return "collection";
   }

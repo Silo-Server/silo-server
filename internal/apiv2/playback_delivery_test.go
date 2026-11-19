@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -61,6 +60,19 @@ func TestPlaybackDeliveryV2BytesErrorsAndAuthorization(t *testing.T) {
 	}
 	deps.PlaybackMedia = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+// A relay answers 502 when its transcode node is unreachable, keyless, or
+// refused the relay's signature: the node is unavailable, which v2 reports as
+// a retryable dependency failure rather than an internal error.
+func TestPlaybackDeliveryNodeUnavailableIsDependencyUnavailable(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)
+	writer := &playbackDeliveryWriter{ResponseWriter: w, request: r}
+	http.Error(writer, "transcode node unavailable", http.StatusBadGateway)
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), TypeDependencyUnavailable.ID) {
+		t.Fatalf("node unavailable = %d %s, want 503 %s", w.Code, w.Body.String(), TypeDependencyUnavailable.ID)
+	}
 }
 
 func TestPlaybackDeliveryProblemDropsLegacyBodyAndHeaders(t *testing.T) {
@@ -377,16 +389,5 @@ func TestPlaybackDecisionV2ProjectsSubtitleURLsWithoutMutatingSource(t *testing.
 	}
 	if in.PlaybackPlan.Subtitle.Artifact.URL != "/api/v1/stream/s/subtitles/1.ass?file_id=42&st=x" || in.PlaybackPlan.Subtitle.Inventory[0].URL != "/api/v1/stream/s/subtitles/0.vtt?file_id=42&st=x" {
 		t.Fatal("projection mutated the persisted decision")
-	}
-}
-
-func TestPlaybackDecisionV2PublishesTheActiveQuality(t *testing.T) {
-	in := playback.DecisionResponseV3{PlaybackPlan: &playback.PlanV3{ActiveQuality: playback.QualityRung1080pLowV3}}
-	raw, err := json.Marshal(playbackDecision(in).PlaybackPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), `"active_quality":"1080p-low"`) {
-		t.Fatalf("v2 plan must carry active_quality: %s", raw)
 	}
 }

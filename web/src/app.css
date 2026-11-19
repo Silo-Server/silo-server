@@ -1318,43 +1318,26 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     fill: none;
   }
 
+  /* A click fills the whole star, so fill up to the end of the hovered star:
+     the hovered half, every half before it, and the right half after a
+     hovered left half. */
   :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(1):hover)
-    .star-rating-star:nth-of-type(-n + 1),
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(2):hover)
-    .star-rating-star:nth-of-type(-n + 2),
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(3):hover)
-    .star-rating-star:nth-of-type(-n + 3),
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(4):hover)
-    .star-rating-star:nth-of-type(-n + 4),
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(5):hover)
-    .star-rating-star:nth-of-type(-n + 5) {
+    .star-rating:not([data-suppress-preview])
+    .star-rating-star:is(
+      :hover,
+      :has(~ .star-rating-star:hover),
+      .star-rating-star[data-half="left"]:hover + *
+    ) {
     color: rgb(250 204 21);
   }
 
   :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(1):hover)
-    .star-rating-star:nth-of-type(-n + 1)
-    svg,
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(2):hover)
-    .star-rating-star:nth-of-type(-n + 2)
-    svg,
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(3):hover)
-    .star-rating-star:nth-of-type(-n + 3)
-    svg,
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(4):hover)
-    .star-rating-star:nth-of-type(-n + 4)
-    svg,
-  :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(5):hover)
-    .star-rating-star:nth-of-type(-n + 5)
+    .star-rating:not([data-suppress-preview])
+    .star-rating-star:is(
+      :hover,
+      :has(~ .star-rating-star:hover),
+      .star-rating-star[data-half="left"]:hover + *
+    )
     svg {
     fill: currentcolor;
   }
@@ -1362,7 +1345,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Hovering the star that is already set previews removal: clicking it
      clears the rating, so dim the stars rather than show the same fill. */
   :where(:root[data-fine-pointer="true"])
-    .star-rating:not([data-suppress-preview]):has(.star-rating-star[aria-checked="true"]:hover)
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star[data-clears]:hover)
     .star-rating-star {
     opacity: 0.45;
   }

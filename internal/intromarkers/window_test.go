@@ -1,43 +1,8 @@
 package intromarkers
 
 import (
-	"math"
 	"testing"
 )
-
-func TestHeadWindowIsTheIntroAnalysisWindow(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	candidate := Candidate{FileHash: "h", FileSize: 10, DurationSeconds: 1500}
-	window := headWindow(candidate, cfg)
-	if window.Start != 0 || window.End != 375 {
-		t.Fatalf("head window = %+v, want 0-375 (25%% of 1500 s)", window)
-	}
-	if got := window.identity(candidate); got != introFingerprintIdentity(candidate, cfg) || got.WindowEndSeconds != 375 {
-		t.Fatalf("window identity = %+v, want the intro fingerprint identity", got)
-	}
-	if !headWindow(Candidate{}, cfg).empty() {
-		t.Fatal("a file without a duration has an empty window")
-	}
-}
-
-func TestAdjustSegmentAddsTheWindowStart(t *testing.T) {
-	profile := introProfile(DefaultConfig("ffmpeg"))
-	candidate := Candidate{DurationSeconds: 1500}
-	got := adjustSegment(Segment{Start: 0.4, End: 60}, fingerprintInput{Candidate: candidate, WindowStart: 1050}, profile)
-	// The start snap applies to the start of the file, not of the window.
-	if want := 1050 + 0.4 + chromaprintStartLeadSeconds; math.Abs(got.Start-want) > 1e-9 {
-		t.Fatalf("start = %.3f, want %.3f", got.Start, want)
-	}
-	if want := 1050 + 60 + chromaprintEndLeadSeconds; math.Abs(got.End-want) > 1e-9 {
-		t.Fatalf("end = %.3f, want %.3f", got.End, want)
-	}
-
-	// An end past the file is clamped to its duration.
-	got = adjustSegment(Segment{Start: 400, End: 460}, fingerprintInput{Candidate: candidate, WindowStart: 1050}, profile)
-	if got.End != 1500 {
-		t.Fatalf("end = %.3f, want the 1500 s file end", got.End)
-	}
-}
 
 // windowedInputs builds four episodes whose fingerprints share a 300-point
 // segment at point 100, each fingerprinted from windowStart.

@@ -33,7 +33,7 @@ func downloadedSubtitleSessionV3(t *testing.T) (*PlaybackHandler, *handlerMockSu
 	repo.list = []subtitles.DownloadedSubtitle{downloaded}
 	repo.subtitles[downloaded.ID] = &downloaded
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.SubtitleRepo = repo
@@ -96,7 +96,7 @@ func TestStartPlaybackV2DownloadedSubtitleLookupOutageStillStarts(t *testing.T) 
 	file := v3HandlerFixtureFile(t)
 	repo := newMockSubtitleRepoForHandler()
 	repo.listErr = errors.New("database unavailable")
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.SubtitleRepo = repo
@@ -133,7 +133,7 @@ func TestReplanPlaybackV2DownloadedSubtitleLookupOutageOnAnAlternateIsRetryable(
 	repo.list = []subtitles.DownloadedSubtitle{downloaded}
 	repo.subtitles[downloaded.ID] = &downloaded
 	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
 	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}

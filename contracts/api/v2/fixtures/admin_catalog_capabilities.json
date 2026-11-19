@@ -1,5 +1,5 @@
 {
-  "revision": "22e5309a43ec8cb596de099410238b261e8e82660f0a407d8aa9df2f649acc51",
+  "revision": "ac2472c5bc3e252f81e2bb0d8e049c4c08cccb8b0daff30b5e3dcc2e821d4988",
   "state": "available",
   "allowed": true,
   "item_listing": true,
@@ -7,5 +7,6 @@
   "item_change_events": true,
   "item_match_hints": true,
   "item_metadata": true,
-  "item_metadata_reset": true
+  "item_metadata_reset": true,
+  "item_file_paths": true
 }

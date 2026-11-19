@@ -409,6 +409,9 @@ var profileCascadeTables = []string{
 	// Leaves titles no profile watchlists any more; the profile
 	// handler's watchlist-title purge sweeps those under the title lock.
 	"user_watchlist_titles",
+	// Promotion records the watchlist arrival notice reads; the same purge
+	// clears them after a delete from the SQLite store.
+	"watchlist_title_promotions",
 	// Recommendation state. A deleted profile's ratings would otherwise
 	// keep shaping other accounts' Similar Users rows, and its taste
 	// would be rebuilt every night.

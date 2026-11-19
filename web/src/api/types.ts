@@ -1318,6 +1318,7 @@ export interface ItemDetail {
   is_specials?: boolean;
   user_data?: ItemUserData;
   user_state?: MediaItemUserState;
+  /** The profile's rating, 1 to 10 (half stars). */
   user_rating?: number | null;
 
   // Root folder paths for series items (admin-only).
@@ -3102,7 +3103,8 @@ export interface NotificationReasonFlags {
   continue_watching?: boolean;
   next_up?: boolean;
   // request.* operational payload (title/year/reason ride on
-  // request.approved / request.declined, which have no catalog item yet)
+  // request.approved / request.declined, which have no catalog item yet).
+  // watchlist.available carries tmdb_id and media_type ("movie" | "series").
   request_id?: string;
   tmdb_id?: number;
   media_type?: string;
@@ -3150,9 +3152,6 @@ export interface NotificationUnreadCountResponse {
 export interface NotificationPreferences {
   profile_id: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
 }
 
@@ -3171,9 +3170,6 @@ export interface NotificationWebhook {
   type: NotificationWebhookType;
   url_host: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
   notify_requests: boolean;
   consecutive_failures: number;
@@ -3191,9 +3187,6 @@ export interface NotificationWebhookInput {
   url?: string;
   type?: NotificationWebhookType;
   enabled?: boolean;
-  notify_favorites?: boolean;
-  notify_watchlist?: boolean;
-  notify_continue_watching?: boolean;
   notify_next_up?: boolean;
   notify_requests?: boolean;
 }
@@ -3994,6 +3987,8 @@ export interface PluginCapability {
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
   post_logout_redirect_url?: string;
+  /** A scheduled_task.v1 capability: its manifest default schedule, when the server can run it. */
+  default_schedule?: TriggerConfig;
   /** A request_router.v1 capability: the request server fields its plugin can do without. */
   request_router?: { api_key_optional: boolean; base_url_optional: boolean };
 }
@@ -4482,7 +4477,27 @@ export interface StreamNode {
    * no new work, drained once it has none left. Absent on older servers.
    */
   drain_state?: "none" | "draining" | "drained";
+  /**
+   * A key has been issued to this transcode node. A transcode node without
+   * one takes no work. Always false for a proxy; absent on older servers.
+   */
+  key_issued?: boolean;
+  /**
+   * How this transcode node reads source media: through its own library
+   * mount, or over HTTP from the API servers. Absent on proxies and on older
+   * servers.
+   */
+  source_access?: NodeSourceAccess;
+  /**
+   * Update-body field names the node declares from its own environment. The
+   * server refuses a change to any of them, so the editor shows them
+   * read-only. Absent on servers that predate node declarations.
+   */
+  env_managed?: string[];
 }
+
+/** How a transcode node reads source media. */
+export type NodeSourceAccess = "local" | "core";
 
 export interface CreateNodeRequest {
   name: string;
@@ -4493,6 +4508,8 @@ export interface CreateNodeRequest {
   group?: string;
   max_jobs?: number;
   max_bandwidth_kbps?: number;
+  // Transcode nodes only, with the source_access node capability; absent is local.
+  source_access?: NodeSourceAccess;
 }
 
 export interface UpdateNodeRequest {
@@ -4514,6 +4531,8 @@ export interface UpdateNodeRequest {
   // directory applies when the node restarts.
   download_artifact_dir_override?: string | null;
   download_artifact_max_bytes_override?: number | null;
+  // Transcode nodes only; applies to jobs the node starts after the change.
+  source_access?: NodeSourceAccess;
 }
 
 export interface CheckNodeResponse {
@@ -4627,6 +4646,21 @@ export interface SectionTitleKey {
   title_args?: Record<string, string>;
 }
 
+/** One collection on a row of collections (section_type collection_posters). */
+export interface SectionCollectionCard {
+  id: string;
+  source: "library" | "user";
+  title: string;
+  poster_url: string;
+  poster_thumbhash?: string;
+  poster_is_collage: boolean;
+  item_count: number;
+  /** A server collection's library, for its page link. */
+  library_id?: number;
+  /** A personal collection's owner. */
+  creator_profile_id?: string;
+}
+
 export interface ResolvedSection extends SectionTitleKey {
   id: string;
   section_type: string;
@@ -4637,6 +4671,8 @@ export interface ResolvedSection extends SectionTitleKey {
   is_custom: boolean;
   customized: boolean;
   items: SectionItem[];
+  /** A row of collections' cards; such a row has no items. Absent on other rows. */
+  collections?: SectionCollectionCard[];
   /**
    * The row was read with an item_limit and holds more cards than `items`
    * (see homeRowLimit). Absent when false.

@@ -243,25 +243,30 @@ export function playbackEditions(
 }
 
 /**
- * With no edition picked or remembered, each cut's Auto file competes: a file
- * within the cap (or any file without one) beats one above it, which beats an
- * unmeasured one. Within the cap the higher resolution wins, above it the
- * lower; then HDR, then edition preference and server order. File size is not
- * compared across cuts.
+ * With no edition picked or remembered, the cut is chosen by name first: only
+ * the cuts in the most preferred editionPreference class compete, so a
+ * standard cut is never passed over for a longer one in better quality. Among
+ * those, each cut's Auto file competes: a file within the cap (or any file
+ * without one) beats one above it, which beats an unmeasured one. Within the
+ * cap the higher resolution wins, above it the lower; then HDR, then server
+ * order. File size is not compared across cuts.
  */
 function bestEditionAuto(
   editions: PlaybackEdition[],
   qualityPreference?: string | null,
 ): FileVersion | null {
   const cap = resolutionScore(qualityPreference ?? "auto");
-  const ranked = editions.flatMap((edition) => {
+  // editions come in preference order, so the first holds the best class.
+  const bestClass = editions[0] ? editionPreference(editions[0].key, editions[0].raw) : 0;
+  const preferred = editions.filter((e) => editionPreference(e.key, e.raw) === bestClass);
+  const ranked = preferred.flatMap((edition) => {
     const file = selectDefaultVersion(edition.versions, qualityPreference);
     if (!file) return [];
     const rank = resolutionScore(file.resolution);
     const fitClass = rank < 0 ? 2 : cap < 0 || rank <= cap ? 0 : 1;
     return [{ file, rank, fitClass }];
   });
-  // editions already come in preference, then server, order; sort is stable.
+  // editions already come in server order within a class; sort is stable.
   ranked.sort(
     (a, b) =>
       a.fitClass - b.fitClass ||

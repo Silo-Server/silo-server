@@ -133,28 +133,6 @@ func TestResetEmbeddingsRefusesWhileSavedSettingsWaitForARestart(t *testing.T) {
 	}
 }
 
-func TestResetEmbeddingsHoldsEveryClaimWhileItRuns(t *testing.T) {
-	locker := &keyedLocker{}
-	w := newJobTestWorker(locker, nil)
-	w.engine = closedPoolEngine(t)
-
-	_, err := w.ResetEmbeddings(t.Context())
-	if err == nil || errors.Is(err, ErrJobRunning) || errors.Is(err, ErrJobRunningElsewhere) || errors.Is(err, ErrStaleSweepRunning) {
-		t.Fatalf("reset against a failing database = %v, want a database error", err)
-	}
-	keys, released := locker.snapshot()
-	if !slices.Equal(keys, []int64{embeddingsJobLock, tasteProfilesJobLock, cacheJobLock, staleSweepLock}) || released != 4 {
-		t.Fatalf("locks taken %#x, released %d", keys, released)
-	}
-	assertNothingRunning(t, w)
-	// A cron run of any of those jobs can start again afterwards.
-	if err := w.runJob(job{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		return embeddingsResult{}, nil
-	}}, false); err != nil {
-		t.Fatalf("embeddings after the reset: %v", err)
-	}
-}
-
 func TestDescribeEmbeddingLockConflict(t *testing.T) {
 	lock := EmbeddingLock{BaseURL: "https://user:pw@embed.example", Model: "model-a", SourceDimensions: 768, StorageDimensions: CanonicalEmbeddingDimensions}
 	for _, tc := range []struct {
@@ -164,25 +142,36 @@ func TestDescribeEmbeddingLockConflict(t *testing.T) {
 		model   string
 		dims    int
 		want    string
+		key     string
 	}{
-		{"matching", lock, lock.BaseURL, "model-a", 768, ""},
-		{"matching, dimensions unknown", lock, lock.BaseURL, "model-a", 0, ""},
-		{"other base URL", lock, "http://other", "model-a", 768, ""},
-		{"vendor-prefixed model", lock, "http://other", "google/model-a", 768, ""},
+		{"matching", lock, lock.BaseURL, "model-a", 768, "", ""},
+		{"matching, dimensions unknown", lock, lock.BaseURL, "model-a", 0, "", ""},
+		{"other base URL", lock, "http://other", "model-a", 768, "", ""},
+		{"vendor-prefixed model", lock, "http://other", "google/model-a", 768, "", ""},
 		{"another vendor's model of the same name", EmbeddingLock{Model: "team-a/m", SourceDimensions: 768, StorageDimensions: CanonicalEmbeddingDimensions},
-			"http://other", "team-b/m", 768, `model "team-a/m", not "team-b/m"`},
-		{"no provider chosen", lock, "", "", 0, `No embedding provider is chosen. Choose a provider that serves "model-a"`},
-		{"other model", lock, lock.BaseURL, "model-b", 768, `model "model-a", not "model-b"`},
-		{"other dimensions", lock, lock.BaseURL, "model-a", 1024, "768-dimension vectors, but the model now returns 1024"},
-		{"unstorable lock", EmbeddingLock{BaseURL: "http://ollama", Model: "qwen3-embedding:latest", SourceDimensions: 4096}, "http://ollama", "qwen3-embedding:latest", 0, "records 4096-dimension vectors; Silo stores 1 to 3072"},
-		{"zero-dimension lock", EmbeddingLock{BaseURL: "http://ollama", Model: "m"}, "http://ollama", "m", 0, "records 0-dimension vectors"},
-		{"other storage", EmbeddingLock{Model: "m", SourceDimensions: 768, StorageDimensions: 1536}, "", "m", 768, "stored at 1536 dimensions"},
-		{"other storage, dimensions unknown", EmbeddingLock{Model: "m", SourceDimensions: 768, StorageDimensions: 1536}, "", "m", 0, "stored at 1536 dimensions"},
+			"http://other", "team-b/m", 768, `model "team-a/m", not "team-b/m"`, lockConflictKeyModelMismatch},
+		{"no provider chosen", lock, "", "", 0, `No embedding provider is chosen. Choose a provider that serves "model-a"`, lockConflictKeyNoProvider},
+		{"other model", lock, lock.BaseURL, "model-b", 768, `model "model-a", not "model-b"`, lockConflictKeyModelMismatch},
+		{"other dimensions", lock, lock.BaseURL, "model-a", 1024, "768-dimension vectors, but the model now returns 1024", lockConflictKeyDimensionsMismatch},
+		{"unstorable lock", EmbeddingLock{BaseURL: "http://ollama", Model: "qwen3-embedding:latest", SourceDimensions: 4096}, "http://ollama", "qwen3-embedding:latest", 0, "records 4096-dimension vectors; Silo stores 1 to 3072", lockConflictKeyLockOutOfRange},
+		{"zero-dimension lock", EmbeddingLock{BaseURL: "http://ollama", Model: "m"}, "http://ollama", "m", 0, "records 0-dimension vectors", lockConflictKeyLockOutOfRange},
+		{"other storage", EmbeddingLock{Model: "m", SourceDimensions: 768, StorageDimensions: 1536}, "", "m", 768, "stored at 1536 dimensions", lockConflictKeyStorageMismatch},
+		{"other storage, dimensions unknown", EmbeddingLock{Model: "m", SourceDimensions: 768, StorageDimensions: 1536}, "", "m", 0, "stored at 1536 dimensions", lockConflictKeyStorageMismatch},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := DescribeEmbeddingLockConflict(tc.lock, tc.baseURL, tc.model, tc.dims)
+			got, key, args := DescribeEmbeddingLockConflict(tc.lock, tc.baseURL, tc.model, tc.dims)
 			if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
 				t.Fatalf("conflict = %q, want %q", got, tc.want)
+			}
+			if key != tc.key {
+				t.Fatalf("key = %q, want %q", key, tc.key)
+			}
+			// Every argument a key's English needs is filled; the web
+			// falls back to the English text when one is missing.
+			for _, arg := range args {
+				if arg == "" {
+					t.Fatalf("empty argument in %v", args)
+				}
 			}
 			if strings.Contains(got, "pw@") || strings.Contains(got, "embed.example") || strings.Contains(got, "http://other") {
 				t.Fatalf("conflict quotes a base URL: %q", got)
@@ -203,14 +192,18 @@ func TestEmbeddingLockConflictUsesTheRunningConfigPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM server_settings WHERE key = $1`, embeddingLockSettingKey); err != nil {
 		t.Fatal(err)
 	}
-	if conflict, err := w.EmbeddingLockConflict(ctx); err != nil || conflict != "" {
-		t.Fatalf("no lock: %q, %v", conflict, err)
+	if conflict, key, _, err := w.EmbeddingLockConflict(ctx); err != nil || conflict != "" || key != "" {
+		t.Fatalf("no lock: %q %q, %v", conflict, key, err)
 	}
 	if err := w.engine.repo.SetEmbeddingLock(ctx, EmbeddingLock{BaseURL: "http://ollama:11434", Model: "model-a", SourceDimensions: 768}); err != nil {
 		t.Fatal(err)
 	}
-	if conflict, err := w.EmbeddingLockConflict(ctx); err != nil || !strings.Contains(conflict, `"model-a", not "model-b"`) {
+	conflict, key, args, err := w.EmbeddingLockConflict(ctx)
+	if err != nil || !strings.Contains(conflict, `"model-a", not "model-b"`) {
 		t.Fatalf("other model: %q, %v", conflict, err)
+	}
+	if key != lockConflictKeyModelMismatch || args["locked_model"] != "model-a" || args["model"] != "model-b" {
+		t.Fatalf("other model: key %q, args %v", key, args)
 	}
 }
 

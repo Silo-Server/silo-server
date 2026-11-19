@@ -1,9 +1,13 @@
 package catalog
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -81,100 +85,81 @@ func TestCoalesceSearchIndexEvents(t *testing.T) {
 	}
 }
 
-func TestStaleCatalogSearchIndexUIDs(t *testing.T) {
-	uids := []string{
-		"silo_media_items_rebuild_100", // superseded rebuild
-		"silo_media_items_rebuild_200", // newly active
-		"silo_media_items",             // legacy previously-active index
-		"other_app_index",              // unrelated index on a shared instance
-		"silo_media_items_rebuild_50",  // failed-run leftover
-		"",
-	}
-	stale := staleCatalogSearchIndexUIDs(uids, "silo_media_items", "silo_media_items_rebuild_200", "silo_media_items")
-	sort.Strings(stale)
-	want := []string{"silo_media_items", "silo_media_items_rebuild_100", "silo_media_items_rebuild_50"}
-	if !slices.Equal(stale, want) {
-		t.Fatalf("stale = %v, want %v", stale, want)
-	}
-
-	// The newly active index must survive even when it is also the previous
-	// active uid (re-running a rebuild that already swapped).
-	if got := staleCatalogSearchIndexUIDs([]string{"idx_rebuild_1"}, "idx", "idx_rebuild_1", "idx_rebuild_1"); len(got) != 0 {
-		t.Fatalf("active index must never be deleted, got %v", got)
+// Meilisearch rejects a search whose attributesToSearchOn names an attribute
+// the index does not search, so a two-term attribute missing from the index
+// settings would send every two-term search to the Postgres fallback.
+func TestMeilisearchTwoTermAttributesAreSearchable(t *testing.T) {
+	searchable, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["searchableAttributes"].([]string)
+	for _, attribute := range meilisearchTwoTermSearchAttributes {
+		if !slices.Contains(searchable, attribute) {
+			t.Errorf("two-term search attribute %q is not in searchableAttributes %v", attribute, searchable)
+		}
 	}
 }
 
-func TestCatalogSearchIndexStateRequiresRebuild(t *testing.T) {
-	const expected = 123
-	tests := []struct {
-		name        string
-		state       SearchIndexState
-		indexPrefix string
-		want        bool
-	}{
-		{name: "missing index", state: SearchIndexState{SchemaVersion: expected}, indexPrefix: "index", want: true},
-		{name: "stale schema", state: SearchIndexState{ActiveIndexUID: "index", SchemaVersion: expected - 1}, indexPrefix: "index", want: true},
-		{name: "changed prefix", state: SearchIndexState{ActiveIndexUID: "old_rebuild_123", SchemaVersion: expected}, indexPrefix: "new", want: true},
-		{name: "current legacy uid", state: SearchIndexState{ActiveIndexUID: "index", SchemaVersion: expected}, indexPrefix: "index", want: false},
-		{name: "current rebuild uid", state: SearchIndexState{ActiveIndexUID: "index_rebuild_123", SchemaVersion: expected}, indexPrefix: "index", want: false},
-		{name: "similar prefix", state: SearchIndexState{ActiveIndexUID: "index_rebuild_rebuild_123", SchemaVersion: expected}, indexPrefix: "index", want: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := catalogSearchIndexStateRequiresRebuild(tc.state, expected, tc.indexPrefix); got != tc.want {
-				t.Fatalf("catalogSearchIndexStateRequiresRebuild() = %t, want %t", got, tc.want)
-			}
-		})
+// meilisearchKeywordMatchCount cuts a keyword ranking at its first weaker hit,
+// which drops only weaker hits while the index ranks by words, typo and
+// proximity before anything else.
+func TestMeilisearchRankingRulesLeadWithWordsTypoProximity(t *testing.T) {
+	rules, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["rankingRules"].([]string)
+	if want := []string{"words", "typo", "proximity"}; len(rules) < len(want) || !slices.Equal(rules[:len(want)], want) {
+		t.Fatalf("rankingRules = %v, want them to begin with %v", rules, want)
 	}
 }
 
-func TestCatalogSearchIndexRequiresRebuildWhenActiveUIDIsMissingFromTarget(t *testing.T) {
-	const (
-		expectedSchema = 123
-		indexPrefix    = "index"
+// A failed rebuild must not leave its partial index behind, even when the
+// failure is its own context being canceled, and a new rebuild clears the
+// leftovers of runs that died before they could clean up.
+func TestCatalogSearchRebuildRemovesFailedBuildIndexes(t *testing.T) {
+	const leftover = "silo_media_items_rebuild_1"
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var (
+		mu      sync.Mutex
+		created string
+		deleted []string
 	)
 	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/indexes/index_rebuild_123/stats":
-			_, _ = w.Write([]byte(`{"numberOfDocuments":42}`))
-		case "/indexes/index_rebuild_456/stats":
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"Index not found.","code":"index_not_found"}`))
-		case "/indexes/index_rebuild_789/stats":
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/indexes":
+			_, _ = w.Write([]byte(`{"results":[{"uid":"silo_media_items"},{"uid":"` + leftover + `"},{"uid":"other_app"}],"offset":0,"limit":100,"total":3}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/indexes":
+			var body struct {
+				UID string `json:"uid"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			created = body.UID
+			_, _ = w.Write([]byte(`{"taskUid":1}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/indexes/"):
+			deleted = append(deleted, strings.TrimPrefix(r.URL.Path, "/indexes/"))
+			_, _ = w.Write([]byte(`{"taskUid":2}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/tasks/"):
+			_, _ = w.Write([]byte(`{"status":"succeeded"}`))
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/settings"):
+			// The task running the rebuild is canceled mid-request.
+			cancel()
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"message":"Unavailable.","code":"internal"}`))
 		default:
 			t.Errorf("unexpected Meilisearch request %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	})
-	tests := []struct {
-		name    string
-		uid     string
-		want    bool
-		wantErr bool
-	}{
-		{name: "active uid exists", uid: "index_rebuild_123", want: false},
-		{name: "active uid missing after target move", uid: "index_rebuild_456", want: true},
-		{name: "target temporarily unavailable", uid: "index_rebuild_789", wantErr: true},
+	settings := DefaultCatalogSearchSettings()
+	settings.Provider = SearchProviderMeilisearch
+
+	if _, err := NewCatalogSearchIndexer(nil, nil).rebuildLocked(ctx, nil, settings, client); err == nil {
+		t.Fatal("rebuildLocked succeeded, want the settings failure")
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := catalogSearchIndexRequiresRebuildOnTarget(
-				t.Context(),
-				client,
-				SearchIndexState{ActiveIndexUID: tc.uid, SchemaVersion: expectedSchema},
-				expectedSchema,
-				indexPrefix,
-			)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("catalogSearchIndexRequiresRebuildOnTarget() error = %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("catalogSearchIndexRequiresRebuildOnTarget() = %t, want %t", got, tc.want)
-			}
-		})
+	mu.Lock()
+	defer mu.Unlock()
+	if created == "" || created == leftover {
+		t.Fatalf("created build index %q", created)
+	}
+	if want := []string{leftover, created}; !slices.Equal(deleted, want) {
+		t.Fatalf("deleted indexes = %v, want %v", deleted, want)
 	}
 }
 
@@ -236,58 +221,94 @@ func TestCatalogSearchIndexerWaitsForRestartBeforeUsingSavedSchemaSettings(t *te
 	}
 }
 
-func TestCatalogSearchMaintenanceTargetEqual(t *testing.T) {
-	startup := DefaultCatalogSearchSettings()
-	startup.Provider = SearchProviderMeilisearch
-	startup.MeilisearchURL = "http://meilisearch:7700"
-	startup.IndexTypes = []string{"movie", "series"}
+// The sync task rebuilds an index that is missing or has another schema,
+// applies changed index settings in place to one that has the current schema,
+// and otherwise leaves the index alone. The in-place update never sends the
+// embedder, which only a rebuild may change, and fails when Meilisearch fails
+// the settings task, so the recorded fingerprint stays and the next sync
+// retries.
+func TestCatalogSearchIndexMaintenanceChoosesRebuildSettingsOrNothing(t *testing.T) {
+	settings := DefaultCatalogSearchSettings()
+	settings.Provider = SearchProviderMeilisearch
+	settings.SemanticEnabled = true
+	schema := catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized)
+	const (
+		active  = "silo_media_items_rebuild_100"
+		missing = "silo_media_items_rebuild_200"
+	)
+	var (
+		mu         sync.Mutex
+		patched    []map[string]any
+		taskStatus = "succeeded"
+	)
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/indexes/"+active+"/stats":
+			_, _ = w.Write([]byte(`{"numberOfDocuments":42}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/indexes/"+missing+"/stats":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Index not found.","code":"index_not_found"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/indexes/"+active+"/settings":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode settings: %v", err)
+			}
+			patched = append(patched, body)
+			_, _ = w.Write([]byte(`{"taskUid":7}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/tasks/7":
+			_, _ = w.Write([]byte(`{"status":"` + taskStatus + `","error":{"message":"bad setting"}}`))
+		default:
+			t.Errorf("unexpected Meilisearch request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
 
-	tuningOnly := startup
-	tuningOnly.SyncBatchSize++
-	tuningOnly.RebuildBatchSize++
-	tuningOnly.RebuildQueueDepth++
-	if !catalogSearchMaintenanceTargetEqual(startup, tuningOnly) {
-		t.Fatal("hot-reloadable maintenance tuning must not require a restart fence")
+	tests := []struct {
+		name  string
+		state SearchIndexState
+		want  catalogSearchIndexMaintenance
+	}{
+		{"current", SearchIndexState{ActiveIndexUID: active, SchemaVersion: schema, SettingsFingerprint: catalogSearchMeilisearchSettingsFingerprint}, catalogSearchIndexCurrentSettings},
+		{"settings changed", SearchIndexState{ActiveIndexUID: active, SchemaVersion: schema, SettingsFingerprint: "older"}, catalogSearchIndexApplySettings},
+		{"settings unknown after upgrade", SearchIndexState{ActiveIndexUID: active, SchemaVersion: schema}, catalogSearchIndexApplySettings},
+		{"schema changed", SearchIndexState{ActiveIndexUID: active, SchemaVersion: schema + 1}, catalogSearchIndexRebuild},
+		{"index missing from Meilisearch", SearchIndexState{ActiveIndexUID: missing, SchemaVersion: schema}, catalogSearchIndexRebuild},
+		{"never built", SearchIndexState{}, catalogSearchIndexRebuild},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := planCatalogSearchIndexMaintenance(t.Context(), client, tc.state, settings)
+			if err != nil {
+				t.Fatalf("planCatalogSearchIndexMaintenance() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("planCatalogSearchIndexMaintenance() = %d, want %d", got, tc.want)
+			}
+		})
 	}
 
-	desired := startup
-	desired.SemanticEnabled = true
-	if catalogSearchMaintenanceTargetEqual(startup, desired) {
-		t.Fatal("semantic setting change must wait for the startup configuration")
+	indexer := NewCatalogSearchIndexer(nil, nil)
+	if err := indexer.applyIndexSettingsLocked(t.Context(), client, active); err != nil {
+		t.Fatalf("applyIndexSettingsLocked() error = %v", err)
 	}
-
-	desired = startup
-	desired.IndexTypes = []string{"movie"}
-	if catalogSearchMaintenanceTargetEqual(startup, desired) {
-		t.Fatal("index scope change must wait for the startup configuration")
+	mu.Lock()
+	if len(patched) != 1 {
+		t.Fatalf("settings requests = %d, want 1", len(patched))
 	}
-}
-
-func TestCatalogSearchIndexHasNewerSchema(t *testing.T) {
-	newer := SearchIndexState{
-		ActiveIndexUID: "new-index",
-		SchemaVersion:  (SearchMeilisearchSchemaVersion + 1) * 1_000_000,
+	if _, ok := patched[0]["embedders"]; ok {
+		t.Fatal("in-place settings update sent the embedder")
 	}
-	if !catalogSearchIndexHasNewerSchema(newer) {
-		t.Fatal("newer schema should fence an older server from rebuilding")
+	want, _ := json.Marshal(catalogSearchMeilisearchIndexSettings())
+	got, _ := json.Marshal(patched[0])
+	if string(got) != string(want) {
+		t.Fatalf("settings sent = %s, want %s", got, want)
 	}
-	if catalogSearchIndexHasNewerSchema(SearchIndexState{ActiveIndexUID: "index", SchemaVersion: SearchMeilisearchSchemaVersion * 1_000_000}) {
-		t.Fatal("current schema generation should not be treated as newer")
-	}
-}
-
-func TestRebuildIndexingPercent(t *testing.T) {
-	if got := rebuildIndexingPercent(0, 0); got != 50 {
-		t.Fatalf("unknown total should report midpoint, got %v", got)
-	}
-	if got := rebuildIndexingPercent(0, 10); got != 5 {
-		t.Fatalf("start of band = %v, want 5", got)
-	}
-	if got := rebuildIndexingPercent(10, 10); got != 90 {
-		t.Fatalf("end of band = %v, want 90", got)
-	}
-	// Documents created after the total was counted must not push past the band.
-	if got := rebuildIndexingPercent(15, 10); got != 90 {
-		t.Fatalf("overshoot should clamp to 90, got %v", got)
+	taskStatus = "failed"
+	mu.Unlock()
+	if err := indexer.applyIndexSettingsLocked(t.Context(), client, active); err == nil {
+		t.Fatal("applyIndexSettingsLocked() succeeded although Meilisearch failed the settings task")
 	}
 }

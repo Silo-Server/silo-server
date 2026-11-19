@@ -8,6 +8,7 @@ import type {
   ReprobeNodeResult,
   StreamNode,
   SystemResources,
+  UpdateNodeRequest,
 } from "@/api/types";
 import { t, type MessageKey } from "@/i18n";
 import { parseHWDeviceList } from "@/lib/hwDevices";
@@ -1683,4 +1684,38 @@ function finiteNumber(value: number | null | undefined): number | null {
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+/**
+ * Puts the stored value back into every field of an edit the node declares
+ * from its own environment (`env_managed`). The server refuses a change to
+ * such a field and accepts one that restates it, so a full-form save sends
+ * the stored values for them, whatever the form state holds. Only keys the
+ * body already carries are restated, so a field the form leaves out for this
+ * node type stays out.
+ */
+export function restoreEnvManagedFields(
+  body: UpdateNodeRequest,
+  node: StreamNode,
+): UpdateNodeRequest {
+  const locked = new Set(node.env_managed ?? []);
+  const out: UpdateNodeRequest = { ...body };
+  const restate = <K extends keyof UpdateNodeRequest>(key: K, value: UpdateNodeRequest[K]) => {
+    if (locked.has(key) && key in out) out[key] = value;
+  };
+  restate("name", node.name);
+  restate("url", node.url);
+  restate("public_url", node.public_url ?? null);
+  restate("group", node.group ?? "");
+  restate("max_jobs", node.max_jobs ?? 0);
+  restate("max_bandwidth_kbps", node.max_bandwidth_kbps ?? 0);
+  restate("hw_accel_override", node.hw_accel_override ?? null);
+  restate("hw_device_override", node.hw_device_override ?? null);
+  restate("download_artifact_dir_override", node.download_artifact_dir_override ?? null);
+  restate(
+    "download_artifact_max_bytes_override",
+    node.download_artifact_max_bytes_override ?? null,
+  );
+  if (node.source_access) restate("source_access", node.source_access);
+  return out;
 }

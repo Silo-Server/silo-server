@@ -129,7 +129,7 @@ it("does not go back to the provider after signing out in this tab", async () =>
   renderLogin();
   await settled();
   expect(leave).not.toHaveBeenCalled();
-  expect(screen.getByRole("link", { name: "Company SSO" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Sign in with Company SSO" })).toBeTruthy();
 });
 
 it("does not auto-redirect when a password provider or a second provider is listed", async () => {
@@ -148,7 +148,7 @@ it("does not auto-redirect when a password provider or a second provider is list
 it("asks the provider to pick an account when switching account", async () => {
   auth.providers = [OIDC];
   renderLogin("/login?redirect=%2Factivate%3Fcode%3D48217730&switch_account=1");
-  const link = screen.getByRole("link", { name: "Company SSO" });
+  const link = screen.getByRole("link", { name: "Sign in with Company SSO" });
   expect(link.getAttribute("href")).toBe(
     "/api/v2/auth/oauth/5/start?next=%2Factivate%3Fcode%3D48217730&prompt=select_account",
   );
