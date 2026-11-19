@@ -37,15 +37,21 @@ func binaryRelease(t *testing.T, version string, binary []byte) (*pluginv1.Plugi
 	return manifest, manifestBytes, archiveBytes
 }
 
-func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
-	// Use an ELF architecture different from the running test so the cache
-	// represents a volume moved from another proxy platform.
+// foreignELF returns an ELF header for another platform than the running
+// test's: linux/arm64, or linux/amd64 on an arm64 host.
+func foreignELF() []byte {
 	binaryData := make([]byte, 64)
 	copy(binaryData, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
 	binaryData[16], binaryData[18], binaryData[20], binaryData[52] = 2, 0xB7, 1, 64
-	if runtime.GOARCH == "arm64" {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
 		binaryData[18] = 0x3E // EM_X86_64
 	}
+	return binaryData
+}
+
+func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
+	// The cache represents a volume moved from another proxy platform.
+	binaryData := foreignELF()
 	manifest, manifestBytes, _ := binaryRelease(t, "0.0.19", binaryData)
 	installation := &Installation{ID: 42, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: "/api/plugins/install-cached/plugin"}
 	cache := NewArchiveCacheAt(&legacyArchiveStore{}, t.TempDir())
@@ -610,4 +616,182 @@ func requireLocalInstallPath(t *testing.T, cache *ArchiveCache, installation *In
 		t.Fatal(err)
 	}
 	return path
+}
+
+// platformTestStore is an installation's stored archive, holding another
+// platform's build, and the builds stored for other platforms.
+type platformTestStore struct {
+	mu     sync.Mutex
+	stored *InstallationArchive
+	builds map[string]*InstallationArchive
+}
+
+func (s *platformTestStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
+	return s.stored, nil
+}
+
+func (s *platformTestStore) SaveArchive(context.Context, int, []byte, string, []byte) error {
+	return nil
+}
+
+func (s *platformTestStore) GetPlatformArchive(_ context.Context, _ int, goos, goarch, baseChecksum string) (*InstallationArchive, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if archive, ok := s.builds[goos+"/"+goarch+"@"+baseChecksum]; ok {
+		return archive, nil
+	}
+	return nil, ErrArchiveNotFound
+}
+
+func (s *platformTestStore) SavePlatformArchive(_ context.Context, in SavePlatformArchiveInput) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.builds == nil {
+		s.builds = map[string]*InstallationArchive{}
+	}
+	s.builds[in.OS+"/"+in.Arch+"@"+in.BaseChecksum] = in.Archive
+	return true, nil
+}
+
+// platformBuildFixture is an installation from a catalog whose stored
+// archive holds another platform's build, on a cache without its own root as
+// an API server has, and a catalog that serves this platform's build.
+type platformBuildFixture struct {
+	store        *platformTestStore
+	installation *Installation
+	hostBinary   []byte
+	fetches      atomic.Int32
+	// mutate, when set, changes the fetched build's manifest.
+	mutate func(*pluginv1.PluginManifest)
+}
+
+func newPlatformBuildFixture(t *testing.T) *platformBuildFixture {
+	t.Helper()
+	foreign := foreignELF()
+	manifest, manifestBytes, archive := binaryRelease(t, "1.0.0", foreign)
+	repositoryID := 1
+	return &platformBuildFixture{
+		store: &platformTestStore{stored: &InstallationArchive{
+			InstallationID: 7, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archive,
+		}},
+		installation: &Installation{
+			ID: 7, RepositoryID: &repositoryID, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+			InstallPath: filepath.Join(t.TempDir(), "install-1", "plugin"),
+		},
+		// Not an executable format binaryPlatform knows, so it passes as
+		// this platform's.
+		hostBinary: []byte("#!/bin/sh\n# this platform's build\n"),
+	}
+}
+
+func (f *platformBuildFixture) cache(t *testing.T) *ArchiveCache {
+	cache := NewArchiveCache(f.store)
+	cache.platforms = &platformArchives{store: f.store, fetch: func(context.Context, *Installation) (*downloadedBinary, error) {
+		f.fetches.Add(1)
+		manifest := testPluginManifest(t, f.installation.PluginID, f.installation.Version)
+		manifest.Checksum = sha256Hex(f.hostBinary)
+		if f.mutate != nil {
+			f.mutate(manifest)
+		}
+		manifestJSON, err := protojson.Marshal(manifest)
+		if err != nil {
+			return nil, err
+		}
+		return &downloadedBinary{data: f.hostBinary, checksum: manifest.Checksum, manifest: manifest, manifestJSON: manifestJSON}, nil
+	}}
+	return cache
+}
+
+func (f *platformBuildFixture) installedBinary(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(f.installation.InstallPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// A server on another platform than the one that installed a plugin used to
+// run the stored build and fail with exec format error. It fetches the same
+// version's build for its own platform once, stores it, and every server on
+// that platform then rehydrates from the stored one.
+func TestArchiveCacheFetchesThisPlatformsBuildOfAForeignStoredArchive(t *testing.T) {
+	ctx := context.Background()
+	f := newPlatformBuildFixture(t)
+	// A build stored for an earlier release whose package had the same
+	// checksum is not this release's and is fetched again.
+	staleManifest, staleManifestJSON, staleArchive := binaryRelease(t, "0.9.0", []byte("an earlier release"))
+	f.store.builds = map[string]*InstallationArchive{
+		runtime.GOOS + "/" + runtime.GOARCH + "@" + f.store.stored.Checksum: {
+			ManifestJSON: staleManifestJSON, Checksum: staleManifest.GetChecksum(), Bytes: staleArchive,
+		},
+	}
+
+	// A manifest read runs nothing and takes the stored build as it is,
+	// leaving it on disk as the reported servers had it.
+	if _, err := f.cache(t).Manifest(ctx, f.installation); err != nil {
+		t.Fatalf("Manifest() = %v", err)
+	}
+	if f.fetches.Load() != 0 || !bytes.Equal(f.installedBinary(t), foreignELF()) {
+		t.Fatalf("a manifest read fetched %d builds; want the stored build on disk and no fetch", f.fetches.Load())
+	}
+
+	// Running it replaces that build with this platform's, fetched once.
+	manifest, err := f.cache(t).Ensure(ctx, f.installation)
+	if err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	if f.fetches.Load() != 1 || !bytes.Equal(f.installedBinary(t), f.hostBinary) || manifest.GetChecksum() != sha256Hex(f.hostBinary) {
+		t.Fatalf("Ensure() fetched %d builds and installed checksum %s; want this platform's build, fetched once", f.fetches.Load(), manifest.GetChecksum())
+	}
+
+	// Another server on this platform, with an empty cache, uses the stored
+	// build.
+	if err := os.RemoveAll(filepath.Dir(f.installation.InstallPath)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.cache(t).Ensure(ctx, f.installation); err != nil {
+		t.Fatalf("Ensure() on a second server = %v", err)
+	}
+	if f.fetches.Load() != 1 || !bytes.Equal(f.installedBinary(t), f.hostBinary) {
+		t.Fatalf("a second server fetched again (%d fetches) or installed another build", f.fetches.Load())
+	}
+}
+
+// A build Silo can't fetch, or one it can't trust as the installed
+// release for this platform, fails before anything runs, nothing is stored,
+// and starts within the retry delay don't fetch it again.
+func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		setup       func(*platformBuildFixture)
+		wantFetches int32
+	}{
+		{name: "plugin without a catalog", setup: func(f *platformBuildFixture) { f.installation.RepositoryID = nil }},
+		{name: "build declaring another manifest", wantFetches: 1, setup: func(f *platformBuildFixture) {
+			f.mutate = func(m *pluginv1.PluginManifest) { m.Capabilities = m.Capabilities[:0] }
+		}},
+		{name: "build for another platform", wantFetches: 1, setup: func(f *platformBuildFixture) { f.hostBinary = foreignELF() }},
+		{name: "build with a weaker signature than the installed one", wantFetches: 1, setup: func(f *platformBuildFixture) {
+			repo := "https://github.com/Silo-Server/silo-plugin-example"
+			f.installation.Signature = Signature{State: SignatureStateVerified, SourceRepo: &repo}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlatformBuildFixture(t)
+			tc.setup(f)
+			cache := f.cache(t)
+			for range 2 {
+				if _, err := cache.Ensure(context.Background(), f.installation); err == nil {
+					t.Fatal("Ensure() succeeded, want an error naming the platform")
+				}
+			}
+			if f.fetches.Load() != tc.wantFetches || len(f.store.builds) != 0 {
+				t.Fatalf("fetched %d builds and stored %d; want %d fetched and none stored", f.fetches.Load(), len(f.store.builds), tc.wantFetches)
+			}
+			if _, err := os.Stat(f.installation.InstallPath); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("a binary was left to run at the install path: %v", err)
+			}
+		})
+	}
 }
