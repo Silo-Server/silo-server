@@ -64,4 +64,12 @@ func TestDownloadClientAddressesDB(t *testing.T) {
 	if created, last := addresses(t, quiet.ID); created != "" || last != "" {
 		t.Fatalf("a row registered without an address: created %q last %q, want both empty", created, last)
 	}
+
+	web := f.fenceDownload("addr-web", f.fileID, f.contentID, false)
+	if err := f.repo.Create(from("203.0.113.8"), web); err != nil {
+		t.Fatal(err)
+	}
+	if created, last := addresses(t, web.ID); created != "203.0.113.8" || last != "" {
+		t.Fatalf("an ephemeral web row: created %q last %q, want only created", created, last)
+	}
 }

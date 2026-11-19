@@ -1872,7 +1872,7 @@ What records an address:
 
 | Request | Records |
 |---|---|
-| Registration: `POST /downloads`, series and season creates, monitor create, update and sync | Both fields, from the request that inserted the row. A monitor sync is the device's own request, so the episodes it registers take the device's address. |
+| Registration: `POST /downloads`, series and season creates, and the monitor request that inserts episode rows (sync; native monitor create and update insert none) | Both fields, from the request that inserted the row. A monitor sync is the device's own request, so the episodes it registers take the device's address. |
 | Accepted status report (`PATCH /downloads/{id}`) | `last_client_ip`, in the same write as the report. An older or equal event changes nothing. |
 | `GET`/`HEAD /downloads/{id}/file` | `last_client_ip`. The API server authorizes the request and serves the bytes itself, from its disk or relayed from the node that holds the prepared file, so it sees the device. |
 | `GET`/`HEAD /downloads/{id}/file-proxy` | `last_client_ip`, when the API server authorizes the request. The bytes then come from the node the 307 names, which records nothing, so range requests the device sends straight to the node do not update it. |
