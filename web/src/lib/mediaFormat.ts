@@ -127,8 +127,8 @@ export function audioTrackLabel(track: AudioTrackFormat): string {
 const FORMAT_WORDS = new Set([
   ..."atsc a/52 a/52a a/52b dca dts dts-hd ma coherent acoustics truehd atmos".split(" "),
   ..."ac3 ac-3 eac3 e-ac3 eac-3 e-ac-3 aac advanced audio coding codec interactive".split(" "),
-  ..."flac free lossless alac apple opus vorbis mp3 mpeg layer pcm signed unsigned".split(" "),
-  ..."little-endian big-endian dolby digital plus surround stereo mono".split(" "),
+  ..."flac free lossless alac apple opus vorbis mp2 mp3 mpeg layer pcm signed unsigned".split(" "),
+  ..."floating point little-endian big-endian dolby digital plus surround stereo mono".split(" "),
   ..."1.0 2.0 2.1 5.0 5.1 7.0 7.1".split(" "),
 ]);
 // Numbers a format name can carry ("MPEG audio layer 3", "PCM signed 16-bit"),
