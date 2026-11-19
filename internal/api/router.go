@@ -3619,8 +3619,8 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 
 	// A handler's panic becomes its 500 here, inside the request metrics and
 	// the activity log, so both record it like any other server error
-	// (#3735). Recoverer re-raises http.ErrAbortHandler unchanged.
-	r.Use(middleware.Recoverer)
+	// (#3735), an upgrade request included.
+	r.Use(apimw.Recoverer)
 }
 
 // nodeConfigSettings reads the server settings a transcode node's

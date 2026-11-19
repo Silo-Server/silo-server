@@ -59,30 +59,46 @@ func nativeRequestCount(t *testing.T, method, path, status string) float64 {
 
 // A native handler that panics is answered with a 500 by the recovery
 // middleware. The request metrics and the activity log record it as that 500,
-// like any other server error (#3735).
+// like any other server error (#3735), also when the request asks for a
+// connection upgrade, for which chi's Recoverer writes no status.
 func TestNativePanickingRequestIsRecordedAsServerError(t *testing.T) {
 	cfg, err := config.LoadFromDB(map[string]string{})
 	if err != nil {
 		t.Fatalf("LoadFromDB: %v", err)
 	}
-	activity := &capturingActivityWriter{}
-	root := chi.NewRouter()
-	useBaseMiddleware(root, Dependencies{Config: cfg, ActivityLogWriter: activity})
-	const pattern = "/api/v1/panic-test"
-	root.Get(pattern, func(http.ResponseWriter, *http.Request) { panic("boom") })
+	for _, tc := range []struct {
+		name    string
+		pattern string
+		upgrade bool
+	}{
+		{name: "plain request", pattern: "/api/v1/panic-test"},
+		{name: "upgrade request", pattern: "/api/v1/panic-upgrade-test", upgrade: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			activity := &capturingActivityWriter{}
+			root := chi.NewRouter()
+			useBaseMiddleware(root, Dependencies{Config: cfg, ActivityLogWriter: activity})
+			root.Get(tc.pattern, func(http.ResponseWriter, *http.Request) { panic("boom") })
 
-	before := nativeRequestCount(t, http.MethodGet, pattern, "500")
-	rec := httptest.NewRecorder()
-	root.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, pattern, nil))
+			before := nativeRequestCount(t, http.MethodGet, tc.pattern, "500")
+			req := httptest.NewRequest(http.MethodGet, tc.pattern, nil)
+			if tc.upgrade {
+				req.Header.Set("Connection", "Upgrade")
+				req.Header.Set("Upgrade", "websocket")
+			}
+			rec := httptest.NewRecorder()
+			root.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
-	}
-	if got := nativeRequestCount(t, http.MethodGet, pattern, "500") - before; got != 1 {
-		t.Fatalf("streamapp_http_requests_total{status=500} grew by %v, want 1", got)
-	}
-	entries := activity.recorded()
-	if len(entries) != 1 || entries[0].StatusCode != http.StatusInternalServerError || entries[0].PathPattern != pattern {
-		t.Fatalf("activity entries = %+v, want one 500 row for %s", entries, pattern)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", rec.Code)
+			}
+			if got := nativeRequestCount(t, http.MethodGet, tc.pattern, "500") - before; got != 1 {
+				t.Fatalf("streamapp_http_requests_total{status=500} grew by %v, want 1", got)
+			}
+			entries := activity.recorded()
+			if len(entries) != 1 || entries[0].StatusCode != http.StatusInternalServerError || entries[0].PathPattern != tc.pattern {
+				t.Fatalf("activity entries = %+v, want one 500 row for %s", entries, tc.pattern)
+			}
+		})
 	}
 }
