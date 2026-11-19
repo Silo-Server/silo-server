@@ -233,7 +233,9 @@ The admin reads a monitoring tool uses follow a stricter rule: `poster_url` on
 `GET /api/v2/admin/sessions` rows, on the rows embedded in
 `session.started`, `session.paused` and `session.resumed` events, and on
 `GET /api/v2/admin/catalog/items` items is always a URL this server issued, and
-absent only when the title has no poster. An episode carries its series'
+absent only when the title has no poster. `GET /api/v2/profiles/household/sessions`
+reads the same session rows, so a household manager's session list follows the
+rule too. An episode carries its series'
 poster. `GET /api/v2/admin/catalog/capabilities` reports `item_posters: true`
 when the server applies this rule.
 
