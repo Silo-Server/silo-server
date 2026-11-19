@@ -58214,7 +58214,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Les tâches sont enregistrées au démarrage du serveur : activer ou désactiver une tâche prend donc effet après un redémarrage. Une fois une tâche créée, modifiez sa planification sur sa page de tâche."
+      "value": "L’activation ou la désactivation d’une tâche s’applique sans redémarrage, mais les autres serveurs peuvent mettre un moment à la prendre en compte. Une fois une tâche activée, modifiez sa planification sur sa page de tâche."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79426,6 +79426,12 @@
     {
       "type": 0,
       "value": "Connexion TV : démarrage"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Demandes d’affiche"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

@@ -2282,6 +2282,29 @@ the value history's `media_item_id` and its filter take. The summary items, the
 household sessions listing and the row in each `session.*` WebSocket event share this
 naming.
 
+With `subtitle: true` in the capabilities, each row carries `subtitle`: the
+subtitle the session's current playback plan delivers, or null when it shows
+none. It uses the plan's names: `track_id` is the inventory `track_id` the plan
+selected, `language`, `codec`, `source` (`embedded`, `external`, `downloaded`),
+`forced` and `hearing_impaired` come from that inventory row, and `delivery`
+says how the plan delivers it: `burn_in` (burned into the video), `embedded`
+(carried in the stream the client plays, `subtitle.embedded`), `hls_rendition`
+(a WebVTT rendition of the HLS stream) or `sidecar` (a file the client fetches,
+`subtitle.artifact`). `format` is the format the client receives for a sidecar
+or HLS rendition, and null otherwise. The value follows every replan, including
+the `track_change` a client sends when it switches subtitles, and survives a
+restart and a move to another server, because the session's recovery card and
+its shared row carry it. The row in each `session.*` event carries it too, and
+each [playback history](#playback-history) entry keeps the one the play ended
+on.
+
+The server sees only what reaches it as a plan. A client that turns an already
+delivered sidecar on or off in its own player without a replan changes what is
+on screen and not `subtitle`; every sidecar URL in the inventory stays
+published whatever is selected, and progress reports carry no subtitle. Jellyfin-protocol
+and Audiobookshelf sessions always report null: their progress reports name a
+Jellyfin stream index, not a plan the server made.
+
 `GET /api/v2/admin/sessions/summary` returns `{count, items}`. Optional `user_id`
 filters by account; omitted means all accounts. `limit` chooses a sample of 1–100
 observations (default 20), ordered by start time descending and session identity

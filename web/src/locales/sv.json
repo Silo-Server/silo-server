@@ -52386,7 +52386,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Uppgifter registreras när servern startar, så om du slår på eller av en uppgift gäller ändringen först efter en omstart. När en uppgift väl finns ändrar du dess schema på uppgiftens sida."
+      "value": "Om du slår på eller av en uppgift gäller ändringen utan omstart, men det kan ta en stund innan andra servrar får ändringen. När en uppgift är påslagen ändrar du dess schema på uppgiftens sida."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -72771,6 +72771,12 @@
     {
       "type": 0,
       "value": "Tv-inloggning: start"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Affischförfrågningar"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

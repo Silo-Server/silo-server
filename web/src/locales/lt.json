@@ -65201,7 +65201,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Užduotys registruojamos paleidžiant serverį, todėl užduoties įjungimas ar išjungimas įsigalioja po paleidimo iš naujo. Kai užduotis jau sukurta, jos tvarkaraštį keiskite užduoties puslapyje."
+      "value": "Užduoties įjungimas ar išjungimas įsigalioja be paleidimo iš naujo, nors kitiems serveriams gali prireikti šiek tiek laiko, kad pakeitimą perimtų. Kai užduotis įjungta, jos tvarkaraštį keiskite užduoties puslapyje."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -87512,6 +87512,12 @@
     {
       "type": 0,
       "value": "Prisijungimas televizoriuje: pradžia"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatų užklausos"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

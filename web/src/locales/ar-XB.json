@@ -55506,7 +55506,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "\u200F\u202ETasks are registered when the server starts, so turning one on or off takes effect after a restart. Once a task exists, change its schedule on its task page.\u202C"
+      "value": "\u200F\u202ETurning a task on or off applies without a restart, though other servers can take a moment to pick it up. Once a task is on, change its schedule on its task page.\u202C"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -76647,6 +76647,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ETV sign-in: start\u202C"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPoster requests\u202C"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

@@ -419,6 +419,7 @@ export const v2Operations = {
   "GET /api/v2/images/capabilities": "getImageCapabilities",
   "GET /api/v2/invitations/capabilities": "getInvitationCapabilities",
   "GET /api/v2/invitations/{token}": "lookupInvitation",
+  "GET /api/v2/item-posters/{content_id}": "getItemPoster",
   "GET /api/v2/libraries": "listLibraries",
   "GET /api/v2/libraries/capabilities": "getLibraryCapabilities",
   "GET /api/v2/libraries/metadata-match-queue": "listMetadataMatchQueues",

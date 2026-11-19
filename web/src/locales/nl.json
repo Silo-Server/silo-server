@@ -52158,7 +52158,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Taken worden geregistreerd wanneer de server start, dus het aan- of uitzetten van een taak werkt pas na een herstart. Zodra een taak bestaat, wijzig je de planning op de pagina van die taak."
+      "value": "Een taak aan- of uitzetten werkt zonder herstart, maar andere servers kunnen er even over doen om de wijziging over te nemen. Staat een taak aan, dan wijzig je de planning op de pagina van die taak."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -72539,6 +72539,12 @@
     {
       "type": 0,
       "value": "Tv-aanmelding: starten"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Posterverzoeken"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

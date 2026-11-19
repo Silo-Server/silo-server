@@ -58462,7 +58462,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Sarcinile sunt înregistrate la pornirea serverului, așa că activarea sau dezactivarea uneia are efect după o repornire. După ce o sarcină există, modificați-i programul pe pagina sarcinii."
+      "value": "Activarea sau dezactivarea unei sarcini se aplică fără repornire, deși celelalte servere pot avea nevoie de câteva momente pentru a o prelua. După ce o sarcină este activată, modificați-i programul pe pagina sarcinii."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79806,6 +79806,12 @@
     {
       "type": 0,
       "value": "Conectare pe TV: pornire"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Cereri pentru postere"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

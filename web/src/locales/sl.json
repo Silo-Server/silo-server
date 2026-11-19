@@ -64377,7 +64377,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Opravila se registrirajo ob zagonu strežnika, zato vklop ali izklop opravila začne veljati po ponovnem zagonu. Ko opravilo obstaja, njegov urnik spremenite na strani opravila."
+      "value": "Vklop ali izklop opravila začne veljati brez ponovnega zagona, vendar lahko drugi strežniki za uveljavitev potrebujejo trenutek. Ko je opravilo vklopljeno, njegov urnik spremenite na strani opravila."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -86572,6 +86572,12 @@
     {
       "type": 0,
       "value": "Prijava na TV: začetek"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Zahteve za plakate"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

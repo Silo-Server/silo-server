@@ -57826,7 +57826,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "המשימות נרשמות כשהשרת מופעל, ולכן הפעלה או כיבוי של משימה נכנסים לתוקף אחרי הפעלה מחדש. אחרי שמשימה נוצרה, אפשר לשנות את לוח הזמנים שלה בדף המשימה."
+      "value": "הפעלה או כיבוי של משימה נכנסים לתוקף בלי הפעלה מחדש, אבל לשרתים אחרים ייתכן שיידרש רגע קצר כדי לקלוט את השינוי. אחרי שמשימה הופעלה, אפשר לשנות את לוח הזמנים שלה בדף המשימה."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79189,6 +79189,12 @@
     {
       "type": 0,
       "value": "התחברות בטלוויזיה: התחלה"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "בקשות פוסטר"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

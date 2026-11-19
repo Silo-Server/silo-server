@@ -65180,7 +65180,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Zadania są rejestrowane podczas uruchamiania serwera, więc włączenie lub wyłączenie zadania zadziała dopiero po restarcie. Gdy zadanie już istnieje, zmień jego harmonogram na stronie zadania."
+      "value": "Włączenie lub wyłączenie zadania działa bez ponownego uruchamiania serwera, choć inne serwery mogą potrzebować chwili, aby uwzględnić zmianę. Gdy zadanie jest włączone, zmień jego harmonogram na stronie zadania."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -87419,6 +87419,12 @@
     {
       "type": 0,
       "value": "Logowanie na TV: rozpoczęcie"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Żądania plakatów"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

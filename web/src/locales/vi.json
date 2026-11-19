@@ -52614,7 +52614,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tác vụ được đăng ký khi máy chủ khởi động, nên việc bật hoặc tắt một tác vụ chỉ có hiệu lực sau khi khởi động lại. Khi tác vụ đã tồn tại, hãy thay đổi lịch của tác vụ trên trang tác vụ đó."
+      "value": "Việc bật hoặc tắt một tác vụ có hiệu lực mà không cần khởi động lại, tuy các máy chủ khác có thể cần một lúc để nhận thay đổi. Khi tác vụ đã bật, hãy thay đổi lịch của tác vụ trên trang tác vụ đó."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -73143,6 +73143,12 @@
     {
       "type": 0,
       "value": "Đăng nhập TV: bắt đầu"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Yêu cầu ảnh poster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

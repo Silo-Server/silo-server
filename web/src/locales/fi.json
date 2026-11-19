@@ -52474,7 +52474,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tehtävät rekisteröidään palvelimen käynnistyessä, joten tehtävän ottaminen käyttöön tai poistaminen käytöstä tulee voimaan uudelleenkäynnistyksen jälkeen. Kun tehtävä on olemassa, muuta sen aikataulua tehtävän omalla sivulla."
+      "value": "Tehtävän ottaminen käyttöön tai poistaminen käytöstä tulee voimaan ilman uudelleenkäynnistystä, mutta muilta palvelimilta muutoksen huomaaminen voi kestää hetken. Kun tehtävä on käytössä, muuta sen aikataulua tehtävän omalla sivulla."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -72911,6 +72911,12 @@
     {
       "type": 0,
       "value": "Tv-kirjautuminen: aloitus"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Julistepyynnöt"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
