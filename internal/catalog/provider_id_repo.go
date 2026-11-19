@@ -361,6 +361,14 @@ func (r *ProviderIDRepository) GetByContentIDs(ctx context.Context, contentIDs [
 // item, leaving unmanaged providers (excludedProviderIDs, e.g. the scanner's
 // manga_series identity anchor) intact.
 func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error {
+	return r.inItemLockedTx(ctx, contentID, func(tx pgx.Tx, itemType string) error {
+		return r.ReplaceByContentIDTx(ctx, tx, contentID, itemType, providerIDs)
+	})
+}
+
+// inItemLockedTx runs write in a transaction holding the item's row lock and
+// commits it. write gets the item's type.
+func (r *ProviderIDRepository) inItemLockedTx(ctx context.Context, contentID string, write func(tx pgx.Tx, itemType string) error) error {
 	if strings.TrimSpace(contentID) == "" {
 		return fmt.Errorf("content_id is required")
 	}
@@ -382,7 +390,7 @@ func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID
 		return fmt.Errorf("loading item type for %s: %w", contentID, err)
 	}
 
-	if err := r.ReplaceByContentIDTx(ctx, tx, contentID, itemType, providerIDs); err != nil {
+	if err := write(tx, itemType); err != nil {
 		return err
 	}
 

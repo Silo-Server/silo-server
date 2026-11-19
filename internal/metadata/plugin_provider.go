@@ -206,9 +206,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 		return nil, err
 	}
 
-	// Work-level keys of a book item are never sent to a plugin.
-	queryIDs, _ := bookid.SplitWorkIDs(query.ContentType, query.ProviderIDs)
-	providerIDs, err := structFromStringMap(queryIDs)
+	providerIDs, err := structFromStringMap(pluginRequestProviderIDs(query.ContentType, query.ProviderIDs))
 	if err != nil {
 		return nil, fmt.Errorf("encode provider ids for plugin search: %w", err)
 	}
@@ -259,8 +257,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 // second case ProviderId is empty and the plugin reads the IDs it needs from
 // ProviderIds.
 func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (*MetadataResult, error) {
-	// Work-level keys of a book item are never sent to a plugin.
-	req.ProviderIDs, _ = bookid.SplitWorkIDs(req.ContentType, req.ProviderIDs)
+	req.ProviderIDs = pluginRequestProviderIDs(req.ContentType, req.ProviderIDs)
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" && !p.hasLookupProviderID(req.ProviderIDs) {
 		return nil, nil
@@ -379,6 +376,8 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 		return nil, err
 	}
 
+	// A person's ids, not an item's: there is no item type, and no work key
+	// to strip (pluginRequestProviderIDs).
 	providerIDs, err := structFromStringMap(req.ProviderIDs)
 	if err != nil {
 		return nil, err
@@ -417,6 +416,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 // capability also declared lookup_images: an enrichment provider such as
 // MDBList has no artwork, so it is not asked.
 func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]RemoteImage, error) {
+	req.ProviderIDs = pluginRequestProviderIDs(req.ContentType, req.ProviderIDs)
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" && (!p.lookupImages || !p.hasLookupProviderID(req.ProviderIDs)) {
 		return nil, nil
@@ -508,6 +508,7 @@ func imageMetadataBool(md *structpb.Struct, key string) *bool {
 }
 
 func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]SeasonResult, error) {
+	req.ProviderIDs = pluginRequestProviderIDs(req.ContentType, req.ProviderIDs)
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" {
 		return nil, nil
@@ -551,6 +552,8 @@ func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]
 }
 
 func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) ([]EpisodeResult, error) {
+	// EpisodesRequest has no item type (episodes belong to a series, never a
+	// book), so there is nothing for pluginRequestProviderIDs to strip.
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" {
 		return nil, nil
@@ -629,6 +632,16 @@ func (p *PluginProvider) ResolveImageURLs(ctx context.Context, paths []string, v
 		return nil, err
 	}
 	return response.GetUrls(), nil
+}
+
+// pluginRequestProviderIDs returns the provider ids a plugin request about an
+// item of itemType may carry: a book's work-level keys are never sent to a
+// plugin (bookid.SplitWorkIDs). Every request that carries an item's provider
+// ids takes them from here, before it reads its own key, so a work id cannot
+// open a lookup either.
+func pluginRequestProviderIDs(itemType string, ids map[string]string) map[string]string {
+	edition, _ := bookid.SplitWorkIDs(itemType, ids)
+	return edition
 }
 
 func mergePluginProviderIDs(capabilityID, providerID string, ids *structpb.Struct) map[string]string {

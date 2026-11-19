@@ -437,9 +437,9 @@ func (s *MetadataService) canonicalizeProviderIDDuplicate(
 	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, s.recsStaler, leftContentID, rightContentID, allowMatchedSource, markIdentity)
 }
 
-// clearProvisionalProviderIDsLocked removes provider ID rows for an item only
-// after re-confirming, under a row-level lock, that the item is still in a
-// provisional ownership status. Without the lock, a parallel goroutine could
+// clearProvisionalProviderIDsLocked removes provider ID rows and work id claims
+// for an item only after re-confirming, under a row-level lock, that the item is
+// still in a provisional ownership status. Without the lock, a parallel goroutine could
 // promote the item to matched between the caller's status check and our
 // delete, silently wiping a confirmed item's provider IDs.
 func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, contentID string) error {
@@ -475,6 +475,10 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, contentID); err != nil {
 		return fmt.Errorf("clearing provisional provider IDs from %s: %w", contentID, err)
+	}
+	// A book's work id claims came with the provider IDs and go with them.
+	if err := catalog.DeleteWorkClaimsTx(ctx, tx, contentID); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit provisional provider-id clear: %w", err)

@@ -51,11 +51,7 @@ func ApplyWorkClaimsTx(ctx context.Context, tx pgx.Tx, contentID, itemType strin
 				return fmt.Errorf("storing work id %s for %s: %w", key, contentID, err)
 			}
 		}
-		for _, key := range bookid.WorkKeys() {
-			if answer.Keeps(key) {
-				keep = append(keep, key)
-			}
-		}
+		keep = append(keep, answer.KeptKeys()...)
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM media_item_work_ids
 			WHERE content_id = $1 AND source = $2 AND provider <> ALL($3::text[])
@@ -77,41 +73,21 @@ func DeleteWorkClaimsTx(ctx context.Context, tx pgx.Tx, contentID string) error 
 
 // ReplaceByContentIDWithWorkClaims replaces the item's durable provider IDs, as
 // ReplaceByContentID does, and applies its work claims (ApplyWorkClaimsTx) in
-// the same transaction. An empty providerIDs leaves the stored provider IDs as
-// they are, so an answer that holds only a work id cannot clear them.
+// the same transaction. When providerIDs holds no edition identifier once a
+// book's work keys are taken out, the stored provider IDs stay as they are, so
+// an answer that holds only a work id cannot clear them.
 func (r *ProviderIDRepository) ReplaceByContentIDWithWorkClaims(
 	ctx context.Context,
 	contentID string,
 	providerIDs map[string]string,
 	claims []bookid.WorkClaims,
 ) error {
-	if strings.TrimSpace(contentID) == "" {
-		return errors.New("content_id is required")
-	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin provider id replace transaction: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // a no-op once committed
-
-	// Lock the item before its rows, as ReplaceByContentID does.
-	var itemType string
-	if err := tx.QueryRow(ctx, `SELECT type FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID).Scan(&itemType); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("loading item type for %s: content not found", contentID)
+	return r.inItemLockedTx(ctx, contentID, func(tx pgx.Tx, itemType string) error {
+		if editionIDs, _ := bookid.SplitWorkIDs(itemType, providerIDs); len(editionIDs) > 0 {
+			if err := r.ReplaceByContentIDTx(ctx, tx, contentID, itemType, editionIDs); err != nil {
+				return err
+			}
 		}
-		return fmt.Errorf("loading item type for %s: %w", contentID, err)
-	}
-	if len(providerIDs) > 0 {
-		if err := r.ReplaceByContentIDTx(ctx, tx, contentID, itemType, providerIDs); err != nil {
-			return err
-		}
-	}
-	if err := ApplyWorkClaimsTx(ctx, tx, contentID, itemType, claims); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit provider id replace transaction: %w", err)
-	}
-	return nil
+		return ApplyWorkClaimsTx(ctx, tx, contentID, itemType, claims)
+	})
 }

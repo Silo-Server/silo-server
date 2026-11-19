@@ -239,8 +239,17 @@ transaction that writes the item's provider IDs, from the audiobook enricher,
 the ebook enricher, and the metadata service. An answer replaces the claims of
 the capability that gave it: keys it holds are upserted, and its other keys are
 deleted unless the catalog behind them could not be asked. Claims from other
-capabilities stay. A reset clears every claim; an item merge moves the
-source's claims for keys the target lacks.
+capabilities stay. An item holds one claim per key, so when two capabilities
+answer for the same key, the last answer wins. In the metadata service, an
+answer whose edition ids contradict the item's (same key, different value)
+names another edition: its claims are dropped, and it neither stores nor
+deletes any. A reset, an Identify (the admin naming the book; the answers it
+fetches supply the claims again), and the clearing of a provisional item's
+provider IDs remove every claim; an item merge moves the source's claims for
+keys the target lacks.
+
+Because work keys never reach a plugin, an admin can no longer search for or
+look up a book by a Hardcover id.
 
 Literary work linking scores a shared work id at 0.90 (link source
 `external_id`), below a shared edition id and a shared series, and above an

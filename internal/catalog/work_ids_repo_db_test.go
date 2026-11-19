@@ -20,7 +20,8 @@ import (
 // TestWorkClaimsReplacePerSourceDB pins how a book's work ids are stored:
 // every edition of a book may claim the same work, the key never reaches
 // media_item_provider_ids, and an answer replaces only its own source's
-// claims, except for a catalog that could not be asked.
+// claims, except for a catalog that could not be asked. An answer holding only
+// a work id leaves the provider IDs alone.
 func TestWorkClaimsReplacePerSourceDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
@@ -77,6 +78,14 @@ func TestWorkClaimsReplacePerSourceDB(t *testing.T) {
 	applyWorkClaims(t, pool, ebookA, "ebook", answer("books-metadata", []string{"hardcover"}))
 	assertWorkClaims(t, pool, ebookA, map[string]string{"hardcover": "42/unknown/ebook-metadata"})
 	assertWorkClaims(t, pool, ebookB, map[string]string{"openlibrary_work": work + "/isbn/books-metadata"})
+
+	// A map holding only a work key stores the claim and leaves the stored
+	// provider IDs alone.
+	if err := repo.ReplaceByContentIDWithWorkClaims(ctx, ebookB, map[string]string{"hardcover": "5"},
+		answer("ebook-metadata", nil, bookid.WorkClaim{Provider: "hardcover", ProviderID: "5"})); err != nil {
+		t.Fatalf("ReplaceByContentIDWithWorkClaims(%s, work key only): %v", ebookB, err)
+	}
+	assertDurableProviderIDs(t, pool, ebookB, map[string]string{"isbn": "9780306406101"})
 }
 
 // TestSeparateBookWorkIDsMigrationDB replays the migration in a scratch

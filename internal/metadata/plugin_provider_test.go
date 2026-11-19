@@ -286,7 +286,8 @@ func TestPluginProvider_DropsLocalArtworkSources(t *testing.T) {
 
 // A book's work-level keys never reach a plugin, and come back from
 // GetMetadata as the capability's work claims, with their evidence and the
-// catalogs that could not be asked; a search result carries none.
+// catalogs that could not be asked; a search result carries none, and an
+// artwork request sends none.
 func TestPluginProviderKeepsBookWorkIDsOutOfProviderIDs(t *testing.T) {
 	item, err := structpb.NewStruct(map[string]any{
 		"work_evidence":      map[string]any{"openlibrary_work": "isbn"},
@@ -345,4 +346,9 @@ func TestPluginProviderKeepsBookWorkIDsOutOfProviderIDs(t *testing.T) {
 	if len(results) != 1 || !maps.Equal(results[0].ProviderIDs, edition) {
 		t.Fatalf("search results = %+v, want one with %v", results, edition)
 	}
+	// Identify can carry an admin-typed work id into the artwork phase.
+	if _, err := provider.GetImages(t.Context(), ImageRequest{ProviderIDs: stored, ContentType: "ebook"}); err != nil {
+		t.Fatal(err)
+	}
+	assertStructStringMap(t, client.getImagesReq.GetProviderIds(), edition)
 }

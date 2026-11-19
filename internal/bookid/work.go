@@ -1,9 +1,6 @@
 package bookid
 
-import (
-	"slices"
-	"strings"
-)
+import "strings"
 
 // Work-level identifier keys. A value under one of them names the book an
 // edition belongs to, not the edition itself, so every edition of a book can
@@ -22,29 +19,18 @@ const (
 	EvidenceUnknown     = "unknown"
 )
 
-// workKeyCatalogs maps each work key to the catalog a plugin names in
-// work_lookup_failed when it could not ask for that key.
-var workKeyCatalogs = map[string]string{
-	KeyOpenLibraryWork: "openlibrary",
-	KeyHardcover:       "hardcover",
-}
-
-// WorkKeys returns the work-level keys, sorted.
-func WorkKeys() []string {
-	keys := make([]string, 0, len(workKeyCatalogs))
-	for key := range workKeyCatalogs {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	return keys
+// catalogWorkKeys maps the catalog a plugin names in work_lookup_failed, when
+// it could not ask that catalog, to the work key the catalog supplies.
+var catalogWorkKeys = map[string]string{
+	"openlibrary": KeyOpenLibraryWork,
+	"hardcover":   KeyHardcover,
 }
 
 // WorkKey returns provider folded to its stored form (trimmed, lower case)
 // and whether that is a work-level key.
 func WorkKey(provider string) (string, bool) {
 	key := strings.ToLower(strings.TrimSpace(provider))
-	_, ok := workKeyCatalogs[key]
-	return key, ok
+	return key, key == KeyOpenLibraryWork || key == KeyHardcover
 }
 
 // HasWorkIDs reports whether items of itemType keep work-level keys apart
@@ -74,11 +60,16 @@ type WorkClaims struct {
 	LookupFailed []string
 }
 
-// Keeps reports whether a claim from c.Source under key outlives an answer
-// that left key out, because the catalog behind key could not be asked.
-func (c WorkClaims) Keeps(key string) bool {
-	catalog, ok := workKeyCatalogs[key]
-	return ok && slices.Contains(c.LookupFailed, catalog)
+// KeptKeys returns the work keys whose claims from c.Source outlive an answer
+// that left them out, because the catalog behind the key could not be asked.
+func (c WorkClaims) KeptKeys() []string {
+	var keys []string
+	for _, catalog := range c.LookupFailed {
+		if key, ok := catalogWorkKeys[catalog]; ok {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // NormalizeEvidence returns evidence when it is a known value, else

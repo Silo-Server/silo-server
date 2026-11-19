@@ -2563,6 +2563,13 @@ func hasTransientMatchError(errs []error) bool {
 // the lists it supplies are not extended by later results (localListFields).
 func foldProviderResult(accumulator, result *MetadataResult, language, providerSlug string, isIdentityHinter bool, quarantined map[string]struct{}) {
 	result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
+	// A book answer whose edition ids contradict the item's names another
+	// edition, so its work ids do not describe this item. Its claims are
+	// dropped whole, so it neither stores a claim nor clears its capability's
+	// earlier ones. Only book answers carry claims (splitPluginWorkClaims).
+	if len(result.WorkClaims) > 0 && contradictsProviderIDs(accumulator.ProviderIDs, result.ProviderIDs) {
+		result.WorkClaims = nil
+	}
 	if isIdentityHinter {
 		result.ProviderIDs = nil
 		accumulator.localLists.record(result)
@@ -3151,6 +3158,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	item.ContentID = contentID
+	// A book's work ids came from the match a reset or a correction replaces.
+	// corrected compares only TMDB, TVDB and IMDb ids, which books lack, so an
+	// Identify of a book, the admin naming the book, counts as one too; the
+	// answers it fetches supply the claims again.
+	clearsWorkClaims := resetsRow || corrected || (req.Mode == ModeIdentify && bookid.HasWorkIDs(item.Type))
 	if corrected {
 		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
 			return nil, err
@@ -3169,7 +3181,7 @@ func (s *MetadataService) mergeAndPersist(
 			clearChildEdits: replacesShow,
 			resetLocks:      resetsRow,
 			clearCredits:    resetsRow && creditsUnlisted(item, mergeLocked),
-			clearWorkClaims: resetsRow,
+			clearWorkClaims: clearsWorkClaims,
 			workClaims:      accumulator.WorkClaims,
 		},
 	)
@@ -3380,9 +3392,9 @@ func (s *MetadataService) clearUnlistedCredits(ctx context.Context, contentID st
 
 // itemWriteSteps are the extra writes that commit with an item's identity
 // write: an Identify's choice, clearing a replaced show's season and episode
-// edits, a Reset to Provider dropping the item's locks, the credits its
-// providers no longer list and its work ids, and a book's work ids claimed by
-// the providers' answers.
+// edits, a Reset to Provider dropping the item's locks and the credits its
+// providers no longer list, a reset, an identity correction or a book's
+// Identify dropping its work ids, and the work ids the providers' answers claim.
 type itemWriteSteps struct {
 	identityChosen  bool
 	clearChildEdits bool
