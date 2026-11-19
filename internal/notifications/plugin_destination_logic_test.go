@@ -169,8 +169,8 @@ func TestPluginSettingsSavedSecretOutlivesItsMarking(t *testing.T) {
 	}
 
 	// Settings stored without a write_only record don't say which values
-	// were secret: under v2, which unmarked token, every value stays hidden
-	// until the owner's next save writes the record.
+	// were secret: under v2, which unmarked token, every value stays hidden.
+	// A save records the value it replaced by v2 and keeps the rest hidden.
 	for _, raw := range []string{
 		`{"topic":"alerts","token":"s3cret"}`,
 		`{"settings":{"topic":"alerts","token":"s3cret"}}`,
@@ -188,8 +188,8 @@ func TestPluginSettingsSavedSecretOutlivesItsMarking(t *testing.T) {
 			t.Fatalf("%s: redactPluginText() = %q, leaks the value", raw, got)
 		}
 		saved, err := mergePluginSettings(v2, legacy, map[string]any{"topic": "news"}, nil)
-		if err != nil || saved.unrecorded || saved.Values["token"] != "s3cret" || len(saved.WriteOnly) != 0 {
-			t.Fatalf("%s: save under v2 = %+v, %v; want the record written from v2", raw, saved, err)
+		if err != nil || saved.unrecorded || saved.Values["token"] != "s3cret" || !reflect.DeepEqual(saved.WriteOnly, []string{"token"}) {
+			t.Fatalf("%s: save under v2 = %+v, %v; want topic public and the untouched token still write-only", raw, saved, err)
 		}
 	}
 }

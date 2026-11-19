@@ -587,8 +587,10 @@ to the plugin service, so neither package imports the other.
   marking can't expose a credential. Redaction of plugin text counts them as
   secret too. Settings stored without a `write_only` array (a bare settings
   object, or an envelope that names the record differently) don't say which
-  values were secret, so every value is write-only until the owner's next
-  settings save writes the record from the schema then current. Only fields
+  values were secret, so every value is write-only. The owner's next
+  settings save writes the record: a value it replaces is classified by the
+  schema then current, and every value it leaves alone stays write-only.
+  Only fields
   the current schema classifies as public are returned, so a stored field a
   plugin upgrade stopped declaring stays hidden. Names are unique per account
   profile. Restoring a backup carries live destinations and webhooks back by

@@ -408,7 +408,9 @@ func mergePluginSettings(channel PluginChannel, stored pluginSettings, write map
 	}
 	secret := []string{}
 	for key := range merged {
-		if slices.Contains(channel.SecretFields, key) || (slices.Contains(stored.WriteOnly, key) && !replaced[key]) {
+		// A value the save didn't replace keeps its record; settings without
+		// one keep every such value write-only.
+		if slices.Contains(channel.SecretFields, key) || (stored.isSecret(channel, key) && !replaced[key]) {
 			secret = append(secret, key)
 		}
 	}

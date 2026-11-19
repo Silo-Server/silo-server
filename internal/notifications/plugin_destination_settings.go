@@ -99,8 +99,9 @@ type pluginSettings struct {
 	// unrecorded marks settings stored without a write_only record (a bare
 	// settings object, or an envelope from a build that named the record
 	// differently). Nothing tells which of their values were secret, so every
-	// one is write-only until the owner's next settings save writes the
-	// record from the schema then current.
+	// one is write-only. A save writes the record: what it replaced is
+	// classified by the schema then current, and every other value stays
+	// write-only.
 	unrecorded bool
 }
 
