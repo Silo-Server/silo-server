@@ -2687,6 +2687,15 @@ client repeats its kept step-down estimate on later replans, records nothing.
 A seek reanchor reuses the playing recipe and a seek failure recovery replays
 the stored start request; neither records nor clears a limit.
 
+A stall the server's own transcode caused is not the link's. When a replan
+reports `observed_rebuffer` while the playing transcode on the API server has
+no lead over the client (the client has fetched every produced segment but at
+most the newest), the encoder was slower than real time, as a heavy subtitle
+burn-in can be, and the server plans the replan under the estimate but records
+no limit. An encoder that keeps up runs ahead of the client up to the throttle
+window, so a slow link leaves it far ahead. A transcode on a remote node is not
+visible to the API server, so its stalls still record.
+
 An Auto start or replan without `bandwidth_estimate_kbps` plans with the
 connection's current reading, the one `GET /api/v2/playback/connection`
 reports, as a `probe` estimate, so a client that starts before it has read its

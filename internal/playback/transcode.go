@@ -3199,6 +3199,18 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 	return progress
 }
 
+// OutputBoundsClient reports whether the running encoder has no lead over the
+// client: the client has fetched every produced segment but at most the
+// newest. Playback is then paced by how fast the server produces segments,
+// not by the link, so a stall the client reports now is the server's. An
+// encoder that keeps up runs ahead of the client up to the throttle window;
+// one that is slower than real time, such as a heavy subtitle burn-in, never
+// gets ahead.
+func (s *TranscodeSession) OutputBoundsClient() bool {
+	progress := s.SegmentProgress(time.Now())
+	return progress.Running && progress.ProducedHead-progress.LastRequestedSegment <= 1
+}
+
 // SegmentRecoveryDecision determines whether a missing segment should briefly
 // wait for ffmpeg or immediately use the seek-restart path.
 func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) SegmentRecoveryDecision {

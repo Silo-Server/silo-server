@@ -1168,3 +1168,32 @@ func TestTranscodeThrottlerIgnoresOutputFromAnEarlierGeneration(t *testing.T) {
 		t.Fatalf("writes = %q, want up", writer.writes)
 	}
 }
+
+// A client that has fetched all but at most one produced segment is waiting
+// on the encoder: its stall says nothing about the link. A running encoder
+// that is ahead of the client, or one that has finished, is not.
+func TestTranscodeOutputBoundsClient(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		running       bool
+		produced      int
+		lastRequested int
+		want          bool
+	}{
+		{name: "client at produced head", running: true, produced: 4, lastRequested: 4, want: true},
+		{name: "head segment not yet fetched", running: true, produced: 5, lastRequested: 4, want: true},
+		{name: "encoder ahead of the client", running: true, produced: 40, lastRequested: 4, want: false},
+		{name: "encoder finished", running: false, produced: 4, lastRequested: 4, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := TranscodeOpts{TargetCodecVideo: "h264", SegmentDuration: 2}
+			writeManifestRange(t, dir, 0, tc.produced, ".ts")
+			writeSegmentFile(t, dir, segmentFilename(tc.produced, opts), []byte("x"), time.Now())
+			session := &TranscodeSession{outputDir: dir, running: tc.running, lastRequestedSegment: tc.lastRequested, opts: opts}
+			if got := session.OutputBoundsClient(); got != tc.want {
+				t.Fatalf("OutputBoundsClient() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
