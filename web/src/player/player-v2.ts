@@ -175,8 +175,12 @@ export async function playerV2<K extends PlayerV2Key>(
   );
 
   const text = await res.text().catch(() => "");
+  // Without a problem document (a proxy's HTML page, an empty body) the player
+  // has nothing readable to show beyond its own message: the body is markup
+  // and the status text is untranslated.
+  const requestFailed = t("web.player.error.requestFailed");
   if (!res.ok) {
-    let message = res.statusText || t("web.player.error.requestFailed");
+    let message = requestFailed;
     let code: string | undefined;
     try {
       const problem = JSON.parse(text) as ProblemLike;
@@ -193,12 +197,16 @@ export async function playerV2<K extends PlayerV2Key>(
         code = segment.replace(/#.*$/, "") || undefined;
       }
     } catch {
-      if (text.trim().length > 0) message = text.trim();
+      // Not a problem document; keep the player's own message.
     }
     throw new PlayerFetchError(res.status, message, code, text);
   }
 
   onResponse?.(res);
   if (text.trim() === "") return undefined as SuccessOf<OperationOf<K>>;
-  return JSON.parse(text) as SuccessOf<OperationOf<K>>;
+  try {
+    return JSON.parse(text) as SuccessOf<OperationOf<K>>;
+  } catch {
+    throw new PlayerFetchError(res.status, requestFailed, undefined, text);
+  }
 }
