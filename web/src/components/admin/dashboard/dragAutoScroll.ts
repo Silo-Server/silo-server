@@ -12,9 +12,9 @@ import { useCallback, useEffect, useRef } from "react";
  */
 
 /** How far from a scroll edge the pointer starts auto-scrolling. */
-export const EDGE_ZONE_PX = 80;
+const EDGE_ZONE_PX = 80;
 /** Fastest the loop will scroll, in pixels per frame, so it stays controllable. */
-export const MAX_SCROLL_SPEED_PX = 24;
+const MAX_SCROLL_SPEED_PX = 24;
 
 /**
  * Signed scroll speed for a pointer at `clientY` over a visible scroll area
@@ -25,7 +25,7 @@ export const MAX_SCROLL_SPEED_PX = 24;
  * scroll up (pointer near the top), positive means scroll down. The zone
  * shrinks for short containers so the two zones never overlap.
  */
-export function edgeScrollSpeed(
+function edgeScrollSpeed(
   clientY: number,
   top: number,
   bottom: number,
@@ -55,7 +55,7 @@ export function edgeScrollSpeed(
  * layout scrolls on the document today, but an inner `overflow-y: auto` region
  * (a future layout, an embedding) resolves the same way.
  */
-export function findScrollContainer(start: HTMLElement | null): Element | null {
+function findScrollContainer(start: HTMLElement | null): Element | null {
   for (let el = start?.parentElement ?? null; el; el = el.parentElement) {
     const overflowY = window.getComputedStyle(el).overflowY;
     const scrollable = overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay";
@@ -72,7 +72,7 @@ export function findScrollContainer(start: HTMLElement | null): Element | null {
  * viewport itself; for an inner container it is its rect clipped to the
  * viewport.
  */
-export function scrollViewportBounds(container: Element): { top: number; bottom: number } {
+function scrollViewportBounds(container: Element): { top: number; bottom: number } {
   if (
     container === document.scrollingElement ||
     container === document.documentElement ||

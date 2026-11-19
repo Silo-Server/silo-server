@@ -2462,6 +2462,27 @@ func (r *FileRepository) IsActivePath(ctx context.Context, path string) (bool, e
 	return active, nil
 }
 
+// IsActiveFile reports whether media file id is still active in the catalog
+// at exactly path. Scanner paths are authoritative here, as for IsActivePath.
+// The core checks a transcode node's source grant with it: a node may open a
+// granted source only while this holds.
+func (r *FileRepository) IsActiveFile(ctx context.Context, id int, path string) (bool, error) {
+	var active bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM media_files
+			WHERE id = $1
+			  AND file_path = $2
+			  AND missing_since IS NULL
+		)
+	`, id, path).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("checking active media file %d: %w", id, err)
+	}
+	return active, nil
+}
+
 // GetByHash retrieves a media file by its file hash.
 func (r *FileRepository) GetByHash(ctx context.Context, hash string) (*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files WHERE file_hash = $1 LIMIT 1`
@@ -3167,6 +3188,23 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, filePath strin
 	tag, err := r.pool.Exec(ctx,
 		"UPDATE media_files SET missing_since = $1, updated_at = NOW() WHERE id = $2 AND file_path = $3",
 		since, id, filePath,
+	)
+	if err != nil {
+		return fmt.Errorf("marking file missing: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrFileNotFound
+	}
+	return nil
+}
+
+// MarkMissingWrittenBefore is MarkMissing for a row last written before
+// before. A row another scan wrote since then is left alone and reported as
+// ErrFileNotFound, so a scan cannot hide a file a later scan just indexed.
+func (r *FileRepository) MarkMissingWrittenBefore(ctx context.Context, id int, filePath string, since, before time.Time) error {
+	tag, err := r.pool.Exec(ctx,
+		"UPDATE media_files SET missing_since = $1, updated_at = NOW() WHERE id = $2 AND file_path = $3 AND updated_at < $4",
+		since, id, filePath, before,
 	)
 	if err != nil {
 		return fmt.Errorf("marking file missing: %w", err)

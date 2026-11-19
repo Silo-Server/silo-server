@@ -55,6 +55,21 @@ export function parseTextWeight(value: string | null | undefined): TextWeight {
   return value === "strong" ? "strong" : "default";
 }
 
+/**
+ * A stored "true" or "false" is the user's own choice and always wins. With
+ * nothing stored, high contrast follows the system's "increase contrast"
+ * setting (`prefers-contrast: more`). themeBoot.js repeats this rule.
+ */
 export function parseHighContrast(value: string | null | undefined): boolean {
-  return value === "true";
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return prefersMoreContrast();
+}
+
+function prefersMoreContrast(): boolean {
+  try {
+    return window.matchMedia("(prefers-contrast: more)").matches;
+  } catch {
+    return false;
+  }
 }

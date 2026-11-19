@@ -60,7 +60,9 @@ func HideWatchedItemsFromHome(ctx context.Context, store userstore.UserStore, pr
 // it would drop the one card the viewer is resuming.
 func PreserveWatchedItemsOnHome(sectionType SectionType) bool {
 	switch sectionType {
-	case SectionMostWatched, SectionProfileActivityFeed, SectionForgottenFavorites, SectionContinueWatching:
+	case SectionMostWatched, SectionProfileActivityFeed, SectionForgottenFavorites, SectionContinueWatching,
+		// A row of collections has no titles to hide.
+		SectionCollectionPosters:
 		return true
 	default:
 		return false

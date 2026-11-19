@@ -162,11 +162,15 @@ stays external (library or rating limits); one with several waits until the
 catalog merges them. For each title with exactly one visible copy:
 
 1. Lock the title and check the entry still exists (invariant 2).
-2. `AddToWatchlistAt(profileID, contentID, entry.added_at)` through the
-   notification-wrapped user store, so a promoted series queues an interest
-   recompute. When the row already exists, `GetWatchlistEntry` tells whether
-   it is a half-done promotion (invariant 3).
-3. Delete the entry, and the title if it is now orphaned, then commit.
+2. `AddToWatchlistAt(profileID, contentID, entry.added_at)`. When the row
+   already exists, `GetWatchlistEntry` tells whether it is a half-done
+   promotion (invariant 3). Watchlist changes do not affect new-episode
+   notifications, which follow Next Up only (see
+   [Eligibility rules](notifications.md#eligibility-rules)).
+3. Delete the entry, and the title if it is now orphaned. When this call
+   removed the entry and the library entry is new, record the move in
+   `watchlist_title_promotions` for the watchlist arrival notice (see
+   [Notifications](notifications.md#watchlist-arrivals)). Then commit.
 4. If this call removed the entry and the library entry is new (invariant 3),
    run `Effects.WatchlistPromoted`, implemented by
    `handlers.PersonalDataHandler`: the provider export event
@@ -195,6 +199,14 @@ A failure is logged and the read continues; the next read retries.
 
 Other catalog reads (item lists through `ItemsHandler`, people, jellycompat) do
 not promote.
+
+Watch provider sync tracks an entry it imported by the title's TMDB ID and
+keeps the title's other IDs on its own sync row, because promotion deletes the
+title and its aliases. Promotion and removal add the title's IDs to the
+profile's sync rows for it in the same transaction, before the entry goes.
+Sync uses them to tell a promotion from a removal and to find the library item
+a provider removal must take off
+([watch-provider-plugins.md](watch-provider-plugins.md#list-sync-rows)).
 
 ## ID repair without a scheduled task
 
@@ -248,6 +260,9 @@ and a remove button.
 Adding a title the library doesn't have can also request it, so the existing
 `request.fulfilled` notification tells the profile when it arrives. See
 [Media requests](media-requests.md#watchlist-requests) for the request side.
+Without a request the profile still hears: fanout sends `watchlist.available`
+when the title arrives (see
+[Notifications](notifications.md#watchlist-arrivals)).
 
 - Server switch: `request_settings.watchlist_requests` (default on), edited in
   admin Settings › Requests and carried by the v2 admin request settings.
@@ -357,6 +372,4 @@ least 15.
 
 Watch-provider (Simkl, MDBList) and Plex imports still drop rows the
 library doesn't have, and export only library items. Carrying unowned titles
-through them needs its own design; imports would never auto-request. A profile
-that cannot request, or has opted out, gets no arrival notification: only the
-request's `request.fulfilled` notification tells anyone.
+through them needs its own design; imports would never auto-request.

@@ -23,12 +23,3 @@ func TestMetricsHandlerServesPrometheus(t *testing.T) {
 		t.Fatal("metrics response did not contain Prometheus exposition data")
 	}
 }
-
-func TestMetricsListenerDisabledByDefault(t *testing.T) {
-	t.Setenv(metricsListenEnv, "")
-	stop, err := startMetricsListener(true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stop()
-}

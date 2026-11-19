@@ -72,8 +72,3 @@ func sizedFeaturedLogoPath(path string, size imagesize.Size) string {
 func sizedPosterPath(path string, size imagesize.Size) string {
 	return sizedImagePath(path, "poster", size, featuredPosterPath(path))
 }
-
-// sizedBackdropPath is featuredBackdropPath with the request's size applied.
-func sizedBackdropPath(path string, size imagesize.Size) string {
-	return sizedImagePath(path, artworkkey.ImageBackdrop, size, featuredBackdropPath(path))
-}

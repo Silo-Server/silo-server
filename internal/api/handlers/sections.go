@@ -216,21 +216,37 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 			return "library_collection_id is required for collection sections", false
 		}
 	}
-
-	cfg := sections.ParseConfigFilters(config)
-	if cfg.FilterType != "" && cfg.FilterType != "movie" && cfg.FilterType != "series" && cfg.FilterType != "audiobook" {
-		return "filter_type must be 'movie', 'series', or 'audiobook'", false
+	// An admin page row of collections shows server collections only, and
+	// its list is checked on every write: a bad entry would block deleting
+	// the collections it names.
+	if sectionType == sections.SectionCollectionPosters {
+		if msg, ok := validateRecipeConfig(sectionType, config); !ok {
+			return msg, false
+		}
+		if err := sections.ValidateAdminCollectionPosters(sectionType, config); err != nil {
+			return err.Error(), false
+		}
 	}
+
 	if _, err := sections.ParseContinueType(config); err != nil {
 		return err.Error(), false
 	}
 
 	var rawLibraryConfig struct {
-		FilterLibraryID  *int  `json:"filter_library_id"`
-		FilterLibraryIDs []int `json:"filter_library_ids"`
+		FilterType       string `json:"filter_type"`
+		FilterLibraryID  *int   `json:"filter_library_id"`
+		FilterLibraryIDs []int  `json:"filter_library_ids"`
 	}
 	if len(config) > 0 {
 		_ = json.Unmarshal(config, &rawLibraryConfig)
+	}
+	// Only the legacy filter_type key is limited here, as the parser
+	// normalizes it; a structured media_scope is checked when the query
+	// definition parses below.
+	if rawLibraryConfig.FilterType != "" {
+		if ft := sections.ParseConfigFilters(config).FilterType; ft != itemTypeMovie && ft != itemTypeSeries && ft != itemTypeAudiobook {
+			return "filter_type must be 'movie', 'series', or 'audiobook'", false
+		}
 	}
 	if rawLibraryConfig.FilterLibraryID != nil && *rawLibraryConfig.FilterLibraryID <= 0 {
 		return "filter_library_id must be a positive library ID", false
@@ -349,10 +365,12 @@ type sectionItemResponse struct {
 	BackdropThumbhash      string                 `json:"backdrop_thumbhash,omitempty"`
 	LogoURL                string                 `json:"logo_url,omitempty"`
 	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
-	Badges                 []string               `json:"badges,omitempty"`
-	ItemSource             string                 `json:"item_source,omitempty"`
-	UserState              *itemUserStateResponse `json:"user_state,omitempty"`
-	UpcomingEvent          *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	// Availability is the series poster fraction. json:"-" because /api/v1 is frozen.
+	Availability  *catalog.Availability  `json:"-"`
+	Badges        []string               `json:"badges,omitempty"`
+	ItemSource    string                 `json:"item_source,omitempty"`
+	UserState     *itemUserStateResponse `json:"user_state,omitempty"`
+	UpcomingEvent *upcomingEventResponse `json:"upcoming_event,omitempty"`
 	// PendingTranslationLanguage and MachineTranslatedFields reach the v2
 	// card only; v1 is frozen.
 	PendingTranslationLanguage string   `json:"-"`
@@ -389,6 +407,9 @@ type resolvedSectionResponse struct {
 	IsCustom    bool                  `json:"is_custom"`
 	Customized  bool                  `json:"customized"`
 	Items       []sectionItemResponse `json:"items"`
+	// Collections are a row of collections' cards. Only the v2 API carries
+	// them.
+	Collections []sections.CollectionCard `json:"-"`
 	// TitleKey and TitleArgs are the section's; see
 	// sections.ResolvedSection. Only the v2 API carries them.
 	TitleKey  string            `json:"-"`
@@ -790,6 +811,10 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		if err := rec.Validate(cfg); err != nil {
 			return apiError(http.StatusBadRequest, "invalid_config", err.Error())
 		}
+		// A row of collections has no title to show as the hero.
+		if !sections.CanBeHero(sections.SectionType(recipeType)) {
+			o.Featured = nil
+		}
 		if recipeType == string(sections.SectionTrendingDiscover) && !o.Hidden && !o.Removed {
 			refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
 		}
@@ -1052,7 +1077,7 @@ func dropEmptySeasonalSections(withItems []sections.SectionWithItems) []sections
 func dropEmptySections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
 	out := withItems[:0]
 	for _, w := range withItems {
-		if len(w.Items) == 0 {
+		if !w.HasCards() {
 			continue
 		}
 		out = append(out, w)
@@ -1086,30 +1111,55 @@ type episodeParentImageURLs struct {
 
 // buildSections renders sections for a viewer described by its context,
 // access filter and artwork size; it is what v1 and v2 share.
-func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request) homeSectionsResponse {
-	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, art, nil)
+// includeAvailability is only true for native /api/v2 callers: Availability is
+// json:"-" on the frozen v1 card shape.
+func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, includeAvailability bool) homeSectionsResponse {
+	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, art, nil, includeAvailability, nil)
+}
+
+type sectionLookup int
+
+const (
+	sectionLookupOverlaySummaries sectionLookup = iota
+	sectionLookupPlayTargets
+	sectionLookupLocalization
+	sectionLookupUserStates
+	sectionLookupImageURLs
+	sectionLookupEpisodeMeta
+	sectionLookupMangaChapterMeta
+	sectionLookupAvailability
+	sectionLookupCount
+)
+
+var sectionLookupTimingKeys = [sectionLookupCount]string{
+	sectionLookupOverlaySummaries: "overlay_summaries_ms",
+	sectionLookupPlayTargets:      "play_targets_ms",
+	sectionLookupLocalization:     "localization_ms",
+	sectionLookupUserStates:       "user_states_ms",
+	sectionLookupImageURLs:        "image_urls_ms",
+	sectionLookupEpisodeMeta:      "episode_meta_ms",
+	sectionLookupMangaChapterMeta: "manga_chapter_meta_ms",
+	sectionLookupAvailability:     "availability_ms",
+}
+
+// sectionBuildTimings measures the parallel card lookups. Each duration has
+// one writer and is read after the wait. Skipped lookups leave a zero duration.
+type sectionBuildTimings [sectionLookupCount]time.Duration
+
+func (t *sectionBuildTimings) appendLogAttrs(attrs []slog.Attr) []slog.Attr {
+	for lookup, elapsed := range t {
+		attrs = append(attrs, slog.Int64(sectionLookupTimingKeys[lookup], elapsed.Milliseconds()))
+	}
+	return attrs
 }
 
 // buildSectionsWithUserStates is buildSections reusing user states the caller
 // already loaded for these items (the Home hide-watched filter does); nil
-// loads them as buildSections does.
-func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, knownUserStates map[string]*itemUserStateResponse) homeSectionsResponse {
+// loads them as buildSections does. A non-nil timings receives each lookup's
+// duration.
+func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, knownUserStates map[string]*itemUserStateResponse, includeAvailability bool, timings *sectionBuildTimings) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
-
-	contentIDs := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, section := range withItems {
-		for _, item := range section.Items {
-			if item == nil || item.ContentID == "" {
-				continue
-			}
-			if _, ok := seen[item.ContentID]; ok {
-				continue
-			}
-			seen[item.ContentID] = struct{}{}
-			contentIDs = append(contentIDs, item.ContentID)
-		}
-	}
+	contentIDs := uniqueSectionContentIDs(withItems)
 
 	allItems := make([]*models.MediaItem, 0)
 	for _, s := range withItems {
@@ -1127,7 +1177,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 
 	var wg sync.WaitGroup
 
-	goSectionLookup(ctx, &wg, "overlay_summaries", func() {
+	goSectionLookup(ctx, &wg, sectionLookupOverlaySummaries, timings, func() {
 		if len(contentIDs) == 0 || h.fetcher == nil {
 			return
 		}
@@ -1139,24 +1189,25 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		overlaySummaries = summaries
 	})
 
-	goSectionLookup(ctx, &wg, "play_targets", func() { playTargets = h.resolveSectionPlayableTargets(ctx, allItems, libraryID, viewerAccess) })
+	goSectionLookup(ctx, &wg, sectionLookupPlayTargets, timings, func() { playTargets = h.resolveSectionPlayableTargets(ctx, allItems, libraryID, viewerAccess) })
 
 	if knownUserStates != nil {
 		userStates = knownUserStates
 	} else {
-		goSectionLookup(ctx, &wg, "user_states", func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+		goSectionLookup(ctx, &wg, sectionLookupUserStates, timings, func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	}
 	// localizedItems lines up with allItems: a content ID can sit in several
 	// rows with different artwork, so each row keeps its own clone.
 	var localizedItems []*models.MediaItem
 	var pendingTranslations map[string]string
 	localizationAccess := sectionLocalizationAccess(viewerAccess, libraryID)
-	goSectionLookup(ctx, &wg, "localization", func() {
+	goSectionLookup(ctx, &wg, sectionLookupLocalization, timings, func() {
 		localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, localizationAccess)
 	})
-	goSectionLookup(ctx, &wg, "image_urls", func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
-	goSectionLookup(ctx, &wg, "episode_meta", func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
-	goSectionLookup(ctx, &wg, "manga_chapter_meta", func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
+	goSectionLookup(ctx, &wg, sectionLookupImageURLs, timings, func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
+	goSectionLookup(ctx, &wg, sectionLookupEpisodeMeta, timings, func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
+	goSectionLookup(ctx, &wg, sectionLookupMangaChapterMeta, timings, func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
+	availability := h.startSectionAvailability(ctx, &wg, timings, includeAvailability, viewerAccess, allItems)
 
 	wg.Wait()
 	h.resolveFallbackParentArtwork(ctx, withItems, episodeMeta, art, imageURLs)
@@ -1189,22 +1240,51 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
 			Items:       items,
+			Collections: s.Collections,
 			TitleKey:    s.TitleKey,
 			TitleArgs:   s.TitleArgs,
 		})
 	}
+	availability.attach(ctx, resp.Sections)
 	return resp
+}
+
+// uniqueSectionContentIDs lists each content ID on the rows once, in row order.
+func uniqueSectionContentIDs(withItems []sections.SectionWithItems) []string {
+	contentIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, section := range withItems {
+		for _, item := range section.Items {
+			if item == nil || item.ContentID == "" {
+				continue
+			}
+			if _, ok := seen[item.ContentID]; ok {
+				continue
+			}
+			seen[item.ContentID] = struct{}{}
+			contentIDs = append(contentIDs, item.ContentID)
+		}
+	}
+	return contentIDs
 }
 
 // goSectionLookup runs one of buildSectionsWithUserStates' card lookups on
 // wg. The lookups run on their own goroutines, out of reach of the request's
 // panic recovery, so a panic is logged and leaves the lookup's result empty,
-// as its errors do.
-func goSectionLookup(ctx context.Context, wg *sync.WaitGroup, lookup string, run func()) {
+// as its errors do. When requested, the duration covers the lookup itself.
+func goSectionLookup(ctx context.Context, wg *sync.WaitGroup, lookup sectionLookup, timings *sectionBuildTimings, run func()) {
 	wg.Go(func() {
+		var start time.Time
+		if timings != nil {
+			start = time.Now()
+		}
 		defer func() {
+			if timings != nil {
+				timings[lookup] = time.Since(start)
+			}
 			if rec := recover(); rec != nil {
-				slog.ErrorContext(ctx, "section card lookup panicked", "component", "api", "lookup", lookup,
+				name := strings.TrimSuffix(sectionLookupTimingKeys[lookup], "_ms")
+				slog.ErrorContext(ctx, "section card lookup panicked", "component", "api", "lookup", name,
 					"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
 			}
 		}()

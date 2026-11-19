@@ -503,6 +503,10 @@ func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		// Delete the fixture in batches so statement triggers run once per
+		// table instead of once for each cascaded episode or file deletion.
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM episodes WHERE series_id = $1`, series)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, series)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})

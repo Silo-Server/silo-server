@@ -443,6 +443,26 @@ export function getCollectionFieldOption(field: string): CollectionFieldOption |
   return COLLECTION_FIELD_OPTIONS.find((option) => option.value === normalizedField);
 }
 
+/**
+ * A rule value read back from a URL parameter, typed by the rule's field. A
+ * text field keeps digits as text, so a content rating of "15" or a title of
+ * "1917" still compares as a string. A field this list does not know keeps
+ * the older guess from the value's shape.
+ */
+export function parseRuleValueParam(field: string, value: string): string | number | boolean {
+  const valueType = getCollectionFieldOption(field)?.valueType;
+  if (valueType === "string") {
+    return value;
+  }
+  if (valueType !== "number" && (value === "true" || value === "false")) {
+    return value === "true";
+  }
+  if (valueType !== "boolean" && /^-?\d+$/.test(value)) {
+    return Number(value);
+  }
+  return value;
+}
+
 /** The value a rule starts with when its field or condition changes. */
 export function getDefaultRuleValue(field: string, op: string): FilterRule["value"] {
   const fieldDef = getCollectionFieldOption(field);

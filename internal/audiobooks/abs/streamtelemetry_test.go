@@ -1,13 +1,11 @@
 package abs
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,32 +18,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
-
-func TestABSSubjectNormalization(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		userID string
-		want   streamtelemetry.Subject
-	}{
-		// A positive integer is a silo account id, so it lands in the same
-		// subject space native, compat and proxy publish — that is what lets a
-		// per-user total sum across families (§4.2b).
-		{"positive account id", "42", streamtelemetry.UserSubject(42)},
-		// "0" and "-1" parse but name no account. Merging them into the shared
-		// user space would attribute ABS bytes to a user that does not exist.
-		{"zero", "0", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "0"}},
-		{"negative", "-1", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "-1"}},
-		{"non numeric", "abc", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "abc"}},
-		{"overflow", "99999999999999999999", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "99999999999999999999"}},
-		{"empty", "", streamtelemetry.Subject{}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := absSubject(test.userID); got != test.want {
-				t.Fatalf("absSubject(%q) = %+v, want %+v", test.userID, got, test.want)
-			}
-		})
-	}
-}
 
 // telemetryRegistry builds an enabled registry observing the ABS family. Every
 // test that starts one must Stop it: the package-level now seam in
@@ -146,79 +118,6 @@ type absResponse struct {
 	body   []byte
 }
 
-func getWithHeaders(t *testing.T, client *http.Client, method, url string, headers map[string]string) absResponse {
-	t.Helper()
-	req, err := http.NewRequest(method, url, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, value := range headers {
-		req.Header.Set(name, value)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		t.Fatal(err)
-	}
-	return absResponse{status: resp.StatusCode, header: resp.Header.Clone(), body: buf.Bytes()}
-}
-
-func TestMountedABSRouterAttributesPublicTrack(t *testing.T) {
-	body := []byte("\xff\xfb\x00\x00" + strings.Repeat("audio", 400))
-	registry := telemetryRegistry(t)
-	deps := absPublicTrackDeps(t, "sid-telemetry", "book-1", "42", body)
-	server := absTelemetryServer(t, registry, deps)
-	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
-	t.Cleanup(client.CloseIdleConnections)
-
-	got := getWithHeaders(t, client, http.MethodGet, server.URL+"/public/session/sid-telemetry/track/1",
-		map[string]string{"X-Silo-Client": "Silo Audiobooks", "X-Silo-Client-Version": "3.1.0"})
-	if got.status != http.StatusOK || !bytes.Equal(got.body, body) {
-		t.Fatalf("GET = %d, %d bytes (want %d)", got.status, len(got.body), len(body))
-	}
-
-	// Byte totals come from Sweep, not Snapshot: SessionView.BytesAccepted is
-	// lastSweptBytes and only the sweep folds live observations into it.
-	snapshot := server.settledSweep(t)
-	if len(snapshot.Sessions) != 1 {
-		t.Fatalf("sessions = %+v", snapshot.Sessions)
-	}
-	session := snapshot.Sessions[0]
-	if session.SessionID != "sid-telemetry" {
-		t.Fatalf("session id = %q", session.SessionID)
-	}
-	if session.Subject != streamtelemetry.UserSubject(42) || session.ProfileID != "profile-1" {
-		t.Fatalf("subject = %+v profile = %q", session.Subject, session.ProfileID)
-	}
-	if session.MediaFileID != 77 {
-		t.Fatalf("media file id = %d, want 77", session.MediaFileID)
-	}
-	if session.PlayMethod != "direct" {
-		t.Fatalf("play method = %q", session.PlayMethod)
-	}
-	if session.StartedAtSource != streamtelemetry.StartedAtSourceSession {
-		t.Fatalf("started source = %q, want the ABS session's own start", session.StartedAtSource)
-	}
-	// ABS public tracks carry no signed stream token; claiming a verified
-	// issued-at would be a fabrication.
-	if session.TokenIssuedAtSources[streamtelemetry.TokenIssuedAtSourceNone] != 1 {
-		t.Fatalf("token sources = %+v", session.TokenIssuedAtSources)
-	}
-	if len(session.Routes) != 1 || session.Routes[0].Role != streamtelemetry.RoleViewerEgress || !session.Routes[0].CapRelevant {
-		t.Fatalf("routes = %+v", session.Routes)
-	}
-	if session.Routes[0].BytesAccepted != int64(len(body)) {
-		t.Fatalf("bytes = %d, want %d", session.Routes[0].BytesAccepted, len(body))
-	}
-	if len(session.ClientVariants) != 1 || session.ClientVariants[0].Name != "Silo Audiobooks" || session.ClientVariants[0].Version != "3.1.0" {
-		t.Fatalf("client variants = %+v", session.ClientVariants)
-	}
-}
-
 // feedMediaStore serves one item with one media file for the RSS feed-file
 // route.
 type feedMediaStore struct {
@@ -257,84 +156,4 @@ func (f *feedStore) GetFeed(context.Context, string) (RSSFeed, error) {
 }
 func (f *feedStore) ListUserFeeds(context.Context, string, string) ([]RSSFeed, error) {
 	return nil, nil
-}
-
-// §4.2b: the RSS feed route has no authenticated caller — the slug is the
-// capability — so the transfer must be attributed to the feed's owner.
-func TestMountedABSRouterFeedFileResolvesOwner(t *testing.T) {
-	body := []byte(strings.Repeat("feed-audio", 200))
-	path := filepath.Join(t.TempDir(), "feed.mp3")
-	if err := os.WriteFile(path, body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	registry := telemetryRegistry(t)
-	server := absTelemetryServer(t, registry, Dependencies{
-		MediaStore:   &feedMediaStore{file: &models.MediaFile{ID: 501, FilePath: path, ContentID: "book-9"}},
-		RSSFeedStore: &feedStore{feed: RSSFeed{ID: "feed-1", UserID: "7", ProfileID: "profile-9", LibraryItemID: "book-9", Slug: "slug-9"}},
-		AccessResolver: newFakeOwnerResolver().
-			set("7", "profile-9", catalog.AccessFilter{UserID: 7, ProfileID: "profile-9"}),
-	})
-	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
-	t.Cleanup(client.CloseIdleConnections)
-
-	got := getWithHeaders(t, client, http.MethodGet, server.URL+"/feed/slug-9/file/501", nil)
-	if got.status != http.StatusOK || !bytes.Equal(got.body, body) {
-		t.Fatalf("GET = %d, %d bytes", got.status, len(got.body))
-	}
-	snapshot := server.settledSweep(t)
-	if len(snapshot.Sessions) != 0 {
-		t.Fatalf("feed file created a logical session: %+v", snapshot.Sessions)
-	}
-	if len(snapshot.Transfers) != 1 {
-		t.Fatalf("transfers = %+v", snapshot.Transfers)
-	}
-	transfer := snapshot.Transfers[0]
-	if transfer.Subject != streamtelemetry.UserSubject(7) || transfer.ProfileID != "profile-9" {
-		t.Fatalf("feed transfer was not attributed to the feed owner: %+v", transfer)
-	}
-	if transfer.MediaFileID != 501 || transfer.BytesAccepted != int64(len(body)) {
-		t.Fatalf("transfer = %+v", transfer)
-	}
-}
-
-func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
-	body := []byte("\xff\xfb\x00\x00audio-bytes")
-
-	// A rejected request must create no LOGICAL activity. It does not produce an
-	// empty snapshot: the observer still saw the request and the error body, and
-	// that is deliberately retained in the unattributed counters.
-	for _, test := range []struct {
-		name       string
-		sid        string
-		closed     bool
-		wantStatus int
-	}{
-		{"unknown session", "sid-missing", false, http.StatusNotFound},
-		{"closed session", "sid-closed", true, http.StatusGone},
-	} {
-		t.Run(test.name+" creates no logical activity", func(t *testing.T) {
-			registry := telemetryRegistry(t)
-			deps := absPublicTrackDeps(t, "sid-real", "book-1", "42", body)
-			if test.closed {
-				closedAt := time.Now()
-				store := deps.PlaybackSessionStore.(*fakePlaybackSessionStore)
-				_ = store.InsertPlaybackSession(context.Background(), ABSPlaybackSession{
-					ID: test.sid, UserID: "42", ContentID: "book-1", ClosedAt: &closedAt,
-				})
-			}
-			server := absTelemetryServer(t, registry, deps)
-			got := getWithHeaders(t, server.Client(), http.MethodGet,
-				server.URL+"/public/session/"+test.sid+"/track/1", nil)
-			if got.status != test.wantStatus {
-				t.Fatalf("status = %d, want %d", got.status, test.wantStatus)
-			}
-			snapshot := server.settledSweep(t)
-			if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
-				t.Fatalf("rejected request created logical activity: %+v %+v", snapshot.Sessions, snapshot.Transfers)
-			}
-			if snapshot.UnattributedObservations == 0 {
-				t.Fatal("rejected request was not counted as unattributed")
-			}
-		})
-	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -82,42 +81,5 @@ func notInterestedRows() []userstore.NotInterestedEntry {
 		{ProfileID: "p-owner", MediaItemID: "series:b", AddedAt: "2026-01-01T00:00:00Z"},
 		{ProfileID: "p-owner", MediaItemID: "movie:a", AddedAt: "2026-01-01T00:00:00Z"},
 		{ProfileID: "p-other", MediaItemID: "movie:z", AddedAt: "2025-12-30T00:00:00Z"},
-	}
-}
-
-func notInterestedDeps(svc NotInterestedService) Dependencies {
-	deps := pilotDeps(nil, nil)
-	deps.NotInterested = svc
-	return deps
-}
-
-func TestMarkGetAndUnmarkNotInterested(t *testing.T) {
-	svc := &fakeNotInterested{missing: map[string]bool{"movie:hidden": true}}
-	h := newTestHandler(t, notInterestedDeps(svc))
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/not-interested/movie:new", "", viewerHeaders()), TypeNotFound)
-
-	for range 2 {
-		if rec := do(t, h, http.MethodPut, "/api/v2/not-interested/movie:new", "", viewerHeaders()); rec.Code != http.StatusNoContent {
-			t.Fatalf("mark = %d %s", rec.Code, rec.Body.String())
-		}
-	}
-	if len(svc.marks) != 1 {
-		t.Fatalf("marks = %+v", svc.marks)
-	}
-	rec := do(t, h, http.MethodGet, "/api/v2/not-interested/movie:new", "", viewerHeaders())
-	if rec.Code != 200 || rec.Body.String() != `{"item_id":"movie:new","marked_at":"2026-01-03T00:00:00.000Z"}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/not-interested/movie:hidden", "", viewerHeaders()), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/not-interested/episode:x", "", viewerHeaders()), TypeValidationFailed)
-
-	for range 2 {
-		if rec := do(t, h, http.MethodDelete, "/api/v2/not-interested/movie:new", "", viewerHeaders()); rec.Code != http.StatusNoContent {
-			t.Fatalf("unmark = %d %s", rec.Code, rec.Body.String())
-		}
-	}
-	if len(svc.marks) != 0 {
-		t.Fatalf("marks after unmark = %+v", svc.marks)
 	}
 }

@@ -23,7 +23,7 @@ COPY docs/design/schemas/ /app/docs/design/schemas/
 RUN pnpm run build
 
 # Stage 2: Prepare Go build workspace
-FROM golang:1.26 AS build-base
+FROM golang:1.27 AS build-base
 ENV CGO_ENABLED=1
 ENV GOPROXY=https://proxy.golang.org,direct
 ENV GOPRIVATE=github.com/Silo-Server/*

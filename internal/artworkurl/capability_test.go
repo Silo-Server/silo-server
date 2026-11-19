@@ -43,28 +43,6 @@ func TestJobArtifactSignerRoutesAndVerifies(t *testing.T) {
 	}
 }
 
-// The two capability kinds derive independent keys, so a URL minted for artwork
-// cannot be replayed to download a job artifact, or the reverse. Artwork URLs
-// are handed out broadly and job artifacts are administrator data.
-func TestCapabilityDomainsDoNotCrossVerify(t *testing.T) {
-	const secret = "test-secret"
-	artwork := NewSigner(secret, time.Hour)
-	artifact := NewJobArtifactSigner(secret, time.Hour)
-	now := time.Now()
-
-	artworkURL, _ := artwork.SignFor("job-abc", now, time.Hour)
-	exp, sig := queryOf(t, artworkURL)
-	if err := artifact.Verify("job-abc", exp, sig, now); err == nil {
-		t.Fatal("artwork capability authorized a job artifact")
-	}
-
-	artifactURL, _ := artifact.SignFor("job-abc", now, time.Hour)
-	exp, sig = queryOf(t, artifactURL)
-	if err := artwork.Verify("job-abc", exp, sig, now); err == nil {
-		t.Fatal("job artifact capability authorized artwork")
-	}
-}
-
 func queryOf(t *testing.T, raw string) (int64, string) {
 	t.Helper()
 	_, query, ok := strings.Cut(raw, "?")

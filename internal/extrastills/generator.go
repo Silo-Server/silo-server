@@ -2,6 +2,9 @@
 // a card image taken from a frame of the video. A sidecar image, which the
 // scanner copies (internal/scanner/extra_stills.go), always wins: the scanner
 // replaces a generated still with it, and the generator never overwrites one.
+//
+// A second pass gives each movie with no poster a 2:3 crop of a frame of its
+// own video (posters.go). Any other image replaces it.
 package extrastills
 
 import (
@@ -40,13 +43,16 @@ type StillCacher interface {
 	CacheExtraStill(ctx context.Context, data []byte, extraID string) (storedPath string, thumbhash string, err error)
 }
 
-// Generator takes a frame for each local extra that has no image.
+// Generator takes a frame for each local extra that has no image, and, with
+// WithPosters, for each movie that has no poster.
 type Generator struct {
 	pool   *pgxpool.Pool
 	extras *catalog.ExtraRepository
 	files  FileLoader
 	frames FrameExtractor
 	cacher StillCacher
+	// posters is nil until WithPosters.
+	posters *posterPass
 }
 
 // NewGenerator builds a generator over the extras in pool.
@@ -54,13 +60,14 @@ func NewGenerator(pool *pgxpool.Pool, files FileLoader, frames FrameExtractor, c
 	return &Generator{pool: pool, extras: catalog.NewExtraRepository(pool), files: files, frames: frames, cacher: cacher}
 }
 
-// Generate gives up to limit extras a frame and reports how many it saved.
-// It does nothing while another replica is generating, and stops early when no
-// transcode node can be reserved.
-func (g *Generator) Generate(ctx context.Context, limit int) (int, error) {
+// Generate gives up to limit extras a frame, then up to limit movies a frame
+// poster, and reports how many of each it saved. It does nothing while
+// another replica is generating, and stops early when no transcode node can
+// be reserved.
+func (g *Generator) Generate(ctx context.Context, limit int) (extras, posters int, err error) {
 	lock, acquired, err := pglock.TryAcquire(ctx, g.pool, lockKey)
 	if err != nil || !acquired {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() {
 		if err := lock.Release(context.WithoutCancel(ctx)); err != nil {
@@ -68,6 +75,17 @@ func (g *Generator) Generate(ctx context.Context, limit int) (int, error) {
 		}
 	}()
 
+	extras, err = g.generateExtras(ctx, limit)
+	if err != nil || g.posters == nil {
+		return extras, 0, err
+	}
+	posters, err = g.posters.run(ctx, limit)
+	return extras, posters, err
+}
+
+// generateExtras gives up to limit extras a frame and reports how many it
+// saved. It stops early when no transcode node can be reserved.
+func (g *Generator) generateExtras(ctx context.Context, limit int) (int, error) {
 	pending, err := g.extras.ListPendingFrameStills(ctx, limit)
 	if err != nil {
 		return 0, err

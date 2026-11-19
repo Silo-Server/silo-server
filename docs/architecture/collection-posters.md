@@ -63,8 +63,11 @@ no match with a poster). A read serves those records with one statement for all 
 smart collections. It queues a refresh when the record is missing, names another definition, or
 names a collage the artwork reconcile cleared (serving nothing until then), or is older than the refresh interval (15 minutes; serving the
 recorded collage meanwhile), so a new match reaches the collage within that time. A record goes
-with its collection, and with its collage when that collage is retired as unused. Server and
-personal smart collections share this (`smartCollageSet`):
+with its collection, and with its collage when that collage is retired as unused. A refresh also
+deletes the collection's records nobody refreshed for a week, such as one left behind when a
+profile's restrictions changed its access hash, with or without a collage. A viewer that still
+reads with that access finds no record on its next read, sees no collage, and queues the refresh
+that records it again. Server and personal smart collections share this (`smartCollageSet`):
 
 - Server collections record in `library_collection_smart_collages`. Their members never depend
   on the viewer's account or profile, so the access hash leaves those out and viewers with the

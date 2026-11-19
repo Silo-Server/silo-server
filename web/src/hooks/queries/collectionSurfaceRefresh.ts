@@ -1,5 +1,20 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { catalogKeys, collectionKeys, libraryCollectionKeys } from "./keys";
+import {
+  catalogKeys,
+  collectionKeys,
+  libraryCollectionKeys,
+  libraryCollectionTitleKeys,
+  sectionKeys,
+} from "./keys";
+
+/**
+ * A row of collections shows each collection's name, poster and count, so a
+ * collection change marks the cached Home and library rows stale. They read
+ * again when next shown rather than all at once now.
+ */
+function markRowsStale(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: sectionKeys.all, refetchType: "none" });
+}
 
 export async function invalidateUserCollectionQueries(
   queryClient: QueryClient,
@@ -8,19 +23,23 @@ export async function invalidateUserCollectionQueries(
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: collectionKeys.all }),
     queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
+    markRowsStale(queryClient),
     ...(collectionId
       ? [queryClient.invalidateQueries({ queryKey: collectionKeys.items(collectionId) })]
       : []),
   ]);
 }
 
-export async function invalidateLibraryCollectionQueries(queryClient: QueryClient) {
+async function invalidateLibraryCollectionQueries(queryClient: QueryClient) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.all }),
+    // After the lists, so a pinned-title read joins an open tab's refetch.
+    queryClient.invalidateQueries({ queryKey: libraryCollectionTitleKeys.all }),
     // The Collections page's Server collections list, which the grid there
     // reads beside each library's list.
     queryClient.invalidateQueries({ queryKey: collectionKeys.server() }),
     queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
+    markRowsStale(queryClient),
   ]);
 }
 

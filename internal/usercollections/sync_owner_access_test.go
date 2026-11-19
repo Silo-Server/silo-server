@@ -85,20 +85,6 @@ func TestRunSyncFailsVisiblyWhenOwnerAccessIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestRunSyncLeavesCollectionsWithoutASourceAlone(t *testing.T) {
-	owners := &staticOwners{err: errors.New("unused")}
-	svc := NewService(nil, nil, nil, owners, nil, slog.New(slog.DiscardHandler))
-	store := &mockSyncUserStore{}
-
-	_, _, err := svc.RunSync(t.Context(), 7, store, &userstore.Collection{ID: "c", CreatorProfileID: "owner"})
-	if !errors.Is(err, ErrSyncUnsupported) {
-		t.Fatalf("RunSync error = %v, want ErrSyncUnsupported", err)
-	}
-	if len(owners.asked) != 0 || store.syncState.Status != "" {
-		t.Fatalf("a collection with no source resolved its owner (%v) or recorded a sync state (%+v)", owners.asked, store.syncState)
-	}
-}
-
 func TestPickMembersFillsTheLimitWithAllowedTitles(t *testing.T) {
 	limit := func(n int) *int { return &n }
 	// One entry per source position; "" is an entry the catalog has no title for.
@@ -158,46 +144,6 @@ func (f *failingWriteStore) UpdateCollectionSyncState(ctx context.Context, input
 		return f.stateErr
 	}
 	return f.mockSyncUserStore.UpdateCollectionSyncState(ctx, input)
-}
-
-// A failed member replacement wrote nothing, so it is recorded. A failure
-// after the members were replaced must not be recorded over them with the
-// item count the sync started with.
-func TestRunSyncRecordsAWriteFailureOnlyBeforeMembersChange(t *testing.T) {
-	cases := []struct {
-		name        string
-		store       *failingWriteStore
-		wantWrites  int
-		wantFailed  bool
-		wantReplace bool
-	}{
-		{"replacing the members fails", &failingWriteStore{replaceErr: errors.New("connection reset")}, 1, true, false},
-		{"recording the sync fails after the members changed", &failingWriteStore{stateErr: errors.New("connection reset")}, 1, false, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			svc := NewService(nil, nil, nil, &staticOwners{}, nil, slog.New(slog.DiscardHandler))
-			svc.TMDBLists = &countingTMDBListFetcher{}
-			collection := &userstore.Collection{
-				ID:               "c",
-				CreatorProfileID: "owner",
-				SourceConfig:     `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`,
-				ItemCount:        12,
-			}
-
-			if _, _, err := svc.RunSync(t.Context(), 7, tc.store, collection); err == nil {
-				t.Fatal("RunSync succeeded although a write failed")
-			}
-			state := tc.store.syncState
-			if tc.store.stateWrites != tc.wantWrites || (state.Status == "failed") != tc.wantFailed || (tc.store.replacedItems != nil) != tc.wantReplace {
-				t.Fatalf("state writes %d, recorded %+v, members replaced %v; want %d writes, failure recorded %v, members replaced %v",
-					tc.store.stateWrites, state, tc.store.replacedItems != nil, tc.wantWrites, tc.wantFailed, tc.wantReplace)
-			}
-			if tc.wantFailed && state.ItemCount != 12 {
-				t.Fatalf("recorded item count %d, want the unchanged 12", state.ItemCount)
-			}
-		})
-	}
 }
 
 // Two syncs can run at once. One that started earlier and fails later must

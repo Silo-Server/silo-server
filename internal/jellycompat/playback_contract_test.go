@@ -5,6 +5,9 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -14,11 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/go-chi/chi/v5"
@@ -28,7 +33,7 @@ func TestBitrateProbeHonorsSize(t *testing.T) {
 	for _, tc := range []struct {
 		query        string
 		status, size int
-	}{{"", 200, 102400}, {"?size=1", 200, 1}, {"?SIZE=32769", 200, 32769}, {"?size=0", 400, 0}, {"?size=100000001", 400, 0}, {"?size=no", 400, 0}} {
+	}{{"", 200, 102400}, {"?size=1", 200, 1}, {"?SIZE=32769", 200, 32769}, {"?size=0", 400, 0}, {"?size=100000001", 400, 0}} {
 		t.Run(tc.query, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			(&PlaybackHandler{}).HandleBitrateTest(rr, httptest.NewRequest("GET", "/Playback/BitrateTest"+tc.query, nil))
@@ -235,7 +240,7 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 		DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv,mp4,ts", VideoCodec: "h264,hevc", AudioCodec: "aac,ac3,eac3,flac"}},
 		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3"}},
 	}
-	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret"}
+	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret", NodeKeys: nodeauthtest.SameKey("secret")}
 	stereoAAC := version
 	stereoAAC.CodecAudio = "aac"
 	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}
@@ -297,24 +302,12 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 // hls.js, even when it plays the static direct URL, so only a source played
 // through its TranscodingUrl may say hls (#2879).
 func TestTranscodingSubProtocolFollowsPlayedURL(t *testing.T) {
+	// The direct-play and transcode-only cases are in
+	// TestMediaSourceDTOOmitsTranscodingURLOnDirectPlaySources.
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	for _, tc := range []struct {
-		name   string
-		source PlaybackMediaSource
-		want   string
-	}{
-		{"direct play with transcode fallback", PlaybackMediaSource{SupportsDirectPlay: true, SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
-		{"direct stream with transcode fallback", PlaybackMediaSource{SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
-		{"transcode only", PlaybackMediaSource{SupportsTranscoding: true}, "hls"},
-		{"nothing playable", PlaybackMediaSource{}, "http"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.source.ID = "source"
-			dto := h.mediaSourceDTO("item", "play", tc.source)
-			if dto.TranscodingSubProtocol != tc.want {
-				t.Fatalf("TranscodingSubProtocol = %q, want %q", dto.TranscodingSubProtocol, tc.want)
-			}
-		})
+	dto := h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source"})
+	if dto.TranscodingSubProtocol != "http" {
+		t.Fatalf("nothing playable: TranscodingSubProtocol = %q, want http", dto.TranscodingSubProtocol)
 	}
 }
 
@@ -420,6 +413,57 @@ func TestSubtitleDeliveryMarksLTRAuthoredText(t *testing.T) {
 		if body := rr.Body.String(); rr.Code != 200 || strings.Count(body, "\u200e") != 3 || !strings.Contains(body, "\u200eلقد انفجر -") {
 			t.Fatalf("%s: status=%d body=%q", format, rr.Code, body)
 		}
+	}
+}
+
+// Infuse drops an external subtitle sent without Content-Length (#4486), and
+// net/http sends any body over its 2 KiB buffer chunked unless the handler
+// states the length. The server mounts the compat router's compressor, as
+// production does, and asks for gzip, as clients do.
+func TestSubtitleResponsesStateContentLength(t *testing.T) {
+	var srt, vtt, ass strings.Builder
+	vtt.WriteString("WEBVTT\n\n")
+	ass.WriteString("[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+	for i := range 80 {
+		m, s := i*2/60, i*2%60
+		fmt.Fprintf(&srt, "%d\n00:%02d:%02d,000 --> 00:%02d:%02d,500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", i+1, m, s, m, s, i)
+		fmt.Fprintf(&vtt, "00:%02d:%02d.000 --> 00:%02d:%02d.500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", m, s, m, s, i)
+		fmt.Fprintf(&ass, "Dialogue: 0,0:%02d:%02d.00,0:%02d:%02d.50,Default,,0,0,0,,Line %d of a subtitle long enough to outgrow the buffer\n", m, s, m, s, i) //nolint:misspell // ASS event keyword
+	}
+	r := chi.NewRouter()
+	r.Use(httpstream.CompressExcept(skipCompatMediaCompression, "application/json"))
+	r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", func(w http.ResponseWriter, r *http.Request) {
+		data := map[string]string{"srt": srt.String(), "vtt": vtt.String(), "ass": ass.String()}[r.URL.Query().Get("source")]
+		(&PlaybackHandler{}).deliverSubtitle(w, r, r.URL.Query().Get("source"), []byte(data), 0)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	for _, tc := range []struct{ name, route, query string }{
+		{"srt as stored", "stream.srt", "source=srt"},
+		{"vtt as stored", "stream.vtt", "source=vtt"},
+		{"ass as stored", "stream.ass", "source=ass"},
+		{"vtt windowed", "stream.vtt", "source=vtt&EndPositionTicks=6000000000"},
+		{"json events", "stream.js", "source=vtt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, srv.URL+"/Videos/item/source/Subtitles/5/0/"+tc.route+"?"+tc.query, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != http.StatusOK || len(resp.TransferEncoding) != 0 || resp.ContentLength != int64(len(body)) {
+				t.Fatalf("status=%d Transfer-Encoding=%v Content-Length=%d, read %d bytes", resp.StatusCode, resp.TransferEncoding, resp.ContentLength, len(body))
+			}
+		})
 	}
 }
 

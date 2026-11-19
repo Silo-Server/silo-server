@@ -1,4 +1,7 @@
 import * as epubcfi from "foliate-js/epubcfi.js";
+import { t } from "@/i18n";
+
+import { protectBookContent } from "@/reader/bookContentSecurity";
 
 export const CFI = epubcfi;
 
@@ -322,7 +325,7 @@ export class DocumentLoader {
 
   private async makeTextBook(): Promise<BookDoc> {
     const text = await this.file.text();
-    const title = this.file.name.replace(/\.[^.]+$/, "") || "Document";
+    const title = this.file.name.replace(/\.[^.]+$/, "") || t("web.reader.document.fallbackTitle");
     const createDocument = async () => {
       const doc = document.implementation.createHTMLDocument(title);
       const pre = doc.createElement("pre");
@@ -365,7 +368,7 @@ export class DocumentLoader {
     let book: BookDoc | null = null;
     let format: BookFormat = "EPUB";
     if (!this.file.size) {
-      throw new Error("File is empty");
+      throw new Error(t("web.reader.error.fileEmpty"));
     }
     try {
       if (await this.isZip()) {
@@ -424,13 +427,14 @@ export class DocumentLoader {
     } catch (e: unknown) {
       console.error("Failed to open document:", e);
       if (e instanceof Error && e.message?.includes("not a valid zip")) {
-        throw new Error("Unsupported or corrupted book file");
+        throw new Error(t("web.reader.error.unsupportedOrCorrupted"));
       }
       throw e;
     }
     if (!book) {
-      throw new Error("Unsupported book format");
+      throw new Error(t("web.reader.error.unsupportedFormat"));
     }
+    protectBookContent(book);
     return { book, format };
   }
 }

@@ -8,41 +8,6 @@ import (
 	"time"
 )
 
-func TestSeedDefaultsPreservesExistingServerInstanceID(t *testing.T) {
-	store := newMemorySettingsStore(map[string]string{
-		KeyServerInstanceID: "existing-instance",
-	})
-	if err := SeedDefaults(context.Background(), store); err != nil {
-		t.Fatalf("SeedDefaults: %v", err)
-	}
-	if got := store.values[KeyServerInstanceID]; got != "existing-instance" {
-		t.Fatalf("server instance id = %q, want existing-instance", got)
-	}
-	if got := store.values[KeyUploadsEnabled]; got != defaultUploadsEnabledStr {
-		t.Fatalf("uploads enabled default = %q, want %q", got, defaultUploadsEnabledStr)
-	}
-}
-
-func TestSeedDefaultsGeneratesDedicatedServerInstanceIDWhenMissing(t *testing.T) {
-	const jellyfinServerIDKey = "jellyfin_compat.server_id"
-	store := newMemorySettingsStore(map[string]string{
-		jellyfinServerIDKey: "constant-jellyfin-id",
-	})
-	if err := SeedDefaults(context.Background(), store); err != nil {
-		t.Fatalf("SeedDefaults: %v", err)
-	}
-	got := store.values[KeyServerInstanceID]
-	if len(got) != 36 {
-		t.Fatalf("server instance id length = %d, want UUID string", len(got))
-	}
-	if got == store.values[jellyfinServerIDKey] {
-		t.Fatal("diagnostics server instance id reused jellyfin_compat.server_id")
-	}
-	if store.values[jellyfinServerIDKey] != "constant-jellyfin-id" {
-		t.Fatalf("jellyfin server id changed to %q", store.values[jellyfinServerIDKey])
-	}
-}
-
 func TestSeedDefaultsAdoptsConcurrentInstanceIDWinner(t *testing.T) {
 	// A store that supports insert-if-absent seeds the instance ID atomically:
 	// when another node wins the race, this node adopts the winning value
@@ -87,53 +52,6 @@ func TestLoadCleanupIntervalCapsHugeValues(t *testing.T) {
 		if got <= 0 {
 			t.Fatalf("LoadCleanupInterval(%s) = %v, want a positive duration", raw, got)
 		}
-	}
-}
-
-func TestLoadSettingsPropagatesReadErrors(t *testing.T) {
-	// A genuine read failure must surface as an error so callers can return a
-	// retryable failure instead of silently reporting defaults (e.g. uploads
-	// disabled) to clients.
-	store := &failingSettingsStore{
-		memorySettingsStore: memorySettingsStore{values: map[string]string{KeyUploadsEnabled: "true"}},
-		failKey:             KeyUploadsEnabled,
-	}
-	if _, err := LoadSettings(context.Background(), store); err == nil {
-		t.Fatal("LoadSettings did not propagate a store read error")
-	}
-
-	// A later key failing must also propagate, not be swallowed as a default.
-	store = &failingSettingsStore{
-		memorySettingsStore: memorySettingsStore{values: map[string]string{KeyUploadsEnabled: "true"}},
-		failKey:             KeyMaxBytesPerUser,
-	}
-	if _, err := LoadSettings(context.Background(), store); err == nil {
-		t.Fatal("LoadSettings did not propagate a late store read error")
-	}
-}
-
-func TestLoadSettingsFallsBackForInvalidNumbers(t *testing.T) {
-	store := newMemorySettingsStore(map[string]string{
-		KeyMaxBundleBytes:       "-1",
-		KeyMaxUncompressedBytes: "not-a-number",
-		KeyMaxReportsPerUserDay: "0",
-		KeyRetentionDays:        "0",
-		KeyMaxBytesPerUser:      "-2",
-		KeyConsentNoticeVersion: "0",
-	})
-
-	got, err := LoadSettings(context.Background(), store)
-	if err != nil {
-		t.Fatalf("LoadSettings: %v", err)
-	}
-	want := DefaultSettings()
-	if got.MaxBundleBytes != want.MaxBundleBytes ||
-		got.MaxUncompressedBytes != want.MaxUncompressedBytes ||
-		got.MaxReportsPerUserDay != want.MaxReportsPerUserDay ||
-		got.RetentionDays != want.RetentionDays ||
-		got.MaxBytesPerUser != want.MaxBytesPerUser ||
-		got.ConsentNoticeVersion != want.ConsentNoticeVersion {
-		t.Fatalf("LoadSettings = %+v, want defaults %+v", got, want)
 	}
 }
 

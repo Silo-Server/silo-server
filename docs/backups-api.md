@@ -302,7 +302,8 @@ server would grant a new account more than the backup did),
 `template_not_available` (a template collection whose template this
 server's catalog does not have, or that does not suit the library), and
 `collection_not_mapped` (a page section showing a collection that is
-neither here nor in the backup), and `unreadable` (an entry of the backup the
+neither here nor in the backup; for a row of collections, when none of the
+collections it lists is), and `unreadable` (an entry of the backup the
 reader left out because a value in it cannot be restored; its `id` is
 `unreadable:<n>` and it can never be chosen), `kept_stricter` (a
 settings page whose every differing setting would widen access), and
@@ -359,7 +360,10 @@ Kind-specific details:
   `web only`, `configuration`, and `N collection items` of the collection it
   manages). A
   chosen section replaces the configuration of the one here or is created; a
-  section that manages a collection brings it.
+  section that manages a collection brings it. A row of collections
+  (`collection_posters`) lists each collection mapped to the one here, in
+  order; an entry whose collection is neither here nor in the backup is left
+  out of the list, with a report note saying how many were.
 - `account`: `account` with `username`, `email`, `role`, `admin` (restoring
   creates an administrator), `match` (`account_id`, `restored`,
   `username_email`, or `new`), `target` (what the request sends back: the

@@ -18,6 +18,14 @@ type ebookSkipFile struct {
 	modifiedAt      *time.Time
 	groupKeyVersion int
 	status          string
+	// linked reports whether the item has a membership in the file's library.
+	// A scan that stopped between writing the file row and the membership, or
+	// lost the item to a concurrent sweep, leaves an unchanged file without
+	// one; skipping it would leave the book out of the library for good.
+	linked bool
+	// mangaSeriesLinked: the item is a manga chapter linked to a series that
+	// has a library membership. Only the manga scan reads it.
+	mangaSeriesLinked bool
 }
 
 type ebookSkipState map[string][]ebookSkipFile
@@ -30,7 +38,14 @@ type ebookScanCandidate struct {
 func (r *FileRepository) loadEbookSkipState(ctx context.Context, folderID int, paths []string) (ebookSkipState, error) {
 	rows, err := r.pool.Query(ctx, `
   SELECT mf.observed_root_path, COALESCE(mf.content_id, ''), mf.file_path, mf.file_size,
-         mf.file_modified_at, mf.group_key_version, COALESCE(mi.status, '')
+         mf.file_modified_at, mf.group_key_version, COALESCE(mi.status, ''),
+         EXISTS (SELECT 1 FROM media_item_libraries mil
+                 WHERE mil.content_id = mf.content_id AND mil.media_folder_id = mf.media_folder_id),
+         EXISTS (
+           SELECT 1 FROM manga_chapters mc
+           JOIN media_item_libraries mil ON mil.content_id = mc.series_content_id
+           WHERE mc.chapter_content_id = mf.content_id
+         )
   FROM media_files mf
   LEFT JOIN media_items mi ON mi.content_id = mf.content_id
   WHERE mf.media_folder_id = $1 AND mf.observed_root_path = ANY($2)
@@ -44,7 +59,7 @@ func (r *FileRepository) loadEbookSkipState(ctx context.Context, folderID int, p
 	for rows.Next() {
 		var root string
 		var file ebookSkipFile
-		if err := rows.Scan(&root, &file.contentID, &file.path, &file.size, &file.modifiedAt, &file.groupKeyVersion, &file.status); err != nil {
+		if err := rows.Scan(&root, &file.contentID, &file.path, &file.size, &file.modifiedAt, &file.groupKeyVersion, &file.status, &file.linked, &file.mangaSeriesLinked); err != nil {
 			return nil, fmt.Errorf("read ebook skip state: %w", err)
 		}
 		state[root] = append(state[root], file)
@@ -63,7 +78,7 @@ func unchangedEbookFile(files []ebookSkipFile, path string, size int64, modified
 	if file.path != path || file.size != size || file.modifiedAt == nil || !sameFileModifiedAt(file.modifiedAt, modifiedAt) {
 		return "", false
 	}
-	if file.contentID == "" || file.groupKeyVersion != ebookGroupKeyVersion {
+	if file.contentID == "" || !file.linked || file.groupKeyVersion != ebookGroupKeyVersion {
 		return "", false
 	}
 	if strings.EqualFold(strings.TrimSpace(file.status), "unmatched") {

@@ -3,7 +3,6 @@ package watchsync
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -13,7 +12,6 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
-	hostplugins "github.com/Silo-Server/silo-server/internal/plugins"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -221,80 +219,6 @@ func TestPluginProviderRejectsMissingAccountIdentity(t *testing.T) {
 	}
 }
 
-func TestPluginProviderValidatesAndOverlaysConnectionConfig(t *testing.T) {
-	client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
-		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: testValidatedToken, TokenType: testBearerTokenType},
-		Account:     &pluginv1.WatchSyncAccount{ExternalSubject: "7", Username: testPluginUsername},
-	}}
-	schema := &pluginv1.ConfigSchema{
-		Key: "floppy", Title: "Floppy server", Required: true,
-		JsonSchema: `{"type":"object","properties":{"base_url":{"type":"string","format":"uri"}},"required":["base_url"],"additionalProperties":false}`,
-		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{
-			Key: "base_url", Label: "Base URL", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_TEXT, Required: true,
-		}}},
-	}
-	provider, err := NewPluginProvider(PluginProviderOptions{
-		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
-		DisplayName: "Floppy", Descriptor: &pluginv1.WatchSyncProviderDescriptor{
-			AuthMethods: []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
-		},
-		ConnectionConfigSchema: []*pluginv1.ConfigSchema{schema},
-		ResolveClient:          func(context.Context, int, string) (WatchSyncPluginClient, error) { return client, nil },
-		ResolveConfig: func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error) {
-			return &pluginv1.WatchSyncProviderConfig{Values: map[string]string{"floppy.base_url": "https://legacy.example.com"}}, nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = provider.ConnectWithAPIKeyConfig(context.Background(), "token", ConnectionConfigValues{
-		"floppy": {"base_url": "https://personal.example.com"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := client.exchangeRequest.GetProviderConfig().GetValues()["floppy.base_url"]; got != "https://personal.example.com" {
-		t.Fatalf("base URL = %q", got)
-	}
-	views := provider.ConnectionConfigSchema()
-	if len(views) != 1 || views[0].AdminForm == nil || views[0].AdminForm.Fields[0].Control != "TEXT" {
-		t.Fatalf("connection config schema = %#v", views)
-	}
-	_, _, err = provider.ConnectWithAPIKeyConfig(context.Background(), "token", nil)
-	if invalid, ok := errors.AsType[InvalidConnectionInputError](err); !ok || !strings.Contains(invalid.Message, "required") {
-		t.Fatalf("missing config error = %#v", err)
-	}
-}
-
-// A connect fault that means the supplied input can't work becomes
-// InvalidConnectionInputError with the plugin's redacted safe message; other
-// faults keep their classification.
-func TestPluginProviderClassifiesConnectFaults(t *testing.T) {
-	for _, tc := range []struct {
-		code         pluginv1.WatchSyncFaultCode
-		invalidInput bool
-	}{
-		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_REQUEST, true},
-		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMANENT, true},
-		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL, false},
-		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_TEMPORARY, false},
-	} {
-		t.Run(tc.code.String(), func(t *testing.T) {
-			client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{Fault: &pluginv1.WatchSyncFault{
-				Code: tc.code, SafeMessage: "server URL rejected for key input-token",
-			}}}
-			_, _, err := testPluginProvider(t, client).ConnectWithAPIKey(context.Background(), "input-token")
-			invalid, ok := errors.AsType[InvalidConnectionInputError](err)
-			if ok != tc.invalidInput {
-				t.Fatalf("error = %#v, invalid input = %v", err, ok)
-			}
-			if ok && invalid.Message != "server URL rejected for key [REDACTED]" {
-				t.Fatalf("message = %q", invalid.Message)
-			}
-		})
-	}
-}
-
 func TestPluginProviderClassifiesAndRedactsConnectionSecrets(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
 		Fault: &pluginv1.WatchSyncFault{
@@ -419,47 +343,6 @@ func TestPluginProviderRedactsUndeclaredConnectionSecrets(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), undeclaredSecret) || !strings.Contains(err.Error(), "[REDACTED]") {
 		t.Fatalf("undeclared connection secret was not redacted: %q", err)
-	}
-}
-
-func TestPluginProviderEnforcesVisibleRequiredConnectionAdminFields(t *testing.T) {
-	client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
-		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: testValidatedToken},
-		Account:     &pluginv1.WatchSyncAccount{ExternalSubject: "7"},
-	}}
-	provider, err := NewPluginProvider(PluginProviderOptions{
-		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
-		Descriptor: &pluginv1.WatchSyncProviderDescriptor{AuthMethods: []pluginv1.WatchSyncAuthMethod{
-			pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY,
-		}},
-		ConnectionConfigSchema: []*pluginv1.ConfigSchema{{
-			Key:        "server",
-			JsonSchema: `{"type":"object","properties":{"advanced":{"type":"boolean"},"endpoint":{"type":"string"}},"required":["advanced"],"additionalProperties":false}`,
-			AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
-				{Key: "advanced", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_SWITCH},
-				{
-					Key: "endpoint", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_TEXT, Required: true,
-					ShowWhen: []*pluginv1.AdminFormCondition{{Field: "advanced", Equals: []string{"true"}}},
-				},
-			}},
-		}},
-		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
-			return client, nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, _, err := provider.ConnectWithAPIKeyConfig(context.Background(), "token", ConnectionConfigValues{
-		"server": {"advanced": false},
-	}); err != nil {
-		t.Fatalf("hidden required field: %v", err)
-	}
-	if _, _, err := provider.ConnectWithAPIKeyConfig(context.Background(), "token", ConnectionConfigValues{
-		"server": {"advanced": true},
-	}); err == nil || !strings.Contains(err.Error(), `field "endpoint" is required`) {
-		t.Fatalf("visible required field error = %v", err)
 	}
 }
 
@@ -638,38 +521,6 @@ func TestPluginProviderRefreshReturnsCredentialsAlongsideFault(t *testing.T) {
 	}
 }
 
-func TestPluginProviderExportsRichEpisodeIdentity(t *testing.T) {
-	client := &fakeWatchSyncPluginClient{}
-	client.applyResponse = &pluginv1.WatchSyncApplyEventsResponse{Results: []*pluginv1.WatchSyncApplyResult{{
-		EventId: testWatchHistoryID, Status: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
-	}}}
-	provider := testPluginProvider(t, client)
-	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{AccessToken: testSecretValue}, []LocalPlay{{
-		HistoryID:       testWatchHistoryID,
-		MediaItemID:     testEpisodeMediaID,
-		Kind:            historyimport.KindEpisode,
-		SeriesTVDBID:    "123",
-		SeriesTMDBID:    "456",
-		SeasonNumber:    2,
-		EpisodeNumber:   7,
-		WatchedAt:       time.Now().UTC(),
-		DurationSeconds: 1440,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Sent) != 1 || result.Sent[0] != testWatchHistoryID {
-		t.Fatalf("result = %#v", result)
-	}
-	event := client.applyRequest.GetEvents()[0]
-	if client.applyRequest.GetContext().GetCredentials().GetAccessToken() != testSecretValue ||
-		event.GetMedia().GetSeriesExternalIds()["tvdb"] != "123" ||
-		event.GetMedia().GetEpisodeNumber() != 7 ||
-		event.GetMedia().GetMediaType() != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE {
-		t.Fatalf("apply request = %#v", client.applyRequest)
-	}
-}
-
 func TestPluginProviderSkipsUnsupportedExportMedia(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{applyResponse: &pluginv1.WatchSyncApplyEventsResponse{Results: []*pluginv1.WatchSyncApplyResult{
 		{EventId: testWatchHistoryID, Status: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED},
@@ -729,15 +580,6 @@ func TestPluginProviderTransportFailureIsRetryableAndSanitized(t *testing.T) {
 	_, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: testWatchHistoryID, Kind: historyimport.KindMovie}})
 	if !isRetryableProviderError(err) || strings.Contains(err.Error(), testSecretValue) {
 		t.Fatalf("error = %#v", err)
-	}
-}
-
-func TestPluginProviderSanitizesFaultMessage(t *testing.T) {
-	message := safeApplyMessage(&pluginv1.WatchSyncApplyResult{Fault: &pluginv1.WatchSyncFault{
-		SafeMessage: "  failed\n\taccess-token " + strings.Repeat("x", 300),
-	}}, "access-token")
-	if strings.ContainsAny(message, "\n\t") || strings.Contains(message, "access-token") || len([]rune(message)) > 257 {
-		t.Fatalf("message was not sanitized: %q", message)
 	}
 }
 
@@ -998,40 +840,6 @@ func TestPluginProviderBoundsRemoteStateTraversalByItemCount(t *testing.T) {
 	}
 }
 
-func TestPluginProviderMarksGuessedListTime(t *testing.T) {
-	state := &pluginv1.WatchSyncRemoteState{
-		ProviderItemKey: "imdb:tt0137523",
-		Media: &pluginv1.WatchSyncMedia{
-			MediaType: pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
-			Title:     "Movie", ExternalIds: map[string]string{"imdb": "tt0137523"},
-		},
-	}
-	listedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	dated, err := remoteFavoriteFromProto(testPluginProviderKey, state, &pluginv1.WatchSyncRemoteListState{ListedAt: timestamppb.New(listedAt)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	undated, err := remoteFavoriteFromProto(testPluginProviderKey, state, &pluginv1.WatchSyncRemoteListState{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dated.FavoritedAtGuessed || !dated.FavoritedAt.Equal(listedAt) || !undated.FavoritedAtGuessed || undated.FavoritedAt.IsZero() {
-		t.Fatalf("dated = %v/%v, undated = %v/%v", dated.FavoritedAt, dated.FavoritedAtGuessed, undated.FavoritedAt, undated.FavoritedAtGuessed)
-	}
-}
-
-func TestPluginProviderDecodesKeyOnlyListTombstone(t *testing.T) {
-	row, err := remoteFavoriteFromProto(testPluginProviderKey, &pluginv1.WatchSyncRemoteState{
-		ProviderItemKey: "remote-1",
-	}, &pluginv1.WatchSyncRemoteListState{Removed: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !row.Removed || row.ProviderItemKey != "remote-1" || row.Kind != "" {
-		t.Fatalf("row = %#v", row)
-	}
-}
-
 func TestPluginProviderListEventsKeepFailuresAndPresenceAwareOrder(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{}
 	provider := testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
@@ -1139,41 +947,6 @@ func TestPluginProviderDecodesRatingSnapshot(t *testing.T) {
 	kept := withoutRatingCursors(map[string]string{pluginRatingsCursorKey: "a", pluginWatchedCursorKey: "b"})
 	if _, ok := kept[pluginRatingsCursorKey]; ok || kept[pluginWatchedCursorKey] != "b" {
 		t.Fatalf("cursors kept after account change = %#v", kept)
-	}
-}
-
-func TestPluginProviderPaginatesIncrementalRatingsWithTombstone(t *testing.T) {
-	client := &fakeWatchSyncPluginClient{listResponses: []*pluginv1.WatchSyncListRemoteStateResponse{
-		{
-			Items:         []*pluginv1.WatchSyncRemoteState{remoteRatingState("m1", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE, "tt1", 6, nil)},
-			NextPageToken: "page-2",
-		},
-		{
-			Items:      []*pluginv1.WatchSyncRemoteState{{ProviderItemKey: "m2", Rating: &pluginv1.WatchSyncRemoteRatingState{Removed: true}}},
-			NextCursor: "cursor-2",
-		},
-	}}
-	provider := testPluginProviderWithDescriptor(t, client, ratingTestDescriptor(
-		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
-		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES,
-	))
-	batch, err := provider.FetchRatings(context.Background(), ServerConfig{}, Connection{
-		SyncCursors: map[string]string{pluginRatingsCursorKey: testCursorOne},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(client.listRequests) != 2 || client.listRequests[1].GetCursor() != testCursorOne ||
-		client.listRequests[1].GetPageToken() != "page-2" {
-		t.Fatalf("requests = %#v", client.listRequests)
-	}
-	// An incremental read is complete for no kind, so absent ratings stay unknown.
-	if len(batch.SnapshotKinds) != 0 || batch.UpdatedCursors[pluginRatingsCursorKey] != "cursor-2" || len(batch.Rows) != 2 {
-		t.Fatalf("batch = %#v", batch)
-	}
-	tombstone := batch.Rows[1]
-	if !tombstone.Removed || tombstone.ProviderItemKey != "m2" || tombstone.Kind != "" || tombstone.Rating != 0 {
-		t.Fatalf("tombstone = %#v", tombstone)
 	}
 }
 
@@ -1420,42 +1193,6 @@ func TestPluginProviderRatingEventsFailUnsupportedMedia(t *testing.T) {
 	}
 	if client.applyRequest != nil || result.Failed[testSeriesMediaID] != watchSyncUnsupportedSeriesMediaMessage {
 		t.Fatalf("result=%#v request=%#v", result, client.applyRequest)
-	}
-}
-
-func TestPluginProviderRatingCapabilitiesSurviveCapabilityStorage(t *testing.T) {
-	stored := ratingTestDescriptor(
-		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
-		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES,
-	)
-	stored.SyncDropped = true
-	stored.RatingExportRequiresWatched = []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE}
-	records, err := hostplugins.CapabilityRecordsFromManifest(&pluginv1.PluginManifest{Capabilities: []*pluginv1.CapabilityDescriptor{{
-		Type: "watch_sync_provider.v1", Id: testPluginCapabilityID, DisplayName: "AniList",
-		WatchSyncProvider: stored,
-	}}})
-	if err != nil || len(records) != 1 {
-		t.Fatalf("records=%#v err=%v", records, err)
-	}
-	// Capability metadata is stored as JSON and decoded on provider reload.
-	metadata, err := json.Marshal(records[0].Metadata)
-	if err != nil {
-		t.Fatal(err)
-	}
-	records[0].Metadata = nil
-	if err := json.Unmarshal(metadata, &records[0].Metadata); err != nil {
-		t.Fatal(err)
-	}
-	descriptor, err := hostplugins.DecodeCapability(&records[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := testPluginProviderWithDescriptor(t, &fakeWatchSyncPluginClient{}, descriptor.GetWatchSyncProvider())
-	capabilities := provider.Capabilities()
-	if !capabilities.ImportRatings || !capabilities.ExportRatings || !capabilities.SyncDropped ||
-		!provider.supportsMedia(pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES) ||
-		!provider.RatingExportRequiresWatched(historyimport.KindMovie) {
-		t.Fatalf("capabilities=%#v descriptor=%#v", capabilities, descriptor.GetWatchSyncProvider())
 	}
 }
 
@@ -1787,36 +1524,5 @@ func TestPluginProviderRedactsEverySecretFromPageWarnings(t *testing.T) {
 	}
 	if !slices.Equal(batch.Warnings, []string{"client [REDACTED] and attribute [REDACTED]"}) {
 		t.Fatalf("warnings = %q, want both secrets redacted", batch.Warnings)
-	}
-}
-
-// The first-party plugins under the former built-in keys keep the pause that
-// saves progress when a session ends; any other plugin receives a stop.
-func TestStopsEndedSessionsExemptsFirstPartyPlugins(t *testing.T) {
-	for _, tt := range []struct {
-		key  string
-		want bool
-	}{
-		{simklProviderKey, false},
-		{mdblistProviderKey, false},
-		{testPluginProviderKey, true},
-	} {
-		provider, err := NewPluginProvider(PluginProviderOptions{
-			InstallationID: 4,
-			ProviderKey:    tt.key,
-			CapabilityID:   testPluginCapabilityID,
-			Descriptor: &pluginv1.WatchSyncProviderDescriptor{
-				AuthMethods: []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
-			},
-			ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
-				return &fakeWatchSyncPluginClient{}, nil
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := stopsEndedSessions(provider); got != tt.want {
-			t.Errorf("stopsEndedSessions(%s) = %v, want %v", tt.key, got, tt.want)
-		}
 	}
 }

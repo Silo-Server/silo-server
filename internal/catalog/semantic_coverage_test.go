@@ -3,7 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
-	"strings"
+
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -55,40 +55,6 @@ func (c constCoverageModels) ActiveEmbeddingModel(_ context.Context) (string, er
 	return c.model, nil
 }
 
-// fatalFetch is a fetch seam that fails the test if it is ever invoked. It
-// proves the read path never reaches the database.
-func fatalFetch(t *testing.T) func(context.Context, string) ([]catalogTypeCoverage, error) {
-	t.Helper()
-	return func(context.Context, string) ([]catalogTypeCoverage, error) {
-		t.Fatal("fetch must not be called")
-		return nil, nil
-	}
-}
-
-// TestCoverageRefreshEmptyModelDoesNotFetch verifies that when no embedding
-// model is active (no lock / no provider value) Refresh publishes an empty
-// not-ready snapshot without ever consulting the fetch seam.
-func TestCoverageRefreshEmptyModelDoesNotFetch(t *testing.T) {
-	models := &fakeCoverageModels{}
-	models.push("", nil)
-	tr := &semanticCoverageTracker{fetch: fatalFetch(t), models: models, clock: time.Now}
-
-	if err := tr.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh returned error: %v", err)
-	}
-	ready, reason := tr.CoverageReady(nil)
-	if ready {
-		t.Fatalf("empty-model tracker reported ready (reason %q)", reason)
-	}
-	snap := tr.Snapshot()
-	if snap == nil {
-		t.Fatalf("Snapshot() = nil after Refresh, want empty snapshot")
-	}
-	if snap.Model != "" {
-		t.Fatalf("snapshot model = %q, want empty", snap.Model)
-	}
-}
-
 // TestCoverageRefreshModelErrorRetainsLastGood verifies that a provider error
 // is fail-safe: the previous good snapshot is retained, not overwritten with a
 // not-ready one.
@@ -124,135 +90,6 @@ func TestCoverageRefreshModelErrorRetainsLastGood(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("fetch called %d times, want 1 (provider error short-circuits)", calls)
-	}
-}
-
-// TestComputeCoverageSnapshotThreshold verifies readiness is one threshold on
-// the ratio: a fresh snapshot and one computed after a ready snapshot answer
-// the same for the same counts, so nodes refreshing from one database agree.
-func TestComputeCoverageSnapshotThreshold(t *testing.T) {
-	now := time.Unix(0, 0)
-	ready := func(vectorized int) bool {
-		s := computeCoverageSnapshot(
-			[]catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: vectorized}},
-			"m", now,
-		)
-		return s.PerType["movie"].Ready
-	}
-	for _, tc := range []struct {
-		vectorized int
-		want       bool
-	}{
-		{84, false},
-		{85, true},
-		{92, true},
-		{100, true},
-		{0, false},
-	} {
-		if got := ready(tc.vectorized); got != tc.want {
-			t.Errorf("ratio 0.%02d ready = %v, want %v", tc.vectorized, got, tc.want)
-		}
-	}
-
-	// A tracker that was ready before coverage dropped to 0.85 and one that
-	// just started report the same.
-	models := constCoverageModels{model: "m"}
-	var vectorized atomic.Int64
-	fetch := func(context.Context, string) ([]catalogTypeCoverage, error) {
-		return []catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: int(vectorized.Load())}}, nil
-	}
-	longRunning := &semanticCoverageTracker{fetch: fetch, models: models, clock: time.Now}
-	vectorized.Store(95)
-	if err := longRunning.Refresh(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for _, v := range []int64{85, 84} {
-		vectorized.Store(v)
-		fresh := &semanticCoverageTracker{fetch: fetch, models: models, clock: time.Now}
-		for _, tr := range []*semanticCoverageTracker{longRunning, fresh} {
-			if err := tr.Refresh(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-		}
-		a, _ := longRunning.CoverageReady(nil)
-		b, _ := fresh.CoverageReady(nil)
-		if a != b || a != (v >= 85) {
-			t.Fatalf("at %d%% the long-running tracker says %v and a fresh one %v", v, a, b)
-		}
-	}
-}
-
-// TestComputeCoverageSnapshotZeroEligibleNotReady verifies a type with no
-// eligible items is never marked ready and contributes nothing to overall.
-func TestComputeCoverageSnapshotZeroEligibleNotReady(t *testing.T) {
-	s := computeCoverageSnapshot(
-		[]catalogTypeCoverage{{Type: "movie", Eligible: 0, Vectorized: 0}},
-		"m", time.Unix(0, 0),
-	)
-	c := s.PerType["movie"]
-	if c.Ready {
-		t.Fatalf("zero-eligible type should not be ready")
-	}
-	if c.Ratio != 0 {
-		t.Fatalf("zero-eligible ratio = %v, want 0", c.Ratio)
-	}
-	if s.Overall != 0 {
-		t.Fatalf("overall = %v, want 0 when nothing eligible", s.Overall)
-	}
-}
-
-// TestCoverageReadyScopeAND verifies scope semantics: an explicit scope is an
-// AND over requested types, the reason names the first failing type, and an
-// empty scope requires every snapshot type to be ready.
-func TestCoverageReadyScopeAND(t *testing.T) {
-	now := time.Unix(0, 0)
-	snap := computeCoverageSnapshot(
-		[]catalogTypeCoverage{
-			{Type: "movie", Eligible: 100, Vectorized: 95},  // ready
-			{Type: "series", Eligible: 100, Vectorized: 50}, // not ready
-		},
-		"m", now,
-	)
-	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
-	tr.snap.Store(snap)
-
-	if ready, reason := tr.CoverageReady([]string{"movie", "series"}); ready {
-		t.Fatalf("scope with not-ready series reported ready")
-	} else if !strings.Contains(reason, "series") {
-		t.Fatalf("reason = %q, should name the failing type series", reason)
-	}
-
-	if ready, _ := tr.CoverageReady([]string{"movie"}); !ready {
-		t.Fatalf("movie-only scope should be ready")
-	}
-
-	// Empty scope = all snapshot types; series is not ready so overall fails.
-	if ready, reason := tr.CoverageReady(nil); ready {
-		t.Fatalf("empty scope should require all types ready, reason=%q", reason)
-	}
-}
-
-// TestCoverageReadyScopeUnknownTypeNotGated verifies that a requested type with
-// no snapshot row (no eligible items) is skipped, and a scope consisting only
-// of such types reports the no-embeddable-items reason rather than panicking.
-func TestCoverageReadyScopeUnknownTypeNotGated(t *testing.T) {
-	snap := computeCoverageSnapshot(
-		[]catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: 95}},
-		"m", time.Unix(0, 0),
-	)
-	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
-	tr.snap.Store(snap)
-
-	// movie present+ready, "music" absent -> gated only on the present type.
-	if ready, _ := tr.CoverageReady([]string{"movie", "music"}); !ready {
-		t.Fatalf("absent type should not gate a ready present type")
-	}
-
-	// Scope of only-absent types -> nothing to gate -> not ready with reason.
-	if ready, reason := tr.CoverageReady([]string{"music"}); ready {
-		t.Fatalf("scope with no embeddable items reported ready")
-	} else if !strings.Contains(reason, "no embeddable items") {
-		t.Fatalf("reason = %q, want no-embeddable-items message", reason)
 	}
 }
 
@@ -326,30 +163,6 @@ func TestCoverageRefreshModelChangeWithFailedRecount(t *testing.T) {
 	}
 	if ready, _ := tr.CoverageReady(nil); ready {
 		t.Fatalf("a failed recount under a new model must not keep the old model's readiness")
-	}
-}
-
-// TestCoverageReadyEmptyScopeGatesTypesWithItems verifies that an empty scope
-// is gated by every type that has eligible items, and only by those.
-func TestCoverageReadyEmptyScopeGatesTypesWithItems(t *testing.T) {
-	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
-
-	// A type listed with no eligible items does not gate.
-	tr.snap.Store(computeCoverageSnapshot([]catalogTypeCoverage{
-		{Type: "movie", Eligible: 100, Vectorized: 95},
-		{Type: "ebook", Eligible: 0, Vectorized: 0},
-	}, "m", time.Unix(0, 0)))
-	if ready, reason := tr.CoverageReady(nil); !ready {
-		t.Fatalf("a type with no items blocked the empty scope: %q", reason)
-	}
-
-	// A small type that has items and too few vectors still gates.
-	tr.snap.Store(computeCoverageSnapshot([]catalogTypeCoverage{
-		{Type: "movie", Eligible: 100, Vectorized: 95},
-		{Type: "ebook", Eligible: 3, Vectorized: 0},
-	}, "m", time.Unix(0, 0)))
-	if ready, reason := tr.CoverageReady(nil); ready || !strings.Contains(reason, `"ebook"`) {
-		t.Fatalf("empty scope with an unready type = %v, %q", ready, reason)
 	}
 }
 

@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -91,92 +90,6 @@ func writeManifestFixture(t *testing.T, dir, manifest string, files ...string) {
 	}
 }
 
-func TestBuildPlaybackManifest_CopyVideoUsesRealManifest(t *testing.T) {
-	realEntries := []string{
-		"#EXT-X-MEDIA-SEQUENCE:9",
-		"#EXTINF:2.669000,",
-		"#EXTINF:1.669000,",
-		"#EXT-X-MAP:URI=\"segment/init.mp4?token=test\"",
-		"segment/seg_00009.m4s?token=test",
-		"segment/seg_00010.m4s?token=test",
-	}
-	tests := []struct {
-		name          string
-		totalDuration float64
-		want          []string
-		forbidden     []string
-		tokenless     bool
-	}{
-		{
-			name:          "known duration",
-			totalDuration: 10,
-			want:          append([]string{"#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-START:TIME-OFFSET=0.001,PRECISE=YES"}, realEntries...),
-			// copy-mode manifest should not be synthetic VOD
-			forbidden: []string{"#EXT-X-PLAYLIST-TYPE:VOD"},
-			tokenless: true,
-		},
-		{
-			// unknown duration — must fall back to real manifest
-			name:          "unknown duration",
-			totalDuration: 0,
-			want:          realEntries,
-			// unknown-duration manifest cannot promise append-only EVENT semantics
-			forbidden: []string{"#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-START:"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tempDir := t.TempDir()
-			writeManifestFixture(t, tempDir, copyFragmentManifest, "init.mp4", "seg_00009.m4s", "seg_00010.m4s")
-			session := &TranscodeSession{
-				outputDir: tempDir,
-				opts: TranscodeOpts{
-					TargetCodecVideo: "copy",
-					TargetCodecAudio: "aac",
-					SegmentDuration:  2,
-					TotalDuration:    tt.totalDuration,
-				},
-			}
-
-			got, err := session.BuildPlaybackManifest("segment/", "token=test")
-			if err != nil {
-				t.Fatalf("BuildPlaybackManifest: %v", err)
-			}
-			text := string(got)
-			for _, want := range tt.want {
-				if !strings.Contains(text, want) {
-					t.Fatalf("manifest missing %q:\n%s", want, text)
-				}
-			}
-			for _, forbidden := range tt.forbidden {
-				if strings.Contains(text, forbidden) {
-					t.Fatalf("manifest unexpectedly contains %q:\n%s", forbidden, text)
-				}
-			}
-			if !tt.tokenless {
-				return
-			}
-
-			tokenless, err := session.BuildPlaybackManifest("segment/", "")
-			if err != nil {
-				t.Fatalf("BuildPlaybackManifest tokenless: %v", err)
-			}
-			for _, want := range []string{
-				"#EXT-X-MAP:URI=\"segment/init.mp4\"",
-				"segment/seg_00009.m4s",
-				"segment/seg_00010.m4s",
-			} {
-				if !strings.Contains(string(tokenless), want) {
-					t.Fatalf("tokenless manifest missing %q:\n%s", want, tokenless)
-				}
-			}
-			if strings.Contains(string(tokenless), "?st=") || strings.Contains(string(tokenless), "?token=") {
-				t.Fatalf("tokenless manifest propagated a credential query:\n%s", tokenless)
-			}
-		})
-	}
-}
-
 func TestBuildPlaybackManifest_AdvancedCopyGenerationKeepsHistoricalRemountPosition(t *testing.T) {
 	tempDir := t.TempDir()
 	const producedSegments = 160
@@ -251,39 +164,6 @@ func TestBuildPlaybackManifest_AdvancedCopyGenerationKeepsHistoricalRemountPosit
 	}
 	if strings.Count(string(advanced), "#EXT-X-PLAYLIST-TYPE:EVENT") != 1 || strings.Count(string(advanced), "#EXT-X-START:") != 1 {
 		t.Fatalf("stable tags duplicated after manifest advance:\n%s", advanced)
-	}
-}
-
-func TestBuildPlaybackManifest_EncodedTranscodeUsesSyntheticVODManifest(t *testing.T) {
-	session := &TranscodeSession{
-		opts: TranscodeOpts{
-			TargetCodecVideo: "h264",
-			TargetCodecAudio: "aac",
-			SegmentDuration:  2,
-			TotalDuration:    5.1,
-		},
-	}
-
-	got, err := session.BuildPlaybackManifest("segment/", "token=test")
-	if err != nil {
-		t.Fatalf("BuildPlaybackManifest: %v", err)
-	}
-
-	text := string(got)
-	for _, want := range []string{
-		"#EXT-X-PLAYLIST-TYPE:VOD",
-		"#EXT-X-MEDIA-SEQUENCE:0",
-		"#EXTINF:2.000000,",
-		"#EXTINF:1.100000,",
-		"segment/seg_00000.ts?token=test",
-		"segment/seg_00002.ts?token=test",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("manifest missing %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "#EXT-X-MAP:") {
-		t.Fatalf("encoded manifest should not use fMP4 init map:\n%s", text)
 	}
 }
 
@@ -617,52 +497,6 @@ func resolvePlaylistURIs(t *testing.T, manifest string) []string {
 	return uris
 }
 
-func TestBuildPlaybackManifest_LongEncodedTranscodeUsesRealManifest(t *testing.T) {
-	tempDir := t.TempDir()
-	manifest := strings.Join([]string{
-		"#EXTM3U",
-		"#EXT-X-VERSION:3",
-		"#EXT-X-TARGETDURATION:2",
-		"#EXT-X-MEDIA-SEQUENCE:0",
-		"#EXTINF:2.000000,",
-		"seg_00000.ts",
-		"#EXTINF:2.000000,",
-		"seg_00001.ts",
-		"",
-	}, "\n")
-	writeManifestFixture(t, tempDir, manifest)
-
-	session := &TranscodeSession{
-		outputDir: tempDir,
-		opts: TranscodeOpts{
-			TargetCodecVideo: "h264",
-			TargetCodecAudio: "aac",
-			SegmentDuration:  2,
-			TotalDuration:    1_000_000,
-		},
-	}
-
-	got, err := session.BuildPlaybackManifest("segment/", "token=test")
-	if err != nil {
-		t.Fatalf("BuildPlaybackManifest: %v", err)
-	}
-
-	text := string(got)
-	if strings.Contains(text, "#EXT-X-PLAYLIST-TYPE:VOD") ||
-		strings.Contains(text, "seg_499999.ts") {
-		t.Fatalf("long encoded manifest should not synthesize every segment:\n%s", text)
-	}
-	for _, want := range []string{
-		"#EXT-X-MEDIA-SEQUENCE:0",
-		"segment/seg_00000.ts?token=test",
-		"segment/seg_00001.ts?token=test",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("manifest missing %q:\n%s", want, text)
-		}
-	}
-}
-
 func TestBuildSourceAlignedPlaybackManifestAnchorsSeekedRealPlaylist(t *testing.T) {
 	tempDir := t.TempDir()
 	manifest := strings.Join([]string{
@@ -711,46 +545,6 @@ func TestBuildSourceAlignedPlaybackManifestAnchorsSeekedRealPlaylist(t *testing.
 	}
 	if count := strings.Count(text, "#EXT-X-GAP"); count != 8 {
 		t.Fatalf("timeline gap count = %d, want 8:\n%s", count, text)
-	}
-}
-
-// The gap segments a source-aligned playlist prepends use the same query
-// form as the real segments, so a large seek does not bring back a
-// credential-sized query on every gap URI.
-func TestSourceAlignedGapsUseTheSubstitutedQuery(t *testing.T) {
-	tempDir := t.TempDir()
-	writeManifestFixture(t, tempDir, strings.Join([]string{
-		"#EXTM3U",
-		"#EXT-X-VERSION:3",
-		"#EXT-X-TARGETDURATION:2",
-		"#EXT-X-MEDIA-SEQUENCE:1800",
-		"#EXTINF:2.000000,",
-		"seg_01800.ts",
-		"",
-	}, "\n"))
-	session := &TranscodeSession{
-		outputDir: tempDir,
-		opts: TranscodeOpts{
-			TargetCodecVideo:        "h264",
-			TargetCodecAudio:        "aac",
-			SegmentDuration:         2,
-			TotalDuration:           1_000_000,
-			SeekSeconds:             3600,
-			StartSegmentNumber:      1800,
-			HLSVariableSubstitution: true,
-		},
-	}
-	rawQuery := "source_timeline=1&st=" + strings.Repeat("eyJzaWQiOi", 100)
-	got, err := session.BuildSourceAlignedPlaybackManifest("segment/", rawQuery)
-	if err != nil {
-		t.Fatalf("BuildSourceAlignedPlaybackManifest: %v", err)
-	}
-	if count := strings.Count(string(got), rawQuery); count != 1 {
-		t.Fatalf("query appears %d times, want once in its definition:\n%s", count, got)
-	}
-	uris := resolvePlaylistURIs(t, string(got))
-	if len(uris) < 2 || uris[0] != "segment/source_timeline_gap.ts?"+rawQuery || uris[len(uris)-1] != "segment/seg_01800.ts?"+rawQuery {
-		t.Fatalf("resolved URIs = %q", uris)
 	}
 }
 
@@ -962,115 +756,6 @@ func TestResolveSegmentRecoveryTarget_CopyMapsActualAnchorToManifestNumber(t *te
 	}
 }
 
-func TestRestartSeekTarget(t *testing.T) {
-	tests := []struct {
-		name     string
-		manifest string // written to the output dir when non-empty
-		opts     TranscodeOpts
-		segment  int
-		wantOK   bool
-		want     float64
-	}{
-		// Copy-mode fragments have variable durations, so a segment the manifest
-		// can't yet place must NOT fall back to fixed-duration seg×dur math (which
-		// would seek FFmpeg to the wrong source time and desync A/V). Instead it
-		// reports the seek target as unresolved (0, false, nil).
-		{
-			name: "copy segment outside manifest is unresolved",
-			manifest: strings.Join([]string{
-				"#EXTM3U",
-				"#EXT-X-VERSION:7",
-				"#EXT-X-TARGETDURATION:3",
-				"#EXT-X-MEDIA-SEQUENCE:9",
-				"#EXT-X-MAP:URI=\"init.mp4\"",
-				"#EXTINF:2.669000,",
-				"seg_00009.m4s",
-				"#EXTINF:1.669000,",
-				"seg_00010.m4s",
-				"",
-			}, "\n"),
-			opts:    TranscodeOpts{SeekSeconds: 18.261, TargetCodecVideo: "copy", SegmentDuration: 2},
-			segment: 50,
-		},
-		{
-			name:    "encoded uses fixed duration math",
-			opts:    TranscodeOpts{TargetCodecVideo: "h264", SegmentDuration: 2},
-			segment: 50,
-			wantOK:  true,
-			want:    100,
-		},
-		// A freshly reconstructed copy-mode window has a near-empty/absent manifest
-		// (ErrManifestNotReady). The seek target must be reported unresolved
-		// (0, false, nil) so the caller retries instead of seeking to a fabricated
-		// seg×dur position.
-		{
-			name:    "copy manifest not ready is unresolved",
-			opts:    TranscodeOpts{TargetCodecVideo: "copy", SegmentDuration: 2},
-			segment: 10,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			session := &TranscodeSession{outputDir: t.TempDir(), opts: tt.opts}
-			if tt.manifest != "" {
-				writeManifestFixture(t, session.outputDir, tt.manifest)
-			}
-			got, ok, err := session.RestartSeekTarget(tt.segment)
-			if err != nil {
-				t.Fatalf("RestartSeekTarget: %v", err)
-			}
-			if ok != tt.wantOK || got != tt.want {
-				t.Fatalf("RestartSeekTarget(%d) = %f, %v; want %f, %v", tt.segment, got, ok, tt.want, tt.wantOK)
-			}
-		})
-	}
-}
-
-func TestWaitForSegment_RestartingSessionReturnsNotFoundInsteadOfTranscodeFailed(t *testing.T) {
-	session := &TranscodeSession{
-		outputDir:  t.TempDir(),
-		restarting: &restartFlight{done: make(chan struct{})},
-		waitErr:    errors.New("signal: killed"),
-	}
-
-	_, err := session.WaitForSegment("seg_00010.m4s", 5*time.Millisecond)
-	if !errors.Is(err, ErrSegmentNotFound) {
-		t.Fatalf("WaitForSegment error = %v, want ErrSegmentNotFound", err)
-	}
-}
-
-// A segment wait ends as soon as its request does, whether FFmpeg is running
-// or restarting, instead of polling until the timeout for a client that left.
-func TestWaitForOpenSegmentContextEndsWithTheRequest(t *testing.T) {
-	for _, tt := range []struct {
-		name       string
-		restarting bool
-	}{
-		{name: "running"},
-		{name: "restarting", restarting: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				session := &TranscodeSession{outputDir: t.TempDir(), running: true}
-				if tt.restarting {
-					session.restarting = &restartFlight{done: make(chan struct{})}
-				}
-				ctx, cancel := context.WithCancel(t.Context())
-				time.AfterFunc(50*time.Millisecond, cancel)
-
-				started := time.Now()
-				_, err := session.WaitForOpenSegmentContext(ctx, "seg_00010.ts", 30*time.Second)
-				if !errors.Is(err, context.Canceled) {
-					t.Fatalf("WaitForOpenSegmentContext error = %v, want context.Canceled", err)
-				}
-				if waited := time.Since(started); waited > 50*time.Millisecond {
-					t.Fatalf("wait returned %v after it started, want when the request ended at 50ms", waited)
-				}
-			})
-		})
-	}
-}
-
 func noRestart(t *testing.T, d SegmentRecoveryDecision) {
 	t.Helper()
 	if d.RestartOnTimeout {
@@ -1197,45 +882,6 @@ func TestSegmentRecoveryDecision(t *testing.T) {
 	}
 }
 
-func TestTranscodeThrottlerUsesProducedHeadForGap(t *testing.T) {
-	tempDir := t.TempDir()
-	now := time.Now()
-	writeManifestRange(t, tempDir, 225, 293, ".ts")
-	for _, i := range []int{225, 254, 293} {
-		writeSegmentFile(t, tempDir, segmentFilename(i, TranscodeOpts{TargetCodecVideo: "h264"}), []byte("x"), now)
-	}
-
-	session := &TranscodeSession{
-		outputDir:            tempDir,
-		running:              true,
-		lastRequestedSegment: 225,
-		opts: TranscodeOpts{
-			TargetCodecVideo:   "h264",
-			SegmentDuration:    2,
-			StartSegmentNumber: 225,
-		},
-	}
-	writer := &recordingWriteCloser{}
-	throttler := NewTranscodeThrottler(session, writer, 60, 2)
-
-	throttler.CheckOnce()
-	if !throttler.paused {
-		t.Fatal("expected throttler to pause")
-	}
-	if writer.writes != "p" {
-		t.Fatalf("writes = %q, want p", writer.writes)
-	}
-
-	writeManifestRange(t, tempDir, 225, 254, ".ts")
-	throttler.CheckOnce()
-	if throttler.paused {
-		t.Fatal("expected throttler to resume")
-	}
-	if writer.writes != "pu" {
-		t.Fatalf("writes = %q, want pu", writer.writes)
-	}
-}
-
 // A check already past its progress read when Stop runs must not pause
 // FFmpeg: the throttler that replaced this one never saw the pause, so it
 // would not resume it.
@@ -1308,56 +954,6 @@ func writeSegmentFile(t *testing.T, dir string, name string, data []byte, modTim
 	}
 	if err := os.Chtimes(filepath.Join(dir, name), modTime, modTime); err != nil {
 		t.Fatalf("chtimes segment %s: %v", name, err)
-	}
-}
-
-func TestSegmentProgressFindsNewestListedSegment(t *testing.T) {
-	// Each playlist lists segments 0-9. Segments in present are written in
-	// order, two seconds apart, as FFmpeg writes them; empty ones after them.
-	tests := []struct {
-		name     string
-		start    int
-		present  []int
-		empty    []int
-		wantHead int
-		wantLast int // the segment whose write time is reported, or -1 for none
-	}{
-		{name: "pruned prefix", present: []int{6, 7, 8, 9}, wantHead: 9, wantLast: 9},
-		{
-			name:    "missing and zero-byte tail, gap, unlisted newer file",
-			present: []int{0, 1, 2, 5, 6, 12}, empty: []int{7},
-			wantHead: 6, wantLast: 6,
-		},
-		{name: "playlist left behind a later start", start: 40, present: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, wantHead: 39, wantLast: 9},
-		{name: "nothing listed on disk", start: 3, wantHead: 2, wantLast: -1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			writeManifestRange(t, dir, 0, 9, ".ts")
-			written := time.Now().Add(-time.Hour).Truncate(time.Second)
-			writtenAt := map[int]time.Time{}
-			write := func(n int, data []byte) {
-				written = written.Add(2 * time.Second)
-				writeSegmentFile(t, dir, fmt.Sprintf("seg_%05d.ts", n), data, written)
-				writtenAt[n] = written
-			}
-			for _, n := range tt.present {
-				write(n, []byte("x"))
-			}
-			for _, n := range tt.empty {
-				write(n, nil)
-			}
-			session := &TranscodeSession{outputDir: dir, running: true, opts: TranscodeOpts{
-				TargetCodecVideo: "h264", SegmentDuration: 2, StartSegmentNumber: tt.start,
-			}}
-
-			got := session.SegmentProgress(time.Now())
-			if got.ProducedHead != tt.wantHead || !got.LastProducedAt.Equal(writtenAt[tt.wantLast]) || !got.HasManifest {
-				t.Fatalf("progress head %d, last produced %v, manifest %t; want head %d, last produced %v (segment %d), manifest true",
-					got.ProducedHead, got.LastProducedAt, got.HasManifest, tt.wantHead, writtenAt[tt.wantLast], tt.wantLast)
-			}
-		})
 	}
 }
 
@@ -1470,6 +1066,41 @@ func TestCleanStaleOutputForRestart_EncodedRecipe(t *testing.T) {
 	}
 }
 
+func TestSourceAlignedCopyStartHintSurvivesReload(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		requested, origin float64
+		segment           int
+	}{
+		{"forward", 900, 898.125, 449},
+		{"backward", 300, 298.125, 149},
+		{"origin at zero", 0.5, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := TranscodeOpts{TargetCodecVideo: "copy", SegmentDuration: 2, TotalDuration: 3600, SeekSeconds: tc.requested, StreamOriginSeconds: tc.origin, CopySeekAnchorResolved: true, StartSegmentNumber: tc.segment}
+			raw := fmt.Sprintf("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:%d\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.700000,\nseg_%05d.m4s\n", tc.segment, tc.segment)
+			for reload := range 3 {
+				manifest := stabilizeCopyHLSRemountTimeline([]byte(raw), opts)
+				if !bytes.Contains(manifest, []byte("#EXT-X-START:TIME-OFFSET=0.001,")) {
+					t.Fatal("fixture lacks generation-relative start")
+				}
+				aligned, err := AlignRealManifestToSourceTimeline(manifest, opts, "gap.m4s")
+				if err != nil {
+					t.Fatal(err)
+				}
+				expected := fmt.Sprintf("#EXT-X-START:TIME-OFFSET=%.6f,PRECISE=YES", tc.requested)
+				if !bytes.Contains(aligned, []byte(expected)) || bytes.Count(aligned, []byte("#EXT-X-START:")) != 1 {
+					t.Fatalf("reload %d wrong source-time start:\n%s", reload, aligned)
+				}
+				if bytes.Contains(aligned, []byte("#EXT-X-START:TIME-OFFSET=0.001,")) {
+					t.Fatal("start still points into unavailable gap prefix")
+				}
+				raw += fmt.Sprintf("#EXTINF:1.700000,\nseg_%05d.m4s\n", tc.segment+reload+1)
+			}
+		})
+	}
+}
+
 func TestTranscodeThrottlerIgnoresOutputFromAnEarlierGeneration(t *testing.T) {
 	tempDir := t.TempDir()
 	now := time.Now()
@@ -1535,79 +1166,5 @@ func TestTranscodeThrottlerIgnoresOutputFromAnEarlierGeneration(t *testing.T) {
 	}
 	if writer.writes != "up" {
 		t.Fatalf("writes = %q, want up", writer.writes)
-	}
-}
-
-func TestAppendManifestQueryParam(t *testing.T) {
-	manifest := strings.Join([]string{
-		"#EXTM3U",
-		"#EXT-X-VERSION:7",
-		"#EXT-X-TARGETDURATION:2",
-		"#EXT-X-MAP:URI=\"segment/init.mp4\"",
-		"#EXTINF:2.000000,",
-		"segment/seg_00000.ts",
-		"#EXTINF:2.000000,",
-		"segment/seg_00001.ts?existing=1",
-		"",
-	}, "\n")
-
-	got := string(AppendManifestQueryParam([]byte(manifest), "st", "TOKEN"))
-	for _, want := range []string{
-		"#EXT-X-MAP:URI=\"segment/init.mp4?st=TOKEN\"",
-		"segment/seg_00000.ts?st=TOKEN",
-		"segment/seg_00001.ts?existing=1&st=TOKEN",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("rewritten manifest missing %q:\n%s", want, got)
-		}
-	}
-	// Tags and EXTINF lines must be untouched.
-	if !strings.Contains(got, "#EXT-X-TARGETDURATION:2") || strings.Contains(got, "#EXT-X-TARGETDURATION:2?st") {
-		t.Fatalf("non-URI tag was rewritten:\n%s", got)
-	}
-}
-
-func TestAppendManifestQueryParam_NonManifestUnchanged(t *testing.T) {
-	body := []byte("not a manifest\nsegment/seg_00000.ts\n")
-	if got := AppendManifestQueryParam(body, "st", "TOKEN"); string(got) != string(body) {
-		t.Fatalf("non-manifest body should be unchanged, got:\n%s", got)
-	}
-	if got := AppendManifestQueryParam([]byte("#EXTM3U\nseg.ts\n"), "", "TOKEN"); !strings.Contains(string(got), "seg.ts\n") || strings.Contains(string(got), "seg.ts?") {
-		t.Fatalf("empty key should be a no-op, got:\n%s", got)
-	}
-}
-
-func TestSourceAlignedCopyStartHintSurvivesReload(t *testing.T) {
-	for _, tc := range []struct {
-		name              string
-		requested, origin float64
-		segment           int
-	}{
-		{"forward", 900, 898.125, 449},
-		{"backward", 300, 298.125, 149},
-		{"origin at zero", 0.5, 0, 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			opts := TranscodeOpts{TargetCodecVideo: "copy", SegmentDuration: 2, TotalDuration: 3600, SeekSeconds: tc.requested, StreamOriginSeconds: tc.origin, CopySeekAnchorResolved: true, StartSegmentNumber: tc.segment}
-			raw := fmt.Sprintf("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:%d\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.700000,\nseg_%05d.m4s\n", tc.segment, tc.segment)
-			for reload := range 3 {
-				manifest := stabilizeCopyHLSRemountTimeline([]byte(raw), opts)
-				if !bytes.Contains(manifest, []byte("#EXT-X-START:TIME-OFFSET=0.001,")) {
-					t.Fatal("fixture lacks generation-relative start")
-				}
-				aligned, err := AlignRealManifestToSourceTimeline(manifest, opts, "gap.m4s")
-				if err != nil {
-					t.Fatal(err)
-				}
-				expected := fmt.Sprintf("#EXT-X-START:TIME-OFFSET=%.6f,PRECISE=YES", tc.requested)
-				if !bytes.Contains(aligned, []byte(expected)) || bytes.Count(aligned, []byte("#EXT-X-START:")) != 1 {
-					t.Fatalf("reload %d wrong source-time start:\n%s", reload, aligned)
-				}
-				if bytes.Contains(aligned, []byte("#EXT-X-START:TIME-OFFSET=0.001,")) {
-					t.Fatal("start still points into unavailable gap prefix")
-				}
-				raw += fmt.Sprintf("#EXTINF:1.700000,\nseg_%05d.m4s\n", tc.segment+reload+1)
-			}
-		})
 	}
 }

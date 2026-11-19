@@ -94,7 +94,7 @@ func TestStartPlaybackV2DoesNotBlockOnCopySafetyScan(t *testing.T) {
 	ensurer := &blockingProbeEnsurer{t: t}
 	racer := &recordingCopySafetyRacer{}
 
-	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.ProbeEnsurer = ensurer

@@ -332,7 +332,7 @@ func apiKeyLegacyRepository(t *testing.T) *APIKeyRepository {
 	}
 	t.Cleanup(pool.Close)
 	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY,username text); INSERT INTO users VALUES(1,'one'),(2,'two');
- CREATE TABLE api_keys(id bigserial PRIMARY KEY,user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,label text NOT NULL,api_key text NOT NULL UNIQUE,rate_tier text NOT NULL DEFAULT 'standard' CHECK(rate_tier IN ('standard','elevated')),scopes text[],created_at timestamptz NOT NULL DEFAULT now(),last_used_at timestamptz);
+ CREATE TABLE api_keys(id bigserial PRIMARY KEY,user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,label text NOT NULL,api_key text NOT NULL UNIQUE,rate_tier text NOT NULL DEFAULT 'standard' CHECK(rate_tier IN ('standard','elevated')),scopes text[],profile_id text,created_at timestamptz NOT NULL DEFAULT now(),last_used_at timestamptz);
  INSERT INTO api_keys(user_id,label,api_key) VALUES(1,'Existing','sa_existing_credential_kept_unchanged')`); err != nil {
 		t.Fatal(err)
 	}

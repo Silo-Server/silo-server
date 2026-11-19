@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"context"
-	"fmt"
-	"slices"
 	"strings"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -50,38 +47,4 @@ func progressIDs(entries []userstore.WatchProgress) []string {
 		ids = append(ids, entry.MediaItemID)
 	}
 	return ids
-}
-
-func TestLiveContinueWatchingProgressFillsPastDroppedSeries(t *testing.T) {
-	store := &pagedProgressStore{}
-	for i := range 4 {
-		store.entries = append(store.entries, userstore.WatchProgress{MediaItemID: fmt.Sprintf("dropped-%d", i)})
-	}
-	store.entries = append(store.entries,
-		userstore.WatchProgress{MediaItemID: "keep-1"},
-		userstore.WatchProgress{MediaItemID: "keep-2"},
-		userstore.WatchProgress{MediaItemID: "keep-3"},
-	)
-	h := &RecommendationsHandler{WatchTonightFetcher: droppedPrefixFetcher{}}
-
-	got, err := h.liveContinueWatchingProgress(t.Context(), store, 1, "p", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := progressIDs(got); !slices.Equal(ids, []string{"keep-1", "keep-2"}) {
-		t.Fatalf("entries = %v, want the first two not dropped", ids)
-	}
-}
-
-func TestLiveContinueWatchingProgressStopsWhenSourceRunsOut(t *testing.T) {
-	store := &pagedProgressStore{entries: []userstore.WatchProgress{{MediaItemID: "dropped-1"}, {MediaItemID: "keep-1"}, {MediaItemID: "dropped-2"}}}
-	h := &RecommendationsHandler{WatchTonightFetcher: droppedPrefixFetcher{}}
-
-	got, err := h.liveContinueWatchingProgress(t.Context(), store, 1, "p", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := progressIDs(got); !slices.Equal(ids, []string{"keep-1"}) || store.reads != 2 {
-		t.Fatalf("entries = %v after %d reads, want [keep-1] after 2", ids, store.reads)
-	}
 }

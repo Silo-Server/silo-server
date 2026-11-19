@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -67,6 +68,9 @@ type RecipeCard struct {
 	DeviceID         string `json:"device_id,omitempty"`
 	DevicePlatform   string `json:"device_platform,omitempty"`
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
+	// AdaptationReasons is the admin views' account of why the route adapts,
+	// kept like the client metadata above and never projected into claims.
+	AdaptationReasons []string `json:"adaptation_reasons,omitempty"`
 
 	// Header-authenticated recovery. A session that negotiated
 	// header_authenticated_media_v1 publishes no stream token, so the API keeps
@@ -118,6 +122,8 @@ type RecipeCard struct {
 	VideoRange                 string                 `json:"video_range,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
 	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
+	KeyframePlanned            bool                   `json:"keyframe_planned,omitempty"`
+	KeyframePlanResume         bool                   `json:"keyframe_plan_resume,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
 	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
@@ -197,6 +203,21 @@ func (e RecipeExecutor) NamesAnotherNode(card RecipeCard) bool {
 		nodeURL != "" && cardURL != "" && cardURL != nodeURL
 }
 
+// IssuedForAnotherRoute is NamesAnotherNode for the core stopping the node at
+// e.NodeURL, the URL it dialed. The core knows that URL exactly, so the card's
+// own node URL decides: a card naming a different node URL was written for
+// another start of the transport id (a move, or the next candidate a
+// Jellyfin-compatible start tried) and is kept, whatever row id it carries,
+// which a candidate's card may lack or carry stale. Only a card without a URL
+// falls back to the row ids, kept when both are known and differ.
+func (e RecipeExecutor) IssuedForAnotherRoute(card RecipeCard) bool {
+	stopped, issued := nodepool.CanonicalNodeURL(e.NodeURL), nodepool.CanonicalNodeURL(card.TranscodeNodeURL)
+	if stopped != "" && issued != "" {
+		return issued != stopped
+	}
+	return e.NodeID > 0 && card.RoutingExecutionNodeID > 0 && card.RoutingExecutionNodeID != e.NodeID
+}
+
 func normalizeExecutorURL(nodeURL string) string {
 	return strings.TrimRight(strings.TrimSpace(nodeURL), "/")
 }
@@ -264,6 +285,8 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		VideoRange:                 opts.VideoRange,
 		CopyVideoMPEGTS:            opts.CopyVideoMPEGTS,
 		KeyframePlaylist:           opts.KeyframePlaylist,
+		KeyframePlanned:            opts.KeyframePlanned,
+		KeyframePlanResume:         opts.KeyframePlanResume,
 		SeekSeconds:                opts.SeekSeconds,
 		StreamOriginSeconds:        opts.StreamOriginSeconds,
 		CopySeekAnchorResolved:     opts.CopySeekAnchorResolved,
@@ -375,6 +398,8 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		VideoRange:                 c.VideoRange,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		KeyframePlaylist:           c.KeyframePlaylist,
+		KeyframePlanned:            c.KeyframePlanned,
+		KeyframePlanResume:         c.KeyframePlanResume,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -508,6 +533,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		VideoRange:                 c.VideoRange,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		KeyframePlaylist:           c.KeyframePlaylist,
+		KeyframePlanResume:         c.KeyframePlanResume,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -645,6 +671,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		VideoRange:                    c.VideoRange,
 		CopyVideoMPEGTS:               c.CopyVideoMPEGTS,
 		KeyframePlaylist:              c.KeyframePlaylist,
+		KeyframePlanResume:            c.KeyframePlanResume,
 		SeekSeconds:                   c.SeekSeconds,
 		StreamOriginSeconds:           c.StreamOriginSeconds,
 		CopySeekAnchorResolved:        c.CopySeekAnchorResolved,

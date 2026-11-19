@@ -6,8 +6,8 @@ import { queryDefinitionFromSectionConfig } from "@/api/types";
 import type { Library } from "@/api/types";
 import { matchRecipePreset, presetLabel, type RecipeCatalogResponse } from "@/lib/recipes";
 import { Eye, EyeOff, GripVertical, Pencil, Star, Trash2 } from "lucide-react";
-import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeSortable } from "@/hooks/useSortableList";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
 import { useT, type MessageKey } from "@/i18n";
@@ -168,10 +168,11 @@ export function SortableSectionTableRow({
   onDelete: () => void;
 }) {
   const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: section.id,
-    disabled: !canReorder,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id: section.id,
+      disabled: !canReorder,
+    });
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -266,9 +267,10 @@ export function SortableSectionCardRow({
   actions?: ReactNode;
 }) {
   const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: section.id,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id: section.id,
+    });
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,

@@ -2,7 +2,7 @@ import { useThemeMusic } from "./useThemeMusic";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
-import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useAvailableUserLibraries, useUserLibraries } from "@/hooks/queries/libraries";
 import type { ItemDetail } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -16,29 +16,30 @@ import SeriesContent from "@/pages/ItemDetail/SeriesContent";
 import SeasonContent from "@/pages/ItemDetail/SeasonContent";
 import EpisodeContent from "@/pages/ItemDetail/EpisodeContent";
 import AudiobookContent from "@/pages/ItemDetail/AudiobookContent";
+import "@/pages/audiobooks/audiobooks.css";
 import EbookContent from "@/pages/ItemDetail/EbookContent";
 import MangaContent from "@/pages/ItemDetail/MangaContent";
 import ItemDetailSkeleton from "./ItemDetailSkeleton";
+import AudiobookDetailSkeleton from "./AudiobookDetailSkeleton";
 import {
   useSidebarItemDetailsReady,
   useSidebarItemEnteredFromHome,
 } from "@/components/sidebarItemNavigationContext";
 import { parseOptionalLibraryId } from "@/components/sidebarItemNavigation";
 import { useShowAdvisoryAge } from "@/hooks/useShowAdvisoryAge";
+import { markItemDetailShown } from "@/lib/itemNavigationTiming";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
 import { useT } from "@/i18n";
 
 interface HomeItemTransitionShape {
   compact: boolean;
   hidePoster: boolean;
-  squarePoster: boolean;
   hasLogo: boolean;
 }
 
 const NEUTRAL_HOME_ITEM_TRANSITION_SHAPE: HomeItemTransitionShape = {
   compact: false,
   hidePoster: false,
-  squarePoster: false,
   hasLogo: false,
 };
 
@@ -51,7 +52,6 @@ function getHomeItemTransitionShape(
   return {
     compact: item.type === "season",
     hidePoster: item.type === "episode",
-    squarePoster: item.type === "audiobook",
     // An unknown choice reserves the logo box, as the hero itself does.
     hasLogo: showTitleArt !== false && Boolean(item.logo_url),
   };
@@ -61,7 +61,7 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
   const t = useT();
   const showTitleArt = useShowTitleArt();
   const [shape] = useState(() => getHomeItemTransitionShape(item, showTitleArt));
-  const { compact, hidePoster, squarePoster, hasLogo } = shape;
+  const { compact, hidePoster, hasLogo } = shape;
 
   return (
     <div
@@ -83,13 +83,9 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
               <div
                 data-testid="home-item-transition-poster"
                 className={`home-item-transition-block flex-shrink-0 rounded-lg border border-solid shadow-[var(--shadow-md)] ${
-                  squarePoster
-                    ? compact
-                      ? "aspect-square w-[180px] sm:w-[200px]"
-                      : "aspect-square w-[200px] sm:w-[260px]"
-                    : compact
-                      ? "aspect-[2/3] w-[140px] sm:w-[160px]"
-                      : "aspect-[2/3] w-[170px] sm:w-[220px]"
+                  compact
+                    ? "aspect-[2/3] w-[140px] sm:w-[160px]"
+                    : "aspect-[2/3] w-[170px] sm:w-[220px]"
                 }`}
               />
             )}
@@ -181,6 +177,14 @@ export default function ItemDetail() {
   // Items without an advisory skip the lookup, which is most of them.
   const showAdvisoryAge = useShowAdvisoryAge(item?.advisory_age != null);
   const enteredItemFromHome = useSidebarItemEnteredFromHome();
+  // While the item loads, its library (from the link) or a cached copy says
+  // whether the page will be a book, so the placeholder can take its layout.
+  // The sidebar has already read the library list; this only looks at that copy.
+  const { data: availableLibraries } = useAvailableUserLibraries({ enabled: false });
+  const loadingAudiobook =
+    item?.type === "audiobook" ||
+    (libraryId !== undefined &&
+      availableLibraries?.find((library) => library.id === libraryId)?.type === "audiobooks");
 
   useDocumentTitle(
     itemNotFound
@@ -201,7 +205,24 @@ export default function ItemDetail() {
     }
   }, [itemError, t]);
 
+  const detailShown = !loading && itemDetailsReady && item !== undefined;
+  useEffect(() => {
+    if (detailShown && id) markItemDetailShown(id);
+  }, [detailShown, id]);
+
   if (loading || !itemDetailsReady) {
+    if (loadingAudiobook) {
+      return (
+        <div
+          data-testid={enteredItemFromHome ? "home-item-transition-shell" : undefined}
+          className={enteredItemFromHome ? "bg-background min-h-screen" : undefined}
+          aria-busy="true"
+        >
+          <span className="sr-only">{t("web.detail.page.loadingDetails")}</span>
+          <AudiobookDetailSkeleton solid={enteredItemFromHome} />
+        </div>
+      );
+    }
     if (enteredItemFromHome) {
       return <HomeItemTransitionShell key={id} item={item} />;
     }

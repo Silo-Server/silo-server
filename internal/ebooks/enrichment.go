@@ -883,6 +883,10 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 			Owner:               owner,
 			ItemType:            ebookContentType(),
 			ContentID:           item.ContentID,
+			NoAuthor:            strings.TrimSpace(item.Author) == "",
+			// "Dune (2019)" is searched as "Dune", so a no-author item is
+			// matched against that title; the raw one still checks volumes.
+			NoAuthorTitle: searchQuery.Title,
 		})
 		if admitErr != nil {
 			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))

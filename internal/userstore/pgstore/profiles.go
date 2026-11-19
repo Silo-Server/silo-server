@@ -409,6 +409,9 @@ var profileCascadeTables = []string{
 	// Leaves titles no profile watchlists any more; the profile
 	// handler's watchlist-title purge sweeps those under the title lock.
 	"user_watchlist_titles",
+	// Promotion records the watchlist arrival notice reads; the same purge
+	// clears them after a delete from the SQLite store.
+	"watchlist_title_promotions",
 	// Recommendation state. A deleted profile's ratings would otherwise
 	// keep shaping other accounts' Similar Users rows, and its taste
 	// would be rebuilt every night.
@@ -535,6 +538,13 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		`DELETE FROM jellycompat_displayprefs WHERE user_id = $1 AND left(prefs_id, length($2)) = $2`,
 		s.userID, userstore.ProfileDisplayPrefsPrefix(id)); err != nil {
 		return nil, fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
+	}
+	// Jellyfin-compatible sessions signed in as the profile end with it. Every
+	// lookup reads the stored row, so deleting it ends them on all replicas.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM jellycompat_sessions WHERE streamapp_user_id = $1 AND profile_id = $2`,
+		s.userID, id); err != nil {
+		return nil, fmt.Errorf("deleting Jellyfin sessions for profile %s: %w", id, err)
 	}
 	if err := deleteProfileSectionOverrides(ctx, tx, s.userID, id); err != nil {
 		return nil, err

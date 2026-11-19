@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"hash"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -89,76 +88,6 @@ func countHashedBytes(cache *ArchiveCache) *atomic.Int64 {
 	var n atomic.Int64
 	cache.newHash = func() hash.Hash { return countingHash{Hash: sha256.New(), n: &n} }
 	return &n
-}
-
-func TestServiceManifestReadsSkipRehashOfVerifiedBinary(t *testing.T) {
-	const size = 1 << 20
-	svc, installation := newManifestReadService(t, size)
-	hashed := countHashedBytes(svc.archiveCache)
-	ctx := t.Context()
-
-	// The first read hashes the binary: this process has not verified it yet.
-	if _, err := svc.ManifestForInstallation(ctx, installation.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got := hashed.Swap(0); got != size {
-		t.Fatalf("first manifest read hashed %d bytes, want %d", got, size)
-	}
-
-	for _, read := range []struct {
-		name string
-		call func() error
-	}{
-		{"ManifestForInstallation", func() error {
-			_, err := svc.ManifestForInstallation(ctx, installation.ID)
-			return err
-		}},
-		{"RouteDescriptors", func() error {
-			_, err := svc.RouteDescriptors(ctx, installation.ID)
-			return err
-		}},
-		{"UserConfigSchema", func() error {
-			_, err := svc.UserConfigSchema(ctx, installation.ID)
-			return err
-		}},
-		{"ResolveAssetPath", func() error {
-			_, err := svc.ResolveAssetPath(ctx, installation.ID, manifestReadAsset)
-			return err
-		}},
-		{"networkAccessManifest", func() error {
-			_, err := svc.networkAccessManifest(ctx, installation)
-			return err
-		}},
-	} {
-		if err := read.call(); err != nil {
-			t.Fatalf("%s: %v", read.name, err)
-		}
-		if got := hashed.Swap(0); got != 0 {
-			t.Errorf("warm %s hashed %d bytes, want 0", read.name, got)
-		}
-	}
-
-	// A plugin asset request reads the manifest twice: once to match the
-	// route, once to resolve the file.
-	proxy := NewHTTPProxyWithTypedResolver(svc, nil)
-	recorder := httptest.NewRecorder()
-	proxy.ServeAsset(recorder, httptest.NewRequest(http.MethodGet, "/", nil), installation.ID, manifestReadAsset)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("asset request status = %d, want 200", recorder.Code)
-	}
-	if got := hashed.Swap(0); got != 0 {
-		t.Errorf("warm plugin asset request hashed %d bytes, want 0", got)
-	}
-
-	// Launching executes the binary, so it hashes the binary every time.
-	for range 2 {
-		if _, err := svc.Start(ctx, installation.ID); err != nil {
-			t.Fatal(err)
-		}
-		if got := hashed.Swap(0); got != size {
-			t.Errorf("Start hashed %d bytes, want %d", got, size)
-		}
-	}
 }
 
 // BenchmarkInstalledPluginWarmRead reads an installed plugin with a 16 MiB

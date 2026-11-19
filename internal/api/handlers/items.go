@@ -341,29 +341,37 @@ type itemListResponse struct {
 	Overview               string   `json:"overview,omitempty"`
 	posterPath             string
 	backdropPath           string
-	PosterIsEpisodeStill   *bool                       `json:"-"`
-	BackdropIsEpisodeStill *bool                       `json:"-"`
-	PosterURL              string                      `json:"poster_url,omitempty"`
-	PosterThumbhash        string                      `json:"poster_thumbhash,omitempty"`
-	BackdropURL            string                      `json:"backdrop_url,omitempty"`
-	BackdropThumbhash      string                      `json:"backdrop_thumbhash,omitempty"`
-	LogoURL                string                      `json:"-"`
-	ReleaseDate            *string                     `json:"release_date,omitempty"`
-	LastAirDate            *string                     `json:"last_air_date,omitempty"`
-	AddedAt                *time.Time                  `json:"added_at,omitempty"`
-	MangaChapterCount      *int                        `json:"manga_chapter_count,omitempty"`
-	MangaVolumeCount       *int                        `json:"manga_volume_count,omitempty"`
-	OverlaySummary         *models.OverlaySummary      `json:"overlay_summary,omitempty"`
-	SortMetrics            *sortMetricsResponse        `json:"sort_metrics,omitempty"`
-	ProgressUpdatedAt      *string                     `json:"-"`
-	ItemSource             string                      `json:"-"`
-	UserState              *itemUserStateResponse      `json:"user_state,omitempty"`
-	WorkID                 string                      `json:"work_id,omitempty"`
-	WorkTitle              string                      `json:"work_title,omitempty"`
-	WorkFormats            []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
+	PosterIsEpisodeStill   *bool                  `json:"-"`
+	BackdropIsEpisodeStill *bool                  `json:"-"`
+	PosterURL              string                 `json:"poster_url,omitempty"`
+	PosterThumbhash        string                 `json:"poster_thumbhash,omitempty"`
+	BackdropURL            string                 `json:"backdrop_url,omitempty"`
+	BackdropThumbhash      string                 `json:"backdrop_thumbhash,omitempty"`
+	LogoURL                string                 `json:"-"`
+	ReleaseDate            *string                `json:"release_date,omitempty"`
+	LastAirDate            *string                `json:"last_air_date,omitempty"`
+	AddedAt                *time.Time             `json:"added_at,omitempty"`
+	MangaChapterCount      *int                   `json:"manga_chapter_count,omitempty"`
+	MangaVolumeCount       *int                   `json:"manga_volume_count,omitempty"`
+	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
+	// Availability is the series poster fraction (complete released seasons
+	// over released seasons). json:"-" because /api/v1 is frozen.
+	Availability      *catalog.Availability       `json:"-"`
+	SortMetrics       *sortMetricsResponse        `json:"sort_metrics,omitempty"`
+	ProgressUpdatedAt *string                     `json:"-"`
+	ItemSource        string                      `json:"-"`
+	UserState         *itemUserStateResponse      `json:"user_state,omitempty"`
+	WorkID            string                      `json:"work_id,omitempty"`
+	WorkTitle         string                      `json:"work_title,omitempty"`
+	WorkFormats       []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
 
 	// ParentArtwork reaches the v2 card only; v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
+	// Authors, PositionSeconds and DurationSeconds reach the v2 card only;
+	// catalog browse fills them (listBookAuthors, listInProgressPositions).
+	Authors         []string `json:"-"`
+	PositionSeconds *float64 `json:"-"`
+	DurationSeconds *float64 `json:"-"`
 }
 
 type sortMetricsResponse struct {
@@ -396,14 +404,17 @@ type browseResponse struct {
 
 // seasonResponse is the shape of a season in API responses.
 type seasonResponse struct {
-	ContentID       string                  `json:"content_id"`
-	PlayContentID   string                  `json:"play_content_id,omitempty"`
-	SeasonNumber    int                     `json:"season_number"`
-	IsSpecials      bool                    `json:"is_specials,omitempty"`
-	Title           string                  `json:"title"`
-	Overview        string                  `json:"overview,omitempty"`
-	AirDate         string                  `json:"air_date,omitempty"`
-	EpisodeCount    int                     `json:"episode_count"`
+	ContentID     string `json:"content_id"`
+	PlayContentID string `json:"play_content_id,omitempty"`
+	SeasonNumber  int    `json:"season_number"`
+	IsSpecials    bool   `json:"is_specials,omitempty"`
+	Title         string `json:"title"`
+	Overview      string `json:"overview,omitempty"`
+	AirDate       string `json:"air_date,omitempty"`
+	EpisodeCount  int    `json:"episode_count"`
+	// Availability is episodes in the library over known episodes. json:"-"
+	// because /api/v1 is frozen.
+	Availability    *catalog.Availability   `json:"-"`
 	PosterURL       string                  `json:"poster_url,omitempty"`
 	PosterThumbhash string                  `json:"poster_thumbhash,omitempty"`
 	UserData        *catalog.SeasonUserData `json:"user_data,omitempty"`
@@ -883,6 +894,69 @@ func (h *ItemsHandler) listItemUserStates(ctx context.Context, v ItemViewer, ite
 		return map[string]*itemUserStateResponse{}
 	}
 	return states
+}
+
+// maxCardAuthors caps the author names one browse card carries.
+const maxCardAuthors = 3
+
+// listBookAuthors returns the author names of the audiobooks and ebooks in
+// items, at most maxCardAuthors each, with one query for the page. Other
+// types are not looked up, so a page without books costs nothing.
+func (h *ItemsHandler) listBookAuthors(ctx context.Context, items []*models.MediaItem) map[string][]string {
+	if h == nil || h.browseRepo == nil || h.browseRepo.Pool() == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil && (item.Type == itemTypeAudiobook || item.Type == itemTypeEbook) {
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	authors, err := catalog.ListBookAuthors(ctx, h.browseRepo.Pool(), ids, maxCardAuthors)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing browse card authors", "component", "api", "error", err)
+		return nil
+	}
+	return authors
+}
+
+// listInProgressPositions returns the profile's visible progress on the items
+// it has started and not finished, with one progress read for the page.
+// Series, seasons, and ebooks have no playback position of their own and are
+// not looked up. The caller still drops items user_state reports played.
+func (h *ItemsHandler) listInProgressPositions(ctx context.Context, v ItemViewer, items []*models.MediaItem) map[string]userstore.WatchProgress {
+	store, profileID, ok := h.viewerUserStore(ctx, v.ProfileID)
+	if !ok {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		switch item.Type {
+		case "series", "season", itemTypeEbook:
+			continue
+		}
+		ids = append(ids, item.ContentID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	progress, err := store.ListProgressByMediaItems(ctx, profileID, ids)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing browse card positions", "component", "api", "error", err)
+		return nil
+	}
+	for id, p := range progress {
+		if p.Completed || p.PositionSeconds <= 0 || p.DurationSeconds <= 0 {
+			delete(progress, id)
+		}
+	}
+	return progress
 }
 
 // episodeResponseShell maps an already-localized episode onto the response
@@ -2038,6 +2112,12 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 type ItemViewer struct {
 	Access    catalog.AccessFilter
 	ProfileID string
+	// IncludeCardAvailability runs the season/series presence lookup for
+	// poster badges. Only /api/v2 sets it, and only for a profile that draws
+	// the availability badge (access.Scope.CardAvailability): Availability is
+	// json:"-" on the frozen v1 card and season shapes, and nobody else shows
+	// the counts, so neither pays for the aggregation.
+	IncludeCardAvailability bool
 }
 
 func (h *ItemsHandler) ensurePresentationLibraryAccess(ctx context.Context, contentID string, filter catalog.AccessFilter) error {

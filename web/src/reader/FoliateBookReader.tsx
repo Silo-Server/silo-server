@@ -34,7 +34,7 @@ type FoliateViewElement = HTMLElement & {
   next?: () => void;
   prev?: () => void;
   search?: (
-    options: ReaderSearchOptions & { query: string },
+    options: ReaderSearchOptions & { query: string; limit?: number; signal?: AbortSignal },
   ) => AsyncGenerator<FoliateSearchResult>;
   clearSearch?: () => void;
   renderer?: HTMLElement & {
@@ -59,7 +59,8 @@ export type FoliateBookReaderHandle = {
   prev: () => void;
   goTo: (href: string) => void;
   goToFraction: (fraction: number) => Promise<void>;
-  search: (query: string) => Promise<ReaderSearchResult[]>;
+  // Resolves null when a newer search, clearSearch, or closing the book replaced it.
+  search: (query: string) => Promise<ReaderSearchOutcome | null>;
   clearSearch: () => void;
   clearSelection: () => void;
   createSelectionAnnotation: () => ReaderSelection | null;
@@ -91,6 +92,15 @@ export type ReaderSettings = {
 
 export type ReaderReadyState = {
   toc: TOCItem[];
+};
+
+// Whole-book search stops after this many matches.
+export const READER_SEARCH_RESULT_LIMIT = 1000;
+
+export type ReaderSearchOutcome = {
+  results: ReaderSearchResult[];
+  // More matches exist past READER_SEARCH_RESULT_LIMIT.
+  truncated: boolean;
 };
 
 export type ReaderSearchOptions = {
@@ -130,6 +140,8 @@ type FoliateSearchResult = {
     excerpt?: FoliateSearchExcerpt;
     label?: string;
   }>;
+  // The last result of a search whose matches ran past its limit.
+  truncated?: boolean;
 };
 
 type RelocateDetail = {
@@ -501,6 +513,10 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const annotationsRef = useRef<EbookReaderAnnotation[]>(annotations);
     const drawnCfisRef = useRef<Set<string>>(new Set());
     const selectionCleanupRef = useRef<(() => void)[]>([]);
+    // The one live search; a newer search, clearSearch, or closing its view aborts it.
+    const searchRef = useRef<{ view: FoliateViewElement; controller: AbortController } | null>(
+      null,
+    );
     const [loading, setLoading] = useState(true);
     // null is a failure with no message of its own; its fallback text resolves at
     // render so a language change does not reopen the book.
@@ -629,16 +645,42 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
           await viewRef.current?.goToFraction(Math.min(1, Math.max(0, fraction)));
         },
         search: async (query: string) => {
+          searchRef.current?.controller.abort();
+          searchRef.current = null;
           const trimmed = query.trim();
           const view = viewRef.current;
-          if (!trimmed || !view?.search) return [];
+          if (!trimmed || !view?.search) return { results: [], truncated: false };
+          const search = { view, controller: new AbortController() };
+          searchRef.current = search;
+          const { signal } = search.controller;
           const results: ReaderSearchResult[] = [];
-          for await (const result of view.search({ query: trimmed, scope: "book" })) {
-            results.push(...flattenSearchResult(result));
+          let truncated = false;
+          try {
+            for await (const result of view.search({
+              query: trimmed,
+              scope: "book",
+              limit: READER_SEARCH_RESULT_LIMIT,
+              signal,
+            })) {
+              if (signal.aborted) return null;
+              if (result.truncated) truncated = true;
+              results.push(...flattenSearchResult(result));
+            }
+          } catch (error) {
+            // A book closed under the search can fail its section loads.
+            if (signal.aborted) return null;
+            throw error;
+          } finally {
+            if (searchRef.current === search) searchRef.current = null;
           }
-          return results;
+          if (signal.aborted) return null;
+          return { results, truncated };
         },
-        clearSearch: () => viewRef.current?.clearSearch?.(),
+        clearSearch: () => {
+          searchRef.current?.controller.abort();
+          searchRef.current = null;
+          viewRef.current?.clearSearch?.();
+        },
         clearSelection: () => {
           viewRef.current?.deselect?.();
           onSelectionChange?.(null);
@@ -674,6 +716,10 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       // idempotent and never touches resources owned by a newer run.
       const disposeOpenArtifacts = () => {
         if (openedView) {
+          if (searchRef.current?.view === openedView) {
+            searchRef.current.controller.abort();
+            searchRef.current = null;
+          }
           openedView.close?.();
           openedView.remove();
           if (viewRef.current === openedView) {

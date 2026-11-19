@@ -20,6 +20,9 @@ type AdminDashboardCapabilities struct {
 	// EgressBySource reports that GET /admin/stats/timeseries carries
 	// egress_sources and each point's egress_by_source.
 	EgressBySource bool `json:"egress_by_source"`
+	// StreamsByMethod reports that each GET /admin/stats/timeseries point
+	// carries streams_by_method.
+	StreamsByMethod bool `json:"streams_by_method"`
 	// APIClients reports GET /admin/stats/api-clients and its per-session
 	// endpoints read.
 	APIClients bool `json:"api_clients"`
@@ -35,7 +38,7 @@ func registerAdminDashboardCapabilities(reg *Registry) {
 	op := Operation{Operation: humaOp("GET", Prefix+"/admin/dashboard/capabilities", "getAdminDashboardCapabilities", "admin-observability", "Discover dashboard features supported by v2 in this build. Support does not promise dependency readiness; layout storage is not yet available on v2."), Class: ClassActingAdmin}
 	Register(reg, op, func(context.Context, *CapabilityInput) (*AdminDashboardCapabilitiesOutput, error) {
 		return &AdminDashboardCapabilitiesOutput{Body: AdminDashboardCapabilities{
-			Timeseries: true, PlaybackActivity: true, TopActivity: true, Health: true, WatchProviders: true, DownloadsStats: true, LogLevelList: true, EgressTotals: true, EgressBySource: true, APIClients: true,
+			Timeseries: true, PlaybackActivity: true, TopActivity: true, Health: true, WatchProviders: true, DownloadsStats: true, LogLevelList: true, EgressTotals: true, EgressBySource: true, StreamsByMethod: true, APIClients: true,
 		}}, nil
 	})
 }

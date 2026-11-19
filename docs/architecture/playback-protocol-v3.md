@@ -858,8 +858,9 @@ origin. The proxy refuses before it relays, so a transcode node needs no marker
 for it.
 The transcode-executed shape also requires the shared node-recipe store. The API
 writes the plan-scoped transport record before publishing the proxy URL; the
-transcode node validates it before starting each progressive response, and stop
-or force reload deletes it. This durable authority prevents a signed URL whose
+API's resolve checks it before the transcode node starts each progressive
+response, and a stop deletes it or a force reload revokes it
+([transcode nodes](transcode-nodes.md#resolve)). This durable authority prevents a signed URL whose
 token remains valid after a node replacement from resurrecting stopped FFmpeg
 work. When the store is unavailable, route selection excludes only this shape.
 
@@ -874,6 +875,24 @@ past zero and its FFmpeg's `noise` filter takes the `drop` expression (probed
 once per binary). It is not a plan transformation or a required capability: an
 executor without the filter, or one that predates the claim, serves the plain
 copy, so it never narrows where the route may run.
+
+macOS Firefox also shows nothing from a stream whose first picture is a CRA,
+so under the same claim the executor leads a seeked copy that starts on one
+with the source's own first frame, an IDR that shares the file's parameter
+sets (`remuxIDRPrimer`). The video comes from an ffconcat list on stdin (that
+frame, then the source from the copy's first keyframe), audio from the usual
+seeked input shifted by `-itsoffset`. A matching `noise` drop keeps only the
+primer frame ahead of that keyframe and drops the keyframe's leading pictures.
+The copy must start on the keyframe the plan's timeline starts on, so the plan
+adds its `stream_origin_seconds` to the stream URL as `origin`. The executor
+finds that keyframe and the first one in the source's Matroska Cues
+(`keyframes.Load`, cached per file version) and reads the first slice of each
+block to check the first is an IDR and the origin's is not, which skips
+closed-GOP encodes. No FFmpeg runs for it: the lookup has a 300 ms budget,
+at most eight run at once, and when it misses, overruns or finds every slot
+busy, the executor serves the plain copy at once. A source without usable
+Cues, such as MP4 or MPEG-TS, or a URL without `origin`, gets the plain copy.
+A primed response reads the source twice.
 
 **Copied AAC framing.** MPEG-TS carries AAC as ADTS, which fragmented MP4
 cannot hold, and FFmpeg does not insert `aac_adtstoasc` on its own under
@@ -973,7 +992,7 @@ parameter, and never carries a parameter across families.
 
 | Route family | Routes | Query parameters |
 | --- | --- | --- |
-| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
+| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — `origin` — the plan's `stream_origin_seconds`, alongside `seek` when the plan asked for the resume leading-picture drop (§ resume leading-picture drop) — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
 | Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
 | Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8); `original=1` on an original-SRT `.srt` URL (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
 

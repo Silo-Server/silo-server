@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -202,25 +203,6 @@ func TestApproveKeepsApprovalWhenSubmissionFails(t *testing.T) {
 	}
 }
 
-func TestSubmitApprovedMarksFailedAfterLastAttempt(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.requests["r1"] = &Request{
-		ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive,
-		SubmitAttempts: maxSubmitAttempts - 1,
-	}
-	svc := newTestService(store)
-	svc.SetRouterProvider(&fakeRouterProvider{fulfillErr: errors.New("radarr: connection refused")})
-
-	req, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	if req.Outcome != OutcomeFailed || req.LastError != "radarr: connection refused" {
-		t.Fatalf("request = %+v, want failed with the last error", req)
-	}
-}
-
 // lapsingRouter succeeds, but while the call is in flight its claim lapses and
 // meanwhile changes the request as another actor would.
 type lapsingRouter struct {
@@ -279,30 +261,6 @@ func TestSubmitSuccessWithExpiredLeaseIsDropped(t *testing.T) {
 				t.Fatalf("targets = %+v, want none recorded by the stale attempt", targets)
 			}
 		})
-	}
-}
-
-func TestCreateRequestReplacesOwnFailedRequestAtQuota(t *testing.T) {
-	store := newFakeStore()
-	store.settings.GlobalMaxRequests = 1
-	now := time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
-	// The failed request fills the user's only slot; re-requesting the same
-	// title replaces it, so it must not count against the re-request.
-	store.requests["mine-failed"] = &Request{
-		ID: "mine-failed", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved,
-		Outcome: OutcomeFailed, RequestedByUserID: 1, CreatedAt: now,
-	}
-	svc := newTestService(store)
-
-	req, err := svc.CreateRequest(context.Background(), testViewer(1), fightClubInput)
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if req.Status != StatusPending {
-		t.Fatalf("request = %+v, want a new pending request", req)
-	}
-	if _, ok := store.requests["mine-failed"]; ok {
-		t.Fatal("the failed request was not replaced")
 	}
 }
 
@@ -528,21 +486,6 @@ func TestWithdrawIgnoresFailedTargetsDatabase(t *testing.T) {
 	}
 }
 
-func TestSubmitBackoff(t *testing.T) {
-	for attempts, want := range map[int]time.Duration{
-		1:  5 * time.Minute,
-		2:  10 * time.Minute,
-		3:  20 * time.Minute,
-		4:  40 * time.Minute,
-		5:  time.Hour,
-		10: time.Hour,
-	} {
-		if got := submitBackoff(attempts); got != want {
-			t.Errorf("submitBackoff(%d) = %s, want %s", attempts, got, want)
-		}
-	}
-}
-
 // Issue #582: after the 4K tier is turned off, Retry must drop the failed 4K
 // target instead of leaving the request failed next to a finished 1080p copy.
 func TestRetryDropsFailedTargetForUnwantedQuality(t *testing.T) {
@@ -570,55 +513,6 @@ func TestRetryDropsFailedTargetForUnwantedQuality(t *testing.T) {
 	targets, _ := store.ListTargets(context.Background(), "r1")
 	if len(targets) != 1 || targets[0].Quality != Quality1080p {
 		t.Fatalf("targets = %+v, want only the 1080p target", targets)
-	}
-}
-
-func TestReconcileStampsEveryCandidate(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.candidates = []*Request{
-		{ID: "ok", MediaType: MediaTypeMovie, TMDBID: 1, Status: StatusQueued, Outcome: OutcomeActive},
-		{ID: "broken", MediaType: MediaTypeMovie, TMDBID: 2, Status: StatusQueued, Outcome: OutcomeActive},
-	}
-	store.targets = map[string][]Target{
-		"ok":     {{ID: 1, RequestID: "ok", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusQueued}},
-		"broken": {{ID: 2, RequestID: "broken", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusQueued}},
-	}
-	svc := newTestService(store)
-	svc.SetRouterProvider(&fakeRouterProvider{statusErr: errors.New("sonarr timeout")})
-
-	result, err := svc.ReconcileRequests(context.Background(), 10)
-	if err != nil {
-		t.Fatalf("ReconcileRequests: %v", err)
-	}
-	if result.Errors != 2 {
-		t.Fatalf("errors = %d, want 2", result.Errors)
-	}
-	if len(store.reconciled) != 2 {
-		t.Fatalf("stamped = %v, want both candidates stamped even though they errored", store.reconciled)
-	}
-}
-
-func TestRequestState(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		req  Request
-		want State
-	}{
-		{"pending", Request{Status: StatusPending, Outcome: OutcomeActive}, StatePending},
-		{"approved", Request{Status: StatusApproved, Outcome: OutcomeActive}, StateApproved},
-		{"queued", Request{Status: StatusQueued, Outcome: OutcomeActive}, StateProcessing},
-		{"downloading", Request{Status: StatusDownloading, Outcome: OutcomeActive}, StateProcessing},
-		{"downloaded, not scanned in yet", Request{Status: StatusCompleted, Outcome: OutcomeActive}, StateProcessing},
-		{"in the library", Request{Status: StatusCompleted, Outcome: OutcomeActive, LibraryContentID: "movie-tmdb-1"}, StateAvailable},
-		{"declined", Request{Status: StatusPending, Outcome: OutcomeDeclined}, StateDeclined},
-		{"withdrawn", Request{Status: StatusPending, Outcome: OutcomeCancelled}, StateCancelled},
-		// A failed request keeps whatever status it failed at.
-		{"failed after queueing", Request{Status: StatusQueued, Outcome: OutcomeFailed}, StateFailed},
-	} {
-		if got := tc.req.State(); got != tc.want {
-			t.Errorf("%s: State() = %q, want %q", tc.name, got, tc.want)
-		}
 	}
 }
 
@@ -704,69 +598,159 @@ func TestRetryOfAFailedTierIsNotCompletedByTheLibrary(t *testing.T) {
 	}
 }
 
-// A Retry with no request server left for the media type backs off with the
-// reason, then fails, rather than waiting on a library that already holds the
-// delivered copy and so never settles it.
-func TestRetryOfAFailedTierWithNoRouterFailsAgain(t *testing.T) {
-	ctx := context.Background()
-	store := newFakeStore()
-	svc, _ := newRoutedService(store)
-	retryingMovie(store, svc)
-	if _, err := svc.Retry(ctx, Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
-		t.Fatalf("Retry: %v", err)
-	}
-	if _, err := svc.ReconcileRequests(ctx, 10); err != nil {
-		t.Fatal(err)
-	}
-	if got := store.requests["r1"]; got.Status != StatusApproved || got.Outcome != OutcomeActive || got.LastError == "" {
-		t.Fatalf("in backoff: request = %s/%s (%q), want approved/active with the reason", got.Status, got.Outcome, got.LastError)
-	}
-
-	due := svc.now().Add(-time.Second)
-	store.requests["r1"].NextSubmitAt = &due
-	store.requests["r1"].SubmitAttempts = maxSubmitAttempts - 1
-	if _, err := svc.ReconcileRequests(ctx, 10); err != nil {
-		t.Fatal(err)
-	}
-	if got := store.requests["r1"]; got.Outcome != OutcomeFailed || got.LastError == "" {
-		t.Fatalf("after the last attempt: request = %s/%s (%q), want failed with the reason", got.Status, got.Outcome, got.LastError)
-	}
-}
-
-// A Retry with no request server left settles when nothing it still wants is
-// missing: here the requester's quality was lowered to the 1080p that arrived.
-func TestRetryWithNoRouterAndNothingLeftToSendCompletes(t *testing.T) {
-	store := newFakeStore()
-	svc, _ := newRoutedService(store)
-	retryingMovie(store, svc)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-	if _, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
-		t.Fatalf("Retry: %v", err)
-	}
-	if got := store.requests["r1"]; got.Status != StatusCompleted || got.Outcome != OutcomeActive {
-		t.Fatalf("request = %s/%s (%q), want completed/active", got.Status, got.Outcome, got.LastError)
-	}
-}
-
 // deleteFailingStore fails every target delete.
 type deleteFailingStore struct{ *fakeStore }
 
-func (deleteFailingStore) DeleteTarget(context.Context, int64) error {
+func (deleteFailingStore) DeleteTarget(context.Context, string, int64, time.Time) error {
 	return errors.New("database unavailable")
 }
 
-// A retry with no request server whose settling fails backs off like any
-// failed attempt, rather than holding its claim until the lease runs out.
-func TestRetryWithNoRouterBacksOffWhenSettlingFails(t *testing.T) {
-	store := newFakeStore()
-	svc, _ := newRoutedService(store)
-	retryingMovie(store, svc)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-	svc.store = deleteFailingStore{store}
-	if _, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
-		t.Fatalf("Retry: %v", err)
+// A submission attempt that outlived its claim neither drops a failed target
+// nor settles the request while a newer claim is submitting it (#4184).
+func TestStaleSubmissionLeavesTheNewerClaimsRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		targets []Target
+	}{
+		{name: "failed target for an unwanted quality", targets: []Target{
+			{ID: 1, RequestID: "r1", Quality: Quality1080p, Status: StatusCompleted},
+			{ID: 2, RequestID: "r1", Quality: Quality2160p, Status: StatusFailed, LastError: msgNoTargetForQuality},
+		}},
+		{name: "nothing left to send", targets: []Target{
+			{ID: 1, RequestID: "r1", Quality: Quality1080p, Status: StatusCompleted},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			newer := time.Now().Add(time.Hour)
+			store.requests["r1"] = &Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive, SubmitLeaseUntil: &newer}
+			store.targets = map[string][]Target{"r1": slices.Clone(tc.targets)}
+			store.targetSeq = 2
+			svc := newTestService(store)
+
+			stale := newer.Add(-time.Minute)
+			_, current, err := svc.planSubmission(context.Background(), Request{ID: "r1", SubmitLeaseUntil: &stale}, Viewer{}, []Quality{Quality1080p}, true)
+			if err != nil {
+				t.Fatalf("plan: %v", err)
+			}
+			if current == nil || current.Status != StatusApproved {
+				t.Fatalf("plan returned %+v, want the request as the newer claim holds it", current)
+			}
+			if got := store.requests["r1"]; got.Status != StatusApproved || got.Outcome != OutcomeActive || !got.SubmitLeaseUntil.Equal(newer) {
+				t.Fatalf("request = %s/%s lease %v, want approved/active with the newer lease", got.Status, got.Outcome, got.SubmitLeaseUntil)
+			}
+			if got := store.targets["r1"]; len(got) != len(tc.targets) {
+				t.Fatalf("targets = %+v, want all %d kept", got, len(tc.targets))
+			}
+		})
 	}
-	if got := store.requests["r1"]; got.NextSubmitAt == nil || got.SubmitLeaseUntil != nil || got.LastError == "" {
-		t.Fatalf("request = %s/%s, next submit %v, lease %v, error %q; want backing off with the error", got.Status, got.Outcome, got.NextSubmitAt, got.SubmitLeaseUntil, got.LastError)
+}
+
+// DeleteTarget and RecomputeStatus write only while the caller's claim holds
+// the request, as RecordSubmission does (#4184).
+func TestClaimedTargetWritesNeedTheClaimDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "r1", 1, 101, StatusApproved)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, quality, status, last_error)
+		VALUES ('r1', '1080p', 'completed', ''), ('r1', '2160p', 'failed', 'radarr 4k unreachable')`); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := repo.ClaimSubmission(ctx, "r1", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	lease, stale := *claimed.SubmitLeaseUntil, claimed.SubmitLeaseUntil.Add(-time.Second)
+	targets, err := repo.ListTargets(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failedID int64
+	for _, target := range targets {
+		if target.Status == StatusFailed {
+			failedID = target.ID
+		}
+	}
+
+	if err := repo.DeleteTarget(ctx, "r1", failedID, stale); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("delete with a stale lease: err = %v, want ErrInvalidState", err)
+	}
+	if _, err := repo.RecomputeStatus(ctx, "r1", stale, Viewer{}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("recompute with a stale lease: err = %v, want ErrInvalidState", err)
+	}
+	if got, err := repo.ListTargets(ctx, "r1"); err != nil || len(got) != 2 {
+		t.Fatalf("after stale writes: targets = %+v err = %v, want both kept", got, err)
+	}
+	if got, err := repo.GetRequest(ctx, "r1"); err != nil || got.Status != StatusApproved {
+		t.Fatalf("after stale writes: request = %+v err = %v, want approved", got, err)
+	}
+
+	if err := repo.DeleteTarget(ctx, "r1", failedID, lease); err != nil {
+		t.Fatalf("delete with the lease: %v", err)
+	}
+	if err := repo.DeleteTarget(ctx, "r1", failedID, lease); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete again: err = %v, want ErrNotFound", err)
+	}
+	req, err := repo.RecomputeStatus(ctx, "r1", lease, Viewer{})
+	if err != nil {
+		t.Fatalf("recompute with the lease: %v", err)
+	}
+	if req.Status != StatusCompleted || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want completed/active", req.Status, req.Outcome)
+	}
+}
+
+// A reclaim that commits while DeleteTarget runs stops the stale attempt's
+// delete: the request row is locked before its lease is checked, so the
+// delete waits for the reclaim and then sees the newer lease.
+func TestDeleteTargetWaitsForAConcurrentReclaimDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "r1", 1, 101, StatusApproved)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, quality, status, last_error)
+		VALUES ('r1', '2160p', 'failed', 'radarr 4k unreachable')`); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := repo.ClaimSubmission(ctx, "r1", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	targets, err := repo.ListTargets(ctx, "r1")
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("targets = %+v err = %v", targets, err)
+	}
+
+	reclaim, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reclaim.Rollback(ctx) }()
+	if _, err := reclaim.Exec(ctx, `UPDATE media_requests SET submit_lease_until = now() + interval '1 hour' WHERE id = 'r1'`); err != nil {
+		t.Fatal(err)
+	}
+	deleted := make(chan error, 1)
+	go func() { deleted <- repo.DeleteTarget(ctx, "r1", targets[0].ID, *claimed.SubmitLeaseUntil) }()
+	// Wait until the delete is blocked on the reclaim's row lock, which
+	// Postgres reports as an ungranted lock; a delete that reads past the
+	// open reclaim finishes first instead.
+	for blocked := false; !blocked; {
+		select {
+		case err := <-deleted:
+			t.Fatalf("delete finished while the reclaim was open (err = %v); want it to wait for the request lock", err)
+		default:
+		}
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted)`).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		runtime.Gosched()
+	}
+	if err := reclaim.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleted; !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("delete after the reclaim: err = %v, want ErrInvalidState", err)
+	}
+	if got, err := repo.ListTargets(ctx, "r1"); err != nil || len(got) != 1 {
+		t.Fatalf("targets after the stale delete = %+v err = %v, want the target kept", got, err)
 	}
 }

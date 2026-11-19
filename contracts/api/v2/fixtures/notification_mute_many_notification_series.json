@@ -1,0 +1,16 @@
+{
+  "results": [
+    {
+      "series_id": "series:bear",
+      "outcome": "applied"
+    },
+    {
+      "series_id": "series:wire",
+      "outcome": "unchanged"
+    },
+    {
+      "series_id": "series:hidden",
+      "outcome": "not_found"
+    }
+  ]
+}

@@ -31,11 +31,15 @@ var accessSettings = func() map[string]widerFunc {
 		// Who may sign in, and how.
 		settingLocalPasswordLogin:             on,
 		"auth.email_auto_match":               on,
+		config.AuthUserAPIKeysSettingKey:      on,
 		"signup.enabled":                      on,
 		"password_reset.self_service_enabled": on,
 		"jellyfin_compat.enabled":             on,
 		"jellyfin_compat.web_enabled":         on,
-		"audiobookshelf_compat.enabled":       on,
+		// Serves a credential-less stream to anyone sharing the address
+		// that negotiated it.
+		config.JellyfinCompatAddressStreamGrantSettingKey: on,
+		"audiobookshelf_compat.enabled":                   on,
 		// How long a session, or an account its provider dropped, stays
 		// signed in, and whether an unreachable provider still vouches.
 		"auth.access_token_expiry":                       longer,

@@ -6,6 +6,7 @@ import {
   resetStillWatchingStreak,
 } from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
+import { useAutoPlayNextEnabled } from "@/hooks/queries/autoPlayNext";
 import {
   lazy,
   Suspense,
@@ -48,7 +49,10 @@ import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { useWatchDetail } from "@/hooks/queries/items";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
-import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
+import {
+  invalidatePlaybackSurfaceQueries,
+  refreshPlaybackSurfaceQueries,
+} from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
 import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -617,8 +621,11 @@ function WatchPlaybackHostContent() {
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
   // does not, or nobody knows yet. settingsCapabilitiesSupportKey collapses the
-  // last two into false, so the query's own state is what separates them.
-  const capabilitiesKnown = settingsCapabilities.isSuccess;
+  // last two into false, so whether any answer has arrived separates them. A
+  // failed background refetch keeps the last good answer as `data` under an
+  // error status; that answer still counts, or the settings read below would
+  // drop every revision-gated key mid-session.
+  const capabilitiesKnown = settingsCapabilities.data !== undefined;
   const supportsIntroSkipMode =
     capabilitiesKnown &&
     settingsCapabilitiesSupportKey(
@@ -687,6 +694,9 @@ function WatchPlaybackHostContent() {
     ],
     enabled: signedIn,
   });
+  // Shares the post-roll switch's query, so the credits card and the post-roll
+  // screen agree. Until the server answers, the card holds its countdown.
+  const autoPlayNext = useAutoPlayNextEnabled({ enabled: signedIn }) === true;
   const loadedBufferingMode = supportsBufferingQualityMode
     ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
         | BufferingMode
@@ -739,8 +749,11 @@ function WatchPlaybackHostContent() {
       getDeviceId: () => getOrCreateDeviceId(),
       refreshToken: refreshAuthentication,
       getAuthContext: getAuthContextVersion,
+      // Leaving the player marks these surfaces stale at once (below), but the
+      // stop is still in flight then. Read them again once it lands.
+      onSessionStopped: () => void refreshPlaybackSurfaceQueries(queryClient),
     }),
-    [],
+    [queryClient],
   );
 
   useEffect(() => {
@@ -1271,6 +1284,7 @@ function WatchPlaybackHostContent() {
           bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
+          autoPlayNext={autoPlayNext}
           canEditMarkers={canEditMarkers}
           playbackRequestKey={requestKeyValue}
           onNavigateEpisode={handleNavigateEpisode}
@@ -1424,6 +1438,7 @@ export function WatchPlaybackBar() {
               onClick={() => transport?.skipBack()}
               disabled={!transport}
               title={t("web.player.bar.skipBackTitle", { count: seekPreferences.skipBack })}
+              aria-label={t("web.player.bar.skipBackTitle", { count: seekPreferences.skipBack })}
             >
               <SkipBack className="h-4 w-4" />
             </Button>
@@ -1446,6 +1461,9 @@ export function WatchPlaybackBar() {
               onClick={() => transport?.skipForward()}
               disabled={!transport}
               title={t("web.player.bar.skipForwardTitle", { count: seekPreferences.skipForward })}
+              aria-label={t("web.player.bar.skipForwardTitle", {
+                count: seekPreferences.skipForward,
+              })}
             >
               <SkipForward className="h-4 w-4" />
             </Button>
@@ -1464,6 +1482,7 @@ export function WatchPlaybackBar() {
               className="h-10 w-10 rounded-full"
               onClick={stopPlayback}
               title={t("web.player.bar.stopTitle")}
+              aria-label={t("web.player.bar.stopTitle")}
             >
               <X className="h-4 w-4" />
             </Button>

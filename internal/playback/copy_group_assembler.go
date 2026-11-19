@@ -471,6 +471,12 @@ func (a *copyGroupAssembler) assembleLocked(run *copyGroupRun) error {
 		if a.stopped.Load() {
 			return nil
 		}
+		if n < 0 {
+			// Groups before a resume's first segment, where FFmpeg's seek
+			// landed early: no segment of the plan holds them.
+			a.dropGroupsBeforePlanLocked(run)
+			continue
+		}
 		if run.pruned[n] {
 			a.dropGroupsLocked(run, n)
 			continue
@@ -503,6 +509,17 @@ func (a *copyGroupAssembler) assembleLocked(run *copyGroupRun) error {
 		a.assembled[n] = true
 	}
 	return nil
+}
+
+// dropGroupsBeforePlanLocked removes the run's groups for keyframes before
+// the plan's first segment.
+func (a *copyGroupAssembler) dropGroupsBeforePlanLocked(run *copyGroupRun) {
+	for k, p := range run.groups {
+		if k < a.plan.firstKey[0] {
+			_ = os.Remove(p)
+			delete(run.groups, k)
+		}
+	}
 }
 
 // dropGroupsLocked removes the run's groups for segment n once it exists.
@@ -607,6 +624,10 @@ func (a *copyGroupAssembler) runHead() (head int, ok bool) {
 		return 0, false
 	}
 	head = a.plan.segmentOfKeyframe(run.lastKey)
+	if head < 0 {
+		// Only groups before a resume's first segment so far.
+		return run.startSegment - 1, true
+	}
 	if _, end := a.plan.keyframeRange(head); run.lastKey < end-1 {
 		head--
 	}

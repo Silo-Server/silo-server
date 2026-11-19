@@ -326,6 +326,7 @@ PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
 POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
+POST /api/v2/admin/nodes/{id}/key	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
 POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media
@@ -796,6 +797,12 @@ GET /api/v2/notifications/email-preferences/address/capabilities	non-media
 GET /api/v2/notifications/email/unsubscribe	non-media
 POST /api/v2/notifications/email/unsubscribe	non-media
 GET /api/v2/notifications/email/verify	non-media
+GET /api/v2/notifications/plugin-channels	non-media
+GET /api/v2/notifications/plugin-destinations	non-media
+POST /api/v2/notifications/plugin-destinations	non-media
+DELETE /api/v2/notifications/plugin-destinations/{id}	non-media
+PUT /api/v2/notifications/plugin-destinations/{id}	non-media
+POST /api/v2/notifications/plugin-destinations/{id}/test	non-media
 GET /api/v2/notifications/preferences	non-media
 PUT /api/v2/notifications/preferences	non-media
 GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media
@@ -805,6 +812,8 @@ DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
+POST /api/v2/notifications/series/mute	non-media
+POST /api/v2/notifications/series/unmute	non-media
 DELETE /api/v2/notifications/series/{series_id}/mute	non-media
 PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media
@@ -844,6 +853,7 @@ GET /api/v2/playback/sessions/{session_id}/control/ws	non-media
 POST /api/v2/playback/sessions/{session_id}/control/ws-ticket	non-media
 POST /api/v2/playback/start	non-media
 GET /api/v2/playback/transcode/{session_id}/master.m3u8	non-media
+HEAD /api/v2/playback/transcode/{session_id}/master.m3u8	non-media
 GET /api/v2/playback/transcode/{session_id}/segment/{name}	non-media
 DELETE /api/v2/playback/{session_id}	non-media
 POST /api/v2/playback/{session_id}/progress	non-media
@@ -1384,6 +1394,7 @@ PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
 POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
+POST /api/v2/admin/nodes/{id}/key	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
 POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media
@@ -1854,6 +1865,12 @@ GET /api/v2/notifications/email-preferences/address/capabilities	non-media
 GET /api/v2/notifications/email/unsubscribe	non-media
 POST /api/v2/notifications/email/unsubscribe	non-media
 GET /api/v2/notifications/email/verify	non-media
+GET /api/v2/notifications/plugin-channels	non-media
+GET /api/v2/notifications/plugin-destinations	non-media
+POST /api/v2/notifications/plugin-destinations	non-media
+DELETE /api/v2/notifications/plugin-destinations/{id}	non-media
+PUT /api/v2/notifications/plugin-destinations/{id}	non-media
+POST /api/v2/notifications/plugin-destinations/{id}/test	non-media
 GET /api/v2/notifications/preferences	non-media
 PUT /api/v2/notifications/preferences	non-media
 GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media
@@ -1863,6 +1880,8 @@ DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
+POST /api/v2/notifications/series/mute	non-media
+POST /api/v2/notifications/series/unmute	non-media
 DELETE /api/v2/notifications/series/{series_id}/mute	non-media
 PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media
@@ -1902,6 +1921,7 @@ GET /api/v2/playback/sessions/{session_id}/control/ws	non-media
 POST /api/v2/playback/sessions/{session_id}/control/ws-ticket	non-media
 POST /api/v2/playback/start	non-media
 GET /api/v2/playback/transcode/{session_id}/master.m3u8	non-media
+HEAD /api/v2/playback/transcode/{session_id}/master.m3u8	non-media
 GET /api/v2/playback/transcode/{session_id}/segment/{name}	non-media
 DELETE /api/v2/playback/{session_id}	non-media
 POST /api/v2/playback/{session_id}/progress	non-media

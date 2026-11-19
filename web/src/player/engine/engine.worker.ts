@@ -41,7 +41,7 @@ import {
   type DecodedAudioFrame,
 } from "./ffmpegAudioDecoder";
 import { avcLengthSize } from "./h264";
-import { hevcLengthSize, stripDolbyVisionNalUnits } from "./hevc";
+import { type HevcPreparation, prepareHevcAccessUnit, prepareHevcTrack } from "./hevc";
 import { IMPORT_COLOR_TAG, pictureColorOf } from "./pictureColor";
 import {
   ENGINE_READ_FAILED,
@@ -132,7 +132,8 @@ let videoConfig: VideoDecoderConfig | null = null;
  * before 0 (such as audio priming) as not for presentation.
  */
 let timelineOrigin = 0;
-let nalLengthSize: number | null = null;
+/** How each HEVC access unit is prepared before decode, or null when it is passed as is. */
+let hevcPreparation: HevcPreparation | null = null;
 /** NAL length-field size of an H.264 track, or null for any other video. */
 let h264LengthSize: number | null = null;
 let audioOutput: { port: MessagePort; channels: number; sampleRate: number } | null = null;
@@ -274,6 +275,18 @@ async function open(spec: EngineSourceSpec): Promise<void> {
       fullRange: config.colorSpace?.fullRange ?? false,
     };
   }
+  const videoCodec = await videoTrack.getCodec();
+  let description = config.description ? toBytes(config.description) : null;
+  hevcPreparation = null;
+  if (videoCodec === "hevc" && description) {
+    // HDR: Chromium tags HEVC frames with the SPS's colour description, not the config's.
+    const track = prepareHevcTrack(description, {
+      stripDolbyVision: spec.video.stripDolbyVision,
+      retagColor: spec.video.transfer !== "sdr",
+    });
+    config.description = description = track.description;
+    hevcPreparation = track.units;
+  }
   const support = await VideoDecoder.isConfigSupported(config);
   if (!support.supported) {
     throw new EngineFailure(
@@ -282,10 +295,6 @@ async function open(spec: EngineSourceSpec): Promise<void> {
     );
   }
   videoConfig = config;
-  const videoCodec = await videoTrack.getCodec();
-  const description = config.description ? toBytes(config.description) : null;
-  nalLengthSize =
-    spec.video.stripDolbyVision && videoCodec === "hevc" ? hevcLengthSize(description) : null;
   h264LengthSize = videoCodec === "avc" ? avcLengthSize(description) : null;
 
   let duration = spec.durationSeconds ?? 0;
@@ -510,7 +519,9 @@ async function decodeVideo(
     if (run !== generation) return "done";
     if (decoder.state === "closed") return rejected ? "rejected" : "done";
     if (packet.timestamp < skipBefore) continue;
-    const data = nalLengthSize ? stripDolbyVisionNalUnits(packet.data, nalLengthSize) : packet.data;
+    const data = hevcPreparation
+      ? prepareHevcAccessUnit(packet.data, hevcPreparation.lengthSize, hevcPreparation.options)
+      : packet.data;
     const chunk = new EncodedVideoChunk({
       type: packet.type,
       timestamp: Math.round(playerTime(packet) * 1e6),

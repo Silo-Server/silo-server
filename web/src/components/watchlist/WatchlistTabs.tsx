@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import {
   parseWatchlistTab,
   WATCHLIST_NOT_IN_LIBRARY_TAB,
@@ -57,7 +57,7 @@ export default function WatchlistTabs({
           <span className="hidden sm:inline">{t("web.library.watchlist.notInLibraryTab")}</span>
           {count !== undefined && count > 0 ? (
             <span className="bg-muted/80 text-muted-foreground ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[0.625rem] font-semibold tabular-nums">
-              {count}
+              {numberText(count)}
             </span>
           ) : null}
           {attention ? (

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -110,6 +111,7 @@ func TestTranscodeProxyDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
 
 func newCompletionTestProxy(client *http.Client) *Server {
 	server := NewServer(testWatcher("proxy-test-secret"), nil)
+	server.SetNodeKeys(nodeauthtest.NodeKey("proxy-test-secret"))
 	server.httpClient = client
 	return server
 }
@@ -133,10 +135,6 @@ func (w *failingCompletionResponseWriter) Write(p []byte) (int, error) {
 	return n, io.ErrClosedPipe
 }
 
-// TestTranscodeProxyFailsPromptlyOnHungNode covers proxy egress for issue
-// #2296: a transcode node that stops answering without closing its connections
-// gets a 502 within the liveness bound instead of holding the request until the
-// player gives up, so the player replans onto another node.
 func TestTranscodeProxyFailsPromptlyOnHungNode(t *testing.T) {
 	release := make(chan struct{})
 	node := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {

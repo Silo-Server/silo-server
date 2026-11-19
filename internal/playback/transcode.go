@@ -72,12 +72,25 @@ type TranscodeOpts struct {
 	// track; empty (older recipes and tokens) keeps the plain copy. It is
 	// durable because reconstruction must write the same segment bytes.
 	CopyAudioCodec string
-	// KeyframePlaylist serves a copy-video stream that starts at the
-	// beginning as one complete VOD playlist planned from the source's
-	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
-	// durable because a reconstructed session must keep serving the playlist
-	// the player already has.
+	// KeyframePlaylist serves a copy-video stream as one complete VOD
+	// playlist planned from the source's keyframe index, instead of FFmpeg's
+	// growing playlist (#1466): from the beginning, or from a resume's
+	// resolved origin. It is durable because a reconstructed session must
+	// keep serving the playlist the player already has.
 	KeyframePlaylist bool
+	// KeyframePlanned reports that the session serves a keyframe plan, which
+	// KeyframePlaylist only asks for: a copy that can't be planned keeps
+	// FFmpeg's playlist. StartTranscode sets it from the plan it resolved,
+	// whatever the caller passed. It is durable so a node-backed session's
+	// recipe records which playlist the node served (#4044).
+	KeyframePlanned bool
+	// KeyframePlanResume records that a resume serves a keyframe plan. A
+	// resume's plan numbers and cuts segments differently from FFmpeg's
+	// playlist, so a rebuild follows this rather than deciding afresh: a
+	// rebuilt resume without it keeps FFmpeg's playlist, and one with it that
+	// can no longer plan fails. The session sets it when it starts a resume's
+	// plan, so its recipe and its node's start response carry it.
+	KeyframePlanResume bool
 	// Reconstructed marks a session rebuilt from its recipe after its server
 	// or node lost it. It isn't durable: each rebuild sets it.
 	Reconstructed bool
@@ -360,6 +373,10 @@ type TranscodeSession struct {
 	// seek anchor, which RecipeOpts restores for a planned session.
 	planStreamOrigin       float64
 	planSeekAnchorResolved bool
+	// planResumeSeconds is the position a resume's plan was asked for (the
+	// first run's requested seek), or 0 for a plan from the start. The
+	// source-aligned playlist starts the player there.
+	planResumeSeconds float64
 	// subtitleSpans lists each generation's subtitle rendition cue file,
 	// oldest first, including those an earlier session recorded in the same
 	// output directory. Guarded by mu.
@@ -528,6 +545,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}
 	if err := prepareSubtitleFilterInput(ctx, &opts); err != nil {
 		releaseHWDevice()
+		// A start refused here wrote nothing. Drop the directory it made,
+		// which a node that hands the start back would otherwise keep until
+		// the orphan sweep; a directory that holds anything stays.
+		_ = os.Remove(opts.OutputDir)
 		return nil, err
 	}
 	copyPlan, err := resolveCopyPlan(ctx, opts)
@@ -535,9 +556,20 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", err)
 	}
+	opts.KeyframePlanned = copyPlan != nil
 	var copyGroups *copyGroupAssembler
+	planResumeSeconds := 0.0
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
+		if copyPlan.resumes() {
+			// A resume's first run starts at the plan's first segment, the
+			// way a restart for it does. Its segments are numbered from the
+			// plan, not from FFmpeg's start number.
+			planResumeSeconds = opts.SeekSeconds
+			opts.SeekSeconds = copyPlan.restartSeekSeconds(0)
+			opts.StartSegmentNumber = 0
+			opts.KeyframePlanResume = true
+		}
 		copyGroups = newCopyGroupAssembler(opts.OutputDir, copyPlan)
 		// The session starts at generation 0.
 		opts.copyGroupPrefix = copyGroups.startRun(opts.StartSegmentNumber, audioRecipeKey(opts), 0)
@@ -572,6 +604,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		copyGroups:             copyGroups,
 		planStreamOrigin:       opts.StreamOriginSeconds,
 		planSeekAnchorResolved: opts.CopySeekAnchorResolved,
+		planResumeSeconds:      planResumeSeconds,
 		subtitleSpans:          subtitleSpans,
 		subtitleCueBase:        subtitleCueBase,
 	}
@@ -582,7 +615,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
 	cmd := fspath.CommandContext(ctx, bin, args...)
@@ -884,7 +917,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if opts.ToneMapMode == "" {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePath(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}
@@ -2257,6 +2290,13 @@ func escapeFilterPath(path string) string {
 
 const subtitleFilterAliasName = "subtitle-source.media"
 
+// ErrRelayedSubtitleBurnIn refuses a text burn-in whose track could not be
+// staged when the input is relayed from the core (fspath.IsRelayed): the
+// libass fallback, which reads the whole media file, is not taken over the
+// relay. A transcode node answers it as work it cannot do, so the start runs
+// on a node that reads the file locally, or on the API server.
+var ErrRelayedSubtitleBurnIn = errors.New("subtitle burn-in: the track cannot be staged and a source read through the core cannot be handed to libass")
+
 // textSubtitleFilter is the libass subtitles filter of a text burn-in: the
 // staged track, the only stream of its file, with its fonts, or else the
 // track's index in the media file.
@@ -2294,6 +2334,15 @@ func prepareSubtitleFilterInput(ctx context.Context, opts *TranscodeOpts) error 
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if fspath.IsRelayed(opts.InputPath) {
+		// libass opens its file with no protocol whitelist and reads all of
+		// it: over the relay that is the whole source through the core, past
+		// any startup budget. The start fails so it runs where the file is
+		// local.
+		slog.InfoContext(ctx, "burn-in subtitle not staged; a relayed source cannot be handed to libass",
+			"component", "playback", "playback_session_id", opts.SessionID, "subtitle_track", opts.SubtitleTrackIndex, "error", err)
+		return fmt.Errorf("%w: %w", ErrRelayedSubtitleBurnIn, err)
 	}
 	slog.InfoContext(ctx, "burn-in subtitle not staged; libass reads the media file",
 		"component", "playback", "playback_session_id", opts.SessionID, "subtitle_track", opts.SubtitleTrackIndex, "error", err)
@@ -2641,9 +2690,18 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return nil, err
 	}
 	if s.copyPlan != nil {
-		// A planned playlist starts at the source's beginning and doesn't
-		// depend on FFmpeg's progress or restarts.
-		return s.buildPlaybackManifest(segPrefix, rawQuery)
+		// A planned playlist doesn't depend on FFmpeg's progress or
+		// restarts. One from the start is on the source's timeline already;
+		// a resume's starts at its origin, so it gets the gap before it that
+		// a seeked FFmpeg playlist gets.
+		manifest, err := s.buildPlaybackManifest(segPrefix, rawQuery)
+		if err != nil || !s.copyPlan.resumes() {
+			return manifest, err
+		}
+		opts := s.Opts()
+		opts.SeekSeconds, opts.StartSegmentNumber = s.planResumeSeconds, 0
+		opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = s.planStreamOrigin, true
+		return AlignRealManifestToSourceTimeline(manifest, opts, sourceTimelineGapURI(manifest, opts, segPrefix, rawQuery))
 	}
 	s.mu.Lock()
 	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
@@ -2661,15 +2719,7 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return manifest, nil
 	}
 
-	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
-	if rawQuery != "" {
-		// Gap URIs take the query form the real segment URIs got.
-		gapQuery := rawQuery
-		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
-			gapQuery = reference
-		}
-		gapURI += "?" + gapQuery
-	}
+	gapURI := sourceTimelineGapURI(manifest, opts, segPrefix, rawQuery)
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
 		timeline, err := parseManifestTimeline(manifest)
 		if err != nil {
@@ -2687,6 +2737,20 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return manifest, nil
 	}
 	return AlignRealManifestToSourceTimeline(manifest, opts, gapURI)
+}
+
+// sourceTimelineGapURI is the URI of the gap segments a source-aligned
+// playlist prepends. Gap URIs take the query form the real segment URIs got.
+func sourceTimelineGapURI(manifest []byte, opts TranscodeOpts, segPrefix, rawQuery string) string {
+	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
+	if rawQuery != "" {
+		gapQuery := rawQuery
+		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
+			gapQuery = reference
+		}
+		gapURI += "?" + gapQuery
+	}
+	return gapURI
 }
 
 // AlignRealManifestToSourceTimeline prepends bounded EXT-X-GAP segments to a
@@ -3559,6 +3623,10 @@ func (s *TranscodeSession) SegmentAt(positionSeconds float64) int {
 		return 0
 	}
 	if s.copyPlan != nil {
+		// A resume's plan starts at its origin, not at the source's start.
+		if s.copyPlan.resumes() {
+			positionSeconds = max(positionSeconds-s.planStreamOrigin, 0)
+		}
 		return s.copyPlan.segmentAt(positionSeconds)
 	}
 	if d := s.Opts().SegmentDuration; d > 0 {
@@ -3576,16 +3644,15 @@ func (s *TranscodeSession) Opts() TranscodeOpts {
 
 // RecipeOpts returns the opts to persist for rebuilding the session. A
 // keyframe-planned session's timeline is its plan, wherever a restart has
-// moved the current run, so its recipe starts from the beginning like its
-// first run: the rebuild plans the same segments again (the planner takes
-// only a session from the start), and a segment request restarts FFmpeg at
-// the player's position.
+// moved the current run, so its recipe starts where its first run did: from
+// the beginning, or at a resume's origin. The rebuild plans the same segments
+// again, and a segment request restarts FFmpeg at the player's position.
 func (s *TranscodeSession) RecipeOpts() TranscodeOpts {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	opts := s.opts
 	if s.copyPlan != nil {
-		opts.SeekSeconds, opts.StartSegmentNumber = 0, 0
+		opts.SeekSeconds, opts.StartSegmentNumber = s.planResumeSeconds, 0
 		opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = s.planStreamOrigin, s.planSeekAnchorResolved
 	}
 	return opts
@@ -3895,7 +3962,11 @@ func (s *TranscodeSession) restart(
 	if s.copyPlan != nil {
 		startSegment = min(max(startSegment, 0), len(s.copyPlan.durations)-1)
 		seekSeconds = s.copyPlan.restartSeekSeconds(startSegment)
+		// The plan's timeline doesn't move: a resume's stays at its origin.
 		streamOriginSeconds, copySeekAnchorResolved = 0, true
+		if s.copyPlan.resumes() {
+			streamOriginSeconds = s.planStreamOrigin
+		}
 	}
 
 	s.mu.Lock()
@@ -3970,7 +4041,7 @@ func (s *TranscodeSession) restart(
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	if decodeOnCPU {
 		slog.WarnContext(ctx, "transcode could not configure its filter graph on GPU-decoded frames; restarting with CPU decoding",
 			"component", "playback",

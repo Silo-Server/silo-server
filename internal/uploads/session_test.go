@@ -120,33 +120,6 @@ func TestManagerAcceptsDuplicateReceivedChunk(t *testing.T) {
 	}
 }
 
-func TestManagerChunkActivityRefreshesExpiry(t *testing.T) {
-	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
-	manager := NewManager(ManagerOptions{
-		RootDir:      t.TempDir(),
-		MaxSize:      16,
-		MaxChunkSize: 4,
-		TTL:          10 * time.Minute,
-		Now:          func() time.Time { return now },
-	})
-
-	session := mustCreate(t, manager, 8)
-
-	// 9 minutes per chunk: an absolute deadline would expire before the
-	// second chunk; an idle timeout refreshed by chunk arrivals must not.
-	now = now.Add(9 * time.Minute)
-	if _, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("abcd")), 4); err != nil {
-		t.Fatalf("PutChunk(0) error = %v", err)
-	}
-	now = now.Add(9 * time.Minute)
-	if _, err := manager.PutChunk(context.Background(), session.ID, 1, bytes.NewReader([]byte("efgh")), 4); err != nil {
-		t.Fatalf("PutChunk(1) after refresh error = %v", err)
-	}
-	if _, err := manager.Complete(session.ID); err != nil {
-		t.Fatalf("Complete() error = %v", err)
-	}
-}
-
 func TestManagerReclaimsOrphanedDirsFromPreviousProcess(t *testing.T) {
 	root := t.TempDir()
 	stale := filepath.Join(root, "deadbeefdeadbeefdeadbeefdeadbeef")

@@ -33,12 +33,14 @@ type Filter struct {
 	Raw   string
 }
 
-// ParseFilter pulls apart an ABS `filter=` query value. Real ABS encodes the
-// value as base64-then-URL-encoded — chi/http already URL-decodes the query,
-// so the input we see is `<kind>.<base64-value>`. Two non-encoded special
-// cases: the literal `no-series` sentinel and the `progress.*` family
-// (in-progress / finished / not-finished). When the value isn't valid
-// base64, we treat it as a sentinel and pass it through unchanged.
+// ParseFilter pulls apart an ABS `filter=` query value. Real ABS clients
+// base64-encode every value, progress states and the no-series sentinel
+// included (the app's filter sheet sends `progress.` + base64 of
+// "in-progress"), and the ABS server decodes every value. chi/http already
+// URL-decodes the query, so the input we see is `<kind>.<base64-value>`.
+// Older or hand-written clients send progress states and no-series in the
+// clear, so a known plain value is taken as is. Any other value that isn't
+// valid base64 is passed through unchanged.
 //
 // Returns (Filter{}, false) when raw is empty or has no kind prefix.
 func ParseFilter(raw string) (Filter, bool) {
@@ -54,9 +56,7 @@ func ParseFilter(raw string) (Filter, bool) {
 	rest := raw[dot+1:]
 	out := Filter{Kind: kind, Raw: raw}
 
-	// progress.* and the no-series sentinel are never base64-encoded by
-	// real ABS clients.
-	if kind == FilterProgress || rest == SentinelNoSeries {
+	if rest == SentinelNoSeries || (kind == FilterProgress && isProgressValue(rest)) {
 		out.Value = rest
 		return out, true
 	}
@@ -73,63 +73,39 @@ func ParseFilter(raw string) (Filter, bool) {
 		out.Value = string(b)
 		return out, true
 	}
-	// Fall through — accept the raw string as a sentinel. Future ABS
-	// versions may add more sentinels (mirroring how no-series escaped the
-	// base64 encoding); this keeps us forward-compatible.
 	out.Value = rest
 	return out, true
 }
 
-// Matches reports whether the given LibraryItem satisfies this filter. genres
-// is best-effort — backend summaries don't carry genres, so a genres filter
-// matches nothing unless the caller pre-populated the field via detail
-// lookups (we currently don't). tags / languages behave the same way and
-// are accepted for forward-compat but always return false.
-//
-// Progress filters require the caller to supply an optional `inProgress`
-// and `finished` flag for the book; without them the progress branch
-// returns false. The caller is responsible for joining progress state from
-// the store.
-func (f Filter) Matches(item LibraryItem, inProgress, finished bool, hasProgress bool) bool {
-	switch f.Kind {
-	case FilterAuthors:
-		for _, a := range item.Media.Metadata.Authors {
-			if a.ID == f.Value || a.Name == f.Value {
-				return true
-			}
-		}
-		return false
-	case FilterSeries:
-		if f.Value == SentinelNoSeries {
-			return len(item.Media.Metadata.Series) == 0
-		}
-		for _, s := range item.Media.Metadata.Series {
-			if s.ID == f.Value || s.Name == f.Value {
-				return true
-			}
-		}
-		return false
-	case FilterNarrators:
-		for _, n := range item.Media.Metadata.Narrators {
-			if n == f.Value {
-				return true
-			}
-		}
-		return false
-	case FilterProgress:
-		switch f.Value {
-		case "in-progress":
-			return hasProgress && inProgress && !finished
-		case "finished":
-			return hasProgress && finished
-		case "not-finished":
-			return !finished
-		case "not-started":
-			return !hasProgress
-		}
-		return false
-	default:
-		// genres / tags / languages — not derivable from a summary today.
-		return false
+func isProgressValue(v string) bool {
+	switch v {
+	case ProgressInProgress, ProgressAudioInProgress, ProgressFinished, ProgressNotStarted, ProgressNotFinished,
+		"ebook-in-progress", "ebook-finished":
+		return true
 	}
+	return false
 }
+
+// ItemsQuery carries the ABS /libraries/{id}/items options the store applies
+// in SQL: the parsed filter and the requested sort. UserID and ProfileID name
+// the viewer whose listening progress the progress filter and the "progress"
+// sort read; a progress filter matches only that profile's rows.
+type ItemsQuery struct {
+	Filter    Filter
+	Sort      string
+	Desc      bool
+	UserID    string
+	ProfileID string
+}
+
+// Progress filter values real ABS clients send (libraryItemsBookFilters.js).
+// audio-in-progress is in-progress restricted to books with audio, which every
+// Silo audiobook is. The ebook-* values match books without audio files, so
+// they match nothing here.
+const (
+	ProgressInProgress      = "in-progress"
+	ProgressAudioInProgress = "audio-in-progress"
+	ProgressFinished        = "finished"
+	ProgressNotStarted      = "not-started"
+	ProgressNotFinished     = "not-finished"
+)

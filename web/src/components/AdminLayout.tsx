@@ -14,6 +14,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { AdminNavTopicsProvider } from "@/hooks/useAdminNavTopics";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useAdminMessages, useT } from "@/i18n";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
@@ -31,6 +32,14 @@ const ADMIN_DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 const LOGO_GLYPH = "▶";
 
 export default function AdminLayout() {
+  return (
+    <AdminNavTopicsProvider>
+      <AdminShell />
+    </AdminNavTopicsProvider>
+  );
+}
+
+function AdminShell() {
   // Admin text is its own catalog chunk; show the route loading state until it has loaded.
   return useAdminMessages() ? <AdminLayoutContent /> : <RouteLoading />;
 }

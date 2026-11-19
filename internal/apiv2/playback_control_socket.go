@@ -61,6 +61,10 @@ const (
 	playbackControlSocketProtocolPath = "/{session_id}/control/ws"
 	playbackControlSocketTicketPath   = "/{session_id}/control/ws-ticket"
 	playbackControlSocketMaxSeconds   = 4 * 60 * 60
+	// playbackControlSocketResumeRetrySeconds is the Retry-After for a live
+	// session this replica has not rebuilt yet: the player's next media
+	// request does that, normally within a few seconds.
+	playbackControlSocketResumeRetrySeconds = 5
 )
 
 func registerPlaybackControlSocket(reg *Registry) {
@@ -76,7 +80,7 @@ func registerPlaybackControlSocket(reg *Registry) {
 	})
 
 	mint := Operation{Operation: humaOp(http.MethodPost, root+playbackControlSocketTicketPath, "createPlaybackControlSocketTicket", "playback", "Delegate the current login session and profile proof to one control handshake for a playback session this owner started."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
-	mint.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
+	mint.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusGone}
 	Register(reg, mint, func(ctx context.Context, in *PlaybackControlSocketTicketInput) (*PlaybackControlSocketTicketOutput, error) {
 		svc := reg.deps.PlaybackControlSocket
 		if svc == nil || !svc.Available() {
@@ -114,6 +118,10 @@ func playbackControlSocketProblem(err error) *Problem {
 		return unavailable("playback control")
 	case errors.Is(err, playback.ErrSessionNotFound):
 		return NewProblem(TypeNotFound, "Playback session not found.")
+	case errors.Is(err, handlers.ErrPlaybackControlSocketSessionEnded):
+		return NewProblem(TypePlaybackSessionEnded, "The playback session has ended; start a new one.")
+	case errors.Is(err, handlers.ErrPlaybackControlSocketSessionResuming):
+		return NewProblem(TypeDependencyUnavailable, "The playback session is not active on this server yet; retry shortly.").WithRetryAfter(playbackControlSocketResumeRetrySeconds)
 	case errors.Is(err, handlers.ErrPlaybackControlSocketNotOwner):
 		return NewProblem(TypePermissionDenied, "The playback session belongs to another account or profile.")
 	case errors.Is(err, handlers.ErrPlaybackControlSocketInstallation):

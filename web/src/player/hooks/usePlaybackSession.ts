@@ -122,12 +122,20 @@ export function reconnectDelayMs(attempt: number): number {
  * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
  * so the stop uses fetch keepalive to outlive a closing page. An unloading
  * page sends it at once rather than after any progress still in flight.
+ *
+ * A player that unmounts while the page stays tells its host once the stop
+ * settles: the page it returned to read its watch state while the stop was
+ * still on its way.
  */
 function stopOnPageExit(config: PlayerConfig, sessionId: string | null, unloading = false) {
   if (!sessionId) return;
-  void stopSequencedSession(config, sessionId, true, unloading).catch(() => {
-    // Best effort: the session expires server-side.
-  });
+  void stopSequencedSession(config, sessionId, true, unloading)
+    .catch(() => {
+      // Best effort: the session expires server-side.
+    })
+    .then(() => {
+      if (!unloading) config.onSessionStopped?.();
+    });
 }
 
 /**
@@ -572,6 +580,8 @@ export function usePlaybackSession(
   });
 
   const sessionIdRef = useRef<string | null>(null);
+  // Stops still in flight for sessions this player has already let go of.
+  const pendingStopsRef = useRef(new Set<Promise<void>>());
   const planRef = useRef<PlanV3 | null>(null);
   // What a `plan_summary` reports against, by adoption: the plan may have been
   // replaced, and its session ended, by the time the summary is sent.
@@ -990,8 +1000,16 @@ export function usePlaybackSession(
   );
 
   const stopSession = useCallback(
-    async (sessionId: string) => {
-      await stopSequencedSession(config, sessionId);
+    (sessionId: string) => {
+      const stop = stopSequencedSession(config, sessionId);
+      const pendingStops = pendingStopsRef.current;
+      pendingStops.add(stop);
+      void stop
+        .catch(() => {})
+        .finally(() => {
+          pendingStops.delete(stop);
+        });
+      return stop;
     },
     [config],
   );
@@ -1353,6 +1371,7 @@ export function usePlaybackSession(
 
   // Clean up session on unmount.
   useEffect(() => {
+    const pendingStops = pendingStopsRef.current;
     return () => {
       // A start can finish after unmount, before it has published a session ID.
       // Let that reply take the stale-start path and stop its own session
@@ -1363,6 +1382,12 @@ export function usePlaybackSession(
       // A start this player left still loading no longer holds off speed tests.
       playbackStartEnded();
       stopOnPageExit(config, sessionIdRef.current);
+      // Stops already sent for sessions this player retired, such as one whose
+      // new output was refused, can still be on their way too. Each tells the
+      // host as it settles, so a slow one cannot hold up the others.
+      for (const stop of pendingStops) {
+        void stop.catch(() => {}).then(() => config.onSessionStopped?.());
+      }
     };
   }, [config, endReconnect]);
 

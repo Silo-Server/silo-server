@@ -13,6 +13,10 @@ var ErrAdminSettingsCheckConfig = errors.New("invalid settings check configurati
 type AdminSettingsCheckResult struct {
 	Success bool
 	Message string
+	// MessageKey names Message's translation catalog entry and MessageArgs
+	// fills its placeholders; MessageKey is empty when Message has none.
+	MessageKey  string
+	MessageArgs map[string]string
 }
 
 // CheckAdminSettingsConnection performs one synchronous check. Some providers
@@ -42,10 +46,10 @@ func (h *AdminHandler) CheckAdminSettingsConnection(ctx context.Context, kind st
 	// Provider errors can include credentials, submitted endpoints, or response
 	// bodies. The native boundary returns a stable diagnostic without those values.
 	if !result.Success {
-		result.Message = result.safeMessage
-		if result.Message == "" {
-			result.Message = "Connection check failed. Verify the submitted settings and provider availability."
+		if result.safeMessage == "" {
+			result = checkFailed(checkMessageFailed)
 		}
+		result.Message = result.safeMessage
 	}
-	return AdminSettingsCheckResult{Success: result.Success, Message: result.Message}, nil
+	return AdminSettingsCheckResult{Success: result.Success, Message: result.Message, MessageKey: result.messageKey, MessageArgs: result.messageArgs}, nil
 }

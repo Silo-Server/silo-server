@@ -20,17 +20,17 @@ func TestHistoryImportDurableAdmissionErrorsDoNotExposeCauses(t *testing.T) {
 	}
 }
 
-// v1 is frozen: failures the v2 adapter explains still answer 500 here, and
-// the cause stays reachable for the v2 mapping.
-func TestHistoryImportAPIErrorKeepsV1DecisionForV2Causes(t *testing.T) {
+// The v2 mapping explains these failures from their cause, so the service
+// error must keep it reachable.
+func TestHistoryImportAPIErrorKeepsTheCauseForV2(t *testing.T) {
 	dial := &url.Error{Op: "Post", URL: "http://emby.example.test/Users/AuthenticateByName", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}}
 	for _, err := range []error{
 		fmt.Errorf("%w: %w", historyimport.ErrSourceUnreachable, dial),
 		fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput),
 	} {
 		out := historyImportAPIError(err)
-		if out.Status != http.StatusInternalServerError || out.Code != policyErrorInternal || !errors.Is(out, err) {
-			t.Fatalf("historyImportAPIError(%v) = %+v, want the unchanged v1 500 wrapping its cause", err, out)
+		if !errors.Is(out, err) {
+			t.Fatalf("historyImportAPIError(%v) = %+v, want it to wrap its cause", err, out)
 		}
 	}
 }

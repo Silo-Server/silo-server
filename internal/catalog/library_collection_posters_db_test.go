@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // fakeCollageGenerator records the collages it is asked to compose instead of
@@ -269,6 +271,147 @@ func TestServerSmartCollectionCollagesDB(t *testing.T) {
 	})
 }
 
+// TestSmartCollageRecordsRetireWhenUnrefreshedDB covers the records of which
+// collage each viewer access sees for a smart collection (#4158). A viewer
+// whose access changes leaves its old record behind, so a refresh of the
+// collection removes the records nobody refreshed within the collage
+// retention window, whether they point at a collage another access still
+// uses or at none, and keeps the ones refreshed within it. Set
+// SILO_TEST_DATABASE_URL to a migrated database to run it.
+func TestSmartCollageRecordsRetireWhenUnrefreshedDB(t *testing.T) {
+	ctx := context.Background()
+	f := seedServerSmartCollage(t)
+	pool := f.repo.pool
+	userID, profile, personalCollection := seedPersonalSmartCollection(t, f)
+	personal := NewPersonalCollectionCollages(pool, &fakeCollageGenerator{})
+	server := NewLibraryCollectionService(f.repo, nil, nil, nil)
+	server.CollageGen = &fakeCollageGenerator{}
+
+	cases := []struct {
+		name         string
+		collectionID string
+		table, scope string
+		records      smartCollageStore
+		accessKey    func(AccessFilter) string
+		refresh      func(AccessFilter) error
+	}{
+		{
+			name:         "personal",
+			collectionID: personalCollection.ID,
+			table:        "user_personal_collection_smart_collages",
+			scope:        fmt.Sprintf("user_id = %d", userID),
+			records:      personalCollageStore{pool: pool, userID: userID},
+			accessKey:    collageAccessKey,
+			refresh: func(access AccessFilter) error {
+				return personal.refreshSmart(ctx, userID, personalCollection, access)
+			},
+		},
+		{
+			name:         "server",
+			collectionID: f.collection.ID,
+			table:        "library_collection_smart_collages",
+			scope:        "TRUE",
+			records:      f.repo,
+			accessKey:    serverSmartCollageAccessKey,
+			refresh: func(access AccessFilter) error {
+				return server.smartCollageSet().refresh(ctx, server.smartCollection(f.collection, access), serverSmartCollageAccessKey(access))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			record := func(access AccessFilter) (smartCollage, bool) {
+				t.Helper()
+				got, err := tc.records.getSmartCollages(ctx, []string{tc.collectionID}, tc.accessKey(access))
+				if err != nil {
+					t.Fatalf("load recorded collages: %v", err)
+				}
+				r, ok := got[tc.collectionID]
+				return r, ok
+			}
+			recorded := func(access AccessFilter) bool { _, ok := record(access); return ok }
+			// Simulates a record last refreshed age ago.
+			backdate := func(access AccessFilter, age time.Duration) {
+				t.Helper()
+				if _, err := pool.Exec(ctx, `UPDATE `+tc.table+` SET refreshed_at = NOW() - make_interval(secs => $3)
+					WHERE `+tc.scope+` AND collection_id = $1 AND access_key = $2`,
+					tc.collectionID, tc.accessKey(access), age.Seconds()); err != nil {
+					t.Fatalf("backdate record: %v", err)
+				}
+			}
+
+			current := AccessFilter{UserID: userID, ProfileID: profile}
+			// Sees the same matches as current, so its record shares
+			// current's collage, which current keeps in use.
+			sharesCollage := current
+			sharesCollage.ProfilePreferredLanguage = "de"
+			// Sees no match, so its record points at no collage.
+			seesNothing := current
+			seesNothing.AllowedContentIDs = []string{f.collection.Slug + "-none"}
+			recent := current
+			recent.ProfilePreferredLanguage = "fr"
+			for _, access := range []AccessFilter{current, sharesCollage, seesNothing, recent} {
+				if err := tc.refresh(access); err != nil {
+					t.Fatalf("refresh: %v", err)
+				}
+				if !recorded(access) {
+					t.Fatalf("refresh recorded nothing for %+v", access)
+				}
+			}
+			currentRecord, _ := record(current)
+			if r, _ := record(sharesCollage); currentRecord.collage.Key == "" || r.collage.Key != currentRecord.collage.Key {
+				t.Fatalf("records name collages %q and %q, want one shared collage", currentRecord.collage.Key, r.collage.Key)
+			}
+			if r, _ := record(seesNothing); r.collage.Key != "" {
+				t.Fatalf("record of an access that sees no match names collage %q, want none", r.collage.Key)
+			}
+			backdate(sharesCollage, collectionCollageUnusedAfter+time.Hour)
+			backdate(seesNothing, collectionCollageUnusedAfter+time.Hour)
+			backdate(recent, collectionCollageUnusedAfter-time.Hour)
+
+			if err := tc.refresh(current); err != nil {
+				t.Fatalf("refresh current access: %v", err)
+			}
+			if recorded(sharesCollage) || recorded(seesNothing) {
+				t.Fatalf("records unrefreshed for longer than %v survived a refresh: sharing a collage %v, with none %v",
+					collectionCollageUnusedAfter, recorded(sharesCollage), recorded(seesNothing))
+			}
+			if !recorded(current) || !recorded(recent) {
+				t.Fatalf("a refresh removed records still in use: current %v, recent %v", recorded(current), recorded(recent))
+			}
+		})
+	}
+}
+
+// seedPersonalSmartCollection creates an account with one profile owning a
+// personal smart collection with f's query.
+func seedPersonalSmartCollection(t *testing.T, f serverSmartCollageFixture) (userID int, profile string, c PersonalCollectionDefinition) {
+	t.Helper()
+	ctx := context.Background()
+	pool := f.repo.pool
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, f.collection.Slug).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	profile = f.collection.Slug + "-owner"
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'owner')`, profile, userID); err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	store, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("open user store: %v", err)
+	}
+	created, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: profile, Name: "Smart", CollectionType: "smart", QueryDefinition: f.query})
+	if err != nil {
+		t.Fatalf("create personal collection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM user_personal_collections WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path LIKE $1`, "%"+created.ID+"%")
+	})
+	return userID, profile, PersonalCollectionDefinition{ID: created.ID, CollectionType: "smart", QueryDefinition: f.query}
+}
+
 // serverSmartCollageFixture is a smart server collection matching titles a
 // to e by genre, in title order. Titles b to e are in shownLibrary, the
 // library it shows in; a is in another library.
@@ -278,6 +421,8 @@ type serverSmartCollageFixture struct {
 	collection   *models.LibraryCollection
 	shownLibrary int
 	poster       func(name string) string
+	// query is the collection's query definition.
+	query string
 }
 
 func seedServerSmartCollage(t *testing.T) serverSmartCollageFixture {
@@ -326,6 +471,7 @@ func seedServerSmartCollage(t *testing.T) serverSmartCollageFixture {
 
 	f.repo = NewLibraryCollectionRepository(pool)
 	query := fmt.Sprintf(`{"match":"all","groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":%q}]}],"sort":{"field":"title","order":"asc"}}`, genre)
+	f.query = query
 	f.collection, err = f.repo.Create(ctx, CreateLibraryCollectionInput{
 		LibraryIDs:      []int{f.shownLibrary},
 		Slug:            prefix,

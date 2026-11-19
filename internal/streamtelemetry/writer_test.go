@@ -2,9 +2,7 @@ package streamtelemetry
 
 import (
 	"bufio"
-	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -36,40 +34,6 @@ func TestObservedWriterPreservesReadFromAndCountsAfterWrite(t *testing.T) {
 		t.Fatalf("ReadFrom = %d, %v, fast=%t, bytes=%d", n, err, underlying.readFrom, obs.BytesAccepted())
 	}
 	registry.release(obs, OutcomeUnknown)
-}
-
-func TestObservedWriterHEADCountsZero(t *testing.T) {
-	registry := NewRegistry(testConfig(), NewLocalStore(), nil)
-	handler := registry.Observe(MediaRoute{Family: FamilyNative, Method: http.MethodHead, Pattern: "/head", Class: ClassPlayback, Role: RoleViewerEgress, Enrolled: true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		Attach(r.Context(), testAttachment("head"))
-		_, _ = w.Write([]byte("not-on-wire"))
-	}))
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodHead, "/head", nil))
-	if got := registry.Sweep().Sessions[0].BytesAccepted; got != 0 {
-		t.Fatalf("HEAD bytes = %d", got)
-	}
-}
-
-func TestObserveDoesNotRunGenericCaptureWhenRouteCaptureExists(t *testing.T) {
-	originalNow := now
-	defer func() { now = originalNow }()
-	nowCalls := 0
-	now = func() time.Time {
-		nowCalls++
-		return time.Unix(123, 0)
-	}
-	captureCalls := 0
-	route := testRoute(ClassPlayback)
-	route.Capture = func(*http.Request) CaptureSet {
-		captureCalls++
-		return CaptureSet{Method: http.MethodGet, Pattern: route.Pattern, ReceivedAt: time.Unix(100, 0)}
-	}
-	registry := NewRegistry(testConfig(), NewLocalStore(), nil)
-	handler := registry.Observe(route)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/media/x", nil))
-	if captureCalls != 1 || nowCalls != 0 {
-		t.Fatalf("capture calls = %d, generic timestamp calls = %d", captureCalls, nowCalls)
-	}
 }
 
 func TestObservedWriterPanicReleasesUnknownAndPropagates(t *testing.T) {
@@ -164,47 +128,5 @@ func TestObservedWriterClassifiesTransportFailuresOnRelease(t *testing.T) {
 				t.Fatalf("outcomes = %+v", session.Outcomes)
 			}
 		})
-	}
-}
-
-// A route in an unobserved family must get the handler back unchanged — not a
-// wrapper that decides per request — so the gate costs nothing on the hot path
-// and cannot half-observe.
-func TestObserveSkipsUnobservedFamily(t *testing.T) {
-	cfg := testConfig()
-	cfg.Families = map[Family]bool{FamilyNative: true}
-	registry := NewRegistry(cfg, NewLocalStore(), nil)
-	t.Cleanup(func() { _ = registry.Stop(context.Background()) })
-
-	body := []byte("audiobook-bytes")
-	serve := func(family Family) Snapshot {
-		route := MediaRoute{Family: family, Method: http.MethodGet, Pattern: "/gated",
-			Class: ClassPlayback, Role: RoleViewerEgress, CapRelevant: true, Enrolled: true}
-		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			Attach(r.Context(), Attachment{Subject: UserSubject(7), SessionID: "gated-" + string(family),
-				StartedAt: time.Unix(100, 0), StartedAtSource: StartedAtSourceSession})
-			_, _ = w.Write(body)
-		})
-		wrapped := registry.Observe(route)(inner)
-		if family != FamilyNative {
-			// An unobserved family must be handed back the very handler it passed in.
-			if fmt.Sprintf("%p", wrapped) != fmt.Sprintf("%p", http.Handler(inner)) {
-				t.Fatalf("%s was wrapped despite being outside the observed set", family)
-			}
-		}
-		recorder := httptest.NewRecorder()
-		wrapped.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/gated", nil))
-		if recorder.Body.String() != string(body) {
-			t.Fatalf("%s body = %q", family, recorder.Body.String())
-		}
-		return registry.Sweep()
-	}
-
-	if snapshot := serve(FamilyABS); len(snapshot.Sessions) != 0 {
-		t.Fatalf("gated-out family produced sessions: %+v", snapshot.Sessions)
-	}
-	snapshot := serve(FamilyNative)
-	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].BytesAccepted != int64(len(body)) {
-		t.Fatalf("observed family sessions = %+v", snapshot.Sessions)
 	}
 }

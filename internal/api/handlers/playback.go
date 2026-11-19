@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -201,10 +202,15 @@ type PlaybackHandler struct {
 	LifecycleViews   PlaybackLifecycleViews
 	// LiveRowJSON renders a session as the live row a sync would store for
 	// it (worker.SessionSyncRowJSON), for a start announced before a sync.
-	LiveRowJSON     func(*playback.Session) (json.RawMessage, error)
-	MissingMarker   MissingFileMarker
-	NodePlanner     nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
-	JWTSecret       string                    // needed for signing stream tokens
+	LiveRowJSON   func(*playback.Session) (json.RawMessage, error)
+	MissingMarker MissingFileMarker
+	NodePlanner   nodepool.SessionPlanner // optional; enables proxy/transcode node selection
+	JWTSecret     string                  // needed for signing stream tokens
+	// NodeKeys signs calls to transcode nodes with each node's own key.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants transcode nodes the source of each start and move;
+	// nil sends none.
+	SourceGrants    nodesource.FileGranter
 	StreamTelemetry *streamtelemetry.Registry // local observation-only telemetry
 	// StreamDeny revokes a session's stream tokens before they expire (see
 	// docs/architecture/restart-resilient-playback.md). Nil-safe: without Redis
@@ -297,7 +303,7 @@ type PlaybackHandler struct {
 	v3ToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
 	v3RouteNodeProbe     func(context.Context, string) bool // nil: probeRouteNodeV3
 	v3NodeCapabilitiesMu sync.Mutex
-	v3NodeCapabilities   map[string]v3NodeCapabilityCache
+	v3NodeCapabilities   map[v3NodeCapabilityKey]v3NodeCapabilityCache
 	// v3NodeProbeBudgets holds what each node last said a capability read of it
 	// costs, guarded by v3NodeCapabilitiesMu. It is kept apart from the
 	// inventory above because the two are invalidated for different reasons: an
@@ -314,7 +320,7 @@ type PlaybackHandler struct {
 	// flight, one at a time each. Guarded by v3NodeCapabilitiesMu, the same
 	// lock as the invalidation counter, so a refresh cannot release its slot in
 	// between an invalidation and that invalidation's claim on it.
-	v3NodeCapabilityRefresh map[string]struct{}
+	v3NodeCapabilityRefresh map[v3NodeCapabilityKey]struct{}
 	v3EventOnce             sync.Once
 	v3EventQueue            chan playback.RouteEventRecordV3
 	v3StartEffectsOnce      sync.Once
@@ -360,7 +366,11 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (often late-set) config/store/secret fields lazily at call time, avoiding a
 	// field-ordering hazard during router setup.
-	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
+	h.tm.NodeRecipesFn = func() playback.NodeRecipeDeleter {
+		deleter, _ := h.NodeRecipeStore.(playback.NodeRecipeDeleter)
+		return deleter
+	}
 	h.tm.LogSinkFn = func() playback.FFmpegLogSink { return h.FFmpegLogSink }
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		c := h.playbackConfig()
@@ -400,7 +410,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		// under the same id between the pre-check above and here. We only tear down the
 		// upstream playback session when the compare-and-delete actually matched the
 		// dead transcode. When it returns false a successor owns the session — do
-		// nothing further, or finalizeSessionStop's unconditional CloseTranscodeSession
+		// nothing further, or finalizeSessionStopWithResult's unconditional CloseTranscodeSession
 		// would reap the live successor's output dir mid-serve.
 		if !h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
 			return
@@ -1206,6 +1216,9 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 	completed := false
 	if file != nil {
 		duration := float64(file.Duration)
+		if session.TimelineDuration > 0 {
+			duration = session.TimelineDuration
+		}
 		durationPtr = &duration
 		if duration > 0 && session.Position/duration > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct) {
 			completed = true
@@ -1266,12 +1279,8 @@ func (h *PlaybackHandler) touchSessionActivity(sessionID string) {
 	}
 }
 
-func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, reason PlaybackEndReason) {
-	h.finalizeSessionStopWithResult(ctx, session, syncNow, syncReason, reason)
-}
-
-// finalizeSessionStopWithResult is finalizeSessionStop reporting the history
-// writer's result, which the v2 stop receipt carries. reason is why the
+// finalizeSessionStopWithResult ends a playback session and reports the
+// history writer's result, which the v2 stop receipt carries. reason is why the
 // attempt ended; a system teardown the client can rebuild under the same id
 // passes none.
 func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, reason PlaybackEndReason) watchstate.PlaybackStopResult {
@@ -1673,6 +1682,9 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	if session.RequestedMediaFileID == 0 {
 		session.RequestedMediaFileID = live.RequestedMediaFileID
 	}
+	if session.TimelineDuration <= 0 {
+		session.TimelineDuration = live.TimelineDuration
+	}
 }
 
 // reconstructedClientTimeout bounds the live-row read a rebuild makes, so a
@@ -1717,6 +1729,9 @@ func (h *PlaybackHandler) restoreReconstructedClient(ctx context.Context, card *
 	fill(&card.ClientUserAgent, live.ClientUserAgent)
 	fill(&card.DeviceID, live.DeviceID)
 	fill(&card.DevicePlatform, live.DevicePlatform)
+	if len(card.AdaptationReasons) == 0 {
+		card.AdaptationReasons = live.AdaptationReasons
+	}
 }
 
 // compatCopyWithoutProgress reports a Jellyfin session copy that never saw
@@ -1946,7 +1961,8 @@ func alignedSeekSeconds(seekSeconds float64, segmentDuration int, targetVideoCod
 	return float64(computeStartSegment(seekSeconds, segmentDuration) * segmentDuration)
 }
 
-// HandleGetTranscodeManifest handles GET /playback/transcode/{session_id}/master.m3u8.
+// HandleGetTranscodeManifest handles GET /playback/transcode/{session_id}/master.m3u8,
+// and HEAD, whose body net/http drops.
 // Legacy transports allow the session UUID to act as the access capability.
 // Header-authenticated V3 transports require the live session owner on every
 // request; their UUID is only a route identifier.
@@ -2392,7 +2408,18 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil
 	}
-	if err := nodeauth.Sign(req, transcodeNodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, h.NodeKeys); err != nil {
+		if transcodeproxy.NodeUnsignable(err) {
+			// A node without a key, or no longer registered at the URL, is
+			// unavailable to this server. It is not moved off: a registry
+			// that is empty or stale here could sign for no node at all, and
+			// moving would restart a healthy transcode on every hop.
+			transcodeproxy.WarnNodeUnsignable(r.Context(), "api", transcodeNodeURL, err)
+			writeTranscodeNodeUnavailable(w)
+			return nil
+		}
+		slog.WarnContext(r.Context(), "cannot sign the relay to a transcode node", "component", "playback",
+			"node", logredact.SanitizeURL(transcodeNodeURL), "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil
 	}
@@ -2439,6 +2466,13 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	if isRedirectStatus(resp.StatusCode) && refusesRelayRedirects(r.Context()) {
 		// The Location is not logged: it may carry a signed token.
 		slog.WarnContext(r.Context(), "transcode node answered a redirect; not relayed", "component", "api", "status", resp.StatusCode, "playback_session_id", sessionID)
+		writeTranscodeNodeUnavailable(w)
+		return nil
+	}
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		// The client authenticated with this server; the node refused this
+		// server's signature or the token it forwarded.
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "api", transcodeNodeURL, resp.StatusCode, h.NodeKeys)
 		writeTranscodeNodeUnavailable(w)
 		return nil
 	}
@@ -2499,7 +2533,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	fullSize := transcodeproxy.FullRepresentationSize(resp)
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(fullSize) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.NodeKeys, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "api", "error", ackErr, "playback_session_id", sessionID)
 		}
 	}
@@ -2511,24 +2545,12 @@ func (h *PlaybackHandler) maybeStartThrottler(ctx context.Context, session *play
 	playback.StartConfiguredTranscodeThrottler(ctx, h.SettingsRepo, session)
 }
 
-// findAlternateFile finds another file version for the same content. It
-// prefers non-4K versions because they can escape a disabled-4K-transcode
-// terminal, but when none exist it returns a 4K candidate so the planner can
-// still accept one that direct-plays or remuxes without forbidden video
-// encoding.
-// Within each class it prefers SDR, then resolution, then bitrate.
-func (h *PlaybackHandler) findAlternateFile(ctx context.Context, source *models.MediaFile, filter catalog.AccessFilter) (*models.MediaFile, error) {
-	candidates, err := h.findAlternateFiles(ctx, source, filter)
-	if err != nil || len(candidates) == 0 {
-		return nil, err
-	}
-	return candidates[0], nil
-}
-
 // findAlternateFiles returns every compatible edition/version candidate in
-// fallback order. Callers that plan candidates must keep trying after a
-// terminal: a lower-resolution candidate can still fail while a later 4K
-// candidate direct-plays or remuxes without forbidden video encoding.
+// fallback order. Non-4K versions come first because they can escape a
+// disabled-4K-transcode terminal; within each class SDR comes first, then
+// resolution, then bitrate. Callers that plan candidates must keep trying
+// after a terminal: a lower-resolution candidate can still fail while a later
+// 4K candidate direct-plays or remuxes without forbidden video encoding.
 //
 // Only versions the viewer may play are returned: the per-file checks
 // loadAuthorizedFile applies to a requested file (library access and the

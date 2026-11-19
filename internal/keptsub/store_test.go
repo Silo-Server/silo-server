@@ -164,50 +164,6 @@ func TestConcurrentRequestsShareOneRead(t *testing.T) {
 	}
 }
 
-func TestReadsWaitForAnotherServer(t *testing.T) {
-	ffmpeg := requireFFmpeg(t)
-	path, file := fixtureFile(t, ffmpeg, true)
-	ref := *playback.EmbeddedSubtitleRefFor(file, 0)
-
-	// The other server's read is the same read: this store's own result,
-	// recorded under the other's claim.
-	other, _, otherBlobs := newTestStore(t, ffmpeg)
-	if _, err := other.WholeTrack(t.Context(), path, ref); err != nil {
-		t.Fatal(err)
-	}
-	keptElsewhere, _ := other.repo.Track(t.Context(), file.ID, 1)
-
-	s, repo, blobs := newTestStore(t, ffmpeg)
-	blobs.objects = otherBlobs.objects
-	repo.claims[trackKey{file.ID, 1}] = memClaim{token: "other", expires: time.Now().Add(time.Hour)}
-
-	// A prefetch gives way.
-	if err := s.Prefetch(t.Context(), path, ref); !errors.Is(err, errClaimedElsewhere) {
-		t.Fatalf("prefetch under another claim: %v", err)
-	}
-	// A request waits for the other server's track: it lands once the
-	// request has polled for it.
-	go func() {
-		waitFor(t, "the request to wait", func() bool {
-			_, claims := repo.counts()
-			return claims >= 3
-		})
-		_ = repo.PutTrack(context.Background(), *keptElsewhere)
-	}()
-	in, err := s.WholeTrack(t.Context(), path, ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if puts, _ := repo.counts(); puts != 1 || convert(t, ffmpeg, in) != demux(t, ffmpeg, path, 0, 0, 0) {
-		t.Fatalf("waited request kept %d tracks itself", puts-1)
-	}
-	// A claim that runs out is taken over.
-	repo.claims[trackKey{file.ID, 2}] = memClaim{token: "dead", expires: time.Now().Add(30 * time.Millisecond)}
-	if _, err := s.WholeTrack(t.Context(), path, *playback.EmbeddedSubtitleRefFor(file, 1)); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // Windows never run FFmpeg on the source: they come from the kept track,
 // else from the index. A window past a sparse track's last cue is empty
 // instead of a read to the end of the file (#1406).

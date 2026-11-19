@@ -15,6 +15,7 @@ import {
   Heart,
   History,
   Layers,
+  LayoutGrid,
   ListFilter,
   MonitorPlay,
   Palette,
@@ -84,6 +85,7 @@ export const KIND_ICONS: Partial<Record<string, LucideIcon>> = {
   anniversaries: Cake,
   award_winners: Award,
   collection: Layers,
+  collection_posters: LayoutGrid,
   custom_filter: ListFilter,
   genre: ListFilter,
 };

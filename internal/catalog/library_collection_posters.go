@@ -383,3 +383,13 @@ func (r *LibraryCollectionRepository) saveSmartCollage(ctx context.Context, coll
 	}
 	return nil
 }
+
+func (r *LibraryCollectionRepository) retireUnrefreshedSmartCollages(ctx context.Context, collectionID string, cutoff time.Time) error {
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM library_collection_smart_collages
+		WHERE collection_id = $1 AND refreshed_at < $2
+	`, collectionID, cutoff); err != nil {
+		return fmt.Errorf("retiring unrefreshed smart collection collages: %w", err)
+	}
+	return nil
+}

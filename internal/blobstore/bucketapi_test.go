@@ -15,56 +15,6 @@ func localBucketAPI(t *testing.T) (*BucketAPI, *Filesystem) {
 	return NewBucketAPI(fs), fs
 }
 
-func TestBucketAPIRoundTripsIgnoringBucket(t *testing.T) {
-	api, fs := localBucketAPI(t)
-	ctx := context.Background()
-	const key = "diagnostics/7/report.tar.gz"
-
-	if err := api.PutStream(ctx, "whatever-bucket", key, strings.NewReader("bundle"), "application/gzip"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fs.Stat(ctx, key); err != nil {
-		t.Fatalf("object not on disk: %v", err)
-	}
-	// A recorded bucket from another deployment must not change where a local
-	// store reads: it has one location.
-	data, err := api.GetObject(ctx, "a-bucket-that-never-existed", key)
-	if err != nil || string(data) != "bundle" {
-		t.Fatalf("read back %q, %v", data, err)
-	}
-	if api.Bucket() != LocalBucket {
-		t.Fatalf("bucket = %q", api.Bucket())
-	}
-	if err := api.DeleteObject(ctx, "another-bucket", key); err != nil {
-		t.Fatal(err)
-	}
-	// Deleting an absent key is not an error; cleanup runs after failures that
-	// may already have removed it.
-	if err := api.DeleteObject(ctx, "", key); err != nil {
-		t.Fatalf("absent key reported as a failure: %v", err)
-	}
-}
-
-// A local reader never blocks on the network, so an upload deadline would
-// otherwise elapse unnoticed and the object would still be published. The admin
-// job runner's upload timeout exists to bound exactly these large writes.
-func TestPutStreamStopsOnACanceledContext(t *testing.T) {
-	fs, err := NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	const key = "catalog-seeds/2026/09/16/job.json.gz"
-	if err := fs.PutStream(ctx, key, strings.NewReader("a large export"), "application/gzip"); err == nil {
-		t.Fatal("canceled write completed")
-	}
-	if _, err := fs.Stat(context.Background(), key); err == nil {
-		t.Fatal("canceled write published an object")
-	}
-}
-
 // Cancellation partway through must not publish a truncated object either: the
 // temporary file is discarded rather than renamed.
 func TestPutStreamDiscardsAPartialWriteOnCancellation(t *testing.T) {

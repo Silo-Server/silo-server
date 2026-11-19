@@ -51,7 +51,7 @@ func TestRemoteCompatSegmentEndsHungBodyBeforeViewerCancellation(t *testing.T) {
 		defer cancel()
 		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/videos/item/hls1/main/7.ts", nil)
 		rr := httptest.NewRecorder()
-		handler := &PlaybackHandler{JWTSecret: "compat-relay-secret"}
+		handler := &PlaybackHandler{JWTSecret: "compat-relay-secret", NodeKeys: nodeauthtest.SameKey("compat-relay-secret")}
 		started := time.Now()
 		var recovered any
 		func() {
@@ -127,7 +127,7 @@ func TestRemoteCompatRelayReusesNodeConnectionsAndRecordsDependencyMetrics(t *te
 	t.Cleanup(node.Close)
 	t.Cleanup(func() { close(done) })
 
-	handler := &PlaybackHandler{JWTSecret: secret}
+	handler := &PlaybackHandler{JWTSecret: secret, NodeKeys: nodeauthtest.SameKey(secret)}
 	streamCallsBefore := nodeDependencyOperations(t, "stream")
 
 	if _, err := handler.fetchRemoteCompatManifest(t.Context(), node.URL, upstream); err != nil {

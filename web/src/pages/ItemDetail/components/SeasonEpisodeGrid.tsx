@@ -10,8 +10,6 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useEpisodeSpoilerPrefs, type EpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
-import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
-import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useGridRowCap } from "@/hooks/useGridRowCap";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { buildItemHref } from "@/lib/mediaNavigation";
@@ -59,8 +57,6 @@ export default function SeasonEpisodeGrid({
   const t = useT();
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
-  const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
-  const prefetchEpisode = usePrefetchCatalogItemDetail();
   const setGridRef = useGridRowCap<HTMLDivElement>(VISIBLE_EPISODE_ROWS, episodes.length);
   const playbackById = useMemo(
     () => new Map((playbackEpisodes ?? []).map((episode) => [episode.content_id, episode])),
@@ -96,11 +92,6 @@ export default function SeasonEpisodeGrid({
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
           spoilerPrefs={spoilerPrefs}
-          onPrefetch={() =>
-            (episodeLinkLibraryId(episode, libraryId) === undefined
-              ? prefetchEpisode
-              : prefetchScopedEpisode)(episode.content_id)
-          }
         />
       ))}
     </div>
@@ -115,7 +106,6 @@ function SeasonEpisodeCard({
   overlayPrefs,
   quickActionMode,
   spoilerPrefs,
-  onPrefetch,
 }: {
   episode: EpisodeListItem;
   playbackEpisode: EpisodeListItem;
@@ -124,11 +114,9 @@ function SeasonEpisodeCard({
   overlayPrefs: CardOverlayPrefs | null;
   quickActionMode: CardQuickActionMode;
   spoilerPrefs: EpisodeSpoilerPrefs;
-  onPrefetch: () => void;
 }) {
   const t = useT();
   const cardRef = useRef<HTMLDivElement>(null);
-  const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const hasPartialProgress =
     !episode.user_data?.played &&
     (episode.user_data?.position_seconds ?? 0) > 0 &&
@@ -147,9 +135,14 @@ function SeasonEpisodeCard({
   const playable = (playbackEpisode.files ?? []).some((file) => !file.unreadable);
 
   return (
-    <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
+    <div ref={cardRef} className="group/card media-card media-card-longpress">
       <div className="group/media relative">
-        <ViewTransitionLink to={episodeHref} state={episodeLinkState} className="group block">
+        <ViewTransitionLink
+          to={episodeHref}
+          state={episodeLinkState}
+          prefetchOn="intent"
+          className="group block"
+        >
           <div className="media-card-image relative aspect-video">
             {episode.still_url ? (
               <img

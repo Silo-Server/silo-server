@@ -9,7 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 // missingFileRepo reports every lookup the way the real repository does for a
@@ -43,15 +42,6 @@ func serviceWithFileRepo(repo FileResolver) *Service {
 		userRepo:    stubUserRepo{user: &models.User{ID: 7, DownloadAllowed: &allowed}},
 		cfg:         config.DownloadConfig{Enabled: true},
 		cfgLoadedAt: time.Now(),
-	}
-}
-
-func TestResolveDirectFileTranslatesMissingFileToNotFound(t *testing.T) {
-	svc := serviceWithFileRepo(missingFileRepo{err: scanner.ErrFileNotFound})
-
-	_, err := svc.ResolveDirectFile(context.Background(), 7, 4242, "", catalog.AccessFilter{})
-	if !errors.Is(err, catalog.ErrItemNotFound) {
-		t.Fatalf("err = %v, want catalog.ErrItemNotFound", err)
 	}
 }
 

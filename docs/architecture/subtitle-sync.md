@@ -206,9 +206,10 @@ send them. A request over the limit waits up to two minutes for a slot,
 then is refused as unavailable, which `prefer_transcode_nodes` answers by
 decoding on this server.
 The node runs each window through `POST /media-samples/run` (see
-[media sampling](media-sampling.md#remote-runs)). The input path must be one
-the node is allowed to read, which requires the same media paths on the node
-as on the API server.
+[media sampling](media-sampling.md#remote-runs)). Each run carries a
+[source grant](transcode-nodes.md#source-grants) for the file, which requires
+the same media paths, sizes and modification times on the node as on the API
+server.
 
 ## Client feedback
 
