@@ -87,6 +87,10 @@ func adminSettingsWriteProblem(err error) error {
 		return p
 	}
 	if e, ok := errors.AsType[*handlers.APIError](err); ok && e.Status == 400 {
+		if e.Field != "" {
+			return NewProblem(TypeValidationFailed, validationSummary).
+				WithErrors(ProblemError{Location: locationBody + "." + e.Field, Code: codeInvalid, Detail: e.Message})
+		}
 		if e.Code == "storage_unavailable" {
 			return NewProblem(TypeValidationFailed, "Storage prerequisites could not be verified.")
 		}

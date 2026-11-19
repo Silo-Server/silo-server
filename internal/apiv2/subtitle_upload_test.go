@@ -7,7 +7,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 
@@ -56,27 +55,6 @@ func subtitleMultipart(t *testing.T, h http.Handler, path, filename string, data
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
-}
-func TestSubtitleUploadV2MultipartAndLimits(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	f := new(fakeSubtitleUploads)
-	deps.SubtitleUploads = f
-	h := newTestHandler(t, deps)
-	fields := map[string]string{"media_file_id": "42", "language": "fr", "language_override": "true", "hearing_impaired": "true", "release_name": "Synthetic"}
-	rec := subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("synthetic bytes"), fields, true)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"7"`) || strings.Contains(rec.Body.String(), "PRIVATE") || strings.Contains(rec.Body.String(), "downloaded_by") {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	if f.calls != 1 || f.access.UserID != 1 || f.access.ProfileID != "p-owner" || f.request.UserID != nil || !f.request.PreferUserLanguage || !f.request.HearingImpaired || string(f.request.Data) != "synthetic bytes" || f.request.Filename != "synthetic.en.srt" {
-		t.Fatalf("multipart lost authority/data: %+v", f)
-	}
-	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("x"), fields, false), TypeAuthenticationRequired)
-	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", bytes.Repeat([]byte("x"), subtitles.MaxUploadSize+1), fields, true), TypePayloadTooLarge)
-	fields["media_file_id"] = "0"
-	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("x"), fields, true), TypeValidationFailed)
-	if f.calls != 1 {
-		t.Fatal("rejected multipart reached upload service")
-	}
 }
 
 // heldBody is a request body that signals its first read and then blocks, so

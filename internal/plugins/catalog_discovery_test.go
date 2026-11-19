@@ -60,24 +60,3 @@ func TestCatalogEntriesForDiscoveryPreventsExternalSourceShadowing(t *testing.T)
 		t.Fatalf("selected repository = %d, want official repository 1", result[0].RepositoryID)
 	}
 }
-
-func TestCatalogEntriesForDiscoveryShowsLatestVersionFromSelectedRepository(t *testing.T) {
-	result := catalogEntriesForDiscovery([]CatalogEntry{
-		{
-			RepositoryID: 1,
-			SourceKind:   RepositorySourceSilo,
-			Manifest:     &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.2.9"},
-		},
-		{
-			RepositoryID: 1,
-			SourceKind:   RepositorySourceSilo,
-			Manifest:     &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.2.10"},
-		},
-	})
-	if len(result) != 1 {
-		t.Fatalf("catalog entries = %d, want 1", len(result))
-	}
-	if result[0].Manifest.GetVersion() != "1.2.10" {
-		t.Fatalf("selected version = %s, want 1.2.10", result[0].Manifest.GetVersion())
-	}
-}

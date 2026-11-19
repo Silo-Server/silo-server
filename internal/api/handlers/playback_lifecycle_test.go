@@ -59,7 +59,7 @@ func TestLifecycleEventsReachAdministratorsOnly(t *testing.T) {
 	events, unsubscribe := hub.Subscribe()
 	defer unsubscribe()
 	mgr := playback.NewSessionManager(0, 0)
-	h := NewPlaybackHandler(mgr, testPlaybackFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}})
+	h := newKeyedPlaybackHandler(mgr, testPlaybackFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}})
 	h.AdminStore = &lifecycleTestStore{}
 	h.EventsHub, h.LifecycleViews, h.LifecycleEncoder = hub, lifecycleTestViews{}, lifecycleTestEncoder{}
 	session, err := mgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)

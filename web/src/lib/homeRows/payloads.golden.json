@@ -1186,6 +1186,29 @@
       },
       "enabled": true
     },
+    "collection_posters/collection_posters_pick/home": {
+      "scope": "home",
+      "section_type": "collection_posters",
+      "title": "Collections",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "collections": []
+      },
+      "enabled": true
+    },
+    "collection_posters/collection_posters_pick/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "collection_posters",
+      "title": "Collections",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "collections": []
+      },
+      "enabled": true
+    },
     "custom_filter/rules/library": {
       "scope": "library",
       "library_id": "7",

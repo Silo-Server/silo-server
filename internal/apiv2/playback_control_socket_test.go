@@ -94,8 +94,16 @@ func TestPlaybackControlSocketTicketDelegatesOwnerAuthority(t *testing.T) {
 		{handlers.ErrPlaybackControlSocketLaneHeld, TypeConflict},
 		{evt.ErrSocketTicket, TypePermissionDenied},
 		{handlers.ErrPlaybackControlSocketUnavailable, TypeDependencyUnavailable},
+		{handlers.ErrPlaybackControlSocketSessionEnded, TypePlaybackSessionEnded},
+		{handlers.ErrPlaybackControlSocketSessionResuming, TypeDependencyUnavailable},
 	} {
 		f.err = mapping.err
 		requireProblem(t, do(t, h, http.MethodPost, path, body, profileOwner()), mapping.want)
+	}
+
+	// A live session this replica has not rebuilt yet says when to retry.
+	f.err = handlers.ErrPlaybackControlSocketSessionResuming
+	if rec := do(t, h, http.MethodPost, path, body, profileOwner()); rec.Header().Get("Retry-After") != "5" {
+		t.Fatalf("Retry-After = %q", rec.Header().Get("Retry-After"))
 	}
 }

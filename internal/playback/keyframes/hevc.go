@@ -1,6 +1,7 @@
 package keyframes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -85,13 +86,14 @@ func newHEVCLayout(entry, cues []byte, video uint64, ticks []uint64, segStart in
 // HEVCKeyframeIsIDR reports whether the first slice of the HEVC keyframe at
 // Keyframes[k] is an IDR picture, rather than a CRA or BLA. It reads that
 // block's headers from the file version Load read the index from, a few
-// small reads, and fails with ErrNoHEVCBlock when it can't tell.
+// small reads, and fails with ErrNoHEVCBlock when it can't tell. A relayed
+// input is read through the relay, as Load reads it.
 func (idx Index) HEVCKeyframeIsIDR(k int) (bool, error) {
 	l := idx.hevc
 	if l == nil || k < 0 || k >= len(l.blocks) || l.blocks[k].cluster < 0 || idx.File.Path == "" {
 		return false, ErrNoHEVCBlock
 	}
-	f, err := fspath.Open(idx.File.Path)
+	f, err := fspath.OpenReader(context.Background(), idx.File.Path)
 	if err != nil {
 		return false, err
 	}

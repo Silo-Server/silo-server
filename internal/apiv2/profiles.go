@@ -680,6 +680,10 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 		if claims.IsRemotePlayback() && v.ID != claims.ProfileID {
 			continue
 		}
+		// So does a profile-bound API key.
+		if claims.APIKeyProfileID != "" && v.ID != claims.APIKeyProfileID {
+			continue
+		}
 		profile, p := profileOf(v)
 		if p != nil {
 			return nil, p
@@ -689,7 +693,7 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 	var maxProfiles *int
 	// The handoff list is filtered to one profile, so its length says nothing
 	// about room left in the household.
-	if view.MaxProfiles >= 1 && !claims.IsRemotePlayback() {
+	if view.MaxProfiles >= 1 && !claims.IsRemotePlayback() && claims.APIKeyProfileID == "" {
 		maxProfiles = &view.MaxProfiles
 	}
 	return &ProfileCollectionOutput{Body: ProfileCollection{

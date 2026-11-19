@@ -363,9 +363,16 @@ func resolveRemuxIDRPrimer(ctx context.Context, filePath string, origin float64)
 // (keyframes.Load, cached per file version) and the headers of two keyframe
 // blocks: the first keyframe must be an IDR, and the one at the plan's origin
 // must not be. A source without usable Cues, such as any MP4 or MPEG-TS
-// file, gets no primer.
+// file, gets no primer, and neither does a relayed input (a transcode node
+// reading through the core): the concat list would name it outside the
+// restrictions fspath.CommandContext gives it, so fspath.FFConcatFileURL
+// refuses it before any read.
 func findRemuxIDRPrimer(filePath string, origin float64) *remuxIDRPrimer {
-	idx, err := keyframes.Load(filePath)
+	fileURL, err := fspath.FFConcatFileURL(filePath)
+	if err != nil {
+		return nil
+	}
+	idx, err := keyframes.Load(context.Background(), filePath)
 	if err != nil || len(idx.Keyframes) < 2 || idx.Keyframes[0] > remuxIDRPrimerMaxFirstKeyframe {
 		return nil
 	}
@@ -387,10 +394,6 @@ func findRemuxIDRPrimer(filePath string, origin float64) *remuxIDRPrimer {
 		return nil
 	}
 	if anchorIDR, err := idx.HEVCKeyframeIsIDR(k); err != nil || anchorIDR {
-		return nil
-	}
-	fileURL, err := fspath.FFConcatFileURL(filePath)
-	if err != nil {
 		return nil
 	}
 	return &remuxIDRPrimer{fileURL: fileURL, firstPTS: cues[0], anchorPTS: cues[k], anchorSeconds: origin}

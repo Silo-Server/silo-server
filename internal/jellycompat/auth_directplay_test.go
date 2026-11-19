@@ -2,24 +2,35 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
+
+// addressGrantSettings sets the address-only stream grant explicitly, so no
+// test depends on its default.
+func addressGrantSettings(enabled bool) stubSettingsReader {
+	return stubSettingsReader{values: map[string]string{config.JellyfinCompatAddressStreamGrantSettingKey: strconv.FormatBool(enabled)}}
+}
 
 // directPlayRouter wraps the probe handler in PlaybackSessionAuth and mounts it
 // on a chi router so RoutePattern() and URLParam("id") are populated exactly as
 // they are in production. The same handler also fronts /Items/{id}/Download to
-// check that playback grants remain scoped to their negotiated item.
-func directPlayRouter(t *testing.T, sessions *SessionStore, playback *PlaybackSessionStore, keyAuth *AdminAPIKeyAuthenticator, reached *bool) *chi.Mux {
+// check that playback grants remain scoped to their negotiated item. settings
+// decides the address-only grant; nil refuses it.
+func directPlayRouter(t *testing.T, sessions *SessionStore, playback *PlaybackSessionStore, keyAuth *AdminAPIKeyAuthenticator, settings SettingsReader, reached *bool) *chi.Mux {
 	t.Helper()
-	probe := PlaybackSessionAuth(sessions, playback, keyAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	probe := PlaybackSessionAuth(sessions, playback, keyAuth, settings)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*reached = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -52,7 +63,7 @@ func TestPlaybackSessionAuth_ExplicitPlaybackGrant(t *testing.T) {
 			for _, method := range []string{http.MethodGet, http.MethodHead} {
 				sessions, playback := seedDirectPlaySession(t, fixedNow)
 				var reached bool
-				router := directPlayRouter(t, sessions, playback, nil, &reached)
+				router := directPlayRouter(t, sessions, playback, nil, nil, &reached)
 				req := httptest.NewRequest(method, tc.path, nil)
 				if tc.token != "" {
 					req.Header.Set("X-Emby-Token", tc.token)
@@ -83,7 +94,7 @@ func TestPlaybackSessionAuth_ExpiredRevokedAndTerminalGrants(t *testing.T) {
 				}
 			}
 			var reached bool
-			router := directPlayRouter(t, sessions, playback, nil, &reached)
+			router := directPlayRouter(t, sessions, playback, nil, nil, &reached)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/Videos/item123/stream.mkv?PlaySessionId=ps1", nil))
 			if rec.Code != http.StatusUnauthorized || reached {
@@ -127,7 +138,7 @@ func TestPlaybackSessionAuth_DirectPlayRequiresAuthority(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions, playback := seedDirectPlaySession(t, clock)
 			var reached bool
-			router := directPlayRouter(t, sessions, playback, nil, &reached)
+			router := directPlayRouter(t, sessions, playback, nil, nil, &reached)
 
 			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
 			rec := httptest.NewRecorder()
@@ -150,8 +161,9 @@ func requestWithCompatRouteItem(req *http.Request, itemID string) *http.Request 
 }
 
 // Jellyfin for Android TV and Findroid open static streams with no token and
-// no PlaySessionId. Only a live, recently active negotiation from the same
-// client address and transport peer for the same item and source grants one.
+// no PlaySessionId. While the administrator allows the address-only grant,
+// only a live, recently active negotiation from the same client address and
+// transport peer for the same item and source grants one.
 func TestPlaybackSessionAuth_CredentialLessStaticStreamGrant(t *testing.T) {
 	const grantPath = "/Videos/item123/stream?static=true&mediaSourceId=src9"
 	for _, tc := range []struct {
@@ -159,10 +171,13 @@ func TestPlaybackSessionAuth_CredentialLessStaticStreamGrant(t *testing.T) {
 		// peer is the transport address; forwarded is an X-Forwarded-For value.
 		peer, forwarded, token string
 		directNegotiation      bool
-		mutate                 func(now *time.Time, sessions *SessionStore, playback *PlaybackSessionStore)
-		want                   int
+		// settings replaces the default reader, which allows the grant.
+		settings SettingsReader
+		mutate   func(now *time.Time, sessions *SessionStore, playback *PlaybackSessionStore)
+		want     int
 	}{
 		{name: "negotiated source from same client", path: grantPath, want: http.StatusOK},
+		{name: "setting off", path: grantPath, settings: addressGrantSettings(false), want: http.StatusUnauthorized},
 		{name: "head", method: http.MethodHead, path: grantPath, want: http.StatusOK},
 		{name: "container route", path: "/Videos/item123/stream.mkv?Static=true&MediaSourceId=src9", want: http.StatusOK},
 		{name: "same client through trusted proxy", path: grantPath, peer: "10.0.0.1:443", forwarded: "192.0.2.1", want: http.StatusOK},
@@ -216,7 +231,11 @@ func TestPlaybackSessionAuth_CredentialLessStaticStreamGrant(t *testing.T) {
 			}
 			_, trustedLAN, _ := net.ParseCIDR("10.0.0.0/8")
 			var reached bool
-			router := clientip.Middleware(clientip.NewResolver([]*net.IPNet{trustedLAN}))(directPlayRouter(t, sessions, playback, nil, &reached))
+			settings := tc.settings
+			if settings == nil {
+				settings = addressGrantSettings(true)
+			}
+			router := clientip.Middleware(clientip.NewResolver([]*net.IPNet{trustedLAN}))(directPlayRouter(t, sessions, playback, nil, settings, &reached))
 			method := tc.method
 			if method == "" {
 				method = http.MethodGet
@@ -237,5 +256,46 @@ func TestPlaybackSessionAuth_CredentialLessStaticStreamGrant(t *testing.T) {
 				t.Fatalf("status=%d reached=%v, want %d; %s", rec.Code, reached, tc.want, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestPlaybackInfoETagGrantsItsStaticStream: the ETag PlaybackInfo hands a
+// client is the per-play tag that Jellyfin for Android TV echoes as "tag" on
+// its credential-less static stream.
+func TestPlaybackInfoETagGrantsItsStaticStream(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{}`))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1"}))
+	recorder := httptest.NewRecorder()
+	handler.HandlePlaybackInfo(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response playbackInfoResponseDTO
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(response.MediaSources) == 0 {
+		t.Fatal("no media sources")
+	}
+	source := response.MediaSources[0]
+
+	sessions := NewSessionStore(time.Hour, nil)
+	if err := sessions.Put(Session{Token: "token-1", StreamAppUserID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	reached := false
+	router := chi.NewRouter()
+	router.With(PlaybackSessionAuth(sessions, handler.playbackStore, nil, nil)).Get("/Videos/{id}/stream", func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/Videos/"+routeID+"/stream?container=mkv&static=true&tag="+source.ETag+"&mediaSourceId="+source.ID, nil))
+	if rec.Code != http.StatusOK || !reached {
+		t.Fatalf("status = %d reached = %v, want the ETag to grant the stream; %s", rec.Code, reached, rec.Body.String())
 	}
 }

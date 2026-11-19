@@ -633,7 +633,7 @@ type LocalRatingEvent struct {
 }
 
 // RatingSyncState is the last rating Silo and a provider agreed on for one item,
-// in Silo stars (1 to 5). No state means the sides agreed the item is unrated.
+// as a score from 1 to 10. No state means the sides agreed the item is unrated.
 // RemoteSeen records that a provider read confirmed the agreed rating.
 // ProviderAccountID scopes the row to the provider account it was agreed with.
 type RatingSyncState struct {

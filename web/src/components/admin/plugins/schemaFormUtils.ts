@@ -3,6 +3,17 @@ import { t as appT, type MessageKey, type TextValues } from "@/i18n";
 
 export type SchemaOption = { value: string; label: string };
 
+/**
+ * record[key] when key is the record's own property. A plugin's field key
+ * such as "constructor" would otherwise read Object.prototype.
+ */
+export function ownValue<T>(
+  record: Readonly<Record<string, T>> | undefined,
+  key: string,
+): T | undefined {
+  return record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 function stringify(value: unknown): string {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null || value === undefined) return "";
@@ -25,7 +36,8 @@ function conditionValue(
   values: Record<string, unknown>,
   fields?: PluginAdminFormField[],
 ): unknown {
-  if (values[key] !== undefined) return values[key];
+  const value = ownValue(values, key);
+  if (value !== undefined) return value;
   return fields?.find((field) => field.key === key)?.default_value;
 }
 
@@ -288,7 +300,8 @@ export function effectiveValue(
   field: PluginAdminFormField,
   values: Record<string, unknown>,
 ): unknown {
-  return values[field.key] !== undefined ? values[field.key] : field.default_value;
+  const value = ownValue(values, field.key);
+  return value !== undefined ? value : field.default_value;
 }
 
 export function fieldIsVisible(
@@ -340,11 +353,12 @@ export function buildSchemaValues(
     if (!fieldIsVisible(descriptor, field, draft)) continue; // don't persist hidden fields' stale values
     // Fall back to the declared default for untouched fields so an unmodified
     // default persists exactly as it is displayed.
-    const rawSource = draft[field.key] !== undefined ? draft[field.key] : field.default_value;
-    const coerced = coerceFieldValue(field, rawSource, fieldTypes?.[field.key]);
+    const rawSource = effectiveValue(field, draft);
+    const fieldType = ownValue(fieldTypes, field.key);
+    const coerced = coerceFieldValue(field, rawSource, fieldType);
     if (coerced === undefined) {
       if (options?.explicitClears && !field.secret && field.control !== "PASSWORD") {
-        out[field.key] = clearedFieldValue(field, fieldTypes?.[field.key]);
+        out[field.key] = clearedFieldValue(field, fieldType);
       }
       continue;
     }

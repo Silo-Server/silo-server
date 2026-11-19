@@ -32,8 +32,11 @@ func ConfigSchemaFieldSets(schema *pluginv1.ConfigSchema) (publicFields, secretF
 				if field == nil {
 					continue
 				}
-				key := strings.TrimSpace(field.GetKey())
-				if key == "" {
+				// The exact key, as the JSON Schema property and the stored
+				// value carry it: a trimmed copy would classify a different
+				// key than the one that holds the value.
+				key := field.GetKey()
+				if strings.TrimSpace(key) == "" {
 					continue
 				}
 				declared[key] = struct{}{}
@@ -105,7 +108,7 @@ func GlobalConfigSecretPaths(manifest *pluginv1.PluginManifest, configKey string
 					field.GetControl() != pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_PASSWORD) {
 				continue
 			}
-			if key := strings.TrimSpace(field.GetKey()); key != "" {
+			if key := field.GetKey(); strings.TrimSpace(key) != "" {
 				addPath([]string{key})
 			}
 		}

@@ -19,21 +19,29 @@ A node drains for either of two reasons:
   `SILO_NODE_DRAIN_TIMEOUT` passes (a Go duration or whole seconds, default
   `10m`; `0` turns the drain off), or until a second signal arrives, and then
   runs the ordinary shutdown, which ends whatever is left. A SIGTERM drain
-  cannot be resumed.
+  cannot be resumed. It does not wait at all while the API refuses the node's
+  key (`key_rejected`, after a key rotation, the node's deletion, or a clock
+  more than 30 seconds off): no relay can reach the node's sessions and no stop
+  can reach the node, so the node logs that it is shutting down without
+  waiting and shuts down. The state is read when the drain begins and once a
+  second while it waits, so a key rejected mid-drain also ends the wait. An
+  administrator's drain, the timeout and the second signal behave the same
+  whatever the key state.
 
 `GET /api/v2/admin/nodes/capabilities` advertises `drain: true`.
 
 ## What a draining node does
 
 The node is `draining` when it received SIGTERM or when its own
-`stream_nodes` row carries a drain request. `nodeconfig.Watcher` reads the
-request with a one-column query of the row it matched for the acceleration
-overrides: on every config load (the 60-second poll and settings changes) and
-on every `node_pool_changed` event, which the API publishes after a drain or
-resume. The event does not reload the config, since a new config pointer makes
-starts already in flight refuse. The query is separate from the override read
-so that a node started before the API has migrated the column still reads its
-overrides; until then it reads no drain request.
+`stream_nodes` row carries a drain request. The request reaches the node as
+`drain_requested` in its configuration document from the API
+(`GET /api/internal/nodes/self/config`, read by `nodeconfig.Remote`; see
+[transcode nodes](transcode-nodes.md#configuration)): at every
+30-second poll, and at once when the API that recorded a drain or resume calls
+the node's `/admin/reload-config`, best effort. A document whose only change is
+the drain request keeps the node's config pointer, since a new pointer makes
+starts already in flight refuse. A drain already in force when the node starts
+is read with its first configuration.
 
 While draining, the node:
 
@@ -68,11 +76,13 @@ are unavailable while it is stopped.
 
 `GET /api/v1/health` answers `200` in every phase, with `status` `ok`,
 `draining` or `drained`. Anything else would make the node pool treat the node
-as dead and stop routing its sessions. The node publishes
-`cache.EventNodeDrainChanged` (payload: its `stream_nodes` id) when a drain
-starts, stops, and reaches drained, so every API server rechecks it at once
-instead of at its next 30-second sweep. A node that has not matched its row
-yet announces nothing and is found by the sweep.
+as dead and stop routing its sessions. When a drain starts (an admin request,
+SIGTERM, or one in force at startup), stops, and reaches drained, the node calls
+`POST /api/internal/nodes/self/health-changed` with a five-second timeout; the
+API that receives it publishes `cache.EventNodeDrainChanged` (payload: the
+node's `stream_nodes` id), so every API server rechecks it at once instead of at
+its next 30-second sweep. A call that fails is logged, and the sweep finds the
+change.
 
 ## What the API servers do
 

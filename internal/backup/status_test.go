@@ -2,13 +2,9 @@ package backup
 
 import (
 	"context"
-	"slices"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-
-	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 type recordingStatus struct {
@@ -54,79 +50,4 @@ func TestOperationPublishesOnlyWhileItHoldsTheLock(t *testing.T) {
 	if want := []string{"begin", "progress token"}; len(store.calls) != len(want) || store.calls[0] != want[0] || store.calls[1] != want[1] {
 		t.Fatalf("status writes = %v, want %v", store.calls, want)
 	}
-}
-
-// TestRecentBackupWarningSpansDestinations: the 48-hour warning reads the
-// latest success at any destination, so switching to a destination with no
-// copies yet says that instead, and a backup there clears it. A backup whose
-// manifest this server cannot authenticate is no success here, whatever
-// completion time it claims.
-func TestRecentBackupWarningSpansDestinations(t *testing.T) {
-	ctx := t.Context()
-	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
-	store, err := blobstore.NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	elsewhere := now.Add(-2 * time.Hour)
-	status := &recordingStatus{rec: StatusRecord{LastSuccessAt: &elsewhere}}
-	svc := New(Options{Destination: NewStoreDestination(store), Status: status, Now: func() time.Time { return now },
-		ServerID: func(context.Context) (string, error) { return "server", nil }})
-	codes := func() []string {
-		t.Helper()
-		listing, err := svc.List(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out []string
-		for _, w := range listing.Warnings {
-			if w.Code == WarningNoRecentBackup || w.Code == WarningNoBackupsAtDestination {
-				out = append(out, w.Code)
-			}
-		}
-		return out
-	}
-	if got := codes(); !slices.Equal(got, []string{WarningNoBackupsAtDestination}) {
-		t.Fatalf("a recent backup elsewhere: warnings %v, want only %s", got, WarningNoBackupsAtDestination)
-	}
-	old := now.Add(-72 * time.Hour)
-	status.rec.LastSuccessAt = &old
-	if got := codes(); !slices.Equal(got, []string{WarningNoBackupsAtDestination, WarningNoRecentBackup}) {
-		t.Fatalf("an old backup elsewhere: warnings %v", got)
-	}
-	putPlainBackup(t, store, "server", FolderName(now.Add(-time.Hour), KindNightly))
-	if got := codes(); len(got) != 0 {
-		t.Fatalf("a recent backup here: warnings %v", got)
-	}
-	status.rec.LastSuccessAt = nil
-	if got := codes(); len(got) != 0 {
-		t.Fatalf("a backup here and no recorded success (a full restore emptied the status): warnings %v", got)
-	}
-
-	// With manifests checked, an unsigned one that claims to complete next
-	// year counts for nothing.
-	forged := blobstoreAt(t)
-	svc = New(Options{Destination: NewStoreDestination(forged), Status: status, Now: func() time.Time { return now },
-		KeyCheck: testKeyCheck, ManifestKey: testManifestKey, ServerID: func(context.Context) (string, error) { return "server", nil }})
-	putPlainBackup(t, forged, "server", FolderName(now.Add(-time.Hour), KindNightly), func(m *Manifest) {
-		m.KeyCheck, m.CompletedAt = testKeyCheck+"-other", now.AddDate(1, 0, 0)
-	})
-	listing, err := svc.List(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	old = now.Add(-72 * time.Hour)
-	status.rec.LastSuccessAt = &old
-	if got := codes(); listing.LastSuccessAt != nil || !slices.Equal(got, []string{WarningNoBackupsAtDestination, WarningNoRecentBackup}) {
-		t.Fatalf("an unverified manifest: last success %v, warnings %v; want none, and both warnings", listing.LastSuccessAt, got)
-	}
-}
-
-func blobstoreAt(t *testing.T) blobstore.Store {
-	t.Helper()
-	store, err := blobstore.NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return store
 }

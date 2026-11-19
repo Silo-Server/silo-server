@@ -179,6 +179,22 @@ func (p *planner) planHomeSection(ctx context.Context, e HomeSectionEntry, libMa
 			return plan, nil
 		}
 	}
+	if listed := listedCollections(e.Config); len(listed) > 0 {
+		mapped, requires, err := p.mapListedCollections(ctx, listed, libMap, sameServer)
+		if err != nil {
+			return plan, err
+		}
+		for _, item := range requires {
+			if ref := SectionCollections + ":" + item; !slices.Contains(plan.item.Requires, ref) {
+				plan.item.Requires = append(plan.item.Requires, ref)
+			}
+		}
+		if len(mapped) == 0 && len(requires) == 0 {
+			plan.item.Status, plan.item.Reason = ItemNotOnThisServer, ReasonCollectionNotMapped
+			plan.item.Message = "None of the collections it shows is on this server or in the backup."
+			return plan, nil
+		}
+	}
 	if len(plan.item.Requires) > 0 {
 		plan.item.Status, plan.item.Selectable = ItemNotOnThisServer, true
 		plan.item.Message = "Restored together with what it shows."
@@ -288,7 +304,11 @@ func (p *planner) sectionChanges(ctx context.Context, plan sectionPlan, libMap m
 			return append(changes, "collection replaced"), nil
 		}
 	}
-	config, ok := remapSectionConfig(e.Config, libMap, collection)
+	listedConfig, _, err := p.remapListedCollections(ctx, e.Config, libMap, sameServer)
+	if err != nil {
+		return nil, err
+	}
+	config, ok := remapSectionConfig(listedConfig, libMap, collection)
 	if !ok || !jsonEqual(config, local.Config) {
 		changes = append(changes, "configuration")
 	}
@@ -361,6 +381,69 @@ func (p *planner) resolveCollection(ctx context.Context, backupID string, libMap
 		}
 	}
 	return "", "", nil
+}
+
+// listedCollections is the server collections a row of collections'
+// configuration lists, in order. A backup's configuration is JSON no schema
+// constrains: a list over userdata.MaxCollectionListEntries is not a row's
+// and lists none, as userdata.RemapCollectionList reads it, so planning
+// never resolves more collections than a row holds.
+func listedCollections(config json.RawMessage) []string {
+	refs := sections.ParseCollectionPostersConfig(config)
+	if len(refs) > userdata.MaxCollectionListEntries {
+		return nil
+	}
+	var out []string
+	for _, ref := range refs {
+		if ref.LibraryCollectionID != "" {
+			out = append(out, ref.LibraryCollectionID)
+		}
+	}
+	return out
+}
+
+// mapListedCollections resolves each listed collection (resolveCollection):
+// mapped holds the ones here by backup id, requires the collections items
+// that would create the others that the backup carries. A collection in
+// neither is in neither.
+func (p *planner) mapListedCollections(ctx context.Context, listed []string, libMap map[int]int, sameServer bool) (mapped map[string]string, requires []string, err error) {
+	mapped = map[string]string{}
+	for _, id := range listed {
+		local, item, err := p.resolveCollection(ctx, id, libMap, sameServer)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch {
+		case local != "":
+			mapped[id] = local
+		case item != "" && !slices.Contains(requires, item):
+			requires = append(requires, item)
+		}
+	}
+	return mapped, requires, nil
+}
+
+// remapListedCollections maps a row of collections' list to the collections
+// here, dropping the entries that have none, and reports how many it
+// dropped. It returns nil when it dropped them all, and config unchanged for
+// any other section.
+func (p *planner) remapListedCollections(ctx context.Context, config json.RawMessage, libMap map[int]int, sameServer bool) (json.RawMessage, int, error) {
+	listed := listedCollections(config)
+	if len(listed) == 0 {
+		return config, 0, nil
+	}
+	mapped, _, err := p.mapListedCollections(ctx, listed, libMap, sameServer)
+	if err != nil {
+		return nil, 0, err
+	}
+	out, total, kept, err := userdata.RemapCollectionList(config, func(field, id string) (string, bool, error) {
+		local, ok := mapped[id]
+		return local, ok && field == userdata.LibraryCollectionField, nil
+	})
+	if err != nil || kept == 0 {
+		return nil, 0, err
+	}
+	return out, total - kept, nil
 }
 
 func idOf(c *localTemplateCollection) string {
@@ -448,7 +531,17 @@ func (a *applier) writeHomeSection(ctx context.Context, tx pgx.Tx, id string) (a
 		}
 		collection = local
 	}
-	config, ok := remapSectionConfig(e.Config, libMap, collection)
+	listedConfig, dropped, err := p.remapListedCollections(ctx, e.Config, libMap, sameServer)
+	if err != nil {
+		return applied{}, err
+	}
+	switch {
+	case listedConfig == nil:
+		return leftOut(item, ReasonCollectionNotMapped, "None of the collections it shows is on this server."), nil
+	case dropped > 0:
+		item.Notes = append(item.Notes, fmt.Sprintf("%d of the collections it shows are not on this server and were left out of it.", dropped))
+	}
+	config, ok := remapSectionConfig(listedConfig, libMap, collection)
 	if !ok {
 		return leftOut(item, ReasonLibraryNotMapped, "A library it shows is not on this server."), nil
 	}

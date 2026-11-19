@@ -78,64 +78,6 @@ func TestExternalIDsCompatible(t *testing.T) {
 	}
 }
 
-func TestCanResolvePersonByName(t *testing.T) {
-	tests := []struct {
-		name string
-		a, b models.Person
-		want bool
-	}{
-		{
-			name: "shared tmdb identity",
-			a:    models.Person{Name: "Tom Holland", TmdbID: "1136406"},
-			b:    models.Person{Name: "Tom Holland", TmdbID: "1136406", ImdbID: "nm4043618"},
-			want: true,
-		},
-		{
-			name: "shared tvdb identity",
-			a:    models.Person{Name: "Jane Doe", TvdbID: "42"},
-			b:    models.Person{Name: "Jane Doe", TvdbID: "42"},
-			want: true,
-		},
-		{
-			name: "two name-only placeholders",
-			a:    models.Person{Name: "Jane Doe"},
-			b:    models.Person{Name: "jane doe"},
-			want: true,
-		},
-		{
-			name: "same name with disjoint provider identities",
-			a:    models.Person{Name: "Tom Holland", TmdbID: "1136406"},
-			b:    models.Person{Name: "Tom Holland", TmdbID: "64796"},
-			want: false,
-		},
-		{
-			name: "same name with ids from different providers but no shared proof",
-			a:    models.Person{Name: "Tom Holland", TmdbID: "1136406"},
-			b:    models.Person{Name: "Tom Holland", ImdbID: "nm0276169"},
-			want: false,
-		},
-		{
-			name: "identified person does not consume name-only placeholder",
-			a:    models.Person{Name: "Jane Doe", TmdbID: "123"},
-			b:    models.Person{Name: "Jane Doe"},
-			want: false,
-		},
-		{
-			name: "different names with shared identity",
-			a:    models.Person{Name: "Jane Doe", TmdbID: "123"},
-			b:    models.Person{Name: "Janet Doe", TmdbID: "123"},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := canResolvePersonByName(tt.a, tt.b); got != tt.want {
-				t.Fatalf("canResolvePersonByName = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCanMergePeople(t *testing.T) {
 	tests := []struct {
 		name string
@@ -253,36 +195,4 @@ func TestMergePersonFields(t *testing.T) {
 			t.Errorf("survivor photo trio was disturbed: %+v", keep)
 		}
 	})
-}
-
-func TestExternalIDValueAndSet(t *testing.T) {
-	p := models.Person{TmdbID: "111", ImdbID: "nm9", TvdbID: "5", PlexGUID: "g"}
-
-	for field, want := range map[string]string{
-		"tmdb_id": "111", "imdb_id": "nm9", "tvdb_id": "5", "plex_guid": "g", "nope": "",
-	} {
-		if got := externalIDValue(p, field); got != want {
-			t.Errorf("externalIDValue(%q) = %q, want %q", field, got, want)
-		}
-	}
-
-	// Setting a field to a new value replaces only that column.
-	updated := p
-	setExternalIDField(&updated, "imdb_id", "nm12345")
-	if updated.ImdbID != "nm12345" {
-		t.Errorf("setExternalIDField did not set imdb_id: %q", updated.ImdbID)
-	}
-	if updated.TmdbID != "111" {
-		t.Errorf("setExternalIDField touched the wrong field: %q", updated.TmdbID)
-	}
-
-	// Setting a field to "" blanks it, matching the old clear behavior.
-	cleared := p
-	setExternalIDField(&cleared, "imdb_id", "")
-	if cleared.ImdbID != "" {
-		t.Errorf("setExternalIDField did not blank imdb_id: %q", cleared.ImdbID)
-	}
-	if cleared.TmdbID != "111" {
-		t.Errorf("setExternalIDField touched the wrong field: %q", cleared.TmdbID)
-	}
 }

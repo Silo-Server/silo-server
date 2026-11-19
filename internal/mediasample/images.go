@@ -14,7 +14,8 @@ import (
 // MJPEG encoder at its default quality.
 type ImageOutput struct {
 	// Width scales the image to this many pixels wide, keeping the aspect
-	// ratio. Zero keeps the source size; otherwise it must be even.
+	// ratio. Zero keeps the source's display size (see pixelAspectFilter);
+	// otherwise it must be even.
 	Width int `json:"width,omitempty"`
 	// ToneMap converts an HDR source to SDR. Nil keeps the decoded colors.
 	ToneMap *ToneMap `json:"tone_map,omitempty"`
@@ -68,6 +69,20 @@ const (
 )
 
 const maxImageWidth = 7680
+
+// pixelAspectFilter scales an image to its display width, applying the
+// stream's sample aspect ratio so a frame from non-square-pixel video is not
+// squeezed. ffmpeg's sar is 1 when the stream has none, so a square-pixel or
+// unknown-SAR source scales to its own size and ffmpeg passes the frame
+// through unchanged. round, because ffmpeg truncates the expression and
+// floating point lands some exact widths one short. The width is not rounded
+// to even, which would shrink an odd-width square source by a pixel, and no
+// setsar follows, which would make ffmpeg write a JFIF header for sources
+// without a SAR. A ratio outside 1:4 to 4:1 is taken for bad metadata and
+// ignored, so such a frame keeps its coded size: applied, it would ask for a
+// frame wider than MJPEG allows or a few pixels wide. The escaped commas keep
+// the filtergraph parser from splitting the expression.
+const pixelAspectFilter = `scale=if(between(sar\,0.25\,4)\,round(iw*sar)\,iw):ih`
 
 func (o ImageOutput) validate() error {
 	if o.Width != 0 && (o.Width < 2 || o.Width > maxImageWidth || o.Width%2 != 0) {
@@ -210,14 +225,15 @@ func (r Runner) prepareImage(ctx context.Context, req Request, attempt Attempt, 
 // buildImageArgs builds the arguments of an At request with an Images
 // output. They keep the layout chapter thumbnails have always used: log
 // level error, hardware decode options, an accurate input seek, and one MJPEG
-// frame on stdout. softwareToneMap is the software tone-map chain, needed
-// when the attempt tone maps in software.
+// frame on stdout. The filter chain always ends by applying the pixel aspect
+// (pixelAspectFilter), before any width scale. softwareToneMap is the
+// software tone-map chain, needed when the attempt tone maps in software.
 func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareToneMap string) ([]string, error) {
 	if req.At == nil || req.Images == nil {
 		return nil, errors.New("images need a single-frame sampling mode")
 	}
 	toneMap := req.Images.ToneMap != nil
-	args := []string{hideBanner, logLevelOption, errorLogLevel}
+	args := []string{hideBanner, logLevelOption, errorLogLevel, "-max_pixels", strconv.Itoa(decodeMaxPixels)}
 	if req.Threads > 0 {
 		args = append(args, "-threads", strconv.Itoa(req.Threads))
 	}
@@ -243,22 +259,18 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 	default:
 		filter = softwareToneMap
 	}
-	if width := req.Images.Width; width > 0 {
-		scale := fmt.Sprintf("scale=%d:-2", width)
-		if filter == "" {
-			filter = scale
-		} else {
-			filter += "," + scale
-		}
+	if filter == "" {
+		filter = pixelAspectFilter
+	} else {
+		filter += "," + pixelAspectFilter
 	}
-	args = append(args,
-		"-ss", fmt.Sprintf("%.3f", req.At.Seconds),
-		"-i", req.Input,
-	)
-	if filter != "" {
-		args = append(args, videoFilterOption, filter)
+	if width := req.Images.Width; width > 0 {
+		filter += fmt.Sprintf(",scale=%d:-2", width)
 	}
 	return append(args,
+		"-ss", fmt.Sprintf("%.3f", req.At.Seconds),
+		"-i", req.Input,
+		videoFilterOption, filter,
 		"-frames:v", "1",
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
@@ -266,15 +278,61 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 	), nil
 }
 
+// Bounds on one extracted frame, so a crafted file cannot make ffmpeg or the
+// caller hold an unbounded frame in memory.
+const (
+	// MaxImagePixels is the largest frame, in pixels, an image attempt
+	// decodes. It equals imageutil's source budget (maxSourcePixels), which
+	// every consumer of an extracted frame already enforces, so a frame at
+	// its decoded size or wider that yields a result is not refused. The
+	// limit is on the decoded size, which decides the decoder's memory: a
+	// larger source that pixelAspectFilter would narrow to under the budget
+	// is refused.
+	MaxImagePixels = 100_000_000
+	// decodeMaxPixels is the -max_pixels ffmpeg gets. ffmpeg compares the
+	// width rounded up to its stride alignment, up to 64 on x86, so a frame
+	// just under MaxImagePixels would be refused at that value. A sixteenth
+	// of headroom covers the rounding for any frame at least 1024 wide.
+	decodeMaxPixels = MaxImagePixels + MaxImagePixels/16
+	// MaxImageBytes is the most one encoded frame may be. The worst case at
+	// MaxImagePixels, noise at ffmpeg's default MJPEG quality, is about 25 MB.
+	MaxImageBytes = 64 << 20
+)
+
+// ErrImageTooLarge means ffmpeg wrote an image over MaxImageBytes.
+var ErrImageTooLarge = errors.New("image too large")
+
 // image runs an image attempt. The output is a single MJPEG frame, so
-// ffmpeg's whole stdout is the image.
+// ffmpeg's whole stdout is the image, up to MaxImageBytes.
 func (a attemptRun) image(req Request, args []string) (Result, *AttemptError) {
-	stdout := &bytes.Buffer{}
-	if failure := a.exec(req, args, nil, stdout); failure != nil {
+	stdout := &cappedBuffer{limit: MaxImageBytes}
+	failure := a.exec(req, args, nil, stdout)
+	// The overflow decides: the refused write closes ffmpeg's stdout, so
+	// ffmpeg exits on a broken pipe and exec reports that exit instead.
+	if stdout.overflowed {
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("%w: ffmpeg wrote more than %d bytes", ErrImageTooLarge, MaxImageBytes)}
+	}
+	if failure != nil {
 		return Result{}, failure
 	}
-	if stdout.Len() == 0 {
+	if stdout.buf.Len() == 0 {
 		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonEmpty, Err: errors.New("ffmpeg wrote no image")}
 	}
-	return Result{Decoder: a.decoder, Images: []Image{{Seconds: req.At.Seconds, JPEG: stdout.Bytes()}}}, nil
+	return Result{Decoder: a.decoder, Images: []Image{{Seconds: req.At.Seconds, JPEG: stdout.buf.Bytes()}}}, nil
+}
+
+// cappedBuffer collects up to limit bytes and refuses the write that would
+// pass it.
+type cappedBuffer struct {
+	buf        bytes.Buffer
+	limit      int
+	overflowed bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.overflowed || b.buf.Len()+len(p) > b.limit {
+		b.overflowed = true
+		return 0, ErrImageTooLarge
+	}
+	return b.buf.Write(p)
 }

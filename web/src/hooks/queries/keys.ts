@@ -263,13 +263,17 @@ export const settingsKeys = {
 export const notificationKeys = {
   all: ["notifications"] as const,
   list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
-  series: (status: "active" | "inactive") => ["notifications", "series", status] as const,
+  /** Every notified-series list; prefix of each status's key. */
+  seriesAll: () => ["notifications", "series"] as const,
+  series: (status: string) => ["notifications", "series", status] as const,
   unreadCount: () => ["notifications", "unread-count"] as const,
   preferences: () => ["notifications", "preferences"] as const,
   emailPreferences: () => ["notifications", "email-preferences"] as const,
   discordPreferences: () => ["notifications", "discord-preferences"] as const,
   capability: () => ["notifications", "capability"] as const,
   webhooks: () => ["notifications", "webhooks"] as const,
+  pluginChannels: () => ["notifications", "plugin-channels"] as const,
+  pluginDestinations: () => ["notifications", "plugin-destinations"] as const,
   webPushSubscriptions: () => ["notifications", "web-push-subscriptions"] as const,
 };
 
@@ -419,6 +423,8 @@ export const adminKeys = {
   libraryProviderDefaults: (libraryType: string) =>
     ["admin", "libraries", "provider-defaults", libraryType] as const,
   nodes: () => ["admin", "nodes"] as const,
+  // Outside "nodes": every node write refreshes the list, not what the build supports.
+  nodeCapabilities: () => ["admin", "nodeCapabilities"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
   downloadPreparations: () => ["admin", "downloadPreparations"] as const,

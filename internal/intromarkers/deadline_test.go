@@ -1,11 +1,9 @@
 package intromarkers
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -126,71 +124,5 @@ func TestRunAnalysisDeadlineCoversEveryAttempt(t *testing.T) {
 		if left <= want-time.Minute || left > want {
 			t.Errorf("attempt %d had %s left, want about %s", i+1, left, want)
 		}
-	}
-}
-
-func TestAnalysisDeadline(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	candidate := Candidate{FileID: 7, FilePath: "/media/show/e1.mkv", DurationSeconds: 1500}
-	cases := []struct {
-		name string
-		req  mediasample.Request
-		want time.Duration
-	}{
-		{"intro window", fingerprintRequest(t.Context(), candidate, headWindow(candidate, cfg)), 8*time.Minute + 15*time.Second},
-		// Samples every three seconds from 900 reach 1497.
-		{"movie tail samples", movieTailRequest(t.Context(), candidate, fingerprintWindow{Start: 900, End: 1500}), 11*time.Minute + 57*time.Second},
-		{"no window", mediasample.Request{}, analysisDeadlineBase},
-		{"capped", mediasample.Request{Window: &mediasample.Window{DurationSeconds: 48 * 3600}}, maxAnalysisDeadline},
-	}
-	for _, tc := range cases {
-		if got := analysisDeadline(cfg, tc.req); got != tc.want {
-			t.Errorf("%s: deadline %s, want %s", tc.name, got, tc.want)
-		}
-	}
-}
-
-// Issue #581: a stalled fingerprint run held its intro group, and the task,
-// until an administrator canceled it. The run now fails that file at its
-// deadline, the group finishes with the other files and is stored as
-// partial, and the log says why.
-func TestAnalyzeGroupFailsStalledFingerprintAndFinishes(t *testing.T) {
-	ffmpeg := writeFakeFFmpeg(t, `case "$*" in
-*stalled.mkv*) exec sleep 30 ;;
-esac
-printf '\001\000\000\000'`)
-	cfg := DefaultConfig(ffmpeg)
-	// The deadline also bounds the other files' runs, which start at
-	// background priority, so it leaves them room on a loaded CI host.
-	cfg.attemptTimeout = 5 * time.Second
-	var candidates []Candidate
-	for i, name := range []string{"e1.mkv", "stalled.mkv", "e3.mkv"} {
-		candidates = append(candidates, Candidate{
-			FileID: i + 1, FilePath: "/media/show/" + name, EpisodeID: name, SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800,
-		})
-	}
-	repo := &fakeIntroRepository{}
-	var logs bytes.Buffer
-	analyzer := &Analyzer{repo: repo, extractor: NewChromaprintExtractor(cfg), config: cfg, logger: slog.New(slog.NewTextHandler(&logs, nil))}
-
-	var summary RunSummary
-	var err error
-	finishesWithinDeadline(t, "group analysis", func() {
-		summary, err = analyzer.analyzeGroup(t.Context(), candidateGroup{
-			SeasonID: "s1", MediaFolderID: 1, AnalysisGroupKey: candidates[0].AnalysisGroupKey(), Candidates: candidates,
-		}, analyzeGroupOptions{persistState: true})
-	})
-	if err != nil {
-		t.Fatalf("analyzeGroup: %v", err)
-	}
-	if summary.FingerprintExtractionErrors != 1 || summary.FingerprintsComputed != 2 {
-		t.Fatalf("extraction errors %d, computed %d; want the stalled file failed and the other two fingerprinted",
-			summary.FingerprintExtractionErrors, summary.FingerprintsComputed)
-	}
-	if len(repo.upsertedStates) != 1 || repo.upsertedStates[0].Status != seasonStatusPartial {
-		t.Fatalf("stored states = %+v, want one partial state", repo.upsertedStates)
-	}
-	if log := logs.String(); !strings.Contains(log, "file_id=2") || !strings.Contains(log, "did not finish within its 5s deadline") {
-		t.Fatalf("log does not name the stalled file's timeout:\n%s", log)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -83,8 +84,9 @@ func authorizedOriginsModeV3() mediaAuthModeV3 {
 // again. The URL must name the proxy and carry no credential of any kind, and
 // the proxy must have been handed the recipe it will serve from.
 func TestPrepareTransportV3AuthorizedOriginsRestoreDirectPlayProxyEgress(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	planner := &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{ID: 51, URL: "http://proxy-1"}}}
 	handler.NodePlanner = planner
 	grants := &recordingRecipeCardStoreV3{}
@@ -136,8 +138,9 @@ func TestPrepareTransportV3AuthorizedOriginsRestoreDirectPlayProxyEgress(t *test
 // URL — which only resolves while the OLD grant exists. Rolling back therefore
 // has to put the displaced grant back, not revoke it.
 func TestPrepareTransportV3AuthorizedOriginsRollbackRestoresTheDisplacedGrant(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: "http://proxy-1"}}}
 	priorCard := playback.RecipeCard{SessionID: "session-origin-replan", UserID: 7, InputPath: "/media/previous-plan.mkv"}
 	grants := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{"session-origin-replan": priorCard}}
@@ -179,8 +182,9 @@ func TestPrepareTransportV3AuthorizedOriginsRollbackRestoresTheDisplacedGrant(t 
 // would keep the proxy authorized to serve the previous recipe for the rest of
 // its TTL, so committing off the proxy revokes it.
 func TestPrepareTransportV3AuthorizedOriginsCommitOffTheProxyRevokesTheGrant(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	// No proxy in the plan: direct play needs no server work, so this attempt
 	// legitimately commits onto the API-local identity route.
 	handler.NodePlanner = &recordingNodePlannerV3{}
@@ -216,8 +220,9 @@ func TestPrepareTransportV3AuthorizedOriginsCommitOffTheProxyRevokesTheGrant(t *
 // facts the proxy cannot look up: without them it would serve a subtly
 // different stream than the plan promised.
 func TestPrepareTransportV3AuthorizedOriginsCarryRemuxSourceFacts(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	stubCopySeekAnchorV3(handler)
 	proxy := capableProxyStubV3(t)
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL + "/"}}}
@@ -269,8 +274,9 @@ func TestPrepareTransportV3AuthorizedOriginsFallBackToTheAPIWhenTheGrantFails(t 
 		{name: "store disabled", store: &recordingRecipeCardStoreV3{disabled: true}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			handler.JWTSecret = "test-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 			planner := &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: "http://proxy-1"}}}
 			handler.NodePlanner = planner
 			handler.ProxyGrantStore = test.store
@@ -331,8 +337,9 @@ func TestPrepareTransportV3AuthorizedOriginsRefuseLocalRemuxWhenTheGrantFails(t 
 }
 
 func TestPrepareTransportV3AuthorizedOriginsFallsBackWhenTranscodeProxyGrantFails(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	stubCopySeekAnchorV3(handler)
 	proxyServer := capableProxyStubV3(t)
 	transcodeServer := progressiveRemuxExecutionStubV3(t)
@@ -376,8 +383,9 @@ func TestPrepareTransportV3AuthorizedOriginsFallsBackWhenTranscodeProxyGrantFail
 }
 
 func TestPrepareTransportV3AuthorizedOriginsDoNotFallBackToAnIncapableAPI(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	stubCopySeekAnchorV3(handler)
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
 		Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
@@ -414,8 +422,9 @@ func TestPrepareTransportV3AuthorizedOriginsDoNotFallBackToAnIncapableAPI(t *tes
 // Without the origins opt-in the mode is unchanged from what PR #723 shipped:
 // everything stays on the API, and no grant is written at all.
 func TestPrepareTransportV3HeaderAuthOnlyStaysOnTheAPIOrigin(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: "http://proxy-1"}}}
 	grants := &recordingRecipeCardStoreV3{}
 	handler.ProxyGrantStore = grants
@@ -461,8 +470,9 @@ func TestPrepareTransportV3AuthorizedOriginsPublishGrantBackedHLSManifest(t *tes
 	}))
 	defer node.Close()
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	planner := &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}, ProxyNode: &nodepool.Node{ID: 52, URL: "http://proxy-1"}}}
 	handler.NodePlanner = planner
 	grants := &recordingRecipeCardStoreV3{}

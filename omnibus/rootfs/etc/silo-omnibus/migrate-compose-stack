@@ -330,13 +330,13 @@ SQL
     fail "after the copy, $(host "$config") has $((free_kb / 1024)) MiB free, and rebuilding its largest text index ($((largest_kb / 1024)) MiB) on the first start needs about $(( (2 * largest_kb + 1024 * 1024) / 1024 )) MiB. Free space there and start again; the earlier Compose file still starts meanwhile"
   fi
 
-  # Proxy and transcode nodes reached the earlier stack's PostgreSQL and Redis
-  # on published ports; the bundled ones are closed to them unless node access
-  # is on, and nodes then sign in as silo.
+  # Proxy nodes reached the earlier stack's PostgreSQL and Redis on published
+  # ports; the bundled ones are closed to them unless node access is on, and
+  # proxies then sign in as silo. Transcode nodes reach Silo itself.
   if ! truthy "${ENABLE_NODE_ACCESS:-false}"; then
-    nodes="$(stage_psql -d silo -c "SELECT count(*) FROM stream_nodes WHERE enabled")"
+    nodes="$(stage_psql -d silo -c "SELECT count(*) FROM stream_nodes WHERE enabled AND type = 'proxy'")"
     if (( nodes > 0 )); then
-      fail "this server has $nodes enabled proxy or transcode node(s), which need its PostgreSQL and Redis. Set ENABLE_NODE_ACCESS=true and uncomment the node-access ports in docker-compose.yml (see .env.example), and point each node's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
+      fail "this server has $nodes enabled proxy node(s), which need its PostgreSQL and Redis. Set ENABLE_NODE_ACCESS=true and uncomment the node-access ports in docker-compose.yml (see .env.example), and point each proxy's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
     fi
   fi
 

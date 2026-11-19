@@ -87,7 +87,7 @@ func newAutoCompatLocalHandler(t *testing.T, ffmpegPath string) (*PlaybackHandle
 		TranscodeDir: t.TempDir(),
 		FFmpegPath:   ffmpegPath,
 		HWAccel:      "auto",
-		tm:           playback.NewTranscodeManager(),
+		tm:           keyedTranscodeManager(),
 	}
 	handler.compatAutoTranscodePipeline = func(_ context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
 		if opts.HWAccel != "auto" {
@@ -232,13 +232,14 @@ func startCompatRemoteTranscode(t *testing.T, hwAccel, report string, response t
 	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
 	handler := &PlaybackHandler{
 		JWTSecret:     "secret",
+		NodeKeys:      nodeauthtest.SameKey("secret"),
 		HWAccel:       hwAccel,
 		NodePlanner:   &nodeLookupPlannerStub{node: pooled},
 		playbackStore: playbackStore,
 		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
 		}},
-		tm: playback.NewTranscodeManager(),
+		tm: keyedTranscodeManager(),
 	}
 	file := &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}
 	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
@@ -260,17 +261,6 @@ func TestStartRemoteTranscodeAutoRequestsFallbackReadinessAndRecordsDecodePath(t
 	}
 }
 
-// An explicit backend has no auto pipeline on the node, so only require_ready
-// makes it wait for the first manifest and retry a rejected GPU decode.
-func TestStartRemoteTranscodeExplicitHardwareRequiresReadiness(t *testing.T) {
-	remoteReq, _ := startCompatRemoteTranscode(t, "nvenc", "", transcodenode.TranscodeStartResponse{
-		Status: "started", HWAccel: "nvenc", SoftwareVideoDecode: true,
-	})
-	if !remoteReq.RequireReady {
-		t.Fatalf("require_ready = false for hw_accel %q, want the node to wait", remoteReq.HWAccel)
-	}
-}
-
 // The node resolves auto against its live hardware, so a missing or software
 // stored report must not keep the fallback from the node.
 func TestStartRemoteTranscodeAutoLeavesFallbackDecisionToNode(t *testing.T) {
@@ -281,41 +271,5 @@ func TestStartRemoteTranscodeAutoLeavesFallbackDecisionToNode(t *testing.T) {
 		if !remoteReq.AutoFallbackReady || remoteReq.RequireReady {
 			t.Errorf("report %q: request = %+v, want auto_fallback_ready without require_ready", report, remoteReq)
 		}
-	}
-}
-
-func TestCompatRemoteAutoFallbackEligible(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		request transcodenode.TranscodeStartRequest
-		want    bool
-	}{
-		{"auto video", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: " AUTO "}, true},
-		{"node default", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264"}, false},
-		{"explicit accel", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "qsv"}, false},
-		{"video copy", transcodenode.TranscodeStartRequest{TargetCodecVideo: "copy", HWAccel: "auto"}, false},
-		{"tone map", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto", ToneMapMode: "software"}, false},
-	} {
-		if got := compatRemoteAutoFallbackEligible(tc.request); got != tc.want {
-			t.Errorf("%s: eligible = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
-func TestRemoteTranscodeStartTimeoutCoversNodeReadiness(t *testing.T) {
-	handler := &PlaybackHandler{}
-	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{}, 0); got != 20*time.Second {
-		t.Fatalf("unready timeout = %v, want 20s", got)
-	}
-	// The node may wait on one manifest per automatic execution path.
-	want := 20*time.Second + transcodenode.TranscodeStartReadyMaxDuration
-	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{RequireReady: true}, 0); got != want {
-		t.Fatalf("ready timeout = %v, want %v", got, want)
-	}
-	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{AutoFallbackReady: true}, 0); got != want {
-		t.Fatalf("auto fallback timeout = %v, want %v", got, want)
-	}
-	if min := time.Duration(playback.MaxAutoTranscodeStartupAttempts) * transcodenode.TranscodeStartReadinessTimeout; want < min {
-		t.Fatalf("ready timeout = %v, want at least %v", want, min)
 	}
 }

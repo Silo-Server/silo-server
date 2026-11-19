@@ -162,6 +162,89 @@ func TestArtworkIdentityFieldsLockOnceStorageIsRecorded(t *testing.T) {
 	}
 }
 
+// A location saved without a restart can differ from the one the running
+// process then records (#4418). Writes that leave the location settings as they
+// are must still save, and a write that puts them back on the recorded location
+// must be accepted; anything else stays locked.
+func TestArtworkLockWhenSavedLocationDiffersFromRecorded(t *testing.T) {
+	pendingS3 := func() map[string]string {
+		return map[string]string{
+			"artwork.local_path":         "/var/lib/silo/artwork",
+			"s3.public_endpoint":         "https://s3.example",
+			"s3.public_bucket":           "artwork",
+			"s3.public_key_prefix":       "silo",
+			blobstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
+		}
+	}
+	pendingPrivate := func() map[string]string {
+		stored := pendingS3()
+		stored["artwork.storage_backend"] = "local"
+		stored["s3.private_endpoint"] = "https://private-s3.example"
+		stored["s3.private_bucket"] = "private"
+		return stored
+	}
+	movedS3 := func() map[string]string {
+		return map[string]string{
+			"artwork.storage_backend":    "local",
+			"artwork.local_path":         "/var/lib/silo/artwork",
+			"s3.public_endpoint":         "https://s3.example",
+			"s3.public_bucket":           "artwork",
+			"s3.public_key_prefix":       "cache",
+			blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|cache",
+		}
+	}
+	// Saved settings match the recorded rows; the bucket or private bucket
+	// named by prefix is "alpha" under the key prefix "beta|cache".
+	collidingS3 := func(prefix, identityKey string) map[string]string {
+		stored := map[string]string{
+			"artwork.storage_backend":    "s3",
+			"s3.public_endpoint":         "https://s3.example",
+			"s3.public_bucket":           "artwork",
+			blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|",
+		}
+		stored[prefix+"_endpoint"] = "https://s3.example"
+		stored[prefix+"_bucket"] = "alpha"
+		stored[prefix+"_key_prefix"] = "beta|cache"
+		stored[identityKey] = "s3|https://s3.example|alpha|beta|cache"
+		return stored
+	}
+	tenantS3 := map[string]string{
+		"s3.public_endpoint":         "https://s3.example/tenant",
+		"s3.public_bucket":           "artwork",
+		blobstore.IdentitySettingKey: "s3|https://s3.example/tenant|artwork|",
+	}
+	for _, tc := range []struct {
+		name   string
+		stored map[string]string
+		values map[string]string
+		locked bool
+	}{
+		{"unrelated setting", pendingS3(), map[string]string{"branding.server_name": "Test"}, false},
+		{"credentials of the pending bucket", pendingS3(), map[string]string{"s3.public_region": "garage"}, false},
+		{"restore local backend", pendingS3(), map[string]string{"artwork.storage_backend": "local"}, false},
+		{"clear the pending bucket", pendingS3(), map[string]string{"s3.public_endpoint": "", "s3.public_bucket": ""}, false},
+		{"another bucket", pendingS3(), map[string]string{"s3.public_bucket": "other"}, true},
+		{"another local root", pendingS3(), map[string]string{"artwork.storage_backend": "local", "artwork.local_path": "/srv/artwork"}, true},
+		{"remove the pending private bucket", pendingPrivate(), map[string]string{"s3.private_endpoint": "", "s3.private_bucket": ""}, false},
+		{"another private bucket", pendingPrivate(), map[string]string{"s3.private_bucket": "other-private"}, true},
+		{"restore recorded s3 location", movedS3(), map[string]string{"artwork.storage_backend": "s3"}, false},
+		{"restore recorded s3 with equivalent spelling", movedS3(), map[string]string{"artwork.storage_backend": "s3", "s3.public_endpoint": "https://S3.example", "s3.public_key_prefix": "/cache/"}, false},
+		// An endpoint path addresses case-sensitive storage, so its case is a
+		// different location even when the recorded path is lowercase.
+		{"another endpoint path case", tenantS3, map[string]string{"s3.public_endpoint": "https://s3.example/Tenant"}, true},
+		// The identity joins its parts with "|", so a bucket carrying one can
+		// spell the recorded identity while naming another bucket.
+		{"bucket that collides with the recorded identity", collidingS3("s3.public", blobstore.IdentitySettingKey), map[string]string{"s3.public_bucket": "alpha|beta", "s3.public_key_prefix": "cache"}, true},
+		{"private bucket that collides with the recorded identity", collidingS3("s3.private", blobstore.OperationalIdentitySettingKey), map[string]string{"s3.private_bucket": "alpha|beta", "s3.private_key_prefix": "cache"}, true},
+	} {
+		_, err := (&AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: tc.stored}}).UpdateAdminSettings(t.Context(), tc.values, nil)
+		requireArtworkLockAnswer(t, tc.name, err, tc.locked)
+	}
+	single := &fakeServerSettingsStore{values: pendingS3()}
+	_, err := (&AdminHandler{SettingsRepo: single}).UpdateAdminSetting(t.Context(), "branding.server_name", "Test", nil)
+	requireArtworkLockAnswer(t, "single unrelated setting", err, false)
+}
+
 func TestArtworkS3BackendRequiresPublicBucket(t *testing.T) {
 	for _, single := range []bool{false, true} {
 		empty := &fakeServerSettingsStore{values: map[string]string{}}

@@ -99,13 +99,13 @@ const (
 	WeightWatchMed  = 0.3  // Watch progress 50-89%
 	WeightWatchlist = 0.15 // Intent signal
 	WeightWatchLow  = -0.2 // Abandoned (< 15%)
-	WeightRatedLow  = -0.5 // 1-2 star ratings
+	WeightRatedLow  = -0.5 // 1-2 star ratings (scores 1 to 4)
 )
 
-// DislikedRatingMax is the highest star rating that marks a title the profile
-// disliked: reads leave such titles out of every row, and they never anchor a
-// Because You Watched row.
-const DislikedRatingMax = 2
+// DislikedScoreMax is the highest rating score (1 to 10) that marks a title
+// the profile disliked, 2 stars: reads leave such titles out of every row,
+// and they never anchor a Because You Watched row.
+const DislikedScoreMax = 4
 
 // RecType constants for recommendation cache.
 const (

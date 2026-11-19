@@ -18,7 +18,7 @@ func (h *NodeHandler) forceReloadRequest(ctx context.Context, node *nodepool.Nod
 	if err != nil {
 		return nil, err
 	}
-	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+	if err := nodeauth.SignWith(req, node.SignTarget(), node.URL, h.nodeKeys); err != nil {
 		return nil, err
 	}
 	return req, nil

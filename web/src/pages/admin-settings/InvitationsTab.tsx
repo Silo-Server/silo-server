@@ -31,11 +31,12 @@ import { toast } from "sonner";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
+import { useMounted } from "@/hooks/useMounted";
 
 import { CreateInvitationForm } from "./CreateInvitationForm";
 import { ClaimLinkBox } from "./InvitationDisplay";
 import { InvitationList } from "./InvitationList";
-import { deliveryMessage, isLinkInvitation, useMounted } from "./invitationRules";
+import { deliveryMessage, isLinkInvitation } from "./invitationRules";
 import {
   FULL_SCREEN_DIALOG_CLASS,
   TOUCH_DIALOG_CLOSE_CLASS,

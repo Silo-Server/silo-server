@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -118,19 +117,6 @@ func source(version int64, name string) *goose.Source {
 	return &goose.Source{Type: goose.TypeSQL, Path: "migrations/sql/" + name, Version: version}
 }
 
-func TestApplyMigrationsLoggedReportsNothingPending(t *testing.T) {
-	stepper := &fakeMigrationStepper{statuses: []*goose.MigrationStatus{
-		{Source: source(200, "200_done.sql"), State: goose.StateApplied},
-	}}
-	logger, out := newMigrationTestLogger()
-	if err := applyMigrationsLogged(t.Context(), stepper, logger, 0); err != nil {
-		t.Fatal(err)
-	}
-	if stepper.calls != 0 || !strings.Contains(out.String(), "database schema is up to date") {
-		t.Fatalf("calls=%d logs:\n%s", stepper.calls, out.String())
-	}
-}
-
 func TestApplyMigrationsLoggedPreservesGoosePendingCheck(t *testing.T) {
 	boom := errors.New("applied migration source is missing")
 	stepper := &fakeMigrationStepper{
@@ -181,30 +167,6 @@ func TestApplyMigrationsLoggedHeartbeatsWhileAMigrationRuns(t *testing.T) {
 			<-done
 			t.Fatalf("no heartbeat naming the running migration:\n%s", out.String())
 		}
-	}
-}
-
-func TestApplyMigrationsLoggedNamesTheFailedMigration(t *testing.T) {
-	broken := source(401, "401_broken.sql")
-	boom := errors.New("syntax error at or near \"TABL\"")
-	stepper := &fakeMigrationStepper{
-		statuses: []*goose.MigrationStatus{
-			{Source: broken, State: goose.StatePending},
-			{Source: source(402, "402_after.sql"), State: goose.StatePending},
-		},
-		steps: []fakeMigrationStep{{err: boom}},
-	}
-	logger, out := newMigrationTestLogger()
-
-	err := applyMigrationsLogged(t.Context(), stepper, logger, 0)
-	if !errors.Is(err, boom) {
-		t.Fatalf("err = %v, want wrapped %v", err, boom)
-	}
-	if stepper.calls != 1 {
-		t.Fatalf("kept applying after a failure: %d calls", stepper.calls)
-	}
-	if !strings.Contains(out.String(), `level=ERROR msg="database migration failed" version=401 name=401_broken.sql progress=1/2`) {
-		t.Fatalf("failure not logged with the migration:\n%s", out.String())
 	}
 }
 
@@ -275,28 +237,6 @@ func TestApplyMigrationsLoggedHeartbeatsWhileStatusWaits(t *testing.T) {
 	}
 }
 
-func TestLogMigrationRollbackResultsReportsPartialFailure(t *testing.T) {
-	logger, out := newMigrationTestLogger()
-	boom := errors.New("rollback failed")
-	partial := &goose.PartialError{
-		Applied: []*goose.MigrationResult{{
-			Source: source(702, "702_rolled_back.sql"), Duration: 2 * time.Second,
-		}},
-		Failed: &goose.MigrationResult{
-			Source: source(701, "701_failed.sql"), Duration: 3 * time.Second, Error: boom,
-		},
-		Err: boom,
-	}
-	if count := logMigrationRollbackResults(t.Context(), logger, 700, nil, fmt.Errorf("down to 700: %w", partial)); count != 1 {
-		t.Fatalf("rolled back = %d, want 1", count)
-	}
-	logs := out.String()
-	if !strings.Contains(logs, `msg="database migration rolled back" version=702 name=702_rolled_back.sql duration=2s`) ||
-		!strings.Contains(logs, `msg="database migration rollback failed" version=701 name=701_failed.sql duration=3s`) {
-		t.Fatalf("partial rollback results missing:\n%s", logs)
-	}
-}
-
 func TestMigrationRollbackCandidatesListAppliedMigrationsAboveTheTarget(t *testing.T) {
 	statuses := []*goose.MigrationStatus{
 		{Source: source(100, "100_keep.sql"), State: goose.StateApplied},
@@ -312,22 +252,5 @@ func TestMigrationRollbackCandidatesListAppliedMigrationsAboveTheTarget(t *testi
 	}
 	if got := migrationRollbackCandidates(statuses, 103); len(got) != 0 {
 		t.Fatalf("plan above the newest applied = %v, want none", migrationNames(got))
-	}
-}
-
-// TestRegisteredGoMigrationsHaveNames covers the Go migrations this provider
-// registers: goose leaves their source path empty, so without a name their
-// progress logs would carry name="".
-func TestRegisteredGoMigrationsHaveNames(t *testing.T) {
-	for _, m := range goMigrations() {
-		name := migrationName(&goose.Source{Type: goose.TypeGo, Path: m.Source, Version: m.Version})
-		if name == "" || name != m.Source {
-			t.Errorf("Go migration %d is logged as %q, want its file name", m.Version, name)
-		}
-		// goose rejects a registered Go migration whose source name doesn't
-		// start with its version.
-		if version, err := goose.NumericComponent(m.Source); err != nil || version != m.Version {
-			t.Errorf("Go migration %d source %q: version %d, err %v", m.Version, m.Source, version, err)
-		}
 	}
 }

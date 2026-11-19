@@ -21,9 +21,9 @@ import (
 const listingTimeout = 3 * time.Second
 
 // CapabilitiesTimeout bounds an uncached LoadCapabilities, which runs up to
-// four listings (filters, muxers, Chromaprint's options, the concat check),
-// each on listingTimeout.
-const CapabilitiesTimeout = 4 * listingTimeout
+// five listings (filters, muxers, Chromaprint's options, the two concat
+// checks), each on listingTimeout.
+const CapabilitiesTimeout = 5 * listingTimeout
 
 // Capabilities is what an ffmpeg binary offers sampling runs. The zero value
 // offers nothing.
@@ -35,6 +35,9 @@ type Capabilities struct {
 	// concatSamples records that the concat demuxer reads a Samples list
 	// from stdin; see checkConcatSamples.
 	concatSamples bool
+	// relayedConcatSamples records that it reads the relayed form of one,
+	// whose entries are a relayed input; see checkRelayedConcatSamples.
+	relayedConcatSamples bool
 }
 
 // HasFilter reports whether ffmpeg lists the named filter.
@@ -88,6 +91,11 @@ func (c Capabilities) Require(req Request) error {
 	}
 	if req.Samples != nil && !req.Samples.ReadThrough && !c.concatSamples {
 		return unsupportedError("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
+	}
+	if req.Samples != nil && !req.Samples.ReadThrough && fspath.IsRelayed(req.Input) && !c.relayedConcatSamples {
+		// Not permanent: a node that reads its sources locally, or the API
+		// server, can sample the file.
+		return unsupportedError("ffmpeg cannot read a sampled input list of a source relayed from the core (concat option directives, http protocol)")
 	}
 	if req.Sheets != nil && !c.HasFilter(filterMetadata) {
 		return unsupportedError("ffmpeg does not list the metadata filter")
@@ -216,7 +224,35 @@ func loadCapabilities(ffmpegPath string, list listFunc) (Capabilities, error) {
 		caps.chromaprintRaw = bytes.Contains(lower, []byte("fp_format")) && bytes.Contains(lower, []byte("raw"))
 	}
 	caps.concatSamples = checkConcatSamples(runWith)
+	if caps.concatSamples {
+		caps.relayedConcatSamples = checkRelayedConcatSamples(runWith)
+	}
 	return caps, nil
+}
+
+// relayedConcatCheckInput is a relay URL nothing listens on (the discard
+// port), which the relayed concat check names.
+const relayedConcatCheckInput = "http://127.0.0.1:9/src/00000000000000000000000000000000"
+
+// checkRelayedConcatSamples reports whether ffmpeg reads the relayed form of
+// a Samples list (see concat.go): the option directives that restrict each
+// entry, and the http protocol. As checkConcatSamples does, it names an input
+// that cannot be opened: an ffmpeg that parses the list reports "Impossible
+// to open" that URL, and one that lacks the option directive fails before.
+// An ffmpeg built without the http protocol reports the same line, followed
+// by "Protocol not found", so that ends the check too.
+func checkRelayedConcatSamples(run func(stdin []byte, args ...string) ([]byte, error)) bool {
+	var list bytes.Buffer
+	list.WriteString("ffconcat version 1.0\n")
+	list.WriteString("file '" + relayedConcatCheckInput + "'\n" + relayedEntryOptions)
+	list.WriteString("file_packet_meta " + sampleMetadataKey + " 1\ninpoint 1\noutpoint 1.04\n")
+	args := append(quietArgs(errorLogLevel), skipFrameOption, keyframeSkipFrame)
+	args = append(args, relayedConcatDemuxerArgs...)
+	args = append(args, "-i", concatListInput, "-f", "null", "-")
+	output, _ := run(list.Bytes(), args...)
+	output = bytes.ToLower(output)
+	return bytes.Contains(output, []byte("impossible to open '"+relayedConcatCheckInput+"'")) &&
+		!bytes.Contains(output, []byte("protocol not found"))
 }
 
 // concatCheckInput is the input the concat check names. It must not exist.

@@ -26,6 +26,7 @@ type TaskManager struct {
 	logger         *slog.Logger
 	observers      []Observer
 	libraryTypes   LibraryTypesFunc
+	firingClaims   FiringClaims
 }
 
 // New creates a new TaskManager.
@@ -82,10 +83,14 @@ func (m *TaskManager) Start(ctx context.Context) {
 
 		configs, err := m.triggerRepo.GetTriggers(ctx, key)
 		if err == nil && configs == nil {
-			// Default providers may read settings. Resolve them only for new
-			// schedules, outside the repository transaction. Initialization
-			// rechecks saved state so a concurrent edit still takes precedence.
-			configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+			if followsDefaultTriggers(w.task) {
+				configs = w.task.DefaultTriggers()
+			} else {
+				// Default providers may read settings. Resolve them only for new
+				// schedules, outside the repository transaction. Initialization
+				// rechecks saved state so a concurrent edit still takes precedence.
+				configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+			}
 		}
 		if err != nil {
 			m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
@@ -123,9 +128,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}
 		}
 
-		// merged carries the firing trigger's config so the run gets its max
-		// runtime, or nil when the schedule changed.
-		merged := make(chan *TriggerConfig, 1)
+		// merged carries the trigger that fired, whose config gives the run's
+		// max runtime, or nil when the schedule changed.
+		merged := make(chan Trigger, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -136,9 +141,8 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 					return
 				case _, ok := <-tr.C():
 					if ok {
-						cfg := tr.Config()
 						select {
-						case merged <- &cfg:
+						case merged <- tr:
 						default:
 						}
 					}
@@ -158,7 +162,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}
 		}()
 
-		var fired *TriggerConfig
+		var fired Trigger
 		select {
 		case <-ctx.Done():
 			close(done)
@@ -190,8 +194,16 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			m.rearmTriggersFromNow(w)
 			continue
 		}
+		if !m.claimFiring(ctx, w, fired) {
+			// Another server runs this firing. Rearm from now, as after a
+			// skipped preflight: this server's last result is older than that
+			// run, so an interval would otherwise fire again at once.
+			m.reloadLastResult(ctx, w)
+			m.rearmTriggersFromNow(w)
+			continue
+		}
 
-		result, err := w.run(ctx, fired.MaxRuntime())
+		result, err := w.run(ctx, fired.Config().MaxRuntime())
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
@@ -385,6 +397,11 @@ func isManualOnly(task Task) bool {
 	return ok && manual.ManualOnly()
 }
 
+func followsDefaultTriggers(task Task) bool {
+	follower, ok := task.(DefaultFollowingTask)
+	return ok && follower.FollowsDefaultTriggers()
+}
+
 func startSpread(task Task) time.Duration {
 	spreader, ok := task.(StartSpreader)
 	if !ok {
@@ -428,15 +445,22 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 }
 
 // GetSchedule reads the durable editor state rather than a live trigger snapshot.
+// A DefaultFollowingTask with no saved schedule reports its DefaultTriggers at
+// revision zero, the schedule it runs until one is saved.
 func (m *TaskManager) GetSchedule(ctx context.Context, key string) (Schedule, error) {
-	if _, err := m.getWorker(key); err != nil {
+	w, err := m.getWorker(key)
+	if err != nil {
 		return Schedule{}, err
 	}
 	repo, ok := m.triggerRepo.(GuardedTriggerRepository)
 	if !ok {
 		return Schedule{}, fmt.Errorf("guarded task schedules unavailable")
 	}
-	return repo.GetSchedule(ctx, key)
+	schedule, err := repo.GetSchedule(ctx, key)
+	if err == nil && schedule.Revision == 0 && followsDefaultTriggers(w.task) {
+		schedule.Triggers = w.task.DefaultTriggers()
+	}
+	return schedule, err
 }
 
 // UpdateSchedule persists under the original revision and installs that schedule

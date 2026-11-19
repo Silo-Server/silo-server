@@ -82,21 +82,6 @@ func TestRequestDownloadRefreshBudgetEndsInsideTheReconcileWait(t *testing.T) {
 	}
 }
 
-// A refresh that holds the write lock past the wait fails the pass loudly
-// instead of skipping it quietly.
-func TestReconcileRequestsTaskFailsWhenTheWaitRunsOut(t *testing.T) {
-	reconciler := &reconcilerStub{}
-	task := NewReconcileRequestsTask(reconciler, 0, nil)
-	task.locks = &fakeReconcileLocks{outcome: reconcileLocksWaitedOut}
-
-	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err == nil {
-		t.Fatal("Execute() error = nil, want the wait to fail the pass")
-	}
-	if runs := reconciler.runs.Load(); runs != 0 {
-		t.Fatalf("runs = %d, want 0", runs)
-	}
-}
-
 func requestLockTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

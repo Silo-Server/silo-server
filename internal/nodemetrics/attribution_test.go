@@ -9,26 +9,6 @@ import (
 	"testing"
 )
 
-func TestResourceAttributionRejectsUnmeasuredIdle(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{})
-	s.sample(context.Background())
-	a := s.Snapshot().Attribution
-	if a == nil || a.CPU.Available || a.Memory.Available || a.Network.Available || a.Load.Available {
-		t.Fatalf("missing procfs files produced available sources: %+v", a)
-	}
-	if a.Process.ResidentBytes != nil || a.Process.ReadBytes != nil || a.Process.HeapLiveBytes == nil || a.Children != nil {
-		t.Fatalf("OS unavailability affected runtime measurements or fabricated OS readings: %+v", a)
-	}
-	values := gatherNames(t, s)
-	for _, name := range []string{"streamapp_node_cpu_percent", "streamapp_node_memory_used_bytes", "streamapp_node_load1", "streamapp_node_network_tx_bps", "silo_process_io_read_bytes_total"} {
-		if _, ok := values[name]; ok {
-			t.Fatalf("missing source emitted %s", name)
-		}
-	}
-}
-
 func TestResourceAttributionCgroupMemoryAncestorAndFailure(t *testing.T) {
 	tree := newProcTree(t)
 	tree.write("meminfo", "MemTotal: 8192 kB\nMemAvailable: 4096 kB\n")

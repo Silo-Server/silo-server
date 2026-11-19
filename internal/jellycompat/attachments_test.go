@@ -57,8 +57,8 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := chi.NewRouter()
-	router.With(PlaybackSessionAuth(sessions, discovery.playbackStore, nil)).Post("/Items/{id}/PlaybackInfo", discovery.HandlePlaybackInfo)
-	router.With(PlaybackSessionAuth(sessions, discovery.playbackStore, nil)).Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", discovery.HandleAttachment)
+	router.With(PlaybackSessionAuth(sessions, discovery.playbackStore, nil, nil)).Post("/Items/{id}/PlaybackInfo", discovery.HandlePlaybackInfo)
+	router.With(PlaybackSessionAuth(sessions, discovery.playbackStore, nil, nil)).Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", discovery.HandleAttachment)
 	request := httptest.NewRequest("POST", "/Items/"+itemID+"/PlaybackInfo", strings.NewReader(`{}`))
 	request.Header.Set("X-Emby-Token", "discovery-token")
 	negotiated := httptest.NewRecorder()

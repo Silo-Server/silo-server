@@ -240,6 +240,13 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	if strings.EqualFold(strings.TrimSpace(items[0].Status), "unmatched") {
 		return 0, false, nil
 	}
+	paths := make([]string, len(existing))
+	for i, file := range existing {
+		paths[i] = file.FilePath
+	}
+	if !s.confirmUnchangedFiles(ctx, folder.ID, paths) {
+		return 0, false, nil
+	}
 	return unreadable, true, nil
 }
 
@@ -780,6 +787,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	if s == nil || folder == nil {
 		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
 	}
+	ctx = withScopedScan(ctx, fullScan)
 
 	warning, err := s.scanWarningBeforeWalk(ctx, folder.ID, fullScan)
 	if err != nil {

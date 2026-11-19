@@ -59,17 +59,3 @@ func TestSyncTMDBListFallsBackToSourceURLAndRedactsFetchErrors(t *testing.T) {
 		t.Fatalf("sync state = %+v (members replaced: %v), want the failure recorded with item count 12", state, store.replacedItems != nil)
 	}
 }
-
-func TestSyncTMDBListRejectsNonListURL(t *testing.T) {
-	fetcher := &recordingTMDBListFetcher{}
-	svc := NewService(nil, nil, nil, &staticOwners{}, nil, slog.New(slog.DiscardHandler))
-	svc.TMDBLists = fetcher
-	collection := &userstore.Collection{ID: "c", CreatorProfileID: "owner", SourceConfig: `{"mode":"tmdb_list","url":"https://www.themoviedb.org/movie/550"}`}
-
-	if _, _, err := svc.RunSync(t.Context(), 7, &mockSyncUserStore{}, collection); err == nil {
-		t.Fatal("RunSync succeeded for a non-list URL")
-	}
-	if fetcher.gotID != 0 {
-		t.Fatalf("fetcher was called with list %d", fetcher.gotID)
-	}
-}

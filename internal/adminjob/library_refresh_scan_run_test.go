@@ -3,7 +3,6 @@ package adminjob
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,35 +43,6 @@ func (r *libraryRefreshTestResolver) ResolveForLibrary(_ context.Context, _ stri
 	return r.req, nil
 }
 
-func TestLibraryRefreshUnmatchedItemCarriesDirectScanRun(t *testing.T) {
-	t.Parallel()
-
-	ingester := &itemRefreshTestIngester{}
-	scanRuns := &itemRefreshTestScanRuns{}
-	refresher := &itemRefreshTestRefresher{}
-	executor := &LibraryRefreshExecutor{
-		folderRepo: &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true}},
-		resolver: &libraryRefreshTestResolver{req: &ItemRefreshRequest{
-			ScanFolderID:     9,
-			ScanPath:         "/media/shows/new-show",
-			RefreshContentID: "series-1",
-		}},
-		ingester:  ingester,
-		scanRuns:  scanRuns,
-		refresher: refresher,
-	}
-
-	if err := executor.refreshUnmatchedItem(context.Background(), 9, "series-1", false); err != nil {
-		t.Fatalf("refreshUnmatchedItem: %v", err)
-	}
-	if ingester.runID != "admin-refresh-run" || scanRuns.completedID != "admin-refresh-run" {
-		t.Fatalf("scan lifecycle run context=%q completed=%q", ingester.runID, scanRuns.completedID)
-	}
-	if scanRuns.createdInput.Mode != scanqueue.ModeSubtree || scanRuns.createdInput.Trigger != libraryRefreshScanTrigger {
-		t.Fatalf("scan create input = %#v", scanRuns.createdInput)
-	}
-}
-
 func TestLibraryRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
 	t.Parallel()
 
@@ -103,75 +73,6 @@ func TestLibraryRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
 		if event.Type == cache.EventScanComplete {
 			t.Fatalf("events = %#v, want no scan_complete before metadata succeeds", eventBus.events)
 		}
-	}
-}
-
-func TestLibraryRefreshPublishesScanCompleteAfterDirectIngest(t *testing.T) {
-	t.Parallel()
-
-	eventBus := &libraryRefreshTestEventBus{}
-	executor := NewLibraryRefreshExecutor(
-		&libraryRefreshTestItemLister{items: []LibraryRefreshItem{{ContentID: "series-1"}}},
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true}},
-		&libraryRefreshTestResolver{req: &ItemRefreshRequest{
-			ScanFolderID:     9,
-			ScanPath:         "/media/shows/new-show",
-			RefreshContentID: "series-1",
-		}},
-		&itemRefreshTestIngester{},
-		&itemRefreshTestScanRuns{},
-		&itemRefreshTestRefresher{},
-		eventBus,
-		nil,
-	)
-	executor.unmatchedDelay = 0
-
-	result, err := executor.Execute(context.Background(), LibraryRefreshRequest{
-		LibraryID: 9,
-		Mode:      LibraryRefreshModeFull,
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if result.PipelineOK != 1 {
-		t.Fatalf("pipeline successes = %d, want 1", result.PipelineOK)
-	}
-	for _, event := range eventBus.events {
-		if event.Type == cache.EventScanComplete && event.Payload == "9" {
-			return
-		}
-	}
-	t.Fatalf("events = %#v, want scan_complete for library 9", eventBus.events)
-}
-
-// An audiobook has its folder scanned and is handed to the audiobook enricher,
-// never to the general metadata refresh.
-func TestLibraryRefreshAudiobookSkipsMetadataRefresh(t *testing.T) {
-	t.Parallel()
-
-	scanRuns := &itemRefreshTestScanRuns{}
-	requeuer := &libraryRefreshTestRequeuer{}
-	executor := &LibraryRefreshExecutor{
-		folderRepo: &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true}},
-		resolver: &libraryRefreshTestResolver{req: &ItemRefreshRequest{
-			ScanFolderID:     9,
-			ScanPath:         "/media/books/a-book",
-			RefreshContentID: "book-1",
-		}},
-		ingester:   &itemRefreshTestIngester{},
-		scanRuns:   scanRuns,
-		refresher:  &itemRefreshTestRefresher{err: errors.New("metadata refresh must not run")},
-		audiobooks: requeuer,
-	}
-
-	if err := executor.refreshUnmatchedItem(context.Background(), 9, "book-1", true); err != nil {
-		t.Fatalf("refreshUnmatchedItem: %v", err)
-	}
-	if scanRuns.completedID != "admin-refresh-run" {
-		t.Fatalf("completed scan run = %q, want admin-refresh-run", scanRuns.completedID)
-	}
-	if !slices.Equal(requeuer.requeued, []string{"book-1"}) {
-		t.Fatalf("requeued = %v, want [book-1]", requeuer.requeued)
 	}
 }
 

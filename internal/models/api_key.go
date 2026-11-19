@@ -4,12 +4,15 @@ import "time"
 
 // APIKey represents a row in the api_keys table.
 type APIKey struct {
-	ID         int64
-	UserID     int
-	Label      string
-	Key        string // creation-only bearer; empty on authentication reads
-	RateTier   string
-	Scopes     []string // empty = unscoped (full access as the owning user)
+	ID       int64
+	UserID   int
+	Label    string
+	Key      string // creation-only bearer; empty on authentication reads
+	RateTier string
+	Scopes   []string // empty = unscoped (full access as the owning user)
+	// ProfileID binds the key to one household profile; empty is an account
+	// key, which may name any profile on its account.
+	ProfileID  string
 	CreatedAt  time.Time
 	LastUsedAt *time.Time // nil if never used
 }
@@ -30,6 +33,7 @@ type APIKeyMetadata struct {
 	KeyPrefix string
 	RateTier  string
 	Scopes    []string
+	ProfileID string // empty for an account key
 	CreatedAt time.Time
 	Revision  int64
 }

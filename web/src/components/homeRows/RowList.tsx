@@ -1,35 +1,22 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DndContext,
-  KeyboardSensor,
-  MouseSensor,
-  TouchSensor,
   closestCenter,
-  useSensor,
-  useSensors,
   type Announcements,
   type DragEndEvent,
   type DragStartEvent,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useMotionSafeSortable } from "@/hooks/useSortableList";
+import { useGripDragSensors, useMotionSafeSortable } from "@/hooks/useSortableList";
 import type { HomeRow } from "@/lib/homeRows/types";
 import type { ListRowProps } from "@/components/calm/ListRow";
 import { useT } from "@/i18n";
 import { useHomeRowTitle } from "@/lib/sectionTitle";
-import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** What the list hands each row so it can be dragged by its grip only. */
 export type SortableRowProps = Pick<ListRowProps, "handleProps" | "ref" | "style" | "dragging">;
-
-const TOUCH_DRAG_DELAY_MS = 200;
 
 function SortableRow({
   id,
@@ -86,15 +73,7 @@ export function RowList({
   // would talk over "Picked up". Only a change of position is announced.
   const lastOver = useRef<UniqueIdentifier | null>(null);
   const shownRows = drag?.rows ?? rows;
-  const scrollBehavior = useMotionScrollBehavior();
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: TOUCH_DRAG_DELAY_MS, tolerance: 5 } }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-      scrollBehavior,
-    }),
-  );
+  const sensors = useGripDragSensors();
 
   const announcements = useMemo<Announcements>(() => {
     const titleOf = (id: UniqueIdentifier) => {

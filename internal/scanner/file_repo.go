@@ -2462,6 +2462,27 @@ func (r *FileRepository) IsActivePath(ctx context.Context, path string) (bool, e
 	return active, nil
 }
 
+// IsActiveFile reports whether media file id is still active in the catalog
+// at exactly path. Scanner paths are authoritative here, as for IsActivePath.
+// The core checks a transcode node's source grant with it: a node may open a
+// granted source only while this holds.
+func (r *FileRepository) IsActiveFile(ctx context.Context, id int, path string) (bool, error) {
+	var active bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM media_files
+			WHERE id = $1
+			  AND file_path = $2
+			  AND missing_since IS NULL
+		)
+	`, id, path).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("checking active media file %d: %w", id, err)
+	}
+	return active, nil
+}
+
 // GetByHash retrieves a media file by its file hash.
 func (r *FileRepository) GetByHash(ctx context.Context, hash string) (*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files WHERE file_hash = $1 LIMIT 1`

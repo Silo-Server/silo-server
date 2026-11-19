@@ -31,7 +31,8 @@ const (
 	// decoding enough of the samples a sheet asked for.
 	ReasonEmpty Reason = "empty"
 	// ReasonOutput means ffmpeg's output did not match its log, so its
-	// frames could not be placed.
+	// frames could not be placed, or that an image passed MaxImageBytes
+	// (ErrImageTooLarge).
 	ReasonOutput Reason = "output"
 )
 

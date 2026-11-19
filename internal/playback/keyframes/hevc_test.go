@@ -39,7 +39,7 @@ func TestHEVCKeyframeIsIDRReadsTheFirstSlice(t *testing.T) {
 		{name: "closed GOP", x265Params: "open-gop=0", laterIDR: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			idx, err := Load(encode(strings.ReplaceAll(test.name, " ", "-")+".mkv", test.x265Params))
+			idx, err := Load(t.Context(), encode(strings.ReplaceAll(test.name, " ", "-")+".mkv", test.x265Params))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -59,7 +59,7 @@ func TestHEVCKeyframeIsIDRReadsTheFirstSlice(t *testing.T) {
 	}
 
 	t.Run("H.264", func(t *testing.T) {
-		idx, err := Load(makeTestMKV(t, ffmpeg))
+		idx, err := Load(t.Context(), makeTestMKV(t, ffmpeg))
 		if err != nil {
 			t.Fatal(err)
 		}

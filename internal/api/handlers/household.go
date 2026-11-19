@@ -57,6 +57,11 @@ func householdManagerAs(
 	if apimw.GetClaims(ctx).IsRemotePlayback() {
 		return false, nil, nil
 	}
+	// Nor does a profile-bound API key: it skips the PIN that proves the
+	// household parent is present.
+	if claims := apimw.GetClaims(ctx); claims != nil && claims.APIKeyProfileID != "" {
+		return false, nil, nil
+	}
 	if activeProfileID == "" {
 		allowed, err := profileLessAdminMayManage(ctx, store)
 		return allowed, nil, err

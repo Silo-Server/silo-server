@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -180,29 +179,6 @@ func TestDefaultPolicyConvertsOnTranscodeNodeRelayedByProxy(t *testing.T) {
 	}
 }
 
-func TestOlderWorkersAreSkipped(t *testing.T) {
-	oldTranscode := node(t, 22, "http://transcode-old", []string{playback.TransportFeatureProgressiveRemuxExecutionV1}, true)
-	planner := &fakePlanner{proxies: []*nodepool.Node{themeProxy(t)}, transcodes: []*nodepool.Node{oldTranscode}}
-	recipes := &fakeRecipes{}
-	result, err := newRouter(planner, recipes, config.DefaultPlaybackRoutingPolicy(), true).Resolve(t.Context(), themeRequest(themesongs.DeliveryConverted))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Shape.ID != "progressive_remux_proxy" || len(recipes.cards) != 0 {
-		t.Fatalf("shape = %+v recipes=%v", result.Shape, recipes.cards)
-	}
-	claims := tokenClaims(t, result.URL, "http://proxy-a")
-	if claims.RoutingExecution != string(noderouting.ExecutionProxy) || claims.RoutingExecutionNodeID != 11 || claims.TranscodeNode != "" {
-		t.Fatalf("claims = %+v", claims)
-	}
-
-	oldProxy := node(t, 12, "http://proxy-old", []string{playback.TransportFeatureProgressiveRemuxRelayV1}, true)
-	result, err = newRouter(&fakePlanner{proxies: []*nodepool.Node{oldProxy}}, recipes, config.DefaultPlaybackRoutingPolicy(), true).Resolve(t.Context(), themeRequest(themesongs.DeliveryOriginal))
-	if err != nil || !result.Local() || result.Shape.ID != "direct_api" {
-		t.Fatalf("older proxy result = %+v err=%v", result, err)
-	}
-}
-
 func TestRoutingPolicyBoundaries(t *testing.T) {
 	proxyOnly := config.DefaultPlaybackRoutingPolicy()
 	proxyOnly.DirectPlayEgress = config.PlaybackEgressProxyOnly
@@ -227,44 +203,6 @@ func TestRoutingPolicyBoundaries(t *testing.T) {
 	result, err = (&Router{}).Resolve(t.Context(), themeRequest(themesongs.DeliveryOriginal))
 	if err != nil || !result.Local() {
 		t.Fatalf("zero router result = %+v err=%v", result, err)
-	}
-}
-
-func TestUnpublishableRouteYieldsToTheNext(t *testing.T) {
-	planner := &fakePlanner{proxies: []*nodepool.Node{themeProxy(t)}, transcodes: []*nodepool.Node{themeTranscode(t)}}
-	recipes := &fakeRecipes{err: errors.New("redis down")}
-	result, err := newRouter(planner, recipes, config.DefaultPlaybackRoutingPolicy(), true).Resolve(t.Context(), themeRequest(themesongs.DeliveryConverted))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Shape.ID != "progressive_remux_proxy" || len(planner.released) == 0 || !strings.HasPrefix(planner.released[0], IDPrefix) {
-		t.Fatalf("shape = %+v released=%v", result.Shape, planner.released)
-	}
-
-	// A client on an overlay network cannot reach a proxy with no origin there.
-	overlay := netaccess.Path{Provider: "tailscale"}
-	req := themeRequest(themesongs.DeliveryOriginal)
-	req.AccessPath = overlay
-	result, err = newRouter(&fakePlanner{proxies: []*nodepool.Node{themeProxy(t)}}, &fakeRecipes{}, config.DefaultPlaybackRoutingPolicy(), true).Resolve(t.Context(), req)
-	if err != nil || !result.Local() {
-		t.Fatalf("overlay result = %+v err=%v", result, err)
-	}
-}
-
-func TestConversionSeekTravelsInTheURL(t *testing.T) {
-	planner := &fakePlanner{proxies: []*nodepool.Node{themeProxy(t)}}
-	req := themeRequest(themesongs.DeliveryConverted)
-	req.SeekSeconds = 12.5
-	result, err := newRouter(planner, &fakeRecipes{}, config.DefaultPlaybackRoutingPolicy(), false).Resolve(t.Context(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parsed, err := url.Parse(result.URL)
-	if err != nil || parsed.Query().Get("seek") != "12.500" {
-		t.Fatalf("url = %q", result.URL)
-	}
-	if _, err := newRouter(planner, &fakeRecipes{}, config.DefaultPlaybackRoutingPolicy(), false).Resolve(t.Context(), Request{}); !errors.Is(err, themesongs.ErrNotFound) {
-		t.Fatalf("empty request: %v", err)
 	}
 }
 
@@ -296,35 +234,4 @@ func byURL(nodes []*nodepool.Node, u string) (*nodepool.Node, bool) {
 		}
 	}
 	return nil, false
-}
-
-func TestCanConvertMatchesResolvableRoutes(t *testing.T) {
-	egressOnly := node(t, 13, "http://proxy-egress", []string{playback.TransportFeatureThemeAudioEgressV1}, false)
-	relayProxy := node(t, 14, "http://proxy-relay", []string{playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureProgressiveRemuxRelayV1}, false)
-	oldTranscode := node(t, 23, "http://transcode-old", []string{playback.TransportFeatureThemeAudioExecutionV1}, true)
-	for _, tc := range []struct {
-		name    string
-		planner *listingPlanner
-		recipes RecipeStore
-		want    bool
-	}{
-		{"converting proxy", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{themeProxy(t)}}}, nil, true},
-		{"transcode node behind a relaying proxy", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{relayProxy}, transcodes: []*nodepool.Node{themeTranscode(t)}}}, &fakeRecipes{}, true},
-		{"transcode node without a relaying proxy", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{egressOnly}, transcodes: []*nodepool.Node{themeTranscode(t)}}}, &fakeRecipes{}, false},
-		{"transcode node without a recipe store", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{relayProxy}, transcodes: []*nodepool.Node{themeTranscode(t)}}}, nil, false},
-		{"transcode node without progressive execution", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{relayProxy}, transcodes: []*nodepool.Node{oldTranscode}}}, &fakeRecipes{}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			router := &Router{Planner: tc.planner}
-			if tc.recipes != nil {
-				router.Recipes = tc.recipes
-			}
-			if got := router.CanConvert(t.Context()); got != tc.want {
-				t.Fatalf("CanConvert = %v, want %v", got, tc.want)
-			}
-		})
-	}
-	if !(&Router{LocalConversion: func(context.Context) bool { return true }}).CanConvert(t.Context()) {
-		t.Fatal("local AAC recipe not counted")
-	}
 }

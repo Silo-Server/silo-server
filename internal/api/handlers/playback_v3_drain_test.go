@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -14,7 +16,7 @@ func (e urlsOnlyEnumerator) TranscodeNodeURLs() []string { return e }
 // A new v3 plan counts no draining node's capabilities: the node refuses every
 // new transport, so a recipe only it advertises could never be placed.
 func TestNewPlanCapabilitiesSkipDrainingNodes(t *testing.T) {
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{URL: "http://draining", Enabled: true, Healthy: true, DrainRequested: true},
 		{URL: "http://stopping", Enabled: true, Healthy: true, DrainState: nodepool.DrainStateDraining},

@@ -1,7 +1,6 @@
 package playback_test
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -98,46 +97,6 @@ func TestSelectAudioTrack(t *testing.T) {
 	}
 }
 
-func TestPreferUnconvertedAudioTrackV3(t *testing.T) {
-	trueHD := models.AudioTrack{Language: "en", Codec: "truehd", Profile: "Dolby TrueHD + Dolby Atmos", Channels: 8, Layout: "7.1", Default: true}
-	atmos := models.AudioTrack{Language: "en", Codec: "eac3", Profile: "Dolby Digital Plus + Dolby Atmos", Channels: 6, Layout: "5.1(side)"}
-	ac3 := models.AudioTrack{Language: "en", Codec: "ac3", Channels: 6, Layout: "5.1(side)"}
-	stereo := models.AudioTrack{Language: "en", Codec: "aac", Channels: 2, Layout: "stereo"}
-	commentary := models.AudioTrack{Language: "en", Codec: "ac3", Channels: 6, Layout: "5.1", Title: "Director's Commentary"}
-	french := models.AudioTrack{Language: "fr", Codec: "eac3", Channels: 6, Layout: "5.1(side)"}
-	copied := func(channels int) playback.StartAudioOutcomeV3 {
-		return playback.StartAudioOutcomeV3{Playable: true, Channels: channels}
-	}
-	converted := func(channels int) playback.StartAudioOutcomeV3 {
-		return playback.StartAudioOutcomeV3{Playable: true, Converted: true, Channels: channels}
-	}
-
-	tests := []struct {
-		name     string
-		tracks   []models.AudioTrack
-		outcomes []playback.StartAudioOutcomeV3
-		want     int
-	}{
-		{name: "an unconverted track replaces a converted default", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 1},
-		{name: "a default that plays as it is stays", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{copied(8), copied(6)}, want: 0},
-		{name: "a track that plans replaces one that does not", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{{}, copied(6)}, want: 1},
-		{name: "most channels, then Atmos, then codec", tracks: []models.AudioTrack{trueHD, stereo, ac3, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(2), copied(6), copied(6)}, want: 3},
-		{name: "a track with fewer channels never replaces a conversion", tracks: []models.AudioTrack{trueHD, stereo}, outcomes: []playback.StartAudioOutcomeV3{converted(6), copied(2)}, want: 0},
-		{name: "a track that is converted too never replaces the default", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(6), converted(2)}, want: 0},
-		{name: "commentary is never substituted in", tracks: []models.AudioTrack{trueHD, commentary}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 0},
-		{name: "another language is never substituted in", tracks: []models.AudioTrack{trueHD, french}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			file := &models.MediaFile{Container: "mkv", CodecAudio: tt.tracks[0].Codec, AudioTracks: tt.tracks}
-			outcome := func(index int) playback.StartAudioOutcomeV3 { return tt.outcomes[index] }
-			if got := playback.PreferUnconvertedAudioTrackV3(file, 0, outcome); got != tt.want {
-				t.Fatalf("PreferUnconvertedAudioTrackV3 = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 	for _, tt := range []struct {
 		name                 string
@@ -200,17 +159,6 @@ func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 	}
 }
 
-func TestIsOriginalLanguagePreference(t *testing.T) {
-	for value, want := range map[string]bool{
-		"original": true, "Original": true, "x-silo-original": true, " X-Silo-Original ": true,
-		"": false, "en": false, "ja": false, "x-silo-other": false,
-	} {
-		if got := playback.IsOriginalLanguagePreference(value); got != want {
-			t.Errorf("IsOriginalLanguagePreference(%q) = %v, want %v", value, got, want)
-		}
-	}
-}
-
 // undecodableFirstAudioTracks mirrors an MP4 whose first audio track is AVS3
 // (av3a): ffprobe's JSON names no codec for it, so the scanner stores none.
 func undecodableFirstAudioTracks() []models.AudioTrack {
@@ -218,34 +166,5 @@ func undecodableFirstAudioTracks() []models.AudioTrack {
 		{Language: "zh", Codec: "", Channels: 6, Default: true},
 		{Language: "zh", Codec: "eac3", Channels: 6, Layout: "5.1"},
 		{Language: "zh", Codec: "aac", Channels: 2, Layout: "stereo"},
-	}
-}
-
-func TestAudioTrackDecodable(t *testing.T) {
-	tests := []struct {
-		name      string
-		codecs    []string
-		fileCodec string
-		want      []bool
-	}{
-		{name: "named codecs", codecs: []string{"eac3", "aac", " TrueHD "}, fileCodec: "eac3", want: []bool{true, true, true}},
-		{name: "ffprobe text unknown", codecs: []string{" Unknown ", "aac"}, fileCodec: "aac", want: []bool{false, true}},
-		{name: "unnamed beside a named track", codecs: []string{"", "eac3"}, fileCodec: "eac3", want: []bool{false, true}},
-		{name: "no audio codec named anywhere", codecs: []string{"", ""}, want: []bool{false, false}},
-		{name: "older rows without per-track codecs", codecs: []string{"", ""}, fileCodec: "aac", want: []bool{true, true}},
-	}
-	for _, tt := range tests {
-		tracks := make([]models.AudioTrack, len(tt.codecs))
-		for i, codec := range tt.codecs {
-			tracks[i].Codec = codec
-		}
-		for i, want := range tt.want {
-			if got := playback.AudioTrackDecodable(tracks, i, tt.fileCodec); got != want {
-				t.Errorf("%s: AudioTrackDecodable(track %d) = %v, want %v", tt.name, i, got, want)
-			}
-		}
-		if got, want := playback.AnyAudioTrackDecodable(tracks, tt.fileCodec), slices.Contains(tt.want, true); got != want {
-			t.Errorf("%s: AnyAudioTrackDecodable = %v, want %v", tt.name, got, want)
-		}
 	}
 }

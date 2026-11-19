@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useLocation, useNavigate } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useDebounce } from "@/hooks/useDebounce";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { buildQueryCatalogHref } from "@/pages/catalogSearchParams";
 import { Search, X } from "lucide-react";
@@ -43,6 +44,8 @@ interface SearchBarProps {
   initialQuery?: string;
   autoFocus?: boolean;
   prominent?: boolean;
+  /** A prominent bar sized as the search page's heading: full width, display type. */
+  hero?: boolean;
   buildSearchHref?: (query: string) => string;
   /** Hint for the compact variant's input, which also names it. */
   placeholder?: string;
@@ -51,11 +54,13 @@ interface SearchBarProps {
 export default function SearchBar({
   initialQuery = "",
   autoFocus = false,
-  prominent = false,
+  prominent: prominentProp = false,
+  hero = false,
   buildSearchHref = buildQueryCatalogHref,
   placeholder: placeholderProp,
 }: SearchBarProps) {
   const t = useT();
+  const prominent = prominentProp || hero;
   const placeholder = placeholderProp ?? t("web.search.placeholder");
   const [query, setQuery] = useState(initialQuery);
   const navigate = useViewTransitionNavigate();
@@ -196,22 +201,44 @@ export default function SearchBar({
   }
 
   if (prominent) {
+    // The hero is the search results page's heading: the query itself, large,
+    // on a hairline. The plain prominent bar is the empty search page's field.
+    const look = hero
+      ? {
+          form: "border-border focus-within:border-ring relative flex w-full items-center border-b transition-colors",
+          icon: "pointer-events-none absolute start-0 h-6 w-6 sm:h-7 sm:w-7",
+          input:
+            "font-display h-auto rounded-none border-0 bg-transparent py-3 ps-10 pe-12 text-3xl leading-tight font-extrabold tracking-[-0.04em] shadow-none focus-visible:ring-0 sm:ps-12 sm:text-4xl md:text-4xl lg:text-5xl dark:bg-transparent",
+          clear:
+            "bg-surface hover:bg-surface-hover absolute end-0 flex size-9 items-center justify-center rounded-full transition-colors",
+        }
+      : {
+          form: "relative w-full max-w-xl",
+          icon: "absolute start-4 top-4 h-5 w-5",
+          input:
+            "search-paint-surface h-14 rounded-[1.4rem] border ps-12 pe-10 text-base shadow-none",
+          clear: "absolute end-4 top-1/2 -translate-y-1/2 p-1",
+        };
     return (
-      <form onSubmit={handleSubmit} className="relative w-full max-w-xl">
-        <Search className="text-muted-foreground absolute start-4 top-4 h-5 w-5" />
+      <form onSubmit={handleSubmit} role={hero ? "search" : undefined} className={look.form}>
+        <Search
+          className={cn("text-muted-foreground", look.icon)}
+          aria-hidden={hero || undefined}
+        />
         <Input
           ref={inputRef}
           placeholder={t("web.search.placeholderProminent")}
+          aria-label={hero ? t("web.search.placeholderProminent") : undefined}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="search-paint-surface h-14 rounded-[1.4rem] border ps-12 pe-10 text-base shadow-none"
+          className={look.input}
         />
         {query && (
           <button
             type="button"
             onClick={handleClear}
             aria-label={t("web.search.clear")}
-            className="text-muted-foreground hover:text-foreground absolute end-4 top-1/2 -translate-y-1/2 p-1"
+            className={cn("text-muted-foreground hover:text-foreground", look.clear)}
           >
             <X className="h-4 w-4" />
           </button>

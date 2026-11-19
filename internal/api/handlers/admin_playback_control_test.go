@@ -30,7 +30,7 @@ func newAdminPlaybackControlTestHandler(t *testing.T) (*AdminPlaybackControlHand
 	commandTracker := playback.NewCommandTracker()
 	t.Cleanup(commandTracker.Close)
 
-	playbackHandler := NewPlaybackHandler(sessionMgr)
+	playbackHandler := newKeyedPlaybackHandler(sessionMgr)
 	playbackHandler.RealtimeHub = realtimeHub
 	playbackHandler.CommandTracker = commandTracker
 	playbackHandler.CommandDispatcher = playback.NewCommandDispatcher(sessionMgr, realtimeHub, commandTracker)

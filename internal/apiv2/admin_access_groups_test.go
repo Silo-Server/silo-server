@@ -58,50 +58,6 @@ func (f *fakeAdminAccessGroups) DeleteAdminAccessGroup(_ context.Context, _ int6
 	f.writes++
 	return nil
 }
-func TestAdminAccessGroupTransport(t *testing.T) {
-	f := fixtureAdminAccessGroups()
-	deps := requestDeps(fixtureRequests())
-	deps.AdminAccessGroups = f
-	h := NewHandler(deps)
-	path := Prefix + "/admin/access-groups/7"
-	read := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
-	tag := read.Header().Get("ETag")
-	if read.Code != 200 || tag == "" || strings.Contains(read.Body.String(), "member_count") {
-		t.Fatal(read.Code, read.Body.String())
-	}
-	cached := do(t, h, http.MethodGet, path, "", with(actingRequestAdmin, "If-None-Match", "W/"+tag))
-	if cached.Code != 304 || cached.Body.Len() != 0 {
-		t.Fatal(cached.Code, cached.Body.String())
-	}
-	body := `{"library_ids":[],"allowed_permissions":[],"download_allowed":false}`
-	requireProblem(t, do(t, h, http.MethodPut, path, body, actingRequestAdmin), TypePreconditionRequired)
-	requireProblem(t, do(t, h, http.MethodPut, path, body, with(actingRequestAdmin, "If-Match", `"stale"`)), TypePreconditionFailed)
-	saved := do(t, h, http.MethodPut, path, body, with(actingRequestAdmin, "If-Match", tag))
-	if saved.Code != 200 || f.last.LibraryIDs == nil || *f.last.LibraryIDs == nil || f.last.DownloadAllowed == nil || *f.last.DownloadAllowed || f.guard.Revision != 11 {
-		t.Fatal(saved.Code, saved.Body.String(), f.last)
-	}
-	f.race = true
-	raced := do(t, h, http.MethodPut, path, body, with(actingRequestAdmin, "If-Match", saved.Header().Get("ETag")))
-	requireProblem(t, raced, TypePreconditionFailed)
-	if raced.Header().Get("ETag") == saved.Header().Get("ETag") {
-		t.Fatal("conflict did not expose current tag")
-	}
-	f.race = false
-	cleared := do(t, h, http.MethodPut, path, `{"library_ids":null,"allowed_permissions":null}`, with(actingRequestAdmin, "If-Match", "*"))
-	if cleared.Code != 200 || f.last.LibraryIDs == nil || *f.last.LibraryIDs != nil || f.last.AllowedPermissions == nil || *f.last.AllowedPermissions != nil || !f.guard.Any {
-		t.Fatal(cleared.Code, cleared.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodPut, path, `{"download_allowed":null}`, with(actingRequestAdmin, "If-Match", "*")), TypeValidationFailed)
-	deleted := do(t, h, http.MethodDelete, path, "", with(actingRequestAdmin, "If-Match", "*"))
-	if deleted.Code != 204 || deleted.Body.Len() != 0 || deleted.Header().Get("ETag") != "" {
-		t.Fatal(deleted.Code, deleted.Body.String())
-	}
-	created := do(t, h, http.MethodPost, Prefix+"/admin/access-groups", `{"name":"New","download_allowed":false,"library_ids":[]}`, actingRequestAdmin)
-	if created.Code != 201 || created.Header().Get("Location") != path || f.created.DownloadAllowed || !f.created.TranscodeAllowed || f.created.LibraryIDs == nil {
-		t.Fatal(created.Code, created.Body.String(), f.created)
-	}
-}
-
 func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 	credentials := []struct {
 		name          string

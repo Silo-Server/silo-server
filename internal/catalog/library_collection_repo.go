@@ -497,6 +497,32 @@ func (r *LibraryCollectionRepository) ListAll(ctx context.Context, libraryID *in
 	return scanLibraryCollections(rows)
 }
 
+// ListVisibleByIDs returns the visible collections among ids, in no
+// particular order. An id that names no collection, or a hidden one, is
+// absent.
+func (r *LibraryCollectionRepository) ListVisibleByIDs(ctx context.Context, ids []string) ([]*models.LibraryCollection, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM library_collections lc
+		%s
+		LEFT JOIN library_collection_items lci ON lci.collection_id = lc.id
+		LEFT JOIN library_collection_libraries lcl ON lcl.collection_id = lc.id
+		WHERE lc.visibility = 'visible' AND lc.id = ANY($1::text[])
+		GROUP BY lc.id, scope_lcl.group_id, scope_lcl.sort_order
+	`, libraryCollectionColumns, libraryCollectionScopeFallbackJoin)
+
+	rows, err := r.pool.Query(ctx, query, ids)
+	if err != nil {
+		return nil, fmt.Errorf("listing library collections by id: %w", err)
+	}
+	defer rows.Close()
+
+	return scanLibraryCollections(rows)
+}
+
 // ListContainingItem returns the visible collections that store a membership
 // row for mediaItemID, ordered by title. The membership subquery is served by
 // the library_collection_items media_item_id index. Smart (live-query)

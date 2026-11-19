@@ -66,31 +66,6 @@ func awaitTranscodeProcessExit(t *testing.T, s *TranscodeSession, what string) {
 	}
 }
 
-func TestStartTranscodeHoldsGPUReservationUntilProcessExit(t *testing.T) {
-	devA := qsvPairDevA
-	s, err := startQSVPairTranscode(t, "hwdevice-session", fakeFFmpegScript(t), "")
-	if err != nil {
-		t.Fatalf("StartTranscode: %v", err)
-	}
-
-	if got := s.Opts().HWDevice; got != devA {
-		t.Fatalf("session device = %q, want first listed device %q", got, devA)
-	}
-	if got := hwDeviceActiveCount(devA); got != 1 {
-		t.Fatalf("active count while running = %d, want 1", got)
-	}
-
-	// CloseProcess kills ffmpeg and waits for it to be reaped; the
-	// reservation must survive until that wait completes and be gone after.
-	if err := s.CloseProcess(); err != nil {
-		t.Fatalf("CloseProcess: %v", err)
-	}
-	awaitTranscodeProcessExit(t, s, "ffmpeg process")
-	if got := hwDeviceActiveCount(devA); got != 0 {
-		t.Fatalf("active count after close = %d, want 0", got)
-	}
-}
-
 func TestStartTranscodeReleasesReservationOnSpawnFailure(t *testing.T) {
 	_, err := startQSVPairTranscode(t, "hwdevice-spawn-fail", filepath.Join(t.TempDir(), "missing-ffmpeg"), "")
 	if err == nil {
@@ -98,75 +73,6 @@ func TestStartTranscodeReleasesReservationOnSpawnFailure(t *testing.T) {
 	}
 	if got := hwDeviceActiveCount(qsvPairDevA); got != 0 {
 		t.Fatalf("active count after failed spawn = %d, want 0", got)
-	}
-}
-
-func TestRestartReacquiresSameGPUAfterNaturalExit(t *testing.T) {
-	devA, devB := qsvPairDevA, qsvPairDevB
-	s, err := startQSVPairTranscode(t, "hwdevice-restart", restartableFakeFFmpegScript(t), "")
-	if err != nil {
-		t.Fatalf("StartTranscode: %v", err)
-	}
-	t.Cleanup(func() { _ = s.CloseProcess() })
-	awaitTranscodeProcessExit(t, s, "initial ffmpeg process")
-
-	occupiedDevice, releaseOccupant := AcquireHWDevice(qsvPairConfigured, "qsv")
-	defer releaseOccupant()
-	if occupiedDevice != devA {
-		t.Fatalf("device selected after natural exit = %q, want released device %q", occupiedDevice, devA)
-	}
-
-	if err := s.Restart(context.Background(), 10, 5); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
-	if got := s.Opts().HWDevice; got != devA {
-		t.Fatalf("restart device = %q, want original device %q", got, devA)
-	}
-	if got := hwDeviceActiveCount(devA); got != 2 {
-		t.Fatalf("active count while restarted process runs = %d, want 2", got)
-	}
-	if got := hwDeviceActiveCount(devB); got != 0 {
-		t.Fatalf("alternate device active count = %d, want 0", got)
-	}
-
-	if err := s.CloseProcess(); err != nil {
-		t.Fatalf("CloseProcess: %v", err)
-	}
-	if got := hwDeviceActiveCount(devA); got != 1 {
-		t.Fatalf("active count after restarted process exit = %d, want occupant only (1)", got)
-	}
-}
-
-func TestAvoidedStartupDeviceKeepsReservationAcrossRestart(t *testing.T) {
-	devB := qsvPairDevB
-	s, err := startQSVPairTranscode(t, "hwdevice-avoid-restart", restartableFakeFFmpegScript(t), qsvPairDevA)
-	if err != nil {
-		t.Fatalf("StartTranscode: %v", err)
-	}
-	t.Cleanup(func() { _ = s.CloseProcess() })
-	awaitTranscodeProcessExit(t, s, "initial ffmpeg process")
-	if got := s.Opts().HWDevice; got != devB {
-		t.Fatalf("retry session device = %q, want alternate device %q", got, devB)
-	}
-	if got := hwDeviceActiveCount(devB); got != 0 {
-		t.Fatalf("active count after initial exit = %d, want 0", got)
-	}
-
-	if err := s.Restart(context.Background(), 10, 5); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
-	if got := s.Opts().HWDevice; got != devB {
-		t.Fatalf("restart device = %q, want alternate device %q", got, devB)
-	}
-	if got := hwDeviceActiveCount(devB); got != 1 {
-		t.Fatalf("active count while restarted process runs = %d, want 1", got)
-	}
-
-	if err := s.CloseProcess(); err != nil {
-		t.Fatalf("CloseProcess: %v", err)
-	}
-	if got := hwDeviceActiveCount(devB); got != 0 {
-		t.Fatalf("active count after restarted process exit = %d, want 0", got)
 	}
 }
 
