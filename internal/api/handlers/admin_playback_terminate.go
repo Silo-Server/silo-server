@@ -26,16 +26,16 @@ import (
 //  3. The receipt carries authority_revoked and client_notified separately; it
 //     never promises that buffered media stops instantly.
 //
-// A terminate of a session the server already ended for an administrator
-// (an earlier terminate, or the fallback for a stop the player did not
-// confirm) converges: 200 with already_revoked and delivery "none", and
-// nothing is dispatched. The answer rests on the session's attempt row,
-// which stays readable for at least 24 hours after the play started
-// (playback.MaxTokenTTL; a replan onto a new stream extends it). After it
-// lapses, the session is unknown (404), as it is when its player stopped it
-// (including a player that carried out an administrator's stop: its own stop
-// wins the row), when it expired, or when it has no attempt row (a Jellyfin
-// play). In a cluster the terminate runs on the replica holding the
+// A terminate of a session whose attempt row the server already stopped for
+// an administrator (an earlier terminate, the fallback for a stop the player
+// did not confirm, or the player's socket confirmation of a stop when it
+// reached the row first) converges: 200 with already_revoked and delivery
+// "none", and nothing is dispatched. The row stays readable for at least 24
+// hours after the play started (playback.MaxTokenTTL; a replan onto a new
+// stream extends it). After it lapses, the session is unknown (404), as it is
+// when the row records the player's own stop (including a player whose HTTP
+// stop beat its confirmation of an administrator's stop), when it expired, or
+// when it has no attempt row (a Jellyfin play). In a cluster the terminate runs on the replica holding the
 // session's control lane (see Terminate).
 
 const (

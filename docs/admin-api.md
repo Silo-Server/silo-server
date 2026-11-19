@@ -2612,19 +2612,21 @@ The JSON body is required (`{}` when there is no reason) and carries an optional
 `session_id`, `authority_revoked`, `already_revoked`, `durable_state`,
 `client_notified`, `delivery` (`dispatched`, `unavailable`, `failed`, `none`)
 and `command_id` when a dismissal was issued. `durable_state` reports `stopped`:
-a terminate that succeeds always commits the terminal stop. A terminate of a
-session the server already ended for an administrator, by an earlier terminate
-or by the stop fallback above, converges: `200` with `authority_revoked: true`, `already_revoked: true`,
-`delivery: "none"` and `client_notified: false`, and nothing is dispatched to the
-player, on every replica. The server knows this from the session's playback
-attempt record, which stays readable for at least 24 hours after the play
-started (a replan onto a new stream extends it). After that record lapses the
-session is unknown and the answer is `404`. A session that is no longer live
-because its player stopped it, it expired, or the server abandoned it is also
-`404`, and so is one whose player carried out an administrator's stop: the
-player's own stop ends that attempt, so the record shows a player stop. There
-is nothing left to end. A Jellyfin-protocol play keeps no attempt
-record, so a repeat terminate of one is `404` too. A player that is offline
+a terminate that succeeds always commits the terminal stop. The answer to a
+session that is no longer live depends on which stop its playback attempt
+record shows. When the record shows an administrator's end, the terminate
+converges on every replica: `200` with `authority_revoked: true`,
+`already_revoked: true`, `delivery: "none"` and `client_notified: false`, and
+nothing is dispatched to the player. That end can come from an earlier
+terminate, from the stop fallback above, or from a player confirming an
+administrator's stop over the control socket. When the record shows the
+player's own stop, the answer is `404`. That includes a player that carried
+out an administrator's stop when its HTTP stop reached the server before its
+confirmation did. An expired or abandoned session is `404` too. The record
+stays readable for at least 24 hours after the play started (a replan onto a
+new stream extends it). After it lapses the session is unknown and the answer
+is `404`. A Jellyfin-protocol play keeps no attempt record, so a repeat
+terminate of one is `404` too. A player that is offline
 yields `authority_revoked: true` with `client_notified: false` and `200`. The
 ledger row keeps `natural_idempotent`. An unknown session is `404`; a session
 whose stop cannot be committed in its current state is `409`. The
