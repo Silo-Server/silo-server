@@ -45,7 +45,7 @@ connection for its locks.
 | Taste profiles | `recommendations.taste_profiles_cron` (04:00) | Rebuild every profile with signals or a taste row |
 | Co-watch | `recommendations.cowatch_cron` (04:30) | Rebuild `item_cowatch`, pruning pairs the run did not rewrite |
 | Cache | `recommendations.recommendations_cron` (05:00) | Global rows, then the rows of every profile with a taste-profile row, oldest For You row first (profiles without one first) |
-| Discover recommendations | `recommendations.external_cron` (06:00) | Retention, then, when the feature is on, the outside-title pool and every profile's outside rows (see Outside titles) |
+| Discover recommendations | `recommendations.external_cron` (06:00) | Retention, then, when the feature is on, the outside-title pool and every profile's outside rows (see Discover recommendations) |
 | Stale sweep | every 5 minutes, own lock | Refresh up to 50 stale profiles, oldest mark first; a sweep that refreshed or failed one is recorded under `recommendations.stale_sweep` |
 
 At startup the worker also builds the global rows when none are cached, so
@@ -634,7 +634,9 @@ runs as soon as it is turned off.
   profile and purges its rows when it does not, as cached rows are handled.
 - **Retention.** A title is deleted 150 days after its last successful
   detail fetch, and a title or source nothing referenced for 30 days; this
-  runs whether or not the feature is on.
+  runs whether or not the feature is on. A server started with
+  recommendations off has no worker, so it runs `RunExternalRetention`, which
+  applies the same rule at startup and daily.
 - **Reset.** The embeddings reset claims this job with the others and, in its
   transaction, deletes every outside vector and outside row. Outside titles,
   sources and links stay, and the next run embeds them again.

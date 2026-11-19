@@ -3117,6 +3117,11 @@ func main() {
 			// their node has loaded it (WithPolicyCheck above).
 			policySystem.OnChangeApplied(recWorker.NotifyPolicyChanged)
 		}
+	} else if deps.DB != nil {
+		// With recommendations off there is no worker, whose outside-title
+		// job is what applies retention. Titles a server stored while they
+		// were on still have to age out.
+		go recommendations.RunExternalRetention(appCtx, deps.DB)
 	}
 
 	// Client IP resolver with trusted proxy config.

@@ -310,6 +310,25 @@ func TestExternalJobWithFeatureOffOnlyPrunesDB(t *testing.T) {
 	}
 }
 
+// A server started with recommendations off has no worker; its retention
+// loop still deletes an expired title.
+func TestRunExternalRetentionPrunesWithoutAWorkerDB(t *testing.T) {
+	s := newExternalRowsScenario(t, 936_000_000)
+	s.f.exec(`UPDATE external_titles SET detail_fetched_at = now() - interval '200 days' WHERE media_type = 'movie' AND tmdb_id = $1`, s.titles[0].TMDBID)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunExternalRetention(ctx, s.pool)
+	}()
+	eventually(t, "the expired title to be pruned", func() bool {
+		stored, err := s.f.repo.externalTitlesByKeys(context.Background(), s.titles[:1])
+		return err == nil && len(stored) == 0
+	})
+	cancel()
+	<-done
+}
+
 // Reads serve the stored row with card data only while the feature is on,
 // and drop a reason the viewer cannot see while keeping its title.
 func TestExternalRecommendationsReadDB(t *testing.T) {

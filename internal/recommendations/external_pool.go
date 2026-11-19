@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -893,11 +894,15 @@ func (r *Repo) externalStoredTitleIDs(ctx context.Context) ([]externalTitleIDs, 
 // has referenced for externalRetentionUnreferenced. It calls neither TMDB nor
 // the embedding provider, so it runs whether or not the feature is enabled.
 func (e *Engine) PruneExternalTitles(ctx context.Context) (ExternalRetentionResult, error) {
-	now, err := e.repo.Now(ctx)
+	return pruneExternalTitles(ctx, e.repo)
+}
+
+func pruneExternalTitles(ctx context.Context, repo *Repo) (ExternalRetentionResult, error) {
+	now, err := repo.Now(ctx)
 	if err != nil {
 		return ExternalRetentionResult{}, err
 	}
-	res, err := e.repo.PruneExternalTitles(ctx, now.Add(-externalRetentionDetail), now.Add(-externalRetentionUnreferenced))
+	res, err := repo.PruneExternalTitles(ctx, now.Add(-externalRetentionDetail), now.Add(-externalRetentionUnreferenced))
 	if err != nil {
 		return res, err
 	}
@@ -905,4 +910,28 @@ func (e *Engine) PruneExternalTitles(ctx context.Context) (ExternalRetentionResu
 		slog.InfoContext(ctx, "outside titles pruned", "component", "recommendations", "titles", res.Titles, "sources", res.Sources, "links", res.Links)
 	}
 	return res, nil
+}
+
+// externalRetentionInterval is how often RunExternalRetention prunes.
+const externalRetentionInterval = 24 * time.Hour
+
+// RunExternalRetention applies outside-title retention now and then daily,
+// until ctx ends. It is for a server started with recommendations off: such
+// a server has no Worker, so nothing else would delete the TMDB data an
+// earlier configuration stored. Every API server runs it; the deletes are
+// idempotent.
+func RunExternalRetention(ctx context.Context, pool *pgxpool.Pool) {
+	repo := NewRepo(pool)
+	ticker := time.NewTicker(externalRetentionInterval)
+	defer ticker.Stop()
+	for {
+		if _, err := pruneExternalTitles(ctx, repo); err != nil && ctx.Err() == nil {
+			slog.WarnContext(ctx, "outside-title retention failed", "component", "recommendations", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
