@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
-import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import { v2ErrorText } from "@/api/v2/request";
 import type { UserDevice } from "@/api/types";
 import { useT } from "@/i18n";
@@ -330,6 +334,7 @@ function DeviceDetail({
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const appearanceSetting = settings[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE];
   const appearance = useAutosavedDraft(parseSubtitleAppearance(appearanceSetting?.value));
+  const appearanceAuthority = useRef<ProfileRequestContextSnapshot | null>(null);
   const appearanceChangedHere = appearanceSetting?.scope === "profile_device";
 
   const changedCount = device.changed_count;
@@ -567,8 +572,14 @@ function DeviceDetail({
         onChange={(patch) => {
           // A queued save goes out once the one in flight settles, and the
           // request carries whichever profile is active then. Drop it if the
-          // person has switched profiles since, so it can't land on another one.
+          // person has switched profiles since, so it can't land on another
+          // one: before this edit merges into it, and again when it is sent.
+          const previous = appearanceAuthority.current;
+          if (previous && !isCapturedProfileAuthorityActive(previous)) {
+            appearance.discardQueued();
+          }
           const authority = captureProfileRequestContext();
+          appearanceAuthority.current = authority;
           const save = async (next: SubtitleAppearance) => {
             if (authority && !isCapturedProfileAuthorityActive(authority)) {
               throw new Error("profile changed before the save was sent");
