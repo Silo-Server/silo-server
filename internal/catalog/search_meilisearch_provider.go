@@ -8,11 +8,13 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -25,7 +27,6 @@ const (
 	meilisearchDeepOffsetLimit         = 500
 	meilisearchShortHybridMinTerms     = 2
 	meilisearchStrictMatchingTermCount = 2
-	meilisearchTitleOnlyTermCount      = 2
 	meilisearchCircuitCooldown         = 30 * time.Second
 	meilisearchQueryVectorCacheTTL     = 15 * time.Minute
 	meilisearchQueryVectorCacheMax     = 1024
@@ -47,8 +48,16 @@ const (
 	// semanticCapabilityProbeTTL rate-limits the embedder capability check
 	// (settings fetch + hybrid probe) so a healthy index is validated at most
 	// once per window. The probe is advisory only and never trips the circuit.
-	semanticCapabilityProbeTTL              = 5 * time.Minute
-	meilisearchFederationCapabilityCacheTTL = 5 * time.Minute
+	semanticCapabilityProbeTTL = 5 * time.Minute
+	// meilisearchSemanticCandidateLimit is how many hits the meaning-only half
+	// of a hybrid search fetches; Silo drops those below
+	// meilisearchSemanticScoreFloor itself. The floor is not sent as
+	// rankingScoreThreshold because, when fewer than limit hits clear a
+	// threshold on a vector query, Meilisearch keeps searching until its
+	// searchCutoffMs and the request outlives the client timeout. The cap also
+	// bounds the meaning half when a model scores most of the library above
+	// the floor.
+	meilisearchSemanticCandidateLimit = 100
 	// meilisearchSemanticMinCosine is the least cosine similarity between a
 	// search's embedding and an item's embedding for the item to count as a
 	// match by meaning. Without a floor the meaning-only half of a hybrid
@@ -60,15 +69,58 @@ const (
 	// score lower than two similar sentences, so it may drop some weak
 	// meaning matches.
 	meilisearchSemanticMinCosine = 0.3
+	// meilisearchSemanticTopMarginShare bounds how far below a search's best
+	// meaning match another meaning match may score, as a share of the range
+	// between the score floor and a perfect score. A search for a title has
+	// one standout match and then a long drop, while a descriptive search
+	// has a cluster of near-equal matches, so the margin keeps the cluster
+	// and drops the tail a title search would otherwise drag in. Measured
+	// with gemini-embedding-2, binary quantized: best scores of 0.64-0.72
+	// against 0.57-0.67 for the hundredth, and a floor of 0.597, which makes
+	// 0.1 a margin of 0.04. Taking a share of the range keeps the margin in
+	// proportion for full-precision vectors and zero-padded models, whose
+	// scores span a different range.
+	meilisearchSemanticTopMarginShare = 0.1
+	// meilisearchKeywordProximityShare is the least proximity score a keyword
+	// hit may have, as a share of the best keyword hit's, to stay in the
+	// results (see meilisearchKeywordMatchCount). Meilisearch scores query
+	// words that sit next to each other 1.00, words a few positions apart
+	// 0.75, 0.57, 0.50 or 0.43, and words in different fields or different
+	// cast names 0.25, 0.20 or 0.14. 0.6 of an adjacent best match keeps the
+	// near matches ("The Living Matrix" at 0.75 for "the matrix") and drops
+	// the scattered ones ("tom hanks" finding Colin Hanks with Tom Kenny at
+	// 0.25). Being relative, it keeps a search whose best match is itself
+	// scattered: "lord rings" ranks the Lord of the Rings titles at 0.50.
+	meilisearchKeywordProximityShare = 0.6
 )
 
-var meilisearchTitleSearchAttributes = []string{
+// meilisearchTwoTermSearchAttributes are the attributes a two-term search's
+// keyword query matches; genres and keywords are left out. Studios and
+// networks are included so a name such as "studio ghibli" finds that studio's
+// work; people are matched by the people query (peopleSearchRequest). Ranking
+// between attributes follows the index's searchableAttributes order, not this
+// list's. The year is included because catalogSearchQueryTerms does not count
+// a year hint as a term, so "blade runner 1982" is a two-term search whose
+// year still has to match under the "all" matching strategy.
+var meilisearchTwoTermSearchAttributes = []string{
 	"title",
 	"original_title",
 	"sort_title",
 	"title_variants",
-	"overview",
+	"studios",  //nolint:goconst // A Meilisearch document attribute, not the SQL column of the same name.
+	"networks", //nolint:goconst // As above.
+	"year",     //nolint:goconst // As above; not a sort field.
 }
+
+// meilisearchKeywordSearchAttributes are the attributes the keyword query of
+// a search of other than two terms matches: every attribute the index
+// searches but people, which the people query matches.
+var meilisearchKeywordSearchAttributes = func() []string {
+	searchable, _ := catalogSearchMeilisearchIndexSettings()["searchableAttributes"].([]string)
+	return slices.DeleteFunc(slices.Clone(searchable), func(attribute string) bool {
+		return attribute == meilisearchPeopleAttribute
+	})
+}()
 
 type meilisearchIndexStateStore interface {
 	GetState(ctx context.Context, provider string) (SearchIndexState, error)
@@ -128,10 +180,9 @@ type MeilisearchSearchProvider struct {
 	capMu       sync.Mutex
 	capCache    CatalogSearchSemanticCapability
 	capCachedAt time.Time
-
-	federationMu            sync.Mutex
-	federationUnsupported   bool
-	federationUnsupportedAt time.Time
+	// capCacheUID is the active index capCache describes; a rebuild that
+	// publishes another index makes the cached answer stale at once.
+	capCacheUID string
 }
 
 type cachedCatalogSearchQueryVector struct {
@@ -233,7 +284,7 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 	}
 
 	keywordOnly := compatibility == catalogSearchIndexKeywordOnly
-	result, err := p.searchMeilisearch(ctx, req, state.ActiveIndexUID, keywordOnly)
+	result, err := p.searchMeilisearch(ctx, req, state, keywordOnly)
 	if err != nil {
 		// The cached state may point at an index a rebuild just swapped away
 		// and deleted. Refetch and retry Meilisearch once so every API node's
@@ -253,7 +304,7 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 					result, retryErr := p.searchMeilisearch(
 						ctx,
 						req,
-						refreshedState.ActiveIndexUID,
+						refreshedState,
 						refreshedCompatibility == catalogSearchIndexKeywordOnly,
 					)
 					if retryErr == nil {
@@ -281,6 +332,20 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 	}
 	result.IndexPendingEvents = pending
 	return result, nil
+}
+
+// searchSettingsCurrent reports whether the active index is known to have
+// this server's index settings (catalogSearchMeilisearchIndexSettings). Until
+// the sync task has applied them in place, a search must not depend on them:
+// Meilisearch answers a search whose attributesToSearchOn names an attribute
+// the index does not search with 400 invalid_search_attributes_to_search_on,
+// so such a search omits attributesToSearchOn and searches every attribute
+// the index searches. Any other request a pending setting makes invalid gets
+// a 4xx, which falls back to PostgreSQL for that request without tripping the
+// circuit. The fingerprint is recorded only after Meilisearch has finished
+// applying the settings, and every node reads it with the index state.
+func searchSettingsCurrent(state SearchIndexState) bool {
+	return state.SettingsFingerprint == catalogSearchMeilisearchSettingsFingerprint
 }
 
 func isMeilisearchIndexNotFound(err error) bool {
@@ -345,7 +410,8 @@ func (p *MeilisearchSearchProvider) invalidateIndexState() {
 	p.stateMu.Unlock()
 }
 
-func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req CatalogSearchRequest, indexUID string, keywordOnly bool) (*CatalogSearchResult, error) {
+func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req CatalogSearchRequest, state SearchIndexState, keywordOnly bool) (*CatalogSearchResult, error) {
+	indexUID := state.ActiveIndexUID
 	target := req.Offset + req.Limit + 1
 	if target <= 0 {
 		target = 1
@@ -360,22 +426,16 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	scanned := 0
 	estimatedTotalHits := 0
 	exhausted := false
-	var baseSearchReq meilisearchSearchRequest
-	var semanticFallback string
-	if keywordOnly {
-		baseSearchReq = p.buildMeilisearchKeywordSearchRequest(req)
-		semanticFallback = "search index rebuild required; using Meilisearch keyword search"
-	} else {
-		baseSearchReq, semanticFallback = p.buildMeilisearchSearchRequest(ctx, req)
-	}
-	// Hybrid searches always federate: see buildFederatedSearchRequest.
-	useFederation := baseSearchReq.Hybrid != nil
-	if useFederation && p.isFederationUnsupported() {
-		semanticFallback = "meilisearch federation unsupported; using keyword search"
-		baseSearchReq.Vector = nil
-		baseSearchReq.Hybrid = nil
-		useFederation = false
-	}
+	baseSearchReq, semanticFallback := p.buildIndexSearchRequest(ctx, req, state, keywordOnly)
+	// semanticRanked counts meaning hits in the latest hybrid merge; the
+	// result reports hybrid mode only when some are.
+	semanticRanked := 0
+	// seen keeps a later batch from repeating an item an earlier batch
+	// already returned.
+	seen := map[string]struct{}{}
+	// keywordBest is the first hit of a keyword scan; later batches keep only
+	// the hits that match as well as it (keywordSearch).
+	var keywordBest *meilisearchSearchHit
 
 	// fallBackToKeyword switches the scan to keyword search. Keyword ranking
 	// differs from hybrid ranking, so the scan restarts from the first hit
@@ -384,8 +444,9 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 		semanticFallback = reason
 		baseSearchReq.Vector = nil
 		baseSearchReq.Hybrid = nil
-		useFederation = false
-		accessible, meiliOffset, scanned = nil, 0, 0
+		accessible, meiliOffset, scanned, semanticRanked = nil, 0, 0, 0
+		keywordBest = nil
+		clear(seen)
 	}
 
 	for len(accessible) < target && !exhausted {
@@ -402,48 +463,44 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 		if remaining := meilisearchCandidateScanCap - scanned; remaining < nextLimit {
 			nextLimit = remaining
 		}
-		searchReq := baseSearchReq
-		searchReq.Offset = meiliOffset
-		searchReq.Limit = nextLimit
-		var resp meilisearchSearchResponse
-		var err error
-		if useFederation {
-			resp, err = p.client.FederatedSearch(ctx, p.buildFederatedSearchRequest(indexUID, req, baseSearchReq, meiliOffset, nextLimit))
-			if err == nil {
-				p.markFederationSupported()
-			} else if isMeilisearchFederationUnsupported(err) {
-				p.markFederationUnsupported()
-				fallBackToKeyword("meilisearch federation unsupported; using keyword search")
+		var batch []string
+		var batchHits int
+		if _, withPeople := peopleSearchRequest(baseSearchReq); baseSearchReq.Hybrid != nil || withPeople {
+			ids, ranked, err := p.rankFromFirstHit(ctx, indexUID, req, baseSearchReq, meiliOffset+nextLimit)
+			switch {
+			case err != nil && baseSearchReq.Hybrid != nil:
+				p.warnHybridFallback(ctx, err)
+				fallBackToKeyword("meilisearch hybrid search failed: " + err.Error())
 				continue
+			case err != nil:
+				return nil, err
 			}
+			semanticRanked, estimatedTotalHits = ranked, len(ids)
+			batch, batchHits = ids[min(meiliOffset, len(ids)):], max(len(ids)-meiliOffset, 0)
 		} else {
-			resp, err = p.client.Search(ctx, indexUID, searchReq)
+			searchReq := baseSearchReq
+			searchReq.Offset, searchReq.Limit = meiliOffset, nextLimit
+			keyword, err := p.keywordSearch(ctx, indexUID, searchReq, keywordBest)
+			if err != nil {
+				return nil, err
+			}
+			keywordBest, estimatedTotalHits = keyword.Best, keyword.EstimatedTotalHits
+			batch, batchHits = meilisearchHitIDs(keyword.Kept), len(keyword.Kept)
 		}
-		if err != nil && baseSearchReq.Hybrid != nil {
-			fallBackToKeyword("meilisearch hybrid search failed: " + err.Error())
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		estimatedTotalHits = resp.EstimatedTotalHits
-		if len(resp.Hits) == 0 {
+		if batchHits == 0 {
 			exhausted = true
 			break
 		}
-		scanned += len(resp.Hits)
-		meiliOffset += len(resp.Hits)
+		scanned += batchHits
+		meiliOffset += batchHits
 
-		ids := make([]string, 0, len(resp.Hits))
-		position := make(map[string]int, len(resp.Hits))
-		for i, hit := range resp.Hits {
-			id := strings.TrimSpace(hit.ContentID)
-			if id == "" {
+		ids := make([]string, 0, len(batch))
+		position := make(map[string]int, len(batch))
+		for i, id := range batch {
+			if _, exists := seen[id]; exists {
 				continue
 			}
-			if _, exists := position[id]; exists {
-				continue
-			}
+			seen[id] = struct{}{}
 			position[id] = i
 			ids = append(ids, id)
 		}
@@ -455,8 +512,11 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 
 		// A short page is the only reliable end-of-results signal.
 		// estimatedTotalHits is an estimate and may undercount; treating it as
-		// authoritative could stop pagination early and drop real results.
-		if len(resp.Hits) < nextLimit {
+		// authoritative could stop pagination early and drop real results. A
+		// keyword batch is also short when keywordSearch cut it, which means
+		// the rest matches worse. A batch ranked from the first hit is short
+		// only when that ranking is, which means the kept hits ran out.
+		if batchHits < nextLimit {
 			exhausted = true
 		}
 	}
@@ -464,6 +524,33 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	if len(accessible) < target && !exhausted {
 		return nil, fmt.Errorf("meilisearch candidate scan cap reached before page was proven")
 	}
+	// The hybrid downgrade above nils baseSearchReq.Hybrid on error, so a
+	// hybrid request that fell back to keyword reports keyword. One whose
+	// meaning half matched nothing above the floor reports keyword too.
+	mode, semanticUsed := searchModeKeyword, false
+	if baseSearchReq.Hybrid != nil && semanticRanked > 0 {
+		mode, semanticUsed = searchModeHybrid, true
+	}
+	return meilisearchResultPage(req, accessible, estimatedTotalHits, mode, semanticUsed, semanticFallback), nil
+}
+
+// rankFromFirstHit returns up to limit IDs of a ranking that is merged in Go
+// and so has no offset in Meilisearch: a hybrid search (hybridSearch), or a
+// keyword search with its people query (keywordRanking). A caller paging
+// through one asks each round for everything up to the end of its batch and
+// takes the batch. ranked counts the IDs the meaning half placed.
+func (p *MeilisearchSearchProvider) rankFromFirstHit(ctx context.Context, indexUID string, req CatalogSearchRequest, base meilisearchSearchRequest, limit int) (ids []string, ranked int, err error) {
+	if base.Hybrid != nil {
+		merged, err := p.hybridSearch(ctx, indexUID, req, base, limit)
+		return merged.IDs, merged.SemanticRanked, err
+	}
+	ids, _, err = p.keywordRanking(ctx, indexUID, base, limit)
+	return ids, 0, err
+}
+
+// meilisearchResultPage cuts the requested page from the accessible items of
+// a search's scan.
+func meilisearchResultPage(req CatalogSearchRequest, accessible []*models.MediaItem, estimatedTotalHits int, mode string, semanticUsed bool, fallbackReason string) *CatalogSearchResult {
 	page := []*models.MediaItem{}
 	if req.Offset < len(accessible) {
 		end := req.Offset + req.Limit
@@ -479,13 +566,6 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	} else if estimatedTotalHits == 0 {
 		total = 0
 	}
-	// Derive Mode/SemanticUsed from the POST-downgrade request: the hybrid
-	// downgrade above nils baseSearchReq.Hybrid on error, so a hybrid request
-	// that fell back to keyword correctly reports keyword / semantic_used=false.
-	mode, semanticUsed := "keyword", false
-	if baseSearchReq.Hybrid != nil {
-		mode, semanticUsed = "hybrid", true
-	}
 	return &CatalogSearchResult{
 		Items:          page,
 		Total:          total,
@@ -494,8 +574,28 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 		Provider:       SearchProviderMeilisearch,
 		Mode:           mode,
 		SemanticUsed:   semanticUsed,
-		FallbackReason: semanticFallback,
-	}, nil
+		FallbackReason: fallbackReason,
+	}
+}
+
+// buildIndexSearchRequest builds the search request for the active index
+// state describes and the reason it does less than the configuration asks,
+// if it does: keyword only when the index's vectors are not current, and
+// without attributesToSearchOn when its settings are not
+// (searchSettingsCurrent).
+func (p *MeilisearchSearchProvider) buildIndexSearchRequest(ctx context.Context, req CatalogSearchRequest, state SearchIndexState, keywordOnly bool) (meilisearchSearchRequest, string) {
+	var request meilisearchSearchRequest
+	var fallback string
+	if keywordOnly {
+		request = p.buildMeilisearchKeywordSearchRequest(req)
+		fallback = "search index rebuild required; using Meilisearch keyword search"
+	} else {
+		request, fallback = p.buildMeilisearchSearchRequest(ctx, req)
+	}
+	if !searchSettingsCurrent(state) {
+		request.AttributesToSearchOn = nil
+	}
+	return request, fallback
 }
 
 func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Context, req CatalogSearchRequest) (meilisearchSearchRequest, string) {
@@ -517,6 +617,10 @@ func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Co
 	}
 	if p.config.Vectorizer == nil {
 		return searchReq, "semantic search enabled but query vectorizer is unavailable"
+	}
+	if normalizeCatalogSearchQueryForVector(req.Query) == "" {
+		// Every term is an exclusion (-word), which leaves nothing to embed.
+		return searchReq, ""
 	}
 	vector, err := p.cachedQueryVector(ctx, req.Query)
 	if err != nil {
@@ -565,27 +669,125 @@ func searchRequestMixesEpisodeAndMedia(itemTypes []string) bool {
 	return includesEpisodes && (len(itemTypes) == 0 || len(mediaTypes) > 0)
 }
 
-// buildFederatedSearchRequest runs a hybrid search as federated queries
-// instead of one Meilisearch hybrid query. A hybrid query applies a
-// rankingScoreThreshold to its keyword and meaning halves alike, so a floor
-// that drops unrelated meaning matches would also drop weak keyword matches.
-// Split apart, the keyword query keeps every keyword match, and only the
-// meaning-only query carries the floor. The weights are the hybrid ratio, as
-// Meilisearch weighs the two halves of a hybrid query, and federation drops
-// an item found by both queries from the lower-ranked one. A request that
-// mixes episodes with other media adds a keyword-only episode query, because
-// episodes carry no vectors.
-func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
+// meilisearchHybridMerge is a hybrid search's merged ranking.
+type meilisearchHybridMerge struct {
+	// IDs is the ranking from its first hit.
+	IDs []string
+	// SemanticKept counts meaning hits that cleared the score floor and the
+	// margin below the best one.
+	SemanticKept int
+	// SemanticRanked counts IDs that the meaning half placed in IDs.
+	SemanticRanked int
+}
+
+// hybridSearch runs a hybrid search as separate keyword and meaning-only
+// queries in one non-federated multi-search and merges them with
+// mergeMeilisearchHybridHits. One hybrid query would apply a score threshold
+// to both halves; here meaning hits are held to meilisearchSemanticScoreFloor
+// and keyword hits to their search's best hit (combineMeilisearchKeywordHits),
+// which a score threshold cannot express. A request that mixes episodes with
+// other media adds a keyword-only episode search, because episodes carry no
+// vectors. limit bounds the keyword queries and the merged ranking; the
+// meaning query fetches meilisearchSemanticCandidateLimit hits.
+func (p *MeilisearchSearchProvider) hybridSearch(
+	ctx context.Context,
 	indexUID string,
 	req CatalogSearchRequest,
 	base meilisearchSearchRequest,
-	offset, limit int,
-) meilisearchFederatedSearchRequest {
-	semanticWeight := 0.0
-	if base.Hybrid != nil && len(base.Vector) > 0 {
-		semanticWeight = min(max(base.Hybrid.SemanticRatio, 0), 1)
+	limit int,
+) (meilisearchHybridMerge, error) {
+	queries := p.buildHybridSearchQueries(indexUID, req, base, limit)
+	responses, err := p.client.MultiSearch(ctx, queries.all())
+	if err != nil {
+		return meilisearchHybridMerge{}, err
 	}
-	keywordWeight := 1 - semanticWeight
+	// Each keyword search is its own ranking, so each is cut against its own
+	// best hit: an episode search's best match need not match as well as the
+	// media search's.
+	var keywordHits, meaningHits []meilisearchSearchHit
+	var keywordFetched, keywordKept, peopleFetched, peopleKept int
+	next := 0
+	for _, search := range queries.Keyword {
+		group := responses[next : next+len(search)]
+		next += len(search)
+		combined := combineMeilisearchKeywordResponses(group, limit)
+		keywordFetched += len(group[0].Hits)
+		keywordKept += combined.OtherKept
+		if len(group) > 1 {
+			peopleFetched += len(group[1].Hits)
+			peopleKept += combined.PeopleKept
+		}
+		keywordHits = append(keywordHits, meilisearchNonIncreasingScores(combined.Hits)...)
+	}
+	if queries.Meaning != nil {
+		meaningHits = responses[next].Hits
+	}
+	floor := meilisearchSemanticScoreFloor(base.Vector, p.config.BinaryQuantized)
+	merged := mergeMeilisearchHybridHits(keywordHits, meaningHits, queries.Ratio, floor, limit)
+
+	var top, last float64
+	if len(meaningHits) > 0 {
+		top, last = meaningHits[0].RankingScore, meaningHits[len(meaningHits)-1].RankingScore
+	}
+	slog.DebugContext(ctx, "catalog search: hybrid search",
+		"component", "catalog",
+		"meaning_hits", len(meaningHits),
+		"meaning_kept", merged.SemanticKept,
+		"meaning_floor", floor,
+		"meaning_top_score", top,
+		"meaning_last_score", last,
+		"keyword_hits", keywordFetched,
+		"keyword_kept", keywordKept,
+		"people_hits", peopleFetched,
+		"people_kept", peopleKept,
+	)
+	return merged, nil
+}
+
+// meilisearchNonIncreasingScores lowers each hit's ranking score to the one
+// before it, so mergeMeilisearchHybridHits, which orders by score, keeps a
+// combined keyword ranking's order: a people hit scored on its one attribute
+// may score above the title hits ranked ahead of it.
+func meilisearchNonIncreasingScores(hits []meilisearchSearchHit) []meilisearchSearchHit {
+	out := slices.Clone(hits)
+	for i := 1; i < len(out); i++ {
+		out[i].RankingScore = min(out[i].RankingScore, out[i-1].RankingScore)
+	}
+	return out
+}
+
+// meilisearchHybridQueries are the multi-search queries of a hybrid search.
+type meilisearchHybridQueries struct {
+	// Keyword holds one keyword search per filter (media, then episodes),
+	// each meilisearchKeywordQueries.
+	Keyword [][]meilisearchMultiSearchQuery
+	// Meaning is the meaning-only query, nil when Ratio gives it no weight.
+	Meaning *meilisearchMultiSearchQuery
+	// Ratio is the semantic ratio that weighs the two halves.
+	Ratio float64
+}
+
+// all returns the queries in the order the responses are read.
+func (q meilisearchHybridQueries) all() []meilisearchMultiSearchQuery {
+	all := slices.Concat(q.Keyword...)
+	if q.Meaning != nil {
+		all = append(all, *q.Meaning)
+	}
+	return all
+}
+
+// buildHybridSearchQueries returns the multi-search queries for a hybrid
+// search.
+func (p *MeilisearchSearchProvider) buildHybridSearchQueries(
+	indexUID string,
+	req CatalogSearchRequest,
+	base meilisearchSearchRequest,
+	limit int,
+) meilisearchHybridQueries {
+	ratio := 0.0
+	if base.Hybrid != nil && len(base.Vector) > 0 {
+		ratio = min(max(base.Hybrid.SemanticRatio, 0), 1)
+	}
 
 	mediaTypes, _ := splitSearchItemTypes(req.ItemTypes)
 	var mediaFilter string
@@ -594,47 +796,363 @@ func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
 	} else {
 		mediaFilter = meilisearchSearchFilter(mediaTypes, req.Access)
 	}
-	episodeFilter := meilisearchSearchFilter([]string{"episode"}, req.Access)
-	keywordQuery := func(filter string) meilisearchFederatedQuery {
-		query := meilisearchFederatedQuery{
-			IndexUID:             indexUID,
-			Query:                base.Query,
-			Filter:               filter,
-			AttributesToRetrieve: base.AttributesToRetrieve,
-			AttributesToSearchOn: base.AttributesToSearchOn,
-			MatchingStrategy:     base.MatchingStrategy,
-		}
-		query.FederationOptions.Weight = keywordWeight
-		return query
+	keywordQueries := func(filter string) []meilisearchMultiSearchQuery {
+		keyword := base
+		keyword.Filter = filter
+		keyword.Offset, keyword.Limit = 0, limit
+		keyword.Vector, keyword.Hybrid = nil, nil
+		keyword.ShowRankingScore = true
+		keyword.ShowRankingScoreDetails = true
+		return meilisearchKeywordQueries(indexUID, keyword)
 	}
 
-	queries := []meilisearchFederatedQuery{keywordQuery(mediaFilter)}
-	if semanticWeight > 0 {
-		// An empty q with a semanticRatio of 1 makes Meilisearch rank by the
-		// supplied vector alone. A meaning-only search never applies q, so
-		// negative terms (-word) narrow only the keyword query.
-		semanticQuery := meilisearchFederatedQuery{
-			IndexUID:              indexUID,
-			Filter:                mediaFilter,
-			AttributesToRetrieve:  base.AttributesToRetrieve,
-			Vector:                base.Vector,
-			Hybrid:                &meilisearchHybridRequest{Embedder: base.Hybrid.Embedder, SemanticRatio: 1},
-			RankingScoreThreshold: meilisearchSemanticScoreFloor(base.Vector, p.config.BinaryQuantized),
-		}
-		semanticQuery.FederationOptions.Weight = semanticWeight
-		queries = append(queries, semanticQuery)
-	}
+	queries := meilisearchHybridQueries{Ratio: ratio, Keyword: [][]meilisearchMultiSearchQuery{keywordQueries(mediaFilter)}}
 	if searchRequestMixesEpisodeAndMedia(req.ItemTypes) {
-		queries = append(queries, keywordQuery(episodeFilter))
+		queries.Keyword = append(queries.Keyword, keywordQueries(meilisearchSearchFilter([]string{"episode"}, req.Access))) //nolint:goconst // The indexed document type, as in the filter above.
 	}
-	return meilisearchFederatedSearchRequest{
-		Federation: meilisearchFederationOptions{Offset: offset, Limit: limit},
-		Queries:    queries,
+	if ratio > 0 {
+		// An empty q with a semanticRatio of 1 makes Meilisearch rank by the
+		// supplied vector alone. Exclusions (-word) are stripped before the
+		// query is embedded and apply only to the keyword queries. No
+		// rankingScoreThreshold: see meilisearchSemanticCandidateLimit.
+		queries.Meaning = &meilisearchMultiSearchQuery{
+			IndexUID: indexUID,
+			meilisearchSearchRequest: meilisearchSearchRequest{
+				Limit:                meilisearchSemanticCandidateLimit,
+				Filter:               mediaFilter,
+				AttributesToRetrieve: base.AttributesToRetrieve,
+				Vector:               base.Vector,
+				Hybrid:               &meilisearchHybridRequest{Embedder: base.Hybrid.Embedder, SemanticRatio: 1},
+				ShowRankingScore:     true,
+			},
+		}
 	}
+	return queries
+}
+
+// mergeMeilisearchHybridHits merges a hybrid search's keyword and meaning
+// hits into one ranking of at most limit IDs. Meaning hits scoring below
+// floor, or further below the best meaning hit than
+// meilisearchSemanticTopMarginShare allows, are dropped. Each hit's ranking
+// score is weighted, keyword hits by 1-semanticRatio and meaning hits by
+// semanticRatio, and hits are ordered by weighted score, highest first. Ties keep their input order, with keyword
+// hits ahead of meaning hits. An ID found more than once keeps its first
+// place.
+func mergeMeilisearchHybridHits(keyword, meaning []meilisearchSearchHit, semanticRatio, floor float64, limit int) meilisearchHybridMerge {
+	type rankedHit struct {
+		id       string
+		score    float64
+		semantic bool
+	}
+	hits := make([]rankedHit, 0, len(keyword)+len(meaning))
+	for _, hit := range keyword {
+		hits = append(hits, rankedHit{id: strings.TrimSpace(hit.ContentID), score: hit.RankingScore * (1 - semanticRatio)})
+	}
+	var merged meilisearchHybridMerge
+	cutoff := floor
+	for _, hit := range meaning {
+		cutoff = max(cutoff, hit.RankingScore-meilisearchSemanticTopMarginShare*(1-floor))
+	}
+	for _, hit := range meaning {
+		if hit.RankingScore < cutoff {
+			continue
+		}
+		merged.SemanticKept++
+		hits = append(hits, rankedHit{id: strings.TrimSpace(hit.ContentID), score: hit.RankingScore * semanticRatio, semantic: true})
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
+
+	merged.IDs = make([]string, 0, min(len(hits), max(limit, 0)))
+	seen := make(map[string]struct{}, len(hits))
+	for _, hit := range hits {
+		if len(merged.IDs) >= limit {
+			break
+		}
+		if hit.id == "" {
+			continue
+		}
+		if _, exists := seen[hit.id]; exists {
+			continue
+		}
+		seen[hit.id] = struct{}{}
+		merged.IDs = append(merged.IDs, hit.id)
+		if hit.semantic {
+			merged.SemanticRanked++
+		}
+	}
+	return merged
+}
+
+// warnHybridFallback logs a hybrid search that failed and is retried as a
+// keyword search. A caller that gave up is not a failure.
+func (p *MeilisearchSearchProvider) warnHybridFallback(ctx context.Context, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	slog.WarnContext(ctx, "catalog search: Meilisearch hybrid search failed; retrying as keyword search",
+		"component", "catalog", "err", err)
+}
+
+// meilisearchHitIDs returns the hits' content IDs in order, without blanks or
+// repeats.
+func meilisearchHitIDs(hits []meilisearchSearchHit) []string {
+	ids := make([]string, 0, len(hits))
+	seen := make(map[string]struct{}, len(hits))
+	for _, hit := range hits {
+		id := strings.TrimSpace(hit.ContentID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// meilisearchKeywordMatchCount returns how many leading hits of a keyword
+// ranking match the search as well as best, usually the ranking's first hit:
+// no more missed query words, no more typos, and a proximity score of at least
+// meilisearchKeywordProximityShare of best's. Meilisearch matches each query
+// word on its own and, under matchingStrategy last or frequency, drops words
+// to fill the requested limit, so without this a search returns hundreds of
+// hits that match one of its words, are typos of it, or scatter its words
+// across fields. A detail object either hit lacks does not separate them.
+//
+// Counting a prefix, rather than filtering, relies on the index ranking by
+// words, then typo, then proximity before any other rule (rankingRules in
+// catalogSearchMeilisearchIndexSettings): every hit after the first that
+// fails ranks no better on those rules, so it fails too.
+func meilisearchKeywordMatchCount(best meilisearchSearchHit, hits []meilisearchSearchHit) int {
+	want := best.RankingScoreDetails
+	if want == nil {
+		return len(hits)
+	}
+	for i, hit := range hits {
+		got := hit.RankingScoreDetails
+		if got == nil {
+			continue
+		}
+		if want.Words != nil && got.Words != nil && got.Words.missed() > want.Words.missed() {
+			return i
+		}
+		if want.Typo != nil && got.Typo != nil && got.Typo.TypoCount > want.Typo.TypoCount {
+			return i
+		}
+		if want.Proximity != nil && got.Proximity != nil &&
+			got.Proximity.Score < meilisearchKeywordProximityShare*want.Proximity.Score {
+			return i
+		}
+	}
+	return len(hits)
+}
+
+// meilisearchKeywordHitBetter reports whether hit a matches the search
+// strictly better than hit b on the rules meilisearchKeywordMatchCount
+// compares, in rankingRules order: fewer missed words, then fewer typos, then
+// a higher proximity score. A rule either hit lacks does not separate them.
+func meilisearchKeywordHitBetter(a, b meilisearchSearchHit) bool {
+	da, db := a.RankingScoreDetails, b.RankingScoreDetails
+	if da == nil || db == nil {
+		return false
+	}
+	if da.Words != nil && db.Words != nil && da.Words.missed() != db.Words.missed() {
+		return da.Words.missed() < db.Words.missed()
+	}
+	if da.Typo != nil && db.Typo != nil && da.Typo.TypoCount != db.Typo.TypoCount {
+		return da.Typo.TypoCount < db.Typo.TypoCount
+	}
+	if da.Proximity != nil && db.Proximity != nil {
+		return da.Proximity.Score > db.Proximity.Score
+	}
+	return false
+}
+
+// meilisearchKeywordHits is a keyword search's ranking from its keyword query
+// and its people query, cut and combined by combineMeilisearchKeywordHits.
+type meilisearchKeywordHits struct {
+	// Hits is the ranking from its first hit.
+	Hits []meilisearchSearchHit
+	// OtherKept and PeopleKept count each query's hits that survived the cut,
+	// before repeats and the limit are dropped.
+	OtherKept, PeopleKept int
+}
+
+// combineMeilisearchKeywordHits combines the hits of a keyword query (other,
+// every searched attribute but people) and its people query into one ranking
+// of at most limit hits. The best hit of the two is the one that matches the
+// search best (meilisearchKeywordHitBetter), other's first on a tie, and each
+// list keeps only its hits that match as well as that one
+// (meilisearchKeywordMatchCount), so a title matched with a typo does not
+// survive an exact name match, nor a scattered name match an exact title.
+// Other's hits come first, as the index's attribute ranking orders titles
+// ahead of people when one query searches both. A hit in both lists
+// keeps its first place.
+func combineMeilisearchKeywordHits(other, people []meilisearchSearchHit, limit int) meilisearchKeywordHits {
+	var best meilisearchSearchHit
+	switch {
+	case len(other) > 0 && len(people) > 0 && meilisearchKeywordHitBetter(people[0], other[0]):
+		best = people[0]
+	case len(other) > 0:
+		best = other[0]
+	case len(people) > 0:
+		best = people[0]
+	default:
+		return meilisearchKeywordHits{}
+	}
+	other = other[:meilisearchKeywordMatchCount(best, other)]
+	people = meilisearchPeopleScoresOnKeywordScale(other, people[:meilisearchKeywordMatchCount(best, people)])
+	combined := meilisearchKeywordHits{
+		Hits:       make([]meilisearchSearchHit, 0, min(len(other)+len(people), max(limit, 0))),
+		OtherKept:  len(other),
+		PeopleKept: len(people),
+	}
+	seen := make(map[string]struct{}, len(other)+len(people))
+	for _, hit := range slices.Concat(other, people) {
+		if len(combined.Hits) >= limit {
+			break
+		}
+		id := strings.TrimSpace(hit.ContentID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		combined.Hits = append(combined.Hits, hit)
+	}
+	return combined
+}
+
+// meilisearchPeopleScoresOnKeywordScale returns the kept people hits with
+// their ranking scores scaled so the first scores what the best kept keyword
+// hit scores, or 1 when no keyword hit was kept. Meilisearch scores a quoted
+// phrase far lower than the same words unquoted (0.60 against 0.97 for a full
+// name), and a hybrid search weighs keyword scores against meaning scores, so
+// unscaled people hits would sink below matches by meaning. A people hit that
+// survived the cut matches as well as the best keyword hit, so it scores like
+// one; the order among people hits is unchanged.
+func meilisearchPeopleScoresOnKeywordScale(other, people []meilisearchSearchHit) []meilisearchSearchHit {
+	if len(people) == 0 || people[0].RankingScore <= 0 {
+		return people
+	}
+	reference := 1.0
+	if len(other) > 0 {
+		reference = other[0].RankingScore
+	}
+	factor := reference / people[0].RankingScore
+	scaled := slices.Clone(people)
+	for i := range scaled {
+		scaled[i].RankingScore = min(scaled[i].RankingScore*factor, 1)
+	}
+	return scaled
+}
+
+// meilisearchKeywordQueries returns the multi-search queries of one keyword
+// search: keyword, then its people query when one is sent
+// (peopleSearchRequest).
+func meilisearchKeywordQueries(indexUID string, keyword meilisearchSearchRequest) []meilisearchMultiSearchQuery {
+	queries := []meilisearchMultiSearchQuery{{IndexUID: indexUID, meilisearchSearchRequest: keyword}}
+	if people, ok := peopleSearchRequest(keyword); ok {
+		queries = append(queries, meilisearchMultiSearchQuery{IndexUID: indexUID, meilisearchSearchRequest: people})
+	}
+	return queries
+}
+
+// combineMeilisearchKeywordResponses combines the responses to
+// meilisearchKeywordQueries, in query order.
+func combineMeilisearchKeywordResponses(responses []meilisearchSearchResponse, limit int) meilisearchKeywordHits {
+	var people []meilisearchSearchHit
+	if len(responses) > 1 {
+		people = responses[1].Hits
+	}
+	return combineMeilisearchKeywordHits(responses[0].Hits, people, limit)
+}
+
+// keywordRanking runs a keyword search and its people query in one
+// multi-search from the first hit and returns their combined ranking, at most
+// limit IDs, and the most hits either query returned. A caller paging through
+// it asks again with a larger limit, as the hybrid path does, because the
+// combined order puts every kept keyword hit ahead of every people hit.
+func (p *MeilisearchSearchProvider) keywordRanking(ctx context.Context, indexUID string, base meilisearchSearchRequest, limit int) ([]string, int, error) {
+	base.Offset, base.Limit = 0, limit
+	base.Vector, base.Hybrid = nil, nil
+	base.ShowRankingScoreDetails = true
+	queries := meilisearchKeywordQueries(indexUID, base)
+	responses, err := p.client.MultiSearch(ctx, queries)
+	if err != nil {
+		return nil, 0, err
+	}
+	combined := combineMeilisearchKeywordResponses(responses, limit)
+	fetched := 0
+	for _, response := range responses {
+		fetched = max(fetched, len(response.Hits))
+	}
+	var peopleFetched int
+	if len(responses) > 1 {
+		peopleFetched = len(responses[1].Hits)
+	}
+	slog.DebugContext(ctx, "catalog search: keyword search",
+		"component", "catalog",
+		"limit", limit,
+		"keyword_hits", len(responses[0].Hits),
+		"keyword_kept", combined.OtherKept,
+		"people_hits", peopleFetched,
+		"people_kept", combined.PeopleKept,
+	)
+	return meilisearchHitIDs(combined.Hits), fetched, nil
+}
+
+// meilisearchKeywordPage is one page of a keyword-only search, cut by
+// meilisearchKeywordMatchCount.
+type meilisearchKeywordPage struct {
+	// Fetched counts the hits Meilisearch returned.
+	Fetched int
+	// Kept are the leading hits that match as well as Best.
+	Kept []meilisearchSearchHit
+	// Best is the ranking's first hit, nil while it has none.
+	Best *meilisearchSearchHit
+	// EstimatedTotalHits is Meilisearch's estimate, or the hits kept up to
+	// this page's end when the page was cut, since nothing after that is kept.
+	EstimatedTotalHits int
+}
+
+// keywordSearch runs a keyword-only catalog search with ranking details and
+// keeps the hits that match as well as best, or as well as the page's first
+// hit when best is nil. A caller paging through one ranking passes the
+// previous page's Best for later pages.
+func (p *MeilisearchSearchProvider) keywordSearch(ctx context.Context, indexUID string, request meilisearchSearchRequest, best *meilisearchSearchHit) (meilisearchKeywordPage, error) {
+	request.ShowRankingScoreDetails = true
+	response, err := p.client.Search(ctx, indexUID, request)
+	if err != nil {
+		return meilisearchKeywordPage{}, err
+	}
+	page := meilisearchKeywordPage{Fetched: len(response.Hits), Kept: response.Hits, Best: best, EstimatedTotalHits: response.EstimatedTotalHits}
+	if page.Best == nil && len(response.Hits) > 0 {
+		first := response.Hits[0]
+		page.Best = &first
+	}
+	if page.Best != nil {
+		page.Kept = response.Hits[:meilisearchKeywordMatchCount(*page.Best, response.Hits)]
+	}
+	if len(page.Kept) < page.Fetched {
+		page.EstimatedTotalHits = request.Offset + len(page.Kept)
+	}
+	slog.DebugContext(ctx, "catalog search: keyword search",
+		"component", "catalog",
+		"offset", request.Offset,
+		"keyword_hits", page.Fetched,
+		"keyword_kept", len(page.Kept),
+	)
+	return page, nil
 }
 
 // meilisearchSemanticScoreFloor converts meilisearchSemanticMinCosine into the
-// score Meilisearch gives a meaning match, for use as rankingScoreThreshold.
+// _rankingScore Meilisearch gives a meaning match. Meaning hits scoring below
+// it are dropped (see mergeMeilisearchHybridHits).
 //
 // Meilisearch scores full-precision vectors as (1+cos)/2. Binary-quantized
 // vectors keep one sign bit per dimension and score by the share of bits that
@@ -669,67 +1187,6 @@ func joinMeilisearchFilters(parts ...string) string {
 	return strings.Join(cleaned, " AND ")
 }
 
-func (p *MeilisearchSearchProvider) isFederationUnsupported() bool {
-	p.federationMu.Lock()
-	defer p.federationMu.Unlock()
-	if !p.federationUnsupported {
-		return false
-	}
-	return p.federationUnsupportedAt.IsZero() ||
-		time.Since(p.federationUnsupportedAt) < meilisearchFederationCapabilityCacheTTL
-}
-
-func (p *MeilisearchSearchProvider) markFederationUnsupported() {
-	p.federationMu.Lock()
-	p.federationUnsupported = true
-	p.federationUnsupportedAt = time.Now()
-	p.federationMu.Unlock()
-}
-
-func (p *MeilisearchSearchProvider) markFederationSupported() {
-	p.federationMu.Lock()
-	p.federationUnsupported = false
-	p.federationUnsupportedAt = time.Time{}
-	p.federationMu.Unlock()
-}
-
-func isMeilisearchFederationUnsupported(err error) bool {
-	var httpErr *meilisearchHTTPError
-	if !errors.As(err, &httpErr) {
-		return false
-	}
-	code := strings.ToLower(strings.TrimSpace(httpErr.Code))
-	message := strings.ToLower(strings.TrimSpace(httpErr.Message))
-	if httpErr.StatusCode == http.StatusNotFound {
-		// A cached active index can disappear during an atomic rebuild swap.
-		// That is a resource miss, not evidence that this Meilisearch process
-		// lacks federation; caching it would disable mixed hybrid search until
-		// Silo restarts even after the provider refreshes the active index UID.
-		if code == "index_not_found" || code == "document_not_found" {
-			return false
-		}
-		return code == "not_found" ||
-			(code == "" && (strings.Contains(message, "route") || strings.Contains(message, "multi-search")))
-	}
-	if httpErr.StatusCode != http.StatusBadRequest {
-		return false
-	}
-
-	// Older Meilisearch versions expose /multi-search but reject the newer
-	// federation object as an unknown field. Cache only that capability-shaped
-	// failure; a malformed or incompatible federated query falls back to
-	// keyword search for that request only, so a request bug is not hidden for
-	// the process life.
-	details := code + " " + message
-	mentionsFederation := strings.Contains(details, "federation")
-	unsupported := strings.Contains(details, "not supported") ||
-		strings.Contains(details, "unsupported") ||
-		strings.Contains(details, "unknown field") ||
-		strings.Contains(details, "unrecognized field") ||
-		strings.Contains(details, "feature not enabled")
-	return mentionsFederation && unsupported
-}
-
 func (p *MeilisearchSearchProvider) matchingStrategyForRequest(req CatalogSearchRequest) string {
 	strategy := strings.TrimSpace(strings.ToLower(p.config.MatchingStrategy))
 	if strategy == "" {
@@ -738,19 +1195,119 @@ func (p *MeilisearchSearchProvider) matchingStrategyForRequest(req CatalogSearch
 	if strategy != "last" {
 		return strategy
 	}
-	// Two-term title searches are easy for Meili's "last" strategy to over-relax
-	// after typo correction (e.g. "spnge bob" degenerating into "spnge").
-	if len(catalogSearchQueryTerms(req.Query)) == meilisearchStrictMatchingTermCount {
+	switch terms := len(catalogSearchQueryTerms(req.Query)); {
+	case terms == meilisearchStrictMatchingTermCount:
+		// Two-term searches are easy for "last" to over-relax after typo
+		// correction (e.g. "spnge bob" degenerating into "spnge").
 		return "all"
+	case terms > meilisearchStrictMatchingTermCount:
+		// "last" drops trailing words, so "movies about time travel" falls
+		// back to titles containing "movie". "frequency" drops the most
+		// common words first and keeps the rare ones that carry the search.
+		return "frequency"
 	}
 	return strategy
 }
 
+// attributesToSearchOnForRequest returns the attributes a search's keyword
+// query matches. People are never among them: the people query matches them
+// whole-word (peopleSearchRequest).
 func (p *MeilisearchSearchProvider) attributesToSearchOnForRequest(req CatalogSearchRequest) []string {
-	if len(catalogSearchQueryTerms(req.Query)) != meilisearchTitleOnlyTermCount {
-		return nil
+	if len(catalogSearchQueryTerms(req.Query)) == meilisearchStrictMatchingTermCount {
+		return slices.Clone(meilisearchTwoTermSearchAttributes)
 	}
-	return append([]string(nil), meilisearchTitleSearchAttributes...)
+	return slices.Clone(meilisearchKeywordSearchAttributes)
+}
+
+// peopleSearchRequest returns the people query that goes with a keyword
+// query, or false when none is sent. Meilisearch matches the last word of a
+// query as a prefix in every attribute it searches and has no setting to stop
+// that for one attribute (prefixSearch is index-wide), so a search for "heat"
+// would match everyone named Heather. The people query searches only people, with
+// the search's words as one quoted phrase, which Meilisearch matches as whole
+// words, and the keyword query leaves people out.
+//
+// None is sent while keyword names no attributes to search on, which
+// buildIndexSearchRequest does while the index's settings are pending; the
+// keyword query then searches people itself, prefix included. None is sent
+// either when the search has no word to match.
+func peopleSearchRequest(keyword meilisearchSearchRequest) (meilisearchSearchRequest, bool) {
+	if len(keyword.AttributesToSearchOn) == 0 {
+		return meilisearchSearchRequest{}, false
+	}
+	query, withYear := meilisearchPeopleQuery(keyword.Query)
+	if query == "" {
+		return meilisearchSearchRequest{}, false
+	}
+	people := keyword
+	people.Query = query
+	people.AttributesToSearchOn = []string{meilisearchPeopleAttribute}
+	if withYear {
+		people.AttributesToSearchOn = append(people.AttributesToSearchOn, "year")
+	}
+	people.Vector, people.Hybrid = nil, nil
+	people.ShowRankingScoreDetails = true
+	return people, true
+}
+
+// meilisearchPeopleQuery returns the q of a search's people query: the
+// search's words, quoted phrases unquoted, as one quoted phrase, then its
+// exclusions (-word, -"phrase") as typed so they still apply. A year hint
+// stays outside the phrase so "tom hanks 1994" still matches the year
+// attribute, as the keyword query does; withYear reports one. The year hint is
+// the last unquoted word parseYearToken accepts when the search has other
+// words, as in extractYearHint. Stray quotes, which would end the phrase
+// early, become word breaks. q is empty when nothing is left to match.
+func meilisearchPeopleQuery(query string) (q string, withYear bool) {
+	var words, exclusions []string
+	year := -1
+	for _, token := range splitCatalogSearchQuery(query) {
+		phrase, quoted := unquoteCatalogSearchPhrase(token.text)
+		if token.excluded {
+			if quoted {
+				if phrase != "" {
+					exclusions = append(exclusions, `-"`+phrase+`"`)
+				}
+				continue
+			}
+			for _, word := range strings.Fields(strings.ReplaceAll(token.text, `"`, " ")) {
+				exclusions = append(exclusions, "-"+word)
+			}
+			continue
+		}
+		if quoted {
+			words = append(words, strings.Fields(phrase)...)
+			continue
+		}
+		for _, word := range strings.Fields(strings.ReplaceAll(token.text, `"`, " ")) {
+			if _, ok := parseYearToken(word); ok {
+				year = len(words)
+			}
+			words = append(words, word)
+		}
+	}
+	if len(words) == 0 {
+		return "", false
+	}
+	var yearHint string
+	if year >= 0 && len(words) > 1 {
+		yearHint = words[year]
+		words = slices.Delete(words, year, year+1)
+	}
+	parts := append([]string{`"` + strings.Join(words, " ") + `"`}, exclusions...)
+	if yearHint != "" {
+		parts = slices.Insert(parts, 1, yearHint)
+	}
+	return strings.Join(parts, " "), yearHint != ""
+}
+
+// unquoteCatalogSearchPhrase returns the text inside a token that is a
+// closed double-quoted phrase, whitespace collapsed.
+func unquoteCatalogSearchPhrase(token string) (string, bool) {
+	if len(token) < 2 || !strings.HasPrefix(token, `"`) || !strings.HasSuffix(token, `"`) {
+		return "", false
+	}
+	return strings.Join(strings.Fields(token[1:len(token)-1]), " "), true
 }
 
 func catalogSearchQueryTerms(query string) []string {
@@ -998,8 +1555,17 @@ func (p *MeilisearchSearchProvider) SemanticCapability(ctx context.Context) Cata
 	if p == nil || p.client == nil {
 		return CatalogSearchSemanticCapability{OK: false, Reason: "meilisearch client unavailable"}
 	}
+	// The cached answer holds only for the index it was computed for. An
+	// unreadable state leaves activeUID empty, which matches no cached index
+	// and so probes again.
+	activeUID := ""
+	if p.stateRepo != nil {
+		if state, _, err := p.indexState(ctx); err == nil {
+			activeUID = strings.TrimSpace(state.ActiveIndexUID)
+		}
+	}
 	p.capMu.Lock()
-	if !p.capCachedAt.IsZero() && time.Since(p.capCachedAt) < semanticCapabilityProbeTTL {
+	if !p.capCachedAt.IsZero() && time.Since(p.capCachedAt) < semanticCapabilityProbeTTL && activeUID != "" && p.capCacheUID == activeUID {
 		cached := p.capCache
 		p.capMu.Unlock()
 		return cached
@@ -1011,6 +1577,7 @@ func (p *MeilisearchSearchProvider) SemanticCapability(ctx context.Context) Cata
 	p.capMu.Lock()
 	p.capCache = capability
 	p.capCachedAt = time.Now()
+	p.capCacheUID = activeUID
 	p.capMu.Unlock()
 	return capability
 }
@@ -1035,7 +1602,11 @@ func (p *MeilisearchSearchProvider) computeSemanticCapability(ctx context.Contex
 	}
 	settings, err := p.client.GetSettings(ctx, uid)
 	if err != nil {
-		return CatalogSearchSemanticCapability{OK: false, Reason: "settings fetch failed: " + err.Error()}
+		capability := CatalogSearchSemanticCapability{OK: false, Reason: "settings fetch failed: " + err.Error()}
+		if isMeilisearchIndexNotFound(err) {
+			capability.missingIndexUID = uid
+		}
+		return capability
 	}
 	capability := evaluateEmbedderSettings(settings, p.config.Embedder, embeddingvectors.CanonicalDimensions)
 	if !capability.OK {
@@ -1112,8 +1683,55 @@ func joinMeilisearchIntFilterValues(values []int) string {
 	return strings.Join(parts, ", ")
 }
 
+// normalizeCatalogSearchQueryForVector returns the text of a search to embed:
+// the query with whitespace collapsed and Meilisearch exclusions removed. An
+// exclusion is a word or a double-quoted phrase preceded by a minus sign
+// (-alien, -"space station"); embedding it would pull the meaning half toward
+// what the searcher asked to leave out.
 func normalizeCatalogSearchQueryForVector(query string) string {
-	return strings.Join(strings.Fields(query), " ")
+	kept := make([]string, 0, 4)
+	for _, token := range splitCatalogSearchQuery(query) {
+		if !token.excluded {
+			kept = append(kept, token.text)
+		}
+	}
+	return strings.Join(strings.Fields(strings.Join(kept, " ")), " ")
+}
+
+// catalogSearchQueryToken is one word or double-quoted phrase of a search as
+// Meilisearch reads it.
+type catalogSearchQueryToken struct {
+	// text is the word or phrase as typed, quotes included, without the
+	// minus sign of an exclusion. It may be empty, as for a lone "-".
+	text string
+	// excluded reports a minus sign before it (-alien, -"space station").
+	excluded bool
+}
+
+// splitCatalogSearchQuery splits a search into words and double-quoted
+// phrases. A quote that is never closed starts an ordinary word.
+func splitCatalogSearchQuery(query string) []catalogSearchQueryToken {
+	var tokens []catalogSearchQueryToken
+	rest := query
+	for {
+		rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
+		if rest == "" {
+			return tokens
+		}
+		excluded := strings.HasPrefix(rest, "-")
+		body := strings.TrimPrefix(rest, "-")
+		end := strings.IndexFunc(body, unicode.IsSpace)
+		if strings.HasPrefix(body, `"`) {
+			if closing := strings.IndexByte(body[1:], '"'); closing >= 0 {
+				end = closing + 2
+			}
+		}
+		if end < 0 {
+			end = len(body)
+		}
+		tokens = append(tokens, catalogSearchQueryToken{text: body[:end], excluded: excluded})
+		rest = body[end:]
+	}
 }
 
 func cloneFloat32Slice(values []float32) []float32 {

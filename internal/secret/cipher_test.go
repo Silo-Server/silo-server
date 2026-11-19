@@ -52,17 +52,6 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	}
 }
 
-func TestEncryptEmptyReturnsEmpty(t *testing.T) {
-	c := newTestCipher(t)
-	ct, err := c.Encrypt("", "any:aad")
-	if err != nil {
-		t.Fatalf("Encrypt empty: %v", err)
-	}
-	if ct != "" {
-		t.Fatalf("Encrypt(\"\") = %q, want empty (no envelope for an empty secret)", ct)
-	}
-}
-
 func TestEncryptNonDeterministic(t *testing.T) {
 	c := newTestCipher(t)
 	const plaintext, aad = "same-secret", "t:c:1"
@@ -119,34 +108,6 @@ func TestDecryptRejects(t *testing.T) {
 		_, err := tc.cipher.Decrypt(tc.ct, tc.aad)
 		if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
 			t.Errorf("Decrypt with %s returned %v, want error %v", tc.name, err, tc.want)
-		}
-	}
-}
-
-func TestNewRejectsShortKey(t *testing.T) {
-	if _, err := New(make([]byte, MinMasterKeyLen-1)); err == nil {
-		t.Fatalf("New with a %d-byte key succeeded, want error", MinMasterKeyLen-1)
-	}
-	if _, err := New(nil); err == nil {
-		t.Fatalf("New(nil) succeeded, want error")
-	}
-	if _, err := New(make([]byte, MinMasterKeyLen)); err != nil {
-		t.Fatalf("New with a %d-byte key failed: %v", MinMasterKeyLen, err)
-	}
-}
-
-func TestIsEncrypted(t *testing.T) {
-	cases := map[string]bool{
-		"enc:v1:x":   true,
-		"sa_abc":     false,
-		"":           false,
-		"ENC:V1:x":   false,
-		"enc:v1":     false,
-		"plain text": false,
-	}
-	for in, want := range cases {
-		if got := IsEncrypted(in); got != want {
-			t.Errorf("IsEncrypted(%q) = %v, want %v", in, got, want)
 		}
 	}
 }

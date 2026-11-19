@@ -197,7 +197,7 @@ func TestNativeSubtitleSwitchReplansTheSameMedia(t *testing.T) {
 				{Index: 2, ContainerTrackID: "3", Codec: "subrip", Language: "eng"},
 				{Index: 3, ContainerTrackID: "4", Codec: "subrip", Language: "spa"},
 			}
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
 			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 			start := v3HandlerStartRequest()
@@ -272,7 +272,7 @@ func TestSubtitleTrackChangedRecoveryStaysOnEffectiveAlternate(t *testing.T) {
 	alternate.VideoTracks[0].Width, alternate.VideoTracks[0].Height = 1920, 1080
 	alternate.VideoTracks[0].Level, alternate.VideoTracks[0].Bitrate = 41, 8_000
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
 	stubCopySeekAnchorV3(handler)
 	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
@@ -316,7 +316,7 @@ func assertNativeSubtitleFailureFallsBackAndStaysDisabled(t *testing.T, features
 	t.Helper()
 	file := v3HandlerFixtureFile(t)
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 3, ContainerTrackID: "4", Codec: "mov_text", Language: "eng"}}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	start := v3HandlerStartRequest()

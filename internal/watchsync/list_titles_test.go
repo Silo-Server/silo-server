@@ -2,7 +2,9 @@ package watchsync
 
 import (
 	"context"
-	"reflect"
+	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,6 +32,13 @@ func (p *watchlistBatchProviderStub) FetchWatchlist(context.Context, ServerConfi
 	return p.rows, nil
 }
 
+// watchlistIncrementalProviderStub sends its rows as an incremental batch.
+type watchlistIncrementalProviderStub struct{ watchlistBatchProviderStub }
+
+func (p *watchlistIncrementalProviderStub) FetchWatchlistBatch(context.Context, ServerConfig, Connection) (FavoriteImportBatch, error) {
+	return FavoriteImportBatch{Rows: p.rows, Incremental: true}, nil
+}
+
 // titlesStub keeps one profile's watchlist entries outside the library by
 // TMDB ID, with the TMDB IDs the library carries.
 type titlesStub struct {
@@ -40,6 +49,13 @@ type titlesStub struct {
 	queued   []WatchlistTitle
 	// requested holds the TMDB IDs of the entries added with a request.
 	requested []int
+	// promotedTVDB marks titles promoted onto a library item that shares
+	// only their TVDB ID, which sync knows from the title's row.
+	promotedTVDB map[int]bool
+	// addErr fails adding the titles with these TMDB IDs, after keeping
+	// the entry when addKeeps is set.
+	addErr   map[int]error
+	addKeeps bool
 }
 
 func (s *titlesStub) LibraryHas(_ context.Context, title WatchlistTitle) (bool, error) {
@@ -47,6 +63,13 @@ func (s *titlesStub) LibraryHas(_ context.Context, title WatchlistTitle) (bool, 
 }
 
 func (s *titlesStub) AddWatchlistTitle(_ context.Context, _ int, _ string, title WatchlistTitle, addedAt time.Time, request bool) (bool, error) {
+	if err := s.addErr[title.TMDBID]; err != nil {
+		if !s.addKeeps {
+			return false, err
+		}
+		s.entries[title.TMDBID] = addedAt
+		return true, err
+	}
 	if _, ok := s.entries[title.TMDBID]; ok {
 		return false, nil
 	}
@@ -75,26 +98,32 @@ func (s *titlesStub) ListWatchlistTitles(context.Context, int, string) ([]Watchl
 	return out, nil
 }
 
-func (s *titlesStub) WatchlistTitlesListed(_ context.Context, _ int, _ string, titles []WatchlistTitle) (map[WatchlistTitle]bool, error) {
-	out := map[WatchlistTitle]bool{}
-	for _, title := range titles {
-		_, out[title] = s.entries[title.TMDBID]
-	}
-	return out, nil
-}
-
-func (s *titlesStub) WatchlistTitleTMDBIDs(_ context.Context, _ int, _ string, titles []WatchlistTitle) (map[WatchlistTitle][]int, error) {
-	out := map[WatchlistTitle][]int{}
+func (s *titlesStub) WatchlistTitleIDs(_ context.Context, _ int, _ string, titles []WatchlistTitle) (map[WatchlistTitle][]string, error) {
+	out := map[WatchlistTitle][]string{}
 	for _, title := range titles {
 		if _, ok := s.entries[title.TMDBID]; ok {
-			out[title] = append([]int{title.TMDBID}, s.former[title.TMDBID]...)
+			for _, id := range append([]int{title.TMDBID}, s.former[title.TMDBID]...) {
+				out[title] = append(out[title], "tmdb:"+strconv.Itoa(id))
+			}
 		}
 	}
 	return out, nil
 }
 
-func (s *titlesStub) WatchlistTitlePromoted(_ context.Context, _ int, _ string, title WatchlistTitle) (bool, error) {
-	return s.promoted[title.TMDBID], nil
+// PromotedWatchlistItems names a title promoted by TMDB ID "item-<tmdb>" and
+// one promoted by TVDB ID "show-<tvdb>".
+func (s *titlesStub) PromotedWatchlistItems(_ context.Context, _ int, _ string, title WatchlistTitle, ids []string) ([]string, error) {
+	if s.promoted[title.TMDBID] {
+		return []string{"item-" + strconv.Itoa(title.TMDBID)}, nil
+	}
+	for _, id := range ids {
+		if tvdb, ok := strings.CutPrefix(id, "tvdb:"); ok {
+			if n, _ := strconv.Atoi(tvdb); s.promotedTVDB[n] {
+				return []string{"show-" + tvdb}, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // A provider's watchlist title the library doesn't have becomes a watchlist
@@ -120,181 +149,183 @@ type watchlistTitleImportCase struct {
 	synced bool
 }
 
-func watchlistTitleImportCases() []watchlistTitleImportCase {
-	const titleRow = "watchlist-title:movie:550"
-	listedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	fightClub := RemoteFavorite{
-		ProviderItemKey: "movie:imdb:tt0137523", Kind: "movie", Title: "Fight Club", Year: 1999,
-		IMDbID: "tt0137523", TMDBID: "550", FavoritedAt: listedAt,
-	}
-	return []watchlistTitleImportCase{
-		{
-			name:       "listed title the library lacks",
-			rows:       []RemoteFavorite{fightClub},
-			wantEntry:  true,
-			wantResult: ImportListResult{Found: 1, Imported: 1, added: 1},
-			wantLocal:  true, wantRemote: true,
-		},
-		{
-			name:       "listed title the library lacks after the first sync",
-			synced:     true,
-			rows:       []RemoteFavorite{fightClub},
-			wantEntry:  true,
-			wantResult: ImportListResult{Found: 1, Imported: 1, added: 1},
-			wantLocal:  true, wantRemote: true, wantQueued: 1,
-		},
-		{
-			name:       "listed title already on the watchlist is queued for its request",
-			synced:     true,
-			entries:    map[int]time.Time{550: listedAt},
-			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: fightClub.ProviderItemKey, RemotePresent: true, LocalPresent: true}},
-			rows:       []RemoteFavorite{fightClub},
-			wantEntry:  true,
-			wantResult: ImportListResult{Found: 1, Imported: 1},
-			wantLocal:  true, wantRemote: true, wantQueued: 1,
-		},
-		{
-			name:        "listed title the library has but did not match",
-			library:     map[int]bool{550: true},
-			rows:        []RemoteFavorite{fightClub},
-			wantResult:  ImportListResult{Found: 1, Unmatched: 1},
-			wantNoState: true,
-		},
-		{
-			name:        "listed title without a TMDB ID",
-			rows:        []RemoteFavorite{{ProviderItemKey: "movie:imdb:tt0137523", Kind: "movie", IMDbID: "tt0137523"}},
-			wantResult:  ImportListResult{Found: 1, Unmatched: 1},
-			wantNoState: true,
-		},
-		{
-			name:       "title the provider dropped",
-			entries:    map[int]time.Time{550: listedAt},
-			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: fightClub.ProviderItemKey, RemotePresent: true, LocalPresent: true}},
-			wantResult: ImportListResult{Removed: 1},
-		},
-		{
-			name:       "title the provider lists under a former TMDB ID",
-			synced:     true,
-			former:     map[int][]int{550: {100}},
-			entries:    map[int]time.Time{550: listedAt},
-			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: "tmdb:550", RemotePresent: true, LocalPresent: true}},
-			rows:       []RemoteFavorite{{Kind: "movie", Title: "Fight Club", TMDBID: "100", FavoritedAt: listedAt}},
-			wantEntry:  true,
-			wantResult: ImportListResult{Found: 1, Imported: 1, added: 1},
-			wantLocal:  true, wantRemote: true, wantQueued: 2,
-		},
-		{
-			name:       "title removed locally waits for the provider removal",
-			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: fightClub.ProviderItemKey, RemotePresent: true, LocalPresent: true}},
-			rows:       []RemoteFavorite{fightClub},
-			wantResult: ImportListResult{Found: 1},
-			wantRemote: true,
-		},
-		{
-			name:       "title removed locally after the library got it waits for the provider removal",
-			library:    map[int]bool{550: true},
-			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: fightClub.ProviderItemKey, RemotePresent: true, LocalPresent: true}},
-			rows:       []RemoteFavorite{fightClub},
-			wantResult: ImportListResult{Found: 1, Unmatched: 1},
-			wantRemote: true,
-		},
-		{
-			name:       "title promoted onto the library watchlist",
-			library:    map[int]bool{550: true},
-			promoted:   map[int]bool{550: true},
-			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: fightClub.ProviderItemKey, RemotePresent: true, LocalPresent: true}},
-			rows:       []RemoteFavorite{fightClub},
-			wantResult: ImportListResult{Found: 1, Unmatched: 1},
-		},
-	}
-}
-
-func TestServiceWatchlistImportKeepsTitlesOutsideLibrary(t *testing.T) {
-	const titleRow = "watchlist-title:movie:550"
-	for _, tt := range watchlistTitleImportCases() {
-		t.Run(tt.name, func(t *testing.T) {
-			store, repo, conn := favoriteImportFixture(t)
-			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
-			if tt.synced {
-				repo.watchlistTitlesSince = map[string]time.Time{conn.ID: time.Now().Add(-time.Hour)}
-			}
-			for _, state := range tt.states {
-				state.ConnectionID, state.ListKind, state.CreatedAt = conn.ID, ListKindWatchlist, time.Now()
-				repo.listItemStates = append(repo.listItemStates, state)
-			}
-			titles := &titlesStub{library: tt.library, promoted: tt.promoted, former: tt.former, entries: map[int]time.Time{}}
-			for id, at := range tt.entries {
-				titles.entries[id] = at
-			}
-			service := NewService(repo, NewRegistry()).
-				WithMatcher(unmatchedMatcherStub{}).
-				WithUserStoreProvider(staticStoreProvider{store: store})
-			service.SetWatchlistTitles(titles)
-
-			result, err := service.importList(context.Background(), conn, ServerConfig{}, &watchlistBatchProviderStub{rows: tt.rows}, service.watchlistBinding())
-			if err != nil {
-				t.Fatal(err)
-			}
-			result.Warnings = nil
-			if !reflect.DeepEqual(result, tt.wantResult) {
-				t.Fatalf("result = %#v, want %#v", result, tt.wantResult)
-			}
-			if len(titles.queued) != tt.wantQueued {
-				t.Fatalf("queued = %#v, want %d", titles.queued, tt.wantQueued)
-			}
-			if wantRequested := tt.synced && tt.wantResult.added > 0; (len(titles.requested) > 0) != wantRequested {
-				t.Fatalf("requested = %v, want a request %v", titles.requested, wantRequested)
-			}
-			if _, marked := repo.watchlistTitlesSince[conn.ID]; !marked {
-				t.Fatal("the import didn't record the connection's first title sync")
-			}
-			if _, ok := titles.entries[550]; ok != tt.wantEntry {
-				t.Fatalf("entry present = %v, want %v", ok, tt.wantEntry)
-			}
-			state := listItemStateOf(repo, titleRow)
-			if tt.wantNoState {
-				if state != nil {
-					t.Fatalf("state = %#v, want none", state)
-				}
-				return
-			}
-			if state == nil || state.LocalPresent != tt.wantLocal || state.RemotePresent != tt.wantRemote {
-				t.Fatalf("state = %#v, want local %v remote %v", state, tt.wantLocal, tt.wantRemote)
-			}
+// A title the profile removed while it had two rows, one per TMDB ID it was
+// listed under, comes back with a listing under a third TMDB ID dated after
+// the removal. Neither old row's removal may take the new add off the
+// provider.
+func TestServiceWatchlistNewerListingSupersedesEveryPendingRow(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+	removedAt := time.Now().Add(-time.Hour)
+	for _, id := range []string{"watchlist-title:movie:550", "watchlist-title:movie:600"} {
+		repo.listItemStates = append(repo.listItemStates, ListItemState{
+			ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: id, Kind: "movie",
+			ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LastRemovedLocalAt: &removedAt,
 		})
 	}
-}
-
-// The first import that keeps titles outside the library, on a new
-// connection or the first sync after upgrading, keeps the provider's backlog
-// without requesting it; titles the provider lists later are requested.
-func TestServiceWatchlistImportRequestsOnlyTitlesAfterFirstSync(t *testing.T) {
-	store, repo, conn := favoriteImportFixture(t)
-	conn.ImportWatchlistEnabled = true
 	titles := &titlesStub{entries: map[int]time.Time{}}
 	service := NewService(repo, NewRegistry()).
 		WithMatcher(unmatchedMatcherStub{}).
 		WithUserStoreProvider(staticStoreProvider{store: store})
 	service.SetWatchlistTitles(titles)
-	backlog := RemoteFavorite{ProviderItemKey: "tmdb:550", Kind: "movie", Title: "Fight Club", TMDBID: "550"}
-	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{backlog}}
-
+	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{
+		ProviderItemKey: "imdb:tt0137523", Kind: "movie", Title: "Fight Club",
+		IMDbID: "tt0137523", TMDBID: "551", FavoritedAt: time.Now(),
+	}}}
 	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
 		t.Fatal(err)
 	}
-	if len(titles.requested) != 0 || len(titles.queued) != 0 {
-		t.Fatalf("first sync requested %v, queued %v, want the backlog kept without requests", titles.requested, titles.queued)
+	if _, added := titles.entries[551]; !added {
+		t.Fatal("the newer listing wasn't added")
 	}
+	for _, id := range []string{"watchlist-title:movie:550", "watchlist-title:movie:600"} {
+		if old := listItemStateOf(repo, id); !old.LocalPresent && old.RemotePresent {
+			t.Fatalf("%s removal still pending: %#v", id, old)
+		}
+	}
+}
 
-	provider.rows = append(provider.rows, RemoteFavorite{ProviderItemKey: "tmdb:680", Kind: "movie", Title: "Pulp Fiction", TMDBID: "680"})
-	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
-		t.Fatal(err)
+// A removal waiting for the provider holds the title in its other form too:
+// a removed entry outside the library holds the library item the listing now
+// matches, and a removed library item holds the entry outside the library the
+// listing becomes once the library loses the item. A listing newer than the
+// removal is a new add, and the removal no longer goes out.
+func TestServiceWatchlistRemovalHoldsTheTitlesOtherForm(t *testing.T) {
+	const titleRow = "watchlist-title:movie:550"
+	removedAt := time.Now().Add(-time.Hour)
+	for _, tt := range []struct {
+		name     string
+		pending  ListItemState
+		matcher  mediaMatcher
+		listedAt time.Time
+		wantAdd  bool
+	}{
+		{
+			name:    "title row holds a library match",
+			pending: ListItemState{MediaItemID: titleRow, ProviderItemKey: "tmdb:550", TitleIDs: []string{"tmdb:550", "imdb:tt0137523"}},
+			matcher: matchedMatcherStub{mediaItemID: testMovieMediaID},
+		},
+		{
+			name:     "newer listing of a library match",
+			pending:  ListItemState{MediaItemID: titleRow, ProviderItemKey: "tmdb:550", TitleIDs: []string{"tmdb:550", "imdb:tt0137523"}},
+			matcher:  matchedMatcherStub{mediaItemID: testMovieMediaID},
+			listedAt: time.Now(), wantAdd: true,
+		},
+		{
+			name:    "library row holds a title outside the library",
+			pending: ListItemState{MediaItemID: testMovieMediaID, ProviderItemKey: "imdb:tt0137523"},
+			matcher: unmatchedMatcherStub{},
+		},
+		{
+			name:     "newer listing of a title outside the library",
+			pending:  ListItemState{MediaItemID: testMovieMediaID, ProviderItemKey: "imdb:tt0137523"},
+			matcher:  unmatchedMatcherStub{},
+			listedAt: time.Now(), wantAdd: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, repo, conn := favoriteImportFixture(t)
+			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			pending := tt.pending
+			pending.ConnectionID, pending.ListKind, pending.Kind = conn.ID, ListKindWatchlist, "movie"
+			pending.RemotePresent, pending.LastRemovedLocalAt = true, &removedAt
+			repo.listItemStates = append(repo.listItemStates, pending)
+			titles := &titlesStub{entries: map[int]time.Time{}}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(tt.matcher).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+			service.SetWatchlistTitles(titles)
+			provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{
+				ProviderItemKey: "imdb:tt0137523", Kind: "movie", Title: "Fight Club",
+				IMDbID: "tt0137523", TMDBID: "550", FavoritedAt: tt.listedAt, FavoritedAtGuessed: tt.listedAt.IsZero(),
+			}}}
+			if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			onLibraryList, err := store.InWatchlist(context.Background(), conn.ProfileID, testMovieMediaID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, titleKept := titles.entries[550]
+			if added := onLibraryList || titleKept; added != tt.wantAdd {
+				t.Fatalf("library item listed %v, title kept %v, want added %v", onLibraryList, titleKept, tt.wantAdd)
+			}
+			state := listItemStateOf(repo, pending.MediaItemID)
+			if stillPending := !state.LocalPresent && state.RemotePresent; stillPending == tt.wantAdd {
+				t.Fatalf("pending row = %#v, want its removal pending %v", state, !tt.wantAdd)
+			}
+		})
 	}
-	if !reflect.DeepEqual(titles.requested, []int{680}) {
-		t.Fatalf("requested = %v, want only the title listed after the first sync", titles.requested)
+}
+
+// An import that fails partway still tracks the entries it already added,
+// including one whose add kept the entry and then failed, so the provider
+// dropping one before the next run takes it off the watchlist.
+func TestServiceWatchlistImportTracksEntriesAddedBeforeAFailure(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		addKeeps bool
+		failing  int
+	}{
+		{name: "a later row fails", failing: 680},
+		{name: "the add keeps the entry and fails", addKeeps: true, failing: 550},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, repo, conn := favoriteImportFixture(t)
+			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			titles := &titlesStub{
+				entries:  map[int]time.Time{},
+				addErr:   map[int]error{tt.failing: errors.New("database unavailable")},
+				addKeeps: tt.addKeeps,
+			}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(unmatchedMatcherStub{}).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+			service.SetWatchlistTitles(titles)
+			provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{
+				{ProviderItemKey: "tmdb:550", Kind: "movie", Title: "Fight Club", TMDBID: "550"},
+				{ProviderItemKey: "tmdb:680", Kind: "movie", Title: "Pulp Fiction", TMDBID: "680"},
+			}}
+
+			if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err == nil {
+				t.Fatal("import succeeded, want the failed add's error")
+			}
+			if _, ok := titles.entries[550]; !ok {
+				t.Fatal("the import didn't add the title")
+			}
+
+			// The provider drops the title before a run succeeds.
+			titles.addErr = nil
+			provider.rows = provider.rows[1:]
+			if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := titles.entries[550]; ok {
+				t.Fatal("the title the provider dropped is still on the watchlist")
+			}
+		})
 	}
-	if len(titles.queued) != 1 || titles.queued[0].TMDBID != 680 {
-		t.Fatalf("queued = %#v, want only the title listed after the first sync", titles.queued)
+}
+
+// A title saved before its sync row write failed still counts as imported
+// and as a change to the local list.
+func TestServiceWatchlistImportCountsATitleWhoseRowWriteFails(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled = true
+	repo.upsertListItemErr = errors.New("database unavailable")
+	titles := &titlesStub{entries: map[int]time.Time{}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(unmatchedMatcherStub{}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	service.SetWatchlistTitles(titles)
+	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{ProviderItemKey: "tmdb:550", Kind: "movie", Title: "Fight Club", TMDBID: "550"}}}
+
+	result, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding())
+	if err == nil {
+		t.Fatal("import succeeded, want the row write's error")
+	}
+	if result.Imported != 1 || !result.changedLocalList() {
+		t.Fatalf("result = %#v, want the saved title counted", result)
 	}
 }
 
@@ -305,29 +336,4 @@ func listItemStateOf(repo *serviceFakeRepo, mediaItemID string) *ListItemState {
 		}
 	}
 	return nil
-}
-
-// A watchlist entry outside the library added in Silo goes to the provider
-// under its TMDB ID.
-func TestServiceWatchlistExportSendsTitlesOutsideLibrary(t *testing.T) {
-	store, repo, conn := favoriteImportFixture(t)
-	conn.ExportWatchlistEnabled = true
-	titles := &titlesStub{entries: map[int]time.Time{550: time.Now().UTC()}}
-	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: store})
-	service.SetWatchlistTitles(titles)
-	provider := &watchlistBatchProviderStub{}
-
-	result, err := service.exportList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.LocalFound != 1 || result.Sent != 1 || len(provider.exported) != 1 {
-		t.Fatalf("result = %#v, exported = %#v", result, provider.exported)
-	}
-	if item := provider.exported[0]; item.MediaItemID != "watchlist-title:movie:550" || item.TMDBID != "550" || item.ProviderItemKey != "tmdb:550" {
-		t.Fatalf("exported = %#v", item)
-	}
-	if state := listItemStateOf(repo, "watchlist-title:movie:550"); state == nil || !state.RemotePresent || !state.LocalPresent {
-		t.Fatalf("state = %#v, want exported", state)
-	}
 }

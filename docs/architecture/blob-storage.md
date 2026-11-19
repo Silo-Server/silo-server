@@ -274,7 +274,12 @@ sweep scopes its cursor to it. Once recorded, the admin settings API rejects
 any write that would resolve to a different identity with `409` (problem type
 `conflict` in `/api/v2`, error code `artwork_storage_locked` in frozen
 `/api/v1`): a different backend, `artwork.local_path` for a
-local store, or the public endpoint, bucket, or key prefix for an S3 store. When
+local store, or the public endpoint, bucket, or key prefix for an S3 store. The
+saved settings can already name another location than the recorded one, when a
+location was saved without a restart and the running store then made the first
+write. A write that leaves those settings as they are still saves, and a write
+that changes them is accepted only when it names the recorded location, so the
+pending change can be put back before a restart. When
 only `storage.operational_identity` is recorded, the private location locks and
 the assets location stays free until the first write through Assets. The
 private bucket is locked on either backend, because it owns the operational

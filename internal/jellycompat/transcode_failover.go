@@ -335,7 +335,7 @@ func (h *PlaybackHandler) commitCompatTranscodeMove(
 		return "", errors.Join(err, h.undoCompatTranscodeMove(playSessionID, previous, next, previousAssignment))
 	}
 	h.recordCompatMoveOnUpstream(ctx, upstreamSessionID, nodeURL, assignment)
-	h.retireCompatTranscodeOnDeadNode(ctx, playSessionID, upstreamSessionID, deadNodeURL, nodeURL)
+	h.retireCompatTranscodeOnDeadNode(ctx, upstreamSessionID, deadNodeURL)
 	return nodeURL, nil
 }
 
@@ -414,19 +414,10 @@ func (h *PlaybackHandler) undoCompatTranscodeMove(
 // in case that node is only unreachable from the relay and still runs FFmpeg.
 // The stop is a release: the transport keeps its id on the new executor, and
 // a fenced stop would make the old node refuse that id for the token lifetime
-// if a later move picked the node again. The node keeps the transport's node
-// recipe record when it names another node (noderecipe.Store.DeleteUnlessMoved).
-//
-// A node that cannot tell (an older binary, or a card without node row ids)
-// deletes the record anyway. A remote move therefore writes the record again
-// after a successful stop; the proxy keeps polling through the short gap, and the new
-// node's rebuild retries on the client's next request. The rewrite uses the
-// session's recipe as it is after the stop, since an audio or subtitle switch
-// on the new node may have replaced the moved one in the meantime.
-func (h *PlaybackHandler) retireCompatTranscodeOnDeadNode(
-	ctx context.Context,
-	playSessionID, upstreamSessionID, deadNodeURL, nodeURL string,
-) {
+// if a later move picked the node again. The release leaves the node recipe
+// record alone (nodes never touch it), so the record the move wrote before
+// this runs stays in place.
+func (h *PlaybackHandler) retireCompatTranscodeOnDeadNode(ctx context.Context, upstreamSessionID, deadNodeURL string) {
 	detached := context.WithoutCancel(ctx)
 	go func() {
 		stopCtx, cancel := context.WithTimeout(detached, compatTranscodeMoveTimeout)
@@ -437,30 +428,6 @@ func (h *PlaybackHandler) retireCompatTranscodeOnDeadNode(
 			slog.InfoContext(detached, "could not stop the transcode on the node it moved off", "component", "jellycompat",
 				"node", logredact.SanitizeURL(deadNodeURL), "playback_session_id", upstreamSessionID,
 				"error", logredact.SanitizeText(err.Error()))
-			return
-		}
-		if nodeURL == "" || h.RecipeNodeStore == nil {
-			return
-		}
-		unlock := h.tm.LockSessionLifecycle(upstreamSessionID)
-		defer unlock()
-		// Under the lock a stop's recipe delete takes: a stop that already
-		// ran has ended the play or its upstream session, and a later one
-		// deletes what this writes. A later move may have put the transport
-		// back on the node this released; a release that landed after that
-		// move ended the rebuilt job and deleted its record, so the record is
-		// written for that node too, and the next request rebuilds there.
-		current, ok := h.playbackStore.Get(playSessionID)
-		if !ok || current.Terminal || current.UpstreamSessionID != upstreamSessionID || current.Recipe == nil ||
-			(!sameCompatNode(current.Recipe.TranscodeNodeURL, nodeURL) && !sameCompatNode(current.Recipe.TranscodeNodeURL, deadNodeURL)) {
-			return
-		}
-		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err != nil || upstream == nil {
-			return
-		}
-		if err := h.RecipeNodeStore.Put(stopCtx, upstreamSessionID, *current.Recipe); err != nil {
-			slog.WarnContext(detached, "rewrite moved transcode recipe after stopping the old node", "component", "jellycompat",
-				"error", logredact.SanitizeText(err.Error()), "playback_session_id", upstreamSessionID)
 		}
 	}()
 }

@@ -129,8 +129,8 @@ type WatchProviderSettings struct {
 	SyncWatchlistRemovalsEnabled bool           `json:"sync_watchlist_removals_enabled"`
 	SyncWatchlistOrderEnabled    bool           `json:"sync_watchlist_order_enabled"`
 	ScrobbleEnabled              bool           `json:"scrobble_enabled"`
-	ImportRatingsEnabled         bool           `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars)."`
-	ExportRatingsEnabled         bool           `json:"export_ratings_enabled" doc:"Send the profile's star ratings to the provider (stars times two) and clear removed ones."`
+	ImportRatingsEnabled         bool           `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings, 1 to 10, unchanged."`
+	ExportRatingsEnabled         bool           `json:"export_ratings_enabled" doc:"Send the profile's ratings, 1 to 10, to the provider unchanged and clear removed ones."`
 	SyncDroppedEnabled           bool           `json:"sync_dropped_enabled" doc:"Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides."`
 	ConnectionSettings           map[string]any `json:"connection_settings" doc:"The value of every setting in the provider's connection_settings, keyed by setting key: true or false for a boolean setting. A setting the profile has not changed has its default. Empty when the provider declares none."`
 }

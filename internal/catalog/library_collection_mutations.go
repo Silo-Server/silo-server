@@ -173,7 +173,7 @@ func (r *LibraryCollectionRepository) deleteCollection(ctx context.Context, id s
 			return nil
 		}
 		var inUse bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM page_sections WHERE config->>'library_collection_id'=$1)`, id).Scan(&inUse); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM page_sections WHERE `+SectionConfigReferencesCollection("config", "$1")+`)`, id).Scan(&inUse); err != nil {
 			return err
 		}
 		if inUse {

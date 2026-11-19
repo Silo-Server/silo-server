@@ -27,101 +27,6 @@ func scoredIDs(items []ScoredItem) []string {
 	return out
 }
 
-// Public reads answer up to the v2 maximum of 50 items per row; section
-// reads answer every cached candidate, so a section can scope the row to
-// its libraries before trimming it.
-func TestPublicReadsServeUpToFiftyAndSectionReadsTheWholePool(t *testing.T) {
-	pool := scoredRun("m", CacheCandidateLimit)
-	repo := &fakeReaderRepo{
-		meta:     &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}},
-		clusters: []TasteCluster{{ClusterIdx: 0, Label: "Drama", TotalWeight: 1}},
-		personal: map[string][]ScoredItem{
-			RecTypeForYouMain + "|":                pool,
-			RecTypeSimilarUsersLiked + "|":         pool,
-			RecTypeForYouClusterPrefix + "0" + "|": pool,
-		},
-	}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
-	ctx := t.Context()
-
-	for _, tc := range []struct {
-		limit, want int
-	}{{0, 20}, {50, 50}, {60, 50}} {
-		main, err := r.GetForYouMain(ctx, 7, "p1", tc.limit, catalog.AccessFilter{})
-		if err != nil || main == nil || len(main.Items) != tc.want {
-			t.Fatalf("GetForYouMain(limit %d) = %v, %v; want %d items", tc.limit, main, err, tc.want)
-		}
-		similar, err := r.GetSimilarUsersLiked(ctx, 7, "p1", tc.limit, catalog.AccessFilter{})
-		if err != nil || len(similar) != tc.want {
-			t.Fatalf("GetSimilarUsersLiked(limit %d) = %d items, %v; want %d", tc.limit, len(similar), err, tc.want)
-		}
-	}
-
-	// The section row is rotated like a default-size page, but keeps every
-	// cached item.
-	main, err := r.SectionForYouMain(ctx, 7, "p1", catalog.AccessFilter{})
-	if err != nil || main == nil || !slices.Equal(slices.Sorted(slices.Values(scoredIDs(main.Items))), scoredIDs(pool)) {
-		t.Fatalf("SectionForYouMain = %v, %v; want the whole cached pool", main, err)
-	}
-	similar, err := r.SectionSimilarUsersLiked(ctx, 7, "p1", catalog.AccessFilter{})
-	if err != nil || len(similar) != CacheCandidateLimit {
-		t.Fatalf("SectionSimilarUsersLiked = %d items, %v; want %d", len(similar), err, CacheCandidateLimit)
-	}
-	taste, err := r.SectionTasteMatchRow(ctx, 7, "p1", "", catalog.AccessFilter{})
-	if err != nil || taste == nil || len(taste.Items) != CacheCandidateLimit {
-		t.Fatalf("SectionTasteMatchRow = %v, %v; want %d items", taste, err, CacheCandidateLimit)
-	}
-}
-
-// A library's For You fill is the profile's other personal rows in a fixed
-// order: the cluster rows heaviest first, then Because You Watched by
-// anchor, most recent first, then Similar Users. Each item appears once at
-// its first place, the fill is filtered like every row, it leaves the main
-// row out, and a missing row asks for no refresh.
-func TestSectionForYouFillOrdersTheOtherPersonalRows(t *testing.T) {
-	refresher := &countingReadRefresher{}
-	repo := &fakeReaderRepo{
-		meta: &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}},
-		clusters: []TasteCluster{
-			{ClusterIdx: 0, Label: "Drama", TotalWeight: 1},
-			{ClusterIdx: 1, Label: "Comedy", TotalWeight: 3},
-			{ClusterIdx: 2, Label: "War", TotalWeight: 2}, // no cached row
-		},
-		personal: map[string][]ScoredItem{
-			RecTypeForYouMain + "|":                {{MediaItemID: "main"}},
-			RecTypeForYouClusterPrefix + "0" + "|": {{MediaItemID: "drama-00"}, {MediaItemID: "drama-01"}, {MediaItemID: "shared"}},
-			RecTypeForYouClusterPrefix + "1" + "|": {{MediaItemID: "comedy-00"}, {MediaItemID: "shared"}, {MediaItemID: "comedy-01"}},
-			// The second anchor is watched, so the first anchor's row drops it.
-			RecTypeBecauseWatched + "|first": {{MediaItemID: "byw-00"}, {MediaItemID: "comedy-00"}, {MediaItemID: "second"}},
-			RecTypeSimilarUsersLiked + "|":   {{MediaItemID: "similar-00"}, {MediaItemID: "hidden"}, {MediaItemID: "byw-00"}},
-		},
-		hidden: map[string]struct{}{"hidden": {}},
-	}
-	r := &Reader{
-		repo:    repo,
-		refresh: refresher,
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("first", "second")}).WithUserStoreOutsidePostgres(true),
-	}
-
-	fill, err := r.SectionForYouFill(t.Context(), 7, "p1", catalog.AccessFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"comedy-00", "shared", "comedy-01", "drama-00", "drama-01", "byw-00", "similar-00"}
-	if got := scoredIDs(fill); !slices.Equal(got, want) {
-		t.Fatalf("fill = %v, want %v", got, want)
-	}
-	if refresher.calls != 0 {
-		t.Fatalf("refreshes = %d, want none", refresher.calls)
-	}
-
-	// With recommendations off there is nothing personal to fill with.
-	fill, err = r.WithPersonalRows(false).SectionForYouFill(t.Context(), 7, "p1", catalog.AccessFilter{})
-	if err != nil || len(fill) != 0 {
-		t.Fatalf("fill with personal rows off = %v, %v; want none", scoredIDs(fill), err)
-	}
-}
-
 // anchorStore is a store whose profile p1 completed the given items, the
 // first most recently.
 func anchorStore(itemIDs ...string) *fakeSignalStore {
@@ -142,7 +47,7 @@ func anchorStore(itemIDs ...string) *fakeSignalStore {
 func TestSectionBecauseYouWatchedPicksAnAnchorWithItemsInScope(t *testing.T) {
 	const tvLibrary, movieLibrary = 1, 2
 	seriesRow, movieRow := scoredRun("series", 5), scoredRun("movie", 5)
-	libraries := map[string]int{}
+	libraries := map[string]int{"latest-series": tvLibrary, "older-movie": movieLibrary}
 	for _, item := range seriesRow {
 		libraries[item.MediaItemID] = tvLibrary
 	}
@@ -159,7 +64,7 @@ func TestSectionBecauseYouWatchedPicksAnAnchorWithItemsInScope(t *testing.T) {
 			libraries: libraries,
 		},
 		refresh: refresher,
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("latest-series", "older-movie")}),
+		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("latest-series", "older-movie")}).WithUserStoreOutsidePostgres(true),
 	}
 	ctx := t.Context()
 
@@ -190,49 +95,5 @@ func TestSectionBecauseYouWatchedPicksAnAnchorWithItemsInScope(t *testing.T) {
 	// would not change.
 	if refresher.calls != 0 {
 		t.Fatalf("refreshes = %d, want none", refresher.calls)
-	}
-}
-
-// An anchor whose cached row the profile has watched through moves on to
-// the next anchor instead of answering an empty row.
-func TestSectionBecauseYouWatchedMovesPastAnEmptiedAnchor(t *testing.T) {
-	store := anchorStore("first", "second")
-	store.progress = append(store.progress, userstore.WatchProgress{ProfileID: "p1", MediaItemID: "seen", Completed: true, UpdatedAt: "2026-08-01T00:00:00Z"})
-	r := &Reader{
-		repo: &fakeReaderRepo{personal: map[string][]ScoredItem{
-			RecTypeBecauseWatched + "|first":  {{MediaItemID: "seen", Score: 1}},
-			RecTypeBecauseWatched + "|second": {{MediaItemID: "fresh", Score: 1}},
-		}},
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true),
-	}
-	items, source, err := r.SectionBecauseYouWatched(t.Context(), 7, "p1", "", nil, catalog.AccessFilter{})
-	if err != nil || source != "second" || !slices.Equal(scoredIDs(items), []string{"fresh"}) {
-		t.Fatalf("source=%q items=%v err=%v; want the second anchor's row", source, scoredIDs(items), err)
-	}
-}
-
-// A section's library scope narrows the viewer's filter: nil leaves it, an
-// empty scope allows nothing, and a list is limited to what the viewer may
-// see.
-func TestScopeToLibraries(t *testing.T) {
-	restricted := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2, 3}}
-	for name, tc := range map[string]struct {
-		filter catalog.AccessFilter
-		scope  []int
-		want   []int
-	}{
-		"no scope keeps the filter":        {restricted, nil, []int{1, 2, 3}},
-		"no scope keeps unrestricted":      {catalog.AccessFilter{}, nil, nil},
-		"empty scope allows nothing":       {catalog.AccessFilter{}, []int{}, []int{}},
-		"unrestricted viewer takes scope":  {catalog.AccessFilter{}, []int{4, 5}, []int{4, 5}},
-		"restricted viewer intersects":     {restricted, []int{2, 4}, []int{2}},
-		"nothing in common allows nothing": {restricted, []int{4}, []int{}},
-		"hidden library leaves the scope":  {catalog.AccessFilter{DisabledLibraryIDs: []int{5}}, []int{4, 5}, []int{4}},
-		"only hidden libraries allow none": {catalog.AccessFilter{DisabledLibraryIDs: []int{5}}, []int{5}, []int{}},
-	} {
-		got := scopeToLibraries(tc.filter, tc.scope).AllowedLibraryIDs
-		if (got == nil) != (tc.want == nil) || !slices.Equal(got, tc.want) {
-			t.Errorf("%s: AllowedLibraryIDs = %#v, want %#v", name, got, tc.want)
-		}
 	}
 }

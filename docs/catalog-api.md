@@ -16,7 +16,10 @@ to server rows. Paging uses that effective row's configuration. A row hidden or
 removed by the profile, a row belonging to another profile, or a row in an
 inaccessible library answers `404`, as an unknown section does.
 
-Every section type can be browsed. Query-backed rows (genre, custom filter,
+Every section type can be browsed except a row of collections
+(`collection_posters`), whose cards are collections rather than titles: it answers an empty
+page (`items: []`, `total: 0`), and a client opens each collection's own page instead. See
+[Rows of collections](#rows-of-collections). Query-backed rows (genre, custom filter,
 collection, recently added or released, random, watchlist, favorites) page their
 source. Every other row, such as the recommendation rows, trending, Continue
 Watching and Next Up, is built by its section fetcher, so it is
@@ -44,6 +47,57 @@ source here, so a Home row that hides watched items lists them here, and a rando
 row is drawn again. A client that shows a capped row reporting `has_more` and
 wants the rest of it in place reads the row again at its own limit
 (`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
+
+## Rows of collections
+
+A row of collections (`section_type: collection_posters`, recipe `collection_posters`, preset
+`collection_posters_pick`, category `hand_picked`) shows several collections as poster cards;
+each card opens that collection. Its config lists them in order, each entry naming exactly one
+collection:
+
+```json
+{ "collections": [{ "library_collection_id": "01J9…" }, { "user_collection_id": "c-…" }] }
+```
+
+The list holds 1 to 30 entries with no collection twice. An administrator row
+(`createAdminSection`, `updateAdminSection`, `bulkCreateAdminSections`) lists server collections
+only and answers `422` for a `user_collection_id`; a profile's own row may mix its visible personal
+collections with server collections. A row of collections can't be the hero banner: saving one
+with `featured: true` stores it as not featured.
+
+On every read that answers a `Section` (`listHomeSections`, `getHomeLayout`'s
+`included_sections`, `getHomeSectionItems`, `listLibrarySections`, `getLibrarySectionItems`) and
+in the administrator preview (`previewAdminSection`), such a section carries `collections`, the
+cards the viewer may see, in the row's order. `items` is `[]`, `total_count` is the number of
+cards, and `item_limit` does not apply: the row shows every collection it lists. Each
+`SectionCollectionCard` has `id`, `source` (`library` for a server collection, `user` for a
+personal one), `title`, `poster_url` (presigned, card size; the assigned poster, else the
+viewer's collage, else empty), `poster_thumbhash`, `poster_is_collage`, `backdrop_url` and
+`backdrop_thumbhash` on a server collection with a backdrop (presigned at the page-width variant
+a collection page uses, so a client can draw it as the hero backdrop while the card is focused;
+a backdrop set to other artwork, such as the collection's poster, has no wide variant and comes
+at card thumbnail size, as on the collection page; absent otherwise, and always absent on a
+personal collection), `item_count` (the titles
+the viewer sees), `library_id` on a server collection (a library the viewer can open that holds
+it, for the collection page link; on a library page, that library), and `creator_profile_id` on
+a personal collection.
+
+A card is left out, silently, when its collection:
+
+- is a server collection that no longer exists, is hidden, sits in no enabled library the
+  viewer can open (on a library page: is not in that library), or has members the viewer can
+  open none of, as the collection lists leave it out;
+- is a personal collection that no longer exists or is not visible to the acting profile (its
+  own, or shared on the login). Its count and collage follow its owner's access, then the
+  viewer's, as `listCollections` does.
+
+A row left with no cards is dropped from the aggregate reads, like any empty row, and
+`getHomeSectionItems` answers it with no cards rather than an error. Rows of collections are
+not part of the hide-watched filter or the duplicate-title pass.
+
+A client that does not know `collections` sees a row with no `items` and leaves it out, as it
+leaves out any empty row. `getHomeCapabilities` reports `collection_rows: true` on a server
+that serves these rows; `listSectionRecipes` lists the `collection_posters` recipe there too.
 
 ## Section titles
 
@@ -115,8 +169,10 @@ A partial last word still matches, which keeps typeahead working. A name
 written without separators, as many Chinese, Japanese, and Korean names are,
 matches only from its start. Only the first eight distinct words count, and a
 word repeated exactly, with the same case, counts once. `%` and `_` are literal. Case-insensitive exact name
-matches come first;
-other matches sort by name, with person ID breaking ties. Ranking happens before
+matches come first. Other matches sort by how many credits the person has that
+the viewer can see within `media_scope`, most first, then by name, with person
+ID breaking ties. A query that matches more names than the server ranks, such as
+a single letter, sorts its other matches by name only. Ranking happens before
 applying the limit.
 
 The optional `media_scope` parameter limits results to people credited on items
@@ -473,6 +529,13 @@ no starting file (for example, when the viewer may access only a later part). `p
 keeps its own order: a variant comes before another when its lowest file ID is lower.
 Audiobook and ebook versions keep their part and file order.
 
+Clients choose the edition a detail page opens on in the same way. A picked edition
+wins, then `user_data.last_edition_key`, then the edition holding
+`user_data.last_file_id`. With no history, the edition is chosen by name before
+quality: an unnamed or standard edition first, then a theatrical one, then any other.
+Only editions in the first of those groups present are compared on quality (a file
+within the quality cap, then higher resolution, then HDR), and ties keep server order.
+
 ## Device-scoped playback answers
 
 `getCatalogItem` and `listCatalogItemVersions` accept the optional
@@ -549,7 +612,33 @@ matches titles across servers can read the IDs from a page of cards instead of
 fetching each item's detail, but must fall back to the detail document for a
 card that omits them.
 
-## Section quality badges
+## Book authors and positions on browse cards
+
+In catalog browse and search results (`listCatalogItems`, `queryCatalogItems`),
+an audiobook or ebook card carries `authors`: up to three author names in credit
+order, the names the book's detail page lists under its authors. It is absent
+for other types, for a book with no author credit, and on every other listing.
+
+The same results, and box set listings, carry `position_seconds` and
+`duration_seconds` on a card the profile has started and not finished, the pair a
+Continue Watching card carries. A card draws its progress bar and time left from
+them. They come from the profile's visible progress, the same position Continue
+Watching resumes from, and are absent while `user_state.played` is true, on
+series, seasons, and ebooks, and without a profile. Each page adds one author
+query when it holds books and one progress read when the profile is set.
+
+## Related books on a book page
+
+The entries of an audiobook or ebook detail's `series`, `related.also_by_author`,
+and `related.similar` add `poster_thumbhash`, the profile's state, and, for
+audiobooks, `duration_seconds`: the summed duration of the book's files the
+viewer can play, as the book's own `total_duration_seconds` is summed.
+`played` (present only when true) follows a catalog card's `user_state.played`:
+an audiobook's visible completed progress or completed history row, an ebook's
+reading progress past the finished threshold. `progress_ratio` (0 to 1) is
+present only on a started book that is not played: listening position over the
+progress record's duration, or ebook reading progress. One state lookup covers
+all three lists; without a profile both stay absent.
 
 Home and library section cards derive `overlay_summary` from the best accessible,
 non-missing media file: resolution first, then dynamic range. A series includes
@@ -885,7 +974,8 @@ flag and send `video` when it is absent.
 responding server's current ranking-availability checks and, for
 Meilisearch, `result_window_limit`, `session_ttl_seconds`, and
 `max_sessions_per_account`. While Meilisearch is configured but its index is
-unbuilt, unreachable, or on an incompatible schema, searches fall back to
+unbuilt, missing from Meilisearch, unreachable, or on an incompatible schema,
+searches fall back to
 PostgreSQL and the read reports `provider: postgres` without the Meilisearch
 limits. These provider and limit fields are an explicit exception to the usual
 configuration-only capability contract: changes in availability affect the
@@ -911,6 +1001,9 @@ returns `invalid_cursor` after a restart or when another replica handles it.
 The configured window must be between 1 and 1,000 candidates; a larger runtime
 index setting returns `capability_unsupported` before serving a partial ranking.
 This is the provider's reachable window, not an exact global match count.
+Keyword matches in it stop at the first one that matches the search worse than
+its best keyword match, so a search can return far fewer candidates than the
+window holds.
 At most 16 ranking sessions are retained per account; starting another discards
 the oldest retained session. Session requests do not extend expiry.
 
@@ -1039,6 +1132,42 @@ episode events collapsed into their parent series; it does not require a
 completed watch. `order=asc` puts the oldest latest watch first, and `desc`
 puts the newest first. Library/media-scope/search overlays retain this order
 before pagination. History does not currently support saved sort preferences.
+
+## Series and season completion
+
+A v2 catalog item and a v2 season can carry `availability`, with `have` and
+`total`. On a series, `have` is released seasons whose known episodes are all
+playable for this viewer, and `total` is released seasons: those with an aired
+episode, and those with no air dates at all once an episode is in the library.
+On a season, `have` is episodes with a playable file and `total` is known
+episodes. A file counts when it is present in an enabled library the viewer
+can access and within the playback-quality ceiling; on a library-scoped read
+with `catalog.scope_versions_to_library` on, only files in that library count.
+A multi-episode file covers each episode it spans; it is linked only to the
+first. The field is absent for other item types, for specials, for a season
+with nothing aired and nothing in the library, and when the episode list is
+incomplete: episode metadata still owes a refresh, or a season that has aired,
+or that precedes a season with episodes, lists none. A trailing season with no
+air date or a future one and no episodes yet, as a provider lists a renewal,
+does not count as incomplete. `/api/v1` does not send it.
+
+Home and library section cards, catalog listings and search, box sets, and the
+season list and season detail carry the field. Item detail, favorites,
+watchlist, collections, history, and Watch Tonight cards do not.
+
+The server counts seasons and episodes, and sends the field, only while the
+acting profile draws the Availability card overlay: poster badges are on
+(`ui.card_overlays_enabled`, or the server-wide default from
+`GET /api/v2/settings/overlay-config` when the profile has not chosen) and the
+profile's `ui.card_overlays` document, or the server-wide default document
+when the profile has none, enables `availability`. The badge is off by
+default, so most reads skip the count and carry no `availability`. A client
+that turns the badge on reads its cards again after saving the setting; the
+next read carries the field. The count's cost follows the episodes of the
+series on the page, not the size of the library.
+
+The web client draws these counts as the Availability card overlay. Apple and
+Android clients can ignore the field until they draw it.
 
 ## Season order
 
@@ -1176,7 +1305,9 @@ The route requires acting administrator access.
 the administrator Home and library pages that show a server collection. Each item carries the
 row's `id`, `scope` (`home` or `library`), `library_id` (the library whose page holds the row;
 `null` for Home), `section_type`, `title`, `featured` (the row is its page's hero banner),
-`enabled`, `position`, and `page_row_count`, the number of rows on that page. Home rows come
+`enabled`, `position`, and `page_row_count`, the number of rows on that page. A row of
+collections that lists the collection is listed too, with `collection_count`, the number of
+collections it lists (this one included); the field is absent on every other row. Home rows come
 first, then library pages by library, each in page order. Rows a template bundle generated as a
 hero are listed like any other row. An unknown collection answers `404`; a collection no row
 shows answers an empty `items` list.
@@ -1188,7 +1319,9 @@ turned-off rows included. One count covers the whole list. Both are absent from
 
 The rows list includes turned-off rows. Both routes read the administrator page layouts only: rows a
 profile added to its own Home are not listed or counted. A collection that `row_count` reports as
-used cannot be deleted (`409`) until those rows stop showing it.
+used cannot be deleted (`409`) until those rows stop showing it. A row of collections counts as
+showing every server collection it lists: to free one, take it out of the row's `collections`
+(`updateAdminSection`), or delete the row when it is the only one the row lists.
 
 Both routes require acting administrator access.
 

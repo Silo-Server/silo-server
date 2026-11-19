@@ -57,6 +57,10 @@ type Scope struct {
 	// HideWatchedItemsOnHome is the profile's resolved home.hide_watched_items,
 	// set together with NextUpMode in the same way.
 	HideWatchedItemsOnHome bool `json:"-"`
+	// CardAvailability is the profile's resolved choice to draw the
+	// availability poster badge (see ViewerPreferences.CardAvailability), set
+	// together with NextUpMode in the same way.
+	CardAvailability bool `json:"-"`
 	// PreferencesDegraded is set when the profile's viewer preferences could
 	// not be read and the scope carries their defaults (see
 	// ResolveViewerPreferences). It stays out of the access fingerprint, which

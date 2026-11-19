@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -100,4 +101,17 @@ func TestCollectionAtomicAppendUnsupportedHTTP(t *testing.T) {
 			t.Fatalf("unsupported append fell back to a position: %d %s", rec.Code, rec.Body)
 		}
 	}
+}
+
+func collectionDeps(t *testing.T) (Dependencies, *fakePersonalCollections, *fakeCollectionImports) {
+	t.Helper()
+	deps := pilotDeps(nil, nil)
+	pc := &fakePersonalCollections{list: handlers.PersonalCollectionListView{
+		Collections: []handlers.PersonalCollectionView{fixtureCollectionView()},
+		Groups:      []handlers.CollectionGroupView{},
+	}}
+	ci := &fakeCollectionImports{configured: true}
+	deps.PersonalCollections = pc
+	deps.CollectionImports = ci
+	return deps, pc, ci
 }

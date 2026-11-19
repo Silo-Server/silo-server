@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
@@ -15,6 +14,7 @@ import {
 } from "./subtitleTranslateRequest";
 import { quotaPeriodWindowLabel } from "@/lib/quotaPeriods";
 import { useT, type MessageKey } from "@/i18n";
+import { PlayerModalDialog } from "./PlayerModalDialog";
 
 /** Glyph on the close button, which carries a translated label. */
 const CLOSE_GLYPH = "✕";
@@ -137,15 +137,6 @@ export function SubtitleTranslateModal({
     refreshQuota();
   }, [isOpen, canTranscribe, refreshQuota]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen, handleClose]);
-
   const handleTranslate = useCallback(async () => {
     if (inFlight.current || !isOpen) return;
     const fromAudio = mode === "audio";
@@ -234,196 +225,189 @@ export function SubtitleTranslateModal({
 
   if (!isOpen) return null;
 
-  const modal = (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-      onClick={handleClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("web.subtitles.translate.titleTranslate")}
+  return (
+    <PlayerModalDialog
+      label={t("web.subtitles.translate.titleTranslate")}
+      className="w-full max-w-[440px] rounded-lg bg-neutral-900 text-white shadow-xl"
+      onClose={handleClose}
     >
-      <div
-        className="w-full max-w-[440px] rounded-lg bg-neutral-900 text-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h2 className="text-sm font-semibold">
-            {mode === "audio"
-              ? t("web.subtitles.translate.titleGenerate")
-              : t("web.subtitles.translate.titleTranslate")}
-          </h2>
-          <button
-            type="button"
-            className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-            onClick={handleClose}
-            aria-label={t("web.subtitles.closeDialog")}
-          >
-            {CLOSE_GLYPH}
-          </button>
-        </div>
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <h2 className="text-sm font-semibold">
+          {mode === "audio"
+            ? t("web.subtitles.translate.titleGenerate")
+            : t("web.subtitles.translate.titleTranslate")}
+        </h2>
+        <button
+          type="button"
+          className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+          onClick={handleClose}
+          aria-label={t("web.subtitles.closeDialog")}
+        >
+          {CLOSE_GLYPH}
+        </button>
+      </div>
 
-        <div className="space-y-3 px-4 py-4">
-          {canTranslate && canTranscribe && (
-            <div className="flex gap-1 rounded bg-neutral-800 p-1" role="tablist">
-              {(
-                [
-                  ["subtitles", "web.subtitles.translate.fromSubtitles"],
-                  ["audio", "web.subtitles.translate.fromAudio"],
-                ] as const satisfies readonly (readonly [SubtitleTranslateMode, MessageKey])[]
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === value}
-                  className={`flex-1 rounded px-2 py-1 text-xs font-medium focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
-                    mode === value ? "bg-white/15 text-white" : "text-white/50 hover:text-white/80"
-                  }`}
-                  onClick={() => setMode(value)}
+      <div className="space-y-3 px-4 py-4">
+        {canTranslate && canTranscribe && (
+          <div className="flex gap-1 rounded bg-neutral-800 p-1" role="tablist">
+            {(
+              [
+                ["subtitles", "web.subtitles.translate.fromSubtitles"],
+                ["audio", "web.subtitles.translate.fromAudio"],
+              ] as const satisfies readonly (readonly [SubtitleTranslateMode, MessageKey])[]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={mode === value}
+                className={`flex-1 rounded px-2 py-1 text-xs font-medium focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                  mode === value ? "bg-white/15 text-white" : "text-white/50 hover:text-white/80"
+                }`}
+                onClick={() => setMode(value)}
+                disabled={submitting}
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!canTranslate && !canTranscribe ? (
+          <p className="py-4 text-center text-xs text-white/50">
+            {t("web.subtitles.translate.noSource")}
+          </p>
+        ) : (
+          <>
+            {mode === "subtitles" ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-white/60">
+                  {t("web.subtitles.translate.translateFrom")}
+                </span>
+                <select
+                  data-autofocus
+                  className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                  value={effectiveSourceIndex ?? ""}
+                  onChange={(e) => setSourceIndex(Number(e.target.value))}
                   disabled={submitting}
                 >
-                  {t(label)}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!canTranslate && !canTranscribe ? (
-            <p className="py-4 text-center text-xs text-white/50">
-              {t("web.subtitles.translate.noSource")}
-            </p>
-          ) : (
-            <>
-              {mode === "subtitles" ? (
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-white/60">
-                    {t("web.subtitles.translate.translateFrom")}
-                  </span>
-                  <select
-                    className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                    value={effectiveSourceIndex ?? ""}
-                    onChange={(e) => setSourceIndex(Number(e.target.value))}
-                    disabled={submitting}
-                  >
-                    {sourceTracks.map((track) => (
-                      <option key={track.index} value={track.index}>
-                        {sourceOptionLabels.get(track.index)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-white/60">
-                    {t("web.subtitles.translate.audioTrack")}
-                  </span>
-                  <select
-                    className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                    value={audioIndex}
-                    onChange={(e) => setAudioIndex(Number(e.target.value))}
-                    disabled={submitting}
-                  >
-                    {(audioTracks ?? []).map((track, i) => (
-                      <option key={i} value={i}>
-                        {audioLabel(track, i)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              {mode === "audio" && !translateEnabled ? (
-                <p className="text-xs leading-relaxed text-white/60">
-                  {t("web.subtitles.translate.spokenLanguageOnly")}
-                </p>
-              ) : (
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-white/60">
-                    {mode === "audio"
-                      ? t("web.subtitles.translate.subtitleLanguage")
-                      : t("web.subtitles.translate.translateTo")}
-                  </span>
-                  <select
-                    className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                    value={targetLang}
-                    onChange={(e) => setTargetLang(e.target.value)}
-                    disabled={submitting}
-                  >
-                    {languageOptions().map((lang) => (
-                      <option key={lang.code} value={lang.code}>
-                        {lang.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              {mode === "audio" && quota && (
-                <p
-                  className={`text-[11px] leading-relaxed ${
-                    quotaExhausted ? "text-amber-300/90" : "text-white/35"
-                  }`}
+                  {sourceTracks.map((track) => (
+                    <option key={track.index} value={track.index}>
+                      {sourceOptionLabels.get(track.index)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-white/60">
+                  {t("web.subtitles.translate.audioTrack")}
+                </span>
+                <select
+                  data-autofocus
+                  className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                  value={audioIndex}
+                  onChange={(e) => setAudioIndex(Number(e.target.value))}
+                  disabled={submitting}
                 >
-                  {quotaExhausted
-                    ? t("web.subtitles.translate.quotaExhausted", {
-                        limit: quota.limit,
-                        limit_text: quota.limit,
-                        period: quotaPeriodLabel,
-                      })
-                    : t("web.subtitles.translate.quotaRemaining", {
-                        limit: quota.limit,
-                        limit_text: quota.limit,
-                        remaining: quota.remaining,
-                        period: quotaPeriodLabel,
-                      })}
-                </p>
-              )}
+                  {(audioTracks ?? []).map((track, i) => (
+                    <option key={i} value={i}>
+                      {audioLabel(track, i)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
-              {error && (
-                <div role="alert" className="rounded bg-red-900/40 px-3 py-2 text-xs text-red-300">
-                  {error}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  className="rounded px-3 py-1.5 text-sm text-white/60 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-                  onClick={handleClose}
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="rounded bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                  onClick={handleTranslate}
-                  disabled={
-                    submitting ||
-                    (mode === "subtitles" && effectiveSourceIndex === null) ||
-                    (mode === "audio" && quotaExhausted)
-                  }
-                >
-                  {submitting
-                    ? t("web.subtitles.translate.starting")
-                    : mode === "audio"
-                      ? t("web.subtitles.translate.generate")
-                      : t("web.subtitles.translate.translate")}
-                </button>
-              </div>
-
-              <p className="text-[11px] leading-relaxed text-white/35">
-                {mode === "audio"
-                  ? translateEnabled
-                    ? t("web.subtitles.translate.noteAudioTranslate")
-                    : t("web.subtitles.translate.noteAudio")
-                  : t("web.subtitles.translate.noteSubtitles")}
+            {mode === "audio" && !translateEnabled ? (
+              <p className="text-xs leading-relaxed text-white/60">
+                {t("web.subtitles.translate.spokenLanguageOnly")}
               </p>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+            ) : (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-white/60">
+                  {mode === "audio"
+                    ? t("web.subtitles.translate.subtitleLanguage")
+                    : t("web.subtitles.translate.translateTo")}
+                </span>
+                <select
+                  className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                  value={targetLang}
+                  onChange={(e) => setTargetLang(e.target.value)}
+                  disabled={submitting}
+                >
+                  {languageOptions().map((lang) => (
+                    <option key={lang.code} value={lang.code}>
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
-  return createPortal(modal, document.body);
+            {mode === "audio" && quota && (
+              <p
+                className={`text-[11px] leading-relaxed ${
+                  quotaExhausted ? "text-amber-300/90" : "text-white/35"
+                }`}
+              >
+                {quotaExhausted
+                  ? t("web.subtitles.translate.quotaExhausted", {
+                      limit: quota.limit,
+                      limit_text: quota.limit,
+                      period: quotaPeriodLabel,
+                    })
+                  : t("web.subtitles.translate.quotaRemaining", {
+                      limit: quota.limit,
+                      limit_text: quota.limit,
+                      remaining: quota.remaining,
+                      period: quotaPeriodLabel,
+                    })}
+              </p>
+            )}
+
+            {error && (
+              <div role="alert" className="rounded bg-red-900/40 px-3 py-2 text-xs text-red-300">
+                {error}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className="rounded px-3 py-1.5 text-sm text-white/60 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                onClick={handleClose}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="rounded bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                onClick={handleTranslate}
+                disabled={
+                  submitting ||
+                  (mode === "subtitles" && effectiveSourceIndex === null) ||
+                  (mode === "audio" && quotaExhausted)
+                }
+              >
+                {submitting
+                  ? t("web.subtitles.translate.starting")
+                  : mode === "audio"
+                    ? t("web.subtitles.translate.generate")
+                    : t("web.subtitles.translate.translate")}
+              </button>
+            </div>
+
+            <p className="text-[11px] leading-relaxed text-white/35">
+              {mode === "audio"
+                ? translateEnabled
+                  ? t("web.subtitles.translate.noteAudioTranslate")
+                  : t("web.subtitles.translate.noteAudio")
+                : t("web.subtitles.translate.noteSubtitles")}
+            </p>
+          </>
+        )}
+      </div>
+    </PlayerModalDialog>
+  );
 }

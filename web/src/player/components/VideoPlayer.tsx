@@ -165,7 +165,7 @@ function pillKey(
   const isEditingOrInMenu =
     !targetInPrompt &&
     target?.closest(
-      'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
+      'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"]',
     ) != null;
   if (isEditingOrInMenu) return null;
 
@@ -350,6 +350,8 @@ interface VideoPlayerProps {
   preview?: PlayerTimeRange | null;
   markerSegments?: PlayerMarkerSegment[];
   autoPlayNextPreview?: boolean;
+  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
+  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   /**
    * Notified after a successful in-player marker edit, with only the kinds it
@@ -568,6 +570,7 @@ export function VideoPlayer({
   preview = null,
   markerSegments,
   autoPlayNextPreview = false,
+  autoPlayNext = true,
   canEditMarkers = true,
   onMarkersEdited,
   duration: propDuration,
@@ -1667,21 +1670,27 @@ export function VideoPlayer({
 
       resetRoomCatchupRate();
 
-      if (directPlayOriginPendingRef.current) {
+      // A seek this stream takes: the replan in flight, and a change queued
+      // behind it, resume there too.
+      const takeSeek = () => {
         rememberPendingSeek(seconds);
+        replanSeekRef.current = replanningRef.current
+          ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
+          : null;
+        onSeek?.(seconds);
         setCurrentTime(seconds);
+      };
+
+      // The original's metadata handler seeks there once the clock's origin
+      // is known.
+      if (directPlayOriginPendingRef.current) {
+        takeSeek();
         return true;
       }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
-        rememberPendingSeek(seconds);
-        replanSeekRef.current = replanningRef.current
-          ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
-          : null;
-        // A change queued behind the replan in flight resumes here too.
-        onSeek?.(seconds);
-        setCurrentTime(seconds);
+        takeSeek();
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;
@@ -2511,6 +2520,7 @@ export function VideoPlayer({
     roomPlaybackActive ? undefined : seriesContext,
     currentTime,
     handleNavigate,
+    { autoPlay: autoPlayNext, playing },
   );
 
   // Previous-episode lookup (mirrors the helper in useNextEpisode). Auto-play
@@ -3675,7 +3685,7 @@ export function VideoPlayer({
     const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const interactionInProgress =
       active?.closest(
-        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
+        'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
       ) !== null ||
       containerRef.current?.querySelector('[role="dialog"], [role="menu"], [role="listbox"]') !=
         null;

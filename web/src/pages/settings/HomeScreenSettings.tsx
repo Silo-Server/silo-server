@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { holdsCollections } from "@/lib/sectionTypes";
 
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 const HOME_PREFERENCE_KEYS = [
@@ -206,7 +207,8 @@ export default function HomeScreenSettings() {
           ? t("web.settings.homeScreen.stopHero")
           : t("web.settings.homeScreen.useHero"),
         icon: row.hero ? StarOff : Star,
-        disabled: busy,
+        // A row of collections has no title to show as the hero.
+        disabled: busy || (!row.hero && holdsCollections(row.sectionType)),
         onSelect: () => void adapter.setHero(row.id, !row.hero),
       },
       shared.moveToTop,

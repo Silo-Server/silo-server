@@ -83,6 +83,7 @@ func registerAdminPluginLifecycle(reg *Registry) {
 	}
 	create := op(http.MethodPost, "", "createAdminPluginInstallation", "Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry.", RetrySafetyNonRetryable)
 	create.DefaultStatus = http.StatusCreated
+	create.Errors = append(create.Errors, http.StatusConflict)
 	Register(reg, create, func(ctx context.Context, in *AdminPluginInstallCreateInput) (*AdminPluginInstallationOutput, error) {
 		if reg.deps.AdminPluginLifecycle == nil {
 			return nil, unavailable("plugin lifecycle")
@@ -122,7 +123,7 @@ func registerAdminPluginLifecycle(reg *Registry) {
 		}
 		return reg.adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.UpdateAdminPluginInstallation(ctx, id, handlers.PluginInstallationUpdateInput{Enabled: in.Body.Enabled, UpdatePolicy: in.Body.UpdatePolicy}))
 	})
-	apply := op(http.MethodPost, "/{id}/update", "applyAdminPluginUpdate", "Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry.", RetrySafetyNonRetryable)
+	apply := op(http.MethodPost, "/{id}/update", "applyAdminPluginUpdate", "Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409, as is an update that another install of the plugin replaced while its package downloaded. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry.", RetrySafetyNonRetryable)
 	apply.Errors = append(apply.Errors, http.StatusNotFound, http.StatusConflict)
 	Register(reg, apply, func(ctx context.Context, in *AdminPluginInstallationIDInput) (*AdminPluginInstallationOutput, error) {
 		if reg.deps.AdminPluginLifecycle == nil {

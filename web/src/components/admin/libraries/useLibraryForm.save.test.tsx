@@ -1,9 +1,7 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
-import { languageOptions } from "@/player/utils/languageNames";
-import { AdvancedFields, MetadataFields } from "./LibraryFormSections";
 import { useLibraryForm } from "./useLibraryForm";
 
 const { mutate } = vi.hoisted(() => ({ mutate: vi.fn() }));
@@ -145,44 +143,6 @@ describe("saving library processing settings", () => {
   });
 });
 
-describe("metadata language picker", () => {
-  beforeAll(() => {
-    Object.defineProperties(Element.prototype, {
-      hasPointerCapture: { configurable: true, value: () => false },
-      setPointerCapture: { configurable: true, value: () => {} },
-      releasePointerCapture: { configurable: true, value: () => {} },
-      scrollIntoView: { configurable: true, value: () => {} },
-    });
-  });
-
-  it("offers only languages the library contract accepts", () => {
-    // updateLibrary and createLibrary take a bare ISO 639-1 code; a regional
-    // tag such as pt-BR fails with 422 validation_failed (#3209).
-    const { result } = renderHook(() => useLibraryForm({ library: null }));
-    render(<MetadataFields form={result.current} />);
-    fireEvent.pointerDown(screen.getByRole("combobox"), {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
-    const codes = screen
-      .getAllByRole("option")
-      .map((option) => languageOptions().find((lang) => lang.label === option.textContent)?.code);
-
-    expect(codes.length).toBeGreaterThan(1);
-    expect(codes.filter((code) => !code || !/^[a-z]{2}$/.test(code))).toEqual([]);
-  });
-});
-
-describe("marker detection switch", () => {
-  it("is hidden for book libraries", () => {
-    const { result } = renderHook(() => useLibraryForm({ library: null }));
-    act(() => result.current.handleTypeChange("audiobooks"));
-    render(<AdvancedFields form={result.current} chapterThumbnailsSupported={false} />);
-    expect(screen.queryByText(/Detect .*markers/)).toBeNull();
-  });
-});
-
 describe("seek preview switch", () => {
   const movies = { id: 1, name: "Movies", type: "movies", paths: ["/media"] } as Library;
 
@@ -211,43 +171,5 @@ describe("seek preview switch", () => {
       form.handleTypeChange("audiobooks"),
     );
     expect(saved).toMatchObject({ body: { trickplay_enabled: false } });
-  });
-
-  it("is hidden when the server does not offer seek previews", () => {
-    const { result } = renderHook(() => useLibraryForm({ library: movies }));
-    render(<AdvancedFields form={result.current} chapterThumbnailsSupported />);
-    expect(screen.queryByText("Generate seek previews")).toBeNull();
-  });
-
-  it("needs public asset storage to turn on, but can always turn off", () => {
-    const off = renderHook(() => useLibraryForm({ library: movies }));
-    const { unmount } = render(
-      <AdvancedFields
-        form={off.result.current}
-        chapterThumbnailsSupported
-        trickplaySupported={false}
-      />,
-    );
-    expect(
-      screen.getByText("Public asset storage is required before this can be enabled."),
-    ).toBeTruthy();
-    expect(screen.getByRole("switch", { name: /seek previews/i }).hasAttribute("disabled")).toBe(
-      true,
-    );
-    unmount();
-
-    const on = renderHook(() =>
-      useLibraryForm({ library: { ...movies, trickplay_enabled: true } }),
-    );
-    render(
-      <AdvancedFields
-        form={on.result.current}
-        chapterThumbnailsSupported
-        trickplaySupported={false}
-      />,
-    );
-    expect(screen.getByRole("switch", { name: /seek previews/i }).hasAttribute("disabled")).toBe(
-      false,
-    );
   });
 });

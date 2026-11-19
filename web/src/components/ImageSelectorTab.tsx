@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import { useState, useMemo, useCallback, useRef, type ChangeEvent } from "react";
 import { joinList } from "@/lib/appLocale";
 import { Check, Loader2, AlertCircle, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -60,15 +60,9 @@ interface ImageSelectorTabProps {
   item: ItemDetail;
   enabled: boolean;
   onImageApplied?: () => void;
-  onApplyPendingChange?: (pending: boolean) => void;
 }
 
-export default function ImageSelectorTab({
-  item,
-  enabled,
-  onImageApplied,
-  onApplyPendingChange,
-}: ImageSelectorTabProps) {
+export default function ImageSelectorTab({ item, enabled, onImageApplied }: ImageSelectorTabProps) {
   const t = useT();
   const availableTabs = item.type === "season" ? SEASON_TABS : IMAGE_TABS;
   const [activeTab, setActiveTab] = useState<ImageTab>("poster");
@@ -86,11 +80,6 @@ export default function ImageSelectorTab({
   const pending = applyMutation.isPending || uploadMutation.isPending;
 
   const images = useMemo(() => data?.images ?? [], [data]);
-
-  useEffect(() => {
-    onApplyPendingChange?.(pending);
-    return () => onApplyPendingChange?.(false);
-  }, [pending, onApplyPendingChange]);
 
   const current = data?.current;
   const providerErrors = data?.provider_errors;

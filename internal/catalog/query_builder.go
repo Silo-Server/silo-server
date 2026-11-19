@@ -1509,7 +1509,7 @@ func (qb *QueryBuilder) releaseDateSortExpr() string {
 	if isEpisodeCatalogScope(qb.mediaScope) {
 		return fmt.Sprintf("%s.episode_air_date", qb.alias)
 	}
-	return queryColumnSQL(qb.alias, querySortDefs["release_date"].columnSQL)
+	return ReleaseDateSortSQL(qb.alias)
 }
 
 func (qb *QueryBuilder) addedAtFilterExpr() string {
@@ -1763,10 +1763,9 @@ func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 		qb.argIdx+1,
 		qb.alias,
 	)
-	expr := `GREATEST(
-		COALESCE(sort_history_viewed.viewed_at, '-infinity'::timestamptz),
-		COALESCE(sort_progress_viewed.viewed_at, '-infinity'::timestamptz)
-	)`
+	// GREATEST skips NULLs, so a never-watched title stays NULL and the
+	// sort's NULLS LAST puts it after the watched ones in both directions.
+	expr := `GREATEST(sort_history_viewed.viewed_at, sort_progress_viewed.viewed_at)`
 	return expr, []string{historyJoin, progressJoin}, []any{qb.userID, qb.profileID}
 }
 

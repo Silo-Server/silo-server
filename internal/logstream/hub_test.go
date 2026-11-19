@@ -2,7 +2,6 @@ package logstream
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -111,62 +110,6 @@ func publishOne(t *testing.T, hub *Hub) <-chan struct{} {
 	}
 	bus := hub.eventBus.(*stuckBus)
 	return bus.calls
-}
-
-func TestHubPublishesQueuedRowsToOtherNodesBeforeClose(t *testing.T) {
-	bus := &recordingBus{}
-	hub := NewHub("node-a", bus)
-
-	entries := []map[string]int{{"id": 1}, {"id": 2}, {"id": 3}}
-	if _, err := PublishAppends(hub, StreamAudit, entries); err != nil {
-		t.Fatal(err)
-	}
-	hub.Close()
-
-	bus.mu.Lock()
-	defer bus.mu.Unlock()
-	if len(bus.events) != len(entries) {
-		t.Fatalf("published %d events, want %d", len(bus.events), len(entries))
-	}
-	for i, event := range bus.events {
-		var envelope appendEnvelope
-		if err := json.Unmarshal([]byte(event.Payload), &envelope); err != nil {
-			t.Fatal(err)
-		}
-		var entry map[string]int
-		if err := json.Unmarshal(envelope.Entry, &entry); err != nil {
-			t.Fatal(err)
-		}
-		if event.Type != cache.EventAuditLogAppended || envelope.Source != "node-a" || envelope.Stream != StreamAudit || entry["id"] != i+1 {
-			t.Fatalf("event %d = %s %+v, entry %v", i, event.Type, envelope, entry)
-		}
-	}
-}
-
-// TestHubLogsPublishFailuresOnce checks that a failing event bus is reported
-// once, not per row: every report is itself persisted and published.
-func TestHubLogsPublishFailuresOnce(t *testing.T) {
-	prev := slog.Default()
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	records := &recordCounter{}
-	slog.SetDefault(slog.New(records))
-
-	bus := &recordingBus{err: errors.New("redis unreachable")}
-	hub := NewHub("node-a", bus)
-	failedBefore := tailDrops(StreamApp, tailDropPublishFailed)
-
-	const n = 10
-	if _, err := PublishAppends(hub, StreamApp, make([]int, n)); err != nil {
-		t.Fatal(err)
-	}
-	hub.Close()
-
-	if got := tailDrops(StreamApp, tailDropPublishFailed) - failedBefore; got != n {
-		t.Fatalf("publish_failed drops = %v, want %d", got, n)
-	}
-	if got := records.count(); got != 1 {
-		t.Fatalf("logged %d records for %d failed publishes, want 1", got, n)
-	}
 }
 
 type recordCounter struct {

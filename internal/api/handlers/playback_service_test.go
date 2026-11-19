@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -45,7 +46,7 @@ func newPlaybackServiceFixture(t *testing.T) *playbackServiceFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	handler.InstallationID = serviceInstallation
 	record := playback.AttemptRecordV3{
 		PlaybackAttemptID:    uuid.NewString(),
@@ -411,7 +412,7 @@ func TestProgressSideEffectsAcrossReplicasEndAtTheRowsLatestSample(t *testing.T)
 	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
 
 	replica := func(manager *playback.SessionManager, store userstore.UserStore) *PlaybackHandler {
-		h := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+		h := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 		h.InstallationID = serviceInstallation
 		h.PlanStoreV3 = planStore
 		h.StoreProvider = testUserStoreProvider{store: store}
@@ -531,7 +532,7 @@ func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 
 func TestSubtitleFontServiceReconstructsAndChecksAdmission(t *testing.T) {
 	manager := playback.NewSessionManager(0, 0)
-	playbackHandler := NewPlaybackHandler(manager)
+	playbackHandler := newKeyedPlaybackHandler(manager)
 	playbackHandler.JWTSecret = "font-service-secret"
 	file := &models.MediaFile{ID: 100, FilePath: writePlaybackTestMediaFile(t, "font-source.mkv"),
 		SubtitleTracks: []models.SubtitleTrack{{Index: 4, Codec: "subrip"}},
@@ -811,7 +812,7 @@ func TestSidecarRoutesEnforceOwningProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
 	stream.TM = handler.TranscodeManager()
 	params := map[string]string{"session_id": session.ID, "track": "0", "name": "segment0.m4s"}
@@ -837,8 +838,9 @@ func TestSidecarRoutesEnforceOwningProfile(t *testing.T) {
 // reconstruction is TestSubtitleFontServiceReconstructsAndChecksAdmission.
 func TestSidecarRoutesReconstructFromTheStreamReference(t *testing.T) {
 	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	handler.JWTSecret = "sidecar-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("sidecar-secret")
 	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
 	stream.JWTSecret = handler.JWTSecret
 	stream.TM = handler.TranscodeManager()

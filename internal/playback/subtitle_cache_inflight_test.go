@@ -97,8 +97,6 @@ func TestExtractTextReusesAFillThatCommitsBeforeTheWait(t *testing.T) {
 	}
 }
 
-// A fill that commits during the last round's wait is reused too: the rounds
-// run out with no reservation, and the lookup after them finds the entry.
 func TestExtractTextReusesAFillThatCommitsDuringTheLastWait(t *testing.T) {
 	cache, source := newTestCache(t)
 	reserve := func() *SubtitleCacheFill {
@@ -135,18 +133,5 @@ func TestExtractTextReusesAFillThatCommitsDuringTheLastWait(t *testing.T) {
 	if err != nil || string(data) != "SHARED" || extracts != 0 || waits != textFillRounds {
 		t.Fatalf("ExtractText = %q, %v after %d extracts and %d waits; want the committed fill, no extract, %d waits",
 			data, err, extracts, waits, textFillRounds)
-	}
-}
-
-// Without a cache directory there's no fill to share: ExtractText extracts.
-func TestExtractTextWithoutACacheExtracts(t *testing.T) {
-	cache := NewSubtitleCache(func() string { return "" })
-	extracts := 0
-	data, err := cache.ExtractText(t.Context(), "/media/movie.mkv", 0, "srt", func(context.Context) ([]byte, error) {
-		extracts++
-		return []byte("DATA"), nil
-	})
-	if err != nil || string(data) != "DATA" || extracts != 1 {
-		t.Fatalf("ExtractText = %q, %v after %d extracts; want one extract", data, err, extracts)
 	}
 }

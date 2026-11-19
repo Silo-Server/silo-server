@@ -109,7 +109,10 @@ type candidatePlannerV3 struct {
 	file              *models.MediaFile
 	source            SourceDescriptorV3
 	capRequiresEncode bool
-	video             videoFactsV3
+	// serverCapBinds is set when the server's stream bitrate limit, not the
+	// request's own cap, is the one the request plans under.
+	serverCapBinds bool
+	video          videoFactsV3
 	// hlsAACMissing is set when an HLS copy remux needed an AAC conversion no
 	// HLS remux executor offers.
 	hlsAACMissing string
@@ -143,6 +146,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	}
 	p := &candidatePlannerV3{input: memoizeLookupsV3(input), file: file}
 	p.source = SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
+	requestCapKbps := optionalValueV3(input.Request.BandwidthCapKbps)
+	p.serverCapBinds = input.ServerBitrateCapKbps > 0 && (requestCapKbps == 0 || input.ServerBitrateCapKbps <= requestCapKbps)
 	p.capRequiresEncode = applyServerBitrateCapV3(&p.input, file, p.source)
 	var result PlannerResultV3
 	if file.IsAudioOnly() {
@@ -297,7 +302,9 @@ func (p *candidatePlannerV3) planAudioOnly() PlannerResultV3 {
 		}
 		return &PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}, nil
 	}
-	return p.selectCandidateV3(candidates, enter, evaluate, exhaustedV3())
+	result := p.selectCandidateV3(candidates, enter, evaluate, exhaustedV3())
+	result.AdaptationReasons = p.audioOnlyAdaptationReasonsV3(result, audioOK, capExceeded)
+	return result
 }
 
 func (p *candidatePlannerV3) audioOnlyRemux(plan PlanV3, convert, forced, capExceeded bool) (*PlannerResultV3, *PlannerResultV3) {

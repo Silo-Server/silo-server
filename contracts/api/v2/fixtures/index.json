@@ -7417,7 +7417,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"e524a14c4883542923d7e2be58ae12ff5a2e649615878e7fcafd8ff387f88801\""
+        "ETag": "\"e77118ae6a2649ae25baba0f650bd324b8bc731fa5e8775ff165ade34686e8d8\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeCapabilities",
@@ -7547,6 +7547,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Section",
       "body_file": "get_home_section_items_capped_ok.json"
+    },
+    {
+      "name": "get_home_section_items_collections_ok",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "A row of collections: its cards are the collections the viewer can see, in collections, with no items; total_count is their number.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/franchises/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Section",
+      "body_file": "get_home_section_items_collections_ok.json"
     },
     {
       "name": "get_home_section_items_item_limit_out_of_range",
@@ -9504,6 +9525,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AccountIdentityCollection",
       "body_file": "list_account_identities_ok.json"
+    },
+    {
+      "name": "list_admin_catalog_items_file_paths",
+      "operation_id": "listAdminCatalogItems",
+      "scenario": "With include_file_paths, each file version also carries its stored path.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/catalog/items?limit=2&include_file_paths=true",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCatalogItemCollection",
+      "body_file": "list_admin_catalog_items_file_paths.json"
     },
     {
       "name": "list_admin_catalog_items_ok",
@@ -12654,6 +12696,28 @@
       "body_file": null
     },
     {
+      "name": "notification_mute_many_notification_series",
+      "operation_id": "muteManyNotificationSeries",
+      "scenario": "The acting profile mutes several series at once; each distinct series gets an outcome in request order, and a series the viewer may not see is not_found.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/notifications/series/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[\"series:bear\",\"series:wire\",\"series:hidden\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotificationSeriesMuteResults",
+      "body_file": "notification_mute_many_notification_series.json"
+    },
+    {
       "name": "notification_mute_notification_series",
       "operation_id": "muteNotificationSeries",
       "scenario": "The acting profile mutes one series: no new-episode notification for it on any channel until it unmutes. Repeating the call changes nothing.",
@@ -12815,6 +12879,28 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/NotificationSyncOutputBody",
       "body_file": "notification_sync_notifications.json"
+    },
+    {
+      "name": "notification_unmute_many_notification_series",
+      "operation_id": "unmuteManyNotificationSeries",
+      "scenario": "The acting profile unmutes several series at once; a series that was not muted is unchanged.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/notifications/series/unmute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[\"series:wire\",\"series:bear\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotificationSeriesMuteResults",
+      "body_file": "notification_unmute_many_notification_series.json"
     },
     {
       "name": "notification_unmute_notification_series",
@@ -14571,7 +14657,7 @@
     {
       "name": "set_rating_out_of_range",
       "operation_id": "setRating",
-      "scenario": "A rating outside 1 to 5 is a validation failure naming the member.",
+      "scenario": "A rating outside 1 to 10 is a validation failure naming the member.",
       "request": {
         "method": "PUT",
         "path": "/api/v2/ratings/movie:new",
@@ -14579,7 +14665,7 @@
           "Authorization": "Bearer tok-member",
           "X-Profile-Id": "p-owner"
         },
-        "body": "{\"rating\":6}"
+        "body": "{\"rating\":11}"
       },
       "expected_status": 422,
       "response_headers": {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -21,6 +22,9 @@ type Hub struct {
 	sourceID    string
 	eventBus    cache.EventBus
 	drops       map[EventChannel]uint64
+	// pluginSubscribers reports whether a plugin event has subscribers. It
+	// is nil until the plugin event dispatcher installs it.
+	pluginSubscribers atomic.Pointer[func(event string) bool]
 }
 
 func NewHub(sourceID string, eventBus cache.EventBus) *Hub {
@@ -43,6 +47,26 @@ func (h *Hub) Start(ctx context.Context) error {
 // relayed from other nodes keep their own.
 func (h *Hub) SourceID() string {
 	return h.sourceID
+}
+
+// SetPluginSubscribers installs the plugin event dispatcher's check for
+// whether an event could have subscribers.
+func (h *Hub) SetPluginSubscribers(check func(event string) bool) {
+	if h == nil {
+		return
+	}
+	h.pluginSubscribers.Store(&check)
+}
+
+// PluginEventWanted reports whether a plugin event could have subscribers, so
+// a publisher can skip building an envelope no plugin receives. It is true
+// until the dispatcher installs its check.
+func (h *Hub) PluginEventWanted(event string) bool {
+	if h == nil {
+		return false
+	}
+	check := h.pluginSubscribers.Load()
+	return check == nil || (*check)(event)
 }
 
 func (h *Hub) Subscribe() (<-chan Envelope, func()) {
@@ -78,7 +102,10 @@ func (h *Hub) Publish(ctx context.Context, env Envelope) error {
 
 	h.publishLocal(env)
 
-	if h.eventBus == nil {
+	// Plugin envelopes stay on this server: no websocket client receives the
+	// plugin channel, and each server's plugin event dispatcher stores only
+	// the envelopes published on it.
+	if h.eventBus == nil || env.Channel == ChannelPlugins {
 		return nil
 	}
 

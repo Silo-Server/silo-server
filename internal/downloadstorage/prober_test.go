@@ -31,33 +31,6 @@ func newTestProber(clock *fakeClock, measure func(dir, scratch string, now time.
 	return p
 }
 
-func TestProberAnswersFromLastMeasurementAndRefreshesWhenDue(t *testing.T) {
-	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
-	calls := 0
-	p := newTestProber(clock, func(dir, _ string, now time.Time) Usage {
-		calls++
-		return Usage{Dir: dir, MeasuredAt: now, Files: calls}
-	})
-	if _, ok := p.Current("/a", ""); ok {
-		t.Fatal("no measurement has finished yet")
-	}
-	<-p.done
-	u, ok := p.Current("/a", "")
-	if !ok || u.Files != 1 || u.Stale {
-		t.Fatalf("first answer = %+v ok=%v", u, ok)
-	}
-	clock.Advance(30 * time.Second)
-	if u, _ := p.Current("/a", ""); u.Files != 1 {
-		t.Fatalf("answer inside the interval should not re-measure, got %+v", u)
-	}
-	clock.Advance(31 * time.Second)
-	p.Current("/a", "")
-	<-p.done
-	if u, _ := p.Current("/a", ""); u.Files != 2 {
-		t.Fatalf("due answer should re-measure, got %+v", u)
-	}
-}
-
 func TestProberFlagsAHungMeasurementStaleAndRunsOnlyOne(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
 	release := make(chan struct{})

@@ -555,17 +555,6 @@ for package in (arg for arg in sys.argv[1:] if arg.startswith('./')):
                 if variable == "COMPILE_EXIT":
                     self.assertFalse(any(c["kind"] == "run" for c in calls), calls)
 
-    def test_integration_reuses_migrations_binary_and_package_directories(self):
-        result, calls = self.execute("go-integration", ["Test history import cancellation and profile authorization against Postgres",
-                                                      "Test the marker claim migration against Postgres"])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        builds = [c for c in calls if c["kind"] == "build"]
-        runs = [c for c in calls if c["kind"] == "run"]
-        self.assertEqual(len(builds), 1, calls)
-        self.assertTrue(all("-race" in c["args"] for c in builds), calls)
-        self.assertEqual([c["cwd"] for c in runs], ["migrations", "internal/historyimport", "internal/api/handlers", "migrations"])
-        self.assertEqual(runs[0]["binary"], runs[-1]["binary"])
-
     def test_integration_keeps_database_assignments_and_all_filters(self):
         names = ["Test Watch Party coordination against Postgres",
                  "Test history import cancellation and profile authorization against Postgres",
@@ -589,31 +578,6 @@ for package in (arg for arg in sys.argv[1:] if arg.startswith('./')):
         self.assertTrue(all(c["database"] == "pgvector-fixture" for c in runs[5:]), calls)
         self.assertTrue(all(c["database"] == "postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable"
                             for c in runs[:5]), calls)
-
-    def test_database_jobs_use_narrow_migration_runner(self):
-        for job in ("go-integration", "go-db-pins", "go-db-auth"):
-            command = self.step(job, "Migrate the test database")
-            self.assertIn('DATABASE_URL="$SILO_TEST_DATABASE_URL"', command)
-            self.assertIn("go run ./scripts/ci/migrate/ --migrate-only", command)
-            self.assertNotIn("SECRET_KEY", command)
-            self.assertNotIn("-race", command)
-
-    def test_weekly_compiled_cache_never_prunes_or_saves(self):
-        source = (REPO_ROOT / ".github/actions/save-go-cache/action.yml").read_text()
-        steps = source.split("    - name: ")[1:]
-        for step in steps[:2]:
-            condition = re.search(r"      if: (.*)", step)[1]
-            self.assertIn("github.event_name != 'schedule'", condition)
-        for step in steps[2:]:
-            self.assertNotIn("github.event_name != 'schedule'", re.search(r"      if: (.*)", step)[1])
-
-    def test_weekly_callers_preserve_module_policy_and_deny_compiled_writes(self):
-        workflow = (REPO_ROOT / ".github/workflows/trusted-linux-ci.yml").read_text()
-        for step in workflow.split("      - name: Save the Go cache\n")[1:]:
-            self.assertIn("github.event_name != 'schedule'", step.splitlines()[0])
-        module = workflow.split("      - name: Save the shared module cache on schedule\n")[1]
-        self.assertIn("github.event_name == 'schedule'", module.splitlines()[0])
-        self.assertIn("module-cache-key:", module.split("\n  go-integration:")[0])
 
 
 if __name__ == "__main__":

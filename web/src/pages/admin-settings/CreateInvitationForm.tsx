@@ -29,9 +29,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { cn } from "@/lib/utils";
+import { useMounted } from "@/hooks/useMounted";
 
 import { ClaimLinkBox } from "./InvitationDisplay";
-import { deliveryMessage, useMounted } from "./invitationRules";
+import { deliveryMessage } from "./invitationRules";
 import {
   FULL_SCREEN_BOTTOM_CLASS,
   PINNED_FOOTER_CLASS,
@@ -329,7 +330,7 @@ export function CreateInvitationForm({
           placeholder={t("web.admin.settings.invitations.create.notePlaceholder")}
           rows={2}
           // 16px below sm so focusing it does not zoom the page on iOS.
-          className="border-border bg-background text-foreground focus:border-ring focus:ring-ring/50 w-full resize-y rounded-md border px-3 py-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px] max-sm:text-base"
+          className="border-input bg-background text-foreground focus:border-ring focus:ring-ring/50 w-full resize-y rounded-md border px-3 py-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px] max-sm:text-base"
         />
         <p className="text-muted-foreground text-xs">
           {delivery === "link"

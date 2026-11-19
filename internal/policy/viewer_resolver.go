@@ -360,6 +360,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		NextUpMode:                 preferences.NextUpMode,
 		NextUpNewReleasesFirst:     preferences.NextUpNewReleasesFirst,
 		HideWatchedItemsOnHome:     preferences.HideWatchedItemsOnHome,
+		CardAvailability:           preferences.CardAvailability,
 		PreferencesDegraded:        preferences.Degraded,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a

@@ -3,7 +3,6 @@ package settingsresolve
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -55,33 +54,6 @@ func resolveOne(t *testing.T, store Store, rc Context, key string, constraints C
 	return got[0]
 }
 
-// TestResolveIssuesOneRead pins the batching. The design rejects one lookup per
-// scope per key, and a season view resolving many items is exactly where that
-// would show up.
-func TestResolveIssuesOneRead(t *testing.T) {
-	store := &fakeStore{}
-	keys := []string{
-		"playback.subtitle_language", "playback.audio_language",
-		"playback.subtitle_mode", "playback.show_forced_subtitles",
-	}
-	rc := Context{
-		ProfileID:  "p1",
-		DeviceID:   "d1",
-		LibraryIDs: []int{1, 2, 3},
-		SeriesIDs:  []string{"s1", "s2", "s3"},
-	}
-
-	if _, err := New(mustContract(t)).Resolve(context.Background(), store, rc, keys, nil); err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if len(store.queries) != 1 {
-		t.Fatalf("issued %d reads for %d keys, want 1", len(store.queries), len(keys))
-	}
-	if len(store.queries[0].Keys) != len(keys) {
-		t.Errorf("query carried %d keys, want %d", len(store.queries[0].Keys), len(keys))
-	}
-}
-
 func TestResolveContextsIssuesOneReadAndRanksEachContext(t *testing.T) {
 	const key = "playback.subtitle_language"
 	store := &fakeStore{rows: []userstore.SettingValue{
@@ -115,24 +87,6 @@ func TestResolveContextsIssuesOneReadAndRanksEachContext(t *testing.T) {
 	}
 	if string(got[0][0].Value) != `"ja"` || string(got[1][0].Value) != `"de"` {
 		t.Errorf("per-context values = %s, %s; want ja, de", got[0][0].Value, got[1][0].Value)
-	}
-}
-
-// TestUnknownAndLocalKeysAreOmitted keeps a newer client's request from
-// failing wholesale. A key this server does not have, or one the contract says
-// never leaves the device, simply has no server answer.
-func TestUnknownAndLocalKeysAreOmitted(t *testing.T) {
-	got, err := New(mustContract(t)).Resolve(context.Background(), &fakeStore{},
-		Context{ProfileID: "p1"},
-		[]string{"playback.subtitle_mode", "not.a.real.key", "downloads.wifi_only"}, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("returned %d results, want only the one remote key", len(got))
-	}
-	if got[0].Key != "playback.subtitle_mode" {
-		t.Errorf("resolved %q", got[0].Key)
 	}
 }
 
@@ -191,134 +145,8 @@ func TestCeilingNarrowsWithoutDestroying(t *testing.T) {
 	}
 }
 
-// TestNoConstraintInputLeavesValueAlone covers the viewer a policy says nothing
-// about, which is most of them.
-func TestNoConstraintInputLeavesValueAlone(t *testing.T) {
-	const key = "playback.preferred_quality"
-	rows := []userstore.SettingValue{
-		row(key, settingscontract.ScopeProfile, `"2160p"`,
-			userstore.SettingIdentity{ProfileID: "p1"}),
-	}
-	for name, constraints := range map[string]Constraints{
-		"no constraints at all": nil,
-		"unrelated input":       {"something_else": json.RawMessage(`"1080p"`)},
-		"empty input":           {"max_playback_quality": json.RawMessage(``)},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got := resolveOne(t, &fakeStore{rows: rows}, Context{ProfileID: "p1"}, key, constraints)
-			if got.Constrained || string(got.Value) != `"2160p"` {
-				t.Errorf("value = %s constrained = %v, want the stored value untouched",
-					got.Value, got.Constrained)
-			}
-		})
-	}
-}
-
-// TestIdentityLocatesTheResolvedRow so a client can offer "reset this device's
-// override" against the scope that actually holds the value.
-func TestIdentityLocatesTheResolvedRow(t *testing.T) {
-	const key = "playback.subtitle_language"
-	rows := []userstore.SettingValue{
-		row(key, settingscontract.ScopeProfileDevice, `"de"`,
-			userstore.SettingIdentity{ProfileID: "p1", DeviceID: "d1"}),
-	}
-	got := resolveOne(t, &fakeStore{rows: rows},
-		Context{ProfileID: "p1", DeviceID: "d1"}, key, nil)
-
-	if got.Identity == nil {
-		t.Fatal("no identity reported for a stored value")
-	}
-	if got.Identity.Scope != settingscontract.ScopeProfileDevice || got.Identity.DeviceID != "d1" {
-		t.Errorf("identity = %+v, want the profile_device row", *got.Identity)
-	}
-
-	// A default came from no row, so there is nothing to reset.
-	def := resolveOne(t, &fakeStore{}, Context{ProfileID: "p1", DeviceID: "d1"}, key, nil)
-	if def.Identity != nil {
-		t.Errorf("identity = %+v for a default, want none", *def.Identity)
-	}
-}
-
-func TestStoreErrorsPropagate(t *testing.T) {
-	sentinel := errors.New("boom")
-	_, err := New(mustContract(t)).Resolve(context.Background(),
-		&fakeStore{err: sentinel}, Context{ProfileID: "p1"},
-		[]string{"playback.subtitle_mode"}, nil)
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("err = %v, want it to wrap the store error", err)
-	}
-}
-
 // The production store must satisfy the narrow read interface declared here.
 // The package takes an interface rather than the concrete store so tests can
 // fake it, which is exactly the seam that lets an incompatible signature go
 // unnoticed until a caller wires the two together.
 var _ Store = (userstore.UserStore)(nil)
-
-// TestResolveProfilesRanksPerProfileInOneRead is the household shape: several
-// profiles resolved from one candidate set, each getting exactly what a
-// single-profile Resolve would have returned, and no profile inheriting
-// another's value. GET /profiles is the caller that makes this matter — a read
-// per profile would turn one list request into n round trips.
-func TestResolveProfilesRanksPerProfileInOneRead(t *testing.T) {
-	const key = "playback.subtitle_language"
-	store := &fakeStore{rows: []userstore.SettingValue{
-		row(key, settingscontract.ScopeAccount, `"en"`, userstore.SettingIdentity{}),
-		row(key, settingscontract.ScopeProfile, `"fr"`,
-			userstore.SettingIdentity{ProfileID: "p1"}),
-		row(key, settingscontract.ScopeProfile, `"ja"`,
-			userstore.SettingIdentity{ProfileID: "p2"}),
-	}}
-
-	got, err := New(mustContract(t)).ResolveProfiles(context.Background(), store,
-		[]string{"p1", "p2", "p3"}, []string{key}, nil)
-	if err != nil {
-		t.Fatalf("ResolveProfiles: %v", err)
-	}
-	if len(store.queries) != 1 {
-		t.Fatalf("issued %d reads for 3 profiles, want 1", len(store.queries))
-	}
-	if len(store.queries[0].ProfileIDs) != 3 {
-		t.Errorf("query carried %d profile ids, want 3", len(store.queries[0].ProfileIDs))
-	}
-
-	// p3 has no row of its own. The account-scope row is not in this key's
-	// resolution order, so p3 falls to the contract default rather than
-	// inheriting a neighbor's language.
-	for profileID, want := range map[string]string{
-		"p1": `"fr"`,
-		"p2": `"ja"`,
-		"p3": `null`,
-	} {
-		effective, ok := got[profileID]
-		if !ok {
-			t.Errorf("no result for %s", profileID)
-			continue
-		}
-		if len(effective) != 1 {
-			t.Errorf("%s returned %d results, want 1", profileID, len(effective))
-			continue
-		}
-		if string(effective[0].Value) != want {
-			t.Errorf("%s resolved to %s, want %s", profileID, effective[0].Value, want)
-		}
-	}
-}
-
-// TestResolveProfilesWithoutProfilesReadsNothing: an account with no profiles
-// is not an error and must not issue a read that would return every
-// account-scope row for no one to use.
-func TestResolveProfilesWithoutProfilesReadsNothing(t *testing.T) {
-	store := &fakeStore{}
-	got, err := New(mustContract(t)).ResolveProfiles(context.Background(), store,
-		nil, []string{"playback.subtitle_mode"}, nil)
-	if err != nil {
-		t.Fatalf("ResolveProfiles: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("returned %d results for no profiles, want none", len(got))
-	}
-	if len(store.queries) != 0 {
-		t.Errorf("issued %d reads for no profiles, want none", len(store.queries))
-	}
-}

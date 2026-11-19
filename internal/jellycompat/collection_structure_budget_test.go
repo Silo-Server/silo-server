@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"testing"
@@ -22,7 +23,7 @@ func TestSmartCollectionStructureAdmission(t *testing.T) {
 			}
 			collection := &models.LibraryCollection{ID: "synthetic", LibraryID: 1, CollectionType: "smart", QueryDefinition: raw}
 			h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: 1, Name: "Synthetic", Type: "movies"}}, nil)
-			h.queryExecutor = &fakeSmartExecutor{}
+			h.queryExecutor = noSmartExecutor{}
 			_, _, ok := h.prepareSmartCollectionQuery(t.Context(), nil, collection)
 			_, leaf := smartCollectionLeafType(collection)
 			if ok != (rules == 128) || leaf != (rules == 128) {
@@ -30,4 +31,16 @@ func TestSmartCollectionStructureAdmission(t *testing.T) {
 			}
 		})
 	}
+}
+
+// noSmartExecutor is an executor that must not matter: admission decides
+// before any query runs.
+type noSmartExecutor struct{}
+
+func (noSmartExecutor) Preview(context.Context, catalog.QueryDefinition, catalog.AccessFilter, int) ([]*models.MediaItem, int, error) {
+	return nil, 0, nil
+}
+
+func (noSmartExecutor) PreviewPage(context.Context, catalog.QueryDefinition, catalog.AccessFilter, int, int, bool) ([]*models.MediaItem, int, bool, error) {
+	return nil, 0, true, nil
 }

@@ -27,14 +27,29 @@ var (
 	// ErrInstanceStateUnavailable reports an instance that has no state
 	// scope: config test-runs use negative installation ids and get none.
 	ErrInstanceStateUnavailable = errors.New("instance state is not available for this plugin instance")
+	// ErrInstanceStateVersionConflict reports a conditional write whose
+	// expected version no longer matches the key: another write got there
+	// first, so the caller must read again.
+	ErrInstanceStateVersionConflict = errors.New("instance state key is not at the expected version")
 )
 
 // InstanceStateStore persists a plugin instance's private state. The host
 // scope (api host or one proxy node) is fixed by the implementation, so a
 // plugin only ever names installation-relative keys.
+//
+// Every key carries a version: 1 after its first write, one more after each
+// later write. Several API servers run their own process of a plugin against
+// one shared scope, so a read-modify-write passes the version it read as
+// expectedVersion to detect a concurrent write.
 type InstanceStateStore interface {
-	ReadInstanceState(ctx context.Context, installationID int, key string) (value []byte, found bool, err error)
-	WriteInstanceState(ctx context.Context, installationID int, key string, value []byte) error
+	// ReadInstanceState returns the stored value and its version; version 0
+	// means no value is stored under key.
+	ReadInstanceState(ctx context.Context, installationID int, key string) (value []byte, version int64, err error)
+	// WriteInstanceState stores value and returns its new version. A nil
+	// expectedVersion writes unconditionally. Otherwise the write lands only
+	// while the key is at *expectedVersion (0: the key must not exist) and
+	// fails with ErrInstanceStateVersionConflict, changing nothing, if not.
+	WriteInstanceState(ctx context.Context, installationID int, key string, value []byte, expectedVersion *int64) (version int64, err error)
 }
 
 // ValidateInstanceStateKey applies the key limit shared by the RPC layer and

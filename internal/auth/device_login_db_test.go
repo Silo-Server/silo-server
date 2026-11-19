@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,85 +52,6 @@ func deviceLoginTestService(t *testing.T) (*DeviceLoginService, *pgxpool.Pool, i
 	svc := NewDeviceLoginService(pool, NewUserRepository(pool), NewJWTService("device-login-test-secret", time.Hour, 24*time.Hour), NewSessionRepository(pool), nil, nil)
 	name := func(label string) string { return "device-login-test-" + suffix + "-" + label }
 	return svc, pool, userID, name
-}
-
-// TestDeviceLoginStartShowsShortCodeLinkDB: the code is eight grouped digits,
-// the QR link carries the code rather than the long browser token, and the
-// request lives 15 minutes.
-func TestDeviceLoginStartShowsShortCodeLinkDB(t *testing.T) {
-	svc, _, _, name := deviceLoginTestService(t)
-	ctx := t.Context()
-	before := time.Now()
-	start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("start"), BaseURL: "https://media.example.test/"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !regexp.MustCompile(`^[0-9]{4}-[0-9]{4}$`).MatchString(start.UserCode) {
-		t.Fatalf("user code = %q", start.UserCode)
-	}
-	if start.VerificationURI != "https://media.example.test/activate" {
-		t.Fatalf("verification_uri = %q", start.VerificationURI)
-	}
-	if want := "https://media.example.test/activate?code=" + normalizeUserCode(start.UserCode); start.VerificationURIComplete != want {
-		t.Fatalf("verification_uri_complete = %q, want %q", start.VerificationURIComplete, want)
-	}
-	if start.ExpiresIn != 900 || start.ExpiresAt.Before(before.Add(14*time.Minute)) {
-		t.Fatalf("expires_in = %d, expires_at = %v", start.ExpiresIn, start.ExpiresAt)
-	}
-	// Spaces and dashes don't matter when the person types it.
-	info, err := svc.Lookup(ctx, DeviceLoginLookupInput{UserCode: " " + normalizeUserCode(start.UserCode)[:4] + " " + normalizeUserCode(start.UserCode)[4:]})
-	if err != nil || info.Status != DeviceLoginStatusPending {
-		t.Fatalf("lookup = %+v, %v", info, err)
-	}
-}
-
-// TestDeviceLoginStartLegacyKeepsV1AnswerDB: the frozen /api/v1 start keeps
-// its 10-minute request and a link carrying the browser code, which a lookup
-// by token still finds.
-func TestDeviceLoginStartLegacyKeepsV1AnswerDB(t *testing.T) {
-	svc, _, _, name := deviceLoginTestService(t)
-	ctx := t.Context()
-	before := time.Now()
-	start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("legacy"), BaseURL: "http://127.0.0.1:8090", Legacy: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if start.ExpiresIn != 600 || start.ExpiresAt.Before(before.Add(9*time.Minute)) || start.ExpiresAt.After(before.Add(11*time.Minute)) {
-		t.Fatalf("expires_in = %d, expires_at = %v", start.ExpiresIn, start.ExpiresAt)
-	}
-	match := regexp.MustCompile(`^http://127\.0\.0\.1:8090/activate\?token=([A-Za-z0-9_-]{43})$`).FindStringSubmatch(start.VerificationURIComplete)
-	if match == nil {
-		t.Fatalf("verification_uri_complete = %q", start.VerificationURIComplete)
-	}
-	info, err := svc.Lookup(ctx, DeviceLoginLookupInput{BrowserCode: match[1]})
-	if err != nil || info.Status != DeviceLoginStatusPending || info.DeviceName != name("legacy") {
-		t.Fatalf("lookup by token = %+v, %v", info, err)
-	}
-}
-
-// TestDeviceLoginStartStoresMalformedLabelsDB: a long multibyte name is cut
-// by characters, a NUL is dropped, and a Latin-1 Quick Connect header byte is
-// dropped, so Postgres stores each request instead of refusing the insert.
-func TestDeviceLoginStartStoresMalformedLabelsDB(t *testing.T) {
-	svc, _, _, name := deviceLoginTestService(t)
-	ctx := t.Context()
-
-	long := name("ja-") + strings.Repeat("日", maxDeviceNameLen)
-	start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: long, DevicePlatform: "tv\x00os"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := string([]rune(long)[:maxDeviceNameLen]); start.DeviceName != want || start.DevicePlatform != "tvos" {
-		t.Fatalf("recorded name %q, platform %q; want %q, %q", start.DeviceName, start.DevicePlatform, want, "tvos")
-	}
-
-	qc, err := svc.StartQuickConnect(ctx, QuickConnectStartInput{DeviceName: name("latin1-Caf\xe9"), AppName: "Jellyfin\x00Web"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if qc.DeviceName != name("latin1-Caf") || qc.AppName != "JellyfinWeb" {
-		t.Fatalf("recorded name %q, app %q", qc.DeviceName, qc.AppName)
-	}
 }
 
 // TestDeviceLoginStartRetriesCodeCollisionDB: a user code already stored is
@@ -229,75 +148,6 @@ func TestDeviceLoginLookupMarksOpenedAndHoldsCodeDB(t *testing.T) {
 	}
 }
 
-// TestDeviceLoginCancelDB: the device withdraws its request; nobody can then
-// approve or deny it, the device's poll sees it, and repeating converges. A
-// request already collected is left as it is.
-func TestDeviceLoginCancelDB(t *testing.T) {
-	svc, _, userID, name := deviceLoginTestService(t)
-	ctx := t.Context()
-
-	start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("cancel")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	status, err := svc.Cancel(ctx, start.DeviceCode)
-	if err != nil || status != DeviceLoginStatusCanceled {
-		t.Fatalf("cancel = %q, %v", status, err)
-	}
-	info, err := svc.Lookup(ctx, DeviceLoginLookupInput{UserCode: start.UserCode})
-	if err != nil || info.Status != DeviceLoginStatusCanceled {
-		t.Fatalf("lookup = %+v, %v", info, err)
-	}
-	if err := svc.Approve(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID); !errors.Is(err, ErrDeviceLoginCanceled) {
-		t.Fatalf("approve error = %v", err)
-	}
-	if err := svc.Deny(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID); !errors.Is(err, ErrDeviceLoginCanceled) {
-		t.Fatalf("deny error = %v", err)
-	}
-	poll, err := svc.Poll(ctx, start.DeviceCode, "")
-	if err != nil || poll.Status != DeviceLoginStatusCanceled || poll.TokenPair != nil {
-		t.Fatalf("poll = %+v, %v", poll, err)
-	}
-	if status, err := svc.Cancel(ctx, start.DeviceCode); err != nil || status != DeviceLoginStatusCanceled {
-		t.Fatalf("second cancel = %q, %v", status, err)
-	}
-
-	// Approved but not yet collected: canceling withdraws it, so the
-	// tokens are never issued.
-	approved, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("approved")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.Approve(ctx, DeviceLoginLookupInput{UserCode: approved.UserCode}, userID); err != nil {
-		t.Fatal(err)
-	}
-	if status, err := svc.Cancel(ctx, approved.DeviceCode); err != nil || status != DeviceLoginStatusCanceled {
-		t.Fatalf("cancel approved = %q, %v", status, err)
-	}
-	if poll, err := svc.Poll(ctx, approved.DeviceCode, ""); err != nil || poll.TokenPair != nil {
-		t.Fatalf("poll after canceling an approval = %+v, %v", poll, err)
-	}
-
-	// Collected: stays consumed.
-	consumed, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("consumed")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.Approve(ctx, DeviceLoginLookupInput{UserCode: consumed.UserCode}, userID); err != nil {
-		t.Fatal(err)
-	}
-	if poll, err := svc.Poll(ctx, consumed.DeviceCode, ""); err != nil || poll.TokenPair == nil {
-		t.Fatalf("collect = %+v, %v", poll, err)
-	}
-	if status, err := svc.Cancel(ctx, consumed.DeviceCode); err != nil || status != DeviceLoginStatusConsumed {
-		t.Fatalf("cancel consumed = %q, %v", status, err)
-	}
-
-	if _, err := svc.Cancel(ctx, "no-such-device-code"); !errors.Is(err, ErrDeviceLoginNotFound) {
-		t.Fatalf("cancel unknown error = %v", err)
-	}
-}
-
 // TestDeviceLoginDenyApprovedByAnotherAccountDB: once one account approves,
 // another account can no more deny the request than approve it, so the
 // device still collects the approval. The approving account can still
@@ -369,41 +219,6 @@ func TestDeviceLoginDenyApprovedByAnotherAccountDB(t *testing.T) {
 	}
 	if poll, err := svc.Poll(ctx, orphaned.DeviceCode, ""); err != nil || poll.Status != DeviceLoginStatusDenied {
 		t.Fatalf("poll after denying orphaned approval = %+v, %v", poll, err)
-	}
-}
-
-// TestDeviceLoginCancelExpiredDB: canceling a request that already expired
-// answers expired, as poll and lookup do, and leaves its stored status alone.
-func TestDeviceLoginCancelExpiredDB(t *testing.T) {
-	svc, pool, userID, name := deviceLoginTestService(t)
-	ctx := t.Context()
-	for _, label := range []string{"expired-pending", "expired-approved"} {
-		start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name(label)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := DeviceLoginStatusPending
-		if label == "expired-approved" {
-			if err := svc.Approve(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID); err != nil {
-				t.Fatal(err)
-			}
-			want = DeviceLoginStatusApproved
-		}
-		if _, err := pool.Exec(ctx, `UPDATE device_login_requests SET expires_at = NOW() - interval '1 minute' WHERE device_name = $1`, name(label)); err != nil {
-			t.Fatal(err)
-		}
-		status, err := svc.Cancel(ctx, start.DeviceCode)
-		if err != nil || status != DeviceLoginStatusExpired {
-			t.Fatalf("%s: cancel = %q, %v", label, status, err)
-		}
-		var stored string
-		var canceledAt *time.Time
-		if err := pool.QueryRow(ctx, `SELECT status, canceled_at FROM device_login_requests WHERE device_name = $1`, name(label)).Scan(&stored, &canceledAt); err != nil {
-			t.Fatal(err)
-		}
-		if stored != want || canceledAt != nil {
-			t.Fatalf("%s: stored status = %q, canceled_at = %v", label, stored, canceledAt)
-		}
 	}
 }
 

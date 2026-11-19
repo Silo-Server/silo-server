@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,45 +15,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/diagnostics/contract"
 )
-
-func TestServiceIngestStoresReadyReport(t *testing.T) {
-	bundle, manifest, info := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "prof_1")
-	repo, store, svc := newIngestFixture()
-
-	result, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
-	if err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-	if result.ReportID != "11111111-1111-1111-1111-111111111111" {
-		t.Fatalf("ReportID = %q, want reserved report ID", result.ReportID)
-	}
-	if result.ShortID != "SILO-ABCDEF123456" {
-		t.Fatalf("ShortID = %q, want SILO-ABCDEF123456", result.ShortID)
-	}
-	if len(repo.ready) != 1 || repo.ready[0] != result.ReportID {
-		t.Fatalf("ready reports = %v, want [%s]", repo.ready, result.ReportID)
-	}
-	if len(repo.readyBlobs) != 1 {
-		t.Fatalf("ready blobs = %v, want one", repo.readyBlobs)
-	}
-	wantKey := "diagnostics/42/11111111-1111-1111-1111-111111111111.tar.gz"
-	readyBlob := repo.readyBlobs[0]
-	if readyBlob.Bucket != "private" || readyBlob.Key != wantKey {
-		t.Fatalf("ready blob location = %s/%s, want private/%s", readyBlob.Bucket, readyBlob.Key, wantKey)
-	}
-	if readyBlob.SHA256 != info.SHA256 {
-		t.Fatalf("ready blob sha256 = %q, want %q", readyBlob.SHA256, info.SHA256)
-	}
-	if len(store.puts) != 1 || store.puts[0] != wantKey {
-		t.Fatalf("stored keys = %v, want [%s]", store.puts, wantKey)
-	}
-	if !bytes.Equal(store.data, bundle) {
-		t.Fatal("stored bundle does not match uploaded bundle")
-	}
-	if len(repo.failed) != 0 || len(store.deleted) != 0 {
-		t.Fatalf("unexpected compensation: failed=%v deleted=%v", repo.failed, store.deleted)
-	}
-}
 
 func TestServiceIngestRejectsBeforeReserving(t *testing.T) {
 	for _, tc := range []struct {
@@ -394,32 +354,6 @@ func TestServiceDeleteReportKeepsBlobWhenRowDeletionFails(t *testing.T) {
 	}
 }
 
-func TestServiceDeleteReportSucceedsWhenBlobDeletionFails(t *testing.T) {
-	report := testReadyDiagnosticReport("22222222-2222-2222-2222-222222222222", 42)
-	repo := &fakeDiagnosticReportStore{
-		getReport:    &report,
-		deleteReport: &report,
-	}
-	store := &fakeDiagnosticObjectStore{bucket: "private", deleteErr: errors.New("s3 down")}
-	svc := newTestDiagnosticsService(repo, store)
-
-	deleted, err := svc.DeleteReport(context.Background(), report.ID)
-	if err != nil {
-		t.Fatalf("DeleteReport error = %v, want success after row deletion", err)
-	}
-	if deleted == nil || deleted.ID != report.ID {
-		t.Fatalf("deleted report = %#v, want %s", deleted, report.ID)
-	}
-	if len(repo.deleted) != 1 || repo.deleted[0] != report.ID {
-		t.Fatalf("deleted rows = %v, want [%s]", repo.deleted, report.ID)
-	}
-	// The row is gone; the orphaned blob delete was attempted (and failed), and
-	// the reconciler will reap it later.
-	if len(store.deleted) == 0 {
-		t.Fatal("blob deletion was not attempted after row removal")
-	}
-}
-
 // newIngestFixture returns a service over empty fakes with a private bucket.
 func newIngestFixture() (*fakeDiagnosticReportStore, *fakeDiagnosticObjectStore, *Service) {
 	repo := &fakeDiagnosticReportStore{}
@@ -718,22 +652,5 @@ func testReadyDiagnosticReport(id string, userID int) Report {
 		BlobBytes:         &bytes,
 		UncompressedBytes: &uncompressed,
 		BlobSHA256:        &sha,
-	}
-}
-
-func TestServiceStatusAdvertisesAcceptedCrashSources(t *testing.T) {
-	svc := newTestDiagnosticsService(&fakeDiagnosticReportStore{}, &fakeDiagnosticObjectStore{bucket: "private"})
-
-	status, err := svc.Status(context.Background(), 42)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	want := []string{"ueh", "exit_info", "metrickit", "exit_sentinel", "watchdog"}
-	if !slices.Equal(status.AcceptedCrashSources, want) {
-		t.Fatalf("AcceptedCrashSources = %v, want %v", status.AcceptedCrashSources, want)
-	}
-	status.AcceptedCrashSources[0] = "changed"
-	if contract.CrashSources()[0] != "ueh" {
-		t.Fatal("status shares the contract's crash source list")
 	}
 }

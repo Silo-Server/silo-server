@@ -34,7 +34,8 @@ func (am *AuthMiddleware) RevalidateCurrent(ctx context.Context, bearer string, 
 		if key == nil || key.ID != expected.APIKeyID || key.UserID != expected.UserID {
 			return ErrCurrentCredentialInvalid
 		}
-		if !apiKeyScopesAllow(key.Scopes, &http.Request{Method: method, URL: &url.URL{Path: path}}) {
+		if !apiKeyScopesAllow(key.Scopes, &http.Request{Method: method, URL: &url.URL{Path: path}}) ||
+			key.ProfileID != expected.APIKeyProfileID {
 			return ErrCurrentCredentialForbidden
 		}
 	} else {

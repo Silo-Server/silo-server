@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
+	"net/netip"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/logthrottle"
 )
 
 // Consumer batch-inserts one node's operational log entries into Postgres and
@@ -20,6 +24,8 @@ type Consumer struct {
 	batchSize int
 	interval  time.Duration
 	streamHub *logstream.Hub
+	// rejectedWarnings spaces InsertNodeBatch's warning per node.
+	rejectedWarnings *logthrottle.Throttle[string]
 }
 
 func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
@@ -28,6 +34,8 @@ func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 		batchSize: 100,
 		interval:  2 * time.Second,
 		streamHub: streamHub,
+
+		rejectedWarnings: logthrottle.New[string](rejectedWarnInterval),
 	}
 }
 
@@ -36,11 +44,21 @@ func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 // records reach stderr and OTLP but are not captured: a warning about a failed
 // batch must not queue another entry behind it.
 func (c *Consumer) Run(ctx context.Context, ch <-chan Entry) {
+	Ship(ctx, ch, c.batchSize, c.interval, c.insertBatch)
+}
+
+// Ship hands entries from ch to insert in batches of at most size, flushing a
+// partial batch every interval, until ctx ends; see logstream.Drain for
+// retries and drops. It is Run with a caller-supplied sink: a transcode node,
+// which has no database, ships its entries to the core with it. Records the
+// pipeline logs about itself reach stderr and OTLP but are not captured, so a
+// warning about a failed batch never queues another entry behind it.
+func Ship(ctx context.Context, ch <-chan Entry, size int, interval time.Duration, insert func(context.Context, []Entry) error) {
 	logstream.Drain[Entry]{
 		Stream:   logstream.StreamApp,
-		Size:     c.batchSize,
-		Interval: c.interval,
-		Insert:   c.insertBatch,
+		Size:     size,
+		Interval: interval,
+		Insert:   insert,
 		Failed: func(ctx context.Context, f logstream.InsertFailure) {
 			if f.RetryIn > 0 {
 				slog.WarnContext(ctx, "opslog batch insert failed; retrying", "component", "opslog",
@@ -51,6 +69,125 @@ func (c *Consumer) Run(ctx context.Context, ch <-chan Entry) {
 				"entries", f.Entries, "attempt", f.Attempt, "error", f.Err)
 		},
 	}.Run(withoutCapture(ctx), ch)
+}
+
+// Bounds on the timestamp of an entry a transcode node shipped, which the
+// node's clock set. Later than nodeEntryMaxAhead past the core's clock is a
+// clock running ahead; older than nodeEntryMaxAge is more than a node keeps
+// queued (logstream.Drain drops what it cannot deliver within minutes). Both
+// are moved to the bound, so a bad clock or a stolen node key cannot file
+// rows outside retention, into a partition not yet created (the default
+// partition), or ahead of everything the live tail shows.
+const (
+	nodeEntryMaxAhead = 30 * time.Second
+	nodeEntryMaxAge   = 24 * time.Hour
+)
+
+// Bounds on the short text fields of an entry a transcode node shipped. The
+// columns are unbounded text, but these fields are labels the viewer filters
+// and groups by: a level is a slog level name, a component a package name,
+// and the ids are request, session and playback session ids. A longer value
+// is cut at the bound. Message and attrs are left to the batch's byte bound.
+const (
+	nodeEntryMaxLevel     = 16
+	nodeEntryMaxComponent = 64
+	nodeEntryMaxID        = 256
+)
+
+// NormalizeNodeEntry makes an entry a transcode node shipped storable as the
+// core's own handler would have built it: it files the entry under nodeID,
+// whatever node id it carried, keeps its timestamp within nodeEntryMaxAge
+// before and nodeEntryMaxAhead after now, cuts its short text fields to their
+// bounds, clears a client_ip that is not an IP address (an address with a
+// port keeps the address) and a user_id outside the column's integer range.
+// What is left are values Postgres accepts, so one bad field does not cost
+// the batch its single insert.
+func NormalizeNodeEntry(entry Entry, nodeID string, now time.Time) Entry {
+	entry.NodeID = nodeID
+	if latest := now.Add(nodeEntryMaxAhead); entry.Timestamp.After(latest) {
+		entry.Timestamp = latest
+	} else if earliest := now.Add(-nodeEntryMaxAge); entry.Timestamp.Before(earliest) {
+		entry.Timestamp = earliest
+	}
+	entry.Level = truncateText(entry.Level, nodeEntryMaxLevel)
+	entry.Component = truncateText(entry.Component, nodeEntryMaxComponent)
+	entry.RequestID = truncateText(entry.RequestID, nodeEntryMaxID)
+	entry.SessionID = truncateText(entry.SessionID, nodeEntryMaxID)
+	entry.PlaybackSessionID = truncateText(entry.PlaybackSessionID, nodeEntryMaxID)
+	entry.ClientIP = normalizeClientIP(entry.ClientIP)
+	if entry.UserID != nil && (*entry.UserID < math.MinInt32 || *entry.UserID > math.MaxInt32) {
+		entry.UserID = nil
+	}
+	return entry
+}
+
+// normalizeClientIP is raw as an inet value, or "" when it is not an IP
+// address. A zone, which inet does not accept, is dropped.
+func normalizeClientIP(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	addr, err := netip.ParseAddr(raw)
+	if err != nil {
+		addrPort, portErr := netip.ParseAddrPort(raw)
+		if portErr != nil {
+			return ""
+		}
+		addr = addrPort.Addr()
+	}
+	return addr.WithZone("").String()
+}
+
+// truncateText cuts s to at most limit bytes without splitting a UTF-8
+// sequence.
+func truncateText(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// rejectedWarnInterval spaces the warning about one node's rejected entries:
+// a node retries nothing it was told was stored, but every batch it sends
+// with the same bad value would log again.
+const rejectedWarnInterval = time.Minute
+
+// InsertNodeBatch stores a batch a transcode node shipped, in the shape the
+// node's own consumer stored it: every entry is normalized by
+// NormalizeNodeEntry, and the rows go to the admin live tail in one insert.
+// When Postgres still rejects a value in the batch, the rows are inserted one
+// at a time so only the rejected ones are lost, as logstream.Drain does for a
+// local batch; the warning about them is logged at most once a minute per
+// node.
+func (c *Consumer) InsertNodeBatch(ctx context.Context, nodeID string, entries []Entry) error {
+	now := time.Now().UTC()
+	stamped := make([]Entry, len(entries))
+	for i, entry := range entries {
+		stamped[i] = NormalizeNodeEntry(entry, nodeID, now)
+	}
+	err := c.insertBatch(ctx, stamped)
+	if err == nil || len(stamped) < 2 || !logstream.ValueRejected(err) {
+		return err
+	}
+	var rejected int
+	for i := range stamped {
+		if rowErr := c.insertBatch(ctx, stamped[i:i+1]); rowErr != nil {
+			if !logstream.ValueRejected(rowErr) {
+				return rowErr
+			}
+			rejected++
+		}
+	}
+	if rejected > 0 && c.rejectedWarnings.Allow(nodeID) {
+		slog.WarnContext(withoutCapture(ctx), "opslog: dropped node log entries Postgres rejected", "component", "opslog",
+			"node_id", nodeID, "rejected", rejected, "entries", len(stamped))
+	}
+	return nil
 }
 
 func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {

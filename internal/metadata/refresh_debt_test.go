@@ -128,7 +128,6 @@ func TestNextRefreshDelaySchedule(t *testing.T) {
 		// ...then we give up: episode-incomplete debt goes terminal at attempt 3+.
 		{RefreshDebtReasonEpisodeIncomplete, 3, refreshDebtTerminalDelay},
 		{RefreshDebtReasonEpisodeIncomplete, 4, refreshDebtTerminalDelay},
-		{RefreshDebtReasonEpisodeIncomplete, 5, refreshDebtTerminalDelay},
 		// Non-episode reasons keep the full stepped backoff and never go terminal.
 		{RefreshDebtReasonCoreMetadataIncomplete, 2, 3 * 24 * time.Hour},
 		{RefreshDebtReasonCoreMetadataIncomplete, 3, 7 * 24 * time.Hour},

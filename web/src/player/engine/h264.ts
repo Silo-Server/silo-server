@@ -8,7 +8,7 @@
  * it (leading pictures) reference the GOP before and cannot be decoded.
  */
 
-import { nalUnitRanges } from "./nalUnits";
+import { nalUnitRanges, unescapeRbsp } from "./nalUnits";
 
 const NAL_NON_IDR_SLICE = 1;
 const NAL_IDR_SLICE = 5;
@@ -55,7 +55,7 @@ export function h264RandomAccess(data: Uint8Array, lengthSize: number): H264Rand
  * are not decoded, and a stream the decoder still rejects starts earlier.
  */
 function recoversImmediately(escaped: Uint8Array): boolean {
-  const sei = unescape(escaped);
+  const sei = unescapeRbsp(escaped);
   let pos = 0;
   // The last byte holds the RBSP stop bit.
   while (pos < sei.length - 1) {
@@ -74,20 +74,4 @@ function recoversImmediately(escaped: Uint8Array): boolean {
     pos += payloadSize;
   }
   return false;
-}
-
-/** Removes emulation prevention bytes (the 0x03 in 00 00 03). */
-function unescape(data: Uint8Array): Uint8Array {
-  const out = new Uint8Array(data.byteLength);
-  let length = 0;
-  let zeros = 0;
-  for (const byte of data) {
-    if (zeros >= 2 && byte === 0x03) {
-      zeros = 0;
-      continue;
-    }
-    zeros = byte === 0 ? zeros + 1 : 0;
-    out[length++] = byte;
-  }
-  return out.subarray(0, length);
 }

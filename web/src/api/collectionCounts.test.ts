@@ -5,6 +5,7 @@ import libraryTab from "../../../contracts/api/v2/fixtures/get_library_collectio
 import { adminCollectionFromV2 } from "./adminCollections";
 import { collectionFromV2, serverCollectionsFromV2 } from "./personalCollections";
 import { libraryCollectionFromV2, userCollectionFromV2 } from "./v2/catalog";
+import { collectionOptionMeta } from "@/components/homeRows/addRow/collectionSearch";
 import { adminCollectionOptions } from "@/hooks/queries/homeRows/useRowCollectionOptions";
 import { buildAllUserCollectionOptions } from "@/hooks/queries/useAllUserCollections";
 import { PERSONAL_SCOPE, SERVER_SCOPE } from "@/lib/collections/scope";
@@ -42,5 +43,9 @@ it.each(["available", "unavailable", "future-status"])(
       ],
     } as unknown as Parameters<typeof serverCollectionsFromV2>[0]);
     expect(libraries[0]?.collections[0]).toMatchObject(counts);
+    // The Home row pickers show the same count, never the stale number.
+    expect(collectionOptionMeta({ collection_type: "smart", ...counts })).toBe(
+      status === "available" ? "Smart · 91 titles" : "Smart · Count unavailable",
+    );
   },
 );

@@ -27,6 +27,9 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const [, setBaselineRevision] = useState(0);
   const saveEpoch = useRef(0);
   const savePending = useRef(false);
+  // The snapshot the last acknowledged save was made over. Until a newer one
+  // arrives, it no longer shows what is saved.
+  const savedOver = useRef<Record<string, string> | undefined>(undefined);
   const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings);
 
   const [localValues, setLocalValues] = useState<Record<string, string>>({});
@@ -44,6 +47,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     setRestartRequired(false);
     editVersions.current.clear();
     editBaseline.current = undefined;
+    savedOver.current = undefined;
     dirtyRef.current = new Set();
   }
   useEffect(() => {
@@ -86,12 +90,33 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   const getPersistedValue = useCallback((key: string) => settings?.[key] ?? "", [settings]);
 
+  /**
+   * Stages a value. A value equal to the saved one undoes the edit instead,
+   * unless `stage` is set: a caller that must write an unchanged value along
+   * with a related edit (the Redis database number with a new URL) passes it.
+   */
   const setValue = useCallback(
-    (key: string, value: string) => {
+    (key: string, value: string, { stage = false }: { stage?: boolean } = {}) => {
       if (!editBaseline.current) editBaseline.current = settings;
       editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
       setLocalValues((prev) => ({ ...prev, [key]: value }));
-      setDirty((prev) => new Set(prev).add(key));
+      // The snapshot leaves secrets out, so a key it lacks (a staged secret
+      // clear among them) stays dirty. An edit made during a save, or before
+      // the snapshot that save wrote has arrived, stays dirty too, because the
+      // snapshot cannot yet say what is saved.
+      const reverted =
+        !stage &&
+        !savePending.current &&
+        settings != null &&
+        settings !== savedOver.current &&
+        Object.hasOwn(settings, key) &&
+        settings[key] === value;
+      setDirty((prev) => {
+        const next = new Set(prev);
+        if (reverted) next.delete(key);
+        else next.add(key);
+        return next;
+      });
     },
     [settings],
   );
@@ -214,6 +239,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       // remain dirty. Reconcile only with a refresh matching that write's revision;
       // background reads and failed writes never advance this draft baseline.
       if (result.settingsSnapshot) editBaseline.current = result.settingsSnapshot;
+      savedOver.current = settings;
       const settledKeys = submittedKeys.filter(
         (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
       );
@@ -257,15 +283,26 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
   const sensitiveManagedByEnv = sensitiveData?.managed_by_env ?? [];
+  const envVars = sensitiveData?.managed_by_env_vars;
+  /**
+   * The environment variable that sets `key` on the server, or undefined when
+   * an admin can save it. Pass it to a field's `managedByEnv`.
+   */
+  const envVar = useCallback((key: string) => envVars?.[key], [envVars]);
+
+  // Until the status is known a field cannot tell whether the environment
+  // sets it, so the form stays in its loading state rather than offer an edit
+  // the server would refuse. A failed status request ends the wait.
+  const sensitiveStatusPending = sensitiveData == null && !sensitiveStatusError;
 
   return {
-    isLoading,
+    isLoading: isLoading || sensitiveStatusPending,
     /**
      * True until the snapshot has either arrived or failed. Unlike `isLoading`
      * this also covers a query that has not been allowed to start yet (no
      * profile selected), so a form can hold its skeleton through that gap.
      */
-    isPending: settings == null && !loadError,
+    isPending: (settings == null && !loadError) || sensitiveStatusPending,
     /** True when the settings snapshot could not be read; values are unset. */
     loadError,
     retryLoad: refetch,
@@ -285,6 +322,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     restartRequired,
     sensitiveConfigured,
     sensitiveManagedByEnv,
+    envVar,
     sensitiveStatusReady: sensitiveData != null,
     sensitiveStatusError,
     buildConnectionCheckRequest,

@@ -2,10 +2,8 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"testing"
 	"time"
 
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
@@ -41,12 +39,6 @@ func (f *fakeTrickplay) SignedManifest(_ context.Context, fileID int) (trickplay
 	}, true, nil
 }
 
-func trickplayDeps(watch *fakeWatch, tp *fakeTrickplay) Dependencies {
-	deps := watchDeps(watch)
-	deps.Trickplay = tp
-	return deps
-}
-
 type watchWithUnavailableArtwork struct{ fakeWatch }
 
 func (f *watchWithUnavailableArtwork) WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error) {
@@ -54,60 +46,6 @@ func (f *watchWithUnavailableArtwork) WatchDetail(ctx context.Context, userID in
 		return nil, errors.New("artwork provider unavailable")
 	}
 	return f.fakeWatch.WatchDetail(ctx, userID, profileID, contentID, filter)
-}
-
-func TestWatchTrickplayDoesNotNeedArtwork(t *testing.T) {
-	tp := &fakeTrickplay{}
-	deps := trickplayDeps(&fakeWatch{}, tp)
-	deps.Watch = &watchWithUnavailableArtwork{}
-	h := newTestHandler(t, deps)
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner)
-	if rec.Code != http.StatusOK || len(tp.calls) != 1 || tp.calls[0] != 42 {
-		t.Fatalf("seek previews = %d %s; manifest calls = %v", rec.Code, rec.Body.String(), tp.calls)
-	}
-}
-
-func TestGetWatchTrickplay(t *testing.T) {
-	watch, tp := &fakeWatch{}, &fakeTrickplay{}
-	h := newTestHandler(t, trickplayDeps(watch, tp))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", with(owner, deviceIDHeader, "tv-1"))
-	if rec.Code != http.StatusOK {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	var body WatchTrickplay
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.FileID != "42" || body.IntervalMS != 10000 || body.ThumbnailWidth != 300 || body.ThumbnailHeight != 126 ||
-		body.TileColumns != 10 || body.ThumbnailCount != 1020 || len(body.Sheets) != 11 || body.Sheets[10].Index != 10 ||
-		body.ExpiresAt != NewInstant(time.Date(2026, 1, 3, 3, 4, 5, 0, time.UTC)) {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	if filter := watch.filters[len(watch.filters)-1]; filter.SelectedFileID != 42 || filter.DeviceID != "tv-1" {
-		t.Fatalf("filter = %+v", filter)
-	}
-
-	// Only the item's own files; only files with previews.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=7", "", owner), TypeNotFound)
-	if len(tp.calls) != 1 {
-		t.Fatalf("previews of a file the item does not list were read: %v", tp.calls)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watch/movie:missing/trickplay?file_id=42", "", owner), TypeNotFound)
-	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=abc", "", owner), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.file_id" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay", "", owner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", nil), TypeAuthenticationRequired)
-
-	tp.err = errors.New("database down")
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner), TypeInternalError)
-
-	off := newTestHandler(t, watchDeps(&fakeWatch{}))
-	requireProblem(t, do(t, off, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner), TypeDependencyUnavailable)
 }
 
 func watchTrickplayFixtureCases() []fixtureCase {

@@ -8,12 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
-	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 func telemetryNodeServer(t *testing.T) (*Server, *streamtelemetry.Registry, *httptest.Server) {
@@ -35,7 +33,7 @@ func nodeMediaRequest(t *testing.T, server *httptest.Server, path, token string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeauthtest.Sign(t, req, testSecret)
+	nodeauthtest.Sign(t, req, testNodeKey)
 	if token != "" {
 		req.Header.Set("X-Silo-Stream-Token", token)
 	}
@@ -51,25 +49,13 @@ func nodeMediaRequest(t *testing.T, server *httptest.Server, path, token string)
 	return resp.StatusCode, body
 }
 
-func signedNodeTelemetryToken(t *testing.T, sessionID, transportID, secret string) string {
-	t.Helper()
-	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID: sessionID, TranscodeTransportID: transportID, PlayMethod: string(playback.PlayTranscode),
-		UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
-	}, secret, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return token
-}
-
 func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 	tests := []struct {
 		name        string
-		withToken   bool
+		identity    bool
 		wantSession string
 	}{
-		{name: "canonical viewer session", withToken: true, wantSession: "viewer-session"},
+		{name: "playback session the start named", identity: true, wantSession: "viewer-session"},
 		{name: "transport fallback", wantSession: "node-transport:transport-session"},
 	}
 	for _, test := range tests {
@@ -82,13 +68,14 @@ func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			srv.mu.Lock()
-			srv.sessions[transportID] = playback.NewTranscodeSessionForTest(outputDir)
-			srv.mu.Unlock()
-			token := ""
-			if test.withToken {
-				token = signedNodeTelemetryToken(t, "viewer-session", transportID, testSecret)
+			identity := sessionIdentity{}
+			if test.identity {
+				identity.playbackSessionID = "viewer-session"
 			}
-			status, body := nodeMediaRequest(t, server, "/transcode/"+transportID+"/segment/seg1.ts", token)
+			srv.registerSessionLocked(transportID, playback.NewTranscodeSessionForTest(outputDir), identity, nil)
+			srv.mu.Unlock()
+			// A relay's stream token names nothing to the node any more.
+			status, body := nodeMediaRequest(t, server, "/transcode/"+transportID+"/segment/seg1.ts", "relay-token")
 			if status != http.StatusOK || string(body) != segment {
 				t.Fatalf("segment = %d %q", status, body)
 			}
@@ -102,34 +89,6 @@ func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 			}
 			if len(session.Routes) != 1 || session.Routes[0].Role != streamtelemetry.RoleInternalRelay || session.Routes[0].BytesAccepted != int64(len(segment)) {
 				t.Fatalf("routes = %+v", session.Routes)
-			}
-		})
-	}
-}
-
-func TestCanonicalSessionID(t *testing.T) {
-	srv := newTestServer(t)
-	const transportID = "transport-id"
-	tests := []struct {
-		name      string
-		token     string
-		want      string
-		wantClaim bool
-	}{
-		{name: "matching", token: signedNodeTelemetryToken(t, "viewer-id", transportID, testSecret), want: "viewer-id", wantClaim: true},
-		{name: "different transport", token: signedNodeTelemetryToken(t, "viewer-id", "other", testSecret), want: "node-transport:" + transportID},
-		{name: "wrong secret", token: signedNodeTelemetryToken(t, "viewer-id", transportID, "wrong"), want: "node-transport:" + transportID},
-		{name: "no header", want: "node-transport:" + transportID},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/transcode/"+transportID+"/master.m3u8", nil)
-			if test.token != "" {
-				req.Header.Set("X-Silo-Stream-Token", test.token)
-			}
-			got, claims := srv.canonicalSessionID(req, transportID)
-			if got != test.want || (claims != nil) != test.wantClaim {
-				t.Fatalf("canonical = %q, claims=%+v", got, claims)
 			}
 		})
 	}

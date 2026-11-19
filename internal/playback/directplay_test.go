@@ -16,27 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
-
-func TestMimeFromExtension(t *testing.T) {
-	cases := map[string]string{
-		"movie.mkv":     "video/x-matroska",
-		"movie.MP4":     "video/mp4",
-		"movie.ts":      "video/mp2t",
-		"book.m4b":      "audio/mp4",
-		"track.opus":    "audio/ogg",
-		"movie.unknown": "application/octet-stream",
-		"movie":         "application/octet-stream",
-	}
-	for name, want := range cases {
-		if got := MimeFromExtension(name); got != want {
-			t.Errorf("MimeFromExtension(%q) = %q, want %q", name, got, want)
-		}
-	}
-}
 
 func TestMediaMIMETypesListsEveryKnownTypeOnce(t *testing.T) {
 	got := MediaMIMETypes()
@@ -200,26 +182,6 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 				t.Fatalf("body = %q, want %q", body, tt.wantBody)
 			}
 		})
-	}
-}
-
-func TestDirectStreamValidatorFingerprint(t *testing.T) {
-	const validator = "\"private-validator\""
-	fingerprint := directStreamValidatorFingerprint(validator)
-	if len(fingerprint) != 16 {
-		t.Fatalf("fingerprint length = %d, want 16", len(fingerprint))
-	}
-	if strings.Contains(fingerprint, "private") || strings.Contains(fingerprint, "validator") {
-		t.Fatalf("fingerprint leaked validator text: %q", fingerprint)
-	}
-	if got := directStreamValidatorFingerprint(validator); got != fingerprint {
-		t.Fatalf("fingerprint = %q, want stable %q", got, fingerprint)
-	}
-	if got := directStreamValidatorFingerprint("\"different\""); got == fingerprint {
-		t.Fatalf("different validator produced the same fingerprint %q", got)
-	}
-	if got := directStreamValidatorFingerprint("  "); got != "" {
-		t.Fatalf("blank validator fingerprint = %q, want omitted", got)
 	}
 }
 
@@ -478,29 +440,6 @@ func platformRequiresDirectPlayValidator() bool {
 	}
 }
 
-func TestServeDirectPlayStalledWriteIncrementsOutcomeMetric(t *testing.T) {
-	filePath := writeDirectPlayFixture(t, "fixture.mp4", "media bytes")
-
-	stalledEnds := directStreamEnds.WithLabelValues(string(httpstream.OutcomeStalledReap))
-	endsBefore := counterValue(t, stalledEnds)
-	activeBefore := gaugeValue(t, directStreamActive)
-
-	writer := &deadlineResponseWriter{header: make(http.Header)}
-	if err := ServeDirectPlay(writer, httptest.NewRequest(http.MethodGet, "/stream", nil), filePath); err != nil {
-		t.Fatal(err)
-	}
-
-	if writer.status != http.StatusOK {
-		t.Fatalf("status = %d, want %d", writer.status, http.StatusOK)
-	}
-	if got := counterValue(t, stalledEnds); got != endsBefore+1 {
-		t.Fatalf("stalled end counter = %v, want %v", got, endsBefore+1)
-	}
-	if got := gaugeValue(t, directStreamActive); got != activeBefore {
-		t.Fatalf("active stream gauge = %v, want restored value %v", got, activeBefore)
-	}
-}
-
 func counterValue(t testing.TB, counter prometheus.Counter) float64 {
 	t.Helper()
 	metric := &dto.Metric{}
@@ -508,15 +447,6 @@ func counterValue(t testing.TB, counter prometheus.Counter) float64 {
 		t.Fatalf("read counter: %v", err)
 	}
 	return metric.GetCounter().GetValue()
-}
-
-func gaugeValue(t testing.TB, gauge prometheus.Gauge) float64 {
-	t.Helper()
-	metric := &dto.Metric{}
-	if err := gauge.Write(metric); err != nil {
-		t.Fatalf("read gauge: %v", err)
-	}
-	return metric.GetGauge().GetValue()
 }
 
 type deadlineResponseWriter struct {

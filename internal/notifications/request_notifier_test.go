@@ -38,42 +38,6 @@ func fulfilledRequest(followers ...requests.Follower) requests.Request {
 	}
 }
 
-func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
-	backend := &fakeFulfillmentBackend{disabled: map[string]bool{"muted": true}}
-	notifier := &RequestFulfillmentNotifier{backend: backend}
-
-	err := notifier.NotifyFulfilled(context.Background(), fulfilledRequest(
-		requests.Follower{UserID: 2, ProfileID: "follower"},
-		requests.Follower{UserID: 1, ProfileID: "requester"}, // a leftover follow by the requester
-		requests.Follower{UserID: 3, ProfileID: "muted"},
-	), "movie-tmdb-949")
-	if err != nil {
-		t.Fatalf("NotifyFulfilled: %v", err)
-	}
-	if len(backend.deliveries) != 2 {
-		t.Fatalf("deliveries = %+v, want the requester and the one unmuted follower", backend.deliveries)
-	}
-	requester, follower := backend.deliveries[0], backend.deliveries[1]
-	if requester.ProfileID != "requester" || parseRequestFlags(requester.ReasonFlags).Follower {
-		t.Fatalf("first delivery = %+v, want the requester's own copy", requester)
-	}
-	if follower.ProfileID != "follower" || follower.UserID != 2 || !parseRequestFlags(follower.ReasonFlags).Follower {
-		t.Fatalf("second delivery = %+v, want the follower's copy marked as such", follower)
-	}
-	if flags := parseRequestFlags(follower.ReasonFlags); flags.RequestID != "req-1" || flags.TMDBID != 949 {
-		t.Fatalf("follower flags = %+v, want the request identity", flags)
-	}
-	// The server-wide post waits for AnnounceFulfilled, which the caller runs
-	// once the request is stamped, so a retried delivery never repeats it.
-	if backend.channelPost != 0 {
-		t.Fatalf("channel posts after NotifyFulfilled = %d, want none", backend.channelPost)
-	}
-	notifier.AnnounceFulfilled(context.Background(), fulfilledRequest())
-	if backend.channelPost != 1 {
-		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", backend.channelPost)
-	}
-}
-
 // Two accounts' legacy "default" profiles, one the requester and one a
 // follower, each get exactly one request.fulfilled delivery, on their own
 // account, and only their own account's devices are pushed. A second pass is

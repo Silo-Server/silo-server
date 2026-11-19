@@ -9,6 +9,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type CatalogHandler struct {
@@ -106,8 +107,12 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		userStates       map[string]*itemUserStateResponse
 		episodeMetadata  map[string]episodeBrowseMetadata
 		playTargets      map[string]string
+		authors          map[string][]string
+		positions        map[string]userstore.WatchProgress
 	)
 	var enrichWG sync.WaitGroup
+	enrichWG.Go(func() { authors = h.itemsH.listBookAuthors(ctx, resultItems) })
+	enrichWG.Go(func() { positions = h.itemsH.listInProgressPositions(ctx, v, resultItems) })
 	enrichWG.Add(5)
 	go func() {
 		defer enrichWG.Done()
@@ -129,6 +134,16 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		defer enrichWG.Done()
 		playTargets = h.itemsH.listPlayableTargets(ctx, v, resultItems, libraryIDs, accessFilter)
 	}()
+	// Series cards are known here, so their seasons are counted alongside the
+	// other lookups rather than after the cards are assembled.
+	var countedSeries []string
+	var seriesCounts *seriesAvailability
+	if h.itemsH != nil && v.IncludeCardAvailability {
+		countedSeries = seriesItemIDs(resultItems)
+		enrichWG.Go(func() {
+			seriesCounts = loadSeriesAvailability(ctx, h.itemsH.itemRepo, accessFilter, countedSeries)
+		})
+	}
 	enrichWG.Wait()
 
 	var (
@@ -176,7 +191,16 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		resp.BackdropURL = imageURLs[item.ContentID].backdropURL
 		resp.LogoURL = imageURLs[item.ContentID].logoURL
 		resp.SortMetrics = sortMetrics[item.ContentID]
+		resp.Authors = authors[item.ContentID]
+		// A card is finished or partway, never both: played wins, as on a
+		// book page's related rows.
+		if p, ok := positions[item.ContentID]; ok && (resp.UserState == nil || !resp.UserState.Played) {
+			resp.PositionSeconds, resp.DurationSeconds = new(p.PositionSeconds), new(p.DurationSeconds)
+		}
 		items = append(items, resp)
+	}
+	if h.itemsH != nil && v.IncludeCardAvailability {
+		h.itemsH.attachItemListAvailability(ctx, accessFilter, items, countedSeries, seriesCounts)
 	}
 	return items
 }

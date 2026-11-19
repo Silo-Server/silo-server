@@ -194,7 +194,7 @@ function isInProgressVideo(mediaType: MediaItemType, hasResumePosition: boolean)
   return (mediaType === "movie" || mediaType === "episode") && hasResumePosition;
 }
 
-export function buildMediaItemMenuModel({
+function buildMediaItemMenuModel({
   mediaType,
   userState,
   hasPartialProgress = false,

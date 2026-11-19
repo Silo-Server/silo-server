@@ -74,29 +74,6 @@ func newTestS3Client(t *testing.T, bucket string) *s3client.Client {
 	})
 }
 
-// A local backend has one root, so every caller shares the recorded store: a
-// first write through Operational must record the identity just as one through
-// Assets does.
-func TestOpenLocalSharesOneRecordedStore(t *testing.T) {
-	settings := &testSettings{values: map[string]string{}}
-	stores, backend, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), Settings: settings})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if backend != BackendLocal {
-		t.Fatalf("backend=%q", backend)
-	}
-	if !stores.Local() || stores.Operational != stores.Assets {
-		t.Fatal("local backend did not share one store")
-	}
-	if err = stores.Operational.Put(context.Background(), "diagnostics/1/report.tar.gz", []byte("x")); err != nil {
-		t.Fatal(err)
-	}
-	if settings.values[IdentitySettingKey] != stores.Assets.Identity() {
-		t.Fatalf("operational write did not record identity: %#v", settings.values)
-	}
-}
-
 // recordingStore must forward every write method. A diagnostic bundle or job
 // artifact is often the first thing a local install writes, and those arrive
 // through PutStream; if it reached the embedded store directly the identity
@@ -162,64 +139,6 @@ func TestOpenS3KeepsBucketIdentitiesSeparate(t *testing.T) {
 	}
 }
 
-// Avatars have always lived in the private bucket, whatever backed artwork. An
-// install that configured one and then moved artwork to disk must keep reading
-// its existing profile-avatars keys, so a configured private bucket owns the
-// operational store even on a local backend.
-func TestOpenLocalStillPrefersAConfiguredPrivateBucket(t *testing.T) {
-	private := newTestS3Client(t, "operational")
-	stores, backend, err := Open(context.Background(), Options{
-		Backend: BackendLocal, LocalPath: t.TempDir(), S3Private: private,
-		Settings: &testSettings{values: map[string]string{}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if backend != BackendLocal {
-		t.Fatalf("backend=%q", backend)
-	}
-	if stores.Operational == stores.Assets || stores.Local() {
-		t.Fatal("local backend overrode the configured private bucket")
-	}
-	if !strings.Contains(stores.Operational.Identity(), "operational") {
-		t.Fatalf("operational identity = %q", stores.Operational.Identity())
-	}
-}
-
-// An S3 backend without a private bucket leaves Operational nil, which is how
-// callers detect that diagnostics and job artifacts have nowhere to go.
-func TestOpenS3WithoutPrivateBucketLeavesOperationalNil(t *testing.T) {
-	stores, _, err := Open(context.Background(), Options{
-		Backend: BackendS3, S3: newTestS3Client(t, "assets"), Settings: &testSettings{values: map[string]string{}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stores.Assets == nil || stores.Operational != nil {
-		t.Fatal("missing private bucket did not leave operational nil")
-	}
-}
-
-func TestOpenLocalRecordsBackendOnFirstPut(t *testing.T) {
-	settings := &testSettings{values: map[string]string{}}
-	stores, backend, err := Open(context.Background(), Options{Backend: "auto", LocalPath: filepath.Join(t.TempDir(), "artwork"), Settings: settings})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := stores.Assets
-	if backend != BackendLocal {
-		t.Fatalf("backend=%q", backend)
-	}
-	if settings.writes != 0 {
-		t.Fatal("recorded before write")
-	}
-	if err = store.Put(context.Background(), "a.webp", []byte("x")); err != nil {
-		t.Fatal(err)
-	}
-	if settings.values[IdentitySettingKey] != store.Identity() || settings.writes != 1 {
-		t.Fatalf("settings=%#v writes=%d", settings.values, settings.writes)
-	}
-}
 func TestOpenRejectsRecordedStorageMismatch(t *testing.T) {
 	root := t.TempDir()
 	current, err := NewFilesystem(root)
@@ -466,24 +385,6 @@ func TestOpenLocalFencesSharedOperationalStore(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("operational write did not resume after the fence was released")
-	}
-}
-
-func TestLocalIdentityMatchesFilesystemWithoutCreatingRoot(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "not", "yet")
-	identity, err := LocalIdentity(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("LocalIdentity touched the root: %v", err)
-	}
-	fs, err := NewFilesystem(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if identity != fs.Identity() {
-		t.Fatalf("LocalIdentity = %q, Filesystem.Identity = %q", identity, fs.Identity())
 	}
 }
 

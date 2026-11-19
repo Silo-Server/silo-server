@@ -13,7 +13,11 @@ func TestWorkerDeliveryInventoryDescriptionCoverage(t *testing.T) {
 	}
 	described := map[string]bool{}
 	for _, op := range describeWorkerProtocols().Operations {
-		described[op.Listener+" "+op.Method+" "+op.Path] = true
+		// The node control routes are on the API listener; the registry test
+		// matches them to the inventory.
+		if op.Listener == "proxy" || op.Listener == "transcode_node" {
+			described[op.Listener+" "+op.Method+" "+op.Path] = true
+		}
 	}
 	count := 0
 	for _, route := range inventory.Routes {

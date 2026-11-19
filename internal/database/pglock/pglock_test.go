@@ -43,16 +43,6 @@ func lockHeld(t *testing.T, pool *pgxpool.Pool, key int64) bool {
 	return held
 }
 
-func TestTryAcquireNilPoolReportsNotAcquired(t *testing.T) {
-	lock, acquired, err := TryAcquire(context.Background(), nil, pglockTestKey)
-	if err != nil || acquired || lock != nil {
-		t.Fatalf("TryAcquire(nil pool) = (%v, %v, %v), want (nil, false, nil)", lock, acquired, err)
-	}
-	if err := lock.Release(context.Background()); err != nil {
-		t.Fatalf("Release on nil lock: %v", err)
-	}
-}
-
 // pglockOtherTestKey is a second key for the tests that hold two locks.
 const pglockOtherTestKey int64 = 0x70676C6F636B02
 

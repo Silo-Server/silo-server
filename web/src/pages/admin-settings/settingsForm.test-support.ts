@@ -36,6 +36,7 @@ export function fakeSettingsForm(
     restartRequired: false,
     sensitiveConfigured: [] as string[],
     sensitiveManagedByEnv: [] as string[],
+    envVar: (_key: string): string | undefined => undefined,
     sensitiveStatusReady: true,
     sensitiveStatusError: false,
     buildConnectionCheckRequest: vi.fn(),

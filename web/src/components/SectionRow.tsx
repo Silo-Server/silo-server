@@ -1,4 +1,5 @@
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useId, useMemo } from "react";
+import { CollectionsRow } from "@/components/CollectionsRow";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
@@ -14,6 +15,7 @@ import { useSectionTitle } from "@/lib/sectionTitle";
 import { useT } from "@/i18n";
 import {
   carouselCardWidthClasses,
+  squarePosterSize,
   shortcutLabel,
   WIDE_CAROUSEL_CARD_WIDTH_CLASSES,
 } from "@/lib/uiCustomization";
@@ -43,30 +45,42 @@ interface SectionRowProps {
 function SectionPinButton({
   sectionId,
   label,
+  rowTitle,
   libraryId,
 }: {
   sectionId: string;
+  /** Stored with the pin. */
   label: string;
+  /** The row's shown (translated) heading, which describes the button. */
+  rowTitle: string;
   libraryId: number;
 }) {
   const t = useT();
   const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
   const pinned = isPinned(libraryId, "section", sectionId);
+  const labelId = useId();
 
   if (!canToggle) return null;
 
   return (
-    <button
-      onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
-      className={`rounded-full p-1.5 transition-colors ${
-        pinned
-          ? "text-primary hover:text-primary/80"
-          : "text-muted-foreground/40 hover:bg-accent/60 hover:text-muted-foreground opacity-0 group-hover/carousel:opacity-100"
-      }`}
-      title={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
-    >
-      {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-    </button>
+    <>
+      <span id={labelId} hidden>
+        {rowTitle}
+      </span>
+      <button
+        onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
+        className={`rounded-full p-1.5 transition-colors ${
+          pinned
+            ? "text-primary hover:text-primary/80"
+            : "text-muted-foreground/40 hover:bg-accent/60 hover:text-muted-foreground opacity-0 group-hover/carousel:opacity-100"
+        }`}
+        title={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
+        aria-label={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
+        aria-describedby={labelId}
+      >
+        {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+      </button>
+    </>
   );
 }
 
@@ -95,7 +109,11 @@ export default memo(function SectionRow({
   );
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
-  const posterSize = cardPresentation.poster_size;
+  // A row of audiobooks draws its square covers a size down (squarePosterSize).
+  const posterSize =
+    section.items.length > 0 && section.items.every((it) => it.type === "audiobook")
+      ? squarePosterSize(cardPresentation.poster_size)
+      : cardPresentation.poster_size;
   const posterWidthClasses = carouselCardWidthClasses(posterSize);
   const isProgressRow = isProgressSectionType(section.section_type);
   // One spoiler lookup per row rather than one per card.
@@ -127,12 +145,14 @@ export default memo(function SectionRow({
   const sectionId = section.id;
   const handleNearEnd = useCallback(() => onNearEnd?.(sectionId), [onNearEnd, sectionId]);
 
+  if (section.collections?.length) return <CollectionsRow section={section} />;
   if (section.items.length === 0) return null;
 
   const headerActions = libraryId ? (
     <SectionPinButton
       sectionId={section.id}
       label={shortcutLabel(pinLabel ?? section.title)}
+      rowTitle={shownTitle}
       libraryId={libraryId}
     />
   ) : undefined;

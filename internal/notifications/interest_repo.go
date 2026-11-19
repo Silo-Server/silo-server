@@ -19,19 +19,20 @@ func NewInterestRepository(pool *pgxpool.Pool) *InterestRepository {
 	return &InterestRepository{pool: pool}
 }
 
-// ListActiveBySeries loads candidate recipients for one (library, series).
-// This is the hot fanout query; it uses the partial active-interest index.
-// Profiles that muted the series are left out in the same query, so a mute
-// costs fanout no per-recipient read.
+// ListActiveBySeries loads candidate recipients for one (library, series):
+// the Next Up candidates, the only interest that can notify
+// (EvaluateRecipient). This is the hot fanout query; it uses the partial
+// active-interest index. Profiles that muted the series are left out in the
+// same query, so a mute costs fanout no per-recipient read.
 func (r *InterestRepository) ListActiveBySeries(ctx context.Context, tx pgx.Tx, libraryID int, seriesID string) ([]SeriesInterest, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT psi.user_id, psi.profile_id, psi.library_id, psi.series_id,
-		       psi.favorite, psi.watchlist, psi.continue_watching, psi.next_up_candidate,
+		       psi.next_up_candidate,
 		       psi.last_completed_episode_key, psi.next_expected_episode_key, psi.last_notified_episode_key,
 		       psi.updated_at
 		FROM profile_series_interest psi
 		WHERE psi.library_id = $1 AND psi.series_id = $2
-		  AND (psi.favorite OR psi.watchlist OR psi.continue_watching OR psi.next_up_candidate)
+		  AND psi.next_up_candidate
 		  AND NOT EXISTS (
 			SELECT 1 FROM profile_series_notification_mutes m
 			WHERE m.series_id = psi.series_id AND m.user_id = psi.user_id AND m.profile_id = psi.profile_id)`,
@@ -46,7 +47,7 @@ func (r *InterestRepository) ListActiveBySeries(ctx context.Context, tx pgx.Tx, 
 		var interest SeriesInterest
 		if err := rows.Scan(
 			&interest.UserID, &interest.ProfileID, &interest.LibraryID, &interest.SeriesID,
-			&interest.Favorite, &interest.Watchlist, &interest.ContinueWatching, &interest.NextUpCandidate,
+			&interest.NextUpCandidate,
 			&interest.LastCompletedEpisodeKey, &interest.NextExpectedEpisodeKey, &interest.LastNotifiedEpisodeKey,
 			&interest.UpdatedAt,
 		); err != nil {
@@ -67,42 +68,33 @@ func (r *InterestRepository) UpsertRows(ctx context.Context, interests []SeriesI
 	var sb strings.Builder
 	sb.WriteString(`
 		INSERT INTO profile_series_interest
-			(user_id, profile_id, library_id, series_id,
-			 favorite, watchlist, continue_watching, next_up_candidate,
+			(user_id, profile_id, library_id, series_id, next_up_candidate,
 			 last_completed_episode_key, next_expected_episode_key, updated_at)
 		VALUES `)
-	args := make([]any, 0, len(interests)*10)
+	args := make([]any, 0, len(interests)*7)
 	for i, interest := range interests {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
 		base := len(args)
-		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,now())",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10))
+		fmt.Fprintf(&sb, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,now())",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7)
 		args = append(args,
-			interest.UserID, interest.ProfileID, interest.LibraryID, interest.SeriesID,
-			interest.Favorite, interest.Watchlist, interest.ContinueWatching, interest.NextUpCandidate,
+			interest.UserID, interest.ProfileID, interest.LibraryID, interest.SeriesID, interest.NextUpCandidate,
 			interest.LastCompletedEpisodeKey, interest.NextExpectedEpisodeKey,
 		)
 	}
 	sb.WriteString(`
 		ON CONFLICT (user_id, profile_id, library_id, series_id) DO UPDATE SET
-			favorite = EXCLUDED.favorite,
-			watchlist = EXCLUDED.watchlist,
-			continue_watching = EXCLUDED.continue_watching,
 			next_up_candidate = EXCLUDED.next_up_candidate,
 			last_completed_episode_key = EXCLUDED.last_completed_episode_key,
 			next_expected_episode_key = EXCLUDED.next_expected_episode_key,
 			updated_at = now()
-		WHERE (profile_series_interest.favorite,
-		       profile_series_interest.watchlist,
-		       profile_series_interest.continue_watching,
-		       profile_series_interest.next_up_candidate,
+		WHERE (profile_series_interest.next_up_candidate,
 		       profile_series_interest.last_completed_episode_key,
 		       profile_series_interest.next_expected_episode_key)
 		IS DISTINCT FROM
-		      (EXCLUDED.favorite, EXCLUDED.watchlist, EXCLUDED.continue_watching,
-		       EXCLUDED.next_up_candidate, EXCLUDED.last_completed_episode_key,
+		      (EXCLUDED.next_up_candidate, EXCLUDED.last_completed_episode_key,
 		       EXCLUDED.next_expected_episode_key)`)
 	if _, err := r.pool.Exec(ctx, sb.String(), args...); err != nil {
 		return fmt.Errorf("upsert series interest: %w", err)
@@ -180,12 +172,12 @@ func (r *InterestRepository) DeleteAllForProfile(ctx context.Context, userID int
 	return err
 }
 
-// PruneInert removes rows with no interest flags and no progression cursors;
-// they can never produce a notification.
+// PruneInert removes rows that are no Next Up candidate and have no
+// progression cursors; they can never produce a notification.
 func (r *InterestRepository) PruneInert(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM profile_series_interest
-		WHERE NOT (favorite OR watchlist OR continue_watching OR next_up_candidate)
+		WHERE NOT next_up_candidate
 		  AND last_completed_episode_key IS NULL
 		  AND next_expected_episode_key IS NULL`)
 	if err != nil {

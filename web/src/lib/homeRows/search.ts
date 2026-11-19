@@ -26,6 +26,7 @@ const ALIASES: Record<string, readonly string[]> = {
   format_showcase: ["4k", "uhd", "hdr", "dolby vision", "quality"],
   random: ["random", "shuffle"],
   collection: ["collection", "ghibli", "franchise", "box set", "list", "smart"],
+  collection_posters: ["collections", "shelf", "franchises", "posters", "several", "many"],
   custom_filter: ["rules", "filter", "genre", "decade", "year", "rating", "smart"],
 };
 

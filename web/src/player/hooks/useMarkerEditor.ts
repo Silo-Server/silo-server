@@ -16,6 +16,18 @@ export const MARKER_LABEL_KEYS: Record<MarkerKind, MessageKey> = {
   preview: "web.markers.kind.preview",
 };
 
+/**
+ * Solid accent per kind, shared by the seek bar's hover dot and the marker
+ * editor panel. Every client uses this palette (TheIntroDB's segment colours,
+ * the Tailwind 400 shades); the seek bar tints use the same hues.
+ */
+export const MARKER_DOT_COLORS: Record<MarkerKind, string> = {
+  intro: "bg-blue-400",
+  recap: "bg-orange-400",
+  credits: "bg-purple-400",
+  preview: "bg-cyan-400",
+};
+
 // Initial span (seconds) given to a freshly created marker before the user
 // refines the opposite edge.
 const NEW_MARKER_SPAN = 60;
@@ -115,6 +127,10 @@ export function useMarkerEditor({
     setError(null);
   }
 
+  // Each opening of the panel, so a save that resolves after the panel was
+  // closed and opened again leaves the new opening's draft alone (#4108).
+  const openingRef = useRef(0);
+
   // The file playing now, for a save that resolves after a version switch.
   const currentFileIdRef = useRef(fileId);
   useEffect(() => {
@@ -125,6 +141,7 @@ export function useMarkerEditor({
 
   const begin = useCallback(() => {
     const snapshot = normalizeDraft(markers);
+    openingRef.current += 1;
     originalRef.current = snapshot;
     setDraft(snapshot);
     setActiveKind(MARKER_KINDS.find((kind) => snapshot[kind] != null) ?? "intro");
@@ -133,6 +150,7 @@ export function useMarkerEditor({
   }, [markers]);
 
   const cancel = useCallback(() => {
+    openingRef.current += 1;
     setEditing(false);
     setError(null);
   }, []);
@@ -200,6 +218,11 @@ export function useMarkerEditor({
       setEditing(false);
       return;
     }
+    const opening = openingRef.current;
+    // Whether the panel still shows the draft this save sent: the same file,
+    // and not closed or opened again since.
+    const stillThisDraft = () =>
+      currentFileIdRef.current === fileId && openingRef.current === opening;
     setSaving(true);
     setError(null);
     try {
@@ -208,6 +231,9 @@ export function useMarkerEditor({
         body: markerUpdateToV2(body),
       });
     } catch (e) {
+      // Show the failure even on a panel reopened on this file since, so the
+      // user learns the earlier edits didn't save. After a version switch the
+      // error would land on another file's panel, so only log it.
       if (currentFileIdRef.current === fileId) {
         setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
       } else {
@@ -217,12 +243,31 @@ export function useMarkerEditor({
     } finally {
       setSaving(false);
     }
-    // A version switch during the request closed this draft, and the editor may
-    // since hold a draft of the new file. Leave that one alone.
-    if (currentFileIdRef.current === fileId) {
+    // A version switch, or closing and reopening the panel, during the request
+    // closed this draft, and the editor may since hold a newer one. Leave that
+    // one's edits alone.
+    if (stillThisDraft()) {
       originalRef.current = draft;
       setDraft(draft);
       setEditing(false);
+    } else if (currentFileIdRef.current === fileId) {
+      // Reopened on the same file: its "before" values were read while this
+      // save was in flight. The saved kinds are its baseline now, and a kind
+      // it hasn't touched shows the saved value, so its dirty state and its
+      // next save compare against what the server holds.
+      const before = originalRef.current;
+      const saved = { ...before };
+      for (const kind of MARKER_KINDS) {
+        if (kind in body) saved[kind] = draft[kind];
+      }
+      originalRef.current = saved;
+      setDraft((current) => {
+        const next = { ...current };
+        for (const kind of MARKER_KINDS) {
+          if (kind in body && rangesEqual(current[kind], before[kind])) next[kind] = draft[kind];
+        }
+        return next;
+      });
     }
     try {
       onSaved?.(body);

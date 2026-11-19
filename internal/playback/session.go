@@ -89,6 +89,9 @@ type Session struct {
 	TargetBitrateKbps      int          // requested output bitrate cap for transcodes
 	TranscodeHWAccel       string       // effective hardware acceleration mode for transcodes
 	ToneMapMode            tonemap.Mode // effective HDR-to-SDR executor for transcodes
+	// AdaptationReasons says why the route changes the file (see
+	// AdaptationReasons); empty for direct play or an unplanned session.
+	AdaptationReasons []string
 
 	// Byte-affecting transcode recipe fields the offloaded restart path needs to
 	// rebuild the exact same stream after an audio switch. Local transcodes read
@@ -166,6 +169,7 @@ type SessionStreamState struct {
 	TargetBitrateKbps             int
 	TranscodeHWAccel              string
 	ToneMapMode                   tonemap.Mode
+	AdaptationReasons             []string
 	TranscodeNodeURL              string
 	TranscodeTransportID          string
 	TranscodeRouteSet             bool
@@ -1261,6 +1265,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
+	s.AdaptationReasons = state.AdaptationReasons
 	if state.TranscodeRouteSet {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
@@ -1312,6 +1317,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		TargetBitrateKbps:             s.TargetBitrateKbps,
 		TranscodeHWAccel:              s.TranscodeHWAccel,
 		ToneMapMode:                   s.ToneMapMode,
+		AdaptationReasons:             s.AdaptationReasons,
 		TranscodeNodeURL:              s.TranscodeNodeURL,
 		TranscodeTransportID:          s.TranscodeTransportID,
 		TranscodeRouteSet:             true,
@@ -1355,6 +1361,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
+	s.AdaptationReasons = state.AdaptationReasons
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
 	s.RoutingNetworkProvider = state.RoutingNetworkProvider
@@ -1910,6 +1917,21 @@ func (m *SessionManager) AnnounceStart(ctx context.Context, sessionID, frontend 
 	for _, hook := range hooks {
 		if hook.Started != nil {
 			hook.Started(ctx, &started, frontend)
+		}
+	}
+}
+
+// AnnounceDetachedStart tells the lifecycle hooks a frontend started a play
+// that no replica holds in memory, such as an Audiobookshelf play a client
+// only reports. The caller supplies the snapshot; registered sessions are
+// left as they are.
+func (m *SessionManager) AnnounceDetachedStart(ctx context.Context, s Session, frontend string) {
+	m.mu.RLock()
+	hooks := append([]LifecycleHooks{}, m.lifecycleHooks...)
+	m.mu.RUnlock()
+	for _, hook := range hooks {
+		if hook.Started != nil {
+			hook.Started(ctx, &s, frontend)
 		}
 	}
 }

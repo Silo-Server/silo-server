@@ -470,6 +470,20 @@ const deleteUnlessMovedAttempts = 3
 // transaction: a card written between them makes the delete reread it rather
 // than remove it.
 func (s *Store) DeleteUnlessMoved(ctx context.Context, sessionID string, executor playback.RecipeExecutor) (kept bool, err error) {
+	return s.deleteUnless(ctx, sessionID, executor.NamesAnotherNode)
+}
+
+// DeleteUnlessIssuedElsewhere is DeleteUnlessMoved for the core stopping the
+// node at executor.NodeURL: it keeps a card issued for another route
+// (playback.RecipeExecutor.IssuedForAnotherRoute), so a stop on one node,
+// however late, never removes the card of the node the transport runs on now.
+func (s *Store) DeleteUnlessIssuedElsewhere(ctx context.Context, sessionID string, executor playback.RecipeExecutor) (kept bool, err error) {
+	return s.deleteUnless(ctx, sessionID, executor.IssuedForAnotherRoute)
+}
+
+// deleteUnless deletes the record stored under sessionID unless keep reports
+// true for its card, reading and deleting in one transaction.
+func (s *Store) deleteUnless(ctx context.Context, sessionID string, keep func(playback.RecipeCard) bool) (kept bool, err error) {
 	if s == nil || s.rdb == nil || sessionID == "" {
 		return false, nil
 	}
@@ -484,7 +498,7 @@ func (s *Store) DeleteUnlessMoved(ctx context.Context, sessionID string, executo
 			case err != nil:
 				return err
 			default:
-				if card, ok := unmarshalCard(data); ok && executor.NamesAnotherNode(card) {
+				if card, ok := unmarshalCard(data); ok && keep(card) {
 					kept = true
 					return nil
 				}

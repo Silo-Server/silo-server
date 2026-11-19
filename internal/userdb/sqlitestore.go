@@ -116,6 +116,10 @@ func (s *SQLiteUserStore) ListCompletedProgressSince(_ context.Context, profileI
 	return ListCompletedProgressSince(s.db, profileID, since, until, limit)
 }
 
+func (s *SQLiteUserStore) ListProgressItemIDs(ctx context.Context, profileID string) ([]string, error) {
+	return ListProgressItemIDs(ctx, s.db, profileID)
+}
+
 func (s *SQLiteUserStore) ListProgressPage(_ context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
 	return ListProgressPage(s.db, profileID, status, after, limit)
 }

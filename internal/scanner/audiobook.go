@@ -2,13 +2,10 @@ package scanner
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -119,53 +116,27 @@ type parsedAudiobookFile struct {
 	ModifiedAt time.Time
 }
 
-// parseAudiobookFolder reads a single audiobook folder and returns its
-// structured representation. Recognized layouts:
-//   - one audio file in the folder, optionally with embedded chapters
-//   - multiple audio files in the folder; each becomes its own
+// parseAudiobookFolder reads the book rooted at folderPath (a book folder, or
+// the file of a loose single-file book; audiobookBookParts lists its parts in
+// disc-folder then filename order) and returns its structured representation:
+//   - one audio file, optionally with embedded chapters
+//   - multiple audio files, including those in disc subfolders; each becomes its own
 //     parsedAudiobookFile, ordered and read as parseAudiobookParts describes
 //
-// Returns an error wrapping errFolderHasNoMedia when the folder contains zero
-// audio files, so the caller can skip it. Every other error (including an
+// Returns an error wrapping errFolderHasNoMedia when the book has no audio
+// files, so the caller can skip it. Every other error (including an
 // ffprobe binary that cannot be executed) is a real failure and must be
 // reported by the caller.
 // allowedPaths is the inventory accepted by discovery, including ignore rules.
-// A nil inventory allows every audio file in the folder.
-func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool) (*parsedAudiobook, error) {
-	entries, err := fspath.ReadDir(folderPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// The folder was renamed or deleted between the scan walk and
-			// this read. It holds no media now, so the caller skips it as it
-			// would an empty folder rather than counting a scan failure.
-			return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, errFolderHasNoMedia)
-		}
-		return nil, fmt.Errorf("read audiobook folder %s: %w", folderPath, err)
-	}
-
-	var audioFiles []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if SupportsAudioFile(entry.Name()) {
-			path := filepath.Join(folderPath, entry.Name())
-			if allowedPaths == nil || allowedPaths[path] {
-				audioFiles = append(audioFiles, path)
-			}
-		}
-	}
-	if len(audioFiles) == 0 {
-		return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, errFolderHasNoMedia)
-	}
-	// Audio parts are commonly named with unpadded numbers (part2, part10).
-	// Use the same natural ordering as ebook archive pages so playback follows
-	// human order instead of byte/lexical order.
-	sort.SliceStable(audioFiles, func(i, j int) bool {
-		return naturalPathLess(audioFiles[i], audioFiles[j])
+// A nil inventory allows every audio file in the folder. walked, when set, is
+// what the walk read of the folder (audiobookWalkedBook.partsOrRelist).
+func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook) (*parsedAudiobook, error) {
+	var book *parsedAudiobook
+	err := walked.partsOrRelist(folderPath, allowedPaths, func(parts []string) (err error) {
+		book, err = parseAudiobookParts(ctx, ffprobePath, folderPath, parts)
+		return err
 	})
-
-	return parseAudiobookParts(ctx, ffprobePath, folderPath, audioFiles)
+	return book, err
 }
 
 // probedAudiobookPart is one readable part of a book with the format tags
@@ -175,14 +146,15 @@ type probedAudiobookPart struct {
 	tags map[string]string
 }
 
-// parseAudiobookParts probes a book's audio files (in natural filename order)
+// parseAudiobookParts probes a book's audio files (in audiobookBookParts order)
 // and assembles the book:
 //   - A part ffprobe rejects as damaged is left out with a warning; the book
 //     is built from the readable parts, and fails only when none is readable.
 //     Any other probe failure (ffprobe missing, unreadable storage) fails the
 //     book so a transient problem cannot drop parts.
 //   - Parts follow their disc and track tags when audiobookPartOrder trusts
-//     them, otherwise filename order.
+//     them, a disc folder's number standing in for a missing disc tag;
+//     otherwise the disc-folder then filename order they arrive in.
 //   - Book tags come from the first part. In a multi-file book whose title
 //     tags name the parts ("Chapter 01"), the album tag is the book title.
 //   - A part keeps its embedded chapters; a part of a multi-file book without
@@ -235,7 +207,13 @@ func parseAudiobookParts(ctx context.Context, ffprobePath, folderPath string, au
 	for i, p := range parts {
 		tags[i] = p.tags
 	}
-	if order, ok := audiobookPartOrder(tags); ok {
+	folderDiscs := make([]int, len(parts))
+	for i, p := range parts {
+		if dir := filepath.Dir(p.file.Path); p.file.Path != folderPath && dir != folderPath {
+			folderDiscs[i] = audiobookDiscNumber(filepath.Base(dir))
+		}
+	}
+	if order, ok := audiobookPartOrder(tags, folderDiscs); ok {
 		ordered := make([]probedAudiobookPart, len(parts))
 		for i, idx := range order {
 			ordered[i] = parts[idx]
@@ -302,9 +280,8 @@ func (e *noReadableAudiobookPartError) Error() string {
 // populateFromTags fills the audiobook's header fields from the ffprobe
 // format tags. Tags are lower-cased by normalizeFormatTags upstream.
 func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
-	b.Title = firstNonEmpty(tags["title"], tags["album"])
-	b.Authors = splitAudiobookCredits(firstNonEmpty(tags["album_artist"], tags["artist"], tags["composer"]))
-	b.Narrators = splitAudiobookCredits(firstNonEmpty(tags["narrator"], tags["performer"], tags["composer"]))
+	b.Authors = audiobookTagAuthors(tags)
+	b.Narrators = audiobookTagNarrators(tags, b.Authors)
 	b.Author, b.Narrator = "", ""
 	if len(b.Authors) > 0 {
 		b.Author = b.Authors[0]
@@ -327,6 +304,10 @@ func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
 			b.SeriesPosition = groupPosition
 		}
 	}
+	if b.Series == "" {
+		b.Series = albumArtistGroupingSeries(tags, b.Authors)
+	}
+	b.Title = audiobookTagTitle(tags["title"], tags["album"], b.Series, b.SeriesPosition)
 	b.ASIN = firstNonEmpty(tags["asin"], tags["audible_asin"], tags["com.audible.asin"])
 	// ffprobe reports an M4B's long description (ldes) as "synopsis" and the
 	// short one (desc, at most 255 characters) as "description".
@@ -350,7 +331,11 @@ func (b *parsedAudiobook) applyFilesystemFallbacks(folderPath string, audioFiles
 }
 
 func deriveAudiobookTitleFromFilesystem(folderPath string, audioFiles []string) string {
-	candidates := []string{filepath.Base(folderPath)}
+	var candidates []string
+	if len(audioFiles) != 1 || audioFiles[0] != folderPath {
+		// A loose single-file book is rooted at, and named by, its file alone.
+		candidates = append(candidates, filepath.Base(folderPath))
+	}
 	if len(audioFiles) == 1 {
 		file := audioFiles[0]
 		candidates = append(candidates, strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)))

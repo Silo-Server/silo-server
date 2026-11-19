@@ -23,6 +23,7 @@ import ViewTransitionLink from "./ViewTransitionLink";
 import { RequestStatusBadge } from "./RequestStatusBadge";
 import RequestResultsGrid, { RequestResultsPager } from "./RequestResultsGrid";
 import { numberText, useT, type Translate } from "@/i18n";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 function cardKey(item: Pick<RequestMediaResult, "media_type" | "tmdb_id">): string {
   return `${item.media_type}-${item.tmdb_id}`;
@@ -65,7 +66,7 @@ type RequestToAddSectionCommonProps = {
   libraryResultsKnown?: boolean;
 };
 
-export type RequestToAddSectionProps = RequestToAddSectionCommonProps &
+type RequestToAddSectionProps = RequestToAddSectionCommonProps &
   (
     | { variant: "dialog"; combobox?: RequestSuggestionCombobox }
     | {
@@ -333,7 +334,7 @@ function GridVariant({
     // The pager sits below the grid; bring the new page's first row into view.
     const section = sectionRef.current;
     if (section && section.getBoundingClientRect().top < 0) {
-      section.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      section.scrollIntoView?.({ block: "start", behavior: motionScrollBehavior() });
     }
   }
 

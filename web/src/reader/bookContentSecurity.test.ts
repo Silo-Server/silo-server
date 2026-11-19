@@ -11,7 +11,9 @@ import { type BookDoc, CFI, DocumentLoader } from "@/reader/readest/libs/documen
 
 const CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
-<head><title>One</title><link rel="stylesheet" href="style.css"/><style>p { color: red; }</style>
+<head><title>One</title><link rel="stylesheet" href="style.css"/><style>p { color: red; }
+body > p { margin: 0; }
+p::after { content: " &amp; more"; }</style>
 <script>parent.stolen = localStorage.getItem("silo_auth")</script><script src="app.js"></script></head>
 <body>
 <p id="intro" style="font-weight: bold" onclick="steal()">Chapter text</p>
@@ -36,12 +38,13 @@ const OPF = `<?xml version="1.0" encoding="utf-8"?>
 <manifest>
 <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
 <item id="c2" href="chapter2.html" media-type="text/html; charset=utf-8"/>
+<item id="c3" href="chapter3.xhtml" media-type="application/xhtml+xml"/>
 <item id="css" href="style.css" media-type="text/css"/>
 <item id="js" href="app.js" media-type="application/javascript"/>
 <item id="png" href="cover.png" media-type="image/png"/>
 <item id="untyped" href="untyped.html"/>
 </manifest>
-<spine><itemref idref="c1"/><itemref idref="c2"/></spine>
+<spine><itemref idref="c1"/><itemref idref="c2"/><itemref idref="c3"/></spine>
 </package>`;
 
 async function fixtureEpub(): Promise<File> {
@@ -61,6 +64,8 @@ async function fixtureEpub(): Promise<File> {
     "chapter1.xhtml": CHAPTER,
     // Mislabelled so the vendored loader skips its own (X)HTML handling.
     "chapter2.html": `<html><body><p>Two</p><img src=x onerror="steal()"><script>steal()</script></body></html>`,
+    // Not well-formed XML, so the vendored loader reads it as HTML.
+    "chapter3.xhtml": `<html><head><style>body > p { margin: 0; }</style></head><body><p>Three<br></p></body></html>`,
     "style.css": "p { margin: 0; }",
     "app.js": "steal()",
     "cover.png": "png",
@@ -94,6 +99,16 @@ function expectInertFrame(markup: string) {
   expect(policy?.getAttribute("content")).toBe(BOOK_DOCUMENT_CSP);
 }
 
+// The text of each <style> as a frame parsing `markup` as `type` reads it,
+// without CSS comments.
+function inlineCSS(markup: string, type: DOMParserSupportedType): string[] {
+  const doc = new DOMParser().parseFromString(markup, type);
+  expect(doc.querySelector("parsererror")).toBeNull();
+  return Array.from(doc.querySelectorAll("style"), (el) =>
+    (el.textContent ?? "").replace(/\/\*[\s\S]*?\*\//g, "").trim(),
+  );
+}
+
 describe("book content security", () => {
   let blobs: Map<string, Blob>;
 
@@ -116,7 +131,7 @@ describe("book content security", () => {
   it("strips active content from EPUB chapters before they reach a frame", async () => {
     const { book } = await new DocumentLoader(await fixtureEpub()).open();
     type LoadableSection = { load(): Promise<string>; loadContent(): Promise<string> };
-    const [first, second] = book.sections as unknown as LoadableSection[];
+    const [first, second, third] = book.sections as unknown as LoadableSection[];
 
     // Reflowable chapters render through srcdoc, fixed-layout ones through the
     // blob URL; both must carry the sanitized markup.
@@ -128,7 +143,13 @@ describe("book content security", () => {
     expectInertFrame(srcdoc);
     expect(srcdoc).not.toContain("noscript");
     // Ordinary book content survives.
-    expect(srcdoc).toContain("p { color: red; }");
+    // Inline CSS reads the same whether the frame parses it as HTML (srcdoc)
+    // or as XML (the blob a fixed-layout frame loads).
+    for (const type of ["text/html", "application/xhtml+xml"] as const) {
+      expect(inlineCSS(srcdoc, type)).toEqual([
+        'p { color: red; }\nbody > p { margin: 0; }\np::after { content: " & more"; }',
+      ]);
+    }
     expect(srcdoc).toMatch(/<p id="intro" style="font-weight: bold">Chapter text<\/p>/);
     expect(srcdoc).toContain('alt="javascript: the good parts"');
     expect(srcdoc).toContain('href="chapter2.xhtml#x" epub:type="noteref"');
@@ -148,6 +169,36 @@ describe("book content security", () => {
     const secondMarkup = await secondBlob.text();
     expectInertFrame(secondMarkup);
     expect(secondMarkup).toContain("<p>Two</p>");
+
+    // A chapter the loader had to read as HTML keeps its inline CSS too.
+    const thirdMarkup = await third!.loadContent();
+    expectInertFrame(thirdMarkup);
+    expect(inlineCSS(thirdMarkup, "text/html")).toEqual(["body > p { margin: 0; }"]);
+  });
+
+  it.each([
+    ["XHTML", "application/xhtml+xml", "&gt;", "&amp;", ""],
+    ["XHTML in CDATA", "application/xhtml+xml", "<![CDATA[>", "&]]>", ""],
+    ["HTML", "text/html", ">", "&", ""],
+    // A prefixed style's rules apply too. jsdom drops the prefix on its own,
+    // so the Firefox case (the prefix kept) is not reproducible here.
+    ["prefixed XHTML", "application/xhtml+xml", "&gt;", "&amp;", "h:"],
+  ])("keeps %s inline style rules that contain > and &", (_name, type, gt, amp, prefix) => {
+    const markup = `<html xmlns="http://www.w3.org/1999/xhtml"><head xmlns:h="http://www.w3.org/1999/xhtml"><title>t</title><${prefix}style>body ${gt} p { margin: 0 } p::after { content: "${amp}" }</${prefix}style></head><body><p>x</p></body></html>`;
+    const result = sanitizeBookDocument(markup, type);
+    expectInertFrame(result);
+    const expected = ['body > p { margin: 0 } p::after { content: "&" }'];
+    expect(inlineCSS(result, "text/html")).toEqual(expected);
+    if (type !== "text/html") expect(inlineCSS(result, "application/xhtml+xml")).toEqual(expected);
+  });
+
+  it("keeps a style's CSS inside an uppercase raw-text ancestor", () => {
+    const markup = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body><TEXTAREA><style>p::after { content: "&lt;/textarea&gt;&lt;p id=out&gt;" }</style></TEXTAREA><p>x</p></body></html>`;
+    const result = sanitizeBookDocument(markup, "application/xhtml+xml");
+    expectInertFrame(result);
+    const frame = new DOMParser().parseFromString(result, "text/html");
+    expect(frame.querySelector("p")?.textContent).toBe("x");
+    expect(frame.getElementById("out")).toBeNull();
   });
 
   // Each payload is XHTML that the sanitizer reads as XML but a srcdoc frame
@@ -155,6 +206,10 @@ describe("book content security", () => {
   it.each([
     ["comment", `<p><!--><img src="x" onerror="steal()"/>--></p>`],
     ["CDATA in style", `<style><![CDATA[</style><img src=x onerror=steal()>]]></style>`],
+    [
+      "style end tag in CSS",
+      `<style>p::after { content: "&lt;/STYLE &gt;&lt;img src=x onerror=steal()&gt;]]&gt;" }</style>`,
+    ],
     ["processing instruction", `<p><?x ><img src=x onerror=steal()>?></p>`],
     [
       "template shadow root",

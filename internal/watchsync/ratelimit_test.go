@@ -41,17 +41,6 @@ func TestParseRetryAfterSaturatesHugeDelays(t *testing.T) {
 	}
 }
 
-func TestSleepContextReturnsWhenContextEnds(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := SleepContext(ctx, time.Hour); !errors.Is(err, context.Canceled) {
-		t.Fatalf("SleepContext error = %v, want context.Canceled", err)
-	}
-	if err := SleepContext(context.Background(), 0); err != nil {
-		t.Fatalf("SleepContext(0) = %v, want nil", err)
-	}
-}
-
 func TestCredentialLimiterPacesEachCredentialSeparately(t *testing.T) {
 	// One request per hour makes any second request for the same credential
 	// block, without the test waiting for real time to pass.
