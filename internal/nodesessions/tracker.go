@@ -232,7 +232,7 @@ func (tr *Tracker) hold(ctx context.Context, info SessionInfo, lingering bool) *
 // last release of a session whose lingering holds delivered media moves it to
 // the touched set instead, and its record expires when its count does.
 func (tr *Tracker) release(ctx context.Context, sessionID string, entry *trackedSession, lingering, delivered bool) {
-	// The request that held the session may be cancelled by now, and its end
+	// The request that held the session may be canceled by now, and its end
 	// must still reach Redis, within a bound.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()

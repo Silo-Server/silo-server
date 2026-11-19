@@ -251,6 +251,7 @@ interface VideoPlayerProps {
   sessionId: string;
   bufferingTitleId?: string;
   selectedVersion?: PlayerFileVersion;
+  resumeVersion?: PlayerFileVersion;
   versions?: PlayerFileVersion[];
   activeFileId?: number | null;
   chapters?: PlayerChapter[];
@@ -538,6 +539,7 @@ export function VideoPlayer({
   replanErrorTitle = null,
   sessionId,
   selectedVersion,
+  resumeVersion,
   versions = [],
   activeFileId,
   chapters = [],
@@ -2047,17 +2049,18 @@ export function VideoPlayer({
       elementMediaPosition() ?? toMediaTime(currentTime, timelineOffsetRef.current);
     // positionSeconds is media time, so the runtime paired with it must be too.
     const durationSeconds = mediaDurationSeconds(backendDurationRef.current, duration);
+    const version = resumeVersion ?? selectedVersion;
 
     return {
       positionSeconds,
       durationSeconds,
-      lastFileId: activeFileId ?? selectedVersion?.file_id,
-      lastResolution: selectedVersion?.resolution,
-      lastHDR: selectedVersion?.hdr,
-      lastCodecVideo: selectedVersion?.codec_video,
-      lastEditionKey: selectedVersion?.edition_key,
+      lastFileId: resumeVersion?.file_id ?? activeFileId ?? selectedVersion?.file_id,
+      lastResolution: version?.resolution,
+      lastHDR: version?.hdr,
+      lastCodecVideo: version?.codec_video,
+      lastEditionKey: version?.edition_key,
     };
-  }, [activeFileId, currentTime, duration, elementMediaPosition, selectedVersion]);
+  }, [activeFileId, currentTime, duration, elementMediaPosition, resumeVersion, selectedVersion]);
 
   useEffect(() => {
     if (!watchTogetherRoomId || !watchTogether.closedReason || leaveInProgressRef.current) {

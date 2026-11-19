@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -368,10 +369,11 @@ type ItemDetail struct {
 
 	// Effective version defaults for episode playback derived from
 	// series-level sticky preferences.
-	EffectiveVersionResolution *string `json:"effective_version_resolution,omitempty"`
-	EffectiveVersionHDR        *bool   `json:"effective_version_hdr,omitempty"`
-	EffectiveVersionCodecVideo *string `json:"effective_version_codec_video,omitempty"`
-	EffectiveVersionEditionKey *string `json:"effective_version_edition_key,omitempty"`
+	EffectiveVersionResolution *string        `json:"effective_version_resolution,omitempty"`
+	EffectiveVersionHDR        *bool          `json:"effective_version_hdr,omitempty"`
+	EffectiveVersionCodecVideo *string        `json:"effective_version_codec_video,omitempty"`
+	EffectiveVersionEditionKey *string        `json:"effective_version_edition_key,omitempty"`
+	EditionAliases             EditionAliases `json:"-"`
 
 	// Audiobook-specific detail. Present only when Type == "audiobook".
 	Audiobook *AudiobookDetailExtension `json:"audiobook,omitempty"`
@@ -774,6 +776,7 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                             `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                           `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                           `json:"effective_version_edition_key,omitempty"`
+	EditionAliases                  EditionAliases                    `json:"-"`
 	// Artwork is mapped explicitly by v2; the frozen v1 JSON omits it.
 	PosterURL         string `json:"-"`
 	PosterThumbhash   string `json:"-"`
@@ -1836,12 +1839,16 @@ func (s *DetailService) GetItemVersionsWithOptions(ctx context.Context, contentI
 	if err != nil {
 		return nil, fmt.Errorf("fetching file versions: %w", err)
 	}
+	var aliases EditionAliases
+	if target.episode != nil || (target.item != nil && target.item.Type == playableTypeMovie) {
+		aliases = ResolveEditionAliases(files, filter)
+	}
 	files = FilterMediaFilesByAccess(files, filter)
 	if target.item != nil && target.item.Type == detailTypeAudiobook {
 		sortAudiobookMediaFiles(files)
 	}
 	files = s.prepareBrowseFiles(ctx, files)
-	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID)
+	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID, aliases)
 	itemType := detailTypeExtra
 	switch {
 	case target.item != nil:
@@ -1966,6 +1973,7 @@ func (s *DetailService) buildExtraItemDetail(ctx context.Context, extra *models.
 		s.newAudioPrefResolver(ctx, filter, extra.ContentID),
 		trickplay,
 		markerPreviews,
+		nil,
 	)
 	sortVideoVersions(detail.Type, detail.Versions)
 	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
@@ -2662,6 +2670,9 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			files = fetched
 		}
 
+		if item.Type == playableTypeMovie {
+			detail.EditionAliases = ResolveEditionAliases(files, filter)
+		}
 		files = FilterMediaFilesByAccess(files, filter)
 		if item.Type == detailTypeAudiobook {
 			sortAudiobookMediaFiles(files)
@@ -2690,7 +2701,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			}
 		}
 		detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
-			ctx, files, filter, audioResolver, availability, pf == nil || !pf.skipMarkerPreviews,
+			ctx, files, filter, audioResolver, availability, pf == nil || !pf.skipMarkerPreviews, detail.EditionAliases,
 		)
 		sortVideoVersions(item.Type, detail.Versions)
 		detail.OverlaySummary = overlays.BuildSummary(files)
@@ -3881,6 +3892,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 			return nil, fmt.Errorf("fetching file versions: %w", err)
 		}
 	}
+	detail.EditionAliases = ResolveEditionAliases(files, filter)
 	files = FilterMediaFilesByAccess(files, filter)
 	files = s.prepareBrowseFiles(ctx, files)
 	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
@@ -3890,6 +3902,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		s.episodeAudioResolver(ctx, seriesCtx, filter, episode.SeriesID),
 		seriesCtx.trickplay,
 		!seriesCtx.skipMarkerPreviews,
+		detail.EditionAliases,
 	)
 	sortVideoVersions(detail.Type, detail.Versions)
 	detail.OverlaySummary = overlays.BuildSummary(files)
@@ -3936,6 +3949,10 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		if err != nil {
 			return nil, fmt.Errorf("fetching watch file versions: %w", err)
 		}
+		var aliases EditionAliases
+		if item.Type == playableTypeMovie {
+			aliases = ResolveEditionAliases(files, filter)
+		}
 		files = FilterMediaFilesByAccess(files, filter)
 		files = s.preparePlaybackFiles(ctx, files)
 		s.queueWatchPlaybackFiles(ctx, item.ContentID, item.Type, files)
@@ -3948,6 +3965,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 			files,
 			filter,
 			item.ContentID,
+			aliases,
 		)
 		detail.Year = item.Year
 		if !filter.OmitWatchArtwork {
@@ -3999,6 +4017,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		return nil, fmt.Errorf("fetching episode watch file versions: %w", err)
 	}
 
+	aliases := ResolveEditionAliases(files, filter)
 	files = FilterMediaFilesByAccess(files, filter)
 	files = s.preparePlaybackFiles(ctx, files)
 	s.queueWatchPlaybackFiles(ctx, episode.ContentID, "episode", files)
@@ -4011,6 +4030,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		files,
 		filter,
 		episode.SeriesID,
+		aliases,
 	)
 	detail.SeasonNumber = episode.SeasonNumber
 	detail.EpisodeNumber = episode.EpisodeNumber
@@ -4087,6 +4107,7 @@ func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID str
 		files,
 		filter,
 		extra.ParentID,
+		nil,
 	)
 	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
 		if localized, locErr := s.LocalizeItemModel(ctx, parent, filter); locErr == nil {
@@ -4127,12 +4148,14 @@ func (s *DetailService) newWatchDetail(
 	files []*models.MediaFile,
 	filter AccessFilter,
 	audioPreferenceContentID string,
+	aliases EditionAliases,
 ) *WatchDetail {
 	versions, playbackVariants, subtitles, intro, credits, recap, preview := s.buildPlaybackInfo(
 		ctx,
 		files,
 		filter,
 		audioPreferenceContentID,
+		aliases,
 	)
 	sortVideoVersions(contentType, versions)
 	return &WatchDetail{
@@ -4142,6 +4165,7 @@ func (s *DetailService) newWatchDetail(
 		Overview:         overview,
 		Versions:         versions,
 		PlaybackVariants: playbackVariants,
+		EditionAliases:   aliases,
 		Subtitles:        subtitles,
 		Intro:            intro,
 		Credits:          credits,
@@ -4696,10 +4720,11 @@ func (s *DetailService) buildPlaybackInfo(
 	files []*models.MediaFile,
 	filter AccessFilter,
 	audioPreferenceContentID string,
+	aliases EditionAliases,
 ) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
 	// Resolve the request-invariant audio preferences once; a multi-track item
 	// would otherwise re-query the profile/preference rows for every file.
-	return s.buildPlaybackInfoWith(ctx, files, filter, s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID), s.trickplay, true)
+	return s.buildPlaybackInfoWith(ctx, files, filter, s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID), s.trickplay, true, aliases)
 }
 
 // buildPlaybackInfoWith is buildPlaybackInfo with a caller-owned audio
@@ -4713,6 +4738,7 @@ func (s *DetailService) buildPlaybackInfoWith(
 	audioResolver *audioPrefResolver,
 	availability TrickplayAvailability,
 	markerPreviews bool,
+	aliases EditionAliases,
 ) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
 	versions := make([]FileVersion, 0, len(files))
 	subtitleSet := make(map[string]SubtitleInfo)
@@ -4760,7 +4786,7 @@ func (s *DetailService) buildPlaybackInfoWith(
 			Bitrate:                  f.Bitrate,
 			AddedAt:                  f.CreatedAt,
 			EditionRaw:               f.EditionRaw,
-			EditionKey:               f.EditionKey,
+			EditionKey:               aliases.Key(f.EditionKey),
 			PresentationKind:         f.PresentationKind,
 			PresentationGroupKey:     f.PresentationGroupKey,
 			PresentationPartIndex:    f.PresentationPartIndex,
@@ -4818,6 +4844,11 @@ func (s *DetailService) buildPlaybackInfoWith(
 
 	s.markTrickplay(ctx, versions, availability)
 	variants := buildPlaybackVariants(versions, filter.SelectedFileID)
+	for i := range variants {
+		if aliases[variants[i].EditionKey] != "" {
+			variants[i].EditionRaw = naming.EditionDisplayLabel(variants[i].EditionKey)
+		}
+	}
 	selectedVersionExists := playbackVersionExists(versions, filter.SelectedFileID)
 	pick := func(field func(v FileVersion) *Marker, fallback *Marker) *Marker {
 		m := selectedPlaybackMarker(versions, variants, filter.SelectedFileID, field)
