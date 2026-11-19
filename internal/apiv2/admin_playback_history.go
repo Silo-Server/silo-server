@@ -34,31 +34,31 @@ type AdminPlaybackHistoryListInput struct {
 // administrator sees it: the account and profile that played, the item and
 // file, the recorded timing, and the client and device that played it.
 type AdminPlaybackHistoryEntry struct {
-	SessionID       string   `json:"session_id" doc:"Playback session identifier; unique per attempt"`
-	UserID          ID       `json:"user_id"`
-	Username        string   `json:"username" doc:"Empty when the account no longer exists"`
-	ProfileID       string   `json:"profile_id"`
-	ProfileName     string   `json:"profile_name" doc:"Profile display name at the time of playback; the profile id when none was recorded"`
-	MediaItemID     string   `json:"media_item_id" doc:"Catalog content id; empty when the attempt was not attributed to an item"`
-	MediaFileID     ID       `json:"media_file_id"`
-	MediaTitle      string   `json:"media_title" doc:"Episode or item title; empty when the item is no longer in the catalog"`
-	MediaType       string   `json:"media_type" doc:"episode, or the catalog item type; empty when unknown"`
-	PlayMethod      string   `json:"play_method"`
-	StartedAt       Instant  `json:"started_at"`
-	EndedAt         Instant  `json:"ended_at"`
-	WatchedSeconds  float64  `json:"watched_seconds" doc:"Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time"`
-	DurationSeconds *float64 `json:"duration_seconds" nullable:"true" doc:"Media duration when known"`
-	Completed       bool     `json:"completed"`
-	PlayedSeconds   *float64 `json:"played_seconds" nullable:"true" doc:"Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement, which includes every play recorded before it existed"`
-	SeriesTitle     string   `json:"series_title" doc:"Series title for an episode; empty otherwise"`
-	SeasonNumber    *int     `json:"season_number" nullable:"true" doc:"Episode season; null when not an episode"`
-	EpisodeNumber   *int     `json:"episode_number" nullable:"true" doc:"Episode number; null when not an episode"`
+	SessionID          string   `json:"session_id" doc:"Playback session identifier; unique per attempt"`
+	UserID             ID       `json:"user_id"`
+	Username           string   `json:"username" doc:"Empty when the account no longer exists"`
+	ProfileID          string   `json:"profile_id"`
+	ProfileName        string   `json:"profile_name" doc:"Profile display name at the time of playback; the profile id when none was recorded"`
+	MediaItemID        string   `json:"media_item_id" doc:"Catalog content id; empty when the attempt was not attributed to an item"`
+	MediaFileID        ID       `json:"media_file_id"`
+	MediaTitle         string   `json:"media_title" doc:"Episode or item title; empty when the item is no longer in the catalog"`
+	MediaType          string   `json:"media_type" doc:"episode, or the catalog item type; empty when unknown"`
+	PlayMethod         string   `json:"play_method"`
+	StartedAt          Instant  `json:"started_at"`
+	EndedAt            Instant  `json:"ended_at"`
+	EndPositionSeconds float64  `json:"end_position_seconds" doc:"Position the play ended at, in seconds: how far into the media it got, not how long it was watched. A play resumed partway through ends past its resume point; played_seconds is the watch time"`
+	DurationSeconds    *float64 `json:"duration_seconds" nullable:"true" doc:"Media duration when known"`
+	Completed          bool     `json:"completed"`
+	PlayedSeconds      *float64 `json:"played_seconds" nullable:"true" doc:"Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement, which includes every play recorded before it existed"`
+	SeriesTitle        string   `json:"series_title" doc:"Series title for an episode; empty otherwise"`
+	SeasonNumber       *int     `json:"season_number" nullable:"true" doc:"Episode season; null when not an episode"`
+	EpisodeNumber      *int     `json:"episode_number" nullable:"true" doc:"Episode number; null when not an episode"`
 
 	Measured             bool     `json:"measured" doc:"Whether the play has a watch-time measurement; played_seconds, start_position_seconds, paused_seconds, measured_since and measured_until are null without one"`
 	StartPositionSeconds *float64 `json:"start_position_seconds" nullable:"true" doc:"First position, in seconds, the measurement saw: where the play began or resumed"`
-	PausedSeconds        *float64 `json:"paused_seconds" nullable:"true" doc:"Seconds the play spent paused between progress reports"`
-	MeasuredSince        *Instant `json:"measured_since" nullable:"true" doc:"First progress report behind the measurement"`
-	MeasuredUntil        *Instant `json:"measured_until" nullable:"true" doc:"Last progress report behind the measurement"`
+	PausedSeconds        *float64 `json:"paused_seconds" nullable:"true" doc:"Seconds the play spent paused between samples"`
+	MeasuredSince        *Instant `json:"measured_since" nullable:"true" doc:"First sample behind the measurement: the start, once its stream was prepared, or the first progress report"`
+	MeasuredUntil        *Instant `json:"measured_until" nullable:"true" doc:"Last sample behind the measurement: the latest progress report, or the final position the stop carried"`
 	ClientIP             *string  `json:"client_ip" nullable:"true" doc:"Viewer's last address on the playback session; null when none was recorded. Rows recorded by older servers may hold the address of the request that ended the attempt"`
 	DeviceID             *string  `json:"device_id" nullable:"true" doc:"Device the client declared in X-Silo-Device-Id when playback started (the profile device registry's identity); a Jellyfin play records the DeviceId of its MediaBrowser authorization. Null when unknown"`
 	DevicePlatform       *string  `json:"device_platform" nullable:"true" doc:"Platform the client declared in X-Silo-Device-Platform when playback started, never derived from the user agent. Null when unknown, and for a Jellyfin play"`
@@ -214,7 +214,7 @@ func adminPlaybackHistoryEntryOf(row handlers.AdminPlaybackHistoryRow) AdminPlay
 		ProfileID: row.ProfileID, ProfileName: row.ProfileName, MediaItemID: row.MediaItemID,
 		MediaFileID: IDFromInt(int64(row.MediaFileID)), MediaTitle: row.MediaTitle, MediaType: row.MediaType,
 		PlayMethod: row.PlayMethod, StartedAt: NewInstant(row.StartedAt), EndedAt: NewInstant(row.EndedAt),
-		WatchedSeconds: row.WatchedSeconds, DurationSeconds: row.DurationSeconds, Completed: row.Completed, PlayedSeconds: row.PlayedSeconds,
+		EndPositionSeconds: row.EndPositionSeconds, DurationSeconds: row.DurationSeconds, Completed: row.Completed, PlayedSeconds: row.PlayedSeconds,
 		SeriesTitle: row.SeriesTitle, SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber,
 		Measured: row.Measured, StartPositionSeconds: row.StartPositionSeconds, PausedSeconds: row.PausedSeconds,
 		MeasuredSince: instantPtr(row.MeasuredSince), MeasuredUntil: instantPtr(row.MeasuredUntil),

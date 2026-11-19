@@ -39,8 +39,10 @@ out any other name a manifest lists, so an internal event such as
 `user_state.changed` never reaches a plugin.
 
 Every identifier in a catalog payload is a JSON string. The host's
-payloads are shared with the events socket, where numeric IDs such as
-`library_id` stay JSON numbers, so the dispatcher converts them: a top-level
+payloads are shared with the events socket, where some numeric IDs, such as
+a scan's `library_id` or a job's `created_by_user_id`, stay JSON numbers (the
+catalog channel's events already send `library_id` as a string), so the
+dispatcher converts them: a top-level
 `id` or `*_id` field holding a number becomes its decimal string, and zero
 becomes absent (a job the server queued itself has no `created_by_user_id`).
 `notification.created` also gets the envelope's account as `user_id`,

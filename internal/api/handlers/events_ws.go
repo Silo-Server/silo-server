@@ -79,7 +79,6 @@ type activeScanLister interface {
 type EventsHandler struct {
 	hub            *evt.Hub
 	jobs           *AdminJobsHandler
-	admin          *AdminHandler
 	tasks          taskInfoLister
 	scans          *evt.ScanRegistry
 	persistedScans activeScanLister
@@ -98,7 +97,6 @@ func (h *EventsHandler) SetNotificationsSystem(system *notifications.System) {
 func NewEventsHandler(
 	hub *evt.Hub,
 	jobs *AdminJobsHandler,
-	admin *AdminHandler,
 	tasks taskInfoLister,
 	scans *evt.ScanRegistry,
 	persistedScans *scanqueue.Service,
@@ -107,7 +105,6 @@ func NewEventsHandler(
 	return &EventsHandler{
 		hub:            hub,
 		jobs:           jobs,
-		admin:          admin,
 		tasks:          tasks,
 		scans:          scans,
 		persistedScans: persistedScans,
@@ -619,7 +616,8 @@ func (h *EventsHandler) snapshotForChannel(
 	channel evt.EventChannel,
 ) (json.RawMessage, error) {
 	switch channel {
-	case evt.ChannelCatalog, evt.ChannelUserState:
+	case evt.ChannelCatalog, evt.ChannelUserState, evt.ChannelSessions:
+		// Session frames are cues: clients re-read GET /api/v2/admin/sessions.
 		return json.RawMessage("null"), nil
 	case evt.ChannelDownloadPreparations:
 		// Events only say what changed; clients re-read the admin list, and a
@@ -650,15 +648,6 @@ func (h *EventsHandler) snapshotForChannel(
 			response = append(response, adminJobToResponse(r, job, h.jobs.store))
 		}
 		return marshalJSON(response), nil
-	case evt.ChannelSessions:
-		if h == nil || h.admin == nil {
-			return json.RawMessage("[]"), nil
-		}
-		sessions, err := h.admin.loadPlaybackSessions(r.Context(), r)
-		if err != nil {
-			return nil, err
-		}
-		return marshalJSON(sessions), nil
 	case evt.ChannelTasks:
 		if h == nil || h.tasks == nil {
 			return json.RawMessage("[]"), nil
@@ -746,7 +735,7 @@ func (h *EventsHandler) writeEventFrame(
 	env evt.Envelope,
 ) error {
 	data := env.Data
-	if len(data) == 0 || (env.Channel == evt.ChannelSessions && env.Event == "sessions.replaced") {
+	if len(data) == 0 {
 		snapshot, err := h.snapshotForChannel(r, claims, boundProfileID, env.Channel)
 		if err != nil {
 			// Drop the frame but keep the stream open (same contract as

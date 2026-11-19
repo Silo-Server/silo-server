@@ -3,12 +3,13 @@ import { SETTING_KEYS, type SettingKey } from "./settingsContract";
 /**
  * The canonical settings an in-player subtitle pick stores for a series.
  *
- * Two surfaces have to agree on this list. The player writes these rows when
- * the viewer picks a track (WatchPage), and "Auto" on the item page clears
- * them (useDeleteSubtitlePreference) — profile_series is the first scope in
- * the manifest's resolution order for both keys, so a row this list forgets is
- * a row that outranks every later choice with nothing in the UI able to remove
- * it. Adding a key here wires up both halves at once.
+ * The player writes these rows when the viewer picks a track (WatchPage).
+ * "Auto" on the item page removes them through the server's subtitle-prefs
+ * DELETE, which clears the language, mode, and forced rows at profile_series
+ * in the same transaction. profile_series is the first scope in the
+ * manifest's resolution order for these keys, so a key added here must also
+ * be cleared by that DELETE (DeleteSubtitlePreference), or it would outrank
+ * every later choice with nothing in the UI able to remove it.
  *
  * playback.show_forced_subtitles is deliberately absent. The player has no
  * forced-subtitle control: the value it holds is the *resolved* one, which for

@@ -251,16 +251,24 @@ answers any owner.
 | Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
 | Hosts and nodes | `/admin/system/resources`, `/admin/system/resources/capabilities`, `/admin/nodes/summary`, `/admin/nodes/capabilities`, `/admin/server/status` |
 | Catalog | `/admin/catalog/items`, `/admin/catalog/capabilities` |
+| Media requests | `/admin/requests`, `/admin/requests/counts`, `/admin/requests/capabilities`, `/admin/requests/{id}/events` |
 
 The scope never returns filesystem paths, node addresses, storage keys, setting
 values or credentials. Operations that carry them stay outside it: item files, download
-storage, settings, logs, API keys, audit, per-device setting values and node
-sessions. Four monitored reads withhold details from scoped keys:
+storage, settings, logs, API keys, audit, per-device setting values, node
+sessions, and the request integrations, settings and routes. Five monitored
+reads withhold details from scoped keys:
 
 - `/admin/system/resources` omits each disk's `path`.
 - `/admin/catalog/items` refuses `include_file_paths` with `403` unless the key
   also holds `admin:catalog:paths`.
 - `/admin/downloads/preparations` omits each job's `error`.
+- `/admin/requests` omits `last_error` on each request and its targets, and
+  `/admin/requests/{id}/events` omits each event's `message`. Both are free
+  text that can name download servers, their addresses and routing rules.
+  `/admin/requests` also omits each target's `instance_name` and `route_name`,
+  the names the administrator gave a download server and a routing rule;
+  `integration_kind` still says what kind of server took the target.
 - Nodes are read through `/admin/nodes/summary`, which has no addresses, paths,
   overrides or capability documents. `/admin/nodes` stays outside the scope.
 

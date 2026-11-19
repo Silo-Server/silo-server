@@ -1,16 +1,17 @@
-import { useState } from "react";
 import { useT } from "@/i18n";
+import { useAutosavedDraft } from "@/hooks/useAutosavedDraft";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { SubtitleAppearancePanelView } from "@/components/settings/SubtitleAppearancePanelView";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
 
 interface AdminSubtitleAppearanceDialogProps {
   /**
-   * The setting being edited. When null the dialog is hidden. The setting
-   * may be a real override or a synthesized default-row from the manifest;
+   * The setting being edited. The parent mounts the dialog only while it is
+   * open, so each open starts its draft from this value. The setting may be a
+   * real override or a synthesized default-row from the manifest;
    * `isOverride` decides whether the reset action is offered.
    */
-  setting: AdminDeviceSetting | null;
+  setting: AdminDeviceSetting;
   /**
    * Whether the underlying setting is a real device override (vs. a
    * synthesized default that hasn't been written yet). Drives the footer
@@ -20,14 +21,13 @@ interface AdminSubtitleAppearanceDialogProps {
   /** Close affordance — clear the parent's `setting` state. */
   onClose: () => void;
   /**
-   * Persist a new value as a JSON string. The parent fires the actual
-   * mutation (so the dialog stays decoupled from the network layer).
+   * Persist a new value as a JSON string, settling once the server answers.
+   * The parent fires the actual mutation (so the dialog stays decoupled from
+   * the network layer) and reports failures.
    */
-  onSave: (setting: AdminDeviceSetting, value: string) => void;
+  onSave: (setting: AdminDeviceSetting, value: string) => Promise<unknown>;
   /** Remove the override on the device. Only invoked when `isOverride`. */
   onReset: (setting: AdminDeviceSetting) => void;
-  /** Pending mutation flag — surfaces in the footer status. */
-  saving?: boolean;
 }
 
 /**
@@ -36,9 +36,8 @@ interface AdminSubtitleAppearanceDialogProps {
  * to end users — same preview, same controls — so admin overrides land in
  * exactly the same shape clients consume.
  *
- * The local appearance state is kept optimistic so dragging a slider feels
- * instantaneous; whenever the parent's `setting.value` flips (because the
- * admin device-detail cache invalidated after a save), we resync.
+ * Each change shows at once and saves in the background; a change the server
+ * rejects drops back out of the preview, so the footer's "saved" status holds.
  */
 export function AdminSubtitleAppearanceDialog({
   setting,
@@ -46,41 +45,16 @@ export function AdminSubtitleAppearanceDialog({
   onClose,
   onSave,
   onReset,
-  saving = false,
 }: AdminSubtitleAppearanceDialogProps) {
   const t = useT();
-  const settingKey = setting?.key;
-  const settingValue = setting?.value ?? null;
+  const draft = useAutosavedDraft(parseSubtitleAppearance(setting.value));
 
-  const [appearance, setAppearance] = useState<SubtitleAppearance>(() =>
-    parseSubtitleAppearance(settingValue),
-  );
-  // Use the React "adjust state during render" pattern to resync optimistic
-  // state when the underlying setting changes — either because the dialog
-  // was opened on a different setting, or because a save round-tripped and
-  // produced a fresh `setting.value` from the cache. Avoids the cascading-
-  // render warning that a useEffect would trigger.
-  const [prev, setPrev] = useState<{ key: string | undefined; value: string | null }>({
-    key: settingKey,
-    value: settingValue,
-  });
-  if (prev.key !== settingKey || prev.value !== settingValue) {
-    setPrev({ key: settingKey, value: settingValue });
-    setAppearance(parseSubtitleAppearance(settingValue));
-  }
-
-  if (!setting) return null;
-
-  const handleChange = (patch: Partial<SubtitleAppearance>) => {
-    const next = { ...appearance, ...patch };
-    setAppearance(next);
-    onSave(setting, JSON.stringify(next));
-  };
+  const handleChange = (patch: Partial<SubtitleAppearance>) =>
+    draft.edit(patch, (next) => onSave(setting, JSON.stringify(next)));
 
   const handleReset = () => {
+    draft.discardQueued();
     onReset(setting);
-    // The cache will repopulate `setting.value` to the empty/default string;
-    // the effect above takes care of resyncing local state.
     onClose();
   };
 
@@ -97,7 +71,7 @@ export function AdminSubtitleAppearanceDialog({
   return (
     <SubtitleAppearancePanelView
       open
-      value={appearance}
+      value={draft.value}
       onChange={handleChange}
       onClose={onClose}
       canReset={isOverride}
@@ -105,7 +79,7 @@ export function AdminSubtitleAppearanceDialog({
       resetLabel={t("web.admin.common.subtitleAppearanceDialog.resetOverride")}
       eyebrow={eyebrow}
       status={
-        saving
+        draft.saving
           ? t("web.admin.common.subtitleAppearanceDialog.saving")
           : isOverride
             ? t("web.admin.common.subtitleAppearanceDialog.savedAutomatically")

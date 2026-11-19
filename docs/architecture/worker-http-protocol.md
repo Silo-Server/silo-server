@@ -308,6 +308,10 @@ request still in flight when the stop lands cannot restart the encode. A fresh
 installs none, and neither does a stop sent with `fence=0`. The API sends that
 when it releases a transport it is moving to another node, since the ID lives
 on and a replica whose copy still names the old node may rebuild it there.
+A release ends only the HLS job it was sent for and answers 404 for any other:
+with `start_id`, the job published by the start that carried that
+`start_id` in `POST /transcode/start`; without it, the job running when the release arrived or a rebuild published
+while it waited for the lifecycle lock, not a job a start published then. A fenced stop ends whatever job runs under the ID.
 Progressive remux keeps its own fence against a new `/remux` request, which
 every fenced stop installs too, since a stop can reach a remux between its GETs.
 The API deletes the transport's stored recipe before it stops a node, unless

@@ -852,6 +852,39 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 	}
 }
 
+func TestSupportsConnectionCheck(t *testing.T) {
+	seriesOnly, err := structpb.NewStruct(map[string]any{"default_priority": map[string]any{"series": 2, "episode": 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name         string
+		capabilities []string
+		metadata     *structpb.Struct
+		want         bool
+	}{
+		{name: "metadata provider", capabilities: []string{"metadata_provider.v1", "image_resolver.v1"}, want: true},
+		{name: "metadata provider without movie priority", capabilities: []string{"metadata_provider.v1"}, metadata: seriesOnly},
+		{name: "marker provider", capabilities: []string{"marker_provider.v1"}, want: true},
+		{name: "sign-in provider", capabilities: []string{"auth_provider.v1", "http_routes.v1"}},
+		{name: "scan source", capabilities: []string{"scan_source.v1"}},
+		{name: "no capabilities"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := &pluginv1.PluginManifest{}
+			for _, capabilityType := range tt.capabilities {
+				manifest.Capabilities = append(manifest.Capabilities, &pluginv1.CapabilityDescriptor{Type: capabilityType, Id: capabilityType, Metadata: tt.metadata})
+			}
+			if got := SupportsConnectionCheck(manifest); got != tt.want {
+				t.Fatalf("SupportsConnectionCheck(%v) = %v, want %v", tt.capabilities, got, tt.want)
+			}
+		})
+	}
+	if SupportsConnectionCheck(nil) {
+		t.Fatal("SupportsConnectionCheck(nil) = true, want false")
+	}
+}
+
 // connectionConfigService serves manifest as installation 7 with stored saved
 // under its "connection" key.
 func connectionConfigService(t *testing.T, manifest *pluginv1.PluginManifest, stored map[string]any) (*Service, *fakeServiceConfigStore) {

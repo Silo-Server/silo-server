@@ -434,7 +434,7 @@ export const V2_CLIENT_HEADERS: Readonly<Record<string, string>> = {
   "X-Silo-Client-Version": typeof __SILO_WEB_VERSION__ === "string" ? __SILO_WEB_VERSION__ : "dev",
 };
 
-function isProblem(value: unknown): value is Problem {
+export function isProblem(value: unknown): value is Problem {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (

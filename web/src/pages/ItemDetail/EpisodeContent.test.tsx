@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import type { FileVersion, ItemDetail, Season } from "@/api/types";
+import type { PrePlaySubtitleSelection } from "@/player/types";
 import { catalogKeys } from "@/hooks/queries/keys";
 import EpisodeContent from "./EpisodeContent";
 import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
@@ -92,11 +93,6 @@ vi.mock("@/hooks/queries/ratings", () => ({
   useRating: mocks.useRating,
   useSetRating: mocks.useSetRating,
   useDeleteRating: mocks.useDeleteRating,
-}));
-
-vi.mock("@/hooks/queries/subtitles", () => ({
-  useDeleteSubtitlePreference: () => ({ mutate: vi.fn() }),
-  useSetSubtitlePreference: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
@@ -436,7 +432,7 @@ describe("EpisodeContent", () => {
     },
   );
 
-  describe("pre-play audio choice", () => {
+  describe("pre-play track choices", () => {
     const tracks = [
       {
         language: "en",
@@ -455,6 +451,10 @@ describe("EpisodeContent", () => {
       onSelectAudioTrack: (index: number) => void;
       onResetAudioSelection: () => void;
       onSelectVersion: (version: FileVersion) => void;
+      prePlaySubtitleMode: string;
+      explicitSubtitleSelection: PrePlaySubtitleSelection | null;
+      onSelectSubtitle: (selection: PrePlaySubtitleSelection) => void;
+      onSelectSubtitleOff: () => void;
     };
     const actionBar = () => mocks.capturedActionBarProps.value as unknown as AudioProps;
 
@@ -483,6 +483,7 @@ describe("EpisodeContent", () => {
           </MemoryRouter>
         </QueryClientProvider>,
       );
+      return client;
     }
 
     beforeEach(() => {
@@ -635,6 +636,43 @@ describe("EpisodeContent", () => {
         }),
       );
       unsubscribe();
+    });
+
+    it("puts the subtitle selector back to the saved pick when Off is not saved", async () => {
+      const requests = stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const client = renderWithTracks();
+      const english: PrePlaySubtitleSelection = {
+        source: "embedded",
+        language: "en",
+        codec: "subrip",
+        track_index: 3,
+      };
+
+      act(() => actionBar().onSelectSubtitle(english));
+      await waitFor(() =>
+        expect(
+          client
+            .getMutationCache()
+            .getAll()
+            .map((m) => m.state.status),
+        ).toEqual(["success"]),
+      );
+      act(() => actionBar().onSelectSubtitleOff());
+      expect(actionBar()).toMatchObject({ prePlaySubtitleMode: "off" });
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          prePlaySubtitleMode: "explicit",
+          explicitSubtitleSelection: english,
+        }),
+      );
+      expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+        "PUT /api/v2/subtitle-prefs/series-1",
+        "PUT /api/v2/subtitle-prefs/series-1",
+      ]);
     });
 
     it("puts the selector back to the last saved choice when quick picks all fail", async () => {

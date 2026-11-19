@@ -449,6 +449,9 @@ function bufferedEndSeconds(media: HTMLMediaElement): number {
   return ranges.length ? ranges.end(ranges.length - 1) : 0;
 }
 const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
+// One page toast tells the viewer the session ended, whichever of the
+// administrator's command and the server's 410 arrives first.
+const SESSION_ENDED_TOAST_ID = "playback-session-ended";
 /** The buffering controller's display-only notices show for 5 seconds on every client. */
 const BUFFERING_NOTICE_VISIBLE_MS = 5_000;
 // The server returns a room to the lobby once its position is within two
@@ -621,6 +624,8 @@ export function VideoPlayer({
   tRef.current = t;
   const playerConfig = usePlayerConfig();
   const isDetached = displayMode !== "foreground";
+  const isDetachedRef = useRef(isDetached);
+  isDetachedRef.current = isDetached;
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -1214,16 +1219,40 @@ export function VideoPlayer({
   replanningRef.current = replanning;
   // The viewer's newest seek while a replan of this session was in flight, and
   // the plan revision it was made on. The replanned stream starts there
-  // instead of where the replan was asked for. A later seek, or a replan that
-  // settles without a new stream, drops it.
-  const replanSeekRef = useRef<{ sessionId: string; revision: number; seconds: number } | null>(
-    null,
-  );
+  // instead of where the replan was asked for. A later seek replaces it; a
+  // replan that settles without a new stream drops it, unless the stream
+  // playing never took it (`carriedFrom`), which then asks for a stream there.
+  const replanSeekRef = useRef<{
+    sessionId: string;
+    revision: number;
+    seconds: number;
+    // Where the stream that never took the seek started.
+    carriedFrom?: number;
+  } | null>(null);
+  // A version switch started meanwhile settles first: one that lands a stream
+  // replaces this session, and the request would pair its new attempt with the
+  // old session.
+  const replanSeekChangeInFlight = replanning || replacing;
   useEffect(() => {
-    if (!replanning && replanSeekRef.current?.revision === planRevision) {
-      replanSeekRef.current = null;
-    }
-  }, [planRevision, replanning]);
+    const replanSeek = replanSeekRef.current;
+    if (replanSeekChangeInFlight || replanSeek?.revision !== planRevision) return;
+    replanSeekRef.current = null;
+    const from = replanSeek.carriedFrom;
+    const video = videoRef.current;
+    if (from === undefined || !video || replanSeek.sessionId !== sessionIdRef.current) return;
+    // A stream that has reached its own start, started before the seek and
+    // played up to it took it. Until the stream loads, its clock reads the
+    // stream's origin, which can be short of its start.
+    const position = toMediaTime(video.currentTime, timelineOffsetRef.current);
+    const settled = (target: number) =>
+      resolvePendingSeekTime(position, target).pendingSeekTime === null;
+    const started = settled(from) || position >= from;
+    const reached =
+      started &&
+      (settled(replanSeek.seconds) ||
+        (replanSeek.seconds >= from && position >= replanSeek.seconds));
+    if (!reached) reanchorAtRef.current(replanSeek.seconds);
+  }, [planRevision, replanSeekChangeInFlight]);
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
   // delivers.
@@ -1585,17 +1614,8 @@ export function VideoPlayer({
   useEffect(() => {
     if (!replanError || replanning) return;
 
-    // A refused reanchor never reaches its target. Resume relative skips from
-    // the surviving stream instead of extending the abandoned request. A
-    // draining stream's failed reanchor handed its target to the reconnect,
-    // which still resumes there.
-    if (connectionStatusRef.current === "connected") {
-      pendingSeekTimeRef.current = null;
-      setPendingSeekTime(null);
-      const video = videoRef.current;
-      if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
-    }
-
+    // A pending seek survives: the surviving stream still takes it. A refused
+    // reanchor releases its own target when its request settles (reanchorAt).
     const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
@@ -1717,14 +1737,27 @@ export function VideoPlayer({
     if (!roomNudgeActiveRef.current) video.playbackRate = baseRate;
   }, [baseRate]);
 
+  // Records a seek the viewer made: where playback is heading and, while a
+  // replan is in flight, where the stream that replan brings starts. The
+  // newest seek replaces an older one either way.
+  const noteViewerSeek = useCallback(
+    (seconds: number) => {
+      rememberPendingSeek(seconds);
+      replanSeekRef.current = replanningRef.current
+        ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
+        : null;
+      setCurrentTime(seconds);
+    },
+    [rememberPendingSeek],
+  );
+
   // Asks the server for a stream anchored at `seconds`. The replan decides
   // whether that took: a refused or failed replan leaves playback where it
   // was. With no handler it returns false.
   const reanchorAt = useCallback(
     (seconds: number): boolean | Promise<boolean> => {
       if (!onReanchorSeek) return false;
-      rememberPendingSeek(seconds);
-      setCurrentTime(seconds);
+      noteViewerSeek(seconds);
       const accepted = onReanchorSeek(seconds);
       if (typeof accepted === "boolean") {
         if (!accepted) releasePendingSeek(seconds);
@@ -1741,8 +1774,10 @@ export function VideoPlayer({
         },
       );
     },
-    [onReanchorSeek, releasePendingSeek, rememberPendingSeek],
+    [noteViewerSeek, onReanchorSeek, releasePendingSeek],
   );
+  const reanchorAtRef = useRef(reanchorAt);
+  reanchorAtRef.current = reanchorAt;
 
   // Counts performPlayerSeek calls, so a seek's late fallback can tell it was
   // replaced.
@@ -1760,12 +1795,8 @@ export function VideoPlayer({
       // A seek this stream takes: the replan in flight, and a change queued
       // behind it, resume there too.
       const takeSeek = () => {
-        rememberPendingSeek(seconds);
-        replanSeekRef.current = replanningRef.current
-          ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
-          : null;
+        noteViewerSeek(seconds);
         onSeek?.(seconds);
-        setCurrentTime(seconds);
       };
 
       // The original's metadata handler seeks there once the clock's origin
@@ -1824,6 +1855,7 @@ export function VideoPlayer({
       canSeekAnywhere,
       handleSeek,
       isHlsStream,
+      noteViewerSeek,
       onSeek,
       reanchorAt,
       reconnectFromDrainedStream,
@@ -2192,11 +2224,16 @@ export function VideoPlayer({
   // The server ended the session for good (an administrator stopped it while
   // this player could not be told directly): leave instead of reconnecting.
   const sessionEndedHandledRef = useRef(false);
+  // Set when an administrator's stop or terminate already showed the notice,
+  // with its reason; the exit below must still run.
+  const adminEndNoticeShownRef = useRef(false);
   useEffect(() => {
     if (connectionStatus !== "ended" && !progressSessionEnded) return;
     if (sessionEndedHandledRef.current) return;
     sessionEndedHandledRef.current = true;
-    toast.info(tRef.current("web.player.session.endedByAdmin"));
+    if (!adminEndNoticeShownRef.current) {
+      toast.info(tRef.current("web.player.session.endedByAdmin"), { id: SESSION_ENDED_TOAST_ID });
+    }
     void handleExit();
   }, [connectionStatus, handleExit, progressSessionEnded]);
 
@@ -2960,25 +2997,49 @@ export function VideoPlayer({
     // A seek made while this stream's plan was fetched is where the stream is
     // heading, as a seek made while it loads is. Pending, it is also where a
     // replan resumes before this stream plays. Taken by the first transport of
-    // the plan that replaced the seek's plan.
+    // the plan that replaced the seek's plan. A room seek request the room has
+    // not run yet waits for the room's command; until then the stream heads
+    // for the seek the room ran last.
+    const pendingSeekIsHeld = () =>
+      pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current === roomHeldSeekRef.current;
+    const unheldPendingSeek = () => (pendingSeekIsHeld() ? null : pendingSeekTimeRef.current);
     const replanSeek = replanSeekRef.current;
+    let replanTarget: number | null = null;
     if (replanSeek && replanSeek.revision !== planRevision) {
       replanSeekRef.current = null;
-      const seconds = pendingSeekTimeRef.current ?? replanSeek.seconds;
-      if (
-        replanSeek.sessionId === sessionIdRef.current &&
-        canSeekAnywhereRef.current &&
-        seconds !== roomHeldSeekRef.current
-      ) {
-        rememberPendingSeek(seconds);
+      if (replanSeek.sessionId === sessionIdRef.current) {
+        replanTarget = unheldPendingSeek() ?? replanSeek.seconds;
       }
     }
-    // A seek the viewer made while the stream loads wins over the plan's start
-    // position; on a seek-anywhere plan it never replans. A room seek request
-    // the room has not run yet waits for the room's command.
-    const hlsStartPosition = () => {
-      const seconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
-      return seconds === null || seconds === roomHeldSeekRef.current
+    if (replanTarget !== null) {
+      const planStart = toMediaTime(effectiveInitialPosition, planTimelineOffsetRef.current);
+      if (canSeekAnywhereRef.current) {
+        if (!pendingSeekIsHeld()) rememberPendingSeek(replanTarget);
+      } else if (resolvePendingSeekTime(planStart, replanTarget).pendingSeekTime === null) {
+        // The plan's start already settles the seek.
+      } else if (replanningRef.current) {
+        // Another change is already in flight; the stream it brings takes the
+        // seek instead of this one.
+        replanSeekRef.current = {
+          sessionId: sessionIdRef.current,
+          revision: planRevision,
+          seconds: replanTarget,
+          carriedFrom: planStart,
+        };
+      } else {
+        // This stream starts where the replan was asked for and cannot seek
+        // anywhere: ask for one anchored at the seek.
+        reanchorAtRef.current(replanTarget);
+      }
+    }
+    // Where on the media this stream starts, when not at the plan's start: a
+    // seek the viewer made while the stream loads wins over the plan's start
+    // position; on a seek-anywhere plan it never replans.
+    const streamStartTarget = () =>
+      canSeekAnywhereRef.current ? (unheldPendingSeek() ?? replanTarget) : null;
+    const streamStartPosition = () => {
+      const seconds = streamStartTarget();
+      return seconds === null
         ? effectiveInitialPosition
         : toPlayerTime(seconds, timelineOffsetRef.current);
     };
@@ -2986,7 +3047,7 @@ export function VideoPlayer({
     const attachNativeHLS = () => {
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
-        video.currentTime = hlsStartPosition();
+        video.currentTime = streamStartPosition();
         attemptAutoplayWhenReady();
       };
       video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
@@ -3034,7 +3095,7 @@ export function VideoPlayer({
               maxBufferLength,
               maxMaxBufferLength: maxBufferLength,
               // hls.js seeks to this once the first fragment is buffered.
-              startPosition: hlsStartPosition(),
+              startPosition: streamStartPosition(),
               startFragPrefetch: true,
               // Segment requests may block while FFmpeg encodes on demand.
               // Remote transcode nodes can also briefly defer the initial
@@ -3271,7 +3332,7 @@ export function VideoPlayer({
             engineSession = attachBrowserEngine({
               video,
               surface,
-              source: route.source,
+              source: { ...route.source, startSeconds: Math.max(0, streamStartPosition()) },
               onMediaData: (request, bytes, first, last) => {
                 if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last);
               },
@@ -3343,7 +3404,9 @@ export function VideoPlayer({
             setDirectPlayOriginSeconds(origin);
             // A seek made while the origin was unknown wins over the start position.
             const mediaTarget =
-              pendingSeekTimeRef.current ?? toMediaTime(effectiveInitialPosition, planOffset);
+              unheldPendingSeek() ??
+              streamStartTarget() ??
+              toMediaTime(effectiveInitialPosition, planOffset);
             const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);
             if (Math.abs(video.currentTime - target) > 0.01) video.currentTime = target;
             applyElementDuration(video);
@@ -5297,6 +5360,23 @@ export function VideoPlayer({
     return () => onPlaybackTransportReady(null);
   }, [onPlaybackTransportReady, skipActions]);
 
+  // A server message renders inside the player only in the foreground, so a
+  // minimized or detached player shows it as a page toast instead. The toast
+  // goes at the top: the minimized player sits along the bottom edge, where
+  // page toasts normally appear, and one there would cover its controls.
+  const showServerNotice = useCallback((next: PlaybackNoticeState) => {
+    if (isDetachedRef.current) {
+      const show = next.tone === "warning" ? toast.warning : toast.info;
+      show(next.title ?? next.message, {
+        description: next.title ? next.message : undefined,
+        duration: PLAYBACK_NOTICE_VISIBLE_MS,
+        position: "top-center",
+      });
+      return;
+    }
+    setNotice(next);
+  }, []);
+
   const executeRealtimeCommand = useCallback(
     async (command: PlaybackRealtimeCommandEnvelope) => {
       const video = videoRef.current;
@@ -5339,7 +5419,7 @@ export function VideoPlayer({
           return;
         }
         case "display_message":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.title"),
@@ -5350,7 +5430,7 @@ export function VideoPlayer({
           });
           return;
         case "server_restarting":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.restartingTitle"),
@@ -5361,7 +5441,7 @@ export function VideoPlayer({
           });
           return;
         case "server_shutting_down":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.shuttingDownTitle"),
@@ -5394,28 +5474,47 @@ export function VideoPlayer({
           return;
         }
         case "stop":
-        case "terminate":
-          if (command.payload) {
-            const message = readStringPayload(command.payload, "message");
-            if (message) {
-              setNotice({
-                title:
-                  readStringPayload(command.payload, "title") ??
-                  (command.name === "terminate"
-                    ? tRef.current("web.player.serverMessage.endedTitle")
-                    : tRef.current("web.player.serverMessage.stoppingTitle")),
-                message,
-                tone: "warning",
-              });
+        case "terminate": {
+          // The player closes at once, so the notice is a page toast that
+          // stays on the screen the viewer lands on. An administrator's
+          // reason travels in the envelope's top-level reason.
+          const byAdmin = command.issued_by?.kind === "admin";
+          const message =
+            readStringPayload(command.payload, "message") ?? (command.reason?.trim() || undefined);
+          if (byAdmin) {
+            // A later 410 from the same end must not toast a second time.
+            adminEndNoticeShownRef.current = true;
+          }
+          if (byAdmin || message) {
+            let fallbackTitle = tRef.current("web.player.session.endedByAdmin");
+            if (!byAdmin) {
+              fallbackTitle =
+                command.name === "terminate"
+                  ? tRef.current("web.player.serverMessage.endedTitle")
+                  : tRef.current("web.player.serverMessage.stoppingTitle");
             }
+            toast.warning(readStringPayload(command.payload, "title") ?? fallbackTitle, {
+              // Replaces the generic notice when a 410 arrived first.
+              id: byAdmin ? SESSION_ENDED_TOAST_ID : undefined,
+              description: message,
+              duration: PLAYBACK_NOTICE_VISIBLE_MS,
+            });
           }
           await handleExit();
           return;
+        }
         default:
           throw new Error("unsupported");
       }
     },
-    [handleExit, handleVolumeChange, onPlanInvalidated, performPlayerSeek, replanPosition],
+    [
+      handleExit,
+      handleVolumeChange,
+      onPlanInvalidated,
+      performPlayerSeek,
+      replanPosition,
+      showServerNotice,
+    ],
   );
 
   const realtime = usePlaybackRealtime({

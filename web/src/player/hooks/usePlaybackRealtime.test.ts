@@ -25,7 +25,7 @@ const config: PlayerConfig = {
   apiBaseUrl: "https://silo.example.test/api/v1",
   getAccessToken: () => "private-token",
   getProfileId: () => "profile",
-  getDeviceId: () => "device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "device" }),
 };
 const authority = { profileId: "profile" };
 class Socket extends EventTarget {

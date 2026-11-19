@@ -219,6 +219,8 @@ type SectionConfigFilters struct {
 	FilterType       string `json:"filter_type"`
 	FilterLibraryID  *int   `json:"filter_library_id"`
 	FilterLibraryIDs []int  `json:"filter_library_ids"`
+	// MediaScope is the config's whole media scope, set by ParseConfigFilters.
+	MediaScope string `json:"-"`
 }
 
 // SectionCollectionConfig holds the selected collection reference.
@@ -229,37 +231,50 @@ type SectionCollectionConfig struct {
 	UserCollectionID    string `json:"user_collection_id,omitempty"`
 }
 
-// The single-type media_scope values a row's type filter covers.
+// The single-type media_scope values a row's type filter covers, and the
+// episode scope.
 const (
 	mediaScopeMovie     = "movie"
 	mediaScopeSeries    = "series"
 	mediaScopeAudiobook = "audiobook"
 	mediaScopeEbook     = "ebook"
 	mediaScopeManga     = "manga"
+	// mediaScopeEpisode reads the episode catalog rather than media_items.
+	mediaScopeEpisode = "episode"
 )
 
-// ParseConfigFilters extracts filter_type and filter_library_id from config JSON.
-// A structured config's single-type media_scope becomes FilterType, so a row
-// keeps to the same type as its See All page. The group scope "video" spans
-// two types and is left to the callers that handle it.
+// ParseConfigFilters extracts the row's type and library filters from config
+// JSON with the parser its See All page uses, so the row keeps to the same
+// titles. A single-type media scope becomes FilterType; MediaScope keeps the
+// whole scope, including the group scope "video" and "episode".
 func ParseConfigFilters(config json.RawMessage) SectionConfigFilters {
 	var f SectionConfigFilters
 	if len(config) > 0 {
 		_ = json.Unmarshal(config, &f)
 	}
-	if len(f.FilterLibraryIDs) == 0 && f.FilterLibraryID == nil {
-		def, err := ParseQueryDefinition(config)
-		if err == nil {
-			switch def.MediaScope {
-			case mediaScopeMovie, mediaScopeSeries, mediaScopeAudiobook, mediaScopeEbook, mediaScopeManga:
-				f.FilterType = def.MediaScope
-			}
-			if len(def.LibraryIDs) > 0 {
-				f.FilterLibraryIDs = append([]int(nil), def.LibraryIDs...)
-			}
-		}
+	scope := catalog.ParseSectionConfigScope(config)
+	f.MediaScope = scope.MediaScope
+	switch scope.MediaScope {
+	case mediaScopeMovie, mediaScopeSeries, mediaScopeAudiobook, mediaScopeEbook, mediaScopeManga:
+		f.FilterType = scope.MediaScope
+	case catalog.MediaScopeVideo, mediaScopeEpisode:
+		// A legacy filter_type naming a group or the episode scope is no
+		// media_items type; MediaScope carries it.
+		f.FilterType = ""
+	}
+	if len(f.LibraryIDs()) == 0 {
+		f.FilterLibraryIDs = scope.LibraryIDs
 	}
 	return f
+}
+
+// GroupItemTypes returns the media_items types of a group media scope such
+// as "video", or nil for every other scope. A single-type scope is FilterType.
+func (f SectionConfigFilters) GroupItemTypes() []string {
+	if f.MediaScope == catalog.MediaScopeVideo {
+		return catalog.MediaScopeItemTypes(f.MediaScope)
+	}
+	return nil
 }
 
 // LibraryIDs returns the effective library filter IDs, supporting both the
@@ -300,34 +315,8 @@ func ParseCollectionConfig(config json.RawMessage) SectionCollectionConfig {
 	return c
 }
 
+// ParseQueryDefinition parses a section config as a query definition, as the
+// row's See All page does.
 func ParseQueryDefinition(config json.RawMessage) (catalog.QueryDefinition, error) {
-	if len(config) == 0 {
-		return catalog.QueryDefinition{}.Normalize(), nil
-	}
-
-	var legacy struct {
-		FilterType       string          `json:"filter_type"`
-		FilterLibraryID  *int            `json:"filter_library_id"`
-		FilterLibraryIDs []int           `json:"filter_library_ids"`
-		Sort             json.RawMessage `json:"sort"`
-		Order            string          `json:"order"`
-	}
-	if err := json.Unmarshal(config, &legacy); err != nil {
-		return catalog.QueryDefinition{}, err
-	}
-
-	if legacy.FilterType != "" || legacy.FilterLibraryID != nil || len(legacy.FilterLibraryIDs) > 0 || legacy.Order != "" || isLegacySortConfig(legacy.Sort) {
-		return catalog.NormalizeLegacySectionFilter(config)
-	}
-
-	var def catalog.QueryDefinition
-	if err := json.Unmarshal(config, &def); err != nil {
-		return catalog.QueryDefinition{}, err
-	}
-	def = def.Normalize()
-	return def, def.Validate()
-}
-
-func isLegacySortConfig(raw json.RawMessage) bool {
-	return len(raw) > 0 && raw[0] == '"'
+	return catalog.ParseSectionQueryDefinition(config)
 }

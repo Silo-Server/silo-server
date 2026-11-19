@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -110,10 +111,9 @@ func (h *Hub) PublishLibraryChanged(ctx context.Context, event LibraryChangeEven
 	if event.New <= 0 {
 		return nil
 	}
-	return h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeLibraryItemAdded), map[string]any{
-		"library_id": event.LibraryID,
-		"new":        event.New,
-	}, evt.PublishOptions{})
+	return h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeLibraryItemAdded), withLibraryID(map[string]any{
+		"new": event.New,
+	}, event.LibraryID), evt.PublishOptions{})
 }
 
 func (h *Hub) PublishCatalogLibraryChanged(ctx context.Context, event LibraryChangeEvent) error {
@@ -130,10 +130,9 @@ func (h *Hub) PublishMetadataUpdated(ctx context.Context, event MetadataUpdateEv
 	if h == nil || h.inner == nil {
 		return nil
 	}
-	return h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeMetadataUpdated), map[string]any{
-		"library_id": event.LibraryID,
+	return h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeMetadataUpdated), withLibraryID(map[string]any{
 		"content_id": event.ContentID,
-	}, evt.PublishOptions{})
+	}, event.LibraryID), evt.PublishOptions{})
 }
 
 func (h *Hub) PublishCatalogItemChanged(ctx context.Context, event MetadataUpdateEvent) error {
@@ -144,11 +143,7 @@ func (h *Hub) PublishCatalogItemChanged(ctx context.Context, event MetadataUpdat
 	if change == "" {
 		change = "metadata_updated"
 	}
-	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogItemChanged), map[string]any{
-		"library_id": event.LibraryID,
-		"content_id": event.ContentID,
-		"change":     change,
-	}, evt.PublishOptions{}); err != nil {
+	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogItemChanged), NewCatalogItemChange(event.LibraryID, event.ContentID, change), evt.PublishOptions{}); err != nil {
 		return err
 	}
 	return h.PublishMetadataUpdated(ctx, event)
@@ -175,8 +170,7 @@ func libraryChangePayload(event LibraryChangeEvent) map[string]any {
 	if reason == "" {
 		reason = "scan"
 	}
-	return map[string]any{
-		"library_id":               event.LibraryID,
+	return withLibraryID(map[string]any{
 		"reason":                   reason,
 		"new":                      event.New,
 		"updated":                  event.Updated,
@@ -184,7 +178,7 @@ func libraryChangePayload(event LibraryChangeEvent) map[string]any {
 		"matched_files":            event.MatchedFiles,
 		"retried_items":            event.RetriedItems,
 		"still_unmatched_warnings": event.StillUnmatchedWarnings,
-	}
+	}, event.LibraryID)
 }
 
 func convertEnvelope(env evt.Envelope) (Envelope, bool) {
@@ -200,7 +194,7 @@ func convertEnvelope(env evt.Envelope) (Envelope, bool) {
 	switch env.Channel {
 	case evt.ChannelCatalog:
 		var payload struct {
-			LibraryID              int    `json:"library_id"`
+			LibraryID              string `json:"library_id"`
 			ContentID              string `json:"content_id"`
 			Reason                 string `json:"reason"`
 			Change                 string `json:"change"`
@@ -214,7 +208,8 @@ func convertEnvelope(env evt.Envelope) (Envelope, bool) {
 		if err := json.Unmarshal(env.Data, &payload); err != nil {
 			return Envelope{}, false
 		}
-		converted.LibraryID = payload.LibraryID
+		// An absent or unreadable library_id names no library.
+		converted.LibraryID, _ = strconv.Atoi(payload.LibraryID)
 		converted.ContentID = payload.ContentID
 		converted.Reason = payload.Reason
 		converted.Change = payload.Change

@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 )
 
 func TestDiscoveryScopesEnforceProjectionAndOwnerAuthority(t *testing.T) {
@@ -78,6 +80,9 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 		ID: 3, Name: "gpu-01", Type: "transcode", URL: "http://10.0.0.9:8090", Healthy: true, CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DownloadArtifactDirOverride: new("/srv/secret-artifacts"),
 		LastStats: json.RawMessage(`{"system":{"cores":8,"disks":[{"path":"/srv/secret-scratch","role":"scratch","total_gb":5}]},"build":{"revision":"secret-build"},"artifacts":{"dir":"/srv/secret-artifacts"}}`),
 	}}}
+	requests := fixtureAdminRequests()
+	requests.failed = true
+	deps.AdminRequests = monitoredRequestQueue{requests}
 	users := map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{}, fakeSessions{}, fakeAPIKeys{keys: map[string]*models.APIKey{
 		"sa_monitor":        {ID: 1, UserID: 2, Scopes: []string{auth.ScopeAdminMonitorRead}},
@@ -86,7 +91,7 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 	}}, fakeUsers{users: users})
 	h := NewHandler(deps)
 
-	for _, path := range []string{"/admin/system/resources", "/admin/downloads/preparations", "/admin/nodes/summary"} {
+	for _, path := range []string{"/admin/system/resources", "/admin/downloads/preparations", "/admin/nodes/summary", "/admin/requests", "/admin/requests/r-1/events", "/admin/requests/counts"} {
 		rec := do(t, h, "GET", Prefix+path, "", bearer("sa_monitor"))
 		if rec.Code != 200 || strings.Contains(rec.Body.String(), "secret") {
 			t.Fatal(path, rec.Code, rec.Body.String())
@@ -98,6 +103,14 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 		t.Fatal("node summary lost its resource sample", rec.Body.String())
 	}
 	requireProblem(t, do(t, h, "GET", Prefix+"/admin/nodes", "", bearer("sa_monitor")), TypePermissionDenied)
+	// Request failures stay out, and the configuration that names servers
+	// and routing rules is refused outright.
+	if body := do(t, h, "GET", Prefix+"/admin/requests", "", bearer("sa_monitor")).Body.String(); strings.Contains(body, "last_error") || strings.Contains(body, "radarr.lan") || strings.Contains(body, "instance_name") || strings.Contains(body, "route_name") || !strings.Contains(body, `"id":"r-1"`) {
+		t.Fatal("monitor request list", body)
+	}
+	for _, path := range []string{"/admin/request-integrations", "/admin/request-settings", "/admin/request-routes"} {
+		requireProblem(t, do(t, h, "GET", Prefix+path, "", bearer("sa_monitor")), TypePermissionDenied)
+	}
 
 	// A scoped key reads cached aggregates; it cannot force the queries.
 	if rec := do(t, h, "GET", Prefix+"/admin/stats/top-activity?refresh=true", "", bearer("sa_monitor")); rec.Code != 200 || insights.refresh {
@@ -108,7 +121,7 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 	}
 
 	// Unscoped administrators keep the full documents.
-	for path, want := range map[string]string{"/admin/system/resources": "/srv/secret-media", "/admin/downloads/preparations": "No space left", "/admin/nodes": "/srv/secret-artifacts"} {
+	for path, want := range map[string]string{"/admin/system/resources": "/srv/secret-media", "/admin/downloads/preparations": "No space left", "/admin/nodes": "/srv/secret-artifacts", "/admin/requests": "radarr.lan", "/admin/requests/r-1/events": "secret-router"} {
 		if rec := do(t, h, "GET", Prefix+path, "", bearer("sa_admin")); rec.Code != 200 || !strings.Contains(rec.Body.String(), want) {
 			t.Fatal(path, rec.Code, rec.Body.String())
 		}
@@ -157,4 +170,16 @@ func TestCatalogPathsScopeGatesListingFilePaths(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, "GET", withPaths, "", bearer("sa_member_paths")), TypePermissionDenied)
 	requireProblem(t, do(t, h, "GET", Prefix+"/admin/sessions", "", bearer("sa_paths")), TypePermissionDenied)
+}
+
+// monitoredRequestQueue adds the admin queue reads to the request fixture.
+// Its one event carries the kind of text a failed submission leaves.
+type monitoredRequestQueue struct{ *fakeAdminRequests }
+
+func (monitoredRequestQueue) CountAdminViews(context.Context, mediarequests.Viewer) (mediarequests.AdminViewCounts, error) {
+	return mediarequests.AdminViewCounts{Failed: 1}, nil
+}
+
+func (monitoredRequestQueue) ListRequestEvents(context.Context, mediarequests.Viewer, string) ([]mediarequests.RequestEvent, error) {
+	return []mediarequests.RequestEvent{{ID: 1, RequestID: "r-1", EventType: "outcome_failed", Message: "http://secret-router:7878 refused the connection", CreatedAt: fixedTime()}}, nil
 }
