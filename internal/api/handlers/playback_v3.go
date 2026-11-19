@@ -202,11 +202,12 @@ func (t *playbackStartTimingsV3) log(ctx context.Context, attemptID string) {
 }
 
 type playbackStartSideEffectsV3 struct {
-	session   playback.Session
-	file      models.MediaFile
-	userID    int
-	profileID string
-	state     *playbackStartSideEffectsStateV3
+	session        playback.Session
+	file           models.MediaFile
+	preferenceFile *models.MediaFile
+	userID         int
+	profileID      string
+	state          *playbackStartSideEffectsStateV3
 	// legacyAudioTrackIndex is the audio an /api/v1 start played, which the
 	// frozen bridge still saves as the series preference; nil on /api/v2.
 	legacyAudioTrackIndex *int
@@ -2443,7 +2444,13 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	// scrobbles or analysis work for the short-lived session they roll back.
 	h.raceCopySafetyV3(effectiveFile.ID, result.Plan)
 	// Only explicit picks are saved, never the audio a start happened to play.
-	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID, nil)
+	var preferenceFile *models.MediaFile
+	if requestedFile.ID != effectiveFile.ID && catalog.ResolveEditionAliases(
+		[]*models.MediaFile{requestedFile, effectiveFile}, catalog.AccessFilter{},
+	).AllowsSubstitution(requestedFile, effectiveFile) {
+		preferenceFile = requestedFile
+	}
+	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, preferenceFile, userID, profileID, nil)
 	h.prefetchSubtitlesV3(session.ID, effectiveFile, req, result)
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientBuild: clientInfo.Build, ClientChannel: clientInfo.Channel, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
@@ -2477,7 +2484,7 @@ func (h *PlaybackHandler) replayDuplicateStartV3(ctx context.Context, userID int
 	return decisionResponseFromAttemptV3(existing), nil
 }
 
-func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context, session *playback.Session, file *models.MediaFile, userID int, profileID string, legacyAudioTrackIndex *int) {
+func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context, session *playback.Session, file, preferenceFile *models.MediaFile, userID int, profileID string, legacyAudioTrackIndex *int) {
 	if h == nil || session == nil || file == nil {
 		return
 	}
@@ -2507,6 +2514,9 @@ func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context,
 		state:     state,
 
 		legacyAudioTrackIndex: legacyAudioTrackIndex,
+	}
+	if preferenceFile != nil {
+		task.preferenceFile = new(*preferenceFile)
 	}
 	h.v3StartEffectsMu.Lock()
 	h.v3StartEffectsPending[session.ID] = state
@@ -2623,7 +2633,11 @@ func (h *PlaybackHandler) runPlaybackStartSideEffectsV3(task playbackStartSideEf
 	if task.legacyAudioTrackIndex != nil {
 		h.persistLegacyAudioPreferenceV3(ctx, task.session.ID, task.userID, task.profileID, &task.file, *task.legacyAudioTrackIndex)
 	}
-	h.persistSeriesPlaybackPreference(ctx, task.userID, task.profileID, &task.file)
+	preferenceFile := task.preferenceFile
+	if preferenceFile == nil {
+		preferenceFile = &task.file
+	}
+	h.persistSeriesPlaybackPreference(ctx, task.userID, task.profileID, preferenceFile)
 	h.syncSessionsNow(ctx, "v3_start")
 }
 
@@ -6006,7 +6020,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// A quality change, and an output change that went back to the requested
 	// edition, choose a version again. Under a buffering budget that must not
 	// be the source that stalled. A track change stays on the mounted version.
-	choosesVersion := qualityChange || (intentChange && !pinnedTrackChange)
+	// If we kept a mounted alias for its tracks, look for new sources from the
+	// requested edition via planReplanAlternateV3, which checks today's group.
+	choosesVersion := (qualityChange || (intentChange && !pinnedTrackChange)) &&
+		effectiveFile.EditionKey == requestedFile.EditionKey
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)

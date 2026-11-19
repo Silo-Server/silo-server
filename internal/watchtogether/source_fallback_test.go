@@ -16,6 +16,7 @@ func fallbackTestResolver() *CatalogSelectionResolver {
 		{FileID: 3, Resolution: "1080p", FileSize: 100},
 		{FileID: 4, Resolution: "1080p", FileSize: 400, EditionKey: "different-cut"},
 		{FileID: 5, Resolution: "1080p", FileSize: 400, PresentationPartIndex: 2},
+		{FileID: 6, Resolution: "1080p", FileSize: 400, Unreadable: true},
 	}})
 }
 
@@ -39,6 +40,26 @@ func TestSourceFallbackSelectsOneSharedVersionForTheRefusal(t *testing.T) {
 	}
 	if _, err := resolver.ResolveSourceFallback(t.Context(), 7, "host", SelectItemInput{ContentID: "movie-1", FileID: new(3)}, "no_alternate_version"); !errors.Is(err, ErrSourceFallbackUnavailable) {
 		t.Fatalf("exhausted fallback returned %v; must not revisit a higher-ranked file or another edition/part", err)
+	}
+}
+
+func TestSourceFallbackUsesProvenAliasForReadableSources(t *testing.T) {
+	versions := []catalog.FileVersion{
+		{FileID: 1, Resolution: "2160p", EditionKey: "extended", StoredEditionKey: "extended_cut"},
+		{FileID: 2, Resolution: "1080p", EditionKey: "extended", StoredEditionKey: "extended"},
+		{FileID: 3, Resolution: "720p", EditionKey: "extended", StoredEditionKey: "extended_cut"},
+	}
+	resolver := NewCatalogSelectionResolver(roomWatchDetail{versions: versions})
+	input := SelectItemInput{ContentID: "movie-1", FileID: new(1)}
+	for _, tt := range []struct {
+		unreadable bool
+		want       int
+	}{{false, 2}, {true, 3}} {
+		versions[0].Unreadable = tt.unreadable
+		resolved, err := resolver.ResolveSourceFallback(t.Context(), 7, "host", input, "no_alternate_version")
+		if err != nil || *resolved.FileID != tt.want {
+			t.Fatalf("fallback = %+v, %v; want file %d", resolved, err, tt.want)
+		}
 	}
 }
 

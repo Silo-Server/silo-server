@@ -2135,6 +2135,12 @@ remaining candidates until one produces a plan. A refused lower-resolution
 candidate therefore does not hide a later 4K version that can direct-play or
 remux without video encoding.
 
+Playback uses the same edition alias groups as the native catalog. It checks
+the viewer's live, authorized file inventory and stored durations before
+choosing a new alias source. Grouping adds no media probes. When an automatic
+alias fallback plays a different file, the requested file remains the
+remembered choice so a later Auto start can use it on a faster connection.
+
 A 4K version whose 4K transcoding is disabled takes its lower qualities from a
 lower-resolution version instead, when the item has one and the request allows
 version fallback. With 4K transcoding allowed, the same holds while

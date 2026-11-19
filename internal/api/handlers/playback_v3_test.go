@@ -322,7 +322,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 
 	for i := range playbackStartSideEffectsWorkersV3 {
 		sessionID := fmt.Sprintf("running-%d", i)
-		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, 1, "profile-1", nil)
+		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, nil, 1, "profile-1", nil)
 	}
 	for range playbackStartSideEffectsWorkersV3 {
 		select {
@@ -333,7 +333,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 	}
 
 	queuedSessionID := "queued-stop"
-	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, 1, "profile-1", nil)
+	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, nil, 1, "profile-1", nil)
 	handler.cancelPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
 	close(scrobbler.release)
 	handler.waitForPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
@@ -4843,6 +4843,95 @@ func TestStartPlaybackV2MultipartSuppressesProgressPersistence(t *testing.T) {
 			}
 			if session.DisableProgressPersistence != tc.wantDisabled {
 				t.Fatalf("DisableProgressPersistence = %v, want %v", session.DisableProgressPersistence, tc.wantDisabled)
+			}
+		})
+	}
+}
+
+// Exercise the route used when neither original fits the stream budget and the
+// 1080p alias is useful only as input to an encode.
+func TestPlaybackV2EditionAliasFallback(t *testing.T) {
+	const bandwidthEstimateKbps = 2600
+	for _, mode := range []string{"start", "replan", "replan-conflict", "pinned"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+				f.source.EditionKey, f.alternate.EditionKey = "extended_cut", "extended"
+				f.source.ProbeUpdatedAt, f.alternate.ProbeUpdatedAt = new(time.Now()), new(time.Now())
+				f.alternate.FilePath = writePlaybackTestMediaFile(t, "movie-hd.mp4")
+				f.startRequest.SubtitleTrackID, f.startRequest.SubtitleTrackIndex = "", nil
+				f.startRequest.ClientFeatures = append(f.startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+				f.handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+				presetLocalRegistryV3(f.handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+					{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+					{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+				}))
+				if mode == "start" || mode == "pinned" {
+					f.startRequest.BandwidthEstimateKbps = new(bandwidthEstimateKbps)
+				}
+				if mode == "pinned" {
+					f.startRequest.AllowAlternateVersions = new(false)
+				}
+			})
+			t.Cleanup(func() { f.handler.tm.CloseTranscodeSession(f.started.SessionID, "") })
+			plan := f.started.PlaybackPlan
+			switch mode {
+			case "pinned":
+				if plan.EffectiveMediaFileID != f.source.ID {
+					t.Fatalf("pinned file switched to %d", plan.EffectiveMediaFileID)
+				}
+				return
+			case "replan", "replan-conflict":
+				if plan.EffectiveMediaFileID != f.source.ID {
+					t.Fatalf("initial plan uses file %d, want %d", plan.EffectiveMediaFileID, f.source.ID)
+				}
+				if mode == "replan-conflict" {
+					conflict := *f.alternate
+					conflict.ID, conflict.EditionKey, conflict.Duration = 126, "extended_edition", f.source.Duration+120
+					fetcher := f.handler.FileVersionFetcher.(testPlaybackFileVersionFetcher)
+					fetcher.byContent[f.source.ContentID] = append(fetcher.byContent[f.source.ContentID], &conflict)
+				}
+				response, err := f.handler.ReplanPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{
+					UserID: 1, ProfileID: "profile-1", InstallationID: f.handler.InstallationID,
+				}, f.started.SessionID, PlaybackReplanCommand{Digest: "edition-alias-replan", Request: playback.ReplanRequestV3{
+					ProtocolVersion: playback.ProtocolV3, ClientFeatures: f.startRequest.ClientFeatures,
+					Operation: playback.ReplanOperationQualityChangeV3, PlaybackAttemptID: f.startRequest.PlaybackAttemptID,
+					ReplanRequestID: "edition-alias-replan", FailedPlanID: plan.PlanID,
+					PlanAttemptID: "edition-alias-replan-attempt", PlanAttemptKey: plan.PlanAttemptKey,
+					AttemptedPlanKeys: []string{plan.PlanAttemptKey}, AttemptCount: 1,
+					QualityPreference: "auto", BandwidthEstimateKbps: new(bandwidthEstimateKbps), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3,
+					SelectedTracks: plan.SelectedTracks, Capabilities: f.startRequest.Capabilities,
+					ClientPlaybackContext: f.startRequest.ClientPlaybackContext,
+				}})
+				if err != nil || response.PlaybackPlan == nil {
+					t.Fatalf("replan: %v, terminal = %#v", err, response.Terminal)
+				}
+				plan = response.PlaybackPlan
+				if mode == "replan-conflict" {
+					if plan.EffectiveMediaFileID != f.source.ID {
+						t.Fatalf("replan used file %d after the alias group split", plan.EffectiveMediaFileID)
+					}
+					return
+				}
+			}
+			if plan.RequestedMediaFileID != f.source.ID || plan.EffectiveMediaFileID != f.alternate.ID ||
+				plan.Delivery != playback.DeliveryTranscodeHLSV3 || plan.EffectiveRecipe.BitrateKbps == nil ||
+				*plan.EffectiveRecipe.BitrateKbps > playback.StreamBudgetKbpsV3(bandwidthEstimateKbps) {
+				t.Fatalf("plan did not transcode the alternate under budget: %+v", plan)
+			}
+			if transport := f.handler.tm.GetTranscodeSession(f.started.SessionID); transport == nil || transport.Opts().InputPath != f.alternate.FilePath {
+				t.Fatal("transcode transport did not open the 1080p input")
+			}
+			f.handler.waitForPlaybackStartSideEffectsV3(t.Context(), f.started.SessionID)
+			preference, err := f.store.GetSeriesPlaybackPreference(t.Context(), "profile-1", f.source.ContentID)
+			if err != nil || preference == nil || preference.FileID != f.source.ID || preference.EditionKey != f.source.EditionKey {
+				t.Fatalf("remembered version = %+v, error = %v", preference, err)
+			}
+			recovered := f.startRequest
+			recovered.PlaybackAttemptID = "edition-alias-recovered"
+			recovered.FileID, recovered.BandwidthEstimateKbps = preference.FileID, nil
+			response := startPlaybackDecisionV2(t, f.handler, marshalV3StartRequest(t, recovered))
+			if response.PlaybackPlan == nil || response.PlaybackPlan.EffectiveMediaFileID != f.source.ID {
+				t.Fatalf("fresh start after bandwidth recovery did not use the requested 4K file: %+v", response)
 			}
 		})
 	}

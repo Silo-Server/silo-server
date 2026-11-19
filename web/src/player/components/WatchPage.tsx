@@ -25,6 +25,17 @@ import { useTrackChoicePersistence } from "../hooks/useTrackChoicePersistence";
 import { toast } from "sonner";
 import { useT } from "@/i18n";
 
+function isStandaloneVersion(version: PlayerFileVersion): boolean {
+  return (
+    !version.presentation_kind &&
+    !version.presentation_group_key &&
+    !version.presentation_part_index &&
+    !version.presentation_part_total &&
+    !version.multi_episode_start &&
+    !version.multi_episode_end
+  );
+}
+
 function patchChapterThumbnail(
   versions: PlayerFileVersion[],
   fileId: number,
@@ -341,6 +352,24 @@ function WatchPagePlayer({
     () => playbackVersions.find((version) => version.file_id === session.mediaFileId),
     [playbackVersions, session.mediaFileId],
   );
+  const requestedPlaybackVersion = playbackVersions.find(
+    (version) => version.file_id === session.plan?.requested_media_file_id,
+  );
+  // Keep the source the viewer asked for when a named cut switched encodes.
+  // Parts and different cuts have their own resume timelines.
+  const resumeVersion =
+    !session.versionPinned() &&
+    requestedPlaybackVersion &&
+    activePlaybackVersion?.edition_key &&
+    requestedPlaybackVersion.edition_key === activePlaybackVersion.edition_key &&
+    isStandaloneVersion(requestedPlaybackVersion) &&
+    isStandaloneVersion(activePlaybackVersion) &&
+    requestedPlaybackVersion.duration > 0 &&
+    activePlaybackVersion.duration > 0 &&
+    Math.abs(requestedPlaybackVersion.duration - activePlaybackVersion.duration) <= 5 &&
+    requestedPlaybackVersion.file_id !== activePlaybackVersion.file_id
+      ? requestedPlaybackVersion
+      : undefined;
   const trickplayAvailable = activePlaybackVersion?.trickplay_available === true;
   const trickplayQuery = useWatchTrickplay(
     contentId,
@@ -391,17 +420,25 @@ function WatchPagePlayer({
 
   const versionPinned = session.versionPinned;
   const handleEnded = useCallback(() => {
+    const version = resumeVersion ?? activePlaybackVersion;
     onEnded?.({
       positionSeconds: session.durationSeconds ?? 0,
       durationSeconds: session.durationSeconds ?? undefined,
-      lastFileId: session.mediaFileId,
-      lastResolution: activePlaybackVersion?.resolution,
-      lastHDR: activePlaybackVersion?.hdr,
-      lastCodecVideo: activePlaybackVersion?.codec_video,
-      lastEditionKey: activePlaybackVersion?.edition_key,
+      lastFileId: resumeVersion?.file_id ?? session.mediaFileId,
+      lastResolution: version?.resolution,
+      lastHDR: version?.hdr,
+      lastCodecVideo: version?.codec_video,
+      lastEditionKey: version?.edition_key,
       versionPinned: versionPinned(),
     });
-  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
+  }, [
+    activePlaybackVersion,
+    onEnded,
+    resumeVersion,
+    session.durationSeconds,
+    session.mediaFileId,
+    versionPinned,
+  ]);
 
   const { saveAudioChoice, saveSubtitleChoice } = useTrackChoicePersistence({
     seriesId: seriesContext?.seriesId ?? contentId,
@@ -693,6 +730,7 @@ function WatchPagePlayer({
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
       selectedVersion={selectedVersion}
+      resumeVersion={resumeVersion}
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}

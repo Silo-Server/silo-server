@@ -50,6 +50,7 @@ func (h *ItemsHandler) WatchDetail(ctx context.Context, userID int, profileID, c
 	if detail.Type == itemTypeMovie || detail.Type == itemTypeEpisode || detail.Type == itemTypeEbook || detail.Type == itemTypeAudiobook {
 		detail.UserData = h.leafUserData(ctx, userID, profileID, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
+		projectEditionPreference(detail.EditionAliases, detail.UserData, &detail.EffectiveVersionEditionKey)
 	}
 	return detail, nil
 }
