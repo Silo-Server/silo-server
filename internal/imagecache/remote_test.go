@@ -2,6 +2,7 @@ package imagecache
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -18,6 +19,10 @@ func TestRemoteFetcherRemembersAnOutcome(t *testing.T) {
 		hits.Add(1)
 		if r.URL.Path == "/missing.png" {
 			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/huge.png" {
+			_, _ = w.Write(append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, remoteResultMaxBytes)...))
 			return
 		}
 		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nrest"))
@@ -43,6 +48,16 @@ func TestRemoteFetcherRemembersAnOutcome(t *testing.T) {
 	if got := hits.Load(); got != 2 {
 		t.Fatalf("provider saw %d requests after a remembered failure, want 2", got)
 	}
+	// An image too large to keep is refused and remembered, not re-downloaded.
+	for range 3 {
+		if _, err := f.Fetch(ctx, "movie-3", srv.URL+"/huge.png"); !errors.Is(err, ErrRemoteTooLarge) {
+			t.Fatalf("Fetch of an oversized image = %v, want ErrRemoteTooLarge", err)
+		}
+	}
+	if got := hits.Load(); got != 3 {
+		t.Fatalf("provider saw %d requests after a remembered oversized image, want 3", got)
+	}
+	hits.Store(2)
 	// A poster that changed its source is a different download.
 	if _, err := f.Fetch(ctx, "movie-1", srv.URL+"/other.png"); err != nil || hits.Load() != 3 {
 		t.Fatalf("a new URL for the same item: err %v, provider requests %d, want 3", err, hits.Load())

@@ -262,7 +262,8 @@ only JPEG, PNG, WebP or GIF bytes, typed by their content rather than the
 provider's header. Concurrent requests for one item share one download, and a
 server runs at most four at once. A server remembers a finished download for
 five minutes and a failed one for 30 seconds, so repeating a link does not
-repeat the request to the provider. The route has no per-address rate limit. Proxied bytes carry
+repeat the request to the provider. An image over 4 MiB is not served from a
+link and answers `404` until the image cache has stored it. The route has no per-address rate limit. Proxied bytes carry
 `Cache-Control: private, max-age=300`; the redirect is `no-store`, since its
 target is a signed URL with its own lifetime.
 

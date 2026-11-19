@@ -43,6 +43,12 @@ var ErrRemoteBusy = errors.New("imagecache: remote image fetches are busy")
 // ErrNotImage reports a download whose bytes are not a served image type.
 var ErrNotImage = errors.New("imagecache: remote body is not an image")
 
+// ErrRemoteTooLarge reports an image too large to serve from a link. Every
+// outcome a link produces must fit the fetcher's memory, or repeating the
+// link would repeat the download; the image-cache job, which stores resized
+// copies, is what serves a large original.
+var ErrRemoteTooLarge = errors.New("imagecache: remote image is too large to serve from a link")
+
 // RemoteImage is one downloaded image.
 type RemoteImage struct {
 	Data        []byte
@@ -84,16 +90,13 @@ func (f *RemoteFetcher) recent(id string, now time.Time) (remoteResult, bool) {
 	return result, true
 }
 
-// remember keeps an outcome for later requests. An image too large to keep,
-// or one the budget has no room for, is simply not remembered. Expired
-// entries are dropped at most once per remoteResultsSweep.
+// remember keeps an outcome for later requests. Expired entries are dropped
+// at most once per remoteResultsSweep.
 func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now time.Time) {
 	ttl := remoteResultTTL
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrRemoteTooLarge) {
+		// An oversized image stays oversized; other failures may clear.
 		ttl = remoteFailureTTL
-	}
-	if len(image.Data) > remoteResultMaxBytes {
-		return
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -113,8 +116,18 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 		f.bytes -= len(old.image.Data)
 		delete(f.results, id)
 	}
-	if f.bytes+len(image.Data) > remoteResultsBudget || len(f.results) >= remoteResultsMax {
-		return
+	// Every outcome is kept: when there is no room, the entries nearest
+	// their expiry make way. An outcome that was not kept would let its link
+	// repeat the download on every request.
+	for len(f.results) > 0 && (f.bytes+len(image.Data) > remoteResultsBudget || len(f.results) >= remoteResultsMax) {
+		oldest, soonest := "", time.Time{}
+		for key, result := range f.results {
+			if oldest == "" || result.until.Before(soonest) {
+				oldest, soonest = key, result.until
+			}
+		}
+		f.bytes -= len(f.results[oldest].image.Data)
+		delete(f.results, oldest)
 	}
 	f.results[id] = remoteResult{image: image, err: err, until: now.Add(ttl)}
 	f.bytes += len(image.Data)
@@ -187,6 +200,9 @@ func (f *RemoteFetcher) fetch(ctx context.Context, rawURL string) (RemoteImage, 
 	data, err := download(ctx, f.client, rawURL, true)
 	if err != nil {
 		return RemoteImage{}, err
+	}
+	if len(data) > remoteResultMaxBytes {
+		return RemoteImage{}, ErrRemoteTooLarge
 	}
 	contentType, ok := ServedImageType(data)
 	if !ok {
