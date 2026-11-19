@@ -1430,3 +1430,4 @@
 
 # Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
 ./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
+./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB

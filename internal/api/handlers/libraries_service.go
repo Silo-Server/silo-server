@@ -319,7 +319,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		return LibraryView{}, err
 	}
 
-	err = h.folderRepo.Update(ctx, id, catalog.UpdateFolderInput{
+	enabledChanged, err := h.folderRepo.Update(ctx, id, catalog.UpdateFolderInput{
 		Paths:                    req.Paths,
 		Type:                     req.Type,
 		Name:                     req.Name,
@@ -347,7 +347,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	}
 	// Publish before the read below: a failed read still answers 500, and a
 	// retry would find nothing left to change.
-	if req.Enabled != nil && *req.Enabled != oldFolder.Enabled {
+	if enabledChanged {
 		h.publishLibraryEnabledChanged(ctx, id, *req.Enabled)
 	}
 	h.pokeRealtimeMonitor()
