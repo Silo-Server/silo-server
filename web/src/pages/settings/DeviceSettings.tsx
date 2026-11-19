@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import { v2ErrorText } from "@/api/v2/request";
 import type { UserDevice } from "@/api/types";
 import { useT } from "@/i18n";
@@ -39,7 +40,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
-import { parseSubtitleAppearance } from "@/lib/subtitleAppearance";
+import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
 import { isImeComposing } from "@/lib/imeComposition";
 
@@ -438,6 +439,7 @@ function DeviceDetail({
                 ) {
                   return;
                 }
+                appearance.discardQueued();
                 clearDevice.mutate(
                   { deviceId: device.device_id, profileId: targetProfileId },
                   {
@@ -562,20 +564,28 @@ function DeviceDetail({
       <SubtitleAppearancePanelView
         open={appearanceOpen}
         value={appearance.value}
-        onChange={(patch) =>
-          appearance.edit(patch, (next) =>
-            setValue
-              .mutateAsync({
+        onChange={(patch) => {
+          // A queued save goes out once the one in flight settles, and the
+          // request carries whichever profile is active then. Drop it if the
+          // person has switched profiles since, so it can't land on another one.
+          const authority = captureProfileRequestContext();
+          const save = async (next: SubtitleAppearance) => {
+            if (authority && !isCapturedProfileAuthorityActive(authority)) {
+              throw new Error("profile changed before the save was sent");
+            }
+            try {
+              await setValue.mutateAsync({
                 key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
                 value: next,
                 identity,
-              })
-              .catch((error: unknown) => {
-                toast.error(v2ErrorText(error, t("web.settings.device.saveFailed")));
-                throw error;
-              }),
-          )
-        }
+              });
+            } catch (error) {
+              toast.error(v2ErrorText(error, t("web.settings.device.saveFailed")));
+              throw error;
+            }
+          };
+          appearance.edit(patch, save);
+        }}
         onClose={() => setAppearanceOpen(false)}
         canReset={appearanceChangedHere}
         onReset={() => {
