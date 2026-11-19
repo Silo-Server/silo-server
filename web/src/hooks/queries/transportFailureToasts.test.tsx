@@ -92,11 +92,15 @@ describe("write failures whose error text is developer English", () => {
       .mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
     const text = await toastFor(() =>
-      result.current.mutateAsync({ userId: 1, profileId: "p1", deviceId: "d1", keys: ["a", "b"] }),
+      result.current.mutateAsync({
+        userId: 1,
+        profileId: "p1",
+        deviceId: "d1",
+        keys: ["a", "b", "c"],
+      }),
     );
     expect(text).toBe(
-      "Reset stopped after 1 of 2 overrides. Reload the settings before continuing. " +
-        "The remaining override could not be reset.",
+      "Reset stopped after 1 of 3 overrides. Reload the settings before continuing.",
     );
   });
 

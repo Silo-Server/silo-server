@@ -550,13 +550,15 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
             completed++;
             continue;
           }
+          // A failure without a readable reason (no connection) gets none: the
+          // count already says how far the reset got.
           throw new Error(
             t("web.admin.common.users.resetAllStopped", {
               count: keys.length,
               count_text: keys.length,
               completed: completed,
-              reason: readableErrorText(err, t("web.admin.common.users.resetAllRemainingFailed")),
-            }),
+              reason: readableErrorText(err, ""),
+            }).trimEnd(),
           );
         }
       }
