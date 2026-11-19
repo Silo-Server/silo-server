@@ -327,10 +327,17 @@ state, semantic readiness, and links to the search maintenance tasks.
 `active_provider` describes the route requests actually take; it is not merely
 the configured provider. `degraded` and the optional `degraded_reason` explain
 temporary fallback or keyword-only operation. `index.rebuild_required` is true
-when the active index does not match the current settings. Background search
-maintenance runs at startup and every minute: it rebuilds a missing or stale
-index, then resumes incremental event sync. When the prior index is known to
-have the same document and media scope, Meilisearch continues serving keyword
+when the active index's document schema does not match the current search
+settings, or when Meilisearch no longer has it (for example after its data
+directory was emptied); in that case `index.document_count` is 0 and searches
+use PostgreSQL, while `meilisearch.healthy` still reports whether Meilisearch
+itself answers. A status read learns that the index is missing from the
+semantic capability probe, so it can take up to five minutes to show.
+Background search maintenance runs at startup and every minute: it rebuilds a
+missing or stale index, applies changed index settings to a current one in
+place (not a rebuild, so not `rebuild_required`), then resumes incremental
+event sync. When the prior index is known to have the same document and media
+scope, Meilisearch continues serving keyword
 search while the replacement is built; otherwise searches use PostgreSQL.
 
 ## `GET /api/v2/admin/nodes`
@@ -349,6 +356,8 @@ configuration, last health result, and last stored hardware inventory. See
 | `healthy` | bool | Result of the last health check. |
 | `drain_requested` | bool | An administrator asked this transcode node to drain: it stays listed and health-checked, but new work goes to other nodes while its sessions finish. See [node drain (v2)](#node-drain-v2). Always `false` on a proxy. |
 | `drain_state` | string | What the node reported on its last health check: `none`, `draining` (after a drain request or SIGTERM, while it finishes its work) or `drained` (nothing left; safe to stop). `none` for a proxy, a node that predates draining, and a node that did not answer. |
+| `key_issued` | bool | A node key has been issued to this transcode node. The key itself is shown only in the response that issues it. Always `false` on a proxy. See [node keys (v2)](#node-keys-v2). |
+| `source_access` | string | How this transcode node reads source media: `local` through its own library mount at the API servers' paths, `core` over HTTP from the API servers. Omitted on a proxy. See [node source access (v2)](#node-source-access-v2). |
 | `active_jobs`, `egress_kbps` | int | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only. |
 | `group` | string \| null | Co-location group. A group is only eligible while every enabled member is healthy. |
 | `max_jobs`, `max_bandwidth_kbps` | int \| null | Capacity caps. `null` means unlimited. `max_jobs` limits streams and file downloads on a proxy and transcodes on a transcode node. `max_bandwidth_kbps` limits a proxy's egress, and a proxy with it set takes no file downloads, because a download's rate is unknown and cannot be reserved; it is stored for a transcode node but not enforced, because a transcode node's output leaves through a proxy or the API server. |
@@ -416,13 +425,18 @@ provider origin, or the file is served from the API server when the planned
 proxy has none. The Jellyfin-compatible playback redirects use the same
 accessor.
 
-A node finds its own row by URL first: `NODE_URL` on the node is matched
-against `stream_nodes.url`, ignoring a trailing slash on either side. A proxy
-or transcode node refuses to start without `NODE_URL`: a URL guessed from its
-listen port could match a different machine's row and adopt its policy.
+A transcode node needs no matching: its key (`SILO_NODE_KEY`) names its row,
+and the API serves it that row's overrides already applied in its
+configuration document (`GET /api/internal/nodes/self/config`), at its
+30-second poll and at once after an admin change to the row.
 
-If the URL does not match, the node falls back to `NODE_NAME` against the
-registered name. This covers split-horizon topologies where `stream_nodes.url`
+A proxy finds its own row by URL first: `SILO_NODE_URL` (or the older
+`NODE_URL`) on the proxy is matched against `stream_nodes.url`, ignoring a
+trailing slash on either side. A proxy refuses to start without either: a URL guessed from its listen port could
+match a different machine's row and adopt its policy.
+
+If the URL does not match, the node falls back to `SILO_NODE_NAME` (or
+`NODE_NAME`) against the registered name. This covers split-horizon topologies where `stream_nodes.url`
 was registered as a public address the node's own `NODE_URL` never equals —
 with `public_url` carrying the client-facing address, `url` can simply be the
 node's internal address and match `NODE_URL` directly, which is the
@@ -437,8 +451,8 @@ goes on dispatching that row's backend and a row that has gone is not evidence
 an operator cleared the override. Fix the mismatch: the node adopts whatever it
 finds on its next poll.
 
-The node overlays its row onto the cluster-wide playback settings on every
-config reload, so the override is what that node probes with, advertises in
+A proxy overlays its row onto the cluster-wide playback settings on every
+config reload, and a transcode node receives them overlaid, so the override is what that node probes with, advertises in
 `capabilities.resolved`, and falls back to when a start request names no
 backend. The API dispatches remote transcodes with the node's
 `hw_accel_override` in preference to its own cluster setting, so the request
@@ -471,6 +485,78 @@ things do wait for a restart: the hardware encoder warmup that ran at boot,
 which stays primed for the old backend, and sessions already transcoding, which
 keep the backend they started with. Restart the node when you want all four in
 agreement immediately.
+
+### Node-declared configuration
+
+A node can declare part of its own row from its environment instead of an
+administrator entering it. `stream_nodes.env_managed` (`env_managed` on the
+node rows of `listAdminNodes` and the update response) names the fields the
+node declared at its last start, using the update body's field names.
+`updateAdminNode` refuses a change to any of them with `422 validation_failed`
+and one `errors[]` entry per field at `body.<field>`, code
+`managed_by_environment`. Restating a declared field's stored value passes, so
+the editor's full-form save keeps working. Enabling, disabling, draining,
+deleting and issuing a key are unaffected. `GET /admin/nodes/capabilities`
+reports `env_declarations`. Writing `env_managed` alone is not a configuration
+change: it moves neither the node's ETag nor the pool generation.
+
+A proxy declares once per start; a transcode node declares at startup and
+again every minute while it runs, so a row or lock changed behind its back is
+put back (`nodedeclare`, `nodepool.Declare`). An unset or blank variable
+declares nothing and leaves that field to the administrator, so removing a
+variable unlocks its field at the next start.
+Values follow the update body: `0` for a cap is unlimited, `0` for the
+download budget is no budget. A node checks each value before sending it and
+refuses to start on a bad one, naming the variable.
+
+| Field | Proxy | Transcode node |
+|---|---|---|
+| `name` | — (identity, set at self-registration) | `SILO_NODE_NAME` |
+| `url` | — (identity, set at self-registration) | `SILO_NODE_URL` |
+| `public_url` | `SILO_NODE_PUBLIC_URL` | — |
+| `group` | `SILO_NODE_GROUP` | `SILO_NODE_GROUP` |
+| `max_jobs` | `SILO_NODE_MAX_STREAMS` | `SILO_NODE_MAX_TRANSCODES` |
+| `max_bandwidth_kbps` | `SILO_NODE_MAX_BANDWIDTH_KBPS` | — |
+| `source_access` | — | `SILO_NODE_SOURCE_ACCESS` |
+| `hw_accel_override` | — | `SILO_NODE_HW_ACCEL` |
+| `hw_device_override` | — | `SILO_NODE_HW_DEVICE` |
+| `download_artifact_dir_override` | — | `SILO_NODE_DOWNLOAD_ARTIFACT_DIR` |
+| `download_artifact_max_bytes_override` | — | `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` |
+
+A proxy writes its declaration to the database before its configuration
+watcher first reads its row (`declareProxyNode` in `cmd/silo`), then publishes
+`node_pool_changed`. It finds its row as the watcher does, by
+`SILO_NODE_URL` (or `NODE_URL`) and then by `SILO_NODE_NAME` (or `NODE_NAME`)
+when exactly one row has that name. With neither name variable set it uses the
+watcher's fallback name `proxy`, unless it registers itself: an unnamed proxy
+with `SILO_NODE_REGISTER=true` is found by URL only, so several of them each
+get their own row. A proxy that matches no row starts as it
+always has when it declares nothing, and refuses to start when it declares
+something. With `SILO_NODE_REGISTER=true` it registers itself instead: a new
+enabled proxy row at its URL, named by its name variable or, with none set, by
+the URL's host. Registration is opt-in because a proxy can match no row and
+still have one, registered at an address clients reach it by; a second row at
+`SILO_NODE_URL` would hand clients an address they cannot reach. A match on a
+row that is not a proxy refuses
+startup when the proxy declares anything and is only logged when it does not.
+A transcode node declares through the core; see
+[transcode nodes](architecture/transcode-nodes.md#registration). A transcode
+node also enforces the values it acts on itself, its job cap, acceleration,
+device, source access and prepared-download directory and budget, whatever
+its row says; its group, name and URL are placement and identity on the main
+server's side and hold only through the row. See
+[what the node enforces](architecture/transcode-nodes.md#what-the-node-enforces).
+A proxy reads its row from the database the main server owns, so it is run
+by the same operator and enforces nothing beyond its row.
+
+Upgrade order: the main server first, since its migration adds the column.
+Proxies read node rows with it, so they follow the main server. A proxy that
+starts while the column is still missing (its main server is migrating beside
+it) starts without its declaration and applies it every 30 seconds until the
+column exists. Transcode
+nodes can go before or after: against an older main server a node that
+declares something logs a warning, starts on its row as it is, and offers the
+declaration again every 30 seconds until the main server takes it.
 
 ### `last_stats`
 
@@ -715,14 +801,18 @@ selection, which is round-robin and does no GPU work.
 ## `POST /api/v2/admin/nodes`
 
 Registers a node. Body: `name`, `type` (`proxy` or `transcode`), `url`, and the
-optional `public_url`, `group`, `max_jobs`, `max_bandwidth_kbps`. A
-non-positive cap and an empty group mean "unlimited" and "ungrouped"; an empty
-`public_url` means clients use `url`.
+optional `public_url`, `group`, `max_jobs`, `max_bandwidth_kbps` and
+`source_access`. A non-positive cap and an empty group mean "unlimited" and
+"ungrouped"; an empty `public_url` means clients use `url`; an omitted
+`source_access` means `local`, and a proxy accepts only `local`
+(`422 validation_failed` otherwise).
 
 `201 Created` with the created node in the same shape as one list entry (with
 no capability fields yet: nothing has been fetched). `422 validation_failed` when a
 required field is missing or `type` is not one of the two allowed values, and
-`409` when a node with that URL already exists with a different configuration; see
+`409` when a node with that URL already exists with a different configuration, or
+when another transcode node already has the same address spelled differently
+(`http://gpu`, `HTTP://GPU:80/`); see
 [node configuration lifecycle (v2)](#node-configuration-lifecycle-v2). The
 node pools are reloaded afterwards.
 
@@ -732,7 +822,8 @@ Updates a node's mutable fields. Every field is optional; an omitted field is
 left unchanged. An empty-string `group` clears the group, and a non-positive
 `max_jobs` or `max_bandwidth_kbps` clears that cap. The request needs the node's
 `config_etag` in `If-Match`: `428` without one, `412` when it is stale. A new
-`url` that belongs to another node gets `409`. See
+`url` that belongs to another node gets `409`, and so does a transcode node's
+new `url` that another transcode node already has under another spelling. See
 [node configuration lifecycle (v2)](#node-configuration-lifecycle-v2).
 
 `public_url` follows the same convention as the overrides below: `null` or an
@@ -761,14 +852,41 @@ when the node restarts; files in the old directory are not moved, so in-use file
 prepared again and cached ones are dropped. See
 [prepared download storage](architecture/download-storage.md).
 
+`source_access` (`local` or `core`) is writable here for a transcode node; a
+proxy accepts only `local`, and anything else is `422 validation_failed`. See
+[node source access (v2)](#node-source-access-v2).
+
 Capability fields are not writable here. They are owned by the health sweep,
 because only the node can say what hardware it has.
+
+### Node source access (v2)
+
+A transcode node reads the source media of its jobs in one of two ways, its
+`source_access`:
+
+- `local` (the default): from its own library mount, which must show every
+  file at the API servers' paths with the same size.
+- `core`: over HTTP from the API servers. The node needs no library mount, and
+  every byte it reads passes through the API servers, so they need the
+  bandwidth for it. `silo_node_source_bytes_sent_total{node}` on each API
+  server shows what each node reads.
+
+The setting is stored configuration: a change advances the node's `config_etag`
+and the pool generation, and the API server pushes `/admin/reload-config` to the
+node. The node applies it to the jobs it starts afterwards; running jobs keep
+their mode. `GET /api/v2/admin/nodes/capabilities` advertises
+`source_access: true` when the server takes the field.
+[Transcode nodes: core source access](architecture/transcode-nodes.md#core-source-access)
+describes the design.
 
 ## `DELETE /api/v2/admin/nodes/{id}`
 
 Removes a node. `204 No Content`, or `404 Not Found` for an unknown id. The
-node pools are reloaded afterwards. Sessions already streaming from the node
-are not torn down by this call. Like PUT, it needs the node's `config_etag` in
+node pools are reloaded afterwards. The node's credential is gone from the
+answering server before the `204`, and from the other API servers and proxies
+once `node_pool_changed` reaches them: nothing signs requests to the node or
+accepts its calls, so its sessions stop serving viewers (relays answer them as
+"node unavailable" and do not move them). The call sends the node nothing. Like PUT, it needs the node's `config_etag` in
 `If-Match`: `428` without one, `412` when it is stale.
 
 ## `POST /api/v2/admin/nodes/{id}/check`
@@ -3312,6 +3430,28 @@ served. The web nodes page shows `Draining · N transcodes left` and then
 `Drained · safe to stop` from these fields. See
 [node drain](architecture/node-drain.md) for the protocol.
 
+### Node keys (v2)
+
+`POST /api/v2/admin/nodes/{id}/key` (`issueAdminNodeKey`) issues a transcode
+node its own key and returns it once: `201 {"node_key": "snk1_<id>_<random>"}`
+with `Cache-Control: no-store`. The key is never returned again; the node row
+only reports `key_issued`. Every call rotates: the previous key is gone from
+this server's credential registry before the response, and from the other API
+servers and proxies once `node_pool_changed` reaches them (within a minute
+without it). The node's running streams fail until it restarts with the new
+key, so drain it first. A disabled node can take a key. The operation requires an acting
+administrator, rejects demo mode, takes no body and is non_retryable: after a
+lost response, issue again rather than replaying. A proxy node returns 409 (a
+proxy takes no key), a missing node 404, a server without the data cipher 503,
+invalid IDs 422, and repository failures a private 500 problem.
+
+The key is stored encrypted in `stream_nodes.node_key_ciphertext` (see
+[secret encryption](architecture/secret-encryption.md)). It is a credential, not
+configuration: issuing it advances neither `config_etag` nor the pool
+generation. `GET /api/v2/admin/nodes/capabilities` advertises `node_keys: true`
+when this server can issue keys. The node starts with this key and the API's
+URL; see [transcode nodes](architecture/transcode-nodes.md).
+
 ### Force reload nodes (v2)
 
 `POST /api/v2/admin/nodes/force-reload` (`forceReloadAdminNodes`) takes a snapshot
@@ -3454,6 +3594,14 @@ replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacem
 that names a different plugin ID than the installation. Both are refused as package errors
 (422) and nothing is installed.
 
+A replacement applies only to the installation it was read against. When another install,
+update or upload of the same plugin replaced the installation while this one looked up its
+catalog entry or downloaded its package, the later one is refused with 409 `conflict` and
+writes nothing: the newer release, its stored package and its files stay. It is refused
+before it stops the plugin, unless both finish at the same moment, when the newer release's
+process may be stopped and started again once. This covers catalog installs, `/update` and
+uploads; an automatic update in the same situation is skipped without recording a refusal.
+
 `PUT /api/v2/admin/plugins/installations/{id}` assigns `enabled` and/or `update_policy`
 (`auto`, `notify`, `off`, `manual`); an empty body is 422. Disabling stops the running plugin
 before the write; any enabled change rebuilds the event subscriber index. Repeating the
@@ -3594,7 +3742,10 @@ restart. An omitted `auto_provision` is true, and enabling an auth binding while
 is enabled is 409 `provider_already_enabled`
 ([external-sign-in.md](architecture/external-sign-in.md)). The task binding marks a server
 restart required and answers 200 with `restart_required` true.
-An omitted task trigger stores an empty object. Both are naturally idempotent upserts.
+An omitted task trigger stores an empty object. A runnable binding trigger outranks the
+manifest's `scheduled_task.default_trigger`; a schedule saved on the task page outranks both
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Both are naturally
+idempotent upserts.
 
 All four require an acting administrator, restrict demo access, answer 404 for an unknown
 installation, 409 for the reserved built-in host row, 422 for a blank key or capability, and

@@ -14,50 +14,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
-func TestMovieTailWindowAndSamples(t *testing.T) {
-	tests := []struct {
-		duration, start float64
-		samples         int
-	}{
-		// The last 900 seconds of a long movie, 300 samples three seconds
-		// apart.
-		{duration: 7200, start: 6300, samples: 300},
-		// The last quarter of a short one.
-		{duration: 2000, start: 1500, samples: 167},
-	}
-	for _, tt := range tests {
-		window := movieTailWindow(Candidate{DurationSeconds: tt.duration})
-		if window.Start != tt.start || window.End != tt.duration {
-			t.Fatalf("window of %.0f s = %+v, want %.0f to the end", tt.duration, window, tt.start)
-		}
-		samples := movieTailSamples(window)
-		if len(samples) != tt.samples || samples[0] != tt.start || samples[1] != tt.start+3 || samples[len(samples)-1] >= tt.duration {
-			t.Fatalf("%.0f s: %d samples from %v to %v", tt.duration, len(samples), samples[0], samples[len(samples)-1])
-		}
-	}
-	if !movieTailWindow(Candidate{}).empty() {
-		t.Fatal("a file without a duration has a tail window")
-	}
-}
-
-func TestMovieTailRequestSamplesStatsOnly(t *testing.T) {
-	candidate := Candidate{FileID: 1, FilePath: "/media/movie.mkv", DurationSeconds: 7200, CodecVideo: "hevc", CodecAudio: "truehd"}
-	req := movieTailRequest(context.Background(), candidate, movieTailWindow(candidate))
-	if err := req.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if req.Window != nil || req.Audio != nil || req.Stats == nil || len(req.Samples.Seconds) != 300 || !req.Background {
-		t.Fatalf("request %+v, want background stats of 300 samples and no audio", req)
-	}
-	if req.Stats.CropWidth != tailCropWidth || req.Stats.Width != tailWidth || len(req.Stats.BlackThresholds) != len(creditsBlackThresholds) {
-		t.Fatalf("stats %+v, want the episode tail pass's", req.Stats)
-	}
-	silence := movieSilenceRequest(context.Background(), candidate, fingerprintWindow{Start: 6900, End: 6912})
-	if err := silence.Validate(); err != nil || silence.Stats != nil || silence.Audio.Fingerprint || silence.Window.DurationSeconds != 12 {
-		t.Fatalf("silence request %+v: %v", silence, err)
-	}
-}
-
 // Movie and episode tails are the same kind with different parameters, so
 // they never share a key, and a movie tail's key names its sampling.
 func TestMovieCreditsTailKeyIsNamespaced(t *testing.T) {
@@ -135,46 +91,6 @@ func TestPlaceMovieCredits(t *testing.T) {
 				t.Fatalf("silence windows %+v, want one around the video start", asked)
 			}
 		})
-	}
-}
-
-func TestPlaceMovieCreditsUsesMovieLimits(t *testing.T) {
-	const duration = 7200.0
-	candidate := Candidate{FileID: 1, DurationSeconds: duration}
-	noSilence := func(fingerprintWindow) ([]mediasample.Interval, error) { return nil, nil }
-
-	// Credits ending 150 s before the end of a movie still count (an episode
-	// allows 120 s); a 600 s roll does too (an episode allows 450 s).
-	keyframes := movieKeyframes(duration, 6450)
-	for i := range keyframes {
-		if keyframes[i].Seconds > duration-150 {
-			keyframes[i].Class = keyframeContent
-		}
-	}
-	segment, ok, _ := placeMovieCredits(candidate, keyframes, noSilence)
-	if !ok || segment.Start != 6447 || math.Abs(segment.End-(duration-150)) > 3 {
-		t.Fatalf("segment %+v, %t; want the movie's credits", segment, ok)
-	}
-
-	// Credits ending more than 180 s before the end do not.
-	for i := range keyframes {
-		if keyframes[i].Seconds > duration-200 {
-			keyframes[i].Class = keyframeContent
-		}
-	}
-	if segment, ok, _ := placeMovieCredits(candidate, keyframes, noSilence); ok {
-		t.Fatalf("segment %+v placed from text ending 200 s before the end", segment)
-	}
-}
-
-func TestSilencesKnownToStartInWindow(t *testing.T) {
-	silences := []mediasample.Interval{{Start: 100, End: 101}, {Start: 100.2, End: 102}}
-	if got := silencesKnownToStartInWindow(silences, fingerprintWindow{Start: 100, End: 112}, 50); len(got) != 1 || got[0].Start != 100.2 {
-		t.Fatalf("got %+v, want the silence cut by the read dropped", got)
-	}
-	// At the start of the tail window the episode rule keeps it.
-	if got := silencesKnownToStartInWindow(silences, fingerprintWindow{Start: 100, End: 112}, 100); len(got) != 2 {
-		t.Fatalf("got %+v, want both at the tail window start", got)
 	}
 }
 

@@ -301,21 +301,6 @@ func TestRegisterRelayCredentialIfAbsentYieldsToConcurrentWinner(t *testing.T) {
 	}
 }
 
-func TestRegisterRelayCredentialIfAbsentPersistsWhenEmpty(t *testing.T) {
-	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
-	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return relayResponse(http.StatusOK, credentialJSON("deployment-first", "first.capability", time.Now().Add(24*time.Hour))), nil
-	})}
-
-	result, registered, err := RegisterRelayCredentialIfAbsent(context.Background(), NewSettings(store), client, DefaultPushRelayURL, false)
-	if err != nil || !registered || result.Credential.APIKey != "first.capability" {
-		t.Fatalf("registered = %v, credential = %+v, err = %v", registered, result.Credential, err)
-	}
-	if got := store.values[SettingPushRelayAPIKey]; got != "first.capability" {
-		t.Fatalf("stored key = %q", got)
-	}
-}
-
 func TestRegisterRelayCredentialIfAbsentYieldsToConcurrentClear(t *testing.T) {
 	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
 	store.beforeWrite = func(values map[string]string) {

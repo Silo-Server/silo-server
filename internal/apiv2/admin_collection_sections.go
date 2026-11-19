@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 // AdminCollectionSectionService reports the administrator Home and library
@@ -26,6 +27,9 @@ type AdminCollectionSection struct {
 	Enabled      bool   `json:"enabled"`
 	Position     int    `json:"position"`
 	PageRowCount int    `json:"page_row_count" doc:"Rows on the page that holds this row, turned-off rows included."`
+	// CollectionCount lets a client tell a row of collections that shows
+	// other collections too, which it edits, from one it can delete.
+	CollectionCount int `json:"collection_count,omitempty" doc:"For a row of collections (section_type collection_posters), how many collections it lists, this one included. Absent for every other row."`
 }
 type AdminCollectionSectionsOutput struct {
 	Body Collection[AdminCollectionSection]
@@ -56,6 +60,9 @@ func (reg *Registry) listAdminCollectionSections(ctx context.Context, in *AdminC
 		item := AdminCollectionSection{ID: ID(r.ID), Scope: r.Scope, SectionType: string(r.SectionType), Title: r.Title, Featured: r.Featured, Enabled: r.Enabled, Position: r.Position, PageRowCount: r.PageRowCount}
 		if r.LibraryID != nil {
 			item.LibraryID = new(ID(strconv.Itoa(*r.LibraryID)))
+		}
+		if sections.HoldsCollections(r.SectionType) {
+			item.CollectionCount = len(sections.ParseCollectionPostersConfig(r.Config))
 		}
 		items = append(items, item)
 	}

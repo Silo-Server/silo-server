@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -41,6 +42,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -339,19 +341,24 @@ type PlaybackWatchStopConfirmer interface {
 
 // PlaybackHandler serves Jellyfin playback negotiation endpoints.
 type PlaybackHandler struct {
-	cfg                     *config.Config
-	content                 ContentService
-	codec                   *ResourceIDCodec
-	deviceProfiles          *DeviceProfileStore
-	playbackStore           CompatPlaybackStore
-	sessionMgr              SessionManagerInterface
-	fileResolver            FilePathResolver
-	downloads               DownloadServer       // nil refuses /Items/{id}/Download
-	accessFilter            AccessFilterResolver // the viewer's scope for downloads
-	storeProvider           userstore.UserStoreProvider
-	ScopeResolver           ScopeResolver
-	NodePlanner             nodepool.SessionPlanner
-	JWTSecret               string
+	cfg            *config.Config
+	content        ContentService
+	codec          *ResourceIDCodec
+	deviceProfiles *DeviceProfileStore
+	playbackStore  CompatPlaybackStore
+	sessionMgr     SessionManagerInterface
+	fileResolver   FilePathResolver
+	downloads      DownloadServer       // nil refuses /Items/{id}/Download
+	accessFilter   AccessFilterResolver // the viewer's scope for downloads
+	storeProvider  userstore.UserStoreProvider
+	ScopeResolver  ScopeResolver
+	NodePlanner    nodepool.SessionPlanner
+	JWTSecret      string
+	// NodeKeys signs calls to transcode nodes with each node's own key.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants a transcode node the source of each start; nil
+	// sends none.
+	SourceGrants            nodesource.FileGranter
 	signalsNotifier         signalsChangedNotifier
 	FFmpegPath              string
 	HWAccel                 string
@@ -391,7 +398,10 @@ type PlaybackHandler struct {
 	// driven to refresh a stale token, so the node reconstructs from this
 	// server-authoritative store instead (see internal/noderecipe). Optional
 	// (nil disables it — integrated/no-node deployments need no handoff).
-	RecipeNodeStore    recipeNodePutter
+	RecipeNodeStore recipeNodePutter
+	// StreamDeny is the playback deny marker store every relay to a transcode
+	// node checks before it signs the request. Nil denies nothing.
+	StreamDeny         *playback.StreamDeny
 	compatToneMapProbe func(context.Context, string, string, string) (tonemap.Capabilities, error)
 	// Test hooks for the Dolby Vision strip: the per-file RPU probe and the
 	// API host's dovi_rpu filter check.
@@ -467,6 +477,11 @@ var errRemoteTranscodeStartFailed = errors.New("remote transcode start failed")
 var errRemoteSoftwareToneMapStartFailed = errors.New("remote software tone-map start failed")
 var errRemoteStartAdoptedLocal = errors.New("remote start superseded by local transcode")
 var errRemoteStartAdoptedRemote = errors.New("remote start adopted an already-published remote transcode")
+
+// errRemoteKeyframePlanLost reports a node restart of a keyframe-planned
+// session whose replacement keeps FFmpeg's playlist: its segments don't match
+// the planned playlist the player holds.
+var errRemoteKeyframePlanLost = errors.New("transcode node did not plan the keyframe playlist the player holds")
 
 type remoteStartAdoptedRemoteError struct {
 	nodeURL string
@@ -636,12 +651,15 @@ func (h *PlaybackHandler) localToneMapCapabilities(ctx context.Context) (tonemap
 // remoteToneMapCapabilities retrieves one transcode node's authenticated,
 // smoke-tested executor inventory under a bounded request deadline.
 func (h *PlaybackHandler) remoteToneMapCapabilities(ctx context.Context, nodeURL string) (tonemap.Capabilities, error) {
-	info, err := h.remoteToneMapCapabilityInfo(ctx, nodeURL)
+	info, err := h.remoteToneMapCapabilityInfo(ctx, nodeauth.TargetTranscode, nodeURL)
 	return info.ToneMapCapabilities, err
 }
 
-func (h *PlaybackHandler) remoteToneMapCapabilityInfo(ctx context.Context, nodeURL string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, h.JWTSecret)
+// remoteToneMapCapabilityInfo reads the capability report of the worker of
+// kind target at nodeURL. The caller names the kind from where it got the
+// URL (the proxy or the transcode pool); proxies serve the same route.
+func (h *PlaybackHandler) remoteToneMapCapabilityInfo(ctx context.Context, target nodeauth.Target, nodeURL string) (playback.HWAccelInfo, error) {
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, target, h.NodeKeys)
 	if err != nil {
 		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		return playback.HWAccelInfo{}, err
@@ -661,7 +679,7 @@ func (h *PlaybackHandler) compatAudioBoostNodeURLs(ctx context.Context, timeout 
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	return h.compatAudioBoostNodeURLsFor(ctx, enumerator.TranscodeNodeURLs(), timeout)
+	return h.compatAudioBoostNodeURLsFor(ctx, nodeauth.TargetTranscode, enumerator.TranscodeNodeURLs(), timeout)
 }
 
 func (h *PlaybackHandler) compatAudioBoostProxyNodeURLs(ctx context.Context, timeout time.Duration) (map[string]struct{}, error) {
@@ -669,10 +687,10 @@ func (h *PlaybackHandler) compatAudioBoostProxyNodeURLs(ctx context.Context, tim
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	return h.compatAudioBoostNodeURLsFor(ctx, enumerator.ProxyNodeURLs(), timeout)
+	return h.compatAudioBoostNodeURLsFor(ctx, nodeauth.TargetProxy, enumerator.ProxyNodeURLs(), timeout)
 }
 
-func (h *PlaybackHandler) compatAudioBoostNodeURLsFor(ctx context.Context, nodeURLs []string, timeout time.Duration) (map[string]struct{}, error) {
+func (h *PlaybackHandler) compatAudioBoostNodeURLsFor(ctx context.Context, target nodeauth.Target, nodeURLs []string, timeout time.Duration) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -687,7 +705,7 @@ func (h *PlaybackHandler) compatAudioBoostNodeURLsFor(ctx context.Context, nodeU
 		wg.Add(1)
 		go func(i int, nodeURL string) {
 			defer wg.Done()
-			results[i].info, results[i].err = h.remoteToneMapCapabilityInfo(fetchCtx, nodeURL)
+			results[i].info, results[i].err = h.remoteToneMapCapabilityInfo(fetchCtx, target, nodeURL)
 		}(i, nodeURL)
 	}
 	wg.Wait()
@@ -1297,7 +1315,11 @@ func NewPlaybackHandler(
 	h.SubtitleCache = playback.NewSubtitleCache(func() string { return h.TranscodeDir })
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (late-set) JWTSecret lazily, matching the native handler.
-	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
+	h.tm.NodeRecipesFn = func() playback.NodeRecipeDeleter {
+		deleter, _ := h.RecipeNodeStore.(playback.NodeRecipeDeleter)
+		return deleter
+	}
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		return playback.TranscodeRuntimeConfig{
 			TranscodeDir:            h.TranscodeDir,
@@ -1729,10 +1751,13 @@ func (h *PlaybackHandler) startRemoteTranscode(
 ) error {
 	return h.startRemoteTranscodeWithToneMapMode(
 		ctx, playSessionID, upstreamSessionID, source, file,
-		initialSeekSeconds, transcodeNodeURL, "",
+		initialSeekSeconds, transcodeNodeURL, "", false,
 	)
 }
 
+// startRemoteTranscodeWithToneMapMode is startRemoteTranscode with a required
+// tone-map mode. requireKeyframePlan rejects a node that keeps FFmpeg's
+// playlist: a restart of a session whose player holds the planned one.
 func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	ctx context.Context,
 	playSessionID string,
@@ -1742,6 +1767,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	initialSeekSeconds float64,
 	transcodeNodeURL string,
 	requiredToneMapMode tonemap.Mode,
+	requireKeyframePlan bool,
 ) error {
 	// Remote contenders for one upstream session single-flight across route
 	// binding, node start, and durable publication. This uses a dedicated key,
@@ -1778,7 +1804,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	hevcEncoding := compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 	if sourceAudioChannels > 0 || hevcEncoding {
 		capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
-		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
+		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, nodeauth.TargetTranscode, transcodeNodeURL)
 		cancelCapabilityFetch()
 		if capabilityErr != nil {
 			return fmt.Errorf("load transcode node recipe capabilities: %w", capabilityErr)
@@ -1845,7 +1871,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			var capabilityErr error
 			capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
 			var info playback.HWAccelInfo
-			info, capabilityErr = h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
+			info, capabilityErr = h.remoteToneMapCapabilityInfo(capabilityCtx, nodeauth.TargetTranscode, transcodeNodeURL)
 			toneMapCapabilities = info.ToneMapCapabilities
 			nodeProbeTimeoutMillis = info.ProbeRequestTimeoutMillis
 			cancelCapabilityFetch()
@@ -1878,8 +1904,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		}
 	}
 
+	// A Jellyfin transcode runs under its playback session's own id.
 	reqBody := transcodenode.TranscodeStartRequest{
 		SessionID:              upstreamSessionID,
+		PlaybackSessionID:      upstreamSessionID,
+		MediaFileID:            file.ID,
 		InputPath:              file.FilePath,
 		SourceVideoCodec:       sourceVideoCodec,
 		SourceVideoProfile:     sourceVideoProfile,
@@ -1905,6 +1934,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		TotalDuration:          float64(source.Version.Duration),
 		RequireReady:           toneMapRecipe.mode != "",
 		ThrottleSeconds:        playback.ConfiguredTranscodeThrottleSeconds(ctx, h.SettingsRepo),
+	}
+	if h.sessionMgr != nil {
+		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
+			reqBody.UserID, reqBody.ProfileID = upstream.UserID, upstream.ProfileID
+		}
 	}
 	if playback.IsAudioToAACStereoDownmixV3(reqBody.SourceAudioChannels, reqBody.TargetCodecAudio, reqBody.TargetAudioChannels) {
 		reqBody.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3
@@ -1958,6 +1992,20 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		reqBody.RequireReady = true
 	}
 
+	// The grant names the node the start is signed for. Every start, the first
+	// candidate's or a later one's, mints its own.
+	if h.SourceGrants != nil {
+		nodeID, err := nodepool.SignedTranscodeNodeID(h.NodeKeys, transcodeNodeURL)
+		if err != nil {
+			return fmt.Errorf("grant transcode node its source: %w", err)
+		}
+		grant, err := nodesource.GrantFile(ctx, h.SourceGrants, nodeID, file)
+		if err != nil {
+			return fmt.Errorf("grant transcode node its source: %w", err)
+		}
+		reqBody.SourceGrant = grant
+	}
+
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
 		body, err := json.Marshal(request)
 		if err != nil {
@@ -1970,7 +2018,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("build transcode request: %w", logredact.SanitizeURLError(err))
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		if err := nodeauth.Sign(httpReq, transcodeNodeURL, h.JWTSecret); err != nil {
+		if err := nodeauth.SignTranscode(httpReq, transcodeNodeURL, h.NodeKeys); err != nil {
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("sign transcode request: %w", err)
 		}
 		resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpReq, "transcode_start")
@@ -1988,6 +2036,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusAccepted {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			// The caller tries the next candidate on any refused start; a
+			// node at its own job cap is also held back from the next one.
+			if nodepool.RefusedAtCapacity(resp) {
+				nodepool.ReportAtCapacity(h.NodePlanner, transcodeNodeURL)
+			}
 			if request.ToneMapMode != "" {
 				if validationErr := transcodenode.ToneMapExecutionErrorForResponse(
 					resp.StatusCode,
@@ -2103,6 +2156,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
 	}
+	if requireKeyframePlan && !nodeResponse.KeyframePlanned {
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, errRemoteKeyframePlanLost)
+	}
 	if err := transcodenode.ValidateCopyVideoMPEGTSAttestation(reqBody, nodeResponse); err != nil {
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
@@ -2178,6 +2235,8 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
 		KeyframePlaylist:       reqBody.KeyframePlaylist,
+		KeyframePlanned:        nodeResponse.KeyframePlanned,
+		KeyframePlanResume:     nodeResponse.KeyframePlanResume,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
 		RequireAudioTrack:      reqBody.RequireAudioTrack,
@@ -2261,6 +2320,14 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 					card.RoutingEgress = assignment.Egress
 					card.RoutingEgressNodeID = assignment.EgressNodeID
 				}
+			}
+			// The play records its routing assignment only after a start
+			// succeeds, so while a start runs it can name the previous
+			// executor or none. The node card binds the node it was started
+			// on, by the row id of the node its URL names.
+			if card.TranscodeNodeURL != "" && (playSession == nil || playSession.RoutingAssignment == nil ||
+				!sameCompatNode(playSession.RoutingAssignment.ExecutionNodeURL, card.TranscodeNodeURL)) {
+				card.RoutingExecutionNodeID = h.compatTranscodeNodeID(card.TranscodeNodeURL, nil)
 			}
 			recipe = &card
 		}
@@ -2599,6 +2666,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			source.SupportsDirectStream = true
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
+		// The client gets, and the play records, a per-play ETag that a
+		// static stream can present as its credential (PlaybackSessionAuth).
+		source.ETag = compatPlayTag(playSessionID, source.ETag)
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, source)
 		// Jellyfin Web stops retrying a failed stream with copy refused once the
@@ -2641,7 +2711,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					SupportsExternalStream: true,
 					DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID, dl.ID),
 					DeliveryMethod:         "External",
-					Path:                   downloadedSubtitlePath(source.Version, dl),
+					Path:                   subtitleStreamPath(routeItemID, source.ID, streamIndex, format),
 					IsExternalURL:          boolPtr(false),
 				})
 			}
@@ -3173,7 +3243,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID string, sour
 		if delivery.Format != "" {
 			stream.DeliveryURL = subtitleDeliveryURL(routeItemID, source.ID, stream.Index, delivery.Format, playSessionID)
 			if stream.IsExternal {
-				stream.Path = fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, source.ID, stream.Index, delivery.Format)
+				stream.Path = subtitleStreamPath(routeItemID, source.ID, stream.Index, delivery.Format)
 			}
 		}
 		if !source.SupportsDirectPlay {
@@ -3913,9 +3983,11 @@ func audioTrackDisplayTitle(track models.AudioTrack) string {
 	if lang != "" {
 		title = lang + " - " + title
 	}
-	// Append embedded title only when it adds info beyond codec/channels (e.g. "Commentary").
-	embedded := strings.TrimSpace(firstNonEmpty(track.Title, track.EmbeddedTitle))
-	if !isGenericAudioLabel(embedded) {
+	// Append the file's own title tag only when it adds something, such as
+	// "Commentary". Title is not used: for an untagged track the scanner fills
+	// it with ffprobe's codec long name ("ATSC A/52B (AC-3, E-AC-3)").
+	embedded := strings.TrimSpace(track.EmbeddedTitle)
+	if !audioLabelRepeatsTitle(embedded, title, track) {
 		title += " - " + embedded
 	}
 	return title
@@ -3978,12 +4050,64 @@ func audioChannelsDisplayName(channels int) string {
 	}
 }
 
-func isGenericAudioLabel(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "stereo", "mono", "5.1", "7.1", "surround", "5.1 surround", "7.1 surround":
-		return true
+// audioLabelRepeatsTitle reports whether every word of an audio title tag is
+// already in the display title, one of the language's codes or the codec, or
+// is a channel word that fits the track, as with tags such as "English",
+// "ENG 5.1" or "EAC3 Surround 5.1". A channel word that contradicts the track,
+// such as "Mono" on a stereo track, is kept.
+func audioLabelRepeatsTitle(label, displayTitle string, track models.AudioTrack) bool {
+	// A tag that is itself a language tag with a subtag, such as "de-DE" on a
+	// de-AT track, is compared whole: a different region says something new.
+	if strings.Contains(label, "-") {
+		if tag := lang.CanonicalTag(label); tag != "" && lang.PrimaryLanguage(tag) != "" &&
+			lang.PrimaryLanguage(tag) == lang.PrimaryLanguage(track.Language) {
+			return strings.EqualFold(tag, lang.CanonicalTag(track.Language))
+		}
 	}
-	return false
+	known := map[string]bool{}
+	switch {
+	case track.Channels == 1:
+		known["mono"], known["1.0"] = true, true
+	case track.Channels == 2:
+		known["stereo"], known["2.0"] = true, true
+	case track.Channels > 2:
+		known["surround"] = true
+	}
+	sources := []string{displayTitle, track.Language, track.Codec, compatChannelLayout(track.Layout)}
+	sources = append(sources, lang.CodeAliases(lang.PrimaryLanguage(track.Language))...)
+	for _, s := range sources {
+		for _, word := range audioLabelWords(s) {
+			known[word] = true
+		}
+	}
+	for _, word := range audioLabelWords(label) {
+		if !known[word] {
+			return false
+		}
+	}
+	return true
+}
+
+// audioCodecSpellings joins hyphenated codec names so "AC-3" and "E-AC-3"
+// match the stored codecs ac3 and eac3.
+var audioCodecSpellings = strings.NewReplacer("e-ac-3", "eac3", "ac-3", "ac3")
+
+func audioLabelWords(s string) []string {
+	words := strings.FieldsFunc(audioCodecSpellings.Replace(strings.ToLower(s)), func(r rune) bool {
+		switch r {
+		case '-', '_', '/', ',', '(', ')', '[', ']', ':', '|':
+			return true
+		}
+		return unicode.IsSpace(r)
+	})
+	out := words[:0]
+	for _, word := range words {
+		// A trailing full stop ("English.") is punctuation; "5.1" keeps its dot.
+		if word = strings.TrimRight(word, "."); word != "" {
+			out = append(out, word)
+		}
+	}
+	return out
 }
 
 func compatSubtitleDisplayTitle(track catalog.VersionSubtitleTrack) string {
@@ -4252,20 +4376,6 @@ func subtitleDeliveryMethod(external bool) string {
 	return "Embed"
 }
 
-func downloadedSubtitlePath(version catalog.FileVersion, sub subtitles.DownloadedSubtitle) string {
-	name := strings.TrimSpace(downloadedSubtitleDisplayTitle(sub))
-	if name == "" {
-		name = mediaSourceName(version)
-	}
-	if name == "" {
-		name = "subtitle"
-	}
-	name = strings.ReplaceAll(name, "/", "-")
-	name = strings.ReplaceAll(name, "\\", "-")
-	filename := name + "." + subtitleRouteFormat(string(sub.Format))
-	return filepath.ToSlash(filepath.Join("/silo/subtitles", filename))
-}
-
 func compatVideoPath(routeItemID string, audioV2 bool) string {
 	base := "/Videos/" + routeItemID
 	if audioV2 {
@@ -4279,7 +4389,7 @@ func compatVideoPath(routeItemID string, audioV2 bool) string {
 // whole account for as long as the login lasts, and a logged URL must grant at
 // most this play's media.
 func subtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, format, playSessionID string) string {
-	base := fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
+	base := subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format)
 	if playSessionID == "" {
 		return base
 	}
@@ -4294,14 +4404,23 @@ func storedSubtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex in
 	if playSessionID != "" {
 		query.Set("PlaySessionId", playSessionID)
 	}
-	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s?%s", routeItemID, mediaSourceID, streamIndex, format, query.Encode())
+	return subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format) + "?" + query.Encode()
+}
+
+// subtitleStreamPath is the subtitle stream route without a query. An external
+// subtitle's Path is this route, sidecar or stored alike, so a client that
+// fetches by Path gets the subtitle. A stored subtitle's Path resolves by its
+// stream index against the current stored list; only its DeliveryUrl pins it
+// by ID, because a query would hide the route's extension.
+func subtitleStreamPath(routeItemID, mediaSourceID string, streamIndex int, format string) string {
+	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
 }
 
 func subtitlePath(track catalog.VersionSubtitleTrack, routeItemID, mediaSourceID string, streamIndex int, format string) string {
 	if !track.External {
 		return ""
 	}
-	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
+	return subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format)
 }
 
 func subtitleExternalURL(track catalog.VersionSubtitleTrack) *bool {

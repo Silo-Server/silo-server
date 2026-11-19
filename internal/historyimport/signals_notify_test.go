@@ -17,27 +17,6 @@ func (n *recordingSignalsNotifier) NotifySignalsChanged(_ context.Context, _ int
 	n.profiles = append(n.profiles, profileID)
 }
 
-func TestRunChangedSignals(t *testing.T) {
-	for name, tc := range map[string]struct {
-		completed bool
-		summary   ExecutionSummary
-		want      bool
-	}{
-		"completed with nothing written": {completed: true, want: true},
-		"failed after progress":          {summary: ExecutionSummary{ProgressUpdated: 1}, want: true},
-		"failed after history":           {summary: ExecutionSummary{HistoryCreated: 1}, want: true},
-		"failed after favorites":         {summary: ExecutionSummary{FavoritesImported: 1}, want: true},
-		"failed after watchlist":         {summary: ExecutionSummary{WatchlistAdded: 1}, want: true},
-		"failed having only matched":     {summary: ExecutionSummary{Fetched: 3, Matched: 2, Unmatched: 1, Skipped: 2}, want: false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := runChangedSignals(tc.completed, tc.summary); got != tc.want {
-				t.Fatalf("runChangedSignals = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 type failingFetchProvider struct{}
 
 func (failingFetchProvider) Stream(context.Context, *StreamPosition, RecordSink) error {

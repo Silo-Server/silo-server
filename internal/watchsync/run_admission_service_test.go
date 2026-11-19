@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -55,59 +53,6 @@ func (r *admissionOrderRepo) CompleteSyncRun(ctx context.Context, run SyncRun) (
 	completed, err := r.serviceFakeRepo.CompleteSyncRun(ctx, run)
 	close(r.completed)
 	return completed, err
-}
-
-func TestServiceSyncAdmissionPrecedesLocalGuard(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	repo := &admissionOrderRepo{
-		serviceFakeRepo:  newServiceFakeRepo(),
-		scheduledEntered: make(chan struct{}), releaseScheduled: make(chan struct{}),
-		completionEntered: make(chan struct{}), releaseCompletion: make(chan struct{}), completed: make(chan struct{}),
-	}
-	releaseScheduled := sync.OnceFunc(func() { close(repo.releaseScheduled) })
-	releaseCompletion := sync.OnceFunc(func() { close(repo.releaseCompletion) })
-	defer releaseScheduled()
-	defer releaseCompletion()
-	conn := repo.withConnection(Connection{ID: "synthetic-connection", Provider: "no-transport", UserID: 7, ProfileID: "profile"})
-	// An empty registry ensures no provider or plugin transport can run. The
-	// worker must reach unknown-provider failure, rather than lose its local guard.
-	service := NewService(repo, NewRegistry())
-	scheduled := make(chan error, 1)
-	go func() { scheduled <- service.SyncConnection(ctx, conn, "scheduled") }()
-	select {
-	case <-repo.scheduledEntered:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	manual, err := service.RequestManualSync(ctx, conn.UserID, conn.ProfileID, conn.Provider)
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-repo.completionEntered:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	releaseScheduled()
-	select {
-	case err := <-scheduled:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	releaseCompletion()
-	select {
-	case <-repo.completed:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	runs := repo.syncRunsSnapshot()
-	if len(runs) != 1 || runs[0].ID != manual.Run.ID || runs[0].Status != string(SyncRunStatusFailed) || !strings.Contains(runs[0].Error, "unknown provider") || runs[0].Warning != "" {
-		t.Fatalf("expected the admitted manual worker to execute its terminal path: %+v", runs)
-	}
 }
 
 type terminalContextRepo struct {

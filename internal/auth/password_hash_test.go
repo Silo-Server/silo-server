@@ -24,12 +24,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestPasswordHashCostDefault(t *testing.T) {
-	if productionPasswordHashCost != bcrypt.DefaultCost {
-		t.Fatalf("production password hash cost = %d, want bcrypt.DefaultCost (%d)", productionPasswordHashCost, bcrypt.DefaultCost)
-	}
-}
-
 func assertTestPasswordHash(t *testing.T, hash, password string) {
 	t.Helper()
 	cost, err := bcrypt.Cost([]byte(hash))

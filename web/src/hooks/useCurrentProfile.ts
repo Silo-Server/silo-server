@@ -3,7 +3,7 @@ import { useProfiles } from "@/hooks/queries/profiles";
 import { storage } from "@/utils/storage";
 import type { Profile } from "@/api/types";
 
-export function resolveCurrentProfile(
+function resolveCurrentProfile(
   profiles: Profile[],
   cachedProfile: Profile | null,
   selectedProfileId?: string | null,

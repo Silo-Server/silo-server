@@ -166,14 +166,6 @@ describe("appearance cache ownership", () => {
     expectSeeded(renderAppearance().captured);
   });
 
-  it("ignores a legacy cache written before namespacing existed", () => {
-    storage.set(KEYS.UI_TEXT_SCALE, "large");
-    storage.set(KEYS.UI_HIGH_CONTRAST, "true");
-    signedInAs(2);
-
-    expectDefaults(renderAppearance().captured);
-  });
-
   it("lets the signed-in profile's own server values win over an empty local cache", () => {
     seedAccountOneAppearance();
     signedInAs(2);

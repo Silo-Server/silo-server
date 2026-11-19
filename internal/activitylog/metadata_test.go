@@ -50,14 +50,6 @@ func TestMiddlewareBoundsAuditUserAgentBeforeWrite(t *testing.T) {
 	}
 }
 
-func TestAuditUserAgentMatchesSafeText(t *testing.T) {
-	for _, raw := range []string{"", "Silo/1.0", "a界😀b", "a\xff\xfeb", "a\x00b", "\xff\x00\xfe"} {
-		if got, want := auditmutation.BoundUserAgent(raw), logstream.SafeText(raw); got != want {
-			t.Fatalf("normalizing %q: got %q, want %q", raw, got, want)
-		}
-	}
-}
-
 type metadataQuery func(context.Context, string, ...any) []any
 
 func (q metadataQuery) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {

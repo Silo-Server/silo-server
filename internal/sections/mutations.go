@@ -90,12 +90,7 @@ func scopeMutation(scope string, library *int) sectionMutation {
 func referencesOf(sections []*PageSection) []string {
 	ids := []string{}
 	for _, section := range sections {
-		var cfg struct {
-			ID string `json:"library_collection_id"`
-		}
-		if json.Unmarshal(section.Config, &cfg) == nil && cfg.ID != "" {
-			ids = append(ids, cfg.ID)
-		}
+		ids = append(ids, LibraryCollectionIDsOf(section.Config)...)
 	}
 	return ids
 }

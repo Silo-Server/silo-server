@@ -99,11 +99,19 @@ const ClearEmptiedExtraStillsCTE = `,
 // extraction records its key too, with still_retry_after set when the failure
 // may pass, or NULL when the file cannot be decoded and waits for it to change.
 // A sidecar copy's source is a file:// URL instead, and a scan replaces a
-// generated still with it.
+// generated still with it. A movie's frame poster uses the same frame prefix
+// in media_items.poster_source_path; frameSourcePatternSQL and the partial
+// index idx_media_items_frame_poster spell it out, so change them with it.
 const (
 	StillSourceFramePrefix       = "frame:"
 	StillSourceFrameFailedPrefix = "frame-failed:"
 )
+
+// frameKeySQL is the frame key of the media_files row aliased f: its id, size
+// and modification time, so a replaced file gets a new key. It is NULL while
+// the size is unknown.
+const frameKeySQL = `f.id || '?v=' || f.file_size || '-' ||
+					COALESCE(floor(extract(epoch FROM f.file_modified_at))::bigint, 0)`
 
 // PendingFrameStill is an extra that needs a generated still: it has no
 // sidecar image, and no frame (or failure still waiting out its retry)
@@ -128,8 +136,7 @@ func (r *ExtraRepository) ListPendingFrameStills(ctx context.Context, limit int)
 				e.content_id, e.still_source, e.still_retry_after,
 				f.id AS file_id, COALESCE(f.duration, 0)::int AS duration,
 				f.duration > 0 OR f.probe_updated_at IS NOT NULL OR f.probe_failed_at IS NOT NULL AS probed,
-				f.id || '?v=' || f.file_size || '-' ||
-					COALESCE(floor(extract(epoch FROM f.file_modified_at))::bigint, 0) AS frame_key
+				`+frameKeySQL+` AS frame_key
 			FROM media_extras e
 			JOIN media_files f ON f.extra_id = e.content_id AND f.missing_since IS NULL
 			JOIN media_folders folder ON folder.id = f.media_folder_id AND folder.enabled

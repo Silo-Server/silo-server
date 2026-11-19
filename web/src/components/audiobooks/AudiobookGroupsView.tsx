@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { AudiobookGroup } from "@/api/types";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
@@ -20,7 +20,9 @@ import {
 import { useT, type Translate } from "@/i18n";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useUICustomization } from "@/hooks/useUICustomization";
 import { formatHoursMinutes } from "@/lib/audiobooks/duration";
+import { cardGridClasses } from "@/lib/uiCustomization";
 
 interface AudiobookGroupsViewProps {
   libraryId: number;
@@ -42,22 +44,27 @@ function groupTotals(t: Translate, group: AudiobookGroup): string {
 
 /** The profile's listening across the group, or nothing before they start it. */
 function groupListening(t: Translate, group: AudiobookGroup): string | undefined {
-  if (group.in_progress_count > 0) {
-    return t("web.audiobooks.groups.statInProgress", {
-      count: group.in_progress_count,
-      count_text: group.in_progress_count,
-    });
-  }
   if (group.finished_count > 0 && group.finished_count === group.item_count) {
     return t("web.audiobooks.groups.statAllFinished");
   }
+  const parts: string[] = [];
   if (group.finished_count > 0) {
-    return t("web.audiobooks.groups.statFinished", {
-      count: group.finished_count,
-      count_text: group.finished_count,
-    });
+    parts.push(
+      t("web.audiobooks.groups.statFinished", {
+        count: group.finished_count,
+        count_text: group.finished_count,
+      }),
+    );
   }
-  return undefined;
+  if (group.in_progress_count > 0) {
+    parts.push(
+      t("web.audiobooks.groups.statInProgress", {
+        count: group.in_progress_count,
+        count_text: group.in_progress_count,
+      }),
+    );
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function groupInitials(name: string): string {
@@ -70,18 +77,10 @@ function groupInitials(name: string): string {
 }
 
 /** A group's cover; one that fails to load leaves a plain tile, not a broken image. */
-function GroupCover({
-  url,
-  className,
-  style,
-}: {
-  url: string;
-  className: string;
-  style?: CSSProperties;
-}) {
+function GroupCover({ url, className }: { url: string; className: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
-    return <div aria-hidden="true" className={`bg-surface-raised ${className}`} style={style} />;
+    return <div aria-hidden="true" className={`bg-surface-raised ${className}`} />;
   }
   return (
     <img
@@ -91,7 +90,6 @@ function GroupCover({
       decoding="async"
       onError={() => setFailed(true)}
       className={`bg-muted object-cover ${className}`}
-      style={style}
     />
   );
 }
@@ -107,28 +105,74 @@ function InitialsTile({ name, className }: { name: string; className: string }) 
 }
 
 /**
- * A series' first covers side by side, each partly under the one before it,
- * so the series reads as a run of books.
+ * A series' cover, square like the Books grid: the first of its covers that
+ * loads. A missing one falls through to the next, so one book's broken
+ * artwork does not blank the whole series, and none loading shows initials.
  */
-function SeriesFan({ group }: { group: AudiobookGroup }) {
-  const posters = group.poster_urls.slice(0, 3);
-  if (posters.length === 0) {
-    return <InitialsTile name={group.name} className="aspect-[3/2] w-full rounded-xl text-2xl" />;
+function SeriesCover({ group }: { group: AudiobookGroup }) {
+  // Failed URLs, not a count: a refetch with new (re-signed or repaired) URLs
+  // tries every cover again.
+  const [failedUrls, setFailedUrls] = useState<ReadonlySet<string>>(() => new Set());
+  const url = group.poster_urls.find((candidate) => !failedUrls.has(candidate));
+  if (!url) {
+    return <InitialsTile name={group.name} className="aspect-square w-full rounded-xl text-2xl" />;
   }
   return (
-    <div className="relative aspect-[3/2] w-full">
-      {posters.map((url, i) => (
-        <GroupCover
-          key={url}
-          url={url}
-          className="absolute top-0 aspect-square w-[66%] rounded-xl shadow-[0_14px_26px_-12px_rgb(0_0_0/0.85),-6px_0_14px_-6px_rgb(0_0_0/0.6)]"
-          style={{
-            insetInlineStart: `${i * 17}%`,
-            zIndex: posters.length - i,
-            filter: i === 0 ? undefined : `brightness(${1 - i * 0.17})`,
-          }}
+    <img
+      key={url}
+      src={url}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailedUrls((failed) => new Set(failed).add(url))}
+      className="bg-muted aspect-square w-full rounded-xl object-cover"
+    />
+  );
+}
+
+/** Series longer than this draw one continuous bar instead of a segment per book. */
+const MAX_RUN_SEGMENTS = 12;
+
+/**
+ * The series' length and the profile's listening in one bar: a segment per
+ * book, filled from the start for finished books, then half-filled for books
+ * in progress. The server sends counts, not positions, so the fill order is
+ * not the books' series order. The stats text says the same, so the bar is
+ * decorative.
+ */
+function SeriesRun({ group }: { group: AudiobookGroup }) {
+  const total = Math.max(group.item_count, 1);
+  const finished = Math.min(group.finished_count, total);
+  const inProgress = Math.min(group.in_progress_count, total - finished);
+  const track = "bg-foreground/15";
+  const fill = "bg-foreground";
+  if (total > MAX_RUN_SEGMENTS) {
+    const finishedPct = (finished / total) * 100;
+    // Half a book each, as in the segmented bar.
+    const inProgressPct = (inProgress / total) * 50;
+    return (
+      <div aria-hidden="true" className={`relative h-1 overflow-hidden rounded-full ${track}`}>
+        <div
+          className={`absolute inset-y-0 start-0 ${fill}`}
+          style={{ width: `${finishedPct}%` }}
         />
-      ))}
+        <div
+          className={`absolute inset-y-0 ${fill}`}
+          style={{ insetInlineStart: `${finishedPct}%`, width: `${inProgressPct}%` }}
+        />
+      </div>
+    );
+  }
+  return (
+    <div aria-hidden="true" className="flex h-1 gap-0.5">
+      {Array.from({ length: total }, (_, i) => {
+        const fillWidth = i < finished ? "w-full" : i < finished + inProgress ? "w-1/2" : null;
+        return (
+          <div key={i} className={`relative flex-1 overflow-hidden rounded-full ${track}`}>
+            {fillWidth && <div className={`absolute inset-y-0 start-0 ${fillWidth} ${fill}`} />}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -156,7 +200,8 @@ function CoverMosaic({ group }: { group: AudiobookGroup }) {
 /**
  * Grouped Library-tab browse for audiobook libraries: Authors and Narrators
  * render as rows with cover stacks and listening stats; Series render as a
- * card grid. Selecting a group drops back into the Books grid filtered to it.
+ * cover grid sized like the Books grid, each with a bar of its books.
+ * Selecting a group drops back into the Books grid filtered to it.
  */
 export default function AudiobookGroupsView({
   libraryId,
@@ -164,6 +209,8 @@ export default function AudiobookGroupsView({
   onSelectGroup,
 }: AudiobookGroupsViewProps) {
   const t = useT();
+  const { cardPresentation } = useUICustomization();
+  const seriesGridClasses = cardGridClasses(cardPresentation.poster_size);
   // Authors/narrators default to most-books-first (collection heavy hitters);
   // series read more naturally alphabetized.
   const [sort, setSort] = useState<AudiobookGroupSort>(groupBy === "series" ? "name" : "count");
@@ -249,10 +296,10 @@ export default function AudiobookGroupsView({
 
       {isInitialLoading ? (
         isSeries ? (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+          <div className={seriesGridClasses}>
             {Array.from({ length: 12 }).map((_, i) => (
               <div key={i}>
-                <Skeleton className="aspect-[3/2] w-full rounded-xl" />
+                <Skeleton className="aspect-square w-full rounded-xl" />
                 <Skeleton className="mt-2 h-4 w-3/4 rounded" />
               </div>
             ))}
@@ -279,7 +326,7 @@ export default function AudiobookGroupsView({
         </p>
       ) : isSeries ? (
         <>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+          <div className={`${seriesGridClasses} gap-y-6`}>
             {groups.map((group) => {
               const listening = groupListening(t, group);
               return (
@@ -289,8 +336,9 @@ export default function AudiobookGroupsView({
                   onClick={() => onSelectGroup(group.name)}
                   className="group/series grid content-start gap-0.5 text-start"
                 >
-                  <div className="mb-2 transition-transform duration-(--duration-fast) group-hover/series:-translate-y-0.5">
-                    <SeriesFan group={group} />
+                  <SeriesCover group={group} />
+                  <div className="mt-2 mb-1.5 px-0.5">
+                    <SeriesRun group={group} />
                   </div>
                   <div className="truncate px-0.5 text-sm font-semibold tracking-tight">
                     {group.name}
@@ -299,7 +347,7 @@ export default function AudiobookGroupsView({
                     {groupTotals(t, group)}
                   </div>
                   {listening && (
-                    <div className="text-foreground truncate px-0.5 text-xs font-medium">
+                    <div className="text-foreground px-0.5 text-xs font-medium text-pretty">
                       {listening}
                     </div>
                   )}

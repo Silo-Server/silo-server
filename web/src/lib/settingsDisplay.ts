@@ -61,7 +61,8 @@ export function isStructuredSetting(definition: SettingDisplay | null): boolean 
  * The option list for a select, in manifest order.
  *
  * Enum members come straight from the contract. Open language tags use the
- * definition's generated advisory option set, plus `currentValue` when the set
+ * definition's generated advisory option set (the app language uses the
+ * languages this client ships), plus `currentValue` when the set
  * lacks it, so a stored tag such as `pt-PT` stays selected instead of blank.
  * A nullable definition gains a leading, context-specific unset entry so a
  * control can express clearing it. Deprecated members stay valid stored values

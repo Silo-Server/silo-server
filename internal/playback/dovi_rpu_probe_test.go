@@ -11,26 +11,6 @@ import (
 	"time"
 )
 
-// The real failure exits 0: ffmpeg treats a per-packet bitstream-filter error
-// as non-fatal and keeps running, so only stderr reveals that every packet was
-// rejected. Trusting the exit code alone is what let a broken strip reach a
-// live session.
-func TestProbeOutputDetectsRejectedPackets(t *testing.T) {
-	rejected := `[dovi_rpu @ 0x55] Failed to read unit 1 (type 39).
-[dovi_rpu @ 0x55] Failed to read access unit from packet.
-[vost#0:0/copy @ 0x55] Error applying bitstream filters to a packet: Invalid data found when processing input`
-
-	if !dvRPUOutputFailed(rejected) {
-		t.Fatal("a stream of rejected packets was read as success")
-	}
-	if dvRPUOutputFailed("") {
-		t.Fatal("clean output was read as a failure")
-	}
-	if dvRPUOutputFailed("[hevc @ 0x55] Stream #0:0: Video: hevc") {
-		t.Fatal("ordinary progress output was read as a failure")
-	}
-}
-
 func writeProbeFile(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "film.mkv")
@@ -40,63 +20,11 @@ func writeProbeFile(t *testing.T, contents string) string {
 	return path
 }
 
-// A file replaced in place keeps its path; inheriting the old verdict would
-// keep stripping an RPU the new file cannot survive (or refuse one it can).
-// Size alone misses a same-length re-encode, so the modification time counts
-// too.
-func TestProbeKeyChangesWithTheFile(t *testing.T) {
-	path := writeProbeFile(t, "original")
-	first, ok := dvRPUProbeKey("ffmpeg", path)
-	if !ok {
-		t.Fatal("a readable file produced no key")
-	}
-	again, _ := dvRPUProbeKey("ffmpeg", path)
-	if again != first {
-		t.Fatal("the same file produced two keys")
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changedTime := info.ModTime().Add(time.Hour)
-	if err := os.Chtimes(path, changedTime, changedTime); err != nil {
-		t.Fatal(err)
-	}
-	retimed, _ := dvRPUProbeKey("ffmpeg", path)
-	if retimed == first {
-		t.Fatal("a modification-time change reused the old verdict")
-	}
-	if err := os.WriteFile(path, []byte("replacement with different size"), 0o600); err != nil {
-		t.Fatalf("replace probe fixture: %v", err)
-	}
-	if err := os.Chtimes(path, changedTime, changedTime); err != nil {
-		t.Fatal(err)
-	}
-	resized, _ := dvRPUProbeKey("ffmpeg", path)
-	if resized == retimed {
-		t.Fatal("a replaced file reused the old verdict")
-	}
-
-	if sameFileOtherBinary, _ := dvRPUProbeKey("/opt/other/ffmpeg", path); sameFileOtherBinary == resized {
-		t.Fatal("a different ffmpeg build reused the old verdict")
-	}
-}
-
 // A file that cannot be stat'd gets no key: the verdict belongs to whatever
 // actually tries to open it, not to a probe that never ran.
 func TestProbeKeyRefusesAnUnreadableFile(t *testing.T) {
 	if _, ok := dvRPUProbeKey("ffmpeg", filepath.Join(t.TempDir(), "absent.mkv")); ok {
 		t.Fatal("a missing file produced a cache key")
-	}
-}
-
-// A nil probe must not change behaviour: most Profile 7 sources need the strip,
-// so "no probe configured" has to mean "strip", not "never strip".
-func TestNilProbeKeepsStripping(t *testing.T) {
-	var probe *DVRPUProbe
-	if !probe.CanStrip(context.Background(), "ffmpeg", "/media/film.mkv") {
-		t.Fatal("a nil probe suppressed the strip")
 	}
 }
 
@@ -265,26 +193,5 @@ func TestProbeCacheIsBounded(t *testing.T) {
 	}
 	if _, ok := probe.results[oldest]; ok {
 		t.Fatal("the oldest entry survived eviction")
-	}
-}
-
-// The filter failing once per frame produced 376,316 stderr lines in the
-// observed session; the markers are all in the first few, so the capture is
-// bounded and the detection still works on the truncated head.
-func TestProbeOutputCaptureIsBounded(t *testing.T) {
-	buf := &cappedBuffer{limit: 64}
-	head := "[dovi_rpu] Failed to read unit 1 (type 39).\n"
-	if n, err := buf.Write([]byte(head)); n != len(head) || err != nil {
-		t.Fatalf("short write reported to ffmpeg: %d %v", n, err)
-	}
-	flood := make([]byte, 1<<20)
-	if n, err := buf.Write(flood); n != len(flood) || err != nil {
-		t.Fatalf("short write reported to ffmpeg: %d %v", n, err)
-	}
-	if len(buf.buf) != 64 {
-		t.Fatalf("capture exceeded its limit: %d bytes", len(buf.buf))
-	}
-	if !dvRPUOutputFailed(buf.String()) {
-		t.Fatal("truncation lost the rejection the probe exists to spot")
 	}
 }

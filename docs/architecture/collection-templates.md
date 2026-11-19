@@ -36,8 +36,7 @@ behavior is documented in the manual at https://siloserver.org/docs/manage-colle
 3. Set `DefaultLimit` to `builtinDefaultLimit` (100). Sync reads up to four times the limit from
    the source (`collectionutil.SourceFetchLimit`), so a finite canonical list that must not be
    truncated gets an explicit override: the IMDb Top 250 templates use 250, and Criterion
-   Collection and A24 use 0 (no limit). Add any new override to the table in
-   `TestBuiltinTemplateDefaultLimits`.
+   Collection and A24 use 0 (no limit).
 4. Put `DefaultSortOrder` in its band. The band orders the collections a bundle creates:
 
    | Band | ID prefix | Also required |

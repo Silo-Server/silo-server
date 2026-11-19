@@ -2,12 +2,76 @@ package routeinventory
 
 import (
 	"fmt"
+	"go/token"
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
+
+type loadedFixtures struct {
+	fset     *token.FileSet
+	routers  []*packages.Package
+	packages map[string][]*packages.Package
+}
+
+// Share type checking of chi and net/http across the rejection cases. Each
+// analysis still indexes and sweeps only the packages under that fixture root.
+var loadFixtures = sync.OnceValues(func() (*loadedFixtures, error) {
+	root, err := filepath.Abs("testdata/fixtures")
+	if err != nil {
+		return nil, err
+	}
+	fset := token.NewFileSet()
+	pkgs, err := loadPackages(root, fset)
+	if err != nil {
+		return nil, err
+	}
+	fixtures := &loadedFixtures{fset: fset, packages: make(map[string][]*packages.Package)}
+	for _, pkg := range pkgs {
+		if pkg.PkgPath == chiImportPath || pkg.PkgPath == httpImportPath {
+			fixtures.routers = append(fixtures.routers, pkg)
+			continue
+		}
+		rel, err := filepath.Rel(root, pkg.Dir)
+		if err != nil {
+			return nil, err
+		}
+		fixture, _, ok := strings.Cut(filepath.ToSlash(rel), "/")
+		if !ok || fixture == ".." {
+			return nil, fmt.Errorf("package %s is outside a fixture directory", pkg.PkgPath)
+		}
+		dir := filepath.Join(root, fixture)
+		fixtures.packages[dir] = append(fixtures.packages[dir], pkg)
+	}
+	return fixtures, nil
+})
+
+func analyzeLoadedFixture(t *testing.T, cfg Config) (*Inventory, error) {
+	t.Helper()
+	fixtures, err := loadFixtures()
+	if err != nil {
+		t.Fatalf("load fixture packages: %v", err)
+	}
+	root, err := filepath.Abs(cfg.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkgs := fixtures.packages[root]
+	if len(pkgs) == 0 {
+		t.Fatalf("no packages for fixture %s", cfg.Root)
+	}
+	set, err := indexSources(root, cfg.analyzedDirs(), fixtures.fset, slices.Concat(pkgs, fixtures.routers))
+	if err != nil {
+		t.Fatalf("index fixture %s: %v", cfg.Root, err)
+	}
+	return analyzeSources(cfg, set)
+}
 
 func fixtureConfig(name string) Config {
 	return Config{
@@ -367,7 +431,15 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 			if build == nil {
 				build = fixtureConfig
 			}
-			inv, err := Analyze(build(tc.fixture))
+			cfg := build(tc.fixture)
+			var inv *Inventory
+			var err error
+			if tc.fixture == "tagged_helper" {
+				// This case exercises source loading and build constraints directly.
+				inv, err = Analyze(cfg)
+			} else {
+				inv, err = analyzeLoadedFixture(t, cfg)
+			}
 			if err == nil {
 				t.Fatalf("expected a failure, got an inventory with %d routes", len(inv.Routes))
 			}
@@ -646,7 +718,7 @@ func TestAnalyzeRecordsListenerDelegationAndConsumer(t *testing.T) {
 func TestAnalyzeRefusesSealedListenerHandlerThroughAVariable(t *testing.T) {
 	for _, fixture := range []string{"consumer_sealed_var", "consumer_sealed_alias", "consumer_sealed_wrapped"} {
 		t.Run(fixture, func(t *testing.T) {
-			_, err := Analyze(consumerFixtureConfig(fixture))
+			_, err := analyzeLoadedFixture(t, consumerFixtureConfig(fixture))
 			if err == nil || !strings.Contains(err.Error(), "sealed listener handler must be built at the registration site") {
 				t.Fatalf("err = %v, want the sealed-handler refusal", err)
 			}
@@ -670,7 +742,7 @@ func TestAnalyzeRefusesConsumerMisuse(t *testing.T) {
 			cfg.Listeners = cfg.Listeners[1:]
 			cfg.Listeners[0].DelegatedBy = ""
 			cfg.AuditDirs = []string{"v2"}
-			_, err := Analyze(cfg)
+			_, err := analyzeLoadedFixture(t, cfg)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
@@ -683,7 +755,7 @@ func TestAnalyzeRefusesConsumerMisuse(t *testing.T) {
 	cfg.Listeners[0].DelegatedBy = ""
 	cfg.Listeners[0].RouterConsumer = ""
 	cfg.AuditDirs = []string{"v2"}
-	if _, err := Analyze(cfg); err == nil || !strings.Contains(err.Error(), "escapes") {
+	if _, err := analyzeLoadedFixture(t, cfg); err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("undeclared consumer err = %v, want an escape refusal", err)
 	}
 }

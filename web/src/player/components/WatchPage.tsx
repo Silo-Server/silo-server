@@ -1,6 +1,8 @@
 import { CircleAlert } from "lucide-react";
 import "@/styles/player-hud.css";
+import { isTransientV2Error } from "@/api/v2/request";
 import { isSourceFallbackReason } from "@/api/v2/watchTogetherSourceFallback";
+import { readWatchTogetherCapabilities } from "@/api/v2/watchTogetherCapabilities";
 import { playbackCapabilitiesV2 } from "../start-v2";
 import { playerV2Origin } from "../player-v2";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +17,7 @@ import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watch
 import { VideoPlayer } from "./VideoPlayer";
 import { PlayerLoadingCover } from "./PlayerLoadingCover";
 import { fetchWatchDetail } from "@/hooks/queries/items";
-import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
+import { useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
@@ -78,25 +80,41 @@ export function WatchPage(props: WatchPageProps) {
   );
 }
 
+// A server that serves rooms but advertises no room socket is current but has
+// no Redis, which the room socket's one-time handshake credentials need. An
+// older server, or a failed read, keeps the generic "needs an update" text.
+async function watchPartyNeedsRedis(): Promise<boolean> {
+  try {
+    const caps = await readWatchTogetherCapabilities();
+    return caps.state === "available" && caps.socket_protocol === "";
+  } catch {
+    return false;
+  }
+}
+
 function WatchPartyPlaybackGate(props: WatchPageProps) {
   const t = useT();
   const config = usePlayerConfig();
-  const [status, setStatus] = useState<"checking" | "supported" | "unsupported" | "failed">(
-    "checking",
-  );
+  const [status, setStatus] = useState<
+    "checking" | "supported" | "unsupported" | "redisRequired" | "failed"
+  >("checking");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void playbackCapabilitiesV2(config)
-      .then(({ features }) => {
-        if (!cancelled) {
-          setStatus(
-            features.includes("watch_party_coordinator_v1") &&
-              features.includes("fixed_media_file_v1")
-              ? "supported"
-              : "unsupported",
-          );
+      .then(async ({ features }) => {
+        if (
+          features.includes("watch_party_coordinator_v1") &&
+          features.includes("fixed_media_file_v1")
+        ) {
+          return "supported" as const;
         }
+        return (await watchPartyNeedsRedis())
+          ? ("redisRequired" as const)
+          : ("unsupported" as const);
+      })
+      .then((next) => {
+        if (!cancelled) setStatus(next);
       })
       .catch(() => {
         if (!cancelled) setStatus("failed");
@@ -119,7 +137,9 @@ function WatchPartyPlaybackGate(props: WatchPageProps) {
           <p className="text-sm leading-relaxed text-[var(--hud-ash)]">
             {status === "unsupported"
               ? t("web.player.watchTogether.unsupported")
-              : t("web.player.watchTogether.checkFailed")}
+              : status === "redisRequired"
+                ? t("web.player.watchTogether.redisRequired")
+                : t("web.player.watchTogether.checkFailed")}
           </p>
         )}
         {status === "failed" && (
@@ -332,7 +352,7 @@ function WatchPagePlayer({
   // A failed refresh retains query data. A terminal response withdraws the
   // cached previews; transient failures keep them until the query recovers.
   const trickplay =
-    trickplayAvailable && (!trickplayQuery.isError || transientTrickplayError(trickplayQuery.error))
+    trickplayAvailable && (!trickplayQuery.isError || isTransientV2Error(trickplayQuery.error))
       ? (trickplayQuery.data ?? null)
       : null;
   const refetchTrickplay = trickplayQuery.refetch;

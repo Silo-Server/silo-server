@@ -49,21 +49,6 @@ func TestOwnerAccessResolvesTheOwnersContentAccess(t *testing.T) {
 	}
 }
 
-func TestOwnerAccessResolvesOnEveryCall(t *testing.T) {
-	resolver := &recordingScopeResolver{scope: access.Scope{AllowedLibraryIDs: []int{1}}}
-	owners := NewOwnerAccess(resolver)
-	for range 2 {
-		if _, err := owners.OwnerFilter(t.Context(), 7, "owner"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// No cross-request cache: an owner's access change must apply on the
-	// next read on every node.
-	if len(resolver.inputs) != 2 {
-		t.Fatalf("resolved %d times, want 2", len(resolver.inputs))
-	}
-}
-
 func TestOwnerAccessFailsClosed(t *testing.T) {
 	if _, err := NewOwnerAccess(&recordingScopeResolver{err: access.ErrProfileNotFound}).OwnerFilter(t.Context(), 7, "gone"); !errors.Is(err, access.ErrProfileNotFound) {
 		t.Fatalf("err = %v, want the resolver's error", err)

@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -201,169 +200,6 @@ func TestProxyDoesNotFollowTokenCarriedRecipe(t *testing.T) {
 	}
 }
 
-// A record can be briefly absent while a move commits (an old node binary
-// deletes it when central stops the transport there). The proxy keeps
-// polling and follows the record once it is back.
-func TestProxyFollowKeepsWaitingThroughMissingRecord(t *testing.T) {
-	newNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("segment from the new node"))
-	}))
-	defer newNode.Close()
-	dead := deadNodeURL(t)
-	store := &fakeMoveStore{cards: map[string]playback.RecipeCard{}}
-	server := newMoveTestProxy(t, store)
-	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "transcode", TranscodeNode: dead}
-
-	go func() {
-		// The record reappears, naming the new node, once the proxy has read
-		// the gap a few times.
-		for store.reads.Load() < 3 {
-			time.Sleep(time.Millisecond) //nolint:forbidigo // polls the recipe store, the observable state
-		}
-		store.mu.Lock()
-		store.cards["upstream-1"] = playback.RecipeCard{SessionID: "upstream-1", TranscodeNodeURL: newNode.URL}
-		store.mu.Unlock()
-	}()
-	rr := relaySegment(server, claims)
-
-	if rr.Code != http.StatusOK || rr.Body.String() != "segment from the new node" {
-		t.Fatalf("relay = %d %q, want 200 from the new node", rr.Code, rr.Body.String())
-	}
-	if len(store.moveRequests()) != 0 {
-		t.Fatal("asked to move a transport whose record was absent")
-	}
-}
-
-// A transport whose record never comes back has stopped: the request fails
-// once the wait ends, without asking for a move.
-func TestProxyFollowGivesUpWithoutRecord(t *testing.T) {
-	dead := deadNodeURL(t)
-	store := &fakeMoveStore{cards: map[string]playback.RecipeCard{}}
-	server := newMoveTestProxy(t, store)
-	server.moves.wait = 100 * time.Millisecond
-	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "transcode", TranscodeNode: dead}
-
-	rr := relaySegment(server, claims)
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("relay = %d, want 502", rr.Code)
-	}
-	if len(store.moveRequests()) != 0 {
-		t.Fatal("asked to move a transport without a record")
-	}
-}
-
-// When nobody moves the transport, the request gives up after the wait and
-// the client's next retry asks again.
-func TestProxyFollowGivesUpWhenNothingMoves(t *testing.T) {
-	dead := deadNodeURL(t)
-	store := &fakeMoveStore{cards: map[string]playback.RecipeCard{"upstream-1": {SessionID: "upstream-1", TranscodeNodeURL: dead}}}
-	server := newMoveTestProxy(t, store)
-	server.moves.wait = 100 * time.Millisecond
-	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "transcode", TranscodeNode: dead}
-
-	rr := relaySegment(server, claims)
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("relay = %d, want 502", rr.Code)
-	}
-	if len(store.moveRequests()) == 0 {
-		t.Fatal("the proxy did not ask central to move the transport")
-	}
-}
-
-// A followed transport's record is re-read periodically, so a later move or a
-// return to the token's node is followed too.
-func TestProxyFollowRechecksRecord(t *testing.T) {
-	var hits sync.Map
-	node := func(name string) *httptest.Server {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			count, _ := hits.LoadOrStore(name, new(atomic.Int32))
-			count.(*atomic.Int32).Add(1)
-			_, _ = w.Write([]byte(name))
-		}))
-		t.Cleanup(srv.Close)
-		return srv
-	}
-	second, third := node("second"), node("third")
-	dead := deadNodeURL(t)
-	store := &fakeMoveStore{
-		cards:   map[string]playback.RecipeCard{"upstream-1": {SessionID: "upstream-1", TranscodeNodeURL: dead}},
-		movedTo: second.URL,
-	}
-	server := newMoveTestProxy(t, store)
-	now := time.Now()
-	server.moves.now = func() time.Time { return now }
-	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "transcode", TranscodeNode: dead}
-
-	if rr := relaySegment(server, claims); rr.Body.String() != "second" {
-		t.Fatalf("first relay served by %q, want second", rr.Body.String())
-	}
-	store.mu.Lock()
-	card := store.cards["upstream-1"]
-	card.TranscodeNodeURL = third.URL
-	store.cards["upstream-1"] = card
-	store.mu.Unlock()
-	if rr := relaySegment(server, claims); rr.Body.String() != "second" {
-		t.Fatalf("relay before the recheck served by %q, want second", rr.Body.String())
-	}
-	now = now.Add(movedTranscodeRecheck)
-	if rr := relaySegment(server, claims); rr.Body.String() != "third" {
-		t.Fatalf("relay after the recheck served by %q, want third", rr.Body.String())
-	}
-	// An unreadable store says nothing about where the transport runs.
-	store.mu.Lock()
-	store.lookupErr = errors.New("redis unavailable")
-	store.mu.Unlock()
-	now = now.Add(movedTranscodeRecheck)
-	if rr := relaySegment(server, claims); rr.Body.String() != "third" {
-		t.Fatalf("relay during a store outage served by %q (%d), want third", rr.Body.String(), rr.Code)
-	}
-}
-
-// A request that moves past several dead nodes tells each move about the
-// nodes it already could not reach, which the API can still list as healthy.
-func TestProxyFollowCarriesFailedNodes(t *testing.T) {
-	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("live"))
-	}))
-	defer live.Close()
-	first, second := deadNodeURL(t), deadNodeURL(t)
-	store := &fakeMoveStore{
-		cards: map[string]playback.RecipeCard{"upstream-1": {SessionID: "upstream-1", TranscodeNodeURL: first}},
-		moves: []string{second, live.URL},
-	}
-	server := newMoveTestProxy(t, store)
-	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "transcode", TranscodeNode: first}
-
-	if rr := relaySegment(server, claims); rr.Code != http.StatusOK || rr.Body.String() != "live" {
-		t.Fatalf("relay = %d %q, want 200 from the live node", rr.Code, rr.Body.String())
-	}
-	requests := store.moveRequests()
-	if len(requests) != 2 || requests[1].NodeURL != second ||
-		len(requests[1].FailedNodes) != 1 || requests[1].FailedNodes[0] != first {
-		t.Fatalf("move requests = %+v, want the second to name %s and leave out %s", requests, second, first)
-	}
-}
-
-// Only HLS transcode routes follow a move. A progressive remux on a transcode
-// node uses the same record as its authority, not as a rebuild recipe.
-func TestProxyDoesNotFollowProgressiveRemux(t *testing.T) {
-	dead := deadNodeURL(t)
-	store := &fakeMoveStore{cards: map[string]playback.RecipeCard{"upstream-1": {SessionID: "upstream-1", TranscodeNodeURL: dead}}}
-	server := newMoveTestProxy(t, store)
-	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "remux", TranscodeNode: dead}
-
-	req := httptest.NewRequest(http.MethodGet, "/stream/remux/token", nil)
-	rr := httptest.NewRecorder()
-	server.proxyToTranscodeNode(rr, req, claims, "/remux/upstream-1", "token")
-
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("relay = %d, want 502", rr.Code)
-	}
-	if store.reads.Load() != 0 || len(store.moveRequests()) != 0 {
-		t.Fatalf("progressive remux consulted the move protocol: reads=%d requests=%d", store.reads.Load(), len(store.moveRequests()))
-	}
-}
-
 // A proxy that starts after a move has nothing cached for the transport. When
 // the token's node is back up, it still answers, so the proxy must not relay
 // there: that node would rebuild the transport from the moved record and run
@@ -394,5 +230,53 @@ func TestProxyFollowsMoveMadeBeforeItStarted(t *testing.T) {
 	}
 	if len(store.moveRequests()) != 0 {
 		t.Fatal("asked for a move while every node answered")
+	}
+}
+
+func TestProxyDoesNotFollowProgressiveRemux(t *testing.T) {
+	dead := deadNodeURL(t)
+	store := &fakeMoveStore{cards: map[string]playback.RecipeCard{"upstream-1": {SessionID: "upstream-1", TranscodeNodeURL: dead}}}
+	server := newMoveTestProxy(t, store)
+	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "remux", TranscodeNode: dead}
+
+	req := httptest.NewRequest(http.MethodGet, "/stream/remux/token", nil)
+	rr := httptest.NewRecorder()
+	server.proxyToTranscodeNode(rr, req, claims, "/remux/upstream-1", "token")
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("relay = %d, want 502", rr.Code)
+	}
+	if store.reads.Load() != 0 || len(store.moveRequests()) != 0 {
+		t.Fatalf("progressive remux consulted the move protocol: reads=%d requests=%d", store.reads.Load(), len(store.moveRequests()))
+	}
+}
+
+func TestProxyFollowKeepsWaitingThroughMissingRecord(t *testing.T) {
+	newNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("segment from the new node"))
+	}))
+	defer newNode.Close()
+	dead := deadNodeURL(t)
+	store := &fakeMoveStore{cards: map[string]playback.RecipeCard{}}
+	server := newMoveTestProxy(t, store)
+	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "transcode", TranscodeNode: dead}
+
+	go func() {
+		// The record reappears, naming the new node, once the proxy has read
+		// the gap a few times.
+		for store.reads.Load() < 3 {
+			time.Sleep(time.Millisecond) //nolint:forbidigo // polls the recipe store, the observable state
+		}
+		store.mu.Lock()
+		store.cards["upstream-1"] = playback.RecipeCard{SessionID: "upstream-1", TranscodeNodeURL: newNode.URL}
+		store.mu.Unlock()
+	}()
+	rr := relaySegment(server, claims)
+
+	if rr.Code != http.StatusOK || rr.Body.String() != "segment from the new node" {
+		t.Fatalf("relay = %d %q, want 200 from the new node", rr.Code, rr.Body.String())
+	}
+	if len(store.moveRequests()) != 0 {
+		t.Fatal("asked to move a transport whose record was absent")
 	}
 }

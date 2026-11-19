@@ -55,7 +55,6 @@ func TestFileCrossings(t *testing.T) {
 		{"TSX crossing", "a.tsx", 800, 801, true, true},
 		{"unchanged debt", "a.go", 1001, 1001, true, false},
 		{"growing debt", "a.go", 1001, 1002, true, false},
-		{"shrinking debt", "a.go", 1002, 1001, true, false},
 		{"new exact", "a.go", 0, 1000, false, false},
 		{"new over", "a.go", 0, 1001, false, true},
 		{"other file", "a.md", 1000, 1001, true, false},

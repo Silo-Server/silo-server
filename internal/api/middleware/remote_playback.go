@@ -30,6 +30,7 @@ var remotePlaybackRoutes = []scopeRoute{
 	{http.MethodDelete, regexp.MustCompile(`^/api/v2/playback/[^/]+$`)},
 	{http.MethodPost, regexp.MustCompile(`^/api/v2/playback/[^/]+/(progress|replan)$`)},
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/playback/transcode/[^/]+/(master\.m3u8|segment/[^/]+)$`)},
+	{http.MethodHead, regexp.MustCompile(`^/api/v2/playback/transcode/[^/]+/master\.m3u8$`)},
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/playback/sessions/control/capabilities$`)},
 	{http.MethodPost, regexp.MustCompile(`^/api/v2/playback/sessions/[^/]+/control/ws-ticket$`)},
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/stream/[^/]+(/subtitles/[^/]+(/fonts)?)?$`)},

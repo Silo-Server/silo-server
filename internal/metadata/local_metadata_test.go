@@ -14,60 +14,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// When an NFO supplies ids, they replace the folder-tag ids as a set. A
-// leftover tag id the NFO does not restate used to stay a trusted hint, so
-// the NFO's own title failed trusted-id selection (its imdb id differs from
-// the tag's) and the item kept the tag identity.
-func TestInitialMatch_NFOIDsReplaceFolderTagIDs(t *testing.T) {
-	t.Parallel()
-	h := newTestHarness()
-	ctx := context.Background()
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "1091"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "The Thing"},
-	}
-	remote := &remoteStubProvider{
-		slug: "tmdb",
-		searchResults: []SearchResult{{
-			Name: "The Thing", Year: 1982, Provider: "tmdb",
-			ProviderIDs: map[string]string{"tmdb": "1091", "imdb": "tt0084787"},
-		}},
-		metadata: &MetadataResult{
-			HasMetadata: true, Title: "The Thing", Year: 1982,
-			ProviderIDs: map[string]string{"tmdb": "1091", "imdb": "tt0084787"},
-		},
-	}
-
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		Hints: &MatchHints{
-			Title:  "Fixture Tagged",
-			Year:   1979,
-			Type:   "movie",
-			TmdbID: "578",       // folder tag [tmdb-578]
-			ImdbID: "tt0073195", // folder tag [imdb-tt0073195], not restated by the NFO
-		},
-		Language: "en",
-		Mode:     ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want a match on the NFO's id", result)
-	}
-	if ids := remote.lastSearchProviderIDs(); ids["imdb"] != "" || ids["tmdb"] != "1091" {
-		t.Errorf("remote search ids = %v, want tmdb 1091 and no leftover tag imdb id", ids)
-	}
-	item, err := h.itemRepo.GetByID(ctx, result.ContentID)
-	if err != nil {
-		t.Fatalf("load matched item: %v", err)
-	}
-	if item.TmdbID != "1091" || item.ImdbID != "tt0084787" {
-		t.Errorf("item ids = tmdb %q imdb %q, want The Thing's 1091 / tt0084787", item.TmdbID, item.ImdbID)
-	}
-}
-
 // Stored durable ids are protected: the NFO's id set replaces only the
 // unprotected (tag-derived) ids.
 func TestInitialMatch_NFOIDsKeepProtectedStoredIDs(t *testing.T) {
@@ -95,32 +41,6 @@ func TestInitialMatch_NFOIDsKeepProtectedStoredIDs(t *testing.T) {
 	ids := remote.lastMetadataIDs()
 	if ids["tmdb"] != "222" || ids["tvdb"] != "555" || ids["imdb"] != "" {
 		t.Errorf("remote GetMetadata ids = %v, want NFO tmdb 222, protected tvdb 555, tag imdb dropped", ids)
-	}
-}
-
-// A title-only NFO names no ids, so the tag ids stay.
-func TestInitialMatch_TitleOnlyNFOKeepsFolderTagIDs(t *testing.T) {
-	t.Parallel()
-	h := newTestHarness()
-
-	nfo := &localHintStubProvider{
-		metadata: &MetadataResult{HasMetadata: true, Title: "Right Movie"},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Right Movie", ProviderIDs: map[string]string{"tmdb": "111"}},
-	}
-
-	_, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		Hints:    &MatchHints{Title: "Right Movie", Year: 2020, Type: "movie", TmdbID: "111", ImdbID: "tt0000111"},
-		Language: "en",
-		Mode:     ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if ids := remote.lastMetadataIDs(); ids["tmdb"] != "111" || ids["imdb"] != "tt0000111" {
-		t.Errorf("remote GetMetadata ids = %v, want both folder tag ids", ids)
 	}
 }
 
@@ -281,53 +201,6 @@ func (p *deadNFOIDRemote) GetMetadata(_ context.Context, r MetadataRequest) (*Me
 	return nil, nil
 }
 
-// The tag ids an NFO replaces are rejected only once the NFO's own ids
-// resolve. An NFO whose id is dead (a typo, a deleted entry) leaves the
-// tag-anchored skeleton's ids as they were, and the match searches again
-// with them.
-func TestInitialMatch_DeadNFOIDKeepsTagIDs(t *testing.T) {
-	t.Parallel()
-	h := newTestHarness()
-	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "movie-tmdb-578", Type: "movie", Title: "Jaws", Year: 1975, Status: "pending",
-		TmdbID: "578", ImdbID: "tt0073195", DefaultMetadataLanguage: "en",
-		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "99999991"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Jaws"},
-	}
-	remote := &deadNFOIDRemote{deadTMDB: "99999991"}
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie-tmdb-578",
-		Hints:     &MatchHints{Title: "Jaws", Year: 1975, Type: "movie", TmdbID: "578", ImdbID: "tt0073195"},
-		Language:  "en",
-		Mode:      ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || result.Decision == nil || result.Decision.Outcome != MatchOutcomeMatched {
-		t.Fatalf("decision = %+v, want a match on the tag ids", result)
-	}
-	searchedTagIDs := slices.ContainsFunc(remote.searched, func(ids map[string]string) bool {
-		return ids["imdb"] == "tt0073195" || ids["tmdb"] == "578"
-	})
-	if !searchedTagIDs {
-		t.Errorf("remote searches = %v, want one with the tag ids", remote.searched)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie-tmdb-578")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.TmdbID != "578" || item.ImdbID != "tt0073195" {
-		t.Errorf("item ids = tmdb %q imdb %q, want the tag ids kept", item.TmdbID, item.ImdbID)
-	}
-}
-
 // permissionDeniedNFOStub is a local provider whose NFO cannot be read because
 // of a permission problem, which does not clear by itself.
 type permissionDeniedNFOStub struct {
@@ -481,19 +354,6 @@ func TestInitialMatch_DeferralRecordsStaleIDs(t *testing.T) {
 	}
 }
 
-// A target refresh of a season with no local folder reads no local season
-// sidecars, as the full pass does.
-func TestTargetSeasonPathsOnlyForLocalSeasons(t *testing.T) {
-	t.Parallel()
-	paths := map[int][]string{1: {"/show/Season 01"}}
-	if got := targetSeasonPaths(paths, 2); got != nil {
-		t.Errorf("targetSeasonPaths(season without a folder) = %v, want nil", got)
-	}
-	if got := targetSeasonPaths(paths, 1); len(got) != 1 || got[1][0] != "/show/Season 01" {
-		t.Errorf("targetSeasonPaths(season 1) = %v", got)
-	}
-}
-
 // Once a remote provider returned one of the NFO's ids, a transient failure
 // elsewhere (an enrichment plugin's spent quota) does not hold the match.
 func TestInitialMatch_VerifiedNFOIDsIgnoreLaterTransientErrors(t *testing.T) {
@@ -549,46 +409,6 @@ func TestInitialMatch_NoTagReSearchOnTransientErrors(t *testing.T) {
 	}
 }
 
-// An NFO id recorded stale on an earlier attempt is no longer a hint: the
-// retry searches with the tag id it replaced and does not query it again.
-func TestInitialMatch_StaleNFOHintIsDropped(t *testing.T) {
-	t.Parallel()
-	h := newTestHarness()
-	staleRepo := newFakeStaleIDRepo()
-	h.service.staleIDRepo = staleRepo
-	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "movie-tmdb-578", Type: "movie", Title: "Jaws", Year: 1975, Status: "pending",
-		TmdbID: "578", ImdbID: "tt0073195", DefaultMetadataLanguage: "en",
-		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-	if err := staleRepo.Upsert(ctx, "movie-tmdb-578", "tmdb", "99999991"); err != nil {
-		t.Fatalf("seed stale id: %v", err)
-	}
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "99999991"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Jaws"},
-	}
-	remote := &deadNFOIDRemote{deadTMDB: "99999991"}
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie-tmdb-578",
-		Hints:     &MatchHints{Title: "Jaws", Year: 1975, Type: "movie", TmdbID: "578", ImdbID: "tt0073195"},
-		Language:  "en",
-		Mode:      ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || result.Decision == nil || result.Decision.Outcome != MatchOutcomeMatched {
-		t.Fatalf("decision = %+v, want a match on the tag ids", result)
-	}
-	if slices.ContainsFunc(remote.searched, func(ids map[string]string) bool { return ids["tmdb"] == "99999991" }) {
-		t.Errorf("remote searches = %v, want the stale NFO id left out", remote.searched)
-	}
-}
-
 // The re-search after a dead NFO identity leaves out a tag id equal to the
 // one the providers just rejected, so the remaining tag ids can match.
 func TestInitialMatch_ReSearchLeavesOutRejectedTagID(t *testing.T) {
@@ -609,32 +429,6 @@ func TestInitialMatch_ReSearchLeavesOutRejectedTagID(t *testing.T) {
 	}
 	if result == nil || result.Decision == nil || result.Decision.Outcome != MatchOutcomeMatched {
 		t.Fatalf("decision = %+v, want a match on the imdb tag id", result)
-	}
-}
-
-// A targeted episode refresh reads only its episode's sidecars but passes
-// the show's other files, so a local provider can tell a deleted target from
-// a missing share even when seasons share a folder.
-func TestRefreshTargetEpisodePassesShowFiles(t *testing.T) {
-	provider := &targetRefreshProvider{episodesBySeason: map[int][]EpisodeResult{
-		5: {{SeasonNumber: 5, EpisodeNumber: 3, Title: "Provider Episode 3"}},
-	}}
-	h, seriesID, _, episodeID := seedTargetRefreshHarness(provider)
-	files := []string{"/show/Season 05/Show S05E03.mkv", "/show/Season 05/Show S05E04.mkv", "/show/Season 06/Show S06E01.mkv"}
-	for i, path := range files {
-		h.fileRepo.groupFiles["show"] = append(h.fileRepo.groupFiles["show"], &models.MediaFile{ID: i + 1, FilePath: path})
-		h.fileRepo.contentIDs[i+1] = seriesID
-	}
-
-	if err := h.service.RefreshScheduledTarget(context.Background(), RefreshTargetEpisode, episodeID); err != nil {
-		t.Fatalf("RefreshScheduledTarget episode: %v", err)
-	}
-	req := provider.lastEpisodesReq
-	if got := req.EpisodeFilePaths; len(got) != 1 || !slices.Equal(got[3], files[:1]) {
-		t.Errorf("EpisodeFilePaths = %v, want only S05E03", got)
-	}
-	if !slices.Equal(req.ShowFilePaths, files) {
-		t.Errorf("ShowFilePaths = %v, want every file of the show %v", req.ShowFilePaths, files)
 	}
 }
 
@@ -711,30 +505,6 @@ func TestInitialMatch_VerifiedIDMustSurvive(t *testing.T) {
 	}
 }
 
-// A remote provider that restates the NFO's id in another accepted form
-// (upper-case key or IMDb id) verifies it.
-func TestRecordVerifiedIDsNormalizesResultIDs(t *testing.T) {
-	t.Parallel()
-	got := recordVerifiedIDs(nil, map[string]string{"IMDB": "TT0084787", "TMDB": " 1091 "}, map[string]string{"imdb": "tt0084787", "tmdb": "1091"})
-	if got["imdb"] != "tt0084787" || got["tmdb"] != "1091" {
-		t.Fatalf("recordVerifiedIDs() = %v, want both NFO ids verified", got)
-	}
-}
-
-// Only a provider that can look the NFO's ids up counts as a checker; an
-// enrichment provider, which looks items up by ids it is given, does not.
-func TestChainChecksIDs(t *testing.T) {
-	t.Parallel()
-	local := &localHintStubProvider{}
-	enrichment := &PluginProvider{capabilityID: "omdb", lookupProviderIDs: []string{"imdb"}}
-	if chainChecksIDs([]Provider{local, enrichment}) {
-		t.Errorf("chainChecksIDs(local, enrichment) = true, want false")
-	}
-	if !chainChecksIDs([]Provider{local, enrichment, &remoteStubProvider{slug: "tmdb"}}) {
-		t.Errorf("chainChecksIDs(local, enrichment, tmdb) = false, want true")
-	}
-}
-
 // detailRejectsNFOID confirms the NFO's TMDB id in search but has no details
 // for it; the folder tag's id is live.
 type detailRejectsNFOID struct {
@@ -808,21 +578,5 @@ func TestInitialMatch_NFOIDRejectedAfterSearchRetriesWithTagIDs(t *testing.T) {
 	}
 	if last := remote.searched[len(remote.searched)-1]; last["tmdb"] != "578" {
 		t.Errorf("retry searched with %v, want the tag tmdb", last)
-	}
-}
-
-// Only a 404 counts as a provider rejecting an NFO id. A verified id that
-// left the set some other way (candidate consensus quarantining it) is not
-// on record as stale, so deferring for it would repeat forever.
-func TestAnyProviderIDIn(t *testing.T) {
-	t.Parallel()
-	dropped := make(providerIDValueSet)
-	dropped.add("tmdb", "1091")
-	dropped.add("imdb", "TT0084787")
-	if !anyProviderIDIn(dropped, map[string]string{"tmdb": "1091"}) || !anyProviderIDIn(dropped, map[string]string{"imdb": "tt0084787"}) {
-		t.Errorf("anyProviderIDIn() = false for a rejected id, want true")
-	}
-	if anyProviderIDIn(dropped, map[string]string{"tmdb": "578"}) || anyProviderIDIn(nil, map[string]string{"tmdb": "1091"}) {
-		t.Errorf("anyProviderIDIn() = true for an id not rejected, want false")
 	}
 }

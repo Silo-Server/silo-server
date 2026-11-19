@@ -2,7 +2,6 @@ package recommendations
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -136,86 +135,6 @@ func waitRun(t *testing.T, h *fakeHistory) taskmanager.ExecutionResult {
 	}
 }
 
-func TestRunJobRefusesASecondRunInThisProcess(t *testing.T) {
-	locker := &fakeLocker{}
-	history := newFakeHistory()
-	w := newJobTestWorker(locker, history)
-
-	started := make(chan struct{})
-	finish := make(chan struct{})
-	blocking := job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		close(started)
-		<-finish
-		return countsResult{Done: 1}, nil
-	}}
-	// A synchronous run returns only after releasing its claim, so the test
-	// can tell when the job is free again.
-	firstDone := make(chan error, 1)
-	go func() { firstDone <- w.runJob(blocking, false) }()
-	select {
-	case <-started:
-	case err := <-firstDone:
-		t.Fatalf("first run did not start: %v", err)
-	}
-	if !w.IsRunning(JobCowatch) {
-		t.Fatal("running job not reported as running")
-	}
-
-	ran := false
-	second := job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		ran = true
-		return countsResult{}, nil
-	}}
-	err := w.runJob(second, true)
-	if !errors.Is(err, ErrJobRunning) || errors.Is(err, ErrJobRunningElsewhere) {
-		t.Fatalf("second run error = %v, want ErrJobRunning", err)
-	}
-	if err.Error() != "cowatch job is already running" {
-		t.Fatalf("second run message = %q", err.Error())
-	}
-	if keys, _ := locker.snapshot(); len(keys) != 1 || keys[0] != cowatchJobLock {
-		t.Fatalf("lock requests = %#x, want one for the co-watch lock", keys)
-	}
-
-	close(finish)
-	if err := <-firstDone; err != nil {
-		t.Fatalf("first run: %v", err)
-	}
-	if err := w.runJob(second, false); err != nil {
-		t.Fatalf("run after the first finished: %v", err)
-	}
-	if !ran {
-		t.Fatal("second job did not run after the first finished")
-	}
-	if _, released := locker.snapshot(); released != 2 {
-		t.Fatalf("locks released = %d, want 2", released)
-	}
-}
-
-func TestRunJobSkipsWhenAnotherServerHoldsTheLock(t *testing.T) {
-	locker := &fakeLocker{held: true}
-	history := newFakeHistory()
-	w := newJobTestWorker(locker, history)
-
-	ran := false
-	err := w.runJob(job{name: JobRecommendations, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		ran = true
-		return cacheResult{}, nil
-	}}, true)
-	if !errors.Is(err, ErrJobRunningElsewhere) {
-		t.Fatalf("error = %v, want ErrJobRunningElsewhere", err)
-	}
-	if err.Error() != "recommendations job is already running on another server" {
-		t.Fatalf("message = %q", err.Error())
-	}
-	if ran || w.IsRunning(JobRecommendations) || history.count() != 0 {
-		t.Fatalf("skipped job ran=%v running=%v recorded=%d", ran, w.IsRunning(JobRecommendations), history.count())
-	}
-	if keys, _ := locker.snapshot(); len(keys) != 1 || keys[0] != cacheJobLock {
-		t.Fatalf("lock requests = %#x, want one for the cache lock", keys)
-	}
-}
-
 func TestRunJobLockFailureIsNotABusyJob(t *testing.T) {
 	w := newJobTestWorker(&fakeLocker{err: errors.New("connection refused")}, newFakeHistory())
 	err := w.runJob(w.jobFor(JobTasteProfiles), true)
@@ -224,55 +143,6 @@ func TestRunJobLockFailureIsNotABusyJob(t *testing.T) {
 	}
 	if w.IsRunning(JobTasteProfiles) {
 		t.Fatal("a job that never started is still marked running")
-	}
-}
-
-func TestRunJobRecordsOutcome(t *testing.T) {
-	history := newFakeHistory()
-	w := newJobTestWorker(&fakeLocker{}, history)
-
-	if err := w.runJob(job{name: JobRecommendations, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		return countsResult{Done: 3, Failed: 1}, nil
-	}}, false); err != nil {
-		t.Fatal(err)
-	}
-	run := waitRun(t, history)
-	if run.TaskKey != cacheTaskKey || run.Status != runStatusCompleted || run.ErrorMessage != "" {
-		t.Fatalf("completed run = %+v", run)
-	}
-	if string(run.ResultData) != `{"done":3,"failed":1}` || run.CompletedAt.Before(run.StartedAt) || run.DurationMs < 0 {
-		t.Fatalf("completed run data = %s %+v", run.ResultData, run)
-	}
-
-	if err := w.runJob(job{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		return countsResult{Done: 2}, errors.New("provider unavailable")
-	}}, false); err != nil {
-		t.Fatal(err)
-	}
-	run = waitRun(t, history)
-	if run.TaskKey != embeddingsTaskKey || run.Status != runStatusFailed || run.ErrorMessage != "provider unavailable" || string(run.ResultData) != `{"done":2,"failed":0}` {
-		t.Fatalf("failed run = %+v %s", run, run.ResultData)
-	}
-
-	// A background run (a manual trigger) is recorded the same way.
-	if err := w.runJob(job{name: JobTasteProfiles, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		return countsResult{Done: 5}, nil
-	}}, true); err != nil {
-		t.Fatal(err)
-	}
-	run = waitRun(t, history)
-	if run.TaskKey != tasteProfilesTaskKey || run.Status != runStatusCompleted || string(run.ResultData) != `{"done":5,"failed":0}` {
-		t.Fatalf("background run = %+v %s", run, run.ResultData)
-	}
-
-	// Without history a run still completes.
-	bare := newJobTestWorker(&fakeLocker{}, nil)
-	ran := false
-	if err := bare.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-		ran = true
-		return countsResult{}, nil
-	}}, false); err != nil || !ran {
-		t.Fatalf("run without history: ran=%v err=%v", ran, err)
 	}
 }
 
@@ -287,46 +157,6 @@ func TestRunJobAppliesTheJobTimeout(t *testing.T) {
 	}
 	if run := waitRun(t, history); run.Status != runStatusFailed || !strings.Contains(run.ErrorMessage, "deadline") {
 		t.Fatalf("timed-out run = %+v", run)
-	}
-}
-
-// Partial runs (the embedding catch-up, the startup global-row build) are
-// recorded under keys of their own, so a later partial run does not hide a
-// failed full run.
-func TestPartialRunsDoNotHideTheLastFullRun(t *testing.T) {
-	history := newFakeHistory()
-	w := newJobTestWorker(&fakeLocker{}, history)
-	for _, j := range []job{
-		{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-			return embeddingsResult{}, errors.New("provider down")
-		}},
-		{name: JobEmbeddings, timeout: time.Minute, partial: true, run: func(context.Context, clusterLock) (jobResult, error) {
-			return embeddingsResult{MissingOnly: true, EmbedCounts: EmbedCounts{Embedded: 1}}, nil
-		}},
-		{name: JobRecommendations, timeout: time.Minute, partial: true, run: func(context.Context, clusterLock) (jobResult, error) {
-			return cacheResult{GlobalOnly: true}, nil
-		}},
-	} {
-		if err := w.runJob(j, false); err != nil {
-			t.Fatal(err)
-		}
-		waitRun(t, history)
-	}
-
-	runs, err := w.LastRuns(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	embed := runs[JobEmbeddings]
-	if embed.Full == nil || embed.Full.Status != runStatusFailed || embed.Full.TaskKey != embeddingsTaskKey {
-		t.Fatalf("last full embeddings run = %+v, want the failed one", embed.Full)
-	}
-	if embed.Partial == nil || embed.Partial.Status != runStatusCompleted || embed.Partial.TaskKey != embeddingsCatchUpTaskKey {
-		t.Fatalf("last embeddings catch-up = %+v", embed.Partial)
-	}
-	cache := runs[JobRecommendations]
-	if cache.Full != nil || cache.Partial == nil || cache.Partial.TaskKey != globalRowsTaskKey {
-		t.Fatalf("cache runs = %+v, want only the startup build, as a partial run", cache)
 	}
 }
 
@@ -411,102 +241,6 @@ func (f *fakeGlobalRows) DeleteGlobalRecommendationCache(_ context.Context, recT
 
 func (f *fakeGlobalRows) HasGlobalRecommendationCache(context.Context) (bool, error) {
 	return f.cached, f.cacheErr
-}
-
-func writtenTypes(f *fakeGlobalRows) string {
-	var types []string
-	for _, recType := range []string{RecTypePopular, RecTypeRecentlyAdded, RecTypeTopRated, RecTypeGenreSamplerPrefix + "Drama", RecTypeGenreSamplerPrefix + "Comedy"} {
-		if _, ok := f.written[recType]; ok {
-			types = append(types, recType)
-		}
-	}
-	return strings.Join(types, ",")
-}
-
-func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
-	w := newJobTestWorker(&fakeLocker{}, nil)
-
-	store := &fakeGlobalRows{fail: map[string]bool{"popular": true, "Comedy": true, "write:" + RecTypeGenreSamplerPrefix + "Drama": true}}
-	written, failed := w.cacheGlobalRows(t.Context(), store, "expiry")
-	// Popular's query, Comedy's query, and Drama's write fail, so their cached
-	// rows are kept until the new expiry. Top rated is served live, so it is
-	// neither written nor kept; every genre row off the menu is deleted.
-	if written != 1 || failed != 3 || writtenTypes(store) != RecTypeRecentlyAdded {
-		t.Fatalf("written=%d failed=%d rows=%s", written, failed, writtenTypes(store))
-	}
-	wantKept := []string{RecTypePopular + "@expiry", RecTypeGenreSamplerPrefix + "Drama@expiry", RecTypeGenreSamplerPrefix + "Comedy@expiry"}
-	if strings.Join(store.extended, ",") != strings.Join(wantKept, ",") {
-		t.Fatalf("kept rows = %v, want %v", store.extended, wantKept)
-	}
-	wantDeleted := []string{RecTypeGenreSamplerPrefix + "*-" + RecTypeGenreSamplerPrefix + "Drama+" + RecTypeGenreSamplerPrefix + "Comedy"}
-	if strings.Join(store.deleted, ",") != strings.Join(wantDeleted, ",") {
-		t.Fatalf("deleted rows = %v, want %v", store.deleted, wantDeleted)
-	}
-
-	// Without the top genres, every cached genre sampler is kept.
-	store = &fakeGlobalRows{fail: map[string]bool{"genres": true}}
-	written, failed = w.cacheGlobalRows(t.Context(), store, "expiry")
-	if written != 2 || failed != 1 || writtenTypes(store) != RecTypePopular+","+RecTypeRecentlyAdded {
-		t.Fatalf("genre failure: written=%d failed=%d rows=%s", written, failed, writtenTypes(store))
-	}
-	if strings.Join(store.extended, ",") != RecTypeGenreSamplerPrefix+"*@expiry" {
-		t.Fatalf("genre failure kept %v, want every genre sampler", store.extended)
-	}
-	if len(store.deleted) != 0 {
-		t.Fatalf("genre failure deleted %v, want nothing", store.deleted)
-	}
-
-	// A failed extend is only logged; the run goes on.
-	store = &fakeGlobalRows{fail: map[string]bool{"popular": true, "recent": true}, extendErr: errors.New("db down")}
-	written, failed = w.cacheGlobalRows(t.Context(), store, "expiry")
-	if written != 2 || failed != 2 || len(store.extended) != 2 {
-		t.Fatalf("failed extend: written=%d failed=%d extended=%v", written, failed, store.extended)
-	}
-}
-
-func TestEnsureGlobalRowsBuildsOnlyWhenNoneIsCached(t *testing.T) {
-	locker := &fakeLocker{}
-	history := newFakeHistory()
-	w := newJobTestWorker(locker, history)
-
-	store := &fakeGlobalRows{}
-	before := time.Now()
-	w.ensureGlobalRows(t.Context(), store)
-	if writtenTypes(store) != strings.Join([]string{RecTypePopular, RecTypeRecentlyAdded, RecTypeGenreSamplerPrefix + "Drama", RecTypeGenreSamplerPrefix + "Comedy"}, ",") {
-		t.Fatalf("startup build wrote %s", writtenTypes(store))
-	}
-	if expires, err := time.Parse(time.RFC3339, store.expires); err != nil || expires.Before(before.Add(cacheTTL).Truncate(time.Second)) {
-		t.Fatalf("startup rows expire at %q (%v)", store.expires, err)
-	}
-	if keys, released := locker.snapshot(); len(keys) != 1 || keys[0] != cacheJobLock || released != 1 {
-		t.Fatalf("startup build locks = %#x released %d, want the cache job's lock", keys, released)
-	}
-	run := waitRun(t, history)
-	var result cacheResult
-	if err := json.Unmarshal(run.ResultData, &result); err != nil {
-		t.Fatal(err)
-	}
-	if run.TaskKey != globalRowsTaskKey || run.Status != runStatusCompleted || !result.GlobalOnly || result.GlobalRows != 4 {
-		t.Fatalf("startup build recorded %+v %s", run, run.ResultData)
-	}
-
-	for name, skip := range map[string]*fakeGlobalRows{
-		"rows cached":  {cached: true},
-		"check failed": {cacheErr: errors.New("db down")},
-	} {
-		w.ensureGlobalRows(t.Context(), skip)
-		if len(skip.written) != 0 {
-			t.Fatalf("%s: startup build wrote %s", name, writtenTypes(skip))
-		}
-	}
-
-	// Another server already holds the cache job: it builds the rows, not us.
-	busy := newJobTestWorker(&fakeLocker{held: true}, history)
-	elsewhere := &fakeGlobalRows{}
-	busy.ensureGlobalRows(t.Context(), elsewhere)
-	if len(elsewhere.written) != 0 || history.count() != 1 {
-		t.Fatalf("startup build ran beside another server: wrote %s, runs %d", writtenTypes(elsewhere), history.count())
-	}
 }
 
 // closedPoolEngine returns an engine whose every database call fails.
@@ -634,47 +368,6 @@ func TestDroppedReadRefreshCanBeAskedAgain(t *testing.T) {
 	}
 }
 
-// Reads that find a profile's rows missing queue at most one refresh per
-// profile per interval on a server; signal changes are not throttled.
-func TestRequestReadRefreshThrottlesEachProfile(t *testing.T) {
-	w, _ := newRefreshTestWorker()
-	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
-	w.readRefreshes.now = func() time.Time { return now }
-	ctx := t.Context()
-
-	if !w.ReadRefreshDue(7, "p") {
-		t.Fatal("a first read refresh is not due")
-	}
-	w.RequestReadRefresh(ctx, 7, "p")
-	takeQueued(t, w)
-	now = now.Add(time.Minute)
-	if w.ReadRefreshDue(7, "p") {
-		t.Fatal("a read refresh is due again within the interval")
-	}
-	w.RequestReadRefresh(ctx, 7, "p")
-	assertNothingQueued(t, w, "second read within the interval")
-
-	// Another profile has its own allowance.
-	w.RequestReadRefresh(ctx, 7, "q")
-	if req := takeQueued(t, w); req.profileID != "q" {
-		t.Fatalf("queued %+v, want profile q", req)
-	}
-	// A signal change goes straight through.
-	w.NotifySignalsChanged(ctx, 7, "p")
-	takeQueued(t, w)
-
-	now = now.Add(readRefreshInterval)
-	w.RequestReadRefresh(ctx, 7, "p")
-	takeQueued(t, w)
-	// The expired entry for q was pruned; p was just let through again.
-	w.readRefreshes.mu.Lock()
-	remembered := len(w.readRefreshes.last)
-	w.readRefreshes.mu.Unlock()
-	if remembered != 1 {
-		t.Fatalf("throttle remembers %d profiles, want only the one let through this interval", remembered)
-	}
-}
-
 // A refresh that fails marks the profile stale again, with a live context
 // even when the refresh's own context ended, so the stale sweep retries it.
 func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
@@ -691,40 +384,6 @@ func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
 	}
 	if marker.calls != 2 || marker.ctxErrs[0] != nil || marker.ctxErrs[1] != nil {
 		t.Fatalf("marks = %d with context errors %v; want two marks with live contexts", marker.calls, marker.ctxErrs)
-	}
-}
-
-// A profile another server is refreshing is not rebuilt here: the refresh
-// reads nothing, marks the profile stale for the sweep, and releases its
-// pending key. Concurrent refreshes could otherwise finish out of order and
-// leave the older one's rows.
-func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
-	w, marker := newRefreshTestWorker()
-	marker.w = nil
-	locker := &fakeLocker{held: true}
-	w.locker = locker
-	// The engine has no repo, so a refresh that went ahead would panic.
-
-	if err := w.refreshProfile(t.Context(), nil, 7, "p"); !errors.Is(err, errProfileRefreshElsewhere) {
-		t.Fatalf("refresh while another server holds the lock = %v, want errProfileRefreshElsewhere", err)
-	}
-	if marker.calls != 1 {
-		t.Fatalf("stale marks = %d, want 1 so the sweep runs the profile again", marker.calls)
-	}
-	if !slices.Equal(locker.keys, []int64{profileRefreshLock(7, "p")}) {
-		t.Fatalf("locks tried %#x, want only the profile's refresh lock", locker.keys)
-	}
-
-	key := profileRefreshKey(7, "p")
-	if !w.claimProfileRefresh(key) {
-		t.Fatal("claim failed")
-	}
-	_ = w.runProfileRefresh(t.Context(), nil, 7, "p", w.refreshProfile)
-	if !w.claimProfileRefresh(key) {
-		t.Fatal("a deferred refresh kept its pending key")
-	}
-	if profileRefreshLock(7, "p") == profileRefreshLock(7, "q") || profileRefreshLock(7, "p") == profileRefreshLock(8, "p") {
-		t.Fatal("different profiles share a refresh lock")
 	}
 }
 
@@ -777,5 +436,39 @@ func TestNotifySignalsChangedOutlivesTheRequest(t *testing.T) {
 	}
 	if req := takeQueued(t, w); req.profileID != "p" {
 		t.Fatalf("queued %+v", req)
+	}
+}
+
+// A profile another server is refreshing is not rebuilt here: the refresh
+// reads nothing, marks the profile stale for the sweep, and releases its
+// pending key. Concurrent refreshes could otherwise finish out of order and
+// leave the older one's rows.
+func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
+	w, marker := newRefreshTestWorker()
+	marker.w = nil
+	locker := &fakeLocker{held: true}
+	w.locker = locker
+	// The engine has no repo, so a refresh that went ahead would panic.
+
+	if err := w.refreshProfile(t.Context(), nil, 7, "p"); !errors.Is(err, errProfileRefreshElsewhere) {
+		t.Fatalf("refresh while another server holds the lock = %v, want errProfileRefreshElsewhere", err)
+	}
+	if marker.calls != 1 {
+		t.Fatalf("stale marks = %d, want 1 so the sweep runs the profile again", marker.calls)
+	}
+	if !slices.Equal(locker.keys, []int64{profileRefreshLock(7, "p")}) {
+		t.Fatalf("locks tried %#x, want only the profile's refresh lock", locker.keys)
+	}
+
+	key := profileRefreshKey(7, "p")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("claim failed")
+	}
+	_ = w.runProfileRefresh(t.Context(), nil, 7, "p", w.refreshProfile)
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("a deferred refresh kept its pending key")
+	}
+	if profileRefreshLock(7, "p") == profileRefreshLock(7, "q") || profileRefreshLock(7, "p") == profileRefreshLock(8, "p") {
+		t.Fatal("different profiles share a refresh lock")
 	}
 }

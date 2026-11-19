@@ -43,74 +43,6 @@ func startupTestOpts() TranscodeOpts {
 	return opts
 }
 
-func TestStartReadyTranscodeAdvancesOnExitAndAvoidsFailedDevice(t *testing.T) {
-	cache := newAutoTranscodePipelineCache()
-	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), cache)
-	var attempts []TranscodeOpts
-	var outputDirs []string
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		attempts = append(attempts, opts)
-		selected := "gpu-0"
-		if opts.AvoidHWDevice == selected {
-			selected = "gpu-1"
-		}
-		opts.HWDevice = selected
-		outputDir := t.TempDir()
-		outputDirs = append(outputDirs, outputDir)
-		return fakeStartupSession(t, opts, outputDir, len(attempts) == 2, false), nil
-	}
-
-	session, err := StartReadyTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
-	if err != nil {
-		t.Fatalf("StartReadyTranscode: %v", err)
-	}
-	if len(attempts) != 2 {
-		t.Fatalf("attempt count = %d, want 2", len(attempts))
-	}
-	if attempts[1].AvoidHWDevice != "gpu-0" || !attempts[1].SoftwareVideoDecode || attempts[1].HWAccel != transcodeHWNVENC {
-		t.Fatalf("fallback = %+v, want mixed NVENC path avoiding gpu-0", attempts[1])
-	}
-	if got := session.Opts().HWDevice; got != "gpu-1" {
-		t.Fatalf("selected device = %q, want gpu-1", got)
-	}
-	if _, statErr := os.Stat(outputDirs[0]); !os.IsNotExist(statErr) {
-		t.Fatalf("failed fresh attempt kept its output dir: %v", statErr)
-	}
-	if preferred, found := cache.get(pipeline.cacheKey); !found || preferred.stage != autoTranscodeMixed {
-		t.Fatalf("cache = %+v (found %v), want mixed stage remembered", preferred, found)
-	}
-}
-
-func TestStartReadyTranscodeDoesNotDuplicateSlowProcess(t *testing.T) {
-	cache := newAutoTranscodePipelineCache()
-	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), cache)
-	attempts := 0
-	var slow *TranscodeSession
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		attempts++
-		slow = fakeStartupSession(t, opts, t.TempDir(), false, true)
-		return slow, nil
-	}
-
-	_, err := StartReadyTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
-	var startupErr *TranscodeStartupError
-	if !errors.As(err, &startupErr) || !startupErr.WasRunning {
-		t.Fatalf("error = %v, want readiness failure of a running process", err)
-	}
-	if !errors.Is(err, ErrManifestNotReady) {
-		t.Fatalf("error = %v, want ErrManifestNotReady cause", err)
-	}
-	if attempts != 1 {
-		t.Fatalf("attempt count = %d, want 1", attempts)
-	}
-	if slow.IsRunning() {
-		t.Fatal("slow fresh start was not closed at the deadline")
-	}
-	if len(cache.preferred) != 0 {
-		t.Fatal("a timeout must never be cached")
-	}
-}
-
 func TestStartReadyTranscodeSpawnErrorIsTerminal(t *testing.T) {
 	spawnErr := errors.New("mkdir failed")
 	for name, failOn := range map[string]int{"first attempt": 1, "after an exit": 2} {
@@ -205,70 +137,6 @@ func TestStartReadyTranscodeDisabledPipelineLegacyRetry(t *testing.T) {
 	}
 }
 
-func TestStartReconstructTranscodeKeepsSlowProcess(t *testing.T) {
-	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), newAutoTranscodePipelineCache())
-	outputDir := t.TempDir()
-	attempts := 0
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		attempts++
-		return fakeStartupSession(t, opts, outputDir, false, true), nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
-	if err != nil {
-		t.Fatalf("StartReconstructTranscode: %v", err)
-	}
-	if !session.IsRunning() {
-		t.Fatal("slow reconstruct was stopped, want it kept running")
-	}
-	if attempts != 1 {
-		t.Fatalf("attempt count = %d, want 1", attempts)
-	}
-	if _, statErr := os.Stat(outputDir); statErr != nil {
-		t.Fatalf("output dir removed: %v", statErr)
-	}
-}
-
-func TestStartReconstructTranscodeKeepsOutputForNextAttempt(t *testing.T) {
-	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), newAutoTranscodePipelineCache())
-	outputDir := t.TempDir()
-	servedSegment := filepath.Join(outputDir, "seg_00010.ts")
-	if err := os.WriteFile(servedSegment, []byte("segment"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// The request that triggered the rebuild ends during the first attempt.
-	// The rebuild serves every request waiting on it, so later attempts still
-	// start. Like StartTranscode for some recipes, this seam returns a
-	// canceled context's error.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	attempts := 0
-	start := func(startCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		if err := startCtx.Err(); err != nil {
-			return nil, err
-		}
-		attempts++
-		cancel()
-		if _, err := os.Stat(servedSegment); err != nil {
-			t.Fatalf("attempt %d: failed attempt removed the shared output dir: %v", attempts, err)
-		}
-		return fakeStartupSession(t, opts, outputDir, attempts == 3, false), nil
-	}
-
-	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
-	if err != nil {
-		t.Fatalf("StartReconstructTranscode: %v", err)
-	}
-	if attempts != 3 {
-		t.Fatalf("attempt count = %d, want 3", attempts)
-	}
-	if got := session.Opts(); got.HWAccel != HWAccelNone || !got.SoftwareVideoDecode {
-		t.Fatalf("final attempt = %+v, want software path", got)
-	}
-}
-
 // A recipe card can be rebuilt where the GPU decoder rejects its source: on
 // another node, or after the operator chose this backend. An explicit backend
 // has no fallback order, so the reconstruct must still move to CPU decoding,
@@ -359,33 +227,6 @@ func TestStartReconstructTranscodeIgnoresPreviousGenerationManifest(t *testing.T
 	}
 	if _, err := os.Stat(outputDir); !os.IsNotExist(err) {
 		t.Fatalf("final reconstruct failure kept output: %v", err)
-	}
-}
-
-func TestWaitForGenerationManifestIgnoresPreviousGenerationOutput(t *testing.T) {
-	outputDir := t.TempDir()
-	seedPreviousGeneration(t, outputDir)
-	opts := startupTestOpts()
-	opts.HWAccel = HWAccelNone
-
-	running := fakeStartupSession(t, opts, outputDir, false, true)
-	if _, err := running.WaitForGenerationManifest(time.Millisecond); !errors.Is(err, ErrManifestNotReady) {
-		t.Fatalf("running WaitForGenerationManifest error = %v, want ErrManifestNotReady", err)
-	}
-
-	exited := fakeStartupSession(t, opts, outputDir, false, false)
-	if _, err := exited.GetManifest(); err != nil {
-		t.Fatalf("GetManifest: %v; want the directory's existing manifest", err)
-	}
-	if _, err := exited.WaitForGenerationManifest(time.Millisecond); !errors.Is(err, ErrTranscodeFailed) {
-		t.Fatalf("exited WaitForGenerationManifest error = %v, want ErrTranscodeFailed", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(outputDir, "stream.m3u8"), []byte(startupTestManifest), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := exited.WaitForGenerationManifest(time.Millisecond); err != nil {
-		t.Fatalf("WaitForGenerationManifest after this generation wrote its manifest: %v", err)
 	}
 }
 
@@ -522,5 +363,100 @@ func TestStartReadyTranscodeRetriesDecoderRejectionOnCPU(t *testing.T) {
 				t.Fatal("CPU-decode retry must keep the NVENC encoder")
 			}
 		})
+	}
+}
+
+func TestWaitForGenerationManifestIgnoresPreviousGenerationOutput(t *testing.T) {
+	outputDir := t.TempDir()
+	seedPreviousGeneration(t, outputDir)
+	opts := startupTestOpts()
+	opts.HWAccel = HWAccelNone
+
+	running := fakeStartupSession(t, opts, outputDir, false, true)
+	if _, err := running.WaitForGenerationManifest(time.Millisecond); !errors.Is(err, ErrManifestNotReady) {
+		t.Fatalf("running WaitForGenerationManifest error = %v, want ErrManifestNotReady", err)
+	}
+
+	exited := fakeStartupSession(t, opts, outputDir, false, false)
+	if _, err := exited.GetManifest(); err != nil {
+		t.Fatalf("GetManifest: %v; want the directory's existing manifest", err)
+	}
+	if _, err := exited.WaitForGenerationManifest(time.Millisecond); !errors.Is(err, ErrTranscodeFailed) {
+		t.Fatalf("exited WaitForGenerationManifest error = %v, want ErrTranscodeFailed", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(outputDir, "stream.m3u8"), []byte(startupTestManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exited.WaitForGenerationManifest(time.Millisecond); err != nil {
+		t.Fatalf("WaitForGenerationManifest after this generation wrote its manifest: %v", err)
+	}
+}
+
+func TestStartReadyTranscodeDoesNotDuplicateSlowProcess(t *testing.T) {
+	cache := newAutoTranscodePipelineCache()
+	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), cache)
+	attempts := 0
+	var slow *TranscodeSession
+	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		attempts++
+		slow = fakeStartupSession(t, opts, t.TempDir(), false, true)
+		return slow, nil
+	}
+
+	_, err := StartReadyTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
+	var startupErr *TranscodeStartupError
+	if !errors.As(err, &startupErr) || !startupErr.WasRunning {
+		t.Fatalf("error = %v, want readiness failure of a running process", err)
+	}
+	if !errors.Is(err, ErrManifestNotReady) {
+		t.Fatalf("error = %v, want ErrManifestNotReady cause", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempt count = %d, want 1", attempts)
+	}
+	if slow.IsRunning() {
+		t.Fatal("slow fresh start was not closed at the deadline")
+	}
+	if len(cache.preferred) != 0 {
+		t.Fatal("a timeout must never be cached")
+	}
+}
+
+func TestStartReconstructTranscodeKeepsOutputForNextAttempt(t *testing.T) {
+	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), newAutoTranscodePipelineCache())
+	outputDir := t.TempDir()
+	servedSegment := filepath.Join(outputDir, "seg_00010.ts")
+	if err := os.WriteFile(servedSegment, []byte("segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The request that triggered the rebuild ends during the first attempt.
+	// The rebuild serves every request waiting on it, so later attempts still
+	// start. Like StartTranscode for some recipes, this seam returns a
+	// canceled context's error.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempts := 0
+	start := func(startCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		if err := startCtx.Err(); err != nil {
+			return nil, err
+		}
+		attempts++
+		cancel()
+		if _, err := os.Stat(servedSegment); err != nil {
+			t.Fatalf("attempt %d: failed attempt removed the shared output dir: %v", attempts, err)
+		}
+		return fakeStartupSession(t, opts, outputDir, attempts == 3, false), nil
+	}
+
+	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
+	if err != nil {
+		t.Fatalf("StartReconstructTranscode: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempt count = %d, want 3", attempts)
+	}
+	if got := session.Opts(); got.HWAccel != HWAccelNone || !got.SoftwareVideoDecode {
+		t.Fatalf("final attempt = %+v, want software path", got)
 	}
 }

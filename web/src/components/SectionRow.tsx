@@ -1,4 +1,5 @@
 import { memo, useCallback, useId, useMemo } from "react";
+import { CollectionsRow } from "@/components/CollectionsRow";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
@@ -144,6 +145,7 @@ export default memo(function SectionRow({
   const sectionId = section.id;
   const handleNearEnd = useCallback(() => onNearEnd?.(sectionId), [onNearEnd, sectionId]);
 
+  if (section.collections?.length) return <CollectionsRow section={section} />;
   if (section.items.length === 0) return null;
 
   const headerActions = libraryId ? (

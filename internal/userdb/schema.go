@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS watch_history (
 CREATE INDEX IF NOT EXISTS idx_watch_history_item_witness
     ON watch_history (profile_id, media_item_id, watched_at DESC, id DESC);
 
+CREATE INDEX IF NOT EXISTS idx_watch_history_profile_watched
+    ON watch_history (profile_id, watched_at, id);
+
 CREATE TABLE IF NOT EXISTS hidden_history_items (
     profile_id TEXT NOT NULL,
     media_item_id TEXT NOT NULL,

@@ -240,6 +240,13 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	if strings.EqualFold(strings.TrimSpace(items[0].Status), "unmatched") {
 		return 0, false, nil
 	}
+	paths := make([]string, len(existing))
+	for i, file := range existing {
+		paths[i] = file.FilePath
+	}
+	if !s.confirmUnchangedFiles(ctx, folder.ID, paths) {
+		return 0, false, nil
+	}
 	return unreadable, true, nil
 }
 
@@ -780,6 +787,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	if s == nil || folder == nil {
 		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
 	}
+	ctx = withScopedScan(ctx, fullScan)
 
 	warning, err := s.scanWarningBeforeWalk(ctx, folder.ID, fullScan)
 	if err != nil {
@@ -1686,31 +1694,26 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook, provide
 }
 
 // normalizeReleaseDateForSQL coerces tag-derived date strings into the
-// ISO YYYY-MM-DD shape media_items.release_date expects. Year-only
-// tags ("2018") become "2018-01-01"; ISO already-correct values pass
-// through; everything else returns "" (skip the column).
+// ISO YYYY-MM-DD shape media_items.release_date expects. A real calendar
+// date passes through. A year alone ("2018"), or a year followed by a month
+// or day that is not one ("2015-00-00", which some taggers write for an
+// unknown date), becomes January 1 of that year. Everything else returns ""
+// (skip the column): a date Postgres rejects would fail the whole book.
 func normalizeReleaseDateForSQL(s string) string {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if len(s) < 4 {
 		return ""
 	}
-	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
-		return s[:10]
+	year := s[:4]
+	if strings.Trim(year, "0123456789") != "" || year == "0000" {
+		return ""
 	}
-	if len(s) >= 4 {
-		y := s[:4]
-		ok := true
-		for _, c := range y {
-			if c < '0' || c > '9' {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return y + "-01-01"
+	if len(s) >= 10 {
+		if _, err := time.Parse(time.DateOnly, s[:10]); err == nil {
+			return s[:10]
 		}
 	}
-	return ""
+	return year + "-01-01"
 }
 
 func mergeUniqueStrings(existing, additions []string) []string {

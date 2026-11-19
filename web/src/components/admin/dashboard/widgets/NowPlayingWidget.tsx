@@ -34,9 +34,6 @@ const MAX_RENDERED_STREAMS = 40;
 const STACKED_STREAM_LIMIT = 4;
 const FIXED_ROWS_QUERY = "(min-width: 1024px)";
 
-/** Height kept free under the last visible row for the "+N more" link. */
-const MORE_LINK_HEIGHT_PX = 24;
-
 export function NowPlayingWidget() {
   const t = useT();
   const sessionsQuery = useAdminSessions();
@@ -88,10 +85,13 @@ export function NowPlayingWidget() {
           </Link>
         )}
       </div>
-      {/* The widget shows as many whole cards as its height allows; the rest
-          are counted in the "+N more" link instead of half-drawn at the edge.
+      {/* The widget shows as many whole cards as its height allows instead of
+          half-drawing one at the edge; the header's "View all" link counts
+          every stream.
           Cards pair up only when the widget itself is wide enough for two, so a
-          half-width widget shows one full-width card per row. */}
+          half-width widget shows one full-width card per row. The viewport
+          stays positioned so it is the cards' offsetParent: the fit compares
+          their offsetTop with its height. */}
       <div ref={setViewport} className="@container relative min-h-0 flex-1 overflow-hidden">
         {sessionsQuery.isLoading ? (
           <div className="grid grid-cols-1 gap-3.5 @2xl:grid-cols-2">
@@ -126,22 +126,6 @@ export function NowPlayingWidget() {
                 );
               })}
             </div>
-            {sessions.length > visibleCount && (
-              <Link
-                to="/admin/activity"
-                className={cn(
-                  "text-muted-foreground hover:text-primary block text-center text-[12px] leading-6 transition-colors",
-                  // In a fixed-height widget the link sits in the strip the
-                  // fit leaves free; a content-sized one just flows after.
-                  fixedRows ? "absolute inset-x-0 bottom-0" : "mt-1",
-                )}
-              >
-                {t("web.admin.dashboard.widgets.nowPlaying.moreStreams", {
-                  count: sessions.length - visibleCount,
-                  count_text: sessions.length - visibleCount,
-                })}
-              </Link>
-            )}
           </>
         )}
       </div>
@@ -179,13 +163,11 @@ function useFittedCardCount(cardCount: number) {
     let next = Number.POSITIVE_INFINITY;
     const last = cards[cards.length - 1];
     if (last && bottomOf(last) > height) {
-      // Not everything fits, so the "+N more" link needs its strip too.
-      const limit = height - MORE_LINK_HEIGHT_PX;
-      // Keep one card even in a widget too short for it: a lone link reads as
-      // an error, and the card clips cleanly at the edge.
+      // Keep one card even in a widget too short for it: an empty widget reads
+      // as an error, and the card clips cleanly at the edge.
       next = Math.max(
         1,
-        cards.findIndex((card) => bottomOf(card) > limit),
+        cards.findIndex((card) => bottomOf(card) > height),
       );
     }
     setVisibleCount(next);
@@ -332,8 +314,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           </>
         )}
 
-        {/* Tags */}
-        <div className="mb-1.5 flex flex-wrap gap-1">
+        {/* Tags. Capped at one line so every card has the same height and
+            the widget's rows stay even: tags that would wrap are clipped
+            whole. The 12px line height (inherited by the pills) plus their
+            padding and border makes the 18px line. */}
+        <div className="mb-1.5 flex max-h-[18px] flex-wrap gap-1 overflow-hidden leading-3">
           <span
             className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodMeta.badgeClass}`}
           >

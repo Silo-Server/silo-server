@@ -17,6 +17,7 @@ import {
   useCatalogWindow,
   useLibraryHasItems,
 } from "@/hooks/queries/catalog";
+import { useCatalogVisibleRange } from "@/hooks/useCatalogVisibleRange";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
@@ -213,30 +214,7 @@ export default function LibraryBrowse({
   const showMediaScopeSelector = libraryType === "mixed";
   const filtersKey = JSON.stringify(scopedQueryDefinition);
 
-  const [visibleRangeState, setVisibleRangeState] = useState<{
-    key: string;
-    range: [number, number];
-  }>({
-    key: filtersKey,
-    range: [0, limit - 1],
-  });
-  const visibleRange =
-    visibleRangeState.key === filtersKey
-      ? visibleRangeState.range
-      : ([0, limit - 1] as [number, number]);
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const handleVisibleRangeChange = useCallback(
-    (start: number, end: number) => {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        setVisibleRangeState({ key: filtersKey, range: [start, end] });
-      }, 50);
-    },
-    [filtersKey],
-  );
-
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
+  const [visibleRange, handleVisibleRangeChange] = useCatalogVisibleRange(filtersKey, limit);
 
   const audiobookAxis = isAudiobookLibraryType(libraryType)
     ? audiobookBrowseAxisFromBrowseType(browseType)

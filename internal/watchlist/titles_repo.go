@@ -363,41 +363,56 @@ func (r *titlesRepo) removeByTMDB(ctx context.Context, userID int, profileID, me
 // entry, which is what makes promotion side effects fire once.
 //
 // add writes through another connection. A node that dies after it rolls the
-// delete back, so the entry stays and the next read finishes the move.
-func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, add func(context.Context) error) (bool, error) {
+// delete back, so the entry stays and the next read finishes the move. add
+// reports whether the library entry is new to the user; when it is and this
+// call removed the entry, the move is recorded in watchlist_title_promotions
+// in the same transaction, so the watchlist arrival notice finds the profile
+// whichever user store holds its library watchlist (see Arrivals).
+func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, contentID string, add func(ctx context.Context, entryAddedAt time.Time) (bool, error)) (moved, newToUser bool, err error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("beginning watchlist title promotion: %w", err)
+		return false, false, fmt.Errorf("beginning watchlist title promotion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	locked, err := lockTitleByID(ctx, tx, titleID)
 	if err != nil || !locked {
-		return false, err
+		return false, false, err
 	}
-	var present bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM user_watchlist_titles
-			WHERE user_id = $1 AND profile_id = $2 AND title_id = $3)`, userID, profileID, titleID).Scan(&present); err != nil {
-		return false, fmt.Errorf("reading promoted watchlist title entry: %w", err)
+	// The entry is read under the title lock: the profile may have removed
+	// and re-added it since the caller listed it, and the library entry
+	// (when add writes it under this lock) and the promotion record must
+	// carry the time of the entry that is moved.
+	var currentAddedAt time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT added_at FROM user_watchlist_titles
+		WHERE user_id = $1 AND profile_id = $2 AND title_id = $3`, userID, profileID, titleID).Scan(&currentAddedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
 	}
-	if !present {
-		return false, nil
+	if err != nil {
+		return false, false, fmt.Errorf("reading promoted watchlist title entry: %w", err)
 	}
-	if err := add(ctx); err != nil {
-		return false, err
+	newToUser, err = add(ctx, currentAddedAt)
+	if err != nil {
+		return false, false, err
+	}
+	// Recorded before the delete, which can take the title and its aliases.
+	if newToUser {
+		if err := recordPromotion(ctx, tx, userID, profileID, titleID, contentID, currentAddedAt); err != nil {
+			return false, false, err
+		}
 	}
 	if err := keepSyncTitleIDsLocked(ctx, tx, userID, profileID, titleID); err != nil {
-		return false, err
+		return false, false, err
 	}
 	removed, err := deleteEntryLocked(ctx, tx, userID, profileID, titleID)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("committing watchlist title promotion: %w", err)
+		return false, false, fmt.Errorf("committing watchlist title promotion: %w", err)
 	}
-	return removed, nil
+	return removed, newToUser, nil
 }
 
 // entryExists reports whether the profile still has an entry on the title.
@@ -485,6 +500,9 @@ func (r *titlesRepo) purgeProfile(ctx context.Context, userID int, profileID str
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_watchlist_titles WHERE user_id = $1 AND profile_id = $2`, userID, profileID); err != nil {
 		return fmt.Errorf("purging watchlist title entries: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM watchlist_title_promotions WHERE user_id = $1 AND profile_id = $2`, userID, profileID); err != nil {
+		return fmt.Errorf("purging watchlist title promotions: %w", err)
 	}
 	if len(ids) > 0 {
 		if _, err := tx.Exec(ctx, `

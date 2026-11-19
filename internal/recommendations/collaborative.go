@@ -150,9 +150,9 @@ func (e *Engine) similarUsersLiked(ctx context.Context, builder rowBuilder, user
 		for _, r := range ratings {
 			var weight float64
 			switch {
-			case r.Rating == 5:
+			case r.Stars() == 5:
 				weight = WeightRated5
-			case r.Rating == 4:
+			case r.Stars() == 4:
 				weight = WeightRated4
 			default:
 				continue

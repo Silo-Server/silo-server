@@ -175,6 +175,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
+	playbackHandler.NodeKeys = deps.NodeKeys
+	if deps.SourceGrants != nil {
+		playbackHandler.SourceGrants = deps.SourceGrants
+	}
 	// Compat transcode reconstruct is driven by the recipe carried in the durable
 	// compat playback store (jellycompat_playback_sessions); no separate native
 	// recipe table is needed.
@@ -193,6 +197,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.ratings = shownRatings
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
+	playbackHandler.StreamDeny = deps.StreamDeny
 	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
 	itemsHandler.themeFFmpegPath = func() string { return playback.ResolveFFmpegPath(playbackHandler.FFmpegPath) }
 	playbackHandler.SessionSyncer = deps.SessionSyncer
@@ -378,7 +383,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Media requests require a token or a PlaySessionId scoped to the negotiated source.
 	r.Group(func(r chi.Router) {
-		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
+		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth, deps.SettingsRepo))
 		r.Use(rateLimit)
 		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Get("/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Items/{id}/Download", playbackHandler.HandleDownload))
@@ -396,21 +401,27 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/audio-v2/stream", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/stream", playbackHandler.HandleAudioV2VideoStream))
 		r.Method(http.MethodHead, "/Videos/{id}/audio-v2/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/audio-v2/stream.{container}", playbackHandler.HandleAudioV2VideoStream))
 		r.Get("/Videos/{id}/audio-v2/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/stream.{container}", playbackHandler.HandleAudioV2VideoStream))
+		r.Method(http.MethodHead, "/Videos/{id}/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/master.m3u8", playbackHandler.HandleMasterManifest))
 		r.Get("/Videos/{id}/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/master.m3u8", playbackHandler.HandleMasterManifest))
 		r.Get("/Videos/{id}/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hls/{playlistId}/stream.m3u8", playbackHandler.HandleHLSManifest))
 		r.Get("/Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleHLSSegment))
+		r.Method(http.MethodHead, "/Videos/{id}/audio-v2/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/audio-v2/master.m3u8", playbackHandler.HandleAudioV2MasterManifest))
 		r.Get("/Videos/{id}/audio-v2/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", playbackHandler.HandleAudioV2MasterManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", playbackHandler.HandleAudioV2HLSManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleAudioV2HLSSegment))
+		r.Method(http.MethodHead, "/Videos/{id}/hevc-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/hevc-v1/master.m3u8", playbackHandler.HandleHEVCV1MasterManifest))
 		r.Get("/Videos/{id}/hevc-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/master.m3u8", playbackHandler.HandleHEVCV1MasterManifest))
 		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleHEVCV1HLSManifest))
 		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleHEVCV1HLSSegment))
+		r.Method(http.MethodHead, "/Videos/{id}/remux-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/remux-v1/master.m3u8", playbackHandler.HandleRemuxV1MasterManifest))
 		r.Get("/Videos/{id}/remux-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/master.m3u8", playbackHandler.HandleRemuxV1MasterManifest))
 		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxV1HLSManifest))
 		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxV1HLSSegment))
+		r.Method(http.MethodHead, "/Videos/{id}/remux-ts-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/remux-ts-v1/master.m3u8", playbackHandler.HandleRemuxTSV1MasterManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/master.m3u8", playbackHandler.HandleRemuxTSV1MasterManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxTSV1HLSManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxTSV1HLSSegment))
+		r.Method(http.MethodHead, "/Videos/{id}/remux-dv-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/remux-dv-v1/master.m3u8", playbackHandler.HandleRemuxDVV1MasterManifest))
 		r.Get("/Videos/{id}/remux-dv-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/master.m3u8", playbackHandler.HandleRemuxDVV1MasterManifest))
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxDVV1HLSManifest))
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxDVV1HLSSegment))

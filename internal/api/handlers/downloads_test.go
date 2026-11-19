@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -344,7 +346,7 @@ func TestHandleDirectDownloadViaProxyRedirectsToProxy(t *testing.T) {
 	}
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL + "/", Enabled: true, Healthy: true, MaxJobs: &maxJobs}})
-	planner := nodepool.NewPlanner(proxies, nodepool.NewTranscodePool())
+	planner := nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool())
 	h := NewDownloadHandler(svc)
 	h.SetProxyDelivery(planner, func() string { return secret })
 	rec := httptest.NewRecorder()
@@ -380,7 +382,7 @@ func TestHandleDirectDownloadFallsBackWithoutHealthyProxy(t *testing.T) {
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{URL: "https://proxy.example", Enabled: true, Healthy: false}})
 	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return "secret" })
 	rec := httptest.NewRecorder()
 	h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", ""))
 
@@ -399,7 +401,7 @@ func TestHandleDirectDownloadFallsBackWhenProxyCannotServePath(t *testing.T) {
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL, Enabled: true, Healthy: true}})
 	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return "secret" })
 	rec := httptest.NewRecorder()
 	h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", ""))
 
@@ -422,7 +424,7 @@ func TestHandleDirectDownloadEstablishedRouteKeepsLocalSuccessStatus(t *testing.
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL, Enabled: true, Healthy: true}})
 	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return "secret" })
 	rec := httptest.NewRecorder()
 	h.HandleDirectDownload(rec, downloadTestRequest(http.MethodGet, "/direct-download?file_id=42", nil, 7, "", ""))
 
@@ -445,7 +447,7 @@ func TestHandleDirectDownloadViaProxyStaysLocalWhenTargetIneligible(t *testing.T
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL, Enabled: true, Healthy: true}})
 	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return "secret" })
 	rec := httptest.NewRecorder()
 	h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", ""))
 
@@ -470,7 +472,7 @@ func TestHandleDirectDownloadUnknownFileIsNotFound(t *testing.T) {
 		t.Run("proxy_"+method, func(t *testing.T) {
 			svc := &proxyDownloadService{fakeDownloadService: &fakeDownloadService{}, resolveErr: catalog.ErrItemNotFound}
 			h := NewDownloadHandler(svc)
-			h.SetProxyDelivery(nodepool.NewPlanner(nodepool.NewProxyPool(), nodepool.NewTranscodePool()), func() string { return "secret" })
+			h.SetProxyDelivery(nodepool.NewPlanner(nodepool.NewProxyPool(), nodepooltest.NewTranscodePool()), func() string { return "secret" })
 			rec := httptest.NewRecorder()
 			h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(method, "/direct-download-proxy?file_id=4242", nil, 7, "", ""))
 			if rec.Code != http.StatusNotFound {
@@ -561,7 +563,7 @@ func TestDirectDownloadRefusesOriginalAboveOverrideCeiling(t *testing.T) {
 			proxies := nodepool.NewProxyPool()
 			proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL, Enabled: true, Healthy: true}})
 			h := NewDownloadHandler(svc)
-			h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+			h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return "secret" })
 			rec := httptest.NewRecorder()
 			h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(method, "/direct-download-proxy?file_id=42", nil, 7, "", ""))
 			if rec.Code != http.StatusForbidden || rec.Header().Get("Location") != "" || proxyRequests != 0 {
@@ -711,7 +713,7 @@ func TestServeDownloadFileRedirectsManagedArtifactsThroughProxies(t *testing.T) 
 			proxies.SetNodes(nodes)
 			svc := &proxyDownloadService{fakeDownloadService: &fakeDownloadService{}, managedTarget: tc.target}
 			h := NewDownloadHandler(svc)
-			h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return secret })
+			h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return secret })
 
 			rec := httptest.NewRecorder()
 			req := downloadTestRequest(http.MethodGet, "/downloads/"+tc.target.DownloadID+"/file", nil, 7, "pA", "devA")

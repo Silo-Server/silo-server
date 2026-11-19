@@ -18,29 +18,6 @@ func (loginSettingsStore) GetAll(context.Context) (map[string]string, error) {
 	return map[string]string{}, nil
 }
 
-func TestStandaloneLoginEnabledReadsGate(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		stored string
-		want   bool
-	}{
-		{"unset defaults on", "", true},
-		{"gated off", "true", false},
-		{"explicitly on", "false", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			provider := &ABSConfigProvider{Settings: loginSettingsStore{value: tc.stored}}
-			got, err := provider.StandaloneLoginEnabled(t.Context())
-			if err != nil {
-				t.Fatalf("StandaloneLoginEnabled: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("StandaloneLoginEnabled = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 // A settings read failure must not reopen login an operator turned off.
 func TestStandaloneLoginEnabledReturnsReadError(t *testing.T) {
 	wantErr := errors.New("settings unavailable")

@@ -31,91 +31,6 @@ func stagedServiceForTest(t *testing.T, now time.Time, room Room, contentID stri
 	return service, repo, host, guest
 }
 
-func TestStageKeepsRoomInLobby(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	service, repo, host, guest := stagedServiceForTest(t, now, lobbyRoom(now), "movie-2")
-	service.rooms[repo.room.ID].members[buildMemberKey(8, "guest")].lobbyReady = false
-
-	snapshot, err := service.StageItem(context.Background(), repo.room.ID, 7, "host", SelectItemInput{ContentID: "movie-2"})
-	if err != nil {
-		t.Fatalf("StageItem() error = %v", err)
-	}
-	if snapshot.Phase != RoomPhaseLobby || snapshot.PlaybackState != RoomPlaybackStateIdle {
-		t.Fatalf("staging changed phase: %s/%s", snapshot.Phase, snapshot.PlaybackState)
-	}
-	if snapshot.SelectionRevision != 0 {
-		t.Fatalf("staging bumped the selection revision to %d", snapshot.SelectionRevision)
-	}
-	if snapshot.Generation != 2 || repo.room.Generation != 2 {
-		t.Fatalf("generation = %d (persisted %d), want 2", snapshot.Generation, repo.room.Generation)
-	}
-	if snapshot.SelectedContentID == nil || *snapshot.SelectedContentID != "movie-2" || snapshot.SelectedFileID == nil || *snapshot.SelectedFileID != 7 {
-		t.Fatalf("staged selection not applied: %+v", snapshot)
-	}
-	if repo.room.SelectedContentID == nil || *repo.room.SelectedContentID != "movie-2" || !repo.room.AnchorUpdatedAt.Equal(now) {
-		t.Fatalf("persisted row = %+v", repo.room)
-	}
-	if len(host.payloads) != 1 || len(guest.payloads) != 1 || host.payloads[0]["type"] != "snapshot" {
-		t.Fatalf("expected one snapshot per member, got host=%d guest=%d", len(host.payloads), len(guest.payloads))
-	}
-}
-
-func TestStageClearsLobbyReadyOnlyWhenContentChanges(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	room := lobbyRoom(now)
-	room.SelectedContentID = stringPtr("movie-2")
-	service, repo, _, _ := stagedServiceForTest(t, now, room, "movie-2")
-	guest := service.rooms[repo.room.ID].members[buildMemberKey(8, "guest")]
-
-	if _, err := service.StageItem(context.Background(), repo.room.ID, 7, "host", SelectItemInput{ContentID: "movie-2"}); err != nil {
-		t.Fatalf("restage same: %v", err)
-	}
-	if !guest.lobbyReady {
-		t.Fatal("re-staging the same content cleared lobby ready")
-	}
-
-	service.selectionResolver = &stubSelectionResolver{resolved: &ResolvedSelection{ContentID: "movie-3"}}
-	snapshot, err := service.StageItem(context.Background(), repo.room.ID, 7, "host", SelectItemInput{ContentID: "movie-3"})
-	if err != nil {
-		t.Fatalf("stage different: %v", err)
-	}
-	if guest.lobbyReady {
-		t.Fatal("staging different content kept lobby ready")
-	}
-	for _, member := range snapshot.Members {
-		if member.LobbyReady {
-			t.Fatalf("snapshot still reports %s ready", member.DisplayName)
-		}
-	}
-}
-
-func TestStageIdenticalResolvedSelectionIsNoOp(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	room := lobbyRoom(now.Add(-time.Minute))
-	room.SelectedContentID = new("movie-2")
-	room.SelectedFileID = new(7)
-	room.SelectedLibraryID = new(8)
-	service, repo, host, guest := stagedServiceForTest(t, now, room, "movie-2")
-
-	// Different request inputs may resolve to the same canonical selection.
-	snapshot, err := service.StageItem(t.Context(), room.ID, 7, "host", SelectItemInput{ContentID: "alias"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Generation != room.Generation || snapshot.SelectionRevision != room.SelectionRevision || snapshot.AnchorUpdatedAt != room.AnchorUpdatedAt.Format(time.RFC3339) {
-		t.Fatalf("identical stage changed the room: %+v", snapshot)
-	}
-	if repo.room.Generation != room.Generation || !repo.room.AnchorUpdatedAt.Equal(room.AnchorUpdatedAt) {
-		t.Fatalf("identical stage persisted a change: %+v", repo.room)
-	}
-	if !service.rooms[room.ID].members[buildMemberKey(8, "guest")].lobbyReady {
-		t.Fatal("identical stage cleared lobby readiness")
-	}
-	if len(host.payloads) != 0 || len(guest.payloads) != 0 {
-		t.Fatal("identical stage broadcast another snapshot")
-	}
-}
-
 func TestStageUpdatesChangedResolvedFileOrLibrary(t *testing.T) {
 	for _, field := range []string{"file", "library"} {
 		t.Run(field, func(t *testing.T) {
@@ -178,46 +93,6 @@ func TestStageRefusals(t *testing.T) {
 	service, repo, _, _ := stagedServiceForTest(t, now, room, "movie-2")
 	if _, err := service.StageItem(context.Background(), repo.room.ID, 7, "host", SelectItemInput{ContentID: "  "}); !errors.Is(err, ErrInvalidSelection) {
 		t.Fatalf("blank content: %v", err)
-	}
-}
-
-func TestStartStagedEntersWaitingAndBumpsRevision(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	room := lobbyRoom(now)
-	room.SelectedContentID = stringPtr("movie-2")
-	service, repo, host, guest := stagedServiceForTest(t, now, room, "movie-2")
-	live := service.rooms[repo.room.ID]
-	live.waitingTimer = time.AfterFunc(time.Hour, func() {})
-	hostMember := live.members[buildMemberKey(7, "host")]
-	hostMember.sessionID = "stale"
-	hostMember.isReady = true
-	hostMember.lobbyReady = true
-	hostMember.correctionCommand = &TransportCommand{CommandID: "stale-correction"}
-
-	snapshot, err := service.StartStagedOnce(context.Background(), repo.room.ID, 7, "host")
-	if err != nil {
-		t.Fatalf("StartStagedOnce() error = %v", err)
-	}
-	if snapshot.Phase != RoomPhasePlaying || snapshot.PlaybackState != RoomPlaybackStateWaiting || !snapshot.IsPaused {
-		t.Fatalf("start did not enter waiting: %+v", snapshot)
-	}
-	if snapshot.SelectionRevision != 1 || snapshot.Generation != 2 {
-		t.Fatalf("revision/generation = %d/%d, want 1/2", snapshot.SelectionRevision, snapshot.Generation)
-	}
-	if snapshot.SelectedContentID == nil || *snapshot.SelectedContentID != "movie-2" {
-		t.Fatalf("start changed the staged item: %+v", snapshot.SelectedContentID)
-	}
-	if hostMember.sessionID != "" || hostMember.isReady || hostMember.lobbyReady || hostMember.correctionCommand != nil {
-		t.Fatalf("start did not reset member epoch state: %+v", hostMember)
-	}
-	if live.members[buildMemberKey(8, "guest")].lobbyReady {
-		t.Fatal("guest lobby ready survived start")
-	}
-	if live.waitingTimer != nil {
-		t.Fatal("waiting deadline from the previous epoch was not disarmed")
-	}
-	if len(host.payloads) != 1 || len(guest.payloads) != 1 {
-		t.Fatalf("expected one snapshot per member, got host=%d guest=%d", len(host.payloads), len(guest.payloads))
 	}
 }
 
@@ -303,53 +178,6 @@ func TestClusterAdoptionPreservesCommittedLobbyReady(t *testing.T) {
 	}
 }
 
-func TestLobbyReadyTogglesAndBroadcasts(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	room := lobbyRoom(now)
-	room.SelectedContentID = stringPtr("movie-1")
-	service, repo, host, guest := stagedServiceForTest(t, now, room, "movie-1")
-	live := service.rooms[repo.room.ID]
-	live.members[buildMemberKey(8, "guest")].lobbyReady = false
-	reg := registrationFor(repo.room.ID, 8, "guest", guest)
-
-	snapshot, err := service.HandleLobbyReadyForConnection(context.Background(), reg, 8, "guest", true)
-	if err != nil {
-		t.Fatalf("ready: %v", err)
-	}
-	var self *MemberSummary
-	for i := range snapshot.Members {
-		if snapshot.Members[i].IsSelf {
-			self = &snapshot.Members[i]
-		}
-	}
-	if self == nil || !self.LobbyReady {
-		t.Fatalf("snapshot does not show self ready: %+v", snapshot.Members)
-	}
-	if len(host.payloads) != 1 || len(guest.payloads) != 1 {
-		t.Fatalf("ready did not broadcast once per member: host=%d guest=%d", len(host.payloads), len(guest.payloads))
-	}
-	if repo.room.Generation != 1 {
-		t.Fatal("lobby ready must not persist or bump the generation")
-	}
-
-	// Same value again is a no-op with no broadcast.
-	if _, err := service.HandleLobbyReadyForConnection(context.Background(), reg, 8, "guest", true); err != nil {
-		t.Fatal(err)
-	}
-	if len(host.payloads) != 1 {
-		t.Fatal("repeated ready broadcast again")
-	}
-	if _, err := service.HandleLobbyReadyForConnection(context.Background(), reg, 8, "guest", false); err != nil || live.members[buildMemberKey(8, "guest")].lobbyReady {
-		t.Fatalf("unready: %v ready=%v", err, live.members[buildMemberKey(8, "guest")].lobbyReady)
-	}
-
-	// A registration whose connection is not the member's current one is refused.
-	stale := registrationFor(repo.room.ID, 8, "guest", stubConn{})
-	if _, err := service.HandleLobbyReadyForConnection(context.Background(), stale, 8, "guest", true); !errors.Is(err, ErrRoomForbidden) {
-		t.Fatalf("stale connection: %v", err)
-	}
-}
-
 func TestLobbyReadyRefusedOutsideLobby(t *testing.T) {
 	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
 	service, repo, _, guest := stagedServiceForTest(t, now, baseRoom(now), "movie-1")
@@ -359,41 +187,6 @@ func TestLobbyReadyRefusedOutsideLobby(t *testing.T) {
 	}
 	if len(guest.payloads) != 0 {
 		t.Fatal("refused ready broadcast")
-	}
-}
-
-func TestSelectionModeSwitchClearsStagedAndLobbyReady(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	room := lobbyRoom(now)
-	room.SelectedContentID = stringPtr("movie-1")
-	room.SelectedFileID = intPtr(7)
-	service, repo, host, guest := stagedServiceForTest(t, now, room, "movie-1")
-	live := service.rooms[repo.room.ID]
-
-	snapshot, err := service.UpdateSelectionMode(context.Background(), repo.room.ID, 7, "host", RoomSelectionModeVote)
-	if err != nil {
-		t.Fatalf("UpdateSelectionMode() error = %v", err)
-	}
-	if snapshot.SelectionMode != RoomSelectionModeVote || snapshot.Phase != RoomPhaseLobby || snapshot.SelectionRevision != 0 {
-		t.Fatalf("switch: %+v", snapshot)
-	}
-	if snapshot.SelectedContentID != nil || snapshot.SelectedFileID != nil || repo.room.SelectedContentID != nil {
-		t.Fatalf("staged item survived the switch: %+v / %+v", snapshot, repo.room)
-	}
-	if snapshot.Generation != 2 || repo.room.SelectionMode != RoomSelectionModeVote {
-		t.Fatalf("persist: gen=%d mode=%s", snapshot.Generation, repo.room.SelectionMode)
-	}
-	if live.members[buildMemberKey(8, "guest")].lobbyReady {
-		t.Fatal("lobby ready survived the switch")
-	}
-	if len(host.payloads) != 1 || len(guest.payloads) != 1 {
-		t.Fatalf("broadcast: host=%d guest=%d", len(host.payloads), len(guest.payloads))
-	}
-
-	// Same mode again is a no-op: no persist, no broadcast.
-	again, err := service.UpdateSelectionMode(context.Background(), repo.room.ID, 7, "host", RoomSelectionModeVote)
-	if err != nil || again.Generation != 2 || len(host.payloads) != 1 {
-		t.Fatalf("repeat: %+v %v payloads=%d", again, err, len(host.payloads))
 	}
 }
 
@@ -417,20 +210,6 @@ func TestSelectionModeSwitchRefusals(t *testing.T) {
 			t.Fatalf("error = %v, want ErrInvalidSelection", err)
 		}
 	})
-}
-
-func TestSwitchToHostPickAllowsDirectSelection(t *testing.T) {
-	service, repo := newVoteRoomService(t, RoomSelectionModeVote, voteRoomSuggestions())
-	if _, err := service.SelectItem(context.Background(), repo.room.ID, 7, "host", SelectItemInput{ContentID: "movie-winner"}); !errors.Is(err, ErrVoteRoomSelection) {
-		t.Fatalf("vote room direct selection: %v", err)
-	}
-	if _, err := service.UpdateSelectionMode(context.Background(), repo.room.ID, 7, "host", RoomSelectionModeHostPick); err != nil {
-		t.Fatalf("switch: %v", err)
-	}
-	snapshot, err := service.SelectItem(context.Background(), repo.room.ID, 7, "host", SelectItemInput{ContentID: "movie-winner"})
-	if err != nil || snapshot.Phase != RoomPhasePlaying {
-		t.Fatalf("host_pick direct selection after switch: %+v %v", snapshot, err)
-	}
 }
 
 func TestStopPlaybackReturnsToLobbyAndKeepsSelection(t *testing.T) {

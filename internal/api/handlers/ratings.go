@@ -11,7 +11,7 @@ import (
 
 // ratingsRepository defines the data access interface for user ratings.
 type ratingsRepository interface {
-	Set(ctx context.Context, userID int, profileID, mediaItemID string, rating int) error
+	Set(ctx context.Context, userID int, profileID, mediaItemID string, score int) error
 	Get(ctx context.Context, userID int, profileID, mediaItemID string) (*catalog.UserRating, error)
 	Delete(ctx context.Context, userID int, profileID, mediaItemID string) error
 	List(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalog.UserRating, error)
@@ -64,14 +64,14 @@ func (h *RatingsHandler) dispatchRatingChange(ctx context.Context, userID int, p
 
 // --- Request types ---
 
-// SetRating sets the profile's rating of an item the viewer may see. The
+// SetRating sets the profile's score (1 to 10) of an item the viewer may see. The
 // caller validates the range; an item outside the viewer's access is 404.
 // Setting the same rating twice converges, so a retried set is safe.
-func (h *RatingsHandler) SetRating(ctx context.Context, userID int, profileID, itemID string, access catalog.AccessFilter, rating int) error {
+func (h *RatingsHandler) SetRating(ctx context.Context, userID int, profileID, itemID string, access catalog.AccessFilter, score int) error {
 	if err := h.itemRepo.EnsureAccessible(ctx, itemID, access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	if err := h.ratingsRepo.Set(ctx, userID, profileID, itemID, rating); err != nil {
+	if err := h.ratingsRepo.Set(ctx, userID, profileID, itemID, score); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set rating")
 	}
 	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)

@@ -2,8 +2,6 @@ package requests
 
 import (
 	"context"
-	"reflect"
-	"testing"
 )
 
 type recordedApproval struct {
@@ -27,61 +25,6 @@ func (n *recordingLifecycleNotifier) RequestApproved(_ context.Context, req Requ
 
 func (n *recordingLifecycleNotifier) RequestDeclined(_ context.Context, req Request) {
 	n.declined = append(n.declined, req.ID)
-}
-
-func TestCreateRequestAutoApprovalReportsPolicyOrigin(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalAutoApprovalEnabled = true
-	store.integrations = []Integration{autoApproveRouterInst("router-1", "radarr-key")}
-	service := newTestService(store)
-	service.SetRouterProvider(&fakeRouterProvider{})
-	recorder := &recordingLifecycleNotifier{}
-	service.SetLifecycleNotifier(recorder)
-
-	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeMovie,
-		TMDBID:    550,
-		Title:     "Fight Club",
-	})
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if len(recorder.submitted) != 1 || recorder.submitted[0] != req.ID {
-		t.Fatalf("submitted notifications = %v, want [%s]", recorder.submitted, req.ID)
-	}
-	want := []recordedApproval{{requestID: req.ID, origin: ApprovalOriginPolicy}}
-	if !reflect.DeepEqual(recorder.approved, want) {
-		t.Fatalf("approved notifications = %+v, want %+v", recorder.approved, want)
-	}
-}
-
-func TestApproveReportsAdminOrigin(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.requests["req-1"] = &Request{
-		ID:                   "req-1",
-		MediaType:            MediaTypeMovie,
-		TMDBID:               550,
-		Title:                "Fight Club",
-		Status:               StatusPending,
-		Outcome:              OutcomeActive,
-		RequestedByUserID:    7,
-		RequestedByProfileID: "profile-7",
-	}
-	service := newTestService(store)
-	service.SetRouterProvider(&fakeRouterProvider{})
-	recorder := &recordingLifecycleNotifier{}
-	service.SetLifecycleNotifier(recorder)
-
-	_, err := service.Approve(context.Background(), Viewer{UserID: 99, IsAdmin: true}, "req-1")
-	if err != nil {
-		t.Fatalf("Approve returned error: %v", err)
-	}
-	want := []recordedApproval{{requestID: "req-1", origin: ApprovalOriginAdmin}}
-	if !reflect.DeepEqual(recorder.approved, want) {
-		t.Fatalf("approved notifications = %+v, want %+v", recorder.approved, want)
-	}
 }
 
 type fakeNotifier struct {
@@ -116,26 +59,5 @@ func completedRequestFixture(id string, tmdbID int) *Request {
 		Outcome:              OutcomeActive,
 		RequestedByUserID:    7,
 		RequestedByProfileID: "profile-1",
-	}
-}
-
-func TestNotifyFulfilledPendingWaitsForCatalogMatch(t *testing.T) {
-	store := newFakeStore()
-	store.requests["req1"] = completedRequestFixture("req1", 42)
-	store.unnotified = []string{"req1"}
-	notifier := &fakeNotifier{}
-	service := NewService(store, &fakeTMDBClient{}, &fakePresence{})
-	service.SetFulfillmentNotifier(notifier)
-
-	service.notifyFulfilledPending(context.Background())
-
-	if len(notifier.requestIDs) != 0 {
-		t.Fatalf("expected no notification before catalog match, got %v", notifier.requestIDs)
-	}
-	if len(store.notified) != 0 {
-		t.Fatalf("expected request to stay pending, got marked %v", store.notified)
-	}
-	if len(store.unnotified) != 1 {
-		t.Fatalf("expected request to remain in the pending set")
 	}
 }

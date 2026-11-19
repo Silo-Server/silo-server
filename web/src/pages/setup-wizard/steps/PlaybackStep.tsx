@@ -103,6 +103,7 @@ export function PlaybackStep() {
           description={t("web.setup.playback.transcodingDescription")}
           value={transcodeEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("playback.transcode_enabled", v)}
+          managedByEnv={form.envVar("playback.transcode_enabled")}
         />
         <SettingField
           label={t("web.setup.playback.hwAccelLabel")}
@@ -113,6 +114,7 @@ export function PlaybackStep() {
           value={hwAccel}
           onChange={(v) => form.setValue("playback.hw_accel", v)}
           disabled={!transcodeEnabled}
+          managedByEnv={form.envVar("playback.hw_accel")}
         />
         <SettingField
           label={t("web.setup.playback.allow4kLabel")}
@@ -162,6 +164,7 @@ export function PlaybackStep() {
             })}
             value={form.getValue("playback.ffmpeg_path")}
             onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
+            managedByEnv={form.envVar("playback.ffmpeg_path")}
           />
           <PathSettingField
             label={t("web.setup.playback.transcodeDirLabel")}
@@ -171,6 +174,7 @@ export function PlaybackStep() {
             })}
             value={form.getValue("playback.transcode_dir")}
             onChange={(v) => form.setValue("playback.transcode_dir", v)}
+            managedByEnv={form.envVar("playback.transcode_dir")}
           />
         </AdvancedSection>
       </StepSection>

@@ -124,6 +124,12 @@ func (h *NotificationsHandler) UnmuteNotificationSeries(ctx context.Context, use
 	return h.system.UnmuteSeries(ctx, userID, profile, seriesID)
 }
 
+// SetNotificationSeriesMuted mutes or unmutes many series for the profile.
+// The caller has dropped the series the viewer may not see from a mute.
+func (h *NotificationsHandler) SetNotificationSeriesMuted(ctx context.Context, userID int, profile string, seriesIDs []string, muted bool) (map[string]notifications.SeriesMuteOutcome, error) {
+	return h.system.SetSeriesMuted(ctx, userID, profile, seriesIDs, muted)
+}
+
 // NotificationPushDisplay uses the same profile-scoped row and rendering as the
 // bridge notification extension endpoint without hydrating unrelated inbox data.
 func (h *NotificationsHandler) NotificationPushDisplay(ctx context.Context, userID int, profile, id string) (notifications.NotificationDisplay, error) {

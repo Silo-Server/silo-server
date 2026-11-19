@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-
-	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // Request describes one analysis decode. It is plain data so that it can be
@@ -19,6 +17,9 @@ import (
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
+	// SourceGrant is the core's source grant for Input when the request runs
+	// on a transcode node, naming that node. A local run ignores it.
+	SourceGrant string `json:"source_grant,omitempty" required:"true"`
 	// Window samples a contiguous span of the file.
 	Window *Window `json:"window,omitempty"`
 	// Samples decodes one video keyframe for each of a list of times.
@@ -223,7 +224,7 @@ func (r Request) Validate() error {
 		if r.Audio != nil || r.Images != nil {
 			return errors.New("samples take only a stats or sheets output")
 		}
-		if _, err := fspath.FFConcatFileURL(r.Input); err != nil {
+		if _, err := concatPath(r.Input); err != nil {
 			return fmt.Errorf("sampled input: %w", err)
 		}
 	}

@@ -295,6 +295,27 @@
           "avoid_duplicates": false,
           "supports_rotation": false,
           "admin_only": false
+        },
+        {
+          "type": "collection_posters",
+          "category": "hand_picked",
+          "presets": [
+            {
+              "key": "collection_posters_pick",
+              "display_name": "A row of collections",
+              "icon": "🗂️",
+              "description_short": "Show several collections as posters. Each one opens its collection.",
+              "description_long": "",
+              "default_params": {
+                "collections": []
+              },
+              "display_name_key": "home.recipe.collectionPostersPick.name",
+              "description_short_key": "home.recipe.collectionPostersPick.description"
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
         }
       ]
     },

@@ -110,17 +110,51 @@ type SectionLayoutOutput struct {
 
 // Section is one page section with its cards.
 type Section struct {
-	ID          string        `json:"id" example:"recently_added"`
-	SectionType string        `json:"section_type" example:"recently_added"`
-	Title       string        `json:"title" example:"Recently Added"`
-	Featured    bool          `json:"featured" example:"false"`
-	ItemLimit   int           `json:"item_limit" example:"20"`
-	TotalCount  int           `json:"total_count" doc:"Items the section has in total, at least the number returned" example:"120"`
-	IsCustom    bool          `json:"is_custom" example:"false"`
-	Customized  bool          `json:"customized" example:"false"`
-	Items       []CatalogItem `json:"items" doc:"Empty, never null"`
-	HasMore     bool          `json:"has_more,omitzero" doc:"The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false" example:"true"`
+	ID          string                  `json:"id" example:"recently_added"`
+	SectionType string                  `json:"section_type" example:"recently_added"`
+	Title       string                  `json:"title" example:"Recently Added"`
+	Featured    bool                    `json:"featured" example:"false"`
+	ItemLimit   int                     `json:"item_limit" example:"20"`
+	TotalCount  int                     `json:"total_count" doc:"Items the section has in total, at least the number returned" example:"120"`
+	IsCustom    bool                    `json:"is_custom" example:"false"`
+	Customized  bool                    `json:"customized" example:"false"`
+	Items       []CatalogItem           `json:"items" doc:"Empty, never null"`
+	HasMore     bool                    `json:"has_more,omitzero" doc:"The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false" example:"true"`
+	Collections []SectionCollectionCard `json:"collections,omitempty" doc:"The cards of a row of collections (section_type collection_posters), in the row's order: the collections the viewer can see. Such a section has no items, total_count is the number of collections, and item_limit does not apply. Absent on every other section. See getHomeCapabilities collection_rows"`
 	SectionTitleKey
+}
+
+// SectionCollectionCard is one collection on a row of collections.
+type SectionCollectionCard struct {
+	ID                string  `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
+	Source            string  `json:"source" enum:"library,user" doc:"library for a server collection, user for a personal collection" example:"library"`
+	Title             string  `json:"title" example:"Marvel"`
+	PosterURL         string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
+	PosterThumbhash   string  `json:"poster_thumbhash,omitempty"`
+	PosterIsCollage   bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty" example:"false"`
+	BackdropURL       string  `json:"backdrop_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived backdrop of a server collection that has one, for a hero backdrop while the card is focused: the page-width variant, or the card thumbnail when the backdrop is set to another artwork such as the collection's poster. Absent when none and on personal collections"`
+	BackdropThumbhash string  `json:"backdrop_thumbhash,omitempty"`
+	ItemCount         int     `json:"item_count" doc:"The titles the acting profile sees in the collection" example:"12"`
+	LibraryID         *ID     `json:"library_id,omitempty" doc:"Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library" example:"1"`
+	CreatorProfileID  *string `json:"creator_profile_id,omitempty" doc:"Present on a personal collection: the profile that made it"`
+}
+
+// sectionCollectionCardsOf maps a row of collections' cards, or nil when the
+// section has none.
+func sectionCollectionCardsOf(cards []sections.CollectionCard) []SectionCollectionCard {
+	if len(cards) == 0 {
+		return nil
+	}
+	out := make([]SectionCollectionCard, 0, len(cards))
+	for _, c := range cards {
+		card := SectionCollectionCard{ID: c.ID, Source: c.Source, Title: c.Title, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash,
+			PosterIsCollage: c.PosterIsCollage && c.PosterURL != "", BackdropURL: c.BackdropURL, BackdropThumbhash: c.BackdropThumbhash, ItemCount: c.ItemCount, CreatorProfileID: c.CreatorProfileID}
+		if c.LibraryID != nil {
+			card.LibraryID = new(IDFromInt(int64(*c.LibraryID)))
+		}
+		out = append(out, card)
+	}
+	return out
 }
 
 // SectionCollection is a page's sections with their cards.
@@ -345,7 +379,7 @@ func sectionOf(v handlers.SectionView, sel ratingsources.Selection) Section {
 		}
 		items = append(items, card)
 	}
-	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, SectionTitleKey: sectionTitleKeyOf(v.TitleKey, v.TitleArgs), Items: items, HasMore: v.HasMore}
+	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, SectionTitleKey: sectionTitleKeyOf(v.TitleKey, v.TitleArgs), Items: items, HasMore: v.HasMore, Collections: sectionCollectionCardsOf(v.Collections)}
 }
 
 func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySectionsInput) (*SectionCollectionOutput, error) {

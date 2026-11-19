@@ -211,7 +211,6 @@ func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *catalog.Encrypted
 func TestBackupRestoreRoundTripDB(t *testing.T) {
 	pool, dsn := backuptest.Database(t)
 	tools := testTools(t)
-	ctx := t.Context()
 	masterKey := []byte("round-trip-test-key-0123456789abcdef")
 	cipher, err := secret.New(masterKey)
 	if err != nil {
@@ -221,10 +220,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestKey, err := secret.BackupManifestKey(masterKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	manifestKey := manifestKeyOf(t, masterKey)
 	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
 	root := t.TempDir()
 	store, err := blobstore.NewFilesystem(root)
@@ -243,12 +239,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		ManifestKey: manifestKey,
 		FindTools:   func(context.Context) (Tools, error) { return tools, nil },
 	})
-	held, err := svc.opts.Locker.TryLock(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := svc.Backup(ctx, held, KindManual, "", nil)
-	held.Release(ctx)
+	result, err := backupUnderLock(t, svc, KindManual)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,59 +247,73 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		t.Fatalf("backup result = %+v, want complete with warnings naming %s", result, seed.missingKey)
 	}
 
-	src := openTestSource(t, filepath.Join(root, "backups", serverID, result.ID))
-	into := createDatabase(t, pool, dsn)
-	blobsInto := t.TempDir()
+	folder := filepath.Join(root, "backups", serverID, result.ID)
+	checkManifestTampering(t, openTestSource(t, folder), manifestKey, keyCheck)
+
+	// The restores read the same archive and each writes to its own target.
+	// Open a Source per subtest because validation records authentication on it.
 	loader := PGLoader{Tools: tools}
-	if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
-		Validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, Into: into, BlobsInto: blobsInto,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	checkManifestTampering(t, src, manifestKey, keyCheck)
-
-	in, err := loader.Inspect(ctx, into)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Everything the manifest counts, less the storage identities, the
-	// signing keys, and the API keys the restore cleared.
-	var signingKeys int64
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM server_settings WHERE key = ANY($1)`, rotatedSettingKeys()).Scan(&signingKeys); err != nil {
-		t.Fatal(err)
-	}
-	want := slices.Clone(src.Manifest.Tables)
-	for i := range want {
-		switch want[i].Name {
-		case "server_settings":
-			want[i].Rows -= int64(len(storageIdentities)) + signingKeys
-		case "api_keys":
-			want[i].Rows = 0
+	t.Run("separate restore", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+		src := openTestSource(t, folder)
+		into := createDatabase(t, pool, dsn)
+		blobsInto := t.TempDir()
+		if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
+			Validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, Into: into, BlobsInto: blobsInto,
+		}); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if in.GooseVersion != src.Manifest.GooseVersion || !slices.Equal(in.Tables, want) {
-		t.Fatalf("restored inventory %d %+v, want %d %+v", in.GooseVersion, in.Tables, src.Manifest.GooseVersion, want)
-	}
-	if len(src.Manifest.AppliedMigrations) == 0 || !slices.Equal(in.Applied, src.Manifest.AppliedMigrations) {
-		t.Fatalf("restored applied migrations %v, manifest %v", in.Applied, src.Manifest.AppliedMigrations)
-	}
-	restoredPool, err := pgxpool.New(ctx, into)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer restoredPool.Close()
-	checkRestoredFiles(t, seed, blobsInto, restoredPool)
-	checkCredentials(t, loader, pool, dsn, into, restoredPool, seed.userID)
-	restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
-	if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
-		t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
-	}
 
-	if err := VerifyBackup(ctx, src, loader, into, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, io.Discard); err == nil || !strings.Contains(err.Error(), "not empty") {
-		t.Fatalf("verify into a used database = %v, want refusal", err)
-	}
-	checkAnotherKey(t, src, loader, pool, dsn, seed.secretKey)
-	checkDrillAsOrdinaryRole(t, src, loader, pool, dsn, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey})
+		in, err := loader.Inspect(ctx, into)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Everything the manifest counts, less the storage identities, the
+		// signing keys, and the API keys the restore cleared.
+		var signingKeys int64
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM server_settings WHERE key = ANY($1)`, rotatedSettingKeys()).Scan(&signingKeys); err != nil {
+			t.Fatal(err)
+		}
+		want := slices.Clone(src.Manifest.Tables)
+		for i := range want {
+			switch want[i].Name {
+			case "server_settings":
+				want[i].Rows -= int64(len(storageIdentities)) + signingKeys
+			case "api_keys":
+				want[i].Rows = 0
+			}
+		}
+		if in.GooseVersion != src.Manifest.GooseVersion || !slices.Equal(in.Tables, want) {
+			t.Fatalf("restored inventory %d %+v, want %d %+v", in.GooseVersion, in.Tables, src.Manifest.GooseVersion, want)
+		}
+		if len(src.Manifest.AppliedMigrations) == 0 || !slices.Equal(in.Applied, src.Manifest.AppliedMigrations) {
+			t.Fatalf("restored applied migrations %v, manifest %v", in.Applied, src.Manifest.AppliedMigrations)
+		}
+		restoredPool, err := pgxpool.New(ctx, into)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer restoredPool.Close()
+		checkRestoredFiles(t, seed, blobsInto, restoredPool)
+		checkCredentials(t, loader, pool, dsn, into, restoredPool, seed.userID)
+		restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
+		if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
+			t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
+		}
+
+		if err := VerifyBackup(ctx, src, loader, into, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, io.Discard); err == nil || !strings.Contains(err.Error(), "not empty") {
+			t.Fatalf("verify into a used database = %v, want refusal", err)
+		}
+	})
+	t.Run("another key", func(t *testing.T) {
+		t.Parallel()
+		checkAnotherKey(t, openTestSource(t, folder), loader, pool, dsn, seed.secretKey)
+	})
+	t.Run("ordinary role drill", func(t *testing.T) {
+		t.Parallel()
+		checkDrillAsOrdinaryRole(t, openTestSource(t, folder), loader, pool, dsn, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey})
+	})
 }
 
 // checkDrillAsOrdinaryRole: a restore drill runs as the role the docs
@@ -391,10 +396,7 @@ func checkManifestTampering(t *testing.T, src *Source, manifestKey []byte, keyCh
 	if err := os.WriteFile(path, changed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tampered, err := OpenSource(src.Folder())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tampered := openTestSource(t, src.Folder())
 	if err := tampered.Validate(t.Context(), ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}); !errors.Is(err, ErrManifestTampered) {
 		t.Fatalf("validating a changed manifest = %v, want ErrManifestTampered", err)
 	}
@@ -1202,12 +1204,12 @@ func checkAnotherKey(t *testing.T, src *Source, loader PGLoader, pool *pgxpool.P
 	if err != nil {
 		t.Fatal(err)
 	}
+	into := createDatabase(t, pool, dsn)
 	if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
-		Validate: ValidateOptions{KeyCheck: "0000-0000-0000-0000"}, Into: createDatabase(t, pool, dsn), DatabaseOnly: true,
+		Validate: ValidateOptions{KeyCheck: "0000-0000-0000-0000"}, Into: into, DatabaseOnly: true,
 	}); !errors.Is(err, ErrKeyMismatch) {
 		t.Fatalf("restore with another key = %v, want ErrKeyMismatch", err)
 	}
-	into := createDatabase(t, pool, dsn)
 	var out strings.Builder
 	if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
 		Validate: ValidateOptions{KeyCheck: "0000-0000-0000-0000", AcceptLostCredentials: true, AcceptSuperuser: true}, Cipher: other,

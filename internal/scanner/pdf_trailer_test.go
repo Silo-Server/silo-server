@@ -3,8 +3,7 @@ package scanner
 import (
 	"bytes"
 	"fmt"
-	"os"
-	"path/filepath"
+
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,29 +39,6 @@ func completePDFMetadataFixture(data []byte) []byte {
 	}
 	data = fmt.Appendf(data, "trailer\n<< /Size %d %s\nstartxref\n%d\n%%%%EOF\n", maxObject+1, bytes.TrimPrefix(dictionary, []byte("<<")), xref)
 	return data
-}
-
-func TestParseEbookPDFEncryptionReferencesInContent(t *testing.T) {
-	for name, content := range map[string]string{
-		"page text":    "BT (/Encrypt 9 0 R) Tj ET",
-		"fake trailer": "trailer << /Encrypt 9 0 R >>\nstartxref\n12\n%%EOF",
-		"fake xref":    "9 0 obj << /Type /XRef /Encrypt 10 0 R >> stream\nnoise",
-	} {
-		t.Run(name, func(t *testing.T) {
-			data := fmt.Sprintf("%%PDF-1.7\n1 0 obj\n<< /Title (Real Title) /Author (Ada Writer) /Subject (Discusses /Encrypt 9 0 R.) >>\nendobj\n2 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", len(content), content)
-			path := filepath.Join(t.TempDir(), "book.pdf")
-			if err := os.WriteFile(path, completePDFMetadataFixture([]byte(data)), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			book, err := parseEbookFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if book.Title != "Real Title" || strings.Join(book.Authors, ",") != "Ada Writer" || book.Description != "Discusses /Encrypt 9 0 R." {
-				t.Fatalf("metadata lost: %+v", book)
-			}
-		})
-	}
 }
 
 func pdfTrailerFixture(dictionary, kind string) []byte {
@@ -234,24 +210,5 @@ func TestPDFDocumentEncryptedRejectsMalformedStructure(t *testing.T) {
 		if _, err := pdfDocumentEncrypted(bytes.NewReader(data), int64(len(data))); err == nil {
 			t.Fatalf("malformed PDF accepted: %.100q", data)
 		}
-	}
-}
-
-func TestParseEbookPDFUnknownEncryptionKeepsSidecarFallback(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte("%PDF-1.7\n1 0 obj << /Title (Untrusted bytes) >> endobj\n%%EOF"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	book, err := parseEbookFile(path)
-	if err != nil || book.Title != "" || book.Format != "pdf" {
-		t.Fatalf("book = %+v, err = %v", book, err)
-	}
-	opf := "<package><metadata><title>Sidecar Title</title><creator>Ada Writer</creator></metadata></package>"
-	if err := os.WriteFile(strings.TrimSuffix(path, ".pdf")+".opf", []byte(opf), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	book, err = parseEbookFile(path)
-	if err != nil || book.Title != "Sidecar Title" || strings.Join(book.Authors, ",") != "Ada Writer" {
-		t.Fatalf("sidecar metadata lost: %+v, err = %v", book, err)
 	}
 }

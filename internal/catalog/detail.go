@@ -315,7 +315,7 @@ type ItemDetail struct {
 	IsSpecials     bool            `json:"is_specials,omitempty"`
 	SeasonUserData *SeasonUserData `json:"user_data,omitempty"`
 	UserState      *ItemUserState  `json:"user_state,omitempty"`
-	UserRating     *int            `json:"user_rating,omitempty"`
+	UserRating     *int            `json:"user_rating,omitempty"` // 1 to 10
 
 	// File versions available for playback.
 	Versions         []FileVersion     `json:"versions"`

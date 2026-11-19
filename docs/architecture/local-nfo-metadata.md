@@ -371,6 +371,52 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   replaces a frame with it, and the task never overwrites one. An extra whose
   sidecar cannot be decoded gets no frame either; it shows no image until the
   sidecar is fixed or removed.
+- After the extras, the same task run gives each movie with no poster a frame
+  of its own video (`internal/extrastills/posters.go`): an item of type movie,
+  not pending its first match, with unlocked images, an empty `poster_path`,
+  and a `poster_source_path` that is empty or a lost frame's. A sidecar or
+  provider poster waiting for its copy has a source of its own, so it is never
+  raced. A movie with live main files in more than one library gets no frame,
+  since the poster is shared by every library the item is in and a frame from
+  one library's file would show viewers of another a file they may not see.
+  The save checks this again, and each run first removes the frame of a movie
+  that has since gained a file in another library, and any frame whose file
+  is no longer a live main file of the movie (missing, deleted, or moved), so
+  the frame goes within one task interval and the movie takes a new one from
+  a file it has now; this outranks the images lock, since a frame was never
+  anyone's choice. The removal finds frame posters through the partial index
+  `idx_media_items_frame_poster` on `poster_source_path LIKE 'frame:%'`.
+  The frame is taken from the lowest-id live file with a known duration
+  and no blocking failure record, at the extras position, cropped to a
+  centered 2:3 portrait at its own scale (`imageutil.CropToPoster`), and stored
+  under the item's `local/` poster keys with the usual poster variants.
+  `poster_source_path` then holds `frame:` and the file's frame key. The save
+  is a compare-and-set on the empty slot and the source read
+  (`ItemRepository.SetFramePosterIfSource`); a frame that loses is left to the
+  artwork revision GC. Failures are per-file media analysis artifacts
+  (`internal/mediaartifact`, kind `frame_poster`, all recorded under one
+  recorder name): a file ffmpeg cannot decode is skipped until it changes,
+  other failures back off the same on every server, growing with each failure,
+  and the poster pass stops after three failures in a row (an offline share)
+  or when no transcode node can be reserved. Like the extras' stills, a frame
+  poster is stored whatever `metadata.cache_images` is set to, so with caching
+  off, where sidecar files are not read, a movie with a poster file beside it
+  shows a frame. Any other image replaces a frame: a sidecar or admin pick as
+  usual, and in a fill-empty refresh (initial match, scheduled refresh) the
+  merge treats an unlocked frame poster as empty, so even an unrated provider
+  poster wins; with no image offered the frame stays. A frame's stored path
+  only ever goes with its `frame:` source: when another image replaces it, the
+  slot serves that image's remote path, or nothing while a local copy is
+  pending, never the frame as a stand-in. A localized provider
+  poster also replaces a frame for viewers in its language, although the frame
+  sits under the `local/` keys that otherwise mark library artwork. Known limits: only the
+  poster slot is filled, so a detail screen that shows only a backdrop still
+  shows none; a frame saved between a refresh's read and its write can be
+  overwritten by that write and is taken again on the next run; with
+  `metadata.cache_images` off, the stored-artwork releaser queues a matched
+  movie showing a frame for a refresh at most weekly; after an admin picks
+  another image there is no way back to the frame; and a replaced file keeps
+  its old frame while the poster slot is filled.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and
@@ -679,6 +725,22 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
 
 A matched item picks up an edited NFO or sidecar image without a manual
 refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
+
+The checks below skip unmatched items. A pending, unmatched or ambiguous item
+that no provider gives metadata still takes the sidecar poster, backdrop and
+logo beside it on each metadata run, which every library scan repeats for such
+items (`saveProvisionalLocalArtwork`, `internal/metadata/local_artwork_discovery.go`).
+The write touches only those artwork columns, and only while the row is still
+provisional and holds the sources and images lock the run read
+(`ItemRepository.UpdateProvisionalArtwork`), so a match, Identify or admin
+artwork choice or lock made meanwhile wins. A slot taking a new sidecar drops
+the cached copy of its previous one, so a replaced file shows no image until
+its new copy lands. A slot on its sidecar is queued again on each run until it
+holds a cached copy, which can then only be that sidecar's. Remote images are
+not applied, nor are the
+other item slots, season posters or episode stills. A removed sidecar goes
+unnoticed, so its stored copy keeps serving. An item an admin marked to stay
+unmatched (`match_ignored_at`) is not processed and takes none.
 
 - **Fingerprints.** `local_sidecar_fingerprints` stores, per library and per
   item, season and episode, a SHA-256 of the path, size and modification time

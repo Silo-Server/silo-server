@@ -342,7 +342,7 @@ func TestLifecycleSweepPassesLiveJellyfinPlaysDB(t *testing.T) {
 		return map[string]bool{}, nil // every play reported after the cutoff
 	})
 	now := time.Now()
-	NewPlaybackHandler(mgr).sweepLifecycle(ctx, pool, now)
+	newKeyedPlaybackHandler(mgr).sweepLifecycle(ctx, pool, now)
 	candidates, err := loadLifecycleCandidates(ctx, pool, now)
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +377,7 @@ func TestLifecycleSweepBacksOffFailedEndsDB(t *testing.T) {
 		failing[insert(2*time.Hour)] = true
 	}
 	abandoned := insert(time.Hour)
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	h := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	h.AdminStore = failingEndAdminStore{NewPGPlaybackAdminStore(pool, nil)}
 	h.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: file, Duration: 3600}}
 	now := time.Now()

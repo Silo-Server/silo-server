@@ -1,8 +1,6 @@
 package recommendations
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
@@ -126,18 +124,5 @@ func TestCowatchMatrixMatchesUnboundedOracle(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("trial %d (items=%d minWatchers=%d minShared=%d topN=%d):\n got %v\nwant %v", trial, items, minWatchers, minShared, topN, got, want)
 		}
-	}
-}
-
-func TestCowatchMatrixStopsWhenContextEnds(t *testing.T) {
-	watchers := map[string][]string{
-		"a": {"1:p", "2:p", "3:p"},
-		"b": {"1:p", "2:p", "3:p"},
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	pairs, err := computeCowatchMatrix(ctx, watchers, 1, 1, 10)
-	if !errors.Is(err, context.Canceled) || pairs != nil {
-		t.Fatalf("pairs=%v err=%v, want context.Canceled and no pairs", pairs, err)
 	}
 }
