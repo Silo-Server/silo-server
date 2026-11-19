@@ -304,8 +304,10 @@ from every code path that writes a managed download, so an event is published
 only after its write commits; every API server drains them, at most 32 every
 100 ms across the cluster, and each reaches sockets on every server. Delivery is
 at most once; changes still unpublished after a day are dropped. Two changes to
-one download written close together can arrive out of order: `at` orders them,
-and the admin routes hold the current state.
+one download written close together can arrive out of order and can share an
+`at`, which has millisecond precision. The number in the envelope's `event_id`
+(`download-change:<n>`) rises with each recorded change and orders them; the
+admin routes hold the current state.
 
 ### Access changes
 
