@@ -1,8 +1,11 @@
 import type { SettingsSectionEntry } from "@/api/types";
+import { collectionRefsOf } from "@/lib/homeRows/collectionList";
 import { homeRowsPath, type RowLinkCollection } from "@/lib/homeRows/rowLinks";
 import type { PageRef, Surface } from "@/lib/homeRows/types";
 
-import { joinNames, libraryPageLabel } from "./copy";
+import { t } from "@/i18n";
+
+import { joinNames, libraryPageLabel, nameWithPlace } from "./copy";
 
 /**
  * A Home or library page row that shows a collection: an administrator's row
@@ -20,6 +23,19 @@ export interface CollectionRow {
   position: number;
   /** How many rows the page has, turned-off rows included. */
   pageRowCount: number;
+  /**
+   * A row of collections: how many collections it lists, this one included.
+   * Absent on a row that shows one collection.
+   */
+  listCount?: number;
+}
+
+/**
+ * Whether deleting the collection leaves this row in place: a row of
+ * collections that lists others too loses only this one.
+ */
+export function keepsRowWithoutCollection(row: Pick<CollectionRow, "listCount">): boolean {
+  return (row.listCount ?? 0) > 1;
 }
 
 /** The rows that show a collection, as read for the editor or a delete. */
@@ -32,9 +48,19 @@ type LibraryNames = ReadonlyMap<number, string>;
 
 /** "Home" or "Kids page"; on this profile's own pages "My Home" or "My Kids page". */
 export function rowPlace(page: PageRef, names: LibraryNames, surface: Surface = "admin"): string {
-  const place =
-    page.kind === "home" ? "Home" : libraryPageLabel(names.get(page.libraryId) ?? "Library");
-  return surface === "profile" ? `My ${place}` : place;
+  if (page.kind === "home")
+    return surface === "profile"
+      ? t("web.collections.rows.myHome")
+      : t("web.collections.rows.home");
+  const library = libraryName(names, page.libraryId);
+  return surface === "profile"
+    ? t("web.collections.rows.myLibraryPage", { library })
+    : libraryPageLabel(library);
+}
+
+/** A library's name, or a neutral word while it isn't known. */
+function libraryName(names: LibraryNames, libraryId: number): string {
+  return names.get(libraryId) ?? t("web.collections.rows.unknownLibrary");
 }
 
 /** `rowPlace` inside a sentence: "Home", "the Kids page", "my Home" or "my Kids page". */
@@ -43,8 +69,14 @@ export function rowPlaceInSentence(
   names: LibraryNames,
   surface: Surface = "admin",
 ): string {
-  if (surface === "profile") return `my ${rowPlace(page, names)}`;
-  return page.kind === "home" ? "Home" : `the ${rowPlace(page, names)}`;
+  if (page.kind === "home")
+    return surface === "profile"
+      ? t("web.collections.rows.myHomeInSentence")
+      : t("web.collections.rows.home");
+  const library = libraryName(names, page.libraryId);
+  return surface === "profile"
+    ? t("web.collections.rows.myLibraryPageInSentence", { library })
+    : t("web.collections.rows.theLibraryPage", { library });
 }
 
 /**
@@ -52,14 +84,22 @@ export function rowPlaceInSentence(
  * sees and "Hidden" for one this profile hid.
  */
 export function rowMeta(row: CollectionRow, names: LibraryNames): string {
-  const where = `${rowPlace(row.page, names, row.surface)} · row ${row.position} of ${row.pageRowCount}`;
+  const where = t("web.collections.rows.rowMeta", {
+    place: rowPlace(row.page, names, row.surface),
+    position: row.position,
+    total: row.pageRowCount,
+  });
   if (row.enabled) return where;
-  return `${where} · ${row.surface === "profile" ? "Hidden" : "Turned off"}`;
+  const state =
+    row.surface === "profile"
+      ? t("web.collections.rows.hidden")
+      : t("web.collections.rows.turnedOff");
+  return `${where} · ${state}`;
 }
 
 /** "Studio Ghibli (Home)": each row by title and place, for naming rows in a message. */
 export function rowLabels(rows: readonly CollectionRow[], names: LibraryNames): string[] {
-  return rows.map((row) => `${row.title} (${rowPlace(row.page, names)})`);
+  return rows.map((row) => nameWithPlace(row.title, rowPlace(row.page, names)));
 }
 
 /**
@@ -72,15 +112,21 @@ export function rowPlaces(rows: readonly CollectionRow[], names: LibraryNames): 
   const pages = [
     ...new Set(
       rows.flatMap((row) =>
-        row.page.kind === "library" ? [names.get(row.page.libraryId) ?? "Library"] : [],
+        row.page.kind === "library" ? [libraryName(names, row.page.libraryId)] : [],
       ),
     ),
   ];
-  const article = mine ? "my" : "the";
   const parts = [
-    ...(home ? [mine ? "my Home" : "Home"] : []),
+    ...(home
+      ? [mine ? t("web.collections.rows.myHomeInSentence") : t("web.collections.rows.home")]
+      : []),
     ...(pages.length > 0
-      ? [`${article} ${joinNames(pages)} page${pages.length === 1 ? "" : "s"}`]
+      ? [
+          t(mine ? "web.collections.rows.myLibraryPages" : "web.collections.rows.theLibraryPages", {
+            count: pages.length,
+            libraries: joinNames(pages),
+          }),
+        ]
       : []),
   ];
   return parts.length > 0 ? joinNames(parts) : null;
@@ -92,7 +138,7 @@ export function onRowsLine(rows: readonly CollectionRow[], names: LibraryNames):
     rows.filter((row) => row.enabled),
     names,
   );
-  return places ? `On ${places}` : null;
+  return places ? t("web.collections.rows.onPlaces", { places }) : null;
 }
 
 interface NamedLibrary {
@@ -158,21 +204,31 @@ export function profileCollectionRows(
   pages: ReadonlyArray<{ page: PageRef; sections: readonly SettingsSectionEntry[] }>,
 ): CollectionRow[] {
   return pages.flatMap(({ page, sections }) =>
-    sections.flatMap((section, index) =>
-      section.section_type === "collection" && section.config?.user_collection_id === collectionId
-        ? [
-            {
-              id: section.id,
-              page,
-              surface: "profile" as const,
-              title: section.title,
-              enabled: !section.hidden,
-              position: index + 1,
-              pageRowCount: sections.length,
-            },
-          ]
-        : [],
-    ),
+    sections.flatMap((section, index) => {
+      const listed =
+        section.section_type === "collection_posters"
+          ? collectionRefsOf(section.config ?? {}).filter((ref) => ref.source === "user")
+          : [];
+      const shows =
+        (section.section_type === "collection" &&
+          section.config?.user_collection_id === collectionId) ||
+        listed.some((ref) => ref.id === collectionId);
+      if (!shows) return [];
+      return [
+        {
+          id: section.id,
+          page,
+          surface: "profile" as const,
+          title: section.title,
+          enabled: !section.hidden,
+          position: index + 1,
+          pageRowCount: sections.length,
+          ...(section.section_type === "collection_posters"
+            ? { listCount: collectionRefsOf(section.config ?? {}).length }
+            : {}),
+        },
+      ];
+    }),
   );
 }
 
@@ -187,4 +243,17 @@ export function matchedLibraries<Library extends { id: number }>(
   if (libraryIds.length === 0) return [...libraries];
   const ids = new Set(libraryIds);
   return libraries.filter((library) => ids.has(library.id));
+}
+
+/** The button when some rows lose only this collection and stay: "Delete it and change 2 rows". */
+export function deleteWithRowChangesLabel(rowCount: number): string {
+  return t("web.collections.copy.deleteWithRowChangesLabel", {
+    count: rowCount,
+    count_text: rowCount,
+  });
+}
+
+/** Under a row of collections that stays: it loses only this collection. */
+export function removedFromRow(title: string): string {
+  return t("web.collections.copy.removedFromRow", { title });
 }

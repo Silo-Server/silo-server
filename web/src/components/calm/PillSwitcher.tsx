@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
+import { numberText, useAppLanguage } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 export interface PillOption {
@@ -39,6 +40,8 @@ export function PillSwitcher({
   disabled?: boolean;
   summary?: string;
 }) {
+  // Counts print in the language's digits, so re-render when it changes.
+  useAppLanguage();
   // The pressed pill stops clear of the fade (4rem).
   const { ref, edges, measure, page } = useScrollStrip<HTMLDivElement>(
     `[aria-pressed="true"]`,
@@ -88,7 +91,7 @@ export function PillSwitcher({
                       // The space keeps "Movies 14" two words for a screen reader; flex hides it.
                       <>
                         {" "}
-                        <span className="text-[12.5px] opacity-60">{option.count}</span>
+                        <span className="text-[12.5px] opacity-60">{numberText(option.count)}</span>
                       </>
                     ) : null}
                   </button>
@@ -122,10 +125,12 @@ function PageButton({ side, onClick }: { side: "left" | "right"; onClick: () => 
       onClick={onClick}
       className={cn(
         "bg-background/90 text-foreground/80 hover:text-foreground hover:bg-accent border-border absolute top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded-full border shadow-sm backdrop-blur-sm transition-colors [:root[data-fine-pointer=true]_&]:inline-flex",
+        // The strip's edges are measured physically (useScrollStrip), in every direction.
+        // eslint-disable-next-line silo/no-physical-direction -- pages toward a physical edge
         side === "left" ? "left-0" : "right-0",
       )}
     >
-      <Icon className="size-4" />
+      <Icon className="no-mirror size-4" />
     </button>
   );
 }

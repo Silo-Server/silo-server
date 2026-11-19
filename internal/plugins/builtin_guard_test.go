@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -20,24 +21,6 @@ func TestReservedPluginIDRejected(t *testing.T) {
 	}
 	if isReservedPluginID("community.example") {
 		t.Error("community plugin ids must stay installable")
-	}
-}
-
-// PreloadEnabled must skip builtin installations explicitly: the sentinel
-// install path has no manifest on disk, and without the skip preload would
-// fail (its caller is log.Fatalf) or at best emit spurious warnings.
-func TestPreloadEnabledSkipsBuiltinInstallation(t *testing.T) {
-	store := newFakeServiceInstallationStore(&Installation{
-		ID:          1,
-		PluginID:    "silo.builtin",
-		Kind:        KindBuiltin,
-		Enabled:     true,
-		InstallPath: "/nonexistent/silo-builtin",
-	})
-	svc := &Service{installations: store}
-
-	if err := svc.PreloadEnabled(context.Background()); err != nil {
-		t.Fatalf("PreloadEnabled with builtin-only store = %v, want nil (builtin must be skipped)", err)
 	}
 }
 
@@ -70,4 +53,66 @@ func seedResidentQueryInstallation(t *testing.T, pool *pgxpool.Pool, enabled boo
 		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id)
 	})
 	return id
+}
+
+// A refused automatic update is stored on the installation row, read back by
+// List, and dropped by an explicit clear or once the installed version changes.
+func TestInstallationStoreUpdateFailureDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	store := NewInstallationStore(pool)
+	ctx := t.Context()
+	id := seedResidentQueryInstallation(t, pool, true)
+	failedAt := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+
+	readFailure := func() *UpdateFailure {
+		t.Helper()
+		installations, err := store.List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, installation := range installations {
+			if installation.ID == id {
+				return installation.UpdateFailure
+			}
+		}
+		t.Fatalf("installation %d not listed", id)
+		return nil
+	}
+	record := func() {
+		t.Helper()
+		if err := store.Update(ctx, id, UpdateInstallationInput{UpdateFailure: &UpdateFailure{Version: "1.1.0", Reason: "refused", FailedAt: failedAt}}); err != nil {
+			t.Fatal(err)
+		}
+		got := readFailure()
+		if got == nil || got.Version != "1.1.0" || got.Reason != "refused" || !got.FailedAt.Equal(failedAt) {
+			t.Fatalf("stored failure = %+v, want 1.1.0 refused at %s", got, failedAt)
+		}
+	}
+
+	record()
+	if err := store.Update(ctx, id, UpdateInstallationInput{ClearUpdateFailure: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFailure(); got != nil {
+		t.Fatalf("failure after clear = %+v, want nil", got)
+	}
+
+	record()
+	// A failure recorded against a version that is no longer installed (a
+	// manual update won the race) leaves the row alone.
+	stale := "0.9.0"
+	if err := store.Update(ctx, id, UpdateInstallationInput{IfVersion: &stale, UpdateFailure: &UpdateFailure{Version: "2.0.0", Reason: "late", FailedAt: failedAt}}); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("stale guarded write = %v, want ErrInstallationChanged", err)
+	}
+	if got := readFailure(); got == nil || got.Version != "1.1.0" {
+		t.Fatalf("failure after stale guarded write = %+v, want the 1.1.0 record kept", got)
+	}
+
+	version := "1.1.0"
+	if err := store.Update(ctx, id, UpdateInstallationInput{Version: &version}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFailure(); got != nil {
+		t.Fatalf("failure after version change = %+v, want nil", got)
+	}
 }

@@ -5,6 +5,9 @@
  * 0 meaning unlimited, but admins read and type them in Mbps.
  */
 
+import { t } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
+
 /** Preset caps offered ahead of a custom value, highest first. */
 export const STREAM_BITRATE_LIMIT_PRESETS_KBPS = [
   40000, 20000, 10000, 8000, 5000, 3000, 2000, 1000,
@@ -27,7 +30,9 @@ export function streamBitrateLimitMbpsText(kbps: number): string {
 }
 
 export function formatStreamBitrateLimit(kbps: number): string {
-  return kbps === 0 ? "Unlimited" : `${streamBitrateLimitMbpsText(kbps)} Mbps`;
+  return kbps === 0
+    ? t("web.player.bitrateLimit.unlimited")
+    : t("web.player.bitrateLimit.value", { mbps: formatDecimal(kbps / 1000, 3, 0) });
 }
 
 // What the custom Mbps box accepts: up to three decimals, "." or "," as separator.

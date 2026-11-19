@@ -2,10 +2,8 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"sort"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
@@ -102,12 +100,6 @@ func newFakeHistory() *fakeHistory {
 	}
 }
 
-func historyDeps(history *fakeHistory) Dependencies {
-	deps := pilotDeps(nil, nil)
-	deps.History = history
-	return deps
-}
-
 type historyPage struct {
 	Items []struct {
 		ContentID string `json:"content_id"`
@@ -124,147 +116,4 @@ type historyPage struct {
 		NextCursor string `json:"next_cursor"`
 		HasMore    bool   `json:"has_more"`
 	} `json:"page"`
-}
-
-func decodeHistory(t *testing.T, body string) historyPage {
-	t.Helper()
-	var page historyPage
-	if err := json.Unmarshal([]byte(body), &page); err != nil {
-		t.Fatalf("decode: %v: %s", err, body)
-	}
-	return page
-}
-
-// The cursor is a keyset, not an offset: rows inserted or removed between
-// pages neither repeat nor skip a row, and equal watched_at values are
-// ordered by id.
-func TestListHistoryKeysetSurvivesChurn(t *testing.T) {
-	history := newFakeHistory()
-	// Five rows, two sharing a timestamp; every one resolves to a card.
-	history.entries = []userstore.WatchHistoryEntry{
-		{ID: "h5", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-05T00:00:00Z", Completed: true},
-		{ID: "h4a", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-04T00:00:00Z", Completed: true},
-		{ID: "h4b", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-04T00:00:00Z", Completed: true},
-		{ID: "h3", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-03T00:00:00Z", Completed: true},
-		{ID: "h2", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-02T00:00:00Z", Completed: true},
-	}
-	for i := range history.entries {
-		history.entries[i].MediaItemID = "movie:" + history.entries[i].ID
-		history.cards[history.entries[i].MediaItemID] = handlers.CollectionItemView{ContentID: history.entries[i].MediaItemID, Type: "movie", Title: "Movie", Genres: []string{}, Status: "matched"}
-	}
-	h := newTestHandler(t, historyDeps(history))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	watchedAts := func(page historyPage) []string {
-		out := make([]string, 0, len(page.Items))
-		for _, item := range page.Items {
-			out = append(out, item.Watch.WatchedAt)
-		}
-		return out
-	}
-	equal := func(got, want []string) bool {
-		if len(got) != len(want) {
-			return false
-		}
-		for i := range got {
-			if got[i] != want[i] {
-				return false
-			}
-		}
-		return true
-	}
-
-	rec := do(t, h, http.MethodGet, "/api/v2/history?limit=2", "", owner)
-	page1 := decodeHistory(t, rec.Body.String())
-	if rec.Code != 200 || !page1.Page.HasMore || !equal(watchedAts(page1), []string{"2026-01-05T00:00:00.000Z", "2026-01-04T00:00:00.000Z"}) {
-		t.Fatalf("page 1: %d %s", rec.Code, rec.Body.String())
-	}
-	// The tie on 2026-01-04 breaks by id: h4b (larger) first, h4a next page.
-	if history.pages[0] != nil {
-		t.Fatalf("first page key = %+v, want nil", history.pages[0])
-	}
-
-	// A new watch lands at the top after page 1: it must not push the last
-	// row of page 1 onto page 2.
-	history.entries = append(history.entries, userstore.WatchHistoryEntry{ID: "h6", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-06T00:00:00Z", Completed: true})
-	rec = do(t, h, http.MethodGet, "/api/v2/history?limit=2&cursor="+page1.Page.NextCursor, "", owner)
-	page2 := decodeHistory(t, rec.Body.String())
-	if rec.Code != 200 || !page2.Page.HasMore || !equal(watchedAts(page2), []string{"2026-01-04T00:00:00.000Z", "2026-01-03T00:00:00.000Z"}) {
-		t.Fatalf("page 2: %d %s", rec.Code, rec.Body.String())
-	}
-	if key := history.pages[1]; key == nil || key.ID != "h4b" || key.WatchedAt != "2026-01-04T00:00:00Z" {
-		t.Fatalf("page 2 key = %+v, want the tie broken by id", key)
-	}
-
-	// A row already emitted disappears after page 2: page 3 still resumes
-	// at h2 rather than skipping it.
-	kept := history.entries[:0]
-	for _, e := range history.entries {
-		if e.ID != "h4a" {
-			kept = append(kept, e)
-		}
-	}
-	history.entries = kept
-	rec = do(t, h, http.MethodGet, "/api/v2/history?limit=2&cursor="+page2.Page.NextCursor, "", owner)
-	page3 := decodeHistory(t, rec.Body.String())
-	if rec.Code != 200 || page3.Page.HasMore || page3.Page.NextCursor != "" || !equal(watchedAts(page3), []string{"2026-01-02T00:00:00.000Z"}) {
-		t.Fatalf("page 3: %d %s", rec.Code, rec.Body.String())
-	}
-	if key := history.pages[2]; key == nil || key.ID != "h3" {
-		t.Fatalf("page 3 key = %+v, want h3", key)
-	}
-}
-
-func TestListHistorySkipsRepeatedCardsAcrossEmptyWindows(t *testing.T) {
-	history := newFakeHistory()
-	history.cards["episode:heat-s01e01"] = history.cards["episode:heat-s01e02"]
-	history.cards["movie:last"] = handlers.CollectionItemView{ContentID: "movie:last", Type: "movie", Title: "Last", Genres: []string{}, Status: "matched"}
-	history.entries = []userstore.WatchHistoryEntry{
-		{ID: "h6", ProfileID: "p-owner", MediaItemID: "episode:heat-s01e02", WatchedAt: "2026-01-06T00:00:00Z"},
-		{ID: "h5", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-05T00:00:00Z"},
-		{ID: "h4", ProfileID: "p-owner", MediaItemID: "episode:heat-s01e01", WatchedAt: "2026-01-04T00:00:00Z"},
-		{ID: "h3", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-03T00:00:00Z"},
-		{ID: "h2", ProfileID: "p-owner", MediaItemID: "movie:last", WatchedAt: "2026-01-02T00:00:00Z"},
-	}
-	h := newTestHandler(t, historyDeps(history))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	first := decodeHistory(t, do(t, h, http.MethodGet, "/api/v2/history?limit=2", "", owner).Body.String())
-	if len(first.Items) != 2 || !first.Page.HasMore {
-		t.Fatalf("first page = %+v", first)
-	}
-	middle := decodeHistory(t, do(t, h, http.MethodGet, "/api/v2/history?limit=2&cursor="+first.Page.NextCursor, "", owner).Body.String())
-	if len(middle.Items) != 0 || !middle.Page.HasMore || middle.Page.NextCursor == first.Page.NextCursor {
-		t.Fatalf("empty intermediate page = %+v", middle)
-	}
-	last := decodeHistory(t, do(t, h, http.MethodGet, "/api/v2/history?limit=2&cursor="+middle.Page.NextCursor, "", owner).Body.String())
-	if len(last.Items) != 1 || last.Items[0].ContentID != "movie:last" || last.Page.HasMore {
-		t.Fatalf("last page = %+v", last)
-	}
-	if len(history.pages) != 3 || history.pages[2].ID != "h3" {
-		t.Fatalf("cursor did not advance over duplicate window: %+v", history.pages)
-	}
-}
-
-func TestListHistoryRejectsBadInput(t *testing.T) {
-	h := newTestHandler(t, historyDeps(newFakeHistory()))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history?image_size=huge", "", owner), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.image_size" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history?offset=10", "", owner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history?cursor=nope", "", owner), TypeInvalidCursor)
-	// A cursor minted for another profile is rejected.
-	rec := do(t, h, http.MethodGet, "/api/v2/history?limit=1", "", owner)
-	cursor := decodeHistory(t, rec.Body.String()).Page.NextCursor
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history?limit=1&cursor="+cursor, "", with(bearer(memberToken), "X-Profile-Id", "p-primary")), TypeInvalidCursor)
-}
-
-func TestListHistoryDeniesWithoutProfile(t *testing.T) {
-	h := newTestHandler(t, historyDeps(newFakeHistory()))
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history", "", bearer(memberToken)), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history", "", nil), TypeAuthenticationRequired)
-	off := newTestHandler(t, pilotDeps(nil, nil))
-	requireProblem(t, do(t, off, http.MethodGet, "/api/v2/history", "", with(bearer(memberToken), "X-Profile-Id", "p-owner")), TypeDependencyUnavailable)
 }

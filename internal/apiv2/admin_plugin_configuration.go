@@ -26,10 +26,12 @@ type AdminPluginConfigurationService interface {
 // value. A declared non-secret top-level field sent as null or a blank string
 // is removed, so the plugin's default applies; undeclared fields are never
 // cleared that way. Manifest-declared secret fields left blank keep their
-// stored value; a secret is removed only when named in clear_secrets.
+// stored value; a secret is removed only when named in clear_secrets. A
+// connection test keeps a stored secret only while the rest of the entry is
+// unchanged and no secret in it is entered.
 type AdminPluginConfigWrite struct {
 	Key          string          `json:"key" minLength:"1" maxLength:"256" doc:"The manifest global_config_schema key"`
-	Value        PluginJSONValue `json:"value" doc:"The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret"`
+	Value        PluginJSONValue `json:"value" doc:"The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while the rest of the entry is unchanged and no secret in it is entered (a secret object or list sent in it counts as entered); otherwise it also leaves out stored top-level fields the schema does not declare"`
 	ClearSecrets []string        `json:"clear_secrets,omitempty" maxItems:"64" doc:"Secret fields to remove; each must be a manifest-declared secret of this key"`
 }
 type AdminPluginConfigInput struct {
@@ -63,7 +65,7 @@ type AdminPluginAuthBindingOutput struct {
 // AdminPluginTaskBindingWrite is the whole-row task binding assignment.
 type AdminPluginTaskBindingWrite struct {
 	Enabled bool            `json:"enabled"`
-	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"Plugin-defined trigger document; omitted stores an empty object"`
+	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). The task runs it unless the task has a saved schedule (a task-page edit, or a schedule an earlier server release saved from the binding trigger); an empty or unrunnable trigger leaves the manifest default_trigger, else one run at server start. Omitted stores an empty object"`
 }
 type AdminPluginTaskBindingInput struct {
 	ID           ID     `path:"id" pattern:"^[1-9][0-9]*$"`
@@ -106,6 +108,8 @@ func adminPluginMutationProblem(err error) error {
 	switch {
 	case errors.Is(err, plugins.ErrInstallationNotFound):
 		return NewProblem(TypeNotFound, "Plugin installation not found.")
+	case errors.Is(err, plugins.ErrInstallationChanged):
+		return NewProblem(TypeConflict, "Another install or update replaced this plugin while its package downloaded, so Silo didn't install it. Check the installed version and try again.")
 	case errors.Is(err, handlers.ErrPluginBuiltinInstallation):
 		return NewProblem(TypeConflict, "Built-in host providers cannot be modified.")
 	case errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled):

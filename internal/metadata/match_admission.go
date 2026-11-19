@@ -57,6 +57,22 @@ type SearchMatchAdmissionRequest struct {
 	Owner               ProviderIDOwnerLookup
 	ItemType            string
 	ContentID           string
+	// NoAuthor marks an item that names no author. The author check after
+	// GetMetadata then passes by default, so only the title vouches for a
+	// candidate, and word overlap alone is not credible: "Raw" for "Raw
+	// Stream" scores 0.67 (#3161). A candidate is considered only when its
+	// title alone identifies the work (titleAloneIdentifies) or it carries a
+	// provider ID the item already has.
+	NoAuthor bool
+	// NoAuthorTitle is the title the NoAuthor check compares candidates
+	// with, when it differs from WantTitle: the title as searched, without a
+	// year or series marker the search dropped. WantTitle still scores the
+	// candidates and checks their volume. Empty means WantTitle.
+	NoAuthorTitle string
+	// Rules, when set, selects with the stricter audiobook rules
+	// (selectBookMatch). With rules, an item with no author matches only
+	// through a provider ID it already holds, so NoAuthorTitle is unused.
+	Rules *BookMatchRules
 }
 
 // SearchMatchAdmission is the result of applying title credibility,
@@ -64,9 +80,12 @@ type SearchMatchAdmissionRequest struct {
 type SearchMatchAdmission struct {
 	Status       SearchMatchAdmissionStatus
 	MatchedTitle string
-	AgreedTitle  string
-	ProviderIDs  map[string]string
-	Conflicts    []ProviderIDConflict
+	// Selected is the chosen candidate, set whenever one was chosen, so a
+	// caller can drop it and admit again when a later check rejects it.
+	Selected    SearchResult
+	AgreedTitle string
+	ProviderIDs map[string]string
+	Conflicts   []ProviderIDConflict
 }
 
 // AdmitSearchMatch centralizes candidate admission for audiobook, ebook, and
@@ -74,13 +93,14 @@ type SearchMatchAdmission struct {
 // ownership lookup succeeds, so a lookup failure cannot partially admit a
 // candidate.
 func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (SearchMatchAdmission, error) {
-	selection, ok := selectBestMatchYear(req.WantTitle, req.WantYear, req.Results)
+	selection, ok := selectForAdmission(req)
 	if !ok {
 		return SearchMatchAdmission{Status: SearchMatchNoCredibleMatch}, nil
 	}
 
 	result := SearchMatchAdmission{
 		MatchedTitle: selection.matchedTitle,
+		Selected:     selection.result,
 		AgreedTitle:  req.AgreedTitle,
 	}
 	if req.AgreedTitle != "" && !AgreesWith(req.AgreedTitle, selection.matchedTitle) {
@@ -114,6 +134,71 @@ func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (Sea
 		result.AgreedTitle = selection.matchedTitle
 	}
 	return result, nil
+}
+
+// selectForAdmission picks the candidate AdmitSearchMatch checks: by the
+// audiobook rules when set, otherwise by title score, keeping only the
+// candidates an item with no author can match.
+func selectForAdmission(req SearchMatchAdmissionRequest) (bestMatchSelection, bool) {
+	if req.Rules != nil {
+		return selectBookMatch(req.WantTitle, req.WantYear, *req.Rules,
+			req.ExistingProviderIDs, req.NoAuthor, req.Results)
+	}
+	results := req.Results
+	if req.NoAuthor {
+		identity := req.NoAuthorTitle
+		if strings.TrimSpace(identity) == "" {
+			identity = req.WantTitle
+		}
+		results = titleOnlyCandidates(identity, req.ExistingProviderIDs, results)
+	}
+	return selectBestMatchYear(req.WantTitle, req.WantYear, results)
+}
+
+// titleOnlyCandidates keeps the results an item with no author can be matched
+// to. They are filtered before selection, so a credible lower-scoring result
+// is still chosen when the top score belongs to one that isn't.
+func titleOnlyCandidates(want string, existing map[string]string, results []SearchResult) []SearchResult {
+	kept := make([]SearchResult, 0, len(results))
+	for _, r := range results {
+		if sharesProviderID(existing, r.ProviderIDs) || resultTitleIdentifies(want, r) {
+			kept = append(kept, r)
+		}
+	}
+	return kept
+}
+
+func resultTitleIdentifies(want string, r SearchResult) bool {
+	name := r.Name
+	if strings.TrimSpace(name) == "" {
+		name = r.OriginalTitle
+	}
+	if titleAloneIdentifies(want, name) {
+		return true
+	}
+	for _, alias := range r.TitleAliases {
+		if titleAloneIdentifies(want, alias.Title) {
+			return true
+		}
+	}
+	return false
+}
+
+// sharesProviderID reports whether candidate carries an ID the item already
+// holds under the same provider, which identifies the work without the title.
+func sharesProviderID(existing, candidate map[string]string) bool {
+	for provider, id := range candidate {
+		provider, id = strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(id)
+		if provider == "" || id == "" {
+			continue
+		}
+		for have, haveID := range existing {
+			if strings.ToLower(strings.TrimSpace(have)) == provider && strings.TrimSpace(haveID) == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // AdmitProviderIDs stages new identities only after every ownership lookup

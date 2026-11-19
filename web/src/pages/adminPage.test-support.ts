@@ -2,8 +2,7 @@ import type { AdminUser } from "@/api/types";
 
 /**
  * Gives jsdom what Radix Select, Tabs and DropdownMenu need to open:
- * ResizeObserver, pointer capture and scrollIntoView. Each test file runs in
- * its own environment, so calling this once at the top of a file is enough.
+ * ResizeObserver, pointer capture and scrollIntoView.
  */
 export function stubRadixDom() {
   globalThis.ResizeObserver ??= class {
@@ -11,12 +10,10 @@ export function stubRadixDom() {
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    setPointerCapture: () => {},
-    releasePointerCapture: () => {},
-    scrollIntoView: () => {},
-  });
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.releasePointerCapture ??= () => {};
+  Element.prototype.scrollIntoView ??= () => {};
 }
 
 /** A regular, enabled account with no overrides of its own. */

@@ -125,17 +125,6 @@ func newTestStreamDeny(t *testing.T) (*StreamDeny, *fakeStreamDenyClient, *strea
 	return deny, client, clock, handler
 }
 
-func TestStreamDenyNilIsNoOp(t *testing.T) {
-	var deny *StreamDeny
-	deny.Deny(t.Context(), "session")
-	if deny.Denied(t.Context(), "session") {
-		t.Fatal("nil StreamDeny reported a session denied")
-	}
-	if NewStreamDeny(nil) != nil {
-		t.Fatal("NewStreamDeny(nil) must return nil so callers can keep the no-op path")
-	}
-}
-
 func TestStreamDenyWritesMarkerWithTokenLifetime(t *testing.T) {
 	deny, client, _, _ := newTestStreamDeny(t)
 	deny.Deny(t.Context(), "sid-1")

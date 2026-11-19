@@ -41,6 +41,7 @@ type pluginClient interface {
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
 	WatchSyncProvider(capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
 	NetworkAccessProvider(capabilityID string) (*pluginhost.NetworkAccessProviderClient, error)
+	NotificationChannel(capabilityID string) (*pluginhost.NotificationChannelClient, error)
 }
 
 type Host interface {
@@ -52,6 +53,10 @@ type Host interface {
 	// StartSeq is at or below the value read before a launch was issued by
 	// an earlier launch that the singleflight joined.
 	NextStartSeq() uint64
+	// Running reports whether the installation's process is up. Unlike
+	// Client it does not count as a use, so a status read cannot keep an
+	// idle plugin running.
+	Running(installationID int) bool
 }
 
 type serviceInstallationStore interface {
@@ -283,9 +288,13 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 	}
 	var result *InstallResult
 	if existing != nil {
-		result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-			return s.installer.ReplaceLocal(ctx, existing, req)
-		})
+		var prepared *PreparedReplacement
+		prepared, err = s.installer.prepareArchive(existing, data, req)
+		if err == nil {
+			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
+				return prepared.Apply(ctx)
+			})
+		}
 	} else {
 		result, err = s.installer.InstallLocal(ctx, req)
 	}
@@ -306,34 +315,44 @@ func (s *Service) InstallRemote(ctx context.Context, req InstallArchiveRequest) 
 }
 
 func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest) (*InstallResult, error) {
+	return s.installCatalog(ctx, req, nil)
+}
+
+// installCatalog installs req. A non-nil expected is the installation the
+// caller chose req for; otherwise it is read before the catalog resolves. The
+// replacement is prepared against it, so another install that lands while the
+// catalog resolves or the package downloads refuses this one rather than
+// being replaced by it.
+func (s *Service) installCatalog(ctx context.Context, req InstallCatalogRequest, expected *Installation) (*InstallResult, error) {
+	existing := expected
+	if existing == nil {
+		var err error
+		existing, err = s.existingInstallationByPluginID(ctx, req.PluginID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	target, err := s.catalog.ResolveInstall(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	existing, err := s.existingInstallationByPluginID(ctx, req.PluginID)
-	if err != nil {
-		return nil, err
-	}
 	var result *InstallResult
-	if target.LegacyArchive {
-		archiveReq := target.ArchiveRequest()
-		if existing == nil {
-			result, err = s.installer.InstallRemote(ctx, archiveReq)
-		} else {
+	switch {
+	case existing != nil:
+		// Download and check the package while the installed copy keeps
+		// running; only a package that passed replaces it.
+		var prepared *PreparedReplacement
+		prepared, err = s.installer.PrepareCatalogReplacement(ctx, existing, target)
+		if err == nil {
 			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return s.installer.ReplaceRemote(ctx, existing, archiveReq)
+				return prepared.Apply(ctx)
 			})
 		}
-	} else {
-		binaryReq := target.BinaryRequest()
-		if existing == nil {
-			result, err = s.installer.InstallBinary(ctx, binaryReq)
-		} else {
-			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return s.installer.ReplaceBinary(ctx, existing, binaryReq)
-			})
-		}
+	case target.LegacyArchive:
+		result, err = s.installer.InstallRemote(ctx, target.ArchiveRequest())
+	default:
+		result, err = s.installer.InstallBinary(ctx, target.BinaryRequest())
 	}
 	if err != nil {
 		return nil, err
@@ -359,11 +378,11 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 		return nil, fmt.Errorf("plugin %q has no repository_id, cannot update from catalog", installation.PluginID)
 	}
 
-	_, err = s.InstallCatalog(ctx, InstallCatalogRequest{
+	_, err = s.installCatalog(ctx, InstallCatalogRequest{
 		RepositoryID: *installation.RepositoryID,
 		PluginID:     installation.PluginID,
 		Version:      targetVersion,
-	})
+	}, installation)
 	if err != nil {
 		return nil, fmt.Errorf("update plugin %q to %s: %w", installation.PluginID, targetVersion, err)
 	}
@@ -381,33 +400,6 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 	return s.installations.GetByID(ctx, installationID)
 }
 
-func (s *Service) InstallBinary(ctx context.Context, req InstallBinaryRequest) (*InstallResult, error) {
-	var result *InstallResult
-	var err error
-	if req.Manifest != nil && req.Manifest.GetPluginId() != "" {
-		existing, existErr := s.existingInstallationByPluginID(ctx, req.Manifest.GetPluginId())
-		if existErr != nil {
-			return nil, existErr
-		}
-		if existing != nil {
-			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return s.installer.ReplaceBinary(ctx, existing, req)
-			})
-			if err != nil {
-				return nil, err
-			}
-			s.OnLifecycleChange(ctx)
-			return result, nil
-		}
-	}
-	result, err = s.installer.InstallBinary(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	s.OnLifecycleChange(ctx)
-	return result, nil
-}
-
 func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*InstallResult, error) {
 	if len(binaryData) == 0 {
 		return nil, fmt.Errorf("binary data is required")
@@ -422,7 +414,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	var result *InstallResult
 	if s.installations == nil {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
 		if err != nil {
 			return nil, err
 		}
@@ -435,7 +427,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("list existing plugin installations for %q: %w", manifest.GetPluginId(), err)
 	}
 	if len(existing) == 0 {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
 		if err != nil {
 			return nil, err
 		}
@@ -446,9 +438,12 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("multiple existing installations found for plugin %q", manifest.GetPluginId())
 	}
 
-	oldInstallation := existing[0]
-	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, manifestJSON, nil)
+	prepared, err := s.installer.prepareBinary(existing[0], binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+	if err != nil {
+		return nil, err
+	}
+	result, err = s.replaceStopped(ctx, existing[0], func() (*InstallResult, error) {
+		return prepared.Apply(ctx)
 	})
 	if err != nil {
 		return nil, err
@@ -475,8 +470,11 @@ func (s *Service) existingInstallationByPluginID(ctx context.Context, pluginID s
 	return existing[0], nil
 }
 
+// stopInstallationIfRunning stops the installation's process whatever its
+// enabled flag said when it was loaded: an admin may have turned it on since,
+// and a process left running would keep serving the replaced release.
 func (s *Service) stopInstallationIfRunning(existing *Installation) error {
-	if existing == nil || !existing.Enabled || s.host == nil {
+	if existing == nil || s.host == nil {
 		return nil
 	}
 	if err := s.host.Stop(existing.ID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
@@ -486,11 +484,25 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 }
 
 // replaceStopped stops the existing installation's process and runs replace.
+// Callers check the new package before calling it, so a refused package
+// never stops the running plugin. An installation that another install or
+// update changed while the package downloaded is refused before its newer
+// process is stopped, and replace itself refuses one changed after that
+// check.
+//
 // When replace fails the row still names the old release but its process is
 // gone: a lazily started plugin comes back on its next RPC, while a resident
 // only restarts on a lifecycle reconcile, so the hooks run before the error
 // is returned. On success the caller runs them after the row has changed.
+// The replacement leaves the row's enabled flag alone, so an admin's switch
+// made while the package downloaded stands, and the result reports the flag
+// as stored.
 func (s *Service) replaceStopped(ctx context.Context, existing *Installation, replace func() (*InstallResult, error)) (*InstallResult, error) {
+	if s.installations != nil {
+		if err := checkUnchanged(ctx, s.installations.GetByID, existing); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.stopInstallationIfRunning(existing); err != nil {
 		return nil, err
 	}
@@ -498,6 +510,16 @@ func (s *Service) replaceStopped(ctx context.Context, existing *Installation, re
 	if err != nil {
 		s.OnLifecycleChange(ctx)
 		return nil, err
+	}
+	if result.Installation != nil && s.installations != nil {
+		// The replacement is already written; a failed read only leaves the
+		// reported flag as loaded before the update.
+		if current, err := s.installations.GetByID(ctx, result.Installation.ID); err != nil {
+			slog.WarnContext(ctx, "reload replaced plugin installation", "component", "plugins",
+				"installation_id", result.Installation.ID, "error", err)
+		} else {
+			result.Installation.Enabled = current.Enabled
+		}
 	}
 	return result, nil
 }
@@ -601,6 +623,10 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 		BinaryPath:     binaryPath,
 		Manifest:       manifest,
 		Config:         configEntries,
+		// Every RPC to a lazily started plugin resolves its client through
+		// ensureClient, which starts it again. A resident is the
+		// supervisor's to keep up.
+		StopWhenIdle: !isResidentManifest(manifest),
 	})
 }
 
@@ -796,6 +822,20 @@ func (s *Service) EventConsumerClient(
 		return nil, err
 	}
 	return client.EventConsumer(capabilityID)
+}
+
+// NotificationChannelClient returns the installation's notification_channel.v1
+// client for capabilityID, starting the plugin when needed.
+func (s *Service) NotificationChannelClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.NotificationChannelClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.NotificationChannel(capabilityID)
 }
 
 func (s *Service) AuthProviderClient(
@@ -1143,6 +1183,15 @@ func (s *Service) readInstalledManifest(
 		return LoadManifestFile(InstalledManifestPath(binaryPath))
 	}
 	return s.archiveCache.Manifest(ctx, installation)
+}
+
+// readInstalledManifestFrom is readInstalledManifest reading a stored
+// archive, when it needs one, through archives.
+func (s *Service) readInstalledManifestFrom(ctx context.Context, installation *Installation, archives archiveStore) (*pluginv1.PluginManifest, error) {
+	if s.archiveCache == nil {
+		return s.readInstalledManifest(ctx, installation)
+	}
+	return s.archiveCache.ManifestFrom(ctx, installation, archives)
 }
 
 func (s *Service) globalConfigEntries(ctx context.Context, installationID int) ([]*pluginv1.ConfigEntry, error) {

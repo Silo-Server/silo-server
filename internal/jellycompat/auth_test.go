@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/activitylog"
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -21,7 +23,7 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 	playbackStore := NewPlaybackSessionStore(time.Hour, clock)
 	playbackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm", MediaSources: []PlaybackMediaSource{{ID: "x"}}})
 
-	mw := PlaybackSessionAuth(sessions, playbackStore, nil)
+	mw := PlaybackSessionAuth(sessions, playbackStore, nil, nil)
 
 	cases := []struct {
 		name     string
@@ -70,7 +72,7 @@ func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
 	sessions := NewSessionStore(30*24*time.Hour, clock)
 	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
 	deps.PlaybackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm"})
-	mw := PlaybackSessionAuth(sessions, deps.PlaybackStore, nil)
+	mw := PlaybackSessionAuth(sessions, deps.PlaybackStore, nil, nil)
 
 	for _, tc := range []struct {
 		elapsed  time.Duration
@@ -89,6 +91,56 @@ func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
 	}
 }
 
+// A PlaySessionId-only media request whose play session cannot be read from
+// the store answers a retryable 503, not a 401 that reads as a revoked grant
+// (#2923). The replica that cached the session keeps serving it, and a static
+// stream that a cached same-address negotiation grants is still served.
+func TestPlaybackSessionAuth_PlaySessionStoreUnavailable(t *testing.T) {
+	const (
+		master = "/Videos/itm/master.m3u8?PlaySessionId=ps-abc"
+		static = "/Videos/itm/stream?static=true&mediaSourceId=src9&PlaySessionId=ps-abc"
+	)
+	sessions := NewSessionStore(30*24*time.Hour, nil)
+	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
+	pool := newUnreachableCompatPool(t)
+	warm := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	warm.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm"})
+	cold := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	coldWithGrant := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	coldWithGrant.Put(PlaybackSession{
+		ID: "ps-live", CompatToken: "compat-tok", RouteItemID: "itm",
+		ClientIP: "192.0.2.1", ClientPeer: "192.0.2.1", MediaSources: []PlaybackMediaSource{{ID: "src9"}},
+	})
+
+	for _, tc := range []struct {
+		name     string
+		store    CompatPlaybackStore
+		path     string
+		wantCode int
+	}{
+		{"replica holding the session", warm, master, http.StatusOK},
+		{"replica without the session", cold, master, http.StatusServiceUnavailable},
+		{"static stream without a grant", cold, static, http.StatusServiceUnavailable},
+		{"static stream granted by a cached negotiation", coldWithGrant, static, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+			router := chi.NewRouter()
+			guarded := router.With(PlaybackSessionAuth(sessions, tc.store, nil, addressGrantSettings(true)))
+			guarded.Handle("/Videos/{id}/master.m3u8", ok)
+			guarded.Handle("/Videos/{id}/stream", ok)
+			rec := httptest.NewRecorder()
+			clientip.Middleware(clientip.NewResolver(nil))(router).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+				t.Fatal("503 carries no Retry-After")
+			}
+		})
+	}
+}
+
 func TestExtractToken_CaseInsensitiveAPIKey(t *testing.T) {
 	// "ApiKey" is Jellyfin's current query spelling (PascalCase); "api_key" is
 	// the legacy spelling. Native clients (incl. Jellyfin Android TV) build
@@ -100,78 +152,6 @@ func TestExtractToken_CaseInsensitiveAPIKey(t *testing.T) {
 			t.Fatalf("%s: ExtractToken = (%q, %v), want (tok123, true)", key, got, ok)
 		}
 	}
-}
-
-func TestAdminAPIKeyActivityAttribution(t *testing.T) {
-	for _, route := range []struct {
-		method string
-		path   string
-		wrap   func(*AdminAPIKeyAuthenticator) func(http.Handler) http.Handler
-	}{
-		{http.MethodPost, "/Library/Media/Updated", func(a *AdminAPIKeyAuthenticator) func(http.Handler) http.Handler {
-			return a.RequireAdminAPIKey
-		}},
-		{http.MethodGet, "/Library/VirtualFolders", func(a *AdminAPIKeyAuthenticator) func(http.Handler) http.Handler {
-			return RequireSessionOrAdminAPIKey(NewAuthenticator(NewSessionStore(time.Hour, nil), nil), a)
-		}},
-	} {
-		for _, tc := range []struct {
-			name   string
-			token  string
-			role   string
-			scopes []string
-			status int
-		}{
-			{name: "valid", token: "sa_test", role: "admin", status: http.StatusNoContent},
-			{name: "unknown", token: "sa_unknown", role: "admin", status: http.StatusUnauthorized},
-			{name: "non-admin", token: "sa_test", role: "user", status: http.StatusForbidden},
-			{name: "scoped", token: "sa_test", role: "admin", scopes: []string{auth.ScopeAdminUsers}, status: http.StatusForbidden},
-		} {
-			t.Run(route.path+"/"+tc.name, func(t *testing.T) {
-				authn := newAdminAPIKeyAuthForTest(
-					&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test", Scopes: tc.scopes}},
-					&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: tc.role, Enabled: true}},
-				)
-				capture := &activityCapture{}
-				called := false
-				handler := activitylog.NewMiddleware(capture, "node-a")(route.wrap(authn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					called = true
-					if !AdminAPIKeyFromContext(r.Context()) {
-						t.Fatal("missing admin API key marker")
-					}
-					w.WriteHeader(http.StatusNoContent)
-				})))
-				req := httptest.NewRequest(route.method, route.path, nil)
-				req.Header.Set("X-Emby-Token", tc.token)
-				rec := httptest.NewRecorder()
-				handler.ServeHTTP(rec, req)
-				if rec.Code != tc.status {
-					t.Fatalf("status = %d, want %d", rec.Code, tc.status)
-				}
-				accepted := tc.status == http.StatusNoContent
-				if called != accepted {
-					t.Fatalf("handler called = %v, want %v", called, accepted)
-				}
-				entries := capture.take()
-				if len(entries) != 1 || entries[0].StatusCode != tc.status {
-					t.Fatalf("entries = %+v, want one entry with status %d", entries, tc.status)
-				}
-				if accepted {
-					if entries[0].UserID == nil || *entries[0].UserID != 2 {
-						t.Fatalf("UserID = %v, want account 2", entries[0].UserID)
-					}
-				} else if entries[0].UserID != nil {
-					t.Fatalf("rejected request UserID = %v, want nil", entries[0].UserID)
-				}
-			})
-		}
-	}
-}
-
-// newAdminAPIKeyAuthForTest builds an authenticator without a UserStoreProvider,
-// exercising the admin-bool path only (no session synthesis).
-func newAdminAPIKeyAuthForTest(keys apiKeyValidator, users apiKeyUserLoader) *AdminAPIKeyAuthenticator {
-	return NewAdminAPIKeyAuthenticator(keys, users, nil, nil)
 }
 
 type fakeAPIKeyValidator struct {

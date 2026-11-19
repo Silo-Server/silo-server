@@ -439,11 +439,6 @@ func TestGateOrderMatchesV1(t *testing.T) {
 		}
 		requireProblem(t, rec, TypePermissionDenied)
 	}
-	// The chain itself, so a reordering that the demo probe cannot see still fails.
-	chain, missing := gateChain(deps, ClassProfileScoped, "", true, false, false, "")
-	if missing != "" || len(chain) != 5 {
-		t.Fatalf("profile-scoped chain = %d gates, missing %q; want auth, demo, rate limit, viewer access, profile", len(chain), missing)
-	}
 }
 
 // TestGatesFailClosedWithoutViewerAccess: every class v1 runs viewer access

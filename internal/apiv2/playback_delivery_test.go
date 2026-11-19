@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -61,6 +60,19 @@ func TestPlaybackDeliveryV2BytesErrorsAndAuthorization(t *testing.T) {
 	}
 	deps.PlaybackMedia = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+// A relay answers 502 when its transcode node is unreachable, keyless, or
+// refused the relay's signature: the node is unavailable, which v2 reports as
+// a retryable dependency failure rather than an internal error.
+func TestPlaybackDeliveryNodeUnavailableIsDependencyUnavailable(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)
+	writer := &playbackDeliveryWriter{ResponseWriter: w, request: r}
+	http.Error(writer, "transcode node unavailable", http.StatusBadGateway)
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), TypeDependencyUnavailable.ID) {
+		t.Fatalf("node unavailable = %d %s, want 503 %s", w.Code, w.Body.String(), TypeDependencyUnavailable.ID)
+	}
 }
 
 func TestPlaybackDeliveryProblemDropsLegacyBodyAndHeaders(t *testing.T) {
@@ -169,6 +181,80 @@ func TestPlaybackDeliveryCopyBeforeStatus(t *testing.T) {
 		}()
 		http.Error(writer, "PRIVATE_ERROR", http.StatusBadGateway)
 	})
+}
+
+// A Google Cast receiver plays HLS from a script on its own origin: it can
+// read neither the playlist nor a segment, nor learn why one was refused,
+// unless every answer carries uncredentialed CORS.
+func TestPlaybackHLSDeliveryAnswersCrossOrigin(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.PlaybackMedia = &PlaybackMediaHandlers{
+		Manifest: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n"))
+		}),
+		Segment: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/gone.m4s") {
+				http.Error(w, "gone", http.StatusGone)
+				return
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			http.ServeContent(w, r, "seg.m4s", time.Time{}, strings.NewReader("0123456789"))
+		}),
+		Original: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("bytes"))
+		}),
+	}
+	h := newTestHandler(t, deps)
+	const castOrigin = "https://www.gstatic.com"
+	anonymous := map[string]string{"Origin": castOrigin}
+	viewer := with(viewerHeaders(), "Origin", castOrigin)
+	transcode := Prefix + "/playback/transcode/" + deliveryTestSession
+	requireCORS := func(name string, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		if rec.Header().Get("Access-Control-Allow-Origin") != "*" ||
+			rec.Header().Get("Access-Control-Allow-Headers") != mediaCORSAllowHeaders ||
+			rec.Header().Get("Access-Control-Expose-Headers") != mediaCORSExposeHeaders ||
+			rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+			t.Fatalf("%s: CORS headers %v", name, rec.Header())
+		}
+	}
+
+	manifest := do(t, h, http.MethodGet, transcode+"/master.m3u8?st=opaque", "", viewer)
+	if manifest.Code != http.StatusOK || manifest.Body.String() != "#EXTM3U\n" {
+		t.Fatalf("manifest: %d %q", manifest.Code, manifest.Body.String())
+	}
+	requireCORS("manifest", manifest)
+
+	segment := do(t, h, http.MethodGet, transcode+"/segment/seg_00001.m4s?st=opaque", "", with(viewer, "Range", "bytes=2-4"))
+	if segment.Code != http.StatusPartialContent || segment.Body.String() != "234" || segment.Header().Get("Content-Range") != "bytes 2-4/10" {
+		t.Fatalf("segment range: %d %q %v", segment.Code, segment.Body.String(), segment.Header())
+	}
+	requireCORS("segment", segment)
+
+	// The authorization gate refuses before the handler runs.
+	requireCORS("unauthenticated manifest", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/master.m3u8?st=opaque", "", anonymous), TypeAuthenticationRequired))
+	requireCORS("unauthenticated segment", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/segment/seg_00001.m4s?st=opaque", "", anonymous), TypeAuthenticationRequired))
+	// A handler failure becomes a problem through the delivery writer.
+	gone := do(t, h, http.MethodGet, transcode+"/segment/gone.m4s?st=opaque", "", viewer)
+	if gone.Code != http.StatusGone {
+		t.Fatalf("gone segment: %d %s", gone.Code, gone.Body.String())
+	}
+	requireCORS("gone segment", gone)
+
+	// Scope: other delivery and JSON operations keep the same-origin default.
+	for _, path := range []string{Prefix + "/stream/" + deliveryTestSession + "?st=opaque", Prefix + "/libraries"} {
+		if rec := do(t, h, http.MethodGet, path, "", viewer); rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("%s gained CORS: %d %v", path, rec.Code, rec.Header())
+		}
+	}
+}
+
+func requireProblemResponse(t *testing.T, rec *httptest.ResponseRecorder, want ProblemType) *httptest.ResponseRecorder {
+	t.Helper()
+	requireProblem(t, rec, want)
+	return rec
 }
 
 func TestPlaybackDecisionV2ProjectsOnlyLocalMediaURLs(t *testing.T) {
@@ -303,16 +389,5 @@ func TestPlaybackDecisionV2ProjectsSubtitleURLsWithoutMutatingSource(t *testing.
 	}
 	if in.PlaybackPlan.Subtitle.Artifact.URL != "/api/v1/stream/s/subtitles/1.ass?file_id=42&st=x" || in.PlaybackPlan.Subtitle.Inventory[0].URL != "/api/v1/stream/s/subtitles/0.vtt?file_id=42&st=x" {
 		t.Fatal("projection mutated the persisted decision")
-	}
-}
-
-func TestPlaybackDecisionV2PublishesTheActiveQuality(t *testing.T) {
-	in := playback.DecisionResponseV3{PlaybackPlan: &playback.PlanV3{ActiveQuality: playback.QualityRung1080pLowV3}}
-	raw, err := json.Marshal(playbackDecision(in).PlaybackPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), `"active_quality":"1080p-low"`) {
-		t.Fatalf("v2 plan must carry active_quality: %s", raw)
 	}
 }

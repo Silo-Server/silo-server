@@ -12,7 +12,7 @@ import (
 // A departed request must not hold the session lifecycle lock for the rest of
 // ManifestStartupTimeout while FFmpeg works toward a manifest nobody will read.
 func TestStartReadyLocalPlaybackTransportStopsWaitingWhenRequestEnds(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	opts := playback.TranscodeOpts{
 		InputPath:          "/media/slow.mkv",
 		OutputDir:          t.TempDir(),

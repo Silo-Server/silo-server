@@ -1,3 +1,4 @@
+import { joinList } from "@/lib/appLocale";
 import {
   lazy,
   Suspense,
@@ -44,7 +45,10 @@ import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
 import { EnterKeyHint, Kbd } from "@/components/ui/kbd";
 import CardPlayOverlay from "./CardPlayOverlay";
+import { numberText, useT, type MessageKey } from "@/i18n";
+
 import { LocalErrorBoundary } from "./LocalErrorBoundary";
+import { isImeComposing } from "@/lib/imeComposition";
 
 // The request suggestions show only once a search has run, so their cards stay
 // out of the launch bundle.
@@ -84,30 +88,30 @@ function scrollSearchResultIntoView(index: number) {
   document.getElementById(searchResultOptionId(index))?.scrollIntoView?.({ block: "nearest" });
 }
 
-function typeLabel(type: BrowseItem["type"]): string {
+function typeLabelKey(type: BrowseItem["type"]): MessageKey | null {
   switch (type) {
     case "movie":
-      return "Movie";
+      return "web.search.typeMovie";
     case "series":
-      return "Series";
+      return "web.search.typeSeries";
     case "season":
-      return "Season";
+      return "web.search.typeSeason";
     case "episode":
-      return "Episode";
+      return "web.search.typeEpisode";
     case "ebook":
-      return "Ebook";
+      return "web.search.typeEbook";
     case "audiobook":
-      return "Audiobook";
+      return "web.search.typeAudiobook";
     case "manga":
-      return "Manga";
+      return "web.search.typeManga";
     default:
-      return type;
+      return null;
   }
 }
 
 // Shared by the option row and the play-overlay layer stacked on top of it, so
 // the overlay always lands on the poster even if the row's spacing changes.
-const ROW_LAYOUT_CLASSES = "flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left";
+const ROW_LAYOUT_CLASSES = "flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-start";
 const ROW_POSTER_CLASSES = "relative h-14 w-10 shrink-0";
 
 function GlobalSearchResultRow({
@@ -125,8 +129,12 @@ function GlobalSearchResultRow({
   onPick: (contentId: string) => void;
   onPlay: () => void;
 }) {
+  const t = useT();
   const { loaded, onLoad, onError } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
+  // A kind the client has no label for shows as the server sends it.
+  const kindKey = typeLabelKey(item.type);
+  const typeLabel = kindKey ? t(kindKey) : item.type;
 
   // Virtual focus: keyboard focus stays in the search input and the option is
   // pointed at by aria-activedescendant, so the row is not a tab stop.
@@ -147,9 +155,11 @@ function GlobalSearchResultRow({
         id={searchResultOptionId(index)}
         role="option"
         aria-selected={isSelected}
-        aria-label={[item.title, item.year > 0 ? String(item.year) : null, typeLabel(item.type)]
-          .filter(Boolean)
-          .join(", ")}
+        aria-label={joinList(
+          [item.title, item.year > 0 ? numberText(item.year) : null, typeLabel].filter(
+            (part): part is string => Boolean(part),
+          ),
+        )}
         onClick={() => onPick(item.content_id)}
         className={ROW_LAYOUT_CLASSES}
       >
@@ -183,8 +193,9 @@ function GlobalSearchResultRow({
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{item.title}</div>
           <div className="text-muted-foreground text-xs">
-            {item.year > 0 ? `${item.year} · ` : ""}
-            {typeLabel(item.type)}
+            {item.year > 0
+              ? t("web.search.yearAndType", { year: item.year, type: typeLabel })
+              : typeLabel}
           </div>
         </div>
         {isSelected && <EnterKeyHint />}
@@ -243,6 +254,7 @@ function GlobalSearchPersonRow({
   onSelect: () => void;
   onPick: (personId: string) => void;
 }) {
+  const t = useT();
   const { loaded, onLoad, onError } = useImageLoaded(person.photo_url);
   const thumbhashUrl = person.photo_thumbhash ? decodeThumbhash(person.photo_thumbhash) : "";
 
@@ -251,7 +263,7 @@ function GlobalSearchPersonRow({
       id={searchResultOptionId(index)}
       role="option"
       aria-selected={isSelected}
-      aria-label={`${person.name}, Person`}
+      aria-label={t("web.search.personOption", { name: person.name })}
       data-selected={isSelected || undefined}
       onMouseMove={isSelected ? undefined : onSelect}
       onClick={() => onPick(person.id)}
@@ -286,7 +298,7 @@ function GlobalSearchPersonRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{person.name}</div>
-        <div className="text-muted-foreground text-xs">Person</div>
+        <div className="text-muted-foreground text-xs">{t("web.search.person")}</div>
       </div>
       {isSelected && <EnterKeyHint />}
     </div>
@@ -297,6 +309,7 @@ export function GlobalSearch({
   defaultOpen = false,
   initialQuery = "",
 }: { defaultOpen?: boolean; initialQuery?: string } = {}) {
+  const t = useT();
   const [open, setOpen] = useState(defaultOpen);
   const [query, setQuery] = useState(initialQuery);
   // Selection follows a result, not a position, so a row stays selected when
@@ -567,7 +580,9 @@ export function GlobalSearch({
     boxSets.length > 0 ? (
       <div role="group" aria-labelledby="global-search-box-sets-heading">
         {grouped ? (
-          <ResultGroupHeading id="global-search-box-sets-heading">Box sets</ResultGroupHeading>
+          <ResultGroupHeading id="global-search-box-sets-heading">
+            {t("web.search.boxSets")}
+          </ResultGroupHeading>
         ) : null}
         {boxSets.map((boxSet, i) => (
           <GlobalSearchBoxSetRow
@@ -592,7 +607,9 @@ export function GlobalSearch({
           grouped && (!peopleFirst || boxSets.length > 0) && "mt-1 border-t border-white/5 pt-1",
         )}
       >
-        <ResultGroupHeading id="global-search-people-heading">People</ResultGroupHeading>
+        <ResultGroupHeading id="global-search-people-heading">
+          {t("web.search.people")}
+        </ResultGroupHeading>
         {people.map((person, i) => (
           <GlobalSearchPersonRow
             key={person.id}
@@ -611,7 +628,9 @@ export function GlobalSearch({
       aria-labelledby="global-search-titles-heading"
       className={cn((peopleFirst || boxSets.length > 0) && "mt-1 border-t border-white/5 pt-1")}
     >
-      <ResultGroupHeading id="global-search-titles-heading">Titles</ResultGroupHeading>
+      <ResultGroupHeading id="global-search-titles-heading">
+        {t("web.search.titles")}
+      </ResultGroupHeading>
       {titleRows}
     </div>
   ) : (
@@ -631,26 +650,26 @@ export function GlobalSearch({
         showCloseButton={false}
       >
         <VisuallyHidden.Root>
-          <DialogTitle>Search</DialogTitle>
+          <DialogTitle>{t("web.search.label")}</DialogTitle>
         </VisuallyHidden.Root>
         <form onSubmit={handleSubmit}>
           <div className={cn("flex items-center px-5 sm:px-6", showResultsPanel && "border-b")}>
-            <Search className="text-muted-foreground mr-2 h-4 w-4 shrink-0" />
+            <Search className="text-muted-foreground me-2 h-4 w-4 shrink-0" />
             <input
               ref={searchInputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={
                 canRequest.discoveryEnabled
-                  ? "Search library or find titles to request..."
-                  : "Search library..."
+                  ? t("web.search.placeholderRequest")
+                  : t("web.search.placeholderLibrary")
               }
               className="placeholder:text-muted-foreground flex h-12 w-full bg-transparent text-sm outline-none"
               autoFocus
               // Submitting opens the Catalog page, so its chunk starts loading
               // as soon as the search box takes focus.
               onFocus={prefetchCatalog}
-              aria-label="Search"
+              aria-label={t("web.search.label")}
               enterKeyHint="search"
               role="combobox"
               aria-expanded={showResultsPanel}
@@ -664,6 +683,7 @@ export function GlobalSearch({
                 selectedIndex >= 0 ? searchResultOptionId(selectedIndex) : undefined
               }
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
                   moveResultFocus(selectedIndex + 1);
@@ -680,11 +700,12 @@ export function GlobalSearch({
             {/* Esc moves to the footer once there are results; until a row is
                 selected, Enter searches, so the ↵ chip sits here. */}
             {!showResultsPanel ? (
-              <Kbd className="ml-2 hidden sm:inline-flex">ESC</Kbd>
+              // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a key cap, not text
+              <Kbd className="ms-2 hidden sm:inline-flex">ESC</Kbd>
             ) : optionCount > 0 && selectedIndex < 0 ? (
-              <span className="text-muted-foreground ml-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
+              <span className="text-muted-foreground ms-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
                 <EnterKeyHint />
-                See all
+                {t("web.search.seeAll")}
               </span>
             ) : null}
           </div>
@@ -692,20 +713,20 @@ export function GlobalSearch({
         {showResultsPanel && (
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="max-h-[min(22rem,55vh)] overflow-y-auto overscroll-contain px-2 py-2">
-              <div id={LIBRARY_LISTBOX_ID} role="listbox" aria-label="Library search results">
+              <div id={LIBRARY_LISTBOX_ID} role="listbox" aria-label={t("web.search.resultsLabel")}>
                 {showLoading && (
                   <div className="text-muted-foreground px-3 py-6 text-center text-sm">
-                    Searching...
+                    {t("web.search.searching")}
                   </div>
                 )}
                 {showError && (
                   <div className="text-destructive px-3 py-4 text-center text-sm">
-                    Could not load results. Press Enter to open the search page.
+                    {t("web.search.loadFailed")}
                   </div>
                 )}
                 {showEmpty && (
                   <div className="text-muted-foreground px-3 py-6 text-center text-sm">
-                    No matches
+                    {t("web.search.noMatches")}
                   </div>
                 )}
                 {boxSetGroup}
@@ -737,12 +758,15 @@ export function GlobalSearch({
             </div>
             <div role="status" aria-live="polite" className="sr-only">
               {requestRows.length > 0
-                ? `${resultCount} library results, ${requestRows.length} request suggestions`
-                : `${resultCount} results found`}
+                ? t("web.search.statusResultsAndRequests", {
+                    count: resultCount,
+                    requests: requestRows.length,
+                  })
+                : t("web.search.statusResults", { count: resultCount })}
             </div>
             <div className="text-muted-foreground hidden items-center justify-center gap-4 border-t px-3 py-2 text-xs sm:flex">
-              <KeyHint keys={["↑", "↓"]}>Navigate</KeyHint>
-              <KeyHint keys={["Esc"]}>Close</KeyHint>
+              <KeyHint keys={["↑", "↓"]}>{t("web.search.navigate")}</KeyHint>
+              <KeyHint keys={["Esc"]}>{t("web.search.close")}</KeyHint>
             </div>
           </div>
         )}

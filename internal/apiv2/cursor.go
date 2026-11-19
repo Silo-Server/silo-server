@@ -90,6 +90,11 @@ func viewerScopeDigest(ctx context.Context) string {
 	if scope.HidesUnadvised() {
 		parts = append(parts, "requireadvisory")
 	}
+	// Same rule: a live-allowed collection can gain a title without any
+	// policy revision, so the allowed titles key the digest themselves.
+	if len(scope.AllowedTitleIDs) > 0 {
+		parts = append(parts, "allowed="+strings.Join(scope.AllowedTitleIDs, ","))
+	}
 	canonical := strings.Join(parts, "\x00")
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:8])

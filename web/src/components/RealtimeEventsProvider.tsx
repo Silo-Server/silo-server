@@ -16,7 +16,15 @@ import type {
   ScanRun,
   TaskInfo,
 } from "@/api/types";
-import { isCapturedProfileAuthorityActive, type ProfileRequestContextSnapshot } from "@/api/client";
+import {
+  captureSessionIdentity,
+  isCapturedProfileAuthorityActive,
+  isSessionIdentityCurrent,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+  type SessionIdentitySnapshot,
+} from "@/api/client";
+import { isTransientV2Error, v2RetryDelayMs } from "@/api/v2/request";
 import {
   mintEventsSocketTicket,
   captureEventsAuthority,
@@ -26,7 +34,7 @@ import {
   applyNotificationCreated,
   applyNotificationRead,
   applyNotificationsSnapshot,
-  formatEpisodeCode,
+  notificationToast,
 } from "@/hooks/queries/notifications";
 import { toast } from "sonner";
 import {
@@ -42,6 +50,7 @@ import {
   scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
 } from "@/components/realtimeCatalogInvalidation";
+import { jobCancelledError, jobFailedError } from "@/lib/adminJobErrors";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
@@ -77,6 +86,8 @@ interface JobWaiter {
   timeoutId: number;
   resolve: (job: AdminJob) => void;
   reject: (error: Error) => void;
+  /** Stops waiting on a socket event and polls the job instead. */
+  poll: () => void;
 }
 
 interface UserStatePayload {
@@ -157,19 +168,58 @@ function isTerminalJob(job: AdminJob) {
   return job.status === "completed" || job.status === "failed" || job.status === "cancelled";
 }
 
-async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/** The longest a job wait backs off after failed reads; a longer Retry-After still holds. */
+const JOB_POLL_MAX_BACKOFF_MS = 30_000;
+/** setTimeout's limit; a longer delay would fire at once. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Reads the job until it finishes. A read that may succeed later does not end
+ * the wait, since the job is still running on the server; it backs off while
+ * reads keep failing. Signing out or switching account or server ends it.
+ */
+async function pollAdminJobUntilTerminal(
+  jobId: string,
+  session: SessionIdentitySnapshot,
+): Promise<AdminJob> {
+  let failures = 0;
   for (;;) {
-    const job = await fetchAdminTaskJob(jobId);
+    if (!isSessionIdentityCurrent(session)) {
+      throw new StaleApiRequestContextError();
+    }
+    const read = await fetchAdminTaskJob(jobId).then(
+      (job) => ({ job }),
+      (error: unknown) => ({ error }),
+    );
+    // A read that finished after a sign-out or account switch, either way, is the old session's.
+    if (!isSessionIdentityCurrent(session)) {
+      throw new StaleApiRequestContextError();
+    }
+    if ("error" in read) {
+      if (!isTransientV2Error(read.error)) {
+        throw read.error;
+      }
+      failures += 1;
+      const backoff = Math.min(1_000 * 2 ** failures, JOB_POLL_MAX_BACKOFF_MS);
+      await delay(Math.min(v2RetryDelayMs(read.error, backoff), MAX_TIMEOUT_MS));
+      continue;
+    }
+    failures = 0;
+    const { job } = read;
     if (job.status === "completed") {
       return job;
     }
     if (job.status === "failed") {
-      throw new Error(job.error_message || job.message || "Job failed");
+      throw jobFailedError(job);
     }
     if (job.status === "cancelled") {
-      throw new Error(job.message || "Job cancelled");
+      throw jobCancelledError(job);
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+    await delay(1_000);
   }
 }
 
@@ -200,7 +250,7 @@ function upsertJob(existing: AdminJob[] | undefined, nextJob: AdminJob, limit = 
   return sortJobs(jobs).slice(0, limit);
 }
 
-export function applyJellyfinCompatOperationUpdate(
+function applyJellyfinCompatOperationUpdate(
   queryClient: QueryClient,
   operation: JellyfinCompatOperationStatus,
   authority: ProfileRequestContextSnapshot | null,
@@ -538,10 +588,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (job.status === "cancelled") {
-      waiter.reject(new Error(job.message || "Job cancelled"));
+      waiter.reject(jobCancelledError(job));
       return;
     }
-    waiter.reject(new Error(job.error_message || job.message || "Job failed"));
+    waiter.reject(jobFailedError(job));
   };
 
   const currentChannels = useCallback(() => {
@@ -662,7 +712,12 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       case "tasks":
         // Reconnect must also catch up history/metrics for tasks that finished
         // while disconnected. One sweep avoids refetching each detail twice.
-        refreshQueries({ queryKey: adminKeys.tasks() });
+        // A plugin update check that finished meanwhile may have changed the
+        // installations too.
+        refreshQueries(
+          { queryKey: adminKeys.tasks() },
+          { queryKey: adminKeys.pluginInstallations() },
+        );
         break;
       case "scans":
         hydrateScans(queryClient, (message.data as ScanRun[]) ?? []);
@@ -706,38 +761,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         return;
       }
       applyNotificationCreated(queryClient, notification);
-      if (notification.type === "episode.available" && notification.series_title) {
-        const episodeCode = formatEpisodeCode(notification);
-        toast(`New episode of ${notification.series_title}`, {
-          description: [episodeCode, notification.episode_title].filter(Boolean).join(" — "),
-        });
-      } else if (notification.type === "request.fulfilled") {
-        const follower = notification.reason_flags?.follower === true;
-        toast(
-          notification.series_title
-            ? `${notification.series_title} is now available`
-            : follower
-              ? "A title you followed is now available"
-              : "Your request is now available",
-          {
-            description: follower
-              ? "A title you asked to hear about has arrived in the library."
-              : "Your media request has arrived in the library.",
-          },
-        );
-      } else if (
-        notification.type === "request.approved" ||
-        notification.type === "request.declined"
-      ) {
-        const verb = notification.type === "request.approved" ? "approved" : "declined";
-        const title = notification.reason_flags?.title;
-        toast(title ? `Request ${verb}: ${title}` : `Your request was ${verb}`, {
-          description:
-            notification.type === "request.declined"
-              ? notification.reason_flags?.reason
-              : undefined,
-        });
-      }
+      const content = notificationToast(notification);
+      if (content) toast(content.title, { description: content.description });
       return;
     }
     if (message.event === "notification.read") {
@@ -812,6 +837,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               { queryKey: adminKeys.taskHistory(task.key) },
               { queryKey: adminKeys.taskMetrics(task.key) },
             );
+            // A finished plugin update check may have updated plugins or
+            // recorded a refused update on them.
+            if (task.key === "check_plugin_updates") {
+              filters.push({ queryKey: adminKeys.pluginInstallations() });
+            }
           }
           refreshQueries(...filters);
         }
@@ -1154,9 +1184,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       closedByEffect = true;
       adminRefresh.cancel();
       clearReconnect();
-      for (const [jobId, waiter] of waitersRef.current) {
+      // The server job outlives this socket: keep waiting on it by polling.
+      for (const waiter of waitersRef.current.values()) {
         window.clearTimeout(waiter.timeoutId);
-        waiter.reject(new Error(`Realtime events provider closed before job ${jobId} finished`));
+        waiter.poll();
       }
       waitersRef.current.clear();
       const socket = activeSocket;
@@ -1189,18 +1220,17 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
   const awaitAdminJob = useCallback(
     (jobId: string) => {
+      const session = captureSessionIdentity();
       const cachedJob = findCachedAdminJob(queryClient, jobId);
       if (cachedJob) {
         if (cachedJob.status === "completed") {
           return Promise.resolve(cachedJob);
         }
         if (cachedJob.status === "failed") {
-          return Promise.reject(
-            new Error(cachedJob.error_message || cachedJob.message || "Job failed"),
-          );
+          return Promise.reject(jobFailedError(cachedJob));
         }
         if (cachedJob.status === "cancelled") {
-          return Promise.reject(new Error(cachedJob.message || "Job cancelled"));
+          return Promise.reject(jobCancelledError(cachedJob));
         }
       }
 
@@ -1208,7 +1238,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       // channel isn't subscribed (not acting as admin), waiting on a live
       // event would hang until the fallback timeout — poll instead.
       if (!actingAdmin || connectionState !== "live") {
-        return pollAdminJobUntilTerminal(jobId);
+        return pollAdminJobUntilTerminal(jobId, session);
       }
 
       return new Promise<AdminJob>((resolve, reject) => {
@@ -1217,12 +1247,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           window.clearTimeout(existing.timeoutId);
         }
 
+        const poll = () => void pollAdminJobUntilTerminal(jobId, session).then(resolve, reject);
         const timeoutId = window.setTimeout(() => {
           waitersRef.current.delete(jobId);
-          void pollAdminJobUntilTerminal(jobId).then(resolve).catch(reject);
+          poll();
         }, 60_000);
 
-        waitersRef.current.set(jobId, { timeoutId, resolve, reject });
+        waitersRef.current.set(jobId, { timeoutId, resolve, reject, poll });
       });
     },
     [actingAdmin, connectionState, queryClient],

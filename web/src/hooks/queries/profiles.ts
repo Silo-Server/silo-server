@@ -5,6 +5,7 @@ import type { components } from "@/api/v2/schema";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 import { profileKeys } from "./keys";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 function replaceProfileInList(profiles: Profile[] | undefined, updatedProfile: Profile) {
   if (!profiles || profiles.length === 0) {
@@ -48,6 +49,14 @@ export interface ProfileList {
    * separately because it arrived after the limit itself.
    */
   require_advisory_age_supported: boolean;
+  /** Whether the server accepts and enforces `requests_allowed`. */
+  requests_allowed_supported: boolean;
+  /**
+   * The household profile limit createProfile enforces, or null when the
+   * server did not report one (an older server, or a limit it could not
+   * read). See canAddProfile.
+   */
+  max_profiles: number | null;
 }
 
 /**
@@ -67,6 +76,7 @@ export function profileFromV2(profile: components["schemas"]["Profile"]): Profil
     max_content_rating: profile.max_content_rating,
     max_advisory_age: profile.max_advisory_age ?? null,
     require_advisory_age: profile.require_advisory_age ?? false,
+    requests_allowed: profile.requests_allowed ?? true,
     quality_preference: profile.quality_preference,
     language: profile.language,
     preferred_metadata_language: profile.preferred_metadata_language,
@@ -119,6 +129,10 @@ export async function listProfiles(): Promise<ProfileList> {
     max_advisory_age_supported: list.max_advisory_age_supported === true,
     // Absent on a server that predates the require-advisory-age option.
     require_advisory_age_supported: list.require_advisory_age_supported === true,
+    // Absent on a server that predates the per-profile requests switch.
+    requests_allowed_supported: list.requests_allowed_supported === true,
+    // Absent on a server that predates reporting the profile limit.
+    max_profiles: list.max_profiles ?? null,
   };
 }
 
@@ -167,11 +181,12 @@ export function useHouseholdSessions(enabled = true) {
   });
 }
 
-export function useProfiles(options?: { enabled?: boolean }) {
+export function useProfiles(options?: { enabled?: boolean; refetchOnWindowFocus?: boolean }) {
   const query = useQuery({
     queryKey: profileKeys.list(),
     queryFn: listProfiles,
     enabled: options?.enabled ?? true,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus ?? false,
   });
 
   return {
@@ -180,6 +195,8 @@ export function useProfiles(options?: { enabled?: boolean }) {
     avatarUploadEnabled: query.data?.avatar_upload_enabled ?? false,
     maxAdvisoryAgeSupported: query.data?.max_advisory_age_supported ?? false,
     requireAdvisoryAgeSupported: query.data?.require_advisory_age_supported ?? false,
+    requestsAllowedSupported: query.data?.requests_allowed_supported ?? false,
+    maxProfiles: query.data?.max_profiles ?? null,
   };
 }
 
@@ -188,11 +205,11 @@ export function useCreateProfile(profileContext?: ProfileRequestContextSnapshot)
   return useMutation({
     mutationFn: (body: ProfileCreate) => createProfile(body, profileContext),
     onSuccess: () => {
-      toast.success("Profile created");
+      toast.success(t("web.common.toast.profiles.created"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save profile");
+      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.saveFailed"));
     },
   });
 }
@@ -210,13 +227,15 @@ export function useUpdateProfile() {
           avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
           max_advisory_age_supported: current?.max_advisory_age_supported ?? false,
           require_advisory_age_supported: current?.require_advisory_age_supported ?? false,
+          requests_allowed_supported: current?.requests_allowed_supported ?? false,
+          max_profiles: current?.max_profiles ?? null,
         };
       });
-      toast.success("Profile updated");
+      toast.success(t("web.common.toast.profiles.updated"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save profile");
+      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.saveFailed"));
     },
   });
 }
@@ -232,12 +251,16 @@ export function useUploadProfileAvatar(profileContext?: ProfileRequestContextSna
         avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
         max_advisory_age_supported: current?.max_advisory_age_supported ?? false,
         require_advisory_age_supported: current?.require_advisory_age_supported ?? false,
+        requests_allowed_supported: current?.requests_allowed_supported ?? false,
+        max_profiles: current?.max_profiles ?? null,
       }));
-      toast.success("Avatar updated");
+      toast.success(t("web.common.toast.profiles.avatarUpdated"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.profiles.avatarUploadFailed"),
+      );
     },
   });
 }
@@ -275,11 +298,13 @@ export function useDeleteProfileAvatar() {
       }
     },
     onSuccess: () => {
-      toast.success("Avatar removed");
+      toast.success(t("web.common.toast.profiles.avatarRemoved"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to remove avatar");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.profiles.avatarRemoveFailed"),
+      );
     },
   });
 }
@@ -287,13 +312,17 @@ export function useDeleteProfileAvatar() {
 export function useDeleteProfile() {
   const queryClient = useQueryClient();
   return useMutation({
+    // Sent even offline, so it fails at once. The confirm dialog closes on
+    // click, so a delete held until reconnect would remove the profile and its
+    // watch history later, with nothing on screen saying one is pending.
+    networkMode: "always",
     mutationFn: (id: string) => v2("DELETE /api/v2/profiles/{id}", { path: { id } }),
     onSuccess: () => {
-      toast.success("Profile deleted");
+      toast.success(t("web.common.toast.profiles.deleted"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to delete");
+      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.deleteFailed"));
     },
   });
 }

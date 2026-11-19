@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import type { RequestMediaType, RequestState } from "@/api/types";
 import {
   addWatchlistTitleV2,
@@ -38,7 +39,7 @@ export function useWatchlistTitles(options: { enabled?: boolean } = {}) {
  * While a title downloads, the list refreshes on the interval the other
  * request surfaces use, so its progress doesn't freeze.
  */
-export function watchlistTitlesRefetchInterval(
+function watchlistTitlesRefetchInterval(
   titles: readonly WatchlistTitle[] | undefined,
 ): number | false {
   return titles?.some((t) => t.request.download) ? REQUEST_DOWNLOAD_REFETCH_INTERVAL : false;
@@ -51,7 +52,7 @@ export function watchlistTitlesRefetchInterval(
  * the watchlist (the home row, item states) refresh too. That refresh reads
  * the titles once more, which finds nothing else gone, so it settles.
  */
-export function refreshAfterTitlesRead(
+function refreshAfterTitlesRead(
   queryClient: QueryClient,
   before: readonly WatchlistTitle[] | undefined,
   after: readonly WatchlistTitle[],
@@ -76,43 +77,45 @@ export interface ToggleWatchlistTitleInput {
 }
 
 /** The toast after an add: whether the title was also requested, and why not. */
-export function watchlistAddToast(
+function watchlistAddToast(
   entry: Pick<WatchlistTitleEntry, "item_id" | "request">,
   input: Pick<ToggleWatchlistTitleInput, "title" | "request">,
   watchlistRequests: boolean | undefined,
 ): { title: string; description?: string } {
   const before = input.request;
   const after = entry.request;
-  const available = `We'll let you know when ${input.title} is available.`;
+  const added = t("web.common.toast.watchlist.added");
   if (entry.item_id) {
-    return { title: "Added to your watchlist" };
+    return { title: added };
   }
   if (after.requested_by_viewer && !before?.requested_by_viewer) {
     return {
-      title: "Added to your watchlist and requested",
-      description: `${available} It moves into your watchlist on its own.`,
+      title: t("web.common.toast.watchlist.addedAndRequested"),
+      description: t("web.common.toast.watchlist.requestedNotice", { title: input.title }),
     };
   }
   if (after.following && !before?.following) {
-    return { title: "Added to your watchlist", description: available };
+    return {
+      title: added,
+      description: t("web.common.toast.watchlist.availableNotice", { title: input.title }),
+    };
   }
   if (after.status) {
     // It already had a request the viewer made or follows.
-    return { title: "Added to your watchlist" };
+    return { title: added };
   }
   if (after.reason) {
     return {
-      title: "Added to your watchlist",
-      description: `It wasn't requested: ${formatRequestReason(after.reason).toLowerCase()}.`,
+      title: added,
+      description: t("web.common.toast.watchlist.notRequestedReason", {
+        reason: formatRequestReason(after.reason).toLowerCase(),
+      }),
     };
   }
   if (watchlistRequests === false) {
-    return {
-      title: "Added to your watchlist",
-      description: "It wasn't requested, because watchlist requests are off.",
-    };
+    return { title: added, description: t("web.common.toast.watchlist.notRequestedRequestsOff") };
   }
-  return { title: "Added to your watchlist", description: "It wasn't requested." };
+  return { title: added, description: t("web.common.toast.watchlist.notRequested") };
 }
 
 /**
@@ -122,7 +125,7 @@ export function watchlistAddToast(
  * page's recommendations), so this walks plain objects and arrays, and keeps
  * the reference of anything it does not change.
  */
-export function patchCachedInWatchlist(
+function patchCachedInWatchlist(
   data: unknown,
   mediaType: RequestMediaType,
   tmdbID: number,
@@ -210,11 +213,13 @@ export function useToggleWatchlistTitle() {
     },
     onError: (err, { mediaType, tmdbID, inWatchlist }) => {
       setCachedInWatchlist(queryClient, mediaType, tmdbID, inWatchlist);
-      toast.error(err instanceof Error ? err.message : "Failed to update your watchlist");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.watchlist.updateFailed"),
+      );
     },
     onSuccess: (entry, input) => {
       if (!entry) {
-        toast.success("Removed from your watchlist");
+        toast.success(t("web.common.toast.watchlist.removed"));
         return;
       }
       const status = queryClient.getQueryData<{ watchlist_requests?: boolean }>(

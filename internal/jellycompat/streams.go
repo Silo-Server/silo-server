@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -579,6 +580,9 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		playSession, source, err = h.createStaticPlaySession(r.Context(), session, routeID, mediaSourceID, clientPlaySessionID)
 	}
 	if err != nil {
+		if writeIfPlaySessionUnreadable(w, r, err) {
+			return
+		}
 		if errors.Is(err, errServerBitrateScopeUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "The server could not resolve the stream bitrate limit")
 			return
@@ -635,7 +639,8 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		h.endPlayIfFileGone(r, playSession, err)
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 
@@ -731,16 +736,44 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		} else {
 			copyAudioCodec = compatSourceAudioCodec(*source)
 		}
+		// A progressive remux is one long response whose ffmpeg belongs to
+		// this request. No later request exists for a stop to refuse, so the
+		// stop has to reach the stream itself, as in the native handler.
+		var abort <-chan struct{}
+		if watcher, ok := h.sessionMgr.(transportStopWatcher); ok {
+			var release func()
+			abort, release = watcher.WatchTransportStop(playSession.UpstreamSessionID)
+			defer release()
+		}
 		_ = playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			ContentType:         playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:           file.IsAudioOnly(),
 			FFmpegPath:          h.FFmpegPath,
 			SourceAudioChannels: sourceAudioChannels,
 			CopyAudioCodec:      copyAudioCodec,
+			Abort:               abort,
 		})
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)
 	}
+}
+
+// lookupOwnPlaySession returns the play session playSessionID names when it
+// belongs to the requesting compat session. Otherwise it answers the request
+// and reports false: a retryable 503 when the playback store could not be
+// read, so a brief outage does not end playback, and 404 when the session is
+// absent or another token's.
+func (h *PlaybackHandler) lookupOwnPlaySession(w http.ResponseWriter, r *http.Request, session *Session, playSessionID string) (*PlaybackSession, bool) {
+	playSession, found, err := h.playbackStore.Lookup(playSessionID)
+	if err != nil {
+		writePlaySessionLookupFailed(w, r, playSessionID, err)
+		return nil, false
+	}
+	if !found || playSession.CompatToken != session.Token {
+		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+		return nil, false
+	}
+	return playSession, true
 }
 
 // HandleMasterManifest serves the compat-owned HLS manifest route.
@@ -759,9 +792,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token {
-		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
 		return
 	}
 
@@ -774,6 +806,12 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !validateCompatHLSRoute(w, r, *source) {
+		return
+	}
+	// A DLNA controller checks the URL with HEAD before handing it to a TV.
+	// Like Jellyfin's, that HEAD starts nothing; the GET that follows does.
+	if r.Method == http.MethodHead {
+		h.headMasterManifest(w, r, playSession, source.FileID)
 		return
 	}
 	// Attach BEFORE ensureUpstreamPlayback below: this route can start a
@@ -794,12 +832,20 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		h.endPlayIfFileGone(r, playSession, err)
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 	upstreamSession, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
+		return
+	}
+	// A denied session is refused before route resolution reserves node
+	// capacity or a node job starts: the relay below forwards to the node it
+	// starts, and refusing only then would leave both behind.
+	if h.remoteCompatDenied(r.Context(), playSession) {
+		writeCompatSessionEnded(w)
 		return
 	}
 
@@ -842,7 +888,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		tcNode := plan.TranscodeNode
 		initialSeekSeconds, _ := compatInitialTranscodePosition(*source, h.compatSegmentDuration(), playSession.InitialSeekSeconds)
 		remoteNodeURL := tcNode.URL
-		startErr := h.startRemoteTranscodeWithToneMapMode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL, requiredToneMapMode)
+		startErr := h.startRemoteTranscodeWithToneMapMode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL, requiredToneMapMode, false)
 		if errors.Is(startErr, errRemoteStartAdoptedLocal) {
 			// Route resolution reserved the remote candidate before the concurrent
 			// local winner was observed. Neither the allowed local continuation nor
@@ -998,12 +1044,24 @@ func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source changed; refresh playback information")
 	case errors.Is(err, tonemap.ErrSourcePreflightRejected):
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source is unsupported by the selected tone-map executor")
+	case errors.Is(err, scanner.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+	case errors.Is(err, errCompatFileLookupUnavailable):
+		slog.Warn("compat transcode file lookup failed", "component", "jellycompat", "error", logredact.SanitizeText(err.Error()))
+		writeSessionCheckUnavailable(w)
+	case errors.Is(err, errCompatUpstreamSessionGone):
+		// As the segment route answers a rebuild whose session is gone.
+		writeError(w, http.StatusNotFound, "NotFound", "Upstream session not found")
 	case errors.Is(err, errTranscode4KDisallowed):
 		writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
 	case errors.Is(err, errHDRTranscodeUnsupported):
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", err.Error())
 	case errors.Is(err, errRemoteTranscodeStartFailed), errors.Is(err, errRemoteSoftwareToneMapStartFailed):
 		writeError(w, http.StatusBadGateway, "TranscodeStartFailed", "No remote transcode executor could start the stream")
+	case errors.Is(err, playback.ErrKeyframePlanChanged):
+		// No rebuild can serve the playlist the player holds, so the session
+		// is gone, as for one that has ended.
+		writeError(w, http.StatusNotFound, "NotFound", "Transcode session not found")
 	case errors.Is(err, playback.ErrManifestNotReady):
 		writeError(w, http.StatusServiceUnavailable, "NotReady", "Transcode playlist not ready")
 	case errors.Is(err, playback.ErrTranscodeFailed):
@@ -1028,9 +1086,8 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	playSessionID := chiURLParam(r, "playlistId")
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token {
-		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
 		return
 	}
 	source := firstMediaSource(playSession)
@@ -1053,6 +1110,10 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	// Before ensureTranscodeManifest, for the same reason as the master manifest.
 	attachCompatStream(r.Context(), session, playSession, source.FileID)
 	if playSession.Recipe != nil && playSession.Recipe.TranscodeNodeURL != "" {
+		if h.remoteCompatDenied(r.Context(), playSession) {
+			writeCompatSessionEnded(w)
+			return
+		}
 		var manifest []byte
 		local, relayErr := h.relayRemoteCompat(r.Context(), playSession, func(nodeURL string) error {
 			var err error
@@ -1099,8 +1160,11 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	}
 
 	playSessionID := chiURLParam(r, "playlistId")
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token || playSession.UpstreamSessionID == "" {
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
+		return
+	}
+	if playSession.UpstreamSessionID == "" {
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
 	}
@@ -1129,6 +1193,10 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if playSession.Recipe != nil && playSession.Recipe.TranscodeNodeURL != "" {
+		if h.remoteCompatDenied(r.Context(), playSession) {
+			writeCompatSessionEnded(w)
+			return
+		}
 		segmentName := chiURLParam(r, "segmentId") + "." + chiURLParam(r, "segmentContainer")
 		local, relayErr := h.relayRemoteCompat(r.Context(), playSession, func(nodeURL string) error {
 			return h.proxyRemoteCompatSegment(w, r, nodeURL, playSession.UpstreamSessionID, segmentName)
@@ -1218,7 +1286,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				"last_produced_age_ms", lastProducedAgeMS,
 				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 				"reason", decision.Reason,
-				"play_session", playSessionID,
+				"play_session", playSessionFingerprint(playSessionID),
 				"session", playSession.UpstreamSessionID,
 				"playback_session_id", playSession.UpstreamSessionID,
 			)
@@ -1232,7 +1300,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					"last_produced_age_ms", lastProducedAgeMS,
 					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 					"reason", decision.Reason,
-					"play_session", playSessionID,
+					"play_session", playSessionFingerprint(playSessionID),
 					"session", playSession.UpstreamSessionID,
 					"playback_session_id", playSession.UpstreamSessionID,
 				)
@@ -1247,7 +1315,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"last_produced_age_ms", lastProducedAgeMS,
 						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 						"reason", decision.Reason,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -1260,13 +1328,14 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					playSession.UpstreamSessionID,
 					transcodeSession,
 					segNum,
+					decision.Progress.GenerationStartedAt,
 				)
 				// A restart skipped because the request ended is not a failure.
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
 					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
 						"error", restartErr,
 						"segment", segmentName,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -1297,7 +1366,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"seek_seconds", target.SeekSeconds,
 						"stream_origin_seconds", target.StreamOriginSeconds,
 						"resolved_start_segment", target.StartSegmentNumber,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -1356,6 +1425,55 @@ func writeCompatManifest(w http.ResponseWriter, manifest []byte, playSession *Pl
 	_, _ = w.Write(rewriteManifest(manifest, playSession.RouteItemID, playSession.ID, source.ID, compatHLSRoutePathSegment(source)))
 }
 
+// remoteCompatDenied reports whether the deny marker revokes the remote
+// transcode a relay is about to forward to. Every relay to a transcode node
+// checks it before it signs the request: the transport id, which is the
+// upstream playback session's, and the recipe's playback session when it
+// differs. A live node runtime that a failed stop left behind is thereby
+// never reached.
+func (h *PlaybackHandler) remoteCompatDenied(ctx context.Context, playSession *PlaybackSession) bool {
+	if h.StreamDeny == nil || playSession == nil {
+		return false
+	}
+	transportID := playSession.UpstreamSessionID
+	if h.StreamDeny.Denied(ctx, transportID) {
+		return true
+	}
+	if playSession.Recipe == nil {
+		return false
+	}
+	sessionID := playSession.Recipe.SessionID
+	return sessionID != "" && sessionID != transportID && h.StreamDeny.Denied(ctx, sessionID)
+}
+
+// headMasterManifest answers a HEAD on a master playlist without starting
+// playback: 410 when the play's upstream session was denied, 404 for a missing
+// file, a retryable 503 when the file lookup fails, and otherwise the
+// playlist's headers with no body.
+func (h *PlaybackHandler) headMasterManifest(w http.ResponseWriter, r *http.Request, playSession *PlaybackSession, fileID int) {
+	if h.remoteCompatDenied(r.Context(), playSession) {
+		writeCompatSessionEnded(w)
+		return
+	}
+	if h.fileResolver == nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
+		return
+	}
+	if _, err := h.fileResolver.GetByID(r.Context(), fileID); err != nil {
+		writeCompatFileLookupError(w, r, fileID, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.WriteHeader(http.StatusOK)
+}
+
+// writeCompatSessionEnded answers a relay request for a denied session: 410,
+// no media bytes.
+func writeCompatSessionEnded(w http.ResponseWriter) {
+	writeError(w, http.StatusGone, "PlaybackSessionEnded", "Playback session ended")
+}
+
 func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL, upstreamSessionID string) ([]byte, error) {
 	target := nodepool.NodeEndpoint(nodeURL, "/transcode/"+url.PathEscape(upstreamSessionID)+"/master.m3u8")
 	query := url.Values{playback.SourceTimelineQueryParam: []string{"1"}}
@@ -1364,7 +1482,10 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 	if err != nil {
 		return nil, err
 	}
-	if err := nodeauth.Sign(req, nodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, nodeURL, h.NodeKeys); err != nil {
+		if transcodeproxy.NodeUnsignable(err) {
+			transcodeproxy.WarnNodeUnsignable(ctx, "jellycompat", nodeURL, err)
+		}
 		return nil, err
 	}
 	resp, err := transcodeproxy.DoNode(transcodeproxy.NodeClient(), req, nodeURL, "stream")
@@ -1375,6 +1496,9 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+			transcodeproxy.WarnNodeRefusedRelay(ctx, "jellycompat", nodeURL, resp.StatusCode, h.NodeKeys)
+		}
 		return nil, fmt.Errorf("remote manifest status %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -1382,8 +1506,8 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 
 // proxyRemoteCompatSegment relays one segment from a transcode node and writes
 // the answer. When the node cannot be reached at all it writes nothing and
-// returns the error (see nodepool.IsConnectFailure), so the caller can
-// move the transcode and retry; every other outcome is written and returns nil.
+// returns the error (see nodepool.IsConnectFailure), so the caller can move
+// the transcode and retry; every other outcome is written and returns nil.
 func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *http.Request, nodeURL, upstreamSessionID, segmentName string) error {
 	path := "/transcode/" + url.PathEscape(upstreamSessionID) + "/segment/" + url.PathEscape(segmentName)
 	target := nodepool.NodeEndpoint(nodeURL, path)
@@ -1392,7 +1516,14 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
 		return nil
 	}
-	if err := nodeauth.Sign(req, nodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, nodeURL, h.NodeKeys); err != nil {
+		if transcodeproxy.NodeUnsignable(err) {
+			// Unavailable to this server, not moved off: a registry that is
+			// empty or stale here could sign for no node at all.
+			transcodeproxy.WarnNodeUnsignable(r.Context(), "jellycompat", nodeURL, err)
+			writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
+			return nil
+		}
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
 		return nil
 	}
@@ -1407,6 +1538,11 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "jellycompat", nodeURL, resp.StatusCode, h.NodeKeys)
+		writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
+		return nil
+	}
 	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
 	transcodeproxy.CopyResponseHeaders(w.Header(), resp.Header)
 	sw := httpstream.NewRollingDeadlineWriter(w)
@@ -1422,7 +1558,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		return nil
 	}
 	if generation != "" && r.Method == http.MethodGet && sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, ""), path, h.JWTSecret, generation); err != nil {
+		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, ""), path, h.NodeKeys, generation); err != nil {
 			slog.WarnContext(r.Context(), "acknowledge Jellyfin-compatible transcode segment", "component", "jellycompat", "error", err, "playback_session_id", upstreamSessionID)
 		}
 	}
@@ -1544,6 +1680,9 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	// before the primary media route is selected. A proxy egress assignment
 	// therefore governs the file or HLS transport, not this sidecar resource.
 	playSession, source, err := h.resolvePlaybackRoute(r, session, chiURLParam(r, "routeItemId"), chiURLParam(r, "routeMediaSourceId"))
+	if writeIfPlaySessionUnreadable(w, r, err) {
+		return
+	}
 	if err != nil || source == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
@@ -1555,7 +1694,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 	// Identity is fully known here. The later 400/404 branches for a bad index or
@@ -1573,6 +1712,30 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	requestedFormat := strings.ToLower(strings.TrimSpace(chiURLParam(r, "routeFormat")))
 	if requestedFormat == "" {
 		requestedFormat = "vtt"
+	}
+
+	// A stored subtitle's issued URL names it by ID, so deleting an earlier
+	// stored subtitle cannot move the URL onto whichever one now holds its
+	// stream index. A URL without the ID (built by the client) resolves by
+	// position below.
+	if storedIDs := newCaseInsensitiveQuery(r.URL.Query()).Values(storedSubtitleIDQuery); len(storedIDs) > 0 {
+		storedID, parseErr := strconv.Atoi(storedIDs[0])
+		if parseErr != nil {
+			// The server never issues a malformed ID.
+			writeError(w, http.StatusNotFound, "NotFound", "Subtitle not found")
+			return
+		}
+		sub, lookupErr := h.findStoredSubtitle(r.Context(), file.ID, storedID)
+		if lookupErr != nil {
+			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
+			return
+		}
+		if sub == nil {
+			writeError(w, http.StatusNotFound, "NotFound", "Subtitle not found")
+			return
+		}
+		h.serveStoredSubtitle(w, r, *sub, requestedFormat, segmentPTSOffset)
+		return
 	}
 
 	// Check for external subtitles first.
@@ -1627,22 +1790,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		baseIndex := computeDownloadedSubBaseIndex(file)
 		downloadedIndex := trackIndex - baseIndex
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
-			dl := downloaded[downloadedIndex]
-			data, err := h.SubtitleBlobs.Get(r.Context(), dl.S3Key)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle from storage")
-				return
-			}
-			// Apply the stored timing correction before conversion or windowing.
-			data, err = subtitles.DeliveryBytes(&dl, data)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to prepare subtitle")
-				return
-			}
-			// The correction can change behind the same URL.
-			w.Header().Set("Cache-Control", "private, no-cache")
-			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: dl.ID})
-			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat, segmentPTSOffset)
+			h.serveStoredSubtitle(w, r, downloaded[downloadedIndex], requestedFormat, segmentPTSOffset)
 			return
 		}
 	}
@@ -1661,7 +1809,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	if requestedFormat == "ass" && playback.IsASS(embeddedTrack.Codec) {
 		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "ass")
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
+			writeSubtitleExtractError(w, err)
 			return
 		}
 		h.deliverSubtitle(w, r, "ass", data, segmentPTSOffset)
@@ -1670,7 +1818,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 
 	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "srt")
 	if subErr != nil {
-		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
+		writeSubtitleExtractError(w, subErr)
 		return
 	}
 	format := "srt"
@@ -1725,19 +1873,6 @@ func subtitleCanServeSRT(format string) bool {
 	}
 }
 
-func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "ass", "ssa":
-		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	case "srt", "subrip":
-		w.Header().Set("Content-Type", "application/x-subrip; charset=utf-8")
-	default:
-		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
-}
-
 // extractEmbeddedTextSubtitle serves one embedded text track: from the cache,
 // a kept copy, or the file's index. When only a demux can produce it, the
 // demux extracts every text track of the file at once, so switching to
@@ -1757,6 +1892,18 @@ func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, file 
 		func(ctx context.Context) ([]byte, error) {
 			return playback.ExtractSubtitleWithFormat(ctx, file.FilePath, trackIndex, format, h.FFmpegPath)
 		})
+}
+
+// writeSubtitleExtractError answers a failed embedded text extraction: a
+// node with no room for another demux (playback.ErrSubtitleReadsBusy) as a
+// retryable 503, anything else as a 500.
+func writeSubtitleExtractError(w http.ResponseWriter, err error) {
+	if errors.Is(err, playback.ErrSubtitleReadsBusy) {
+		w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+		writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "The server is busy; try again in a moment")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 }
 
 func (h *PlaybackHandler) extractTextSubtitleBatch(ctx context.Context, inputPath string, outputs []playback.TextSubtitleOutput) error {
@@ -1852,6 +1999,7 @@ func writeJellyfinJSONSubtitleResponse(w http.ResponseWriter, data []byte) error
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write(payload)
 	return err
@@ -1948,7 +2096,7 @@ func (h *PlaybackHandler) teardownPlaySession(
 	playSession, upstreamSession, transcodeNodeURL, staged := h.stageCompatStop(ctx, playSession, fallbackSession, positionOverride, true)
 	switch {
 	case staged:
-		// stageCompatStop ran cleanup and delivered the stop.
+		// stageCompatStop ran cleanup and started delivering the stop.
 	case playSession.Terminal:
 		// A late Stopped report without PositionTicks cannot replace a staged
 		// fallback after ActiveEncodings already removed the native session. Keep
@@ -1956,13 +2104,12 @@ func (h *PlaybackHandler) teardownPlaySession(
 		// deleting the only recoverable stop position.
 		h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL)
 		if playSession.TerminalScrobbleEvent != nil {
-			h.deliverCompatTerminal(
+			h.deliverCompatTerminalDetached(
 				ctx,
 				playSession.ID,
 				playSession.CompatToken,
 				playSession.TerminalAuthoritative,
 				playSession.ExpiresAt,
-				0,
 				true,
 			)
 		}
@@ -2021,22 +2168,30 @@ func (h *PlaybackHandler) cleanupPlaySession(
 			_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
 		}
 	}
+	// A rebuild or a fresh start holds the session lifecycle lock from before it
+	// starts FFmpeg until it has registered the transcode, so the close above
+	// finds nothing while one is in flight. Wait for it and close what it
+	// registered: the play is over, and nothing else would. The close above
+	// stays outside the lock because a restart holds the lock through its hook,
+	// which can wait on its FFmpeg context. That close cancels the context at
+	// once; one under the lock would wait out restartHookTimeout first.
+	unlock := h.tm.LockSessionLifecycle(playSession.UpstreamSessionID)
+	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, "")
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
 	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
 	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
-	// The session lifecycle lock orders the delete after a transcode move that
-	// is rewriting the record (commitCompatTranscodeMove).
+	// The lock also orders the delete after a transcode move that is rewriting
+	// the record (commitCompatTranscodeMove).
 	if h.RecipeNodeStore != nil {
-		unlock := h.tm.LockSessionLifecycle(playSession.UpstreamSessionID)
 		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
 		err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID)
 		cancel()
-		unlock()
 		if err != nil {
 			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
 				"playback_session_id", playSession.UpstreamSessionID)
 		}
 	}
+	unlock()
 	// Clients often drop the connection right after reporting a stop, so detach
 	// the sync from request cancellation to keep the admin view accurate.
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
@@ -2071,14 +2226,38 @@ const (
 	compatRangeHDR10           = "HDR10"
 	compatRangeHLG             = "HLG"
 	compatRangeSDR             = "SDR"
+	compatRangeUnknown         = "Unknown"
 )
 
 const (
-	compatTerminalClaimLease           = 10 * time.Second
+	// compatConfirmedStopTimeout bounds one confirmed stop delivery: watch-sync's
+	// per-provider budget plus time for the reads it makes before dispatch. A
+	// provider plugin needs most of that budget, since it keeps a reserve before
+	// the host deadline and may make a cold provider write.
+	compatConfirmedStopTimeout = watchsync.ConfirmedStopDispatchTimeout + 15*time.Second
+	// compatTerminalClaimLease outlasts a delivery and its completion write, so
+	// the recovery scan or another server cannot claim a stop still in flight.
+	compatTerminalClaimLease = compatConfirmedStopTimeout + 15*time.Second
+	// compatConfirmedStopRetryWindow is how long a staged stop that keeps
+	// failing is retried, measured from when the play stopped. After it the
+	// stop is dropped with one warning, as a play that ends by expiry drops a
+	// stop the provider refuses. History export can still deliver a dropped
+	// completed play, but only when watched export is on for that connection
+	// and the play was recorded in local watch history.
+	compatConfirmedStopRetryWindow     = time.Hour
 	compatTerminalInitialRetryDelay    = 250 * time.Millisecond
 	compatTerminalMaxRetryDelay        = 30 * time.Second
 	defaultCompatTerminalFallbackDelay = 2 * time.Second
 )
+
+// compatTerminalRequestWait is how long a request that staged a stop waits
+// for its delivery before answering. Delivery carries on detached.
+func (h *PlaybackHandler) compatTerminalRequestWait() time.Duration {
+	if h != nil && h.terminalRequestWait > 0 {
+		return h.terminalRequestWait
+	}
+	return compatSessionSyncTimeout
+}
 
 func (h *PlaybackHandler) compatTerminalFallbackDelay() time.Duration {
 	if h != nil && h.terminalFallbackDelay > 0 {
@@ -2199,7 +2378,7 @@ func (h *PlaybackHandler) finishCompatTerminalStage(
 		h.cleanupPlaySession(ctx, staged, upstreamSession, transcodeNodeURL)
 	}
 	if authoritative {
-		h.deliverCompatTerminal(ctx, staged.ID, staged.CompatToken, true, staged.ExpiresAt, 0, true)
+		h.deliverCompatTerminalDetached(ctx, staged.ID, staged.CompatToken, true, staged.ExpiresAt, true)
 		return
 	}
 	h.scheduleCompatTerminalDelivery(
@@ -2319,6 +2498,20 @@ func (h *PlaybackHandler) deliverCompatTerminal(
 		*playSession.TerminalScrobbleEvent,
 		playSession.TerminalAuthoritative,
 	)
+	// A stop another dispatch is still confirming has no outcome yet, so it is
+	// kept whatever its age: that dispatch may still fail and need a retry.
+	if err != nil && !errors.Is(err, watchsync.ErrConfirmedStopInProgress) &&
+		compatTerminalRetryWindowPassed(*playSession.TerminalScrobbleEvent, time.Now()) {
+		slog.WarnContext(ctx, "dropped jellycompat watch provider stop after its retry window",
+			"component", "jellycompat",
+			"playback_session_id", playSession.TerminalScrobbleEvent.PlaybackSessionID,
+			"stopped_at", playSession.TerminalScrobbleEvent.OccurredAt,
+			"error", err,
+		)
+		// Finish the record as a delivery would, so neither this retry chain
+		// nor the recovery scan picks the stop up again.
+		err = nil
+	}
 	if err != nil {
 		h.playbackStore.ReleaseTerminalClaim(
 			playSessionID, compatToken, ownedClaimUntil, playSession.TerminalClaimVersion, false,
@@ -2348,18 +2541,60 @@ func (h *PlaybackHandler) deliverCompatTerminal(
 	)
 }
 
+// deliverCompatTerminalDetached delivers a staged stop off the caller's
+// request or recovery scan. A confirmed stop can take up to
+// compatConfirmedStopTimeout, so the caller waits only
+// compatTerminalRequestWait: a provider that answers in time still has the stop
+// before the client's next report, and a stalled one holds neither the request
+// nor the rest of a recovery batch.
+func (h *PlaybackHandler) deliverCompatTerminalDetached(
+	ctx context.Context,
+	playSessionID string,
+	compatToken string,
+	requireAuthoritative bool,
+	expiresAt time.Time,
+	retry bool,
+) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	detached := context.WithoutCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.deliverCompatTerminal(detached, playSessionID, compatToken, requireAuthoritative, expiresAt, 0, retry)
+	}()
+	timer := time.NewTimer(h.compatTerminalRequestWait())
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+	}
+}
+
+// compatTerminalRetryWindowPassed reports whether a staged stop that failed
+// has been retried for long enough. An event without a stop time is retried
+// until its play session expires.
+func compatTerminalRetryWindowPassed(event watchsync.ScrobbleEvent, now time.Time) bool {
+	return !event.OccurredAt.IsZero() && now.Sub(event.OccurredAt) >= compatConfirmedStopRetryWindow
+}
+
 // compatSessionSyncTimeout bounds the immediate session sync issued from
 // request paths, so a stalled database degrades to the periodic reconciler
 // tick instead of pinning request goroutines.
 const compatSessionSyncTimeout = 5 * time.Second
 
 func compatDetachedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return compatDetachedContextFor(ctx, compatSessionSyncTimeout)
+}
+
+func compatDetachedContextFor(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
 	} else {
 		ctx = context.WithoutCancel(ctx)
 	}
-	return context.WithTimeout(ctx, compatSessionSyncTimeout)
+	return context.WithTimeout(ctx, timeout)
 }
 
 // syncSessionsNow flushes the native-session snapshot to the shared admin
@@ -2452,12 +2687,22 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			positionSeconds = 0
 		}
 	}
+	// remembered is the report the series' remembered tracks follow; an audio
+	// switch the server refused leaves out its audio.
+	remembered := req
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
 	if selectedAudioStreamIndex, ok := req.AudioStreamIndex.get(); (!stop || !unidentified) && ok && audioSelectionChanged(playSession, req.MediaSourceID, selectedAudioStreamIndex) {
-		playSession = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
+		var accepted bool
+		playSession, accepted = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
+		if !accepted {
+			remembered.AudioStreamIndex = compatIntValue{}
+		}
+	}
+	if !stop || !unidentified {
+		h.rememberCompatTracks(r.Context(), session, playSession, remembered, stop)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
@@ -2498,7 +2743,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 				h.syncSessionsNow(context.WithoutCancel(r.Context()), "compat_unidentified_stop")
 			} else if !errors.Is(err, playback.ErrSessionNotFound) {
 				slog.WarnContext(r.Context(), "jellycompat could not mark an unidentified stop", "component", "jellycompat",
-					"play_session_id", playSession.ID, "error", err)
+					"play_session_id", playSessionFingerprint(playSession.ID), "error", err)
 			}
 		}
 	}
@@ -2561,6 +2806,11 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 		}
 	} else {
 		card = playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
+		if method == string(playback.PlayTranscode) {
+			// A transcode whose recipe isn't saved yet still rebuilds as a
+			// transcode, so the user's transcode limit admits and counts it.
+			card.PlayMethod = playback.PlayTranscode
+		}
 	}
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
@@ -2609,7 +2859,7 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	revived, err := h.ensureUpstreamPlayback(ctx, session, playSession.ID, *source, playSession.UpstreamPlayMethod)
 	if err != nil {
 		slog.WarnContext(ctx, "jellycompat upstream session revive failed", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"upstream_session_id", playSession.UpstreamSessionID,
 			"error", err,
 		)
@@ -2686,7 +2936,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			if h.tm != nil {
 				card := h.upstreamRecipeCard(playSession, compatSession, source, method)
 				fillReconstructedClientInfo(&card, playback.ClientInfoFromContext(ctx))
-				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {
+				reconstructed, admissionErr := h.tm.ReconstructSessionWithError(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card)
+				if admissionErr != nil {
+					// The user's limits refused the play. Keep its upstream session
+					// id: replacing it here could detach a transcode that another
+					// API server is still starting, and a retry admits under it.
+					return nil, admissionErr
+				}
+				if reconstructed != nil {
 					if !playSession.ProgressPersistenceKnown ||
 						playSession.DisableProgressPersistence != reconstructed.DisableProgressPersistence {
 						h.recordCompatProgressPersistence(playSession.ID, reconstructed.DisableProgressPersistence)
@@ -2918,7 +3175,14 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 	transcodeSession, err := h.ensureTranscodeSessionWithToneMapMode(ctx, playSessionID, playSession.UpstreamSessionID, source, requiredToneMapMode)
 	if err != nil {
 		requestErr := ctx.Err()
-		if requestErr == nil || !errors.Is(err, requestErr) {
+		// A rebuild that found the native session gone has closed its own
+		// transcode. Either the play has already ended, or its session expired
+		// and the play can still resume, which a teardown here would prevent by
+		// deleting its row.
+		// A file lookup that failed without finding the file missing keeps the
+		// play too, so the client's retry finds it.
+		if !errors.Is(err, errCompatUpstreamSessionGone) && !errors.Is(err, errCompatFileLookupUnavailable) &&
+			(requestErr == nil || !errors.Is(err, requestErr)) {
 			h.teardownPlaySession(ctx, playSession, nil, nil)
 		}
 		return nil, err
@@ -2940,6 +3204,14 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 }
 
 var compatManifestStartupTimeout = playback.ManifestStartupTimeout
+
+// errCompatUpstreamSessionGone means a rebuilt or newly started transcode was
+// closed because the play's native session went away while it was starting.
+var errCompatUpstreamSessionGone = errors.New("upstream session ended during the transcode rebuild")
+
+// errCompatFileLookupUnavailable means the media file lookup failed for a
+// reason other than a missing file row, such as a database timeout.
+var errCompatFileLookupUnavailable = errors.New("media file lookup unavailable")
 
 func compatTranscodeSessionUsesToneMapMode(session *playback.TranscodeSession, required tonemap.Mode) bool {
 	return required == "" || (session != nil && session.Opts().ToneMapMode == required)
@@ -2988,6 +3260,15 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				if !compatLiveTranscodeMatchesAudioSource(reconstructed, source) {
 					return nil, errCompatRecipeSourceMismatch
 				}
+				// A stop, an expiry or an administrator's end that ran while this
+				// rebuild was starting found no transcode to close. With the native
+				// session gone, nothing else would close the one just registered.
+				if h.tm.CloseTranscodeSessionIfSessionGone(upstreamSessionID, reconstructed, func() bool {
+					_, err := h.sessionMgr.GetSession(upstreamSessionID)
+					return !errors.Is(err, playback.ErrSessionNotFound)
+				}) {
+					return nil, errCompatUpstreamSessionGone
+				}
 				h.recordTranscodeStreamDetails(ctx, upstreamSessionID, reconstructed.Opts())
 				return reconstructed, nil
 			}
@@ -3002,6 +3283,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 
 	file, err := h.fileResolver.GetByID(ctx, source.FileID)
 	if err != nil {
+		if !errors.Is(err, scanner.ErrFileNotFound) {
+			err = fmt.Errorf("%w: %w", errCompatFileLookupUnavailable, err)
+		}
 		return nil, fmt.Errorf("resolve file: %w", err)
 	}
 	if err := os.MkdirAll(h.TranscodeDir, 0o755); err != nil {
@@ -3068,6 +3352,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	}
 	if !compatHLSTranscodesAudio(source) {
 		opts.TargetCodecAudio = compatCopyCodec
+		opts.CopyAudioCodec = compatSourceAudioCodec(source)
 	}
 	var toneMapCapabilities tonemap.Capabilities
 	autoVideoToolboxBitrate := 0
@@ -3176,7 +3461,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				return nil, fallbackErr
 			}
 		}
-	} else if autoPipeline.Enabled() {
+	} else if autoPipeline.Enabled() || playback.HardwareDecodeRetryEligible(opts) {
+		// An explicit hardware backend has no fallback order, but its decoder
+		// can still reject the source, so it is waited on too.
 		var successor *playback.TranscodeSession
 		transcodeSession, successor, err = h.awaitCompatAutoTranscode(ctx, upstreamSessionID, source, requiredToneMapMode, autoPipeline, transcodeSession)
 		if err != nil {
@@ -3209,6 +3496,16 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 		return nil, playback.ErrSessionSuperseded
 	}
+	// As for a rebuild: a stop, an expiry or an administrator's end that ran
+	// while this start was registering found no transcode to close, and with
+	// the native session gone nothing else would close it (#4130).
+	if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIfSessionGoneLocked(upstreamSessionID, transcodeSession, func() bool {
+		_, err := h.sessionMgr.GetSession(upstreamSessionID)
+		return !errors.Is(err, playback.ErrSessionNotFound)
+	}) {
+		publishUnlock()
+		return nil, errCompatUpstreamSessionGone
+	}
 	effectiveOpts := transcodeSession.Opts()
 
 	// Mirror the actual encode decisions onto the upstream session before the
@@ -3224,9 +3521,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 		h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 	})
-	if h.tm.StartThrottler != nil {
-		h.tm.StartThrottler(ctx, transcodeSession)
-	}
+	h.tm.StartInitialThrottler(ctx, transcodeSession)
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {
@@ -3252,6 +3547,11 @@ func (h *PlaybackHandler) newCompatAutoTranscodePipeline(ctx context.Context, op
 // deadline is kept: it is already registered for concurrent manifest requests,
 // and a second encoder would duplicate it. It returns the ready (or slow)
 // session, or the live successor another caller installed instead.
+//
+// A disabled pipeline is an explicit hardware backend. It has no safer path
+// unless the GPU decoder rejected the source, which walks
+// playback.NewSoftwareDecodeRetryPipeline. Any other early exit returns the
+// registered session as an unwaited start would, for its exit monitor to end.
 func (h *PlaybackHandler) awaitCompatAutoTranscode(
 	ctx context.Context,
 	upstreamSessionID string,
@@ -3272,7 +3572,16 @@ func (h *PlaybackHandler) awaitCompatAutoTranscode(
 			return transcodeSession, nil, nil
 		}
 		failedDevice := transcodeSession.Opts().HWDevice
-		advanced := pipeline.AdvanceAfterFailure(failedDevice)
+		advanced := true
+		if pipeline.Enabled() {
+			advanced = pipeline.AdvanceAfterFailure(failedDevice)
+		} else {
+			// An explicit backend: only a decoder rejection has a safer path.
+			pipeline = playback.NewSoftwareDecodeRetryPipeline(pipeline.Current(), readyErr)
+			if !pipeline.Enabled() {
+				return transcodeSession, nil, nil
+			}
+		}
 		replaceUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
 		if live := h.tm.GetTranscodeSession(upstreamSessionID); live != transcodeSession {
 			replaceUnlock()
@@ -3454,8 +3763,9 @@ func (h *PlaybackHandler) preflightCompatAudioSelection(ctx context.Context, pla
 }
 
 // applyReportedAudioSelection switches a playback session to the audio stream a
-// progress report names and returns the session to continue with.
-func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) *PlaybackSession {
+// progress report names. It returns the session to continue with and whether
+// the server accepted the switch.
+func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) (*PlaybackSession, bool) {
 	audioTrackIndex := 0
 	updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
 		ctx, playSession, mediaSourceID, selectedAudioStreamIndex, positionSeconds,
@@ -3465,23 +3775,25 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 	}
 	if selectionErr != nil {
 		slog.WarnContext(ctx, "jellycompat audio selection update failed", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"audio_stream_index", selectedAudioStreamIndex,
 			"error", selectionErr,
 		)
-	} else if updatedSource != nil {
+		return playSession, false
+	}
+	if updatedSource != nil {
 		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
 		slog.InfoContext(ctx, "jellycompat audio selection updated", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"media_source_id", updatedSource.ID,
 			"audio_stream_index", selectedAudioStreamIndex,
 			"audio_track_index", audioTrackIndex,
 			"transcode_restarted", restarted,
 		)
 	}
-	return playSession
+	return playSession, true
 }
 
 func (h *PlaybackHandler) applyCompatAudioSelection(
@@ -3654,10 +3966,9 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		// recipe written before negotiated audio was.
 		transcodeSession.SetRequireAudioTrack(compatRequiresAudioTrack(source))
 		transcodeSession.SetSourceAudioChannels(sourceAudioChannels)
-		startSegment := 0
-		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
-			startSegment = int(positionSeconds / float64(segmentDuration))
-		}
+		// A keyframe-planned session's segments vary in length, so the
+		// session maps the position to its segment.
+		startSegment := transcodeSession.SegmentAt(positionSeconds)
 		if err := h.tm.RestartSessionLocked(ctx, playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
 			transcodeSession.SetAudioTrackIndex(previousOpts.AudioTrackIndex)
 			transcodeSession.SetRequireAudioTrack(previousOpts.RequireAudioTrack)
@@ -3681,11 +3992,12 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		// rebuilds ffmpeg from the newly selected audio track rather than the
 		// stale original. SetAudioTrackIndex mutated the live opts, so read them
 		// back. Best-effort: a stale recipe only costs node-restart resilience,
-		// not the live stream.
-		opts := transcodeSession.Opts()
+		// not the live stream. A keyframe-planned session's recipe keeps its
+		// start at the beginning, so a rebuild serves the same planned playlist.
+		opts := transcodeSession.RecipeOpts()
 		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
 			slog.WarnContext(ctx, "persist audio-restarted transcode recipe", "component", "jellycompat", "error", err,
-				"playback_session_id", playSession.ID)
+				"play_session_id", playSessionFingerprint(playSession.ID), "playback_session_id", playSession.UpstreamSessionID)
 		}
 		return true, nil
 	}
@@ -3707,7 +4019,27 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 	if err != nil {
 		return false, err
 	}
-	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
+	// The player holds a keyframe-planned session's playlist, planned from the
+	// beginning. The node starts the replacement in a new output directory and
+	// plans only a run from the beginning, so restart from the recipe's start,
+	// as RecipeOpts keeps a local session's recipe: the node plans the same
+	// segments, and the player's next segment request restarts FFmpeg at the
+	// planned segment for its position once the from-start run has set the
+	// timeline (#4044). The recipe records whether the node planned: a session
+	// that kept FFmpeg's playlist, because the node couldn't plan it or
+	// predates the attestation, restarts at the position. A planned session's
+	// replacement must plan too: one that keeps FFmpeg's playlist, because the
+	// index has become unreadable or the plan can't be recorded, is stopped
+	// and the switch fails rather than serve segments the playlist doesn't
+	// list.
+	seekSeconds := positionSeconds
+	planned := false
+	if recipe := playSession.Recipe; recipe != nil && recipe.KeyframePlanned &&
+		recipe.SeekSeconds == 0 && recipe.StartSegmentNumber == 0 {
+		seekSeconds, planned = 0, true
+	}
+	if err := h.startRemoteTranscodeWithToneMapMode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID,
+		source, file, seekSeconds, upstreamSession.TranscodeNodeURL, "", planned); err != nil {
 		if errors.Is(err, errRemoteStartAdoptedLocal) || errors.Is(err, errRemoteStartAdoptedRemote) {
 			return true, nil
 		}
@@ -3781,14 +4113,84 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 
 var errPlaybackRouteMismatch = errors.New("playback session does not match requested item")
 
+// playSessionReadError is a route resolution that failed because the playback
+// store could not be read and held no cached session, not because the
+// session is absent.
+type playSessionReadError struct {
+	playSessionID string
+	err           error
+}
+
+func (e *playSessionReadError) Error() string { return "reading play session: " + e.err.Error() }
+func (e *playSessionReadError) Unwrap() error { return e.err }
+
+// endPlayIfFileGone ends a play whose file row is gone, as the other terminal
+// failures of a playback start do. Any other lookup failure keeps the play so
+// the client's retry of the retryable 503 finds it.
+func (h *PlaybackHandler) endPlayIfFileGone(r *http.Request, playSession *PlaybackSession, err error) {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil)
+	}
+}
+
+// writeCompatFileLookupError answers a media route whose file lookup failed:
+// 404 only when the file row is gone. Any other failure (a database timeout,
+// an exhausted pool) says nothing about the file, so the client gets a
+// retryable 503 instead of being told the file was removed.
+func writeCompatFileLookupError(w http.ResponseWriter, r *http.Request, fileID int, err error) {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		return
+	}
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "jellycompat: media file lookup failed; answering 503", "component", "jellycompat",
+			"path", redactHLSPlaySessionID(r.URL.Path), "file_id", fileID, "error", logredact.SanitizeText(err.Error()))
+	}
+	writeSessionCheckUnavailable(w)
+}
+
+// writeIfPlaySessionUnreadable answers the retryable 503 for a route
+// resolution that failed on an unreadable playback store, and reports whether
+// it did, so a brief outage does not end playback with a 404 (#4067).
+func writeIfPlaySessionUnreadable(w http.ResponseWriter, r *http.Request, err error) bool {
+	readErr, ok := errors.AsType[*playSessionReadError](err)
+	if !ok {
+		return false
+	}
+	writePlaySessionLookupFailed(w, r, readErr.playSessionID, readErr.err)
+	return true
+}
+
 func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *Session, routeID, mediaSourceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
 	clientPlaySessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
 	// Only progressive routes support Jellyfin's MediaSource.Id == Item.Id
 	// convention. Subtitle and attachment routes identify an exact source.
 	allowItemAlias := chiURLParam(r, "routeMediaSourceId") == ""
 	staticRequest := strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true")
+	// readErr keeps a failed read of the client's PlaySessionId: the route
+	// lookup below may still find the session cached, and only when it doesn't
+	// is the request answered as unreadable rather than absent.
+	var readErr error
+	// A request authorized by a play's PlaySessionId or per-play tag is
+	// served as that play, whatever PlaySessionId it also carries: a tag
+	// request carries none, and the ID-less fallback below would pick
+	// whichever started play matches. A play that can't be read answers as
+	// retryable; one that is gone falls through.
+	if grant := playbackGrantFromContext(r.Context()); grant != nil {
+		playSession, ok, err := h.playbackStore.Lookup(grant.ID)
+		if err != nil {
+			return nil, nil, &playSessionReadError{playSessionID: grant.ID, err: err}
+		}
+		if ok && playSession.CompatToken == compatSession.Token && mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
+			return playSession, playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest), nil
+		}
+	}
 	if clientPlaySessionID != "" {
-		if playSession, ok := h.playbackStore.Get(clientPlaySessionID); ok && playSession.CompatToken == compatSession.Token {
+		playSession, ok, err := h.playbackStore.Lookup(clientPlaySessionID)
+		if err != nil {
+			readErr = &playSessionReadError{playSessionID: clientPlaySessionID, err: err}
+		}
+		if ok && playSession.CompatToken == compatSession.Token {
 			if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
 				return nil, nil, errPlaybackRouteMismatch
 			}
@@ -3803,15 +4205,28 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if clientPlaySessionID == "" && staticRequest {
 		active, err := h.playbackStore.FindUnidentifiedPlayback(compatSession.Token, routeID, mediaSourceID)
 		if err != nil {
-			return nil, nil, err
+			// Two started plays matching is an answer: the request can't be
+			// bound to either. Any other failure (an unreadable store, a write
+			// still pending, an identity that changed mid-lookup) passes, so
+			// the request is answered as retryable.
+			if errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+				return nil, nil, err
+			}
+			return nil, nil, &playSessionReadError{err: err}
 		}
 		if active != nil {
 			return active, playbackRouteSource(active, mediaSourceID, allowItemAlias, staticRequest), nil
 		}
 	}
 
-	playSession, _, ok := h.playbackStore.FindByRoute(compatSession.Token, routeID)
+	playSession, _, ok, err := h.playbackStore.LookupByRoute(compatSession.Token, routeID)
+	if err != nil {
+		return nil, nil, &playSessionReadError{playSessionID: clientPlaySessionID, err: err}
+	}
 	if !ok {
+		if readErr != nil {
+			return nil, nil, readErr
+		}
 		return nil, nil, ErrSessionNotFound
 	}
 	if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
@@ -4088,29 +4503,18 @@ func compatMasterCodecs(videoCodec string, source PlaybackMediaSource, audio mod
 }
 
 // compatMasterVideoCodec returns the RFC 6381 CODECS entry for the copied
-// video, or "" when the probe lacks the level or another fact the entry
-// needs.
+// video, or "" when the probe lacks the level, names a profile the entry
+// cannot describe, or lacks another fact the entry needs.
 func compatMasterVideoCodec(video models.VideoTrack) string {
 	switch strings.ToLower(strings.TrimSpace(video.Codec)) {
 	case compatVideoCodecHEVC, "h265":
-		if video.Level > 0 {
-			profile := "1.4"
-			if strings.EqualFold(strings.ReplaceAll(video.Profile, " ", ""), "main10") {
-				profile = "2.4"
-			}
+		profile := compatHEVCCodecProfiles[strings.ToLower(strings.ReplaceAll(video.Profile, " ", ""))]
+		if video.Level > 0 && profile != "" {
 			return fmt.Sprintf("hvc1.%s.L%d.B0", profile, video.Level)
 		}
 	case compatTargetVideoCodec, "avc":
-		if video.Level > 0 {
-			profile := "4240"
-			switch strings.ToLower(strings.TrimSpace(video.Profile)) {
-			case "high":
-				profile = "6400"
-			case "main":
-				profile = "4D40"
-			case "baseline":
-				profile = "42E0"
-			}
+		profile := compatH264CodecProfiles[strings.ToLower(strings.TrimSpace(video.Profile))]
+		if video.Level > 0 && profile != "" {
 			return fmt.Sprintf("avc1.%s%02X", profile, video.Level)
 		}
 	case compatVideoCodecAV1:
@@ -4119,6 +4523,34 @@ func compatMasterVideoCodec(video models.VideoTrack) string {
 		return compatVP9CodecString(video)
 	}
 	return ""
+}
+
+// compatH264CodecProfiles maps FFprobe's H.264 profile name to the
+// profile_idc and constraint flag bytes of the avc1 entry. The intra profiles
+// require constraint_set3_flag. Other profiles (Extended, CAVLC 4:4:4) are
+// left out rather than declared as a profile the stream does not have.
+//
+//nolint:goconst // FFprobe profile names, listed verbatim.
+var compatH264CodecProfiles = map[string]string{
+	"constrained baseline":  "4240",
+	"baseline":              "42E0",
+	"main":                  "4D40",
+	"high":                  "6400",
+	"high 10":               "6E00",
+	"high 10 intra":         "6E10",
+	"high 4:2:2":            "7A00",
+	"high 4:2:2 intra":      "7A10",
+	"high 4:4:4 predictive": "F400",
+	"high 4:4:4 intra":      "F410",
+}
+
+// compatHEVCCodecProfiles maps FFprobe's HEVC profile name, spaces removed,
+// to the profile and compatibility fields of the hvc1 entry. Range Extensions
+// and the other extension profiles are told apart only by constraint flags
+// the probe does not report, so they get no entry.
+var compatHEVCCodecProfiles = map[string]string{
+	"main":   "1.4",
+	"main10": "2.4",
 }
 
 // compatAV1CodecString builds the short form av01.0.LLM.DD (AV1 ISOBMFF,
@@ -4310,6 +4742,45 @@ func seekSecondsFromTicks(seekStr string) float64 {
 		return 0
 	}
 	return float64(ticks) / 10_000_000
+}
+
+// storedSubtitleIDQuery names the stored subtitle a jellycompat subtitle
+// DeliveryUrl was issued for (see storedSubtitleDeliveryURL).
+const storedSubtitleIDQuery = "StoredSubtitleId"
+
+// findStoredSubtitle looks up a stored subtitle by the ID an issued URL
+// carries, returning nil when it is not found. Only the file's own stored
+// subtitles match, so an ID from another file is not found.
+func (h *PlaybackHandler) findStoredSubtitle(ctx context.Context, fileID, id int) (*subtitles.DownloadedSubtitle, error) {
+	if h.SubtitleRepo == nil || h.SubtitleBlobs == nil {
+		return nil, nil
+	}
+	sub, err := h.SubtitleRepo.GetDownloadedSubtitle(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if sub == nil || sub.MediaFileID != fileID {
+		return nil, nil
+	}
+	return sub, nil
+}
+
+func (h *PlaybackHandler) serveStoredSubtitle(w http.ResponseWriter, r *http.Request, dl subtitles.DownloadedSubtitle, requestedFormat string, segmentPTSOffset int64) {
+	data, err := h.SubtitleBlobs.Get(r.Context(), dl.S3Key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle from storage")
+		return
+	}
+	// Apply the stored timing correction before conversion or windowing.
+	data, err = subtitles.DeliveryBytes(&dl, data)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to prepare subtitle")
+		return
+	}
+	// The correction can change behind the same URL.
+	w.Header().Set("Cache-Control", "private, no-cache")
+	h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: dl.MediaFileID, StoredID: dl.ID})
+	h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat, segmentPTSOffset)
 }
 
 // computeDownloadedSubBaseIndex returns the first index available for downloaded subtitles.

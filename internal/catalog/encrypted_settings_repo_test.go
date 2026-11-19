@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"maps"
 	"testing"
 
@@ -248,6 +249,7 @@ func TestSensitiveSettingKeys_Audited(t *testing.T) {
 		"ai.chatgpt.credentials",
 		"audiobooks.abs.jwt_secret",
 		"s3.public_secret_key",
+		"backup.s3.secret_key",
 		"s3.operational_secret_key", // legacy alias still read as a fallback
 		"redis.sentinel_password",   // was missing from the old redaction map
 		"recommendations.openai_api_key",
@@ -312,5 +314,32 @@ func TestEncryptedSettings_BackfillIdempotent(t *testing.T) {
 	}
 	if n2 != 0 {
 		t.Fatalf("second backfill encrypted %d, want 0 (no double-encrypt)", n2)
+	}
+}
+
+// A wrong SECRET_KEY must be named as such; one renamed or damaged row under
+// the right key must not be blamed on the key.
+func TestEncryptedSettings_GetAllReportsSecretKeyMismatch(t *testing.T) {
+	ctx := context.Background()
+	raw := newMemSettings()
+	writer := NewEncryptedSettingsRepo(raw, newCipher(t))
+	for _, k := range []string{"tmdb.api_key", "auth.jwt_secret"} {
+		if err := writer.Set(ctx, k, "value-"+k); err != nil {
+			t.Fatalf("Set %s: %v", k, err)
+		}
+	}
+	raw.m["server.mode"] = "integrated"
+
+	_, err := NewEncryptedSettingsRepo(raw, newCipher(t)).GetAll(ctx)
+	if !errors.Is(err, ErrSecretKeyMismatch) || !errors.Is(err, secret.ErrAuthFailed) {
+		t.Fatalf("GetAll under another key = %v, want ErrSecretKeyMismatch wrapping ErrAuthFailed", err)
+	}
+
+	// A ciphertext copied to another key name fails its AAD check while the
+	// other rows still decrypt under the right key.
+	raw.m["s3.public_secret_key"] = raw.m["tmdb.api_key"]
+	_, err = writer.GetAll(ctx)
+	if err == nil || errors.Is(err, ErrSecretKeyMismatch) {
+		t.Fatalf("GetAll with one renamed row = %v, want a decrypt error that is not a key mismatch", err)
 	}
 }

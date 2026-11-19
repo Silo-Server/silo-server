@@ -77,6 +77,9 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	if clientIP == "" {
 		clientIP, _ = attrs["remote_addr"].(string)
 	}
+	// The column is an inet. A remote address carries a port, and one row
+	// the column refuses fails the insert of its whole batch.
+	clientIP = normalizeClientIP(clientIP)
 	nodeID := h.nodeID
 	if attrNodeID, _ := attrs["node_id"].(string); attrNodeID != "" {
 		nodeID = attrNodeID

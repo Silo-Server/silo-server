@@ -62,6 +62,7 @@ const (
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
 	EventMarkersUpdated              = "markers_updated"
 	EventMarkerThumbnailReady        = "marker_thumbnail_ready"
+	EventSubtitleReady               = "subtitle_ready"
 	EventSubtitleTimingChanged       = "subtitle_timing_changed"
 	EventSubtitleSyncUpdated         = "subtitle_sync_updated"
 	EventUserDisabled                = "user_disabled"
@@ -110,10 +111,11 @@ const EventUserSessionsRevoked = "user_sessions_revoked"
 // the transcode to another node; the payload is a noderecipe.MoveRequest.
 const EventTranscodeMoveRequested = "transcode_move_requested"
 
-// EventNodeDrainChanged is published on ChannelAdmin by a transcode node when
-// it starts or stops draining, with its stream_nodes id as the payload, so
-// every API server rechecks that node instead of waiting for its next health
-// sweep. Draining means the node takes no new work; see nodepool.DrainState.
+// EventNodeDrainChanged is published on ChannelAdmin by the API server a
+// transcode node tells (its health-changed call) that it started or stopped
+// draining, with the node's stream_nodes id as the payload, so every API
+// server rechecks that node instead of waiting for its next health sweep.
+// Draining means the node takes no new work; see nodepool.DrainState.
 const EventNodeDrainChanged = "node_drain_changed"
 
 // ---------------------------------------------------------------------------

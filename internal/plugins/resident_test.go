@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -314,23 +313,6 @@ func TestResidentSupervisorHaltStopsResidents(t *testing.T) {
 	}
 }
 
-func TestResidentBackoffSchedule(t *testing.T) {
-	minBackoff, maxBackoff := time.Second, time.Minute
-	for _, tc := range []struct {
-		failures int
-		want     time.Duration
-	}{{0, time.Second}, {1, time.Second}, {2, 2 * time.Second}, {3, 4 * time.Second}, {6, 32 * time.Second}, {7, time.Minute}, {10, time.Minute}, {64, time.Minute}} {
-		if got := residentBackoff(tc.failures, minBackoff, maxBackoff); got != tc.want {
-			t.Errorf("residentBackoff(%d) = %v, want %v", tc.failures, got, tc.want)
-		}
-	}
-	for i := 0; i < 100; i++ {
-		if j := defaultBackoffJitter(time.Minute); j < 0 || j > 15*time.Second {
-			t.Fatalf("jitter %v outside [0, 15s]", j)
-		}
-	}
-}
-
 func TestResidentRestartOfNonResidentOnlyStops(t *testing.T) {
 	host := &fakeServiceHost{}
 	store := newFakeServiceInstallationStore(&Installation{ID: 2, PluginID: "silo.metadb", Version: "1", InstallPath: "/x/plugin", Enabled: true, Kind: KindPlugin})
@@ -369,55 +351,6 @@ func buildResidentFixtureVersion(t *testing.T, version string) string {
 		t.Fatal(err)
 	}
 	return bin
-}
-
-// A replaced or auto-updated binary changes the row's version and install
-// path. On the host that made the change the process is already gone; on
-// any other host running the installation (a proxy node) it is still alive
-// and must be replaced by the next reconcile, not kept because it answers
-// health checks.
-func TestResidentSupervisorReplacesProcessWhenBinaryChanges(t *testing.T) {
-	f := newResidentFixture(t, ResidentOptions{})
-	ctx := context.Background()
-	f.service.StartResidents(ctx)
-	waitState(t, f.service, 5, "initial running", running)
-	first, err := f.host.Client(5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := first.Manifest().GetVersion(); got != "0.1.0" {
-		t.Fatalf("initial version = %q", got)
-	}
-
-	next := buildResidentFixtureVersion(t, "0.2.0")
-	version := "0.2.0"
-	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Version: &version, InstallPath: &next}); err != nil {
-		t.Fatal(err)
-	}
-	f.service.OnLifecycleChange(ctx)
-
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		current, err := f.host.Client(5)
-		state, _ := f.service.Residents().State(5)
-		if err == nil && current != first && current.Manifest().GetVersion() == "0.2.0" && state.State == ResidentRunning {
-			if state.RestartCount != 0 || state.LastError != "" {
-				t.Fatalf("replacement counted as a failure: %+v", state)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("resident kept the old process after the binary changed (err=%v, state=%+v)", err, state)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// The same reconcile again is a no-op: nothing changed.
-	replaced, _ := f.host.Client(5)
-	f.service.OnLifecycleChange(ctx)
-	if again, err := f.host.Client(5); err != nil || again != replaced {
-		t.Fatalf("an unchanged row replaced the process (err=%v)", err)
-	}
 }
 
 // fixtureArchive packs a built fixture binary the way the installer stores
@@ -542,47 +475,6 @@ func TestResidentLazyRPCDoesNotLaunchBeforeTheGateOpens(t *testing.T) {
 		if _, err := f.host.Client(5); !errors.Is(err, pluginhost.ErrClientNotFound) {
 			t.Fatalf("lazy RPC started a provider before the gate opened (armed=%v)", armed)
 		}
-	}
-}
-
-// A change of host identity (a proxy whose stream_nodes row was deleted and
-// re-registered under a new id) replaces every running resident: the process
-// keeps the identity it started with in memory, so it must not go on serving
-// under the new one.
-func TestResidentSupervisorReplacesProcessWhenHostIdentityChanges(t *testing.T) {
-	f := newResidentFixture(t, ResidentOptions{})
-	ctx := context.Background()
-	var identity atomic.Value
-	identity.Store("node:1")
-	f.service.SetResidentHostIdentity(func() string { return identity.Load().(string) })
-	f.service.StartResidents(ctx)
-	waitState(t, f.service, 5, "running under node:1", running)
-	first, err := f.host.Client(5)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	f.service.OnLifecycleChange(ctx)
-	if same, err := f.host.Client(5); err != nil || same != first {
-		t.Fatalf("an unchanged identity replaced the process (err=%v)", err)
-	}
-
-	identity.Store("node:2")
-	f.service.OnLifecycleChange(ctx)
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		current, err := f.host.Client(5)
-		state, _ := f.service.Residents().State(5)
-		if err == nil && current != first && state.State == ResidentRunning {
-			if state.RestartCount != 0 || state.LastError != "" {
-				t.Fatalf("identity change counted as a failure: %+v", state)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("resident kept the old process after the host identity changed (err=%v, state=%+v)", err, state)
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 

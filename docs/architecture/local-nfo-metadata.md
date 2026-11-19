@@ -80,7 +80,7 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
 - **One switch per library.** The chain editor shows the local entry as a
   pinned "Local metadata (NFO + artwork)" switch that sets every level's row at
   once and cannot be reordered. v2 marks the entry with
-  `ProviderChainEntry.local`; the frozen v1 shape is unchanged. Text and
+  `ProviderChainEntry.local`. Text and
   artwork come from the same provider, so the switch turns both on or off.
 
 ## Reading NFO files
@@ -277,6 +277,13 @@ by mode:
   identity keeps the chosen one. Running Identify again is how an admin
   changes it.
 
+A manual refresh or Identify that corrects the match (the chosen IDs contradict
+the stored ones) also empties the stored fields, credits and localized text it
+may rewrite, so a value the new match lacks does not outlive the previous title.
+Locks and manual translations hold, and the title and artwork stay. A refresh or
+Identify that keeps the match never clears a stored field, credit or localized
+text the providers leave empty.
+
 Whenever a run keeps an identity the NFO's IDs contradict, it logs the
 conflict and leaves the NFO provider out of every phase of that run (series,
 season and episode), since its text, lists and art describe the other title
@@ -364,6 +371,52 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   replaces a frame with it, and the task never overwrites one. An extra whose
   sidecar cannot be decoded gets no frame either; it shows no image until the
   sidecar is fixed or removed.
+- After the extras, the same task run gives each movie with no poster a frame
+  of its own video (`internal/extrastills/posters.go`): an item of type movie,
+  not pending its first match, with unlocked images, an empty `poster_path`,
+  and a `poster_source_path` that is empty or a lost frame's. A sidecar or
+  provider poster waiting for its copy has a source of its own, so it is never
+  raced. A movie with live main files in more than one library gets no frame,
+  since the poster is shared by every library the item is in and a frame from
+  one library's file would show viewers of another a file they may not see.
+  The save checks this again, and each run first removes the frame of a movie
+  that has since gained a file in another library, and any frame whose file
+  is no longer a live main file of the movie (missing, deleted, or moved), so
+  the frame goes within one task interval and the movie takes a new one from
+  a file it has now; this outranks the images lock, since a frame was never
+  anyone's choice. The removal finds frame posters through the partial index
+  `idx_media_items_frame_poster` on `poster_source_path LIKE 'frame:%'`.
+  The frame is taken from the lowest-id live file with a known duration
+  and no blocking failure record, at the extras position, cropped to a
+  centered 2:3 portrait at its own scale (`imageutil.CropToPoster`), and stored
+  under the item's `local/` poster keys with the usual poster variants.
+  `poster_source_path` then holds `frame:` and the file's frame key. The save
+  is a compare-and-set on the empty slot and the source read
+  (`ItemRepository.SetFramePosterIfSource`); a frame that loses is left to the
+  artwork revision GC. Failures are per-file media analysis artifacts
+  (`internal/mediaartifact`, kind `frame_poster`, all recorded under one
+  recorder name): a file ffmpeg cannot decode is skipped until it changes,
+  other failures back off the same on every server, growing with each failure,
+  and the poster pass stops after three failures in a row (an offline share)
+  or when no transcode node can be reserved. Like the extras' stills, a frame
+  poster is stored whatever `metadata.cache_images` is set to, so with caching
+  off, where sidecar files are not read, a movie with a poster file beside it
+  shows a frame. Any other image replaces a frame: a sidecar or admin pick as
+  usual, and in a fill-empty refresh (initial match, scheduled refresh) the
+  merge treats an unlocked frame poster as empty, so even an unrated provider
+  poster wins; with no image offered the frame stays. A frame's stored path
+  only ever goes with its `frame:` source: when another image replaces it, the
+  slot serves that image's remote path, or nothing while a local copy is
+  pending, never the frame as a stand-in. A localized provider
+  poster also replaces a frame for viewers in its language, although the frame
+  sits under the `local/` keys that otherwise mark library artwork. Known limits: only the
+  poster slot is filled, so a detail screen that shows only a backdrop still
+  shows none; a frame saved between a refresh's read and its write can be
+  overwritten by that write and is taken again on the next run; with
+  `metadata.cache_images` off, the stored-artwork releaser queues a matched
+  movie showing a frame for a refresh at most weekly; after an admin picks
+  another image there is no way back to the frame; and a replaced file keeps
+  its old frame while the poster slot is filled.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and
@@ -627,7 +680,7 @@ when the item's sidecar discovery offers that exact source for that image type,
 so a file replaced since the list (a new fingerprint) must be picked again. It
 reads the file under the same checks, stores it under the same `local/...` key
 the processor would use, and publishes the fingerprinted source with the images
-lock like any other choice. Seasons, episodes and frozen v1 keep provider-only
+lock like any other choice. Seasons and episodes keep provider-only
 choices. The server answering the admin API reads the file, so it needs the
 library mounted, like a server that copies local artwork; on a server without
 the mount discovery finds nothing and local choices are not offered.
@@ -672,6 +725,22 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
 
 A matched item picks up an edited NFO or sidecar image without a manual
 refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
+
+The checks below skip unmatched items. A pending, unmatched or ambiguous item
+that no provider gives metadata still takes the sidecar poster, backdrop and
+logo beside it on each metadata run, which every library scan repeats for such
+items (`saveProvisionalLocalArtwork`, `internal/metadata/local_artwork_discovery.go`).
+The write touches only those artwork columns, and only while the row is still
+provisional and holds the sources and images lock the run read
+(`ItemRepository.UpdateProvisionalArtwork`), so a match, Identify or admin
+artwork choice or lock made meanwhile wins. A slot taking a new sidecar drops
+the cached copy of its previous one, so a replaced file shows no image until
+its new copy lands. A slot on its sidecar is queued again on each run until it
+holds a cached copy, which can then only be that sidecar's. Remote images are
+not applied, nor are the
+other item slots, season posters or episode stills. A removed sidecar goes
+unnoticed, so its stored copy keeps serving. An item an admin marked to stay
+unmatched (`match_ignored_at`) is not processed and takes none.
 
 - **Fingerprints.** `local_sidecar_fingerprints` stores, per library and per
   item, season and episode, a SHA-256 of the path, size and modification time
@@ -829,9 +898,8 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
   there is not found.
 - No NFO writing, no music/audiobook/ebook NFO (those ecosystems use
   OPF/metadata.json — future builtin providers via the same registry).
-- Feature detection: the `nfo` capability's presence in
-  `GET /api/v1/libraries/provider-defaults` (see
-  `docs/architecture/v1-scope.md`); in v2 an entry with `local: true`.
+- Feature detection: an entry with `local: true` in
+  `GET /api/v2/libraries/provider-defaults`.
 - `<set>` (movie collections) is not mapped: `MetadataResult` has no
   collection field, so `nfoCommon` (`internal/metadata/nfo/nfo.go`) does not
   decode it.

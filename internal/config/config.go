@@ -199,9 +199,13 @@ type PlaybackConfig struct {
 	// SubtitleSyncNodeCapacity is how many media sampling runs (subtitle sync
 	// speech decoding) one transcode node admits at once, across every API
 	// server that sends it work (subtitles.sync_node_capacity).
-	SubtitleSyncNodeCapacity int                   `yaml:"-"`
-	TranscodeEnabled         bool                  `yaml:"transcode_enabled"`
-	Routing                  PlaybackRoutingPolicy `yaml:"-"`
+	SubtitleSyncNodeCapacity int `yaml:"-"`
+	// TrickplayNodeCapacity is how many seek-preview runs one transcode node
+	// admits at once, across every API server that sends it work
+	// (playback.trickplay_node_capacity).
+	TrickplayNodeCapacity int                   `yaml:"-"`
+	TranscodeEnabled      bool                  `yaml:"transcode_enabled"`
+	Routing               PlaybackRoutingPolicy `yaml:"-"`
 	// KeyframePlaylist is playback.copy_keyframe_playlist: copy-remux HLS
 	// from one complete keyframe-planned playlist (#1466).
 	KeyframePlaylist bool `yaml:"-"`
@@ -300,6 +304,9 @@ type jellyfinCompatConfigRaw struct {
 	WebInstallDir         string `yaml:"web_install_dir"`
 	SessionTTL            string `yaml:"session_ttl"`
 	PlaybackSessionTTL    string `yaml:"playback_session_ttl"`
+	// AddressStreamGrantEnabled is imported only when the file sets it, so
+	// an absent key leaves the server default in force.
+	AddressStreamGrantEnabled *bool `yaml:"address_stream_grant_enabled"`
 }
 
 // RecommendationsConfig holds AI recommendation engine settings.
@@ -382,7 +389,7 @@ type DownloadConfig struct {
 	Enabled              bool          `yaml:"-"`
 	ServerBandwidthBPS   int64         `yaml:"-"` // server-wide bytes/sec cap (0 = unlimited)
 	UserBandwidthBPS     int64         `yaml:"-"` // per-user bytes/sec across all their downloads (0 = unlimited)
-	MaxConcurrentPerUser int           `yaml:"-"` // max simultaneous downloads per user (0 = unlimited)
+	MaxConcurrentPerUser int           `yaml:"-"` // max downloads per user being prepared, or queued or transferring at account level (0 = unlimited)
 	MaxPerPeriod         int           `yaml:"-"` // max downloads per user per period (0 = unlimited)
 	PeriodDuration       time.Duration `yaml:"-"` // rolling window for MaxPerPeriod
 
@@ -558,6 +565,10 @@ const defaultJellyfinCompatPlaybackSessionTTL = "24h"
 
 // parseDuration parses a duration string that supports Go's time.ParseDuration
 // formats plus a custom "Nd" format for days.
+// ParseDuration reads a duration setting as the server does: a Go duration,
+// or a whole number of days ("30d").
+func ParseDuration(s string) (time.Duration, error) { return parseDuration(s) }
+
 func parseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty duration string")
@@ -627,6 +638,7 @@ func setDefaults() *configRaw {
 			ChapterThumbnailExecution:    "local",
 			ChapterThumbnailNodeCapacity: 1,
 			SubtitleSyncNodeCapacity:     1,
+			TrickplayNodeCapacity:        1,
 			TranscodeEnabled:             true,
 		},
 		RateLimit: RateLimitConfig{

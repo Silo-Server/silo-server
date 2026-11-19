@@ -9,6 +9,7 @@ import (
 	"net/mail"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -81,9 +82,7 @@ const (
 
 // PlaybackKeyframePlaylistSettingKey serves copy-remux HLS as one complete
 // playlist planned from the source's keyframes, instead of FFmpeg's growing
-// one (#1466). It is off while restarts in the middle of such a stream are
-// still being built; a planned stream that has to restart starts again from
-// the beginning.
+// one (#1466). It is off by default until it has been tried across players.
 const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
 
 // The connection speed test's schedule, delivered to clients with the probe
@@ -144,6 +143,20 @@ const (
 	PlaybackPreferLowerVersionTranscodeSettingKey = "playback.prefer_lower_version_transcode"
 	DownloadLocalTranscodeFallbackSettingKey      = "download.local_transcode_fallback"
 )
+
+// JellyfinCompatAddressStreamGrantSettingKey turns on the Jellyfin API's
+// address-only stream grant: a static video stream that carries no credential
+// is served as the owner of a live PlaybackInfo negotiation made from the same
+// client address. Anyone sharing that address (household or carrier NAT, a VPN
+// exit, a proxy that collapses clients to one address) who knows the item and
+// source IDs can then stream the file. The Jellyfin API reads it live on each
+// request that reaches that grant.
+const JellyfinCompatAddressStreamGrantSettingKey = "jellyfin_compat.address_stream_grant_enabled"
+
+// DefaultJellyfinCompatAddressStreamGrantEnabled is the address-only stream
+// grant's value while the setting is unset. Every default of that setting
+// derives from this constant.
+const DefaultJellyfinCompatAddressStreamGrantEnabled = false
 
 // ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
 // stored alongside server settings for durability but must not be exposed or
@@ -221,6 +234,66 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
+// serverLogFormatSettingKey selects text or JSON console logs.
+const serverLogFormatSettingKey = "server.log_format"
+
+// Backup settings (docs/architecture/backups.md). internal/backup reads them
+// live at each run, so none needs a restart.
+const (
+	// BackupEnabledSettingKey turns the nightly backup on. "Back up now" works
+	// either way.
+	BackupEnabledSettingKey = "backup.enabled"
+	// BackupTimeSettingKey is the server-local HH:MM the nightly backup starts.
+	BackupTimeSettingKey = "backup.time"
+	// BackupKeepSettingKey is how many nightly and manual backups rotation
+	// keeps, from MinBackupKeep to MaxBackupKeep.
+	BackupKeepSettingKey = "backup.keep"
+	// BackupIncludeIntroFingerprintsSettingKey keeps intro fingerprint data in
+	// the dump. Without it, intro detection analyzes a season again when its
+	// next episode arrives.
+	BackupIncludeIntroFingerprintsSettingKey = "backup.include_intro_fingerprints"
+	// BackupIncludeSubtitlesSettingKey copies downloaded subtitles into the
+	// backup's blobs.
+	BackupIncludeSubtitlesSettingKey = "backup.include_subtitles"
+	// BackupDestinationSettingKey names where backups are written:
+	// BackupDestinationDefault, the operational blob store, or
+	// BackupDestinationS3, the dedicated bucket the backup.s3.* keys name.
+	BackupDestinationSettingKey = "backup.destination"
+	BackupDestinationDefault    = "default"
+	BackupDestinationS3         = "s3"
+	// The dedicated backup bucket. The secret key is encrypted at rest.
+	BackupS3EndpointSettingKey  = "backup.s3.endpoint"
+	BackupS3RegionSettingKey    = "backup.s3.region"
+	BackupS3PathStyleSettingKey = "backup.s3.path_style"
+	BackupS3BucketSettingKey    = "backup.s3.bucket"
+	BackupS3KeyPrefixSettingKey = "backup.s3.key_prefix"
+	BackupS3AccessKeySettingKey = "backup.s3.access_key"
+	BackupS3SecretKeySettingKey = "backup.s3.secret_key"
+	// BackupS3KeyAcknowledgedSettingKey is the SECRET_KEY check value the
+	// admin confirmed keeping a copy of. S3 backups run only while it equals
+	// this server's; only the acknowledge-key endpoint writes it.
+	BackupS3KeyAcknowledgedSettingKey = "backup.s3.key_acknowledged"
+	MinBackupKeep                     = 1
+	MaxBackupKeep                     = 60
+	DefaultBackupTime                 = "04:00"
+	DefaultBackupKeep                 = 7
+)
+
+// ParseBackupTime reads a backup.time value, "H:MM" or "HH:MM" on a 24-hour
+// clock.
+func ParseBackupTime(value string) (hour, minute int, ok bool) {
+	h, m, found := strings.Cut(strings.TrimSpace(value), ":")
+	if !found || len(h) < 1 || len(h) > 2 || len(m) != 2 {
+		return 0, 0, false
+	}
+	hour, errH := strconv.Atoi(h)
+	minute, errM := strconv.Atoi(m)
+	if errH != nil || errM != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, false
+	}
+	return hour, minute, true
+}
+
 // ServerLocalURLSettingKey is the API server's address on the local network,
 // for a deployment whose LAN advertisement cannot reach the network or names
 // the wrong port (Docker bridge networking). Signed-in clients read it from the
@@ -244,6 +317,12 @@ const (
 	// address on a Silo account first is the one matched; the match ends the
 	// account's existing sessions, device approvals and API keys.
 	AuthEmailAutoMatchSettingKey = "auth.email_auto_match"
+	// AuthUserAPIKeysSettingKey lets accounts that are not admins, and
+	// profiles other than the primary one, create API keys for themselves.
+	// Those keys carry user scopes only. Off by default: only a server admin
+	// creates keys. Turning it off stops new keys and leaves existing ones
+	// working until they are revoked.
+	AuthUserAPIKeysSettingKey = "auth.user_api_keys" //nolint:gosec // A setting name, not a credential.
 	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
 	// provider check may be before a session refresh asks the provider again.
 	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
@@ -328,6 +407,7 @@ var adminSettingDefaults = map[string]string{
 	ServerLocalURLSettingKey:                  "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
+	AuthUserAPIKeysSettingKey:                 "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
 	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
 
@@ -390,6 +470,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.preview_image_width":                   "300",
 	"playback.trickplay_interval_seconds":            "10",
 	"playback.trickplay_workers":                     "1",
+	"playback.trickplay_node_capacity":               "1",
 	"playback.trickplay_execution":                   "local",
 	ChapterThumbnailSoftwareToneMapSettingKey:        "true",
 	PlaybackTranscodeHardwareToneMapSettingKey:       "true",
@@ -403,16 +484,17 @@ var adminSettingDefaults = map[string]string{
 	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
 	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
 
-	"audiobookshelf_compat.enabled":           "true",
-	"jellyfin_compat.enabled":                 "true",
-	"jellyfin_compat.public_url":              "http://127.0.0.1:8096",
-	"jellyfin_compat.emulated_server_version": DefaultJellyfinCompatEmulatedServerVersion,
-	"jellyfin_compat.server_name":             "Silo",
-	"jellyfin_compat.web_enabled":             "true",
-	"jellyfin_compat.web_version":             DefaultJellyfinWebVersion,
-	"jellyfin_compat.web_install_dir":         DefaultJellyfinWebInstallDir,
-	"jellyfin_compat.session_ttl":             "87600h",
-	"jellyfin_compat.playback_session_ttl":    defaultJellyfinCompatPlaybackSessionTTL,
+	"audiobookshelf_compat.enabled":            "true",
+	"jellyfin_compat.enabled":                  "true",
+	"jellyfin_compat.public_url":               "http://127.0.0.1:8096",
+	"jellyfin_compat.emulated_server_version":  DefaultJellyfinCompatEmulatedServerVersion,
+	"jellyfin_compat.server_name":              "Silo",
+	"jellyfin_compat.web_enabled":              "true",
+	"jellyfin_compat.web_version":              DefaultJellyfinWebVersion,
+	"jellyfin_compat.web_install_dir":          DefaultJellyfinWebInstallDir,
+	"jellyfin_compat.session_ttl":              "87600h",
+	"jellyfin_compat.playback_session_ttl":     defaultJellyfinCompatPlaybackSessionTTL,
+	JellyfinCompatAddressStreamGrantSettingKey: strconv.FormatBool(DefaultJellyfinCompatAddressStreamGrantEnabled),
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
@@ -471,7 +553,6 @@ var adminSettingDefaults = map[string]string{
 	"notifications.fanout_enabled":                             "true",
 	"notifications.ui_enabled":                                 "true",
 	"notifications.fanout.settle_seconds":                      "30",
-	"notifications.fanout.max_series_burst":                    "3",
 	"notifications.fanout.max_event_age_hours":                 "72",
 	"notifications.retention.read_days":                        "90",
 	"notifications.retention.unread_days":                      "180",
@@ -522,7 +603,7 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.matching_strategy":        "last",
 	"catalog.search.meilisearch.sync_batch_size":          "500",
 	"catalog.search.meilisearch.rebuild_batch_size":       "5000",
-	"catalog.search.meilisearch.rebuild_task_queue_depth": "4",
+	"catalog.search.meilisearch.rebuild_task_queue_depth": "16",
 	"catalog.search.meilisearch.semantic_enabled":         "false",
 	"catalog.search.meilisearch.semantic_ratio":           "0.5",
 	"catalog.search.meilisearch.embedder":                 "silo_recommendations",
@@ -532,6 +613,19 @@ var adminSettingDefaults = map[string]string{
 
 	PlaybackBandwidthProbeAutomaticSettingKey:  "true",
 	PlaybackBandwidthProbeMaxAgeDaysSettingKey: strconv.Itoa(DefaultBandwidthProbeMaxAgeDays),
+
+	BackupEnabledSettingKey:                  "true",
+	BackupTimeSettingKey:                     DefaultBackupTime,
+	BackupKeepSettingKey:                     strconv.Itoa(DefaultBackupKeep),
+	BackupIncludeIntroFingerprintsSettingKey: "false",
+	BackupIncludeSubtitlesSettingKey:         "true",
+	BackupDestinationSettingKey:              BackupDestinationDefault,
+	BackupS3EndpointSettingKey:               "",
+	BackupS3RegionSettingKey:                 "",
+	BackupS3PathStyleSettingKey:              "false",
+	BackupS3BucketSettingKey:                 "",
+	BackupS3KeyPrefixSettingKey:              "",
+	BackupS3AccessKeySettingKey:              "",
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -558,6 +652,17 @@ var legacyAdminSettingFallbacks = []struct {
 	{"s3.private_access_key", "s3.operational_access_key"},
 	{"s3.private_secret_key", "s3.operational_secret_key"},
 	{"ai.chat_model", "subtitle_ai.chat_model"},
+}
+
+// AdminSettingDefaultKeys lists every key with an admin default, sorted. The
+// backup restore table must classify each one.
+func AdminSettingDefaultKeys() []string {
+	keys := make([]string, 0, len(adminSettingDefaults))
+	for key := range adminSettingDefaults {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // EffectiveAdminSettings overlays persisted values onto the runtime defaults
@@ -650,7 +755,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
-		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
+		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", JellyfinCompatAddressStreamGrantSettingKey, "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
@@ -666,8 +771,25 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey:
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, AuthUserAPIKeysSettingKey, ServerLANDiscoverySettingKey,
+		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
+		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)
+
+	case BackupTimeSettingKey:
+		hour, minute, ok := ParseBackupTime(value)
+		if !ok {
+			return "", fmt.Errorf("%s must be a 24-hour time such as 04:00", key)
+		}
+		return fmt.Sprintf("%02d:%02d", hour, minute), nil
+	case BackupKeepSettingKey:
+		return normalizeAdminInt(key, value, MinBackupKeep, MaxBackupKeep)
+	case BackupDestinationSettingKey:
+		return normalizeAdminEnum(key, value, BackupDestinationDefault, BackupDestinationS3)
+	case BackupS3EndpointSettingKey:
+		return normalizeAdminURL(key, value)
+	case BackupS3KeyPrefixSettingKey:
+		return strings.Trim(value, "/"), nil
 
 	case AuthProviderRecheckIntervalSettingKey:
 		parsed, err := parseDuration(value)
@@ -724,7 +846,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		// Rows are retained 30 days after their last update, so a longer
 		// lifetime would outlive the reading it describes.
 		return normalizeAdminInt(key, value, 1, maxBandwidthProbeMaxAgeDays)
-	case "playback.trickplay_workers":
+	// A node takes no more runs than API servers send it, so its capacity
+	// shares the per-server worker range.
+	case "playback.trickplay_workers", "playback.trickplay_node_capacity":
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
@@ -773,8 +897,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 65535)
 	case "notifications.fanout.settle_seconds":
 		return normalizeAdminInt(key, value, 0, 3600)
-	case "notifications.fanout.max_series_burst":
-		return normalizeAdminInt(key, value, 1, 1000)
 	case "notifications.fanout.max_event_age_hours":
 		return normalizeAdminInt(key, value, 1, 24*365)
 	case "notifications.retention.read_days", "notifications.retention.unread_days",
@@ -828,6 +950,12 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	case "server.log_level":
 		return normalizeAdminEnum(key, value, "debug", "info", "warn", "error")
+	case serverLogFormatSettingKey:
+		// Empty keeps the text default, as an unset row does.
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminEnum(key, value, "text", "json")
 	case "opslog.capture_level":
 		// "warning" is accepted because the startup reader in cmd/silo treats
 		// it as an alias for "warn".

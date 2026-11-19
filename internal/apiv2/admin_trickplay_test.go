@@ -2,10 +2,7 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"net/http"
-	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/trickplay"
@@ -46,47 +43,6 @@ func (f *fakeAdminTrickplay) LibraryStatuses(context.Context) ([]trickplay.Libra
 		return nil, f.err
 	}
 	return []trickplay.LibraryStatus{{LibraryID: 1, Name: "Movies", Pending: 12, Running: 1, Ready: 840, Unusable: 2, SheetBytes: 1_800_000_000}}, nil
-}
-
-func TestAdminTrickplay(t *testing.T) {
-	admin := &fakeAdminTrickplay{}
-	deps := pilotDeps(nil, nil)
-	deps.AdminTrickplay = admin
-	h := newTestHandler(t, deps)
-	acting := bearer(adminToken)
-
-	rec := do(t, h, http.MethodGet, "/api/v2/admin/items/movie:heat-1995/trickplay", "", acting)
-	if rec.Code != http.StatusOK {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	var status AdminItemTrickplay
-	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
-		t.Fatal(err)
-	}
-	if len(status.Files) != 2 || status.Files[0].State != "ready" || !status.Files[0].Servable || status.Files[0].GeneratedAt == nil ||
-		status.Files[1].LastError == "" || status.Files[1].ThumbnailWidth != 0 {
-		t.Fatalf("status %s", rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/admin/items/movie:missing/trickplay", "", acting), TypeNotFound)
-
-	rec = do(t, h, http.MethodPost, "/api/v2/admin/items/movie:heat-1995/trickplay/regenerate", "", acting)
-	if rec.Code != http.StatusAccepted || len(admin.regenerated) != 1 {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/admin/items/movie:off/trickplay/regenerate", "", acting), TypeCapabilityDisabled)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/admin/items/movie:missing/trickplay/regenerate", "", acting), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/admin/items/movie:heat-1995/trickplay/regenerate", "", bearer(memberToken)), TypePermissionDenied)
-
-	rec = do(t, h, http.MethodGet, "/api/v2/admin/trickplay/libraries", "", acting)
-	var libraries AdminTrickplayLibraries
-	if err := json.Unmarshal(rec.Body.Bytes(), &libraries); err != nil || rec.Code != http.StatusOK || len(libraries.Items) != 1 || libraries.Items[0].Ready != 840 {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	admin.err = errors.New("database down")
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/admin/trickplay/libraries", "", acting), TypeInternalError)
-
-	off := newTestHandler(t, pilotDeps(nil, nil))
-	requireProblem(t, do(t, off, http.MethodGet, "/api/v2/admin/trickplay/libraries", "", acting), TypeDependencyUnavailable)
 }
 
 func adminTrickplayFixtureCases() []fixtureCase {

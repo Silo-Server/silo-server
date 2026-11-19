@@ -3,109 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/gorilla/websocket"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 )
-
-// TestEventsWebSocketDeliversUserSettingsToNonAdmins goes through the real
-// websocket rather than subscribing on the Hub directly, because that is the
-// only place the channel's authorization lives: dropping ChannelUserSettings
-// from allowedChannelsForRole answers the subscribe with {code:"forbidden"},
-// and dropping it from evt.AllChannels closes the connection as an invalid
-// channel — either way the server would keep publishing change events no
-// client could ever receive, while every Hub-level test stayed green.
-func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	handler := &EventsHandler{hub: hub}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The router authenticates before the handler runs; a plain (non-admin)
-		// user is the role whose devices must hear their own settings change.
-		ctx := apimw.SetClaims(r.Context(), &auth.Claims{UserID: 1, Role: "user"})
-		handler.HandleWebSocket(w, r.WithContext(ctx))
-	}))
-	defer server.Close()
-
-	conn, resp, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(server.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("dialing events websocket: %v", err)
-	}
-	if resp != nil && resp.Body != nil {
-		defer func() { _ = resp.Body.Close() }()
-	}
-	defer func() { _ = conn.Close() }()
-
-	readFrame := func(wantType string) map[string]json.RawMessage {
-		t.Helper()
-		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			t.Fatalf("setting read deadline: %v", err)
-		}
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("reading %s frame: %v", wantType, err)
-		}
-		var frame map[string]json.RawMessage
-		if err := json.Unmarshal(data, &frame); err != nil {
-			t.Fatalf("frame is not JSON: %v (%s)", err, data)
-		}
-		if string(frame["type"]) != `"`+wantType+`"` {
-			t.Fatalf("frame type = %s, want %q (frame: %s)", frame["type"], wantType, data)
-		}
-		return frame
-	}
-
-	hello := readFrame("hello")
-	if !strings.Contains(string(hello["available_channels"]), `"user_settings"`) {
-		t.Fatalf("hello does not offer user_settings: %s", hello["available_channels"])
-	}
-
-	if err := conn.WriteJSON(evt.EventsSubscribeMessage{
-		Type:      "subscribe",
-		RequestID: "r1",
-		Channels:  []evt.EventChannel{evt.ChannelUserSettings},
-	}); err != nil {
-		t.Fatalf("sending subscribe: %v", err)
-	}
-
-	subscribed := readFrame("subscribed")
-	if !strings.Contains(string(subscribed["channels"]), `"user_settings"`) {
-		t.Fatalf("subscribe was not accepted: %s", subscribed["channels"])
-	}
-	if rejected, present := subscribed["rejected"]; present && string(rejected) != "null" && string(rejected) != "[]" {
-		t.Fatalf("subscribe was rejected: %s", rejected)
-	}
-
-	// The accepted subscription hydrates with a snapshot frame first.
-	snapshot := readFrame("snapshot")
-	if string(snapshot["channel"]) != `"user_settings"` {
-		t.Fatalf("snapshot channel = %s, want user_settings", snapshot["channel"])
-	}
-
-	// A change event addressed to this user must reach the connection.
-	publishUserSettingsEvent(context.Background(), hub, 1, "",
-		"playback.subtitle_language", "account")
-
-	event := readFrame("event")
-	if string(event["channel"]) != `"user_settings"` {
-		t.Errorf("event channel = %s, want user_settings", event["channel"])
-	}
-	if string(event["event"]) != `"`+userSettingsChangedEvent+`"` {
-		t.Errorf("event = %s, want %q", event["event"], userSettingsChangedEvent)
-	}
-}
 
 // loopbackEventBus delivers each published event to every subscribed handler,
 // standing in for Redis between the nodes of a cluster.
@@ -133,12 +37,9 @@ func (b *loopbackEventBus) Subscribe(_ context.Context, _ string, handler cache.
 
 func (b *loopbackEventBus) Close() error { return nil }
 
-// TestAdminDefaultChangeReachesEveryViewer covers the event that refreshes
-// viewers inheriting an administrator default: it is addressed to every
-// viewer, so an unbound plain user on another account must still receive it,
-// and a server setting that holds no administrator default publishes nothing.
-// The change is made on another node, so the every-viewer address has to
-// survive the event bus.
+// An administrator-default change is addressed to every viewer and is made on
+// another node, so the every-viewer address has to survive the event bus. A
+// server setting that holds no administrator default publishes nothing.
 func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
 	bus := &loopbackEventBus{}
 	hub := evt.NewHub("socket-node", bus)
@@ -146,50 +47,18 @@ func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
 		t.Fatalf("starting hub: %v", err)
 	}
 	adminNode := evt.NewHub("admin-node", bus)
-	handler := &EventsHandler{hub: hub}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := apimw.SetClaims(r.Context(), &auth.Claims{UserID: 7, Role: "user"})
-		handler.HandleWebSocket(w, r.WithContext(ctx))
-	}))
-	defer server.Close()
-
-	conn, resp, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(server.URL, "http")+"?channels=user_settings", nil)
-	if err != nil {
-		t.Fatalf("dialing events websocket: %v", err)
-	}
-	if resp != nil && resp.Body != nil {
-		defer func() { _ = resp.Body.Close() }()
-	}
-	defer func() { _ = conn.Close() }()
-
-	readUntil := func(wantType string) map[string]json.RawMessage {
-		t.Helper()
-		for {
-			if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-				t.Fatalf("setting read deadline: %v", err)
-			}
-			_, data, err := conn.ReadMessage()
-			if err != nil {
-				t.Fatalf("reading until %s frame: %v", wantType, err)
-			}
-			var frame map[string]json.RawMessage
-			if err := json.Unmarshal(data, &frame); err != nil {
-				t.Fatalf("frame is not JSON: %v (%s)", err, data)
-			}
-			if string(frame["type"]) == `"`+wantType+`"` {
-				return frame
-			}
-		}
-	}
-	readUntil("snapshot")
+	h, _ := socketTestHandler()
+	h.Events = NewEventsHandler(hub, nil, nil, nil, nil, nil, nil)
+	_, readFrame := dialEventsSocketV2(t, h, "user", "?channels=user_settings")
+	readFrame("hello")
+	readFrame("subscribed")
+	readFrame("snapshot")
 
 	// Published first: if it produced an event, the read below would see it.
-	publishAdminDefaultEvent(context.Background(), adminNode, "defaults.card_overlays")
-	publishAdminDefaultEvent(context.Background(), adminNode, "defaults.ui.title_art")
+	publishAdminDefaultEvent(t.Context(), adminNode, "defaults.card_overlays")
+	publishAdminDefaultEvent(t.Context(), adminNode, "defaults.ui.title_art")
 
-	event := readUntil("event")
+	event := readFrame("event")
 	var data userSettingsEventPayload
 	if err := json.Unmarshal(event["data"], &data); err != nil {
 		t.Fatalf("event data: %v (%s)", err, event["data"])

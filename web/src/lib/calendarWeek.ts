@@ -1,3 +1,6 @@
+import { t } from "@/i18n";
+import { appLanguage, formatLocale } from "@/lib/appLocale";
+
 /** Returns the ISO date string (YYYY-MM-DD) of the Monday for the week containing `date`. */
 export function getWeekStart(date: Date): string {
   const d = new Date(date);
@@ -36,17 +39,25 @@ export function getWeekDays(weekStart: string): string[] {
 /** Returns a human-readable heading like "Monday, April 7th". */
 export function formatDayHeading(dateStr: string): string {
   const d = parseDate(dateStr);
-  const weekday = d.toLocaleDateString(undefined, { weekday: "long" });
-  const month = d.toLocaleDateString(undefined, { month: "long" });
-  const day = d.getDate();
-  return `${weekday}, ${month} ${ordinal(day)}`;
+  const weekday = d.toLocaleDateString(formatLocale(), { weekday: "long" });
+  const month = d.toLocaleDateString(formatLocale(), { month: "long" });
+  const heading = t("web.calendar.dayHeading", { weekday, month, day: d.getDate() });
+  // Languages that write weekdays in lower case ("miércoles, 4 de noviembre")
+  // still start a heading with a capital; skip any leading isolate marks.
+  // English keeps its bytes, even with a browser that names days in another
+  // language.
+  if (appLanguage() === "en") return heading;
+  return heading.replace(
+    /^([\u2066-\u2069\u200e\u200f]*)(\p{Ll})/u,
+    (_, marks: string, letter: string) => marks + letter.toLocaleUpperCase(formatLocale()),
+  );
 }
 
 /** Returns a short day label like "Mon" and day number like "7". */
 export function formatShortDay(dateStr: string): { label: string; day: number } {
   const d = parseDate(dateStr);
   return {
-    label: d.toLocaleDateString(undefined, { weekday: "short" }),
+    label: d.toLocaleDateString(formatLocale(), { weekday: "short" }),
     day: d.getDate(),
   };
 }
@@ -54,7 +65,7 @@ export function formatShortDay(dateStr: string): { label: string; day: number } 
 /** Returns the month + year label like "April 2026". */
 export function formatMonthYear(dateStr: string): string {
   const d = parseDate(dateStr);
-  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  return d.toLocaleDateString(formatLocale(), { month: "long", year: "numeric" });
 }
 
 /** Compact range for a Mon–Sun week, e.g. "Apr 6 – 12, 2026" or spanning two months. */
@@ -65,10 +76,22 @@ export function formatWeekRangeLabel(weekStart: string): string {
   const sameMonth =
     start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
   if (sameMonth) {
-    const month = start.toLocaleDateString(undefined, { month: "short" });
-    return `${month} ${start.getDate()} – ${end.getDate()}, ${start.getFullYear()}`;
+    const month = start.toLocaleDateString(formatLocale(), { month: "short" });
+    return t("web.calendar.weekRangeSameMonth", {
+      month,
+      start_day: start.getDate(),
+      end_day: end.getDate(),
+      year: start.getFullYear(),
+    });
   }
-  return `${start.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  return t("web.calendar.weekRange", {
+    start: start.toLocaleDateString(formatLocale(), { month: "short", day: "numeric" }),
+    end: end.toLocaleDateString(formatLocale(), {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+  });
 }
 
 /** Checks if a date string is today. */
@@ -88,10 +111,4 @@ function formatDate(d: Date): string {
 function parseDate(dateStr: string): Date {
   const parts = dateStr.split("-").map(Number);
   return new Date(parts[0]!, parts[1]! - 1, parts[2]!);
-}
-
-function ordinal(n: number): string {
-  const s = ["th", "st", "nd", "rd"] as const;
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
 }

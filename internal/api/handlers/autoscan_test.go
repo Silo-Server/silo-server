@@ -2,14 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 )
@@ -20,16 +13,10 @@ type fakeAutoscanStore struct {
 	listConnectionsFn  func() ([]autoscan.Connection, error)
 	createConnectionFn func(autoscan.Connection) (autoscan.Connection, error)
 	updateConnectionFn func(autoscan.Connection) (autoscan.Connection, error)
-	deleteConnectionFn func(string) error
 	listSourcesFn      func() ([]autoscan.Source, error)
 	getSourceFn        func(string) (autoscan.Source, error)
 	createSourceFn     func(autoscan.Source) (autoscan.Source, error)
 	updateSourceFn     func(autoscan.Source) (autoscan.Source, error)
-	deleteSourceFn     func(string) error
-	listScansFn        func(autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error)
-	countScansFn       func(autoscan.ScanListFilter) (int, error)
-	listEventsFn       func(autoscan.EventListFilter) ([]autoscan.EventWithRuns, error)
-	countEventsFn      func(autoscan.EventListFilter) (int, error)
 	listRunningFn      func() ([]autoscan.Event, error)
 	queueSummaryFn     func() (autoscan.QueueSummary, error)
 	latestEventAtFn    func() (*time.Time, error)
@@ -80,12 +67,7 @@ func (f *fakeAutoscanStore) UpdateConnection(_ context.Context, c autoscan.Conne
 	return c, nil
 }
 
-func (f *fakeAutoscanStore) DeleteConnection(_ context.Context, id string) error {
-	if f.deleteConnectionFn != nil {
-		return f.deleteConnectionFn(id)
-	}
-	return nil
-}
+func (f *fakeAutoscanStore) DeleteConnection(context.Context, string) error { return nil }
 
 func (f *fakeAutoscanStore) ListSources(context.Context) ([]autoscan.Source, error) {
 	if f.listSourcesFn != nil {
@@ -115,38 +97,21 @@ func (f *fakeAutoscanStore) UpdateSource(_ context.Context, s autoscan.Source) (
 	return s, nil
 }
 
-func (f *fakeAutoscanStore) DeleteSource(_ context.Context, id string) error {
-	if f.deleteSourceFn != nil {
-		return f.deleteSourceFn(id)
-	}
-	return nil
-}
+func (f *fakeAutoscanStore) DeleteSource(context.Context, string) error { return nil }
 
-func (f *fakeAutoscanStore) ListAutoscanScans(_ context.Context, filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
-	if f.listScansFn != nil {
-		return f.listScansFn(filter)
-	}
+func (f *fakeAutoscanStore) ListAutoscanScans(context.Context, autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
 	return nil, nil
 }
 
-func (f *fakeAutoscanStore) CountAutoscanScans(_ context.Context, filter autoscan.ScanListFilter) (int, error) {
-	if f.countScansFn != nil {
-		return f.countScansFn(filter)
-	}
+func (f *fakeAutoscanStore) CountAutoscanScans(context.Context, autoscan.ScanListFilter) (int, error) {
 	return 0, nil
 }
 
-func (f *fakeAutoscanStore) ListEvents(_ context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
-	if f.listEventsFn != nil {
-		return f.listEventsFn(filter)
-	}
+func (f *fakeAutoscanStore) ListEvents(context.Context, autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
 	return nil, nil
 }
 
-func (f *fakeAutoscanStore) CountEvents(_ context.Context, filter autoscan.EventListFilter) (int, error) {
-	if f.countEventsFn != nil {
-		return f.countEventsFn(filter)
-	}
+func (f *fakeAutoscanStore) CountEvents(context.Context, autoscan.EventListFilter) (int, error) {
 	return 0, nil
 }
 
@@ -291,101 +256,4 @@ func (f *fakeAutoscanTriggerer) SuggestRewrites(context.Context, string) (autosc
 func (f *fakeAutoscanTriggerer) IngestChanges(_ context.Context, in autoscan.ChangeIngest) (autoscan.IngestResult, error) {
 	f.ingested = append(f.ingested, in)
 	return f.ingestResult, f.ingestErr
-}
-
-func newAutoscanRequest(method, target, body, id string) *http.Request {
-	var r *http.Request
-	if body != "" {
-		r = httptest.NewRequest(method, target, strings.NewReader(body))
-	} else {
-		r = httptest.NewRequest(method, target, nil)
-	}
-	if id != "" {
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("id", id)
-		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
-	}
-	return r
-}
-
-func TestAutoscanHandleListConnectionsOmitsSecrets(t *testing.T) {
-	store := &fakeAutoscanStore{
-		listConnectionsFn: func() ([]autoscan.Connection, error) {
-			return []autoscan.Connection{
-				{
-					ID:        "conn-1",
-					Name:      "Radarr",
-					Kind:      "radarr",
-					BaseURL:   "http://radarr.internal:7878",
-					APIKeyRef: "secret-ref-xyz",
-				},
-			}, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-
-	rec := httptest.NewRecorder()
-	h.HandleListConnections(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/connections", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	raw := rec.Body.String()
-	if strings.Contains(raw, "api_key_ref") || strings.Contains(raw, "secret-ref-xyz") {
-		t.Errorf("connections response leaks api_key_ref: %s", raw)
-	}
-	// has_api_key should be reported true (so operators know a key is set) without
-	// disclosing the ref itself.
-	var body struct {
-		Connections []autoscanConnectionResponse `json:"connections"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Connections) != 1 || !body.Connections[0].HasAPIKey {
-		t.Errorf("connections = %+v", body.Connections)
-	}
-}
-
-func TestAutoscanHandleUpdateConnectionBlankKeyPassedThroughForKeep(t *testing.T) {
-	// Fix 1: a metadata-only edit omits api_key_ref ("leave blank to keep
-	// existing"). The handler must pass a blank api_key_ref through to the repo,
-	// whose UpdateConnection SQL keeps the stored key (CASE WHEN $5 = '' THEN
-	// api_key_ref ...). Here we assert the handler does NOT fabricate/clear a key:
-	// it forwards the empty string so the repo's keep-semantics fire.
-	var got autoscan.Connection
-	store := &fakeAutoscanStore{
-		updateConnectionFn: func(c autoscan.Connection) (autoscan.Connection, error) {
-			got = c
-			// Emulate the repo keep-semantics: a blank incoming ref leaves the
-			// previously-stored key in place.
-			if strings.TrimSpace(c.APIKeyRef) == "" {
-				c.APIKeyRef = "existing-stored-ref"
-			}
-			return c, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-
-	// Update with base_url present but api_key_ref absent from the JSON.
-	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/connections/conn-1",
-		`{"name":"Radarr","kind":"radarr","base_url":"http://radarr:7878"}`, "conn-1")
-	rec := httptest.NewRecorder()
-	h.HandleUpdateConnection(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	// Handler must forward a blank api_key_ref (so the repo keeps the existing key).
-	if strings.TrimSpace(got.APIKeyRef) != "" {
-		t.Fatalf("expected handler to forward blank api_key_ref, got %q", got.APIKeyRef)
-	}
-	// And the response must still report HasAPIKey=true (the stored key survived).
-	var body autoscanConnectionResponse
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !body.HasAPIKey {
-		t.Fatalf("expected preserved key reflected as has_api_key=true, got %+v", body)
-	}
 }

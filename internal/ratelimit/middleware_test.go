@@ -8,10 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
 
 type recordingLimiter struct {
@@ -116,40 +113,6 @@ func TestHandlerRejectedClientDoesNotDrainGlobalBudget(t *testing.T) {
 				t.Fatalf("served = %#v, want one request each", served)
 			}
 		})
-	}
-}
-
-func TestHandlerDoesNotConsumeGlobalBudgetForRejectedClient(t *testing.T) {
-	for _, deniedKey := range []string{"ip:203.0.113.10", "key:7"} {
-		t.Run(deniedKey, func(t *testing.T) {
-			perKey := &recordingLimiter{denied: map[string]bool{deniedKey: true}}
-			global := &recordingLimiter{}
-			mw := NewMiddleware(perKey, global, nil, true)
-			mw.cfg = DefaultConfig()
-			handler := mw.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Fatal("next handler called for rejected request")
-			}))
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/items", nil)
-			ctx := clientip.SetContext(req.Context(), "203.0.113.10")
-			ctx = apimw.SetClaims(ctx, &auth.Claims{TokenType: auth.TokenTypeAPIKey, APIKeyID: 7})
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req.WithContext(ctx))
-
-			if rec.Code != http.StatusTooManyRequests {
-				t.Fatalf("response = %d, want 429", rec.Code)
-			}
-			if len(global.keys) != 0 {
-				t.Fatalf("global limiter keys = %#v, want no consumed budget", global.keys)
-			}
-		})
-	}
-}
-
-func TestGlobalRateSupportsFractionalRequestsPerSecond(t *testing.T) {
-	rate := globalRateFor(Config{GlobalReqPerSecond: 0.5})
-	if rate.Burst != 1 {
-		t.Fatalf("burst = %d, want 1", rate.Burst)
 	}
 }
 

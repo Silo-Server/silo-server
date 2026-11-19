@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,11 +14,6 @@ import (
 const downloadColumns = `id, user_id, profile_id, device_id, media_file_id, content_id, episode_id, batch_id,
 	kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
 	created_at, updated_at, completed_at, status_event_at`
-
-const insertDownloadSQL = `INSERT INTO downloads (id, user_id, profile_id, device_id, media_file_id, content_id,
-		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
-		created_at, updated_at, completed_at)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`
 
 // Repository provides CRUD operations for the downloads table.
 type Repository struct {
@@ -139,59 +132,6 @@ func scanDownloads(rows pgx.Rows) ([]*Download, error) {
 	return downloads, rows.Err()
 }
 
-func downloadInsertArgs(d *Download) []any {
-	format := d.Format
-	if format == "" {
-		format = FormatOriginal
-	}
-	quality := d.Quality
-	if quality == "" {
-		quality = QualityOriginal
-	}
-	effectiveQuality := d.EffectiveQuality
-	if effectiveQuality == "" {
-		effectiveQuality = quality
-	}
-	revision := d.Revision
-	if revision <= 0 {
-		revision = 1
-	}
-	return []any{
-		d.ID, d.UserID, nilIfEmpty(d.ProfileID), nilIfEmpty(d.DeviceID), d.MediaFileID, d.ContentID,
-		nilIfEmpty(d.EpisodeID), nilIfEmpty(d.BatchID), d.Kind, d.Status, format, quality, effectiveQuality,
-		d.TargetBitrateKbps, revision, nilIfEmpty(d.ArtifactID), d.FileSize, d.BytesSent, d.ErrorMessage,
-		d.CreatedAt, d.UpdatedAt, d.CompletedAt,
-	}
-}
-
-// Create inserts a new download record.
-func (r *Repository) Create(ctx context.Context, d *Download) error {
-	if _, err := r.pool.Exec(ctx, insertDownloadSQL, downloadInsertArgs(d)...); err != nil {
-		return fmt.Errorf("inserting download: %w", err)
-	}
-	return nil
-}
-
-// CreateBatch inserts multiple download records in a single transaction.
-func (r *Repository) CreateBatch(ctx context.Context, downloads []*Download) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning batch insert: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	for _, d := range downloads {
-		if _, err := tx.Exec(ctx, insertDownloadSQL, downloadInsertArgs(d)...); err != nil {
-			return fmt.Errorf("inserting batch download: %w", err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing batch insert: %w", err)
-	}
-	return nil
-}
-
 // GetByID retrieves a download by its ID.
 func (r *Repository) GetByID(ctx context.Context, id string) (*Download, error) {
 	query := `SELECT ` + downloadColumns + ` FROM downloads WHERE id = $1`
@@ -212,14 +152,36 @@ func (r *Repository) PruneEphemeralOlderThan(ctx context.Context, cutoff time.Ti
 	return tag.RowsAffected(), nil
 }
 
-// CountActiveByUser returns the number of active downloads for a user.
-// 'preparing' counts: an artifact-backed row holds encode work in flight, so
-// it must consume the concurrent quota like a live transfer does.
-func (r *Repository) CountActiveByUser(ctx context.Context, userID int) (int, error) {
+// An account-level transfer is served by one API process, which renews its
+// row when serving starts and every transferLeaseRenewal after that
+// (Service.ServeFile). A row that has gone unrenewed for transferLease belongs
+// to a process that died mid-transfer: it no longer holds a concurrent slot,
+// and a later request fails it instead of serving it. The lease spans several
+// renewals so a slow database write doesn't drop a live transfer.
+const (
+	transferLeaseRenewal = time.Minute
+	transferLease        = 5 * transferLeaseRenewal
+)
+
+// concurrentSlotPredicate matches the download rows that count toward an
+// account's concurrent limit: an entry whose file is being prepared, and an
+// account-level row that is queued or transferring, whose transitions the
+// server makes itself (a transferring row only while its transfer lease
+// holds; $3 is transferLease in seconds). A device entry is downloading
+// because its device said so, and nothing ends that report when the transfer
+// fails, is paused, or the app is removed, so it holds no slot.
+const concurrentSlotPredicate = `(status = 'preparing' OR (device_id IS NULL AND (status = 'queued'
+	OR (status = 'downloading' AND updated_at >= now() - make_interval(secs => $3)))))`
+
+// CountActiveByUser returns how many of a user's downloads hold a slot of the
+// concurrent limit, leaving out the downloads named in except.
+func (r *Repository) CountActiveByUser(ctx context.Context, userID int, except ...string) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading', 'preparing')`,
-		userID,
+		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND `+concurrentSlotPredicate+`
+		   AND id <> ALL($2::text[])`,
+		userID, append([]string{}, except...), // never nil: a NULL array would match no row
+		transferLease.Seconds(),
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting active downloads: %w", err)
@@ -254,6 +216,38 @@ func (r *Repository) UpdateStatus(ctx context.Context, id, status string, bytesS
 		return ErrNotFound
 	}
 	return nil
+}
+
+// RenewTransferLease marks an account-level row's transfer as still running
+// and reports whether it did. It renews only a 'downloading' row whose lease
+// still holds; a lapsed or finished transfer is left as it is.
+func (r *Repository) RenewTransferLease(ctx context.Context, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE downloads SET updated_at = now()
+		 WHERE id = $1 AND device_id IS NULL AND status = 'downloading'
+		   AND updated_at >= now() - make_interval(secs => $2)`,
+		id, transferLease.Seconds(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("renewing download transfer lease: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// FailLapsedTransfer marks an account-level row 'failed' when its transfer
+// lease has lapsed, and reports whether it did. A live transfer's row is left
+// alone.
+func (r *Repository) FailLapsedTransfer(ctx context.Context, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE downloads SET status = 'failed', updated_at = now()
+		 WHERE id = $1 AND device_id IS NULL AND status = 'downloading'
+		   AND updated_at < now() - make_interval(secs => $2)`,
+		id, transferLease.Seconds(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("failing lapsed download transfer: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // TransitionStatus atomically transitions a download from expectedStatus to newStatus.
@@ -362,6 +356,9 @@ func (r *Repository) GetManagedEntry(ctx context.Context, userID int, profileID,
 // Callers have already classified the item as new.
 func (r *Repository) CreateManagedEntry(ctx context.Context, d *Download) (*Download, error) {
 	if err := r.Create(ctx, d); err != nil {
+		if errors.Is(err, errFileNotRegistrable) {
+			return nil, err
+		}
 		if existing, gerr := r.GetManagedEntry(ctx, d.UserID, d.ProfileID, d.DeviceID, d.ContentID, d.EpisodeID); gerr == nil {
 			return existing, nil
 		}
@@ -462,87 +459,6 @@ func (r managedRegistryStore) MonitorEntriesToRegister(ctx context.Context, sub 
 		out[k] = true
 	}
 	return out, rows.Err()
-}
-
-// CreateManagedEntriesBatch inserts managed rows in one statement, skipping
-// identities that already exist (including concurrent-insert races) via ON
-// CONFLICT DO NOTHING on the managed-entry unique index. Returns only the rows
-// actually inserted, so callers can report an honest newly-registered count.
-func (r *Repository) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
-	return (managedRegistryStore{r.pool}).CreateManagedEntriesBatch(ctx, ds)
-}
-
-func (r managedRegistryStore) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
-	if len(ds) == 0 {
-		return nil, nil
-	}
-	const insertCols = 22
-	var sb strings.Builder
-	sb.WriteString(`INSERT INTO downloads (id, user_id, profile_id, device_id, media_file_id, content_id,
-		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
-		created_at, updated_at, completed_at) VALUES `)
-	args := make([]any, 0, len(ds)*insertCols)
-	for i, d := range ds {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteByte('(')
-		for j := 0; j < insertCols; j++ {
-			if j > 0 {
-				sb.WriteByte(',')
-			}
-			sb.WriteByte('$')
-			sb.WriteString(strconv.Itoa(i*insertCols + j + 1))
-		}
-		sb.WriteByte(')')
-		args = append(args, downloadInsertArgs(d)...)
-	}
-	sb.WriteString(` ON CONFLICT (user_id, profile_id, device_id, content_id, (COALESCE(episode_id, ''))) WHERE device_id IS NOT NULL DO NOTHING RETURNING ` + downloadColumns)
-	rows, err := r.db.Query(ctx, sb.String(), args...)
-	if err != nil {
-		return nil, fmt.Errorf("batch inserting managed entries: %w", err)
-	}
-	defer rows.Close()
-	return scanDownloads(rows)
-}
-
-// ReplaceManagedEntry updates an existing managed row to a new file/quality
-// target, incrementing its revision so clients can replace stale local bytes.
-func (r *Repository) ReplaceManagedEntry(ctx context.Context, existing *Download, replacement *Download) (*Download, error) {
-	query := `UPDATE downloads SET
-			media_file_id = $6,
-			batch_id = $7,
-			kind = $8,
-			status = $9,
-			format = $10,
-			quality = $11,
-			effective_quality = $12,
-			target_bitrate_kbps = $13,
-			artifact_id = $14,
-			file_size = $15,
-			bytes_sent = 0,
-			error_message = '',
-			completed_at = NULL,
-			revision = revision + 1,
- status_event_at = NULL,
-			revoked_at = NULL, revoked_by = NULL, revoked_reason = '',
-			updated_at = now()
-		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4 AND revision = $5
-		RETURNING ` + downloadColumns
-	row := r.pool.QueryRow(ctx, query,
-		existing.ID, existing.UserID, existing.ProfileID, existing.DeviceID, existing.Revision,
-		replacement.MediaFileID, nilIfEmpty(replacement.BatchID), replacement.Kind, replacement.Status,
-		replacement.Format, replacement.Quality, replacement.EffectiveQuality, replacement.TargetBitrateKbps,
-		nilIfEmpty(replacement.ArtifactID), replacement.FileSize,
-	)
-	d, err := scanDownload(row)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return r.GetManagedEntry(ctx, existing.UserID, existing.ProfileID, existing.DeviceID, existing.ContentID, existing.EpisodeID)
-		}
-		return nil, fmt.Errorf("replacing managed download: %w", err)
-	}
-	return d, nil
 }
 
 // UpdateManagedBatch moves an otherwise unchanged managed row into the latest
@@ -812,26 +728,30 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 // artifact and returns the stored row. Missing-output recovery can requeue
 // the artifact after the create read it: a 'ready' row linked afterwards is
 // returned to 'preparing' here, and a row that existed earlier was already
-// reset by the requeue, so the caller's copy is stale either way. FOR SHARE
-// waits for an in-flight requeue to commit, so either this read sees the
-// queued artifact or the requeue's linked-download reset sees this row. The
+// reset by the requeue, so the caller's copy is stale either way. The row
+// lock waits for an in-flight requeue to commit, so either this read sees the
+// queued artifact or the requeue's linked-download reset sees this row. It is
+// FOR NO KEY UPDATE, not FOR SHARE, because the expired case below updates
+// the row: two confirms sharing the lock would each wait on the other. The
 // reset is fenced on the artifact so a concurrent create that relinked the
 // row elsewhere is left alone. A preparing row whose artifact is gone was
 // linked to a job an administrator canceled meanwhile; it fails as the
-// cancel's own downloads did, since no job will ever finish it.
-func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Download, error) {
+// cancel's own downloads did, since no job will ever finish it. A preparing
+// row whose job was retired as abandoned meanwhile queues that job again;
+// requeued reports it, so the caller can start preparation.
+func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Download, bool, error) {
 	if d == nil || d.ArtifactID == "" {
-		return d, nil
+		return d, false, nil
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("beginning artifact link check: %w", err)
+		return nil, false, fmt.Errorf("beginning artifact link check: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var artifactStatus string
-	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR SHARE`, d.ArtifactID).Scan(&artifactStatus)
+	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR NO KEY UPDATE`, d.ArtifactID).Scan(&artifactStatus)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("checking linked artifact status: %w", err)
+		return nil, false, fmt.Errorf("checking linked artifact status: %w", err)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err := tx.Exec(ctx,
@@ -839,10 +759,24 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 			 WHERE id = $1 AND artifact_id = $2 AND status = 'preparing'`,
 			d.ID, d.ArtifactID, PreparationCanceledMessage,
 		); err != nil {
-			return nil, fmt.Errorf("failing download of canceled artifact: %w", err)
+			return nil, false, fmt.Errorf("failing download of canceled artifact: %w", err)
 		}
 	}
+	requeued := false
 	switch artifactStatus {
+	case ArtifactExpired:
+		// The job was retired as abandoned after the create read it. This
+		// download needs it, so prepare it again.
+		tag, err := tx.Exec(ctx,
+			`UPDATE download_artifacts a SET `+requeueArtifactAssignment+`, last_used_at = now()
+			 WHERE a.id = $2 AND a.status = 'expired'
+			   AND EXISTS (SELECT 1 FROM downloads d WHERE d.id = $1 AND d.artifact_id = a.id AND d.status = 'preparing')`,
+			d.ID, d.ArtifactID,
+		)
+		if err != nil {
+			return nil, false, fmt.Errorf("requeuing expired artifact of a new download: %w", err)
+		}
+		requeued = tag.RowsAffected() > 0
 	case "queued", "tone_map_queued", "audio_v2_queued", "tracks_v1_queued", "running", "tone_map_running", "audio_v2_running", "tracks_v1_running":
 		if _, err := tx.Exec(ctx,
 			`UPDATE downloads SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
@@ -850,20 +784,20 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 			 WHERE id = $1 AND artifact_id = $2 AND status = 'ready'`,
 			d.ID, d.ArtifactID,
 		); err != nil {
-			return nil, fmt.Errorf("resetting download of requeued artifact: %w", err)
+			return nil, false, fmt.Errorf("resetting download of requeued artifact: %w", err)
 		}
 	}
 	current, err := scanDownload(tx.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE id = $1`, d.ID))
 	if errors.Is(err, ErrNotFound) {
-		return d, nil // deleted concurrently; the caller's copy is all that remains
+		return d, false, nil // deleted concurrently; the caller's copy is all that remains
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing artifact link check: %w", err)
+		return nil, false, fmt.Errorf("committing artifact link check: %w", err)
 	}
-	return current, nil
+	return current, requeued, nil
 }
 
 // ReconcileLinkedDownloads repairs downloads stranded in 'preparing' against a

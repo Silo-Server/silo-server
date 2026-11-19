@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -225,7 +226,7 @@ func TestProfileAccessFilterMatchesTheResolverPostgres(t *testing.T) {
 	if !slices.Equal(filter.AllowedLibraryIDs, []int{f.kidsLib}) || !slices.Equal(filter.AllowedLibraryIDs, scope.AllowedLibraryIDs) {
 		t.Fatalf("build filter libraries = %v, scope = %v; want the group's [%d]", filter.AllowedLibraryIDs, scope.AllowedLibraryIDs, f.kidsLib)
 	}
-	if filter.MaturityLimits != scope.MaturityLimits || filter.MaxContentRating != "PG" {
+	if !reflect.DeepEqual(filter.MaturityLimits, scope.MaturityLimits) || filter.MaxContentRating != "PG" {
 		t.Fatalf("build filter maturity = %+v, scope = %+v", filter.MaturityLimits, scope.MaturityLimits)
 	}
 }
@@ -346,7 +347,7 @@ func TestDeletingAProfilePurgesItsRecommendationRowsPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5)`, userID, profile, prefix+"movie"); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 10)`, userID, profile, prefix+"movie"); err != nil {
 			t.Fatal(err)
 		}
 		if err := repo.UpsertTasteProfile(ctx, userID, profile, axisVector(2500, nil), map[string]int{"rated_5": 1}, "", now); err != nil {
@@ -374,7 +375,7 @@ func TestDeletingAProfilePurgesItsRecommendationRowsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DeleteProfile(ctx, viaStore); err != nil {
+	if _, err := store.DeleteProfile(ctx, viaStore); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.PurgeProfile(ctx, userID, viaPurge); err != nil {

@@ -1,22 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, GripHorizontal, RotateCcw, Trash2, X } from "lucide-react";
+import { useT } from "@/i18n";
 import type { MarkerEditor } from "../hooks/useMarkerEditor";
-import { MARKER_KINDS, MARKER_LABELS } from "../hooks/useMarkerEditor";
-import type { MarkerKind } from "../types";
+import { MARKER_DOT_COLORS, MARKER_KINDS, MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
 import { formatTime } from "../utils/formatTime";
 
 interface MarkerEditPanelProps {
   editor: MarkerEditor;
   currentTime: number;
 }
-
-/** Solid accent per kind, matching the seek-bar region tints. */
-const DOT_COLORS: Record<MarkerKind, string> = {
-  intro: "bg-sky-400",
-  recap: "bg-violet-400",
-  credits: "bg-amber-400",
-  preview: "bg-emerald-400",
-};
 
 /**
  * Floating panel for editing intro/recap/credits/preview markers from the
@@ -25,6 +17,7 @@ const DOT_COLORS: Record<MarkerKind, string> = {
  * a single line so the panel reads cleanly.
  */
 export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
+  const t = useT();
   const { draft, activeKind, saving, error, dirty } = editor;
   const panelRef = useRef<HTMLDivElement>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
@@ -78,7 +71,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
   return (
     <div
       ref={panelRef}
-      className="absolute bottom-40 left-4 z-50 w-[22rem] overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/95 text-white shadow-2xl backdrop-blur-xl sm:bottom-44 sm:left-6"
+      className="absolute start-4 bottom-40 z-50 w-[22rem] overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/95 text-white shadow-2xl backdrop-blur-xl sm:start-6 sm:bottom-44"
       style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -90,16 +83,18 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
         <div className="flex items-start gap-2">
           <GripHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-white/30" />
           <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-semibold tracking-tight">Edit markers</span>
+            <span className="text-sm font-semibold tracking-tight">
+              {t("web.markers.editTitle")}
+            </span>
             <span className="text-[11px] leading-tight text-white/40">
-              Drag the timeline handles, or set points to the playhead.
+              {t("web.markers.panel.hint")}
             </span>
           </div>
         </div>
         <button
           type="button"
-          aria-label="Close marker editor"
-          className="-mr-1 rounded-md p-1 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+          aria-label={t("web.markers.panel.closeLabel")}
+          className="-me-1 rounded-md p-1 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={editor.cancel}
         >
@@ -112,6 +107,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
         {MARKER_KINDS.map((kind) => {
           const range = draft[kind];
           const isActive = kind === activeKind;
+          const label = t(MARKER_LABEL_KEYS[kind]);
           return (
             <div
               key={kind}
@@ -123,12 +119,12 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
               <button
                 type="button"
                 onClick={() => editor.selectKind(kind)}
-                className="flex w-full items-center gap-2.5 rounded-md py-1 text-left"
+                className="flex w-full items-center gap-2.5 rounded-md py-1 text-start"
               >
                 <span
                   className={[
                     "shrink-0 rounded-full transition-all",
-                    DOT_COLORS[kind],
+                    MARKER_DOT_COLORS[kind],
                     isActive ? "h-2.5 w-2.5 ring-2 ring-white/25" : "h-2 w-2 opacity-50",
                   ].join(" ")}
                 />
@@ -138,31 +134,36 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                     isActive ? "text-white" : "text-white/70",
                   ].join(" ")}
                 >
-                  {MARKER_LABELS[kind]}
+                  {label}
                 </span>
                 <span
                   className={[
-                    "ml-auto font-mono text-[11px] tabular-nums",
+                    "ms-auto font-mono text-[11px] tabular-nums",
                     range ? "text-white/75" : "text-white/35",
                   ].join(" ")}
                 >
-                  {range ? `${formatTime(range.start)} – ${formatTime(range.end)}` : "Not set"}
+                  {range
+                    ? t("web.markers.panel.range", {
+                        start: formatTime(range.start),
+                        end: formatTime(range.end),
+                      })
+                    : t("web.markers.panel.notSet")}
                 </span>
               </button>
 
               {isActive && (
                 <div className="mt-2 flex items-center gap-1.5">
                   <EdgeButton onClick={() => editor.setEdge(kind, "start", currentTime)}>
-                    Set start
+                    {t("web.markers.panel.setStart")}
                   </EdgeButton>
                   <EdgeButton onClick={() => editor.setEdge(kind, "end", currentTime)}>
-                    Set end
+                    {t("web.markers.panel.setEnd")}
                   </EdgeButton>
-                  <div className="ml-auto flex items-center gap-0.5">
+                  <div className="ms-auto flex items-center gap-0.5">
                     <button
                       type="button"
-                      aria-label={`Reset ${MARKER_LABELS[kind]} marker`}
-                      title="Reset to saved"
+                      aria-label={t("web.markers.panel.resetLabel", { kind: label })}
+                      title={t("web.markers.panel.resetTitle")}
                       disabled={!editor.isKindDirty(kind)}
                       onClick={() => editor.resetKind(kind)}
                       className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
@@ -171,8 +172,8 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                     </button>
                     <button
                       type="button"
-                      aria-label={`Clear ${MARKER_LABELS[kind]} marker`}
-                      title="Remove marker until manually set again"
+                      aria-label={t("web.markers.panel.clearLabel", { kind: label })}
+                      title={t("web.markers.panel.clearTitle")}
                       disabled={!range}
                       onClick={() => editor.clearKind(kind)}
                       className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-white/10 hover:text-red-300 disabled:pointer-events-none disabled:opacity-25"
@@ -203,11 +204,11 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
             <button
               type="button"
               onClick={editor.resetAll}
-              title="Reset all markers to saved"
+              title={t("web.markers.panel.resetAllTitle")}
               className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap text-white/60 transition-colors hover:bg-white/10 hover:text-white"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              Reset all
+              {t("web.markers.panel.resetAll")}
             </button>
           )}
           <button
@@ -215,7 +216,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
             onClick={editor.cancel}
             className="rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap text-white/70 transition-colors hover:bg-white/10 hover:text-white"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -230,7 +231,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
             ) : (
               <Check className="h-3.5 w-3.5" />
             )}
-            Save
+            {t("web.markers.save")}
           </button>
         </div>
       </div>

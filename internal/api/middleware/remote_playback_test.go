@@ -140,7 +140,7 @@ func TestDerivedCredentialsRefuseRemotePlayback(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/notifications/push/apple/display/1", nil)
 	req.Header.Set("Authorization", "Bearer "+display)
 	rec := httptest.NewRecorder()
-	am.RequireApplePushDisplayAuth(func(next http.Handler) http.Handler { return next }, nil)(ok).ServeHTTP(rec, req)
+	am.RequireApplePushDisplayAuth(func(next http.Handler) http.Handler { return next }, nil, nil)(ok).ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("display token: %d %s", rec.Code, rec.Body.String())
 	}

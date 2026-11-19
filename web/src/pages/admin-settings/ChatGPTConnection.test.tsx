@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -90,20 +90,29 @@ function hold(mock: Mock) {
   return (value: object) => resolve(value);
 }
 
+async function pasteCallback(url: string) {
+  const user = userEvent.setup();
+  const input = screen.getByRole("textbox", { name: "Browser URL" }) as HTMLInputElement;
+  await user.click(input);
+  input.select();
+  await user.paste(url);
+}
+
 /** Pastes the browser's callback URL for the fixture attempt and submits it. */
 async function submitCallback() {
-  await userEvent.type(
-    screen.getByRole("textbox", { name: "Browser URL" }),
+  await pasteCallback(
     "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
   );
   await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
 }
 
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
 describe("ChatGPTConnection", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
   beforeEach(() => {
     setAccessToken("chatgpt-test");
     setProfileId("profile-a");
@@ -216,7 +225,7 @@ describe("ChatGPTConnection", () => {
     expect(screen.getByRole("button", { name: "Connect ChatGPT" })).toBeDisabled();
     const callbackURL =
       "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=fixture-auth-code&client_id=issued-app";
-    await userEvent.type(screen.getByRole("textbox", { name: "Browser URL" }), callbackURL);
+    await pasteCallback(callbackURL);
     await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
     expect(mocks.complete).toHaveBeenCalledWith(callbackURL);
     expect(mocks.success).toHaveBeenCalledOnce();
@@ -547,14 +556,12 @@ describe("ChatGPTConnection", () => {
   it("rejects an authorization link or unrelated callback before submitting", async () => {
     render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-    const input = screen.getByRole("textbox", { name: "Browser URL" });
     for (const url of [
       "https://auth.openai.com/api/accounts/authorize?state=fixture-state",
       "https://example.test/auth/callback?state=fixture-state&code=auth-code",
       "http://127.0.0.1:51122/auth/callback?state=fixture-state&code=auth-code",
     ]) {
-      await userEvent.clear(input);
-      await userEvent.type(input, url);
+      await pasteCallback(url);
       await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
       expect(screen.getByRole("alert")).toHaveTextContent("Paste the full URL");
     }
@@ -596,7 +603,7 @@ describe("ChatGPTConnection", () => {
   it("clears the pasted URL when the dialog closes", async () => {
     render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Browser URL" }), "private-code");
+    await pasteCallback("private-code");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
     expect(screen.getByRole("textbox", { name: "Browser URL" })).toHaveValue("");

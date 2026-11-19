@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,116 +52,6 @@ func actingAdminProfileHandler(store userstore.UserStore) *ProfileHandler {
 	return handler
 }
 
-// TestProfileManagement_AdminAccountChildProfileIsRefused reproduces the
-// bypass: on an admin account, a child profile could lift its own limits,
-// clear another profile's PIN, and add or delete profiles, because the
-// household check let the account's admin role stand in for the primary
-// profile. It is now refused exactly as on a regular account.
-func TestProfileManagement_AdminAccountChildProfileIsRefused(t *testing.T) {
-	for _, tc := range []struct {
-		name, method, path, id, body string
-	}{
-		{"create a profile", http.MethodPost, "/profiles", "", `{"name":"Extra"}`},
-		{"lift its own rating ceiling", http.MethodPut, "/profiles/kid", "kid", `{"max_content_rating":""}`},
-		{"lift its own library restrictions", http.MethodPut, "/profiles/kid", "kid", `{"library_restrictions_enabled":false}`},
-		{"clear another profile's PIN", http.MethodPut, "/profiles/alex", "alex", `{"pin":""}`},
-		{"delete another profile", http.MethodDelete, "/profiles/alex", "alex", ``},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := actingAdminHousehold(t, "")
-			handler := actingAdminProfileHandler(store)
-			req := newAuthorizedProfileRequestWithSession(tc.method, tc.path, tc.body, models.RoleAdmin, "kid", "sess-1")
-			if tc.id != "" {
-				req = withProfileRouteParam(req, "id", tc.id)
-			}
-			rr := httptest.NewRecorder()
-			switch tc.method {
-			case http.MethodPost:
-				handler.HandleCreateProfile(rr, req)
-			case http.MethodPut:
-				handler.HandleUpdateProfile(rr, req)
-			case http.MethodDelete:
-				handler.HandleDeleteProfile(rr, req)
-			}
-			if rr.Code != http.StatusForbidden {
-				t.Fatalf("status = %d, want 403: %s", rr.Code, rr.Body.String())
-			}
-
-			profiles, err := store.ListProfiles(context.Background())
-			if err != nil {
-				t.Fatalf("list profiles: %v", err)
-			}
-			if len(profiles) != 3 {
-				t.Fatalf("profile count = %d, want 3", len(profiles))
-			}
-			for _, p := range profiles {
-				switch p.ID {
-				case "kid":
-					if p.MaxContentRating != "PG" || !p.LibraryRestrictionsEnabled {
-						t.Fatalf("kid limits changed: %+v", p)
-					}
-				case "alex":
-					if p.PINHash == "" {
-						t.Fatal("alex lost her PIN")
-					}
-				}
-			}
-		})
-	}
-}
-
-// TestProfileManagement_AdminAccountActsThroughPrimary: the acting admin is
-// the primary profile, verified when it has a PIN; a profile-less admin
-// request manages only a household with no limited profile.
-func TestProfileManagement_AdminAccountActsThroughPrimary(t *testing.T) {
-	create := func(t *testing.T, store userstore.UserStore, profileID, token string) *httptest.ResponseRecorder {
-		t.Helper()
-		handler := actingAdminProfileHandler(store)
-		req := newAuthorizedProfileRequestWithSession(http.MethodPost, "/profiles", `{"name":"Extra"}`, models.RoleAdmin, profileID, "sess-1")
-		if token != "" {
-			req.Header.Set("X-Profile-Token", token)
-		}
-		rr := httptest.NewRecorder()
-		handler.HandleCreateProfile(rr, req)
-		return rr
-	}
-
-	t.Run("primary without a PIN may", func(t *testing.T) {
-		if rr := create(t, actingAdminHousehold(t, ""), "profile-1", ""); rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
-		}
-	})
-
-	t.Run("PIN-locked primary needs its token", func(t *testing.T) {
-		store := actingAdminHousehold(t, "1234")
-		rr := create(t, store, "profile-1", "")
-		if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "verifying the primary profile PIN") {
-			t.Fatalf("without token = %d %s, want 403 verification", rr.Code, rr.Body.String())
-		}
-		token, _, err := access.NewProfileTokenService("test-secret-value-at-least-32-chars", time.Minute).Mint(access.ProfileTokenClaims{
-			UserID: 1, SessionID: "sess-1", ProfileID: "profile-1",
-		})
-		if err != nil {
-			t.Fatalf("mint token: %v", err)
-		}
-		if rr := create(t, store, "profile-1", token); rr.Code != http.StatusCreated {
-			t.Fatalf("with token = %d, want 201: %s", rr.Code, rr.Body.String())
-		}
-	})
-
-	t.Run("profile-less on a restricted household may not", func(t *testing.T) {
-		if rr := create(t, actingAdminHousehold(t, ""), "", ""); rr.Code != http.StatusForbidden {
-			t.Fatalf("status = %d, want 403: %s", rr.Code, rr.Body.String())
-		}
-	})
-
-	t.Run("profile-less on an unrestricted household may", func(t *testing.T) {
-		if rr := create(t, newProfileTestStore(t), "", ""); rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
-		}
-	})
-}
-
 // TestHouseholdManagement_AdminAPIKeyWithoutProfile: automation holding an
 // admin API key keeps its profile-less household management on a restricted
 // household (v1 and v2 share these handler methods), while a key naming a
@@ -209,77 +97,174 @@ func TestHouseholdManagement_AdminAPIKeyWithoutProfile(t *testing.T) {
 	})
 }
 
-// TestHandleCreateAPIKey_RequiresActingAdmin: an API key skips every profile's
-// PIN, so a child profile on an admin account must not mint one; only the
-// verified primary profile, or a profile-less request on a household with no
-// limited profile, may.
-func TestHandleCreateAPIKey_RequiresActingAdmin(t *testing.T) {
-	tokens := access.NewProfileTokenService("test-secret-value-at-least-32-chars", time.Minute)
-	create := func(t *testing.T, store userstore.UserStore, profileID, token string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
-		t.Helper()
-		keys := &fakeAPIKeyStore{}
-		h := NewAPIKeyHandler(keys)
-		h.Stores = testUserStoreProvider{store: store}
-		h.ProfileTokens = tokens
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(`{"label":"ci"}`))
-		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
-			UserID: 1, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess, SessionID: "sess-1",
-		}))
-		if profileID != "" {
-			req.Header.Set("X-Profile-Id", profileID)
-		}
-		if token != "" {
-			req.Header.Set("X-Profile-Token", token)
-		}
-		rec := httptest.NewRecorder()
-		h.HandleCreateAPIKey(rec, req)
-		return rec, keys
+// actingAdminSession is the admin account's login session sess-1 acting as
+// profileID.
+func actingAdminSession(profileID string) context.Context {
+	ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 1, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess, SessionID: "sess-1"})
+	if profileID != "" {
+		ctx = apimw.SetProfileID(ctx, profileID)
 	}
+	return ctx
+}
 
+// TestProfileManagement_AdminAccountChildProfileIsRefused reproduces the
+// bypass: on an admin account, a child profile could lift its own limits,
+// clear another profile's PIN, and add or delete profiles, because the
+// household check let the account's admin role stand in for the primary
+// profile. It is now refused exactly as on a regular account.
+func TestProfileManagement_AdminAccountChildProfileIsRefused(t *testing.T) {
+	update := func(id string, req ProfileUpdateRequest) func(*ProfileHandler) error {
+		return func(h *ProfileHandler) error {
+			_, err := h.UpdateProfile(actingAdminSession("kid"), ProfileUpdateCommand{
+				UserID: 1, ProfileID: id, ActiveProfileID: "kid", Request: req, VerifyProfile: noProfileVerification,
+			})
+			return err
+		}
+	}
 	for _, tc := range []struct {
-		name, profileID string
-		primaryPIN      string
-		want            int
+		name string
+		run  func(*ProfileHandler) error
 	}{
-		{"child profile", "kid", "", http.StatusForbidden},
-		{"PIN-locked sibling", "alex", "", http.StatusForbidden},
-		{"profile-less on a restricted household", "", "", http.StatusForbidden},
-		{"PIN-locked primary without a token", "profile-1", "1234", http.StatusForbidden},
-		{"primary without a PIN", "profile-1", "", http.StatusCreated},
+		{"create a profile", func(h *ProfileHandler) error {
+			_, err := h.CreateProfile(actingAdminSession("kid"), ProfileCreateCommand{
+				UserID: 1, ActiveProfileID: "kid", Request: ProfileCreateRequest{Name: "Extra"}, VerifyProfile: noProfileVerification,
+			})
+			return err
+		}},
+		{"lift its own rating ceiling", update("kid", ProfileUpdateRequest{MaxContentRating: new("")})},
+		{"lift its own library restrictions", update("kid", ProfileUpdateRequest{LibraryRestrictionsEnabled: new(false)})},
+		{"clear another profile's PIN", update("alex", ProfileUpdateRequest{PIN: new("")})},
+		{"delete another profile", func(h *ProfileHandler) error {
+			return h.DeleteProfile(actingAdminSession("kid"), ProfileDeleteCommand{
+				UserID: 1, ProfileID: "alex", ActiveProfileID: "kid", VerifyProfile: noProfileVerification,
+			})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rec, keys := create(t, actingAdminHousehold(t, tc.primaryPIN), tc.profileID, "")
-			if rec.Code != tc.want || keys.created != (tc.want == http.StatusCreated) {
-				t.Fatalf("status = %d created = %v, want %d: %s", rec.Code, keys.created, tc.want, rec.Body.String())
+			store := actingAdminHousehold(t, "")
+			requireAPIStatus(t, tc.run(actingAdminProfileHandler(store)), http.StatusForbidden)
+
+			profiles, err := store.ListProfiles(context.Background())
+			if err != nil {
+				t.Fatalf("list profiles: %v", err)
+			}
+			if len(profiles) != 3 {
+				t.Fatalf("profile count = %d, want 3", len(profiles))
+			}
+			for _, p := range profiles {
+				switch p.ID {
+				case "kid":
+					if p.MaxContentRating != "PG" || !p.LibraryRestrictionsEnabled {
+						t.Fatalf("kid limits changed: %+v", p)
+					}
+				case "alex":
+					if p.PINHash == "" {
+						t.Fatal("alex lost her PIN")
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestMayCreatePersonalAPIKey_RequiresActingAdmin: an API key skips every
+// profile's PIN, so a child profile on an admin account must not mint one;
+// only the verified primary profile, or a profile-less request on a household
+// with no limited profile, may.
+func TestMayCreatePersonalAPIKey_RequiresActingAdmin(t *testing.T) {
+	verified := func(*userstore.Profile) error { return nil }
+	for _, tc := range []struct {
+		name, profileID, primaryPIN string
+		unrestricted                bool
+		verify                      func(*userstore.Profile) error
+		want                        bool
+		wantErr                     error
+	}{
+		{name: "child profile", profileID: "kid"},
+		{name: "PIN-locked sibling", profileID: "alex", verify: verified},
+		{name: "profile-less on a restricted household"},
+		{name: "PIN-locked primary unverified", profileID: "profile-1", primaryPIN: "1234", wantErr: access.ErrProfileUnverified},
+		{name: "PIN-locked primary verified", profileID: "profile-1", primaryPIN: "1234", verify: verified, want: true},
+		{name: "primary without a PIN", profileID: "profile-1", want: true},
+		{name: "profile-less on an unrestricted household", unrestricted: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var store userstore.UserStore
+			if tc.unrestricted {
+				store = newProfileTestStore(t)
+			} else {
+				store = actingAdminHousehold(t, tc.primaryPIN)
+			}
+			h := NewAPIKeyHandler(&fakeAPIKeyStore{})
+			h.Stores = testUserStoreProvider{store: store}
+			ok, err := h.MayCreatePersonalAPIKey(actingAdminSession(tc.profileID), 1, tc.profileID, tc.verify)
+			if ok != tc.want || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("may create = (%v, %v), want (%v, %v)", ok, err, tc.want, tc.wantErr)
 			}
 		})
 	}
 
-	t.Run("PIN-locked primary with a token", func(t *testing.T) {
-		token, _, err := tokens.Mint(access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "profile-1"})
-		if err != nil {
-			t.Fatalf("mint token: %v", err)
-		}
-		if rec, _ := create(t, actingAdminHousehold(t, "1234"), "profile-1", token); rec.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
-		}
-	})
+	ok, err := NewAPIKeyHandler(&fakeAPIKeyStore{}).MayCreatePersonalAPIKey(actingAdminSession("profile-1"), 1, "profile-1", verified)
+	if ok || err != nil {
+		t.Fatalf("without stores = (%v, %v), want a closed refusal", ok, err)
+	}
+}
 
-	t.Run("profile-less on an unrestricted household", func(t *testing.T) {
-		if rec, _ := create(t, newProfileTestStore(t), "", ""); rec.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
-		}
-	})
+// TestMayCreateProfileAPIKey: the primary profile mints a user key for any
+// profile on the account or for the account; every other profile mints only
+// a key bound to itself, and a PIN-locked one only with its own PIN proof.
+// A credential that is not the account's own login session mints none.
+func TestMayCreateProfileAPIKey(t *testing.T) {
+	verified := func(*userstore.Profile) error { return nil }
+	unverified := func(*userstore.Profile) error { return access.ErrProfileUnverified }
+	for _, tc := range []struct {
+		name, acting, target string
+		verify               func(*userstore.Profile) error
+		want                 bool
+		wantErr              error
+	}{
+		{name: "primary for itself", acting: "profile-1", target: "profile-1", verify: verified, want: true},
+		{name: "primary for the account", acting: "profile-1", verify: verified, want: true},
+		{name: "primary for a child", acting: "profile-1", target: "kid", verify: verified, want: true},
+		{name: "child for itself", acting: "kid", target: "kid", verify: verified, want: true},
+		{name: "child for the account", acting: "kid", verify: verified},
+		{name: "child for a sibling", acting: "kid", target: "alex", verify: verified},
+		{name: "child for the primary", acting: "kid", target: "profile-1", verify: verified},
+		{name: "PIN-locked sibling without its PIN", acting: "alex", target: "alex", verify: unverified, wantErr: access.ErrProfileUnverified},
+		{name: "PIN-locked sibling with its PIN", acting: "alex", target: "alex", verify: verified, want: true},
+		{name: "no profile named", target: "kid", verify: verified},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewAPIKeyHandler(&fakeAPIKeyStore{})
+			h.Stores = testUserStoreProvider{store: actingAdminHousehold(t, "")}
+			ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess})
+			ok, acting, err := h.MayCreateProfileAPIKey(ctx, 1, tc.acting, tc.target, tc.verify)
+			if ok != tc.want || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("may create = (%v, %v), want (%v, %v)", ok, err, tc.want, tc.wantErr)
+			}
+			// The verified profile travels to the insert, which rechecks it.
+			if ok && acting.ID != tc.acting {
+				t.Fatalf("acting profile = %+v, want %q", acting, tc.acting)
+			}
+		})
+	}
 
-	t.Run("fails closed without stores", func(t *testing.T) {
-		keys := &fakeAPIKeyStore{}
-		h := NewAPIKeyHandler(keys)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(`{"label":"ci"}`))
-		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess, SessionID: "sess-1"}))
-		rec := httptest.NewRecorder()
-		h.HandleCreateAPIKey(rec, req)
-		if rec.Code != http.StatusForbidden || keys.created {
-			t.Fatalf("status = %d created = %v, want 403", rec.Code, keys.created)
+	h := NewAPIKeyHandler(&fakeAPIKeyStore{})
+	h.Stores = testUserStoreProvider{store: actingAdminHousehold(t, "")}
+	admin := 9
+	for name, claims := range map[string]*auth.Claims{
+		"api key": {UserID: 1, Role: "user", TokenType: auth.TokenTypeAPIKey, APIKeyID: 3},
+		"view-as": {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: &admin},
+	} {
+		if ok, _, err := h.MayCreateProfileAPIKey(apimw.SetClaims(t.Context(), claims), 1, "profile-1", "kid", verified); ok || err != nil {
+			t.Fatalf("%s = (%v, %v), want a refusal", name, ok, err)
 		}
-	})
+	}
+
+	// Profiles stored outside Postgres: no user key, even for the primary.
+	h.ProfilesOutsidePostgres = true
+	own := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess})
+	if ok, _, err := h.MayCreateProfileAPIKey(own, 1, "profile-1", "profile-1", verified); ok || err != nil {
+		t.Fatalf("profiles outside postgres = (%v, %v), want a refusal", ok, err)
+	}
 }

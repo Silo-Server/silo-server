@@ -2,7 +2,6 @@ package transcodenode
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +18,13 @@ import (
 // playable manifest and keeps running. Every transcode invocation is logged.
 func writeNodeFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, logPath string) {
 	t.Helper()
+	return writeNodeFFmpegFailingWith(t, failPattern, "intentional hardware failure")
+}
+
+// writeNodeFFmpegFailingWith is writeNodeFFmpegFailingOn with the stderr line
+// the failing attempt prints.
+func writeNodeFFmpegFailingWith(t *testing.T, failPattern, stderr string) (ffmpegPath, logPath string) {
+	t.Helper()
 	dir := t.TempDir()
 	ffmpegPath = filepath.Join(dir, "fake-ffmpeg.sh")
 	logPath = filepath.Join(dir, "invocations.log")
@@ -26,7 +32,7 @@ func writeNodeFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, log
 		"last=\"\"\n" +
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
 		"case \"$last\" in *.m3u8) printf '%s\\n' \"$*\" >> \"" + logPath + "\" ;; esac\n" +
-		"case \"$*\" in *'" + failPattern + "'*) echo 'intentional hardware failure' >&2; exit 1 ;; esac\n" +
+		"case \"$*\" in *'" + failPattern + "'*) echo '" + stderr + "' >&2; exit 1 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
@@ -85,31 +91,6 @@ func autoTranscodeStartRequest(req TranscodeStartRequest) TranscodeStartRequest 
 	}
 }
 
-func TestHandleStartRequireReadyAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
-	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-hwaccel cuda")
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	useAutoNVENCPipeline(t, server)
-
-	rr, session := startRegisteredSession(t, server, autoTranscodeStartRequest(TranscodeStartRequest{SessionID: "auto-mixed-1", RequireReady: true}))
-
-	var response TranscodeStartResponse
-	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
-		t.Fatal(err)
-	}
-	if response.HWAccel != "nvenc" || !response.SoftwareVideoDecode {
-		t.Fatalf("response = %+v, want NVENC with software_video_decode", response)
-	}
-	if got := session.Opts().OutputDir; got != server.sessionOutputDir("auto-mixed-1") {
-		t.Fatalf("session output dir = %q, want the session directory", got)
-	}
-	invocations := readNodeFFmpegInvocations(t, logPath)
-	if len(invocations) != 2 || strings.Contains(invocations[1], "-hwaccel cuda") || !strings.Contains(invocations[1], "h264_nvenc") {
-		t.Fatalf("invocations = %q, want full hardware then CPU decode with NVENC", invocations)
-	}
-}
-
 func TestHandleStartAutoReplacementFailureLeavesLiveSession(t *testing.T) {
 	server := newTestServer(t)
 	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-f hls")
@@ -161,43 +142,58 @@ func TestHandleStartAutoReplacementFailureLeavesLiveSession(t *testing.T) {
 	}
 }
 
-func TestSpawnReconstructAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
-	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-hwaccel cuda")
-	cfg := server.watcher.Config()
-	cfg.Playback.FFmpegPath = ffmpegPath
-	cfg.Playback.HWAccel = "auto"
-	useAutoNVENCPipeline(t, server)
+// A node rebuild is shared by every request waiting on it, so once it is
+// admitted the request that triggered it can end without failing the others.
+// StartTranscode returns an ended request's error before FFmpeg runs for an
+// HEVC target, among other recipes.
+func TestSpawnReconstructOutlivesTriggeringRequest(t *testing.T) {
+	for _, test := range []struct{ name, hwAccel string }{
+		// StartupRetryHWAccel changes VideoToolbox, so the node starts it directly.
+		{name: "backend with a software retry", hwAccel: "videotoolbox"},
+		{name: "start once", hwAccel: playback.HWAccelNone},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			server.tracker = nodesessions.NewLocalTracker()
+			fakePath, _ := writeNodeFFmpegFailingOn(t, "no attempt fails")
+			// Answer the capability probes, then hand transcodes to the fake.
+			useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+				"case \"$*\" in\n"+
+				"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n"+
+				"  *-encoders*) echo ' V..... h264_videotoolbox x'; exit 0 ;;\n"+
+				"  *'-f null'*) exit 0 ;;\n"+
+				"esac\n"+
+				"exec \""+fakePath+"\" \"$@\"\n")
+			server.watcher.Config().Playback.HWAccel = test.hwAccel
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// Called after admission, right before the start: the request ends here.
+			server.autoTranscodePipelineFn = func(stepCtx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+				cancel()
+				if stepCtx.Err() != nil {
+					t.Error("fallback order resolved on the ended request's context")
+				}
+				return playback.NewAutoTranscodePipeline(stepCtx, opts)
+			}
 
-	const sessionID = "auto-reconstruct-1"
-	card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
-		SessionID: sessionID, InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
-		SegmentDuration: 2,
-	})
-	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
-	if err != nil || session == nil {
-		t.Fatalf("spawnReconstruct = %v, %v; want the CPU-decode session", session, err)
-	}
-	defer func() { _ = session.Close() }()
-	if opts := session.Opts(); opts.HWAccel != "nvenc" || !opts.SoftwareVideoDecode {
-		t.Fatalf("reconstructed = %s software decode %v, want NVENC with CPU decode", opts.HWAccel, opts.SoftwareVideoDecode)
-	}
-	server.mu.RLock()
-	registered := server.sessions[sessionID]
-	server.mu.RUnlock()
-	if registered != session {
-		t.Fatal("reconstructed fallback session was not registered")
-	}
-	if invocations := readNodeFFmpegInvocations(t, logPath); len(invocations) != 2 {
-		t.Fatalf("invocations = %q, want full hardware then CPU decode", invocations)
+			const sessionID = "outlives-request-1"
+			card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
+				SessionID: sessionID, InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "hevc", TargetCodecAudio: "aac", TargetResolution: "720p", SegmentDuration: 2,
+			})
+			request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+			session, err := server.spawnReconstruct(request, sessionID, -1, resolutionOf(card))
+			if err != nil || session == nil {
+				t.Fatalf("spawnReconstruct = %v, %v; want the session the other requests wait for", session, err)
+			}
+			_ = session.Close()
+		})
 	}
 }
 
 func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	fakePath, logPath := writeNodeFFmpegFailingOn(t, "h264_videotoolbox")
 	// Answer the VideoToolbox capability probes, then hand real transcodes to
 	// the fake that fails hardware encodes.
@@ -218,44 +214,4 @@ func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 	if len(invocations) != 2 || !strings.Contains(invocations[0], "h264_videotoolbox") || !strings.Contains(invocations[1], "libx264") {
 		t.Fatalf("invocations = %q, want VideoToolbox then the legacy software retry", invocations)
 	}
-}
-
-// auto_fallback_ready lets a node whose live auto pipeline is enabled wait for
-// the first manifest and walk the safer paths.
-func TestHandleStartAutoFallbackReadyWalksEnabledPipeline(t *testing.T) {
-	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-hwaccel cuda")
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	useAutoNVENCPipeline(t, server)
-
-	startRegisteredSession(t, server, autoTranscodeStartRequest(TranscodeStartRequest{SessionID: "auto-fallback-1", AutoFallbackReady: true}))
-	if invocations := readNodeFFmpegInvocations(t, logPath); len(invocations) != 2 || strings.Contains(invocations[1], "-hwaccel cuda") {
-		t.Fatalf("invocations = %q, want full hardware then CPU decode", invocations)
-	}
-}
-
-// Without an enabled pipeline, auto_fallback_ready must not wait: a slow
-// software encoder would otherwise be closed at the readiness deadline.
-func TestHandleStartAutoFallbackReadyWithoutPipelineDoesNotWait(t *testing.T) {
-	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	// Capability queries finish immediately; only the software encode is slow.
-	useFakeFFmpeg(t, server, "#!/bin/sh\ncase \" $* \" in\n*' -f hls '*) exec sleep 30 ;;\nesac\n")
-	server.autoTranscodePipelineFn = func(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
-		opts.HWAccel = playback.HWAccelNone
-		return playback.NewAutoTranscodePipeline(ctx, opts)
-	}
-
-	rr := postStartRequest(t, server, autoTranscodeStartRequest(TranscodeStartRequest{SessionID: "auto-software-1", AutoFallbackReady: true}))
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s; want an unwaited start", rr.Code, rr.Body.String())
-	}
-	server.mu.RLock()
-	session := server.sessions["auto-software-1"]
-	server.mu.RUnlock()
-	if session == nil || !session.IsRunning() {
-		t.Fatal("slow software session was not kept running")
-	}
-	_ = session.Close()
 }

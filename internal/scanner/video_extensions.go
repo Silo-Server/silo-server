@@ -3,37 +3,47 @@ package scanner
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/mediacontainer"
 )
 
 // videoExtensions is the set of file extensions the movie and series scanner
-// branches catalog. Every decision about whether a path is a video file goes
-// through this set (SupportsVideoFile, the library walk, ScanFile, extras
-// classification, and scantrigger), so they cannot disagree.
+// branches catalog (mediacontainer.VideoExtensions). Every decision about
+// whether a path is a video file goes through this set (SupportsVideoFile,
+// the library walk, ScanFile, extras classification, and scantrigger), so
+// they cannot disagree, and a transcode node reading through the core admits
+// the demuxers of the same list.
 //
 // Each entry is a container ffprobe identifies and the playback planner can
 // direct play, remux, or transcode; playback.MimeFromExtension names a media
 // type for every one of them.
-var videoExtensions = extensionSet(
-	".mkv .webm",                    // Matroska; WebM is its VP8/VP9/AV1 subset
-	".mp4 .m4v .mov .3gp .3g2 .f4v", // MP4/QuickTime family
-	".avi .divx",                    // AVI; .divx is AVI with a DivX stream
-	".ts .m2ts .mts",                // MPEG-TS; .m2ts/.mts use 192-byte BDAV packets
-	".mpg .mpeg",                    // MPEG program stream
-	".wmv .asf",                     // ASF
-	".flv",                          // Flash video
-	".ogv .ogm",                     // Ogg video and legacy Ogg Media
-)
+var videoExtensions = mediacontainer.VideoExtensions()
 
-// extensionSet builds a set from groups of space-separated extensions.
-func extensionSet(groups ...string) map[string]bool {
-	set := make(map[string]bool)
-	for _, group := range groups {
-		for _, ext := range strings.Fields(group) {
-			set[ext] = true
+// containerDemuxers names the ffprobe demuxer of the container each video
+// extension stands for. ProbeFile reads a file with it when ffprobe only
+// guessed another format (see confirmContainer).
+//
+// .m4v, .mpg and .mpeg have no entry: such a file may be a bare MPEG-4 or
+// MPEG video stream, or an MPEG-TS, instead of the MP4 or MPEG-PS the
+// extension suggests, and the demuxers for bare streams read any bytes at
+// all, so no single demuxer settles what the file is.
+var containerDemuxers = func() map[string]string {
+	demuxers := make(map[string]string)
+	for demuxer, extensions := range map[string]string{
+		demuxerMatroska: ".mkv .webm",
+		demuxerMOV:      ".mp4 .mov .3gp .3g2 .f4v",
+		demuxerAVI:      ".avi .divx",
+		demuxerMPEGTS:   ".ts .m2ts .mts",
+		demuxerASF:      ".wmv .asf",
+		demuxerFLV:      ".flv",
+		demuxerOgg:      ".ogv .ogm",
+	} {
+		for _, ext := range strings.Fields(extensions) {
+			demuxers[ext] = demuxer
 		}
 	}
-	return set
-}
+	return demuxers
+}()
 
 // unsupportedVideoExtensions names video formats the scanner recognizes but
 // deliberately does not catalog, with the reason a skipped file is logged

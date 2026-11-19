@@ -23,7 +23,10 @@ function RadioDot() {
       aria-hidden
       className="border-muted-foreground/70 group-data-[state=checked]/radio:border-foreground grid size-[18px] shrink-0 place-items-center rounded-full border-[1.5px]"
     >
-      <RadioGroupPrimitive.Indicator className="bg-foreground size-2 rounded-full" />
+      <RadioGroupPrimitive.Indicator
+        data-slot="radio-group-indicator"
+        className="bg-foreground size-2 rounded-full"
+      />
     </span>
   );
 }
@@ -60,7 +63,7 @@ function RadioCardItem({
     <RadioGroupPrimitive.Item
       data-slot="radio-card-item"
       className={cn(
-        "group/radio border-border hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:border-foreground/70 data-[state=checked]:bg-accent grid grid-cols-[18px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-0.5 rounded-xl border px-3.5 py-3 text-left outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
+        "group/radio border-border hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:border-foreground/70 data-[state=checked]:bg-accent grid grid-cols-[18px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-0.5 rounded-xl border px-3.5 py-3 text-start outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

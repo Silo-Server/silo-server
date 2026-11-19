@@ -5,6 +5,7 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
+import type { NodeDetectedBackend } from "@/api/types";
 import { adminKeys } from "../keys";
 
 /**
@@ -15,7 +16,7 @@ import { adminKeys } from "../keys";
  */
 const SYSTEM_RESOURCES_REFRESH_MS = 15_000;
 
-export interface BuildInfo {
+interface BuildInfo {
   display: string;
   revision: string;
   dirty: boolean;
@@ -51,6 +52,12 @@ export interface HWAccelInfo {
   render_devices: string[];
   render_device_details?: RenderDeviceInfo[];
   intel_detected: boolean;
+  /**
+   * Probe outcome per backend. `resolved` echoes an explicitly configured
+   * backend even when it was never verified, so only a verified entry here
+   * proves the hardware works.
+   */
+  detected_backends?: NodeDetectedBackend[];
   source: "local" | "transcode_node";
   node_url?: string;
   /** Validated tone-map executors on this server or its transcode nodes. */

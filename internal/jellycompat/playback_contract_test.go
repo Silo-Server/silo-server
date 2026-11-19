@@ -5,6 +5,9 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -14,11 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/go-chi/chi/v5"
@@ -28,7 +33,7 @@ func TestBitrateProbeHonorsSize(t *testing.T) {
 	for _, tc := range []struct {
 		query        string
 		status, size int
-	}{{"", 200, 102400}, {"?size=1", 200, 1}, {"?SIZE=32769", 200, 32769}, {"?size=0", 400, 0}, {"?size=100000001", 400, 0}, {"?size=no", 400, 0}} {
+	}{{"", 200, 102400}, {"?size=1", 200, 1}, {"?SIZE=32769", 200, 32769}, {"?size=0", 400, 0}, {"?size=100000001", 400, 0}} {
 		t.Run(tc.query, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			(&PlaybackHandler{}).HandleBitrateTest(rr, httptest.NewRequest("GET", "/Playback/BitrateTest"+tc.query, nil))
@@ -192,7 +197,7 @@ func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
 			}
 			source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 1}, true)
 			source.HLSRemuxMPEGTS = source.hlsRemuxInTS
-			dto := h.mediaSourceDTO("item", "play", "token", source)
+			dto := h.mediaSourceDTO("item", "play", source)
 			if source.SupportsDirectPlay || !source.SupportsTranscoding || source.TargetAudioChannels != 1 || !source.HLSRemux || dto.TranscodingContainer != container || dto.TranscodingURL == "" {
 				t.Fatalf("wrong negotiated container: source=%+v dto=%+v", source, dto)
 			}
@@ -206,7 +211,7 @@ func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
 
 func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	dto := h.mediaSourceDTO("item", "play", "token", PlaybackMediaSource{ID: "source", SupportsDirectStream: true})
+	dto := h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source", SupportsDirectStream: true})
 	u, err := url.Parse(dto.DirectStreamURL)
 	if err != nil {
 		t.Fatal(err)
@@ -214,10 +219,82 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	if u.Query().Get("static") != "false" {
 		t.Fatalf("URL=%s", dto.DirectStreamURL)
 	}
-	dto = h.mediaSourceDTO("item", "play", "token", PlaybackMediaSource{ID: "source", SupportsDirectPlay: true})
+	dto = h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source", SupportsDirectPlay: true})
 	u, _ = url.Parse(dto.DirectStreamURL)
 	if u.Query().Get("static") != "true" {
 		t.Fatalf("URL=%s", dto.DirectStreamURL)
+	}
+}
+
+// Jellyfin Android TV retries a failed play with direct play off, then with
+// direct stream off too. It plays the TranscodingUrl whenever DirectStream is
+// set, and in that mode restarts playback forever trying to select the HLS
+// audio track (#2645). As in Jellyfin 10.11, DirectStream comes with
+// DirectPlay, and a retry keeps the video a copy when that can help.
+func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
+	version := catalog.FileVersion{FileID: 7, Container: "mkv", CodecVideo: "h264", CodecAudio: "eac3", Resolution: "1080p", Bitrate: 10000,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}}
+	// The relevant parts of the Jellyfin Android TV 0.19 default profile.
+	profile := DeviceProfile{
+		DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv,mp4,ts", VideoCodec: "h264,hevc", AudioCodec: "aac,ac3,eac3,flac"}},
+		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3"}},
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret", NodeKeys: nodeauthtest.SameKey("secret")}
+	stereoAAC := version
+	stereoAAC.CodecAudio = "aac"
+	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}
+	flac := version
+	flac.CodecAudio = "flac"
+	flac.AudioTracks = []models.AudioTrack{{Codec: "flac", Channels: 2, Default: true}}
+	videoOnly := version
+	videoOnly.CodecAudio = ""
+	videoOnly.AudioTracks = nil
+	for _, tc := range []struct {
+		name                     string
+		version                  catalog.FileVersion
+		directPlay, directStream bool
+		noDirectPlayProfiles     bool
+		wantVideoCopy            bool
+		wantAudioEncode          bool
+	}{
+		{name: "direct play also reports direct stream", version: version, directPlay: true, directStream: true},
+		{name: "first retry copies video and audio", version: version, directStream: true, wantVideoCopy: true},
+		{name: "second retry copies video and encodes audio", version: version, wantVideoCopy: true, wantAudioEncode: true},
+		// Direct play accepts FLAC but HLS cannot carry it, so the audio is
+		// encoded rather than the video.
+		{name: "first retry encodes audio HLS cannot carry", version: flac, directStream: true, wantVideoCopy: true, wantAudioEncode: true},
+		// Encoding AAC stereo to AAC stereo would repeat the stream that failed.
+		{name: "second retry encodes video when the audio would not change", version: stereoAAC},
+		// Without direct play profiles no audio counts as supported, which
+		// must not turn an unchanged AAC track into a reason to copy.
+		{name: "profile without direct play still encodes video for unchanged audio", version: stereoAAC, noDirectPlayProfiles: true},
+		// A video-only source has no audio to change, so the copy would repeat
+		// the stream that failed.
+		{name: "second retry encodes video for a video-only source", version: videoOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := playbackInfoRequest{MaxStreamingBitrate: 100_000_000, EnableDirectPlay: new(tc.directPlay), EnableDirectStream: new(tc.directStream)}
+			profile := profile
+			if tc.noDirectPlayProfiles {
+				profile.DirectPlayProfiles = nil
+			}
+			source := h.buildPlaybackSource("item", "play", tc.version, profile, req, true)
+			if source.SupportsDirectPlay != tc.directPlay || source.SupportsDirectStream != tc.directPlay {
+				t.Fatalf("direct play=%v direct stream=%v, want both %v", source.SupportsDirectPlay, source.SupportsDirectStream, tc.directPlay)
+			}
+			if tc.directPlay {
+				return
+			}
+			if !source.SupportsTranscoding || compatHLSCopiesVideo(source) != tc.wantVideoCopy || source.TranscodeAudio != tc.wantAudioEncode {
+				t.Fatalf("transcoding=%v copies video=%v audio encode=%v, want copies video=%v audio encode=%v",
+					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantVideoCopy, tc.wantAudioEncode)
+			}
+			dto := h.mediaSourceDTO("item", "play", source)
+			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || len(tc.version.AudioTracks) > 0 && dto.DefaultAudioStreamIndex == nil {
+				t.Fatalf("DirectStreamUrl=%q TranscodingUrl=%q DefaultAudioStreamIndex=%v", dto.DirectStreamURL, dto.TranscodingURL, dto.DefaultAudioStreamIndex)
+			}
+		})
 	}
 }
 
@@ -225,24 +302,12 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 // hls.js, even when it plays the static direct URL, so only a source played
 // through its TranscodingUrl may say hls (#2879).
 func TestTranscodingSubProtocolFollowsPlayedURL(t *testing.T) {
+	// The direct-play and transcode-only cases are in
+	// TestMediaSourceDTOOmitsTranscodingURLOnDirectPlaySources.
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	for _, tc := range []struct {
-		name   string
-		source PlaybackMediaSource
-		want   string
-	}{
-		{"direct play with transcode fallback", PlaybackMediaSource{SupportsDirectPlay: true, SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
-		{"direct stream with transcode fallback", PlaybackMediaSource{SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
-		{"transcode only", PlaybackMediaSource{SupportsTranscoding: true}, "hls"},
-		{"nothing playable", PlaybackMediaSource{}, "http"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.source.ID = "source"
-			dto := h.mediaSourceDTO("item", "play", "token", tc.source)
-			if dto.TranscodingSubProtocol != tc.want {
-				t.Fatalf("TranscodingSubProtocol = %q, want %q", dto.TranscodingSubProtocol, tc.want)
-			}
-		})
+	dto := h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source"})
+	if dto.TranscodingSubProtocol != "http" {
+		t.Fatalf("nothing playable: TranscodingSubProtocol = %q, want http", dto.TranscodingSubProtocol)
 	}
 }
 
@@ -348,6 +413,57 @@ func TestSubtitleDeliveryMarksLTRAuthoredText(t *testing.T) {
 		if body := rr.Body.String(); rr.Code != 200 || strings.Count(body, "\u200e") != 3 || !strings.Contains(body, "\u200eلقد انفجر -") {
 			t.Fatalf("%s: status=%d body=%q", format, rr.Code, body)
 		}
+	}
+}
+
+// Infuse drops an external subtitle sent without Content-Length (#4486), and
+// net/http sends any body over its 2 KiB buffer chunked unless the handler
+// states the length. The server mounts the compat router's compressor, as
+// production does, and asks for gzip, as clients do.
+func TestSubtitleResponsesStateContentLength(t *testing.T) {
+	var srt, vtt, ass strings.Builder
+	vtt.WriteString("WEBVTT\n\n")
+	ass.WriteString("[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+	for i := range 80 {
+		m, s := i*2/60, i*2%60
+		fmt.Fprintf(&srt, "%d\n00:%02d:%02d,000 --> 00:%02d:%02d,500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", i+1, m, s, m, s, i)
+		fmt.Fprintf(&vtt, "00:%02d:%02d.000 --> 00:%02d:%02d.500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", m, s, m, s, i)
+		fmt.Fprintf(&ass, "Dialogue: 0,0:%02d:%02d.00,0:%02d:%02d.50,Default,,0,0,0,,Line %d of a subtitle long enough to outgrow the buffer\n", m, s, m, s, i) //nolint:misspell // ASS event keyword
+	}
+	r := chi.NewRouter()
+	r.Use(httpstream.CompressExcept(skipCompatMediaCompression, "application/json"))
+	r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", func(w http.ResponseWriter, r *http.Request) {
+		data := map[string]string{"srt": srt.String(), "vtt": vtt.String(), "ass": ass.String()}[r.URL.Query().Get("source")]
+		(&PlaybackHandler{}).deliverSubtitle(w, r, r.URL.Query().Get("source"), []byte(data), 0)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	for _, tc := range []struct{ name, route, query string }{
+		{"srt as stored", "stream.srt", "source=srt"},
+		{"vtt as stored", "stream.vtt", "source=vtt"},
+		{"ass as stored", "stream.ass", "source=ass"},
+		{"vtt windowed", "stream.vtt", "source=vtt&EndPositionTicks=6000000000"},
+		{"json events", "stream.js", "source=vtt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, srv.URL+"/Videos/item/source/Subtitles/5/0/"+tc.route+"?"+tc.query, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != http.StatusOK || len(resp.TransferEncoding) != 0 || resp.ContentLength != int64(len(body)) {
+				t.Fatalf("status=%d Transfer-Encoding=%v Content-Length=%d, read %d bytes", resp.StatusCode, resp.TransferEncoding, resp.ContentLength, len(body))
+			}
+		})
 	}
 }
 
@@ -507,7 +623,7 @@ func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 
 func TestProgressiveRemuxChecksMP4OutputContainer(t *testing.T) {
 	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 8000,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500000}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
 	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
 	for _, tc := range []struct{ property, value string }{
 		{"Width", "1280"}, {"AudioChannels", "2"},

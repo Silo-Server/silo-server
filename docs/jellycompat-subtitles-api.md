@@ -26,10 +26,12 @@ identity includes source path, modification time, size, track ordinal, and
 output format. A source change during extraction prevents publication. Cache
 failures do not prevent delivering a successful extraction, and incomplete
 extracts are not published. A node's first request may still require a complete
-file demux. The cache directory, `subtitle-cache` under the transcode directory,
-is used only while it and the transcode directory are real directories owned by
-the server's user and not writable by their group or other users; otherwise the
-node extracts without caching. Entries are served only when they are regular
+file demux. A node already running as many subtitle demuxes as it allows answers
+`503 ServiceUnavailable` with `Retry-After` instead of starting another. The
+cache directory, `subtitle-cache` under the transcode directory, is used only
+while it and the transcode directory are real directories owned by the server's
+user and not writable by their group or other users; otherwise the node
+extracts without caching. Entries are served only when they are regular
 files inside the cache directory.
 
 Repeated unstarted playback negotiations replace only negotiations with the same

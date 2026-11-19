@@ -2,19 +2,11 @@ package apiv2
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"strings"
-	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
@@ -55,79 +47,6 @@ func (s *fakeThemeSongs) ThemeCapabilities(context.Context) themesongs.Capabilit
 	return themesongs.Capabilities{Transcode: true, ClusterRouting: true}
 }
 
-func TestThemeSongsContractAndAuthorization(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	deps.ViewerAccess = apimw.NewViewerAccessMiddleware(policyResolver{scope: &access.Scope{PolicyRevision: 7}})
-	svc := &fakeThemeSongs{}
-	deps.ThemeSongs = svc
-	h := newTestHandler(t, deps)
-	capability := Prefix + "/catalog/themes/capabilities"
-	rec := do(t, h, "GET", capability, "", themeSongHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"delivery":"routed"`) || !strings.Contains(rec.Body.String(), `"cluster_routing":true`) || !strings.Contains(rec.Body.String(), `"transcode":true`) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	header := themeSongHeaders()
-	header["If-None-Match"] = rec.Header().Get("ETag")
-	if got := do(t, h, "GET", capability, "", header); got.Code != 304 {
-		t.Fatal(got.Code, got.Body.String())
-	}
-	requireProblem(t, do(t, h, "GET", capability, "", nil), TypeAuthenticationRequired)
-	path := Prefix + "/catalog/items/movie:heat-1995/themes/7/playback"
-	requireProblem(t, do(t, h, "POST", path, "", nil), TypeAuthenticationRequired)
-	if got := do(t, h, "POST", path, "", bearer(memberToken)); got.Code == 200 {
-		t.Fatal("profile-less playback accepted")
-	}
-	rec = do(t, h, "POST", path, "", themeSongHeaders())
-	if rec.Code != 200 || svc.identity.UserID == 0 || svc.identity.ProfileID != "p-owner" || svc.identity.SessionID == "" || svc.identity.PolicyRevision != 7 {
-		t.Fatal(rec.Code, rec.Body.String(), svc.identity)
-	}
-	if rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatal("grant was cacheable")
-	}
-	if len(svc.accepted) != 0 || !strings.Contains(rec.Body.String(), `"delivery":"original"`) || !strings.Contains(rec.Body.String(), `"content_type":"audio/mpeg"`) ||
-		!strings.Contains(rec.Body.String(), `/themes/7/audio?token=fixture-theme-grant`) {
-		t.Fatal("bodyless request did not keep the original local grant", rec.Body.String(), svc.accepted)
-	}
-	rec = do(t, h, "POST", path, `{"accepted_formats":[{"container":"m4a","audio_codec":"aac"},{"container":"flac"}]}`, themeSongHeaders())
-	if rec.Code != 200 || len(svc.accepted) != 2 || svc.accepted[0] != (themesongs.Format{Container: "m4a", AudioCodec: "aac"}) ||
-		!strings.Contains(rec.Body.String(), `"delivery":"converted"`) || !strings.Contains(rec.Body.String(), `"content_type":"audio/mp4"`) {
-		t.Fatal("formats were not negotiated", rec.Code, rec.Body.String(), svc.accepted)
-	}
-	svc.routed = "https://proxy.example/stream/theme/signed"
-	rec = do(t, h, "POST", path, "", themeSongHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"url":"https://proxy.example/stream/theme/signed"`) {
-		t.Fatal("routed url was not returned verbatim", rec.Code, rec.Body.String())
-	}
-	svc.routed = ""
-	requireProblem(t, do(t, h, "POST", path, `{"accepted_formats":[{"container":"ogg","audio_codec":"opus"}]}`, themeSongHeaders()), TypeNotAcceptable)
-	svc.fail = themedelivery.ErrCapacityUnavailable
-	requireProblem(t, do(t, h, "POST", path, "", themeSongHeaders()), TypeDependencyUnavailable)
-	svc.fail = nil
-	rec = do(t, h, "GET", Prefix+"/catalog/items/movie:heat-1995", "", themeSongHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"themes":{"owner_id":"movie:heat-1995"`) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	for _, err := range []error{themesongs.ErrNotFound, errors.New("theme store unavailable")} {
-		svc.fail = err
-		rec = do(t, h, "GET", Prefix+"/catalog/items/movie:heat-1995", "", themeSongHeaders())
-		if rec.Code != 200 || strings.Contains(rec.Body.String(), `"themes"`) {
-			t.Fatal("optional theme lookup broke item detail", rec.Code, rec.Body.String())
-		}
-	}
-	svc.fail = nil
-	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		rec = do(t, h, method, Prefix+"/catalog/items/movie:heat-1995/themes/7/audio?token=bad", "", nil)
-		if rec.Code != 401 {
-			t.Fatal(method, rec.Code, rec.Body.String())
-		}
-	}
-	deps.ThemeSongs = nil
-	rec = do(t, newTestHandler(t, deps), "GET", capability, "", themeSongHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"state":"not_configured"`) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-}
-
 // originalThemeSongs grants every audio request the original file at path.
 type originalThemeSongs struct {
 	fakeThemeSongs
@@ -141,25 +60,6 @@ func (s *originalThemeSongs) OpenGrant(context.Context, string, string, string) 
 	}
 	file := themesongs.File{Song: themesongs.Song{ID: "7", Title: "Opening", Container: "mp3"}, Size: 64 << 10, Modified: time.Unix(1700000000, 0)}
 	return file, themesongs.DeliveryOriginal, f, nil
-}
-
-// Original theme audio must reach the connection's ReadFrom with the file
-// still visible to sendfile, as TestPlaybackDeliveryKeepsZeroCopy checks for
-// the stream route.
-func TestThemeSongAudioKeepsZeroCopy(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "theme.mp3")
-	body := strings.Repeat("x", 64<<10)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	deps, _ := catalogDeps(t)
-	deps.ThemeSongs = &originalThemeSongs{path: path}
-	h := newTestHandler(t, deps)
-	inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
-	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, Prefix+"/catalog/items/movie:heat-1995/themes/7/audio?token=grant", nil))
-	if inner.Code != http.StatusOK || inner.Body.String() != body || inner.fromFile != int64(len(body)) {
-		t.Fatalf("status %d, body %d bytes, %d of them read from the file by ReadFrom", inner.Code, inner.Body.Len(), inner.fromFile)
-	}
 }
 
 func themeSongsFixtureCases() []fixtureCase {

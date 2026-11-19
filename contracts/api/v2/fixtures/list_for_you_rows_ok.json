@@ -3,6 +3,10 @@
     {
       "type": "cluster",
       "title": "Because you enjoy Crime",
+      "title_key": "home.section.becauseYouEnjoy",
+      "title_args": {
+        "genres": "Crime"
+      },
       "kind": "cluster",
       "key": "0",
       "items": [

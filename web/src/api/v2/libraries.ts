@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type {
   AdminJob,
   CreateLibraryRequest,
@@ -223,7 +224,7 @@ export function adminJobFromV2(job: AdminJobV2): AdminJob {
     created_by_user_id: 0,
     request_payload: {},
     result_payload: job.refresh_result ?? job.deletion_result ?? {},
-    message: job.state === "canceling" ? "Cancellation requested" : "",
+    message: job.state === "canceling" ? t("web.common.job.cancellationRequested") : "",
     error_message: job.failure?.detail,
     progress_current: job.progress?.current ?? 0,
     progress_total: job.progress?.total ?? 0,

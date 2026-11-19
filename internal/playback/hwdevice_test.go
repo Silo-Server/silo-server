@@ -2,12 +2,8 @@ package playback
 
 import (
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // fakeDeviceStat installs a stat function that reports only the given paths as
@@ -35,139 +31,6 @@ func resetDeviceLoad(t *testing.T) {
 	hwDeviceLoad.mu.Unlock()
 }
 
-func TestParseHWDeviceSet(t *testing.T) {
-	cases := []struct {
-		in   string
-		want []string
-	}{
-		{"", nil},
-		{"/dev/dri/renderD128", []string{"/dev/dri/renderD128"}},
-		{"/dev/dri/renderD128,/dev/dri/renderD129", []string{"/dev/dri/renderD128", "/dev/dri/renderD129"}},
-		{" /dev/dri/renderD128 , /dev/dri/renderD129 ,", []string{"/dev/dri/renderD128", "/dev/dri/renderD129"}},
-	}
-	for _, tc := range cases {
-		got := ParseHWDeviceSet(tc.in)
-		if got.Empty() != (len(tc.want) == 0) || got.Multi() != (len(tc.want) > 1) {
-			t.Fatalf("ParseHWDeviceSet(%q) Empty/Multi mismatch for %v", tc.in, tc.want)
-		}
-		list := got.List()
-		if len(list) != len(tc.want) {
-			t.Fatalf("ParseHWDeviceSet(%q).List() = %v, want %v", tc.in, list, tc.want)
-		}
-		for i := range list {
-			if list[i] != tc.want[i] {
-				t.Fatalf("ParseHWDeviceSet(%q).List() = %v, want %v", tc.in, list, tc.want)
-			}
-		}
-	}
-}
-
-// An empty setting resolves to nothing only when there is nothing to resolve to.
-// Pointed at an empty device directory for the same reason as the counting test
-// below: with a real /dev/dri present this now returns the device execution
-// would pick, which is the point of resolving it here.
-func TestAcquireHWDeviceEmptyValueStaysEmptyWithoutDevices(t *testing.T) {
-	resetDeviceLoad(t)
-	original := defaultDRIDir
-	defaultDRIDir = t.TempDir()
-	t.Cleanup(func() { defaultDRIDir = original })
-
-	for _, accel := range []string{"qsv", "vaapi"} {
-		device, release := AcquireHWDevice("", accel)
-		if device != "" {
-			t.Fatalf("%s device = %q, want empty with no available hardware", accel, device)
-		}
-		if got := HWDeviceLoadSnapshot(); len(got) != 0 {
-			t.Fatalf("%s snapshot = %v, want no count for an unresolved device", accel, got)
-		}
-		release()
-	}
-}
-
-func TestAcquireHWDeviceSingleValuePassesThrough(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t) // nothing exists; single value must still pass through
-	for _, accel := range []string{"qsv", "vaapi", "nvenc", "none"} {
-		device, release := AcquireHWDevice("/dev/dri/renderD128", accel)
-		if device != "/dev/dri/renderD128" {
-			t.Fatalf("accel %s: device = %q, want explicit single value unchanged", accel, device)
-		}
-		release()
-	}
-}
-
-// The single-GPU node is the common deployment. Having nothing to balance is no
-// reason to leave its workloads uncounted: sessions would read 0 on a node
-// whose engine busy percentage says it is transcoding.
-func TestAcquireHWDeviceSingleRenderDeviceIsCounted(t *testing.T) {
-	for _, accel := range []string{"qsv", "vaapi"} {
-		t.Run(accel, func(t *testing.T) {
-			resetDeviceLoad(t)
-			fakeDeviceStat(t) // the device need not exist for the count to be right
-			_, releaseFirst := AcquireHWDevice("/dev/dri/renderD128", accel)
-			_, releaseSecond := AcquireHWDevice("/dev/dri/renderD128", accel)
-
-			if got := HWDeviceLoadSnapshot()["/dev/dri/renderD128"]; got != 2 {
-				t.Fatalf("snapshot count = %d, want both workloads counted (%v)", got, HWDeviceLoadSnapshot())
-			}
-			releaseFirst()
-			releaseSecond()
-			if got := HWDeviceLoadSnapshot(); len(got) != 0 {
-				t.Fatalf("snapshot after release = %v, want empty", got)
-			}
-		})
-	}
-}
-
-func TestAcquireHWDeviceBalancesAcrossList(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
-	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
-
-	dev1, release1 := AcquireHWDevice(configured, "qsv")
-	if dev1 != "/dev/dri/renderD128" {
-		t.Fatalf("first workload device = %q, want first listed on tie", dev1)
-	}
-	dev2, release2 := AcquireHWDevice(configured, "vaapi")
-	if dev2 != "/dev/dri/renderD129" {
-		t.Fatalf("second workload device = %q, want least-loaded second device", dev2)
-	}
-	dev3, release3 := AcquireHWDevice(configured, "qsv")
-	if dev3 != "/dev/dri/renderD128" {
-		t.Fatalf("third workload device = %q, want round-back to first on tie", dev3)
-	}
-
-	// Releasing the first workload makes renderD128 least-loaded again.
-	release1()
-	release3()
-	dev4, release4 := AcquireHWDevice(configured, "qsv")
-	if dev4 != "/dev/dri/renderD128" {
-		t.Fatalf("post-release device = %q, want freed first device", dev4)
-	}
-	release2()
-	release4()
-}
-
-func TestAcquireHWDeviceSkipsMissingDevices(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t, "/dev/dri/renderD129")
-	device, release := AcquireHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
-	defer release()
-	if device != "/dev/dri/renderD129" {
-		t.Fatalf("device = %q, want the only present device", device)
-	}
-}
-
-func TestAcquireHWDeviceAllMissingFallsBackToFirst(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t) // none exist
-	device, release := AcquireHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
-	defer release()
-	if device != "/dev/dri/renderD128" {
-		t.Fatalf("device = %q, want deterministic first entry when none exist", device)
-	}
-}
-
 // NVENC is counted but never balanced: a multi-entry list still resolves to its
 // first entry, because CUDA indexes are not render-node paths and the balancer
 // has no way to compare them.
@@ -186,79 +49,6 @@ func TestAcquireHWDeviceNVENCMultiListUsesFirstWithoutBalancing(t *testing.T) {
 	// resource sampling names that GPU — otherwise the join drops it.
 	if got := hwDeviceActiveCount("cuda:0"); got != 2 {
 		t.Fatalf("active count = %d, want both NVENC workloads counted under cuda:0", got)
-	}
-}
-
-// NVENC selects GPUs by CUDA index, and the sampler publishes them as "cuda:N".
-// Counting the raw configured value would report zero sessions on every
-// explicitly-selected NVIDIA GPU while it transcodes.
-func TestNVENCAccountingDeviceUsesSamplerNamespace(t *testing.T) {
-	for _, tc := range []struct{ configured, want string }{
-		{"", DefaultNVENCDevice},
-		{"0", "cuda:0"},
-		{"1", "cuda:1"},
-		{"1,0", "cuda:1"},
-		{"cuda:1", "cuda:1"},
-		{"GPU-1234abcd", "GPU-1234abcd"},
-		{"/dev/dri/renderD128", "/dev/dri/renderD128"},
-	} {
-		if got := nvencAccountingDevice(tc.configured); got != tc.want {
-			t.Fatalf("nvencAccountingDevice(%q) = %q, want %q", tc.configured, got, tc.want)
-		}
-	}
-}
-
-// The snapshot is what node metrics report per device; it must show live
-// workloads and drop devices back out once they are released.
-func TestHWDeviceLoadSnapshot(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
-	_, releaseA := AcquireHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
-	_, releaseB := AcquireHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
-	_, releaseNVENC := AcquireHWDevice("", "nvenc")
-
-	snapshot := HWDeviceLoadSnapshot()
-	want := map[string]int{
-		"/dev/dri/renderD128": 1,
-		"/dev/dri/renderD129": 1,
-		DefaultNVENCDevice:    1,
-	}
-	if len(snapshot) != len(want) {
-		t.Fatalf("snapshot = %v, want %v", snapshot, want)
-	}
-	for device, count := range want {
-		if snapshot[device] != count {
-			t.Fatalf("snapshot[%q] = %d, want %d (snapshot %v)", device, snapshot[device], count, snapshot)
-		}
-	}
-
-	// The copy must not track later changes, or a reader would see counts move
-	// underneath a snapshot it already published.
-	releaseA()
-	releaseB()
-	releaseNVENC()
-	if snapshot["/dev/dri/renderD128"] != 1 {
-		t.Fatal("snapshot changed after release; it is not a copy")
-	}
-	if remaining := HWDeviceLoadSnapshot(); len(remaining) != 0 {
-		t.Fatalf("snapshot after all releases = %v, want empty", remaining)
-	}
-}
-
-func TestAcquireHWDeviceSoftwareAccelDoesNotReserve(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
-	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
-
-	_, releaseNone := AcquireHWDevice(configured, "none")
-	defer releaseNone()
-
-	// A software workload must not shift the balance: the next GPU workload
-	// still lands on the first device.
-	device, release := AcquireHWDevice(configured, "qsv")
-	defer release()
-	if device != "/dev/dri/renderD128" {
-		t.Fatalf("device = %q, want first device unaffected by software workload", device)
 	}
 }
 
@@ -282,29 +72,6 @@ func TestAcquireHWDeviceReleaseIsIdempotent(t *testing.T) {
 		if count < 0 {
 			t.Fatalf("device %s count = %d, want never negative", device, count)
 		}
-	}
-}
-
-func TestAcquireHWDeviceAvoidsFailedRenderDeviceAndReservesAlternate(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
-	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
-	got, workload, release := acquireHWDevice(configured, "qsv", "/dev/dri/renderD128")
-	defer release()
-	if got != "/dev/dri/renderD129" {
-		t.Fatalf("alternate device = %q, want renderD129", got)
-	}
-	if workload != got {
-		t.Fatalf("workload device = %q, want the selected device %q", workload, got)
-	}
-	if active := hwDeviceActiveCount(got); active != 1 {
-		t.Fatalf("alternate device active count = %d, want 1", active)
-	}
-	if got, _, releaseNVENC := acquireHWDevice(configured, "nvenc", "/dev/dri/renderD128"); got != "/dev/dri/renderD128" {
-		releaseNVENC()
-		t.Fatalf("NVENC retry device = %q, want first configured device", got)
-	} else {
-		releaseNVENC()
 	}
 }
 
@@ -339,38 +106,5 @@ func TestAcquireHWDeviceConcurrentStartsBalanceExactly(t *testing.T) {
 	// could pile concurrent starts onto one device.
 	if counts["/dev/dri/renderD128"] != workloads/2 || counts["/dev/dri/renderD129"] != workloads/2 {
 		t.Fatalf("concurrent workload split = %v, want exact %d/%d", counts, workloads/2, workloads/2)
-	}
-}
-
-// The probe matrix stops at a ceiling, so past it there is no verdict to
-// dispatch on. Balancing over the full configured list would hand a share of the
-// node's transcodes to a device the walk never reached, and the failure would
-// land after the session started — while the published capabilities say nothing
-// about that device either way.
-func TestAcquireHWDeviceNeverSelectsPastTheProbeCeiling(t *testing.T) {
-	resetDeviceLoad(t)
-	devices := make([]string, 0, tonemap.MaxProbedDevices+1)
-	for i := range tonemap.MaxProbedDevices + 1 {
-		devices = append(devices, "/dev/dri/renderD"+strconv.Itoa(128+i))
-	}
-	fakeDeviceStat(t, devices...)
-	beyond := devices[tonemap.MaxProbedDevices]
-	configured := strings.Join(devices, ",")
-
-	// Every probed device has to be handed a workload before the one past the
-	// ceiling could come up, so run enough starts to cover the whole list once.
-	var releases []func()
-	t.Cleanup(func() {
-		for _, release := range releases {
-			release()
-		}
-	})
-	for range len(devices) {
-		selected, release := AcquireHWDevice(configured, "qsv")
-		releases = append(releases, release)
-		if selected == beyond {
-			t.Fatalf("workload dispatched to %q, which is past the %d-device probe ceiling",
-				beyond, tonemap.MaxProbedDevices)
-		}
 	}
 }

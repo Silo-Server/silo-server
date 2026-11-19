@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -70,6 +71,21 @@ type LibrarySectionItemsInput struct {
 	SectionClient
 }
 
+// SectionTitleKey names the translation catalog message a section's title
+// is the English of. Both fields are absent when the title is text an
+// administrator or the profile typed.
+type SectionTitleKey struct {
+	TitleKey  string            `json:"title_key,omitempty" doc:"Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present" example:"home.section.recentlyAddedIn"`
+	TitleArgs map[string]string `json:"title_args,omitempty" doc:"Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none" example:"{\"library\":\"Movies\"}"`
+}
+
+func sectionTitleKeyOf(key string, args map[string]string) SectionTitleKey {
+	if key == "" {
+		return SectionTitleKey{}
+	}
+	return SectionTitleKey{TitleKey: key, TitleArgs: args}
+}
+
 // SectionLayoutEntry is one section of a page layout, without items.
 type SectionLayoutEntry struct {
 	ID          string `json:"id" example:"recently_added"`
@@ -79,6 +95,7 @@ type SectionLayoutEntry struct {
 	ItemLimit   int    `json:"item_limit" example:"20"`
 	IsCustom    bool   `json:"is_custom" doc:"An administrator-defined section rather than a built-in one" example:"false"`
 	Customized  bool   `json:"customized" doc:"The profile has overridden the section's placement or visibility" example:"false"`
+	SectionTitleKey
 }
 
 // SectionLayout is a page's sections in display order.
@@ -93,16 +110,51 @@ type SectionLayoutOutput struct {
 
 // Section is one page section with its cards.
 type Section struct {
-	ID          string        `json:"id" example:"recently_added"`
-	SectionType string        `json:"section_type" example:"recently_added"`
-	Title       string        `json:"title" example:"Recently Added"`
-	Featured    bool          `json:"featured" example:"false"`
-	ItemLimit   int           `json:"item_limit" example:"20"`
-	TotalCount  int           `json:"total_count" doc:"Items the section has in total, at least the number returned" example:"120"`
-	IsCustom    bool          `json:"is_custom" example:"false"`
-	Customized  bool          `json:"customized" example:"false"`
-	Items       []CatalogItem `json:"items" doc:"Empty, never null"`
-	HasMore     bool          `json:"has_more,omitzero" doc:"The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false" example:"true"`
+	ID          string                  `json:"id" example:"recently_added"`
+	SectionType string                  `json:"section_type" example:"recently_added"`
+	Title       string                  `json:"title" example:"Recently Added"`
+	Featured    bool                    `json:"featured" example:"false"`
+	ItemLimit   int                     `json:"item_limit" example:"20"`
+	TotalCount  int                     `json:"total_count" doc:"Items the section has in total, at least the number returned" example:"120"`
+	IsCustom    bool                    `json:"is_custom" example:"false"`
+	Customized  bool                    `json:"customized" example:"false"`
+	Items       []CatalogItem           `json:"items" doc:"Empty, never null"`
+	HasMore     bool                    `json:"has_more,omitzero" doc:"The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false" example:"true"`
+	Collections []SectionCollectionCard `json:"collections,omitempty" doc:"The cards of a row of collections (section_type collection_posters), in the row's order: the collections the viewer can see. Such a section has no items, total_count is the number of collections, and item_limit does not apply. Absent on every other section. See getHomeCapabilities collection_rows"`
+	SectionTitleKey
+}
+
+// SectionCollectionCard is one collection on a row of collections.
+type SectionCollectionCard struct {
+	ID                string  `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
+	Source            string  `json:"source" enum:"library,user" doc:"library for a server collection, user for a personal collection" example:"library"`
+	Title             string  `json:"title" example:"Marvel"`
+	PosterURL         string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
+	PosterThumbhash   string  `json:"poster_thumbhash,omitempty"`
+	PosterIsCollage   bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty" example:"false"`
+	BackdropURL       string  `json:"backdrop_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived backdrop of a server collection that has one, for a hero backdrop while the card is focused: the page-width variant, or the card thumbnail when the backdrop is set to another artwork such as the collection's poster. Absent when none and on personal collections"`
+	BackdropThumbhash string  `json:"backdrop_thumbhash,omitempty"`
+	ItemCount         int     `json:"item_count" doc:"The titles the acting profile sees in the collection" example:"12"`
+	LibraryID         *ID     `json:"library_id,omitempty" doc:"Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library" example:"1"`
+	CreatorProfileID  *string `json:"creator_profile_id,omitempty" doc:"Present on a personal collection: the profile that made it"`
+}
+
+// sectionCollectionCardsOf maps a row of collections' cards, or nil when the
+// section has none.
+func sectionCollectionCardsOf(cards []sections.CollectionCard) []SectionCollectionCard {
+	if len(cards) == 0 {
+		return nil
+	}
+	out := make([]SectionCollectionCard, 0, len(cards))
+	for _, c := range cards {
+		card := SectionCollectionCard{ID: c.ID, Source: c.Source, Title: c.Title, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash,
+			PosterIsCollage: c.PosterIsCollage && c.PosterURL != "", BackdropURL: c.BackdropURL, BackdropThumbhash: c.BackdropThumbhash, ItemCount: c.ItemCount, CreatorProfileID: c.CreatorProfileID}
+		if c.LibraryID != nil {
+			card.LibraryID = new(IDFromInt(int64(*c.LibraryID)))
+		}
+		out = append(out, card)
+	}
+	return out
 }
 
 // SectionCollection is a page's sections with their cards.
@@ -235,7 +287,7 @@ func registerLibraryViews(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/layout", "getLibraryLayout", "libraries",
 		"The library's section layout for the acting profile, without items.")), reg.getLibraryLayout)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections", "listLibrarySections", "libraries",
-		"The library's sections with their cards, as the acting profile sees them.")), reg.listLibrarySections)
+		"The library's sections that have cards for the acting profile, with those cards.")), reg.listLibrarySections)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections/{section_id}/items", "getLibrarySectionItems", "libraries",
 		"One section of the library with its cards.")), reg.getLibrarySectionItems)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/collections", "getLibraryCollections", "libraries",
@@ -254,11 +306,26 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 	return claims.UserID, profileID, nil
 }
 
+// cardAvailabilityWanted reports whether the acting profile draws the
+// availability poster badge. Card reads count seasons and episodes only then:
+// the badge is off by default, and the count is the one card lookup whose
+// cost grows with the number of episodes behind a page.
+func cardAvailabilityWanted(ctx context.Context) bool {
+	scope, ok := access.GetScope(ctx)
+	return ok && scope.CardAvailability
+}
+
 // sectionViewer is what the section seams need beyond the context. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
 func sectionViewer(ctx context.Context, art imagesize.Request, client SectionClient) handlers.SectionViewer {
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths, Web: client.web()}
+	return handlers.SectionViewer{
+		Access:                  handlers.AccessFilterFromContext(ctx, ""),
+		ImageSize:               art.Size,
+		ImageWidths:             art.Widths,
+		IncludeCardAvailability: cardAvailabilityWanted(ctx),
+		Web:                     client.web(),
+	}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
@@ -297,7 +364,7 @@ func (reg *Registry) getLibraryLayout(ctx context.Context, in *LibraryLayoutInpu
 func sectionLayoutOf(view handlers.SectionLayoutView) SectionLayout {
 	out := SectionLayout{Sections: make([]SectionLayoutEntry, 0, len(view.Sections))}
 	for _, s := range view.Sections {
-		out.Sections = append(out.Sections, SectionLayoutEntry{ID: s.ID, SectionType: s.SectionType, Title: s.Title, Featured: s.Featured, ItemLimit: s.ItemLimit, IsCustom: s.IsCustom, Customized: s.Customized})
+		out.Sections = append(out.Sections, SectionLayoutEntry{ID: s.ID, SectionType: s.SectionType, Title: s.Title, Featured: s.Featured, ItemLimit: s.ItemLimit, IsCustom: s.IsCustom, Customized: s.Customized, SectionTitleKey: sectionTitleKeyOf(s.TitleKey, s.TitleArgs)})
 	}
 	return out
 }
@@ -312,7 +379,7 @@ func sectionOf(v handlers.SectionView, sel ratingsources.Selection) Section {
 		}
 		items = append(items, card)
 	}
-	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items, HasMore: v.HasMore}
+	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, SectionTitleKey: sectionTitleKeyOf(v.TitleKey, v.TitleArgs), Items: items, HasMore: v.HasMore, Collections: sectionCollectionCardsOf(v.Collections)}
 }
 
 func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySectionsInput) (*SectionCollectionOutput, error) {

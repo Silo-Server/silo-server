@@ -150,7 +150,7 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 	if err != nil {
 		return nil, nil, err
 	}
-	args = append(args, concatInputArgs...)
+	args = append(args, listInputArgs(req.Input)...)
 	args = append(args, "-i", concatListInput,
 		mapStreamOption, firstVideoStream, disableAudioOption, disableSubtitlesOption, disableDataOption,
 		videoFilterOption, req.statsGraph(attempt, hw.Accel).filter,
@@ -188,7 +188,7 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []
 		}
 		args = append(args, decode...)
 		args = append(args, req.keyframeInputArgs(list.skip)...)
-		args = append(args, concatDemuxerArgs...)
+		args = append(args, listDemuxerArgs(req.Input)...)
 		args = append(args, "-i", concatListInput)
 		return append(args, sheetsOutputArgs(graph)...), concat, nil
 	}
@@ -203,16 +203,30 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []
 	}
 	args = append(args, req.keyframeInputArgs(skip)...)
 	args = append(args, decode...)
+	// AVI packets carry a DTS but no PTS. Without one, a decoder that holds
+	// keyframes back for reordering, such as H.264 or MPEG-2 with B-frames,
+	// stamps each with the DTS of the packet that releases it, a GOP or more
+	// later, and the timing log has no packet time. genpts fills each
+	// missing PTS from the stream's later DTS before decoding; packets that
+	// carry one keep it.
 	args = append(args,
+		"-fflags", "+genpts",
 		"-ss", formatSeconds(req.Window.StartSeconds),
 		"-t", formatSeconds(req.Window.DurationSeconds),
 		"-i", req.Input,
 	)
 	// Copy the same input's packets to a timing log without decoding them.
 	// Their extent distinguishes a valid final GOP from premature EOF;
-	// keyframe timestamps alone cannot. A separate file keeps packet metadata
-	// from interleaving with frame log lines on stderr.
-	args = append(args, mapStreamOption, firstVideoStream, "-c:v", "copy", "-f", "framecrc", packetTimingPath)
+	// keyframe timestamps alone cannot. The audio streams' packets tell a
+	// video that ends before its audio from a truncated file, whose streams
+	// stop together; only streams the probe found a sample rate for are
+	// copied, since the muxer refuses the others. A separate file keeps
+	// packet metadata from interleaving with frame log lines on stderr.
+	args = append(args, mapStreamOption, firstVideoStream)
+	for _, audio := range req.timingAudio {
+		args = append(args, mapStreamOption, "0:"+strconv.Itoa(audio))
+	}
+	args = append(args, "-c", "copy", "-f", "framecrc", packetTimingPath)
 	return append(args, sheetsOutputArgs(graph)...), nil, nil
 }
 

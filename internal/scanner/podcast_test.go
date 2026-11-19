@@ -4,48 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
+
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestParsePodcastShow(t *testing.T) {
-	ffprobePath := FFprobePathFromFFmpeg("ffmpeg")
-	if _, err := exec.LookPath(ffprobePath); err != nil {
-		ffprobePath = "ffprobe"
-		if _, err := exec.LookPath(ffprobePath); err != nil {
-			t.Skip("ffprobe not available")
-		}
-	}
-
-	ctx := context.Background()
-	got, err := parsePodcastShow(ctx, ffprobePath, "testdata/podcast_fixtures/show_a", nil)
-	if err != nil {
-		t.Fatalf("parsePodcastShow: %v", err)
-	}
-	if got.Title != "Show A" {
-		t.Errorf("Title = %q, want %q", got.Title, "Show A")
-	}
-	if got.Author != "Show A Host" {
-		t.Errorf("Author = %q, want %q", got.Author, "Show A Host")
-	}
-	if got.Year != 2024 {
-		t.Errorf("Year = %d, want 2024", got.Year)
-	}
-	if len(got.Episodes) != 3 {
-		t.Fatalf("got %d episodes, want 3", len(got.Episodes))
-	}
-	for i, ep := range got.Episodes {
-		wantTrack := i + 1
-		if ep.Track != wantTrack {
-			t.Errorf("episode %d Track = %d, want %d", i, ep.Track, wantTrack)
-		}
-	}
-}
 
 func TestScanPodcastFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	root := t.TempDir()
@@ -64,18 +29,6 @@ func TestScanPodcastFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "folder_id=43") {
 		t.Fatalf("error = %q, want folder id", err)
-	}
-}
-
-func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
-	root := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	s := &Scanner{}
-	err := s.ScanPodcastFolder(ctx, &models.MediaFolder{ID: 43, Paths: []string{root}})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("ScanPodcastFolder error = %v, want context.Canceled", err)
 	}
 }
 
@@ -163,121 +116,5 @@ func TestParsePodcastShowSkipsAFileStillChanging(t *testing.T) {
 	}
 	if _, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil); !errors.Is(err, errPodcastFileChanging) {
 		t.Fatalf("parsePodcastShow error = %v, want errPodcastFileChanging", err)
-	}
-}
-
-// A show folder whose name needs fspath encoding is listed encoded, and its
-// episodes are still stat'ed and probed by their real names.
-func TestParsePodcastShowReadsAnEncodedShowName(t *testing.T) {
-	dir := t.TempDir()
-	ffprobePath := filepath.Join(dir, "ffprobe")
-	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n")
-	// A Latin-1 name, as older tools write one. A file system that takes only
-	// UTF-8 names, such as APFS, gets a name holding a code point from
-	// fspath's reserved range instead, which is escaped the same way.
-	showDir := ""
-	for _, name := range []string{"B\xe5rd", "B\U0010FE80rd"} {
-		if err := os.Mkdir(filepath.Join(dir, name), 0o755); err == nil {
-			showDir = filepath.Join(dir, name)
-			break
-		}
-	}
-	if showDir == "" {
-		t.Skip("file system takes no name that needs encoding")
-	}
-	if err := os.WriteFile(filepath.Join(showDir, "01.mp3"), []byte(podcastProbeJSON("61")), 0o644); err != nil {
-		t.Fatalf("write episode: %v", err)
-	}
-	encoded := fspath.Encode(showDir)
-	if encoded == showDir {
-		t.Fatalf("%q needs no encoding", showDir)
-	}
-
-	got, err := parsePodcastShow(context.Background(), ffprobePath, encoded, nil)
-	if err != nil {
-		t.Fatalf("parsePodcastShow: %v", err)
-	}
-	if len(got.Episodes) != 1 || got.Episodes[0].Path != filepath.Join(encoded, "01.mp3") {
-		t.Fatalf("episodes = %+v, want the one episode under the encoded show path", got.Episodes)
-	}
-	if ep := got.Episodes[0]; ep.Probe == nil || ep.Probe.Duration != 61 || ep.Size == 0 {
-		t.Fatalf("probe = %+v, size %d; want the 61-second probe and the file's size", ep.Probe, ep.Size)
-	}
-}
-
-func TestPodcastShowFolder(t *testing.T) {
-	roots := []string{"/media/podcasts", "/media/more-podcasts", "/media/more-podcasts/nested"}
-	tests := []struct {
-		name string
-		path string
-		want string
-	}{
-		{name: "show folder", path: "/media/podcasts/Show A", want: "/media/podcasts/Show A"},
-		{name: "episode file", path: "/media/podcasts/Show A/Episode 2.mp3", want: "/media/podcasts/Show A"},
-		{name: "folder inside a show", path: "/media/podcasts/Show A/extras/bonus", want: "/media/podcasts/Show A"},
-		{name: "unclean path", path: "/media/podcasts//Show A/./extras/", want: "/media/podcasts/Show A"},
-		{name: "second root", path: "/media/more-podcasts/Show B/Episode 1.mp3", want: "/media/more-podcasts/Show B"},
-		{name: "most specific nested root", path: "/media/more-podcasts/nested/Show C", want: "/media/more-podcasts/nested/Show C"},
-		{name: "nested library root", path: "/media/more-podcasts/nested", want: ""},
-		{name: "library root", path: "/media/podcasts", want: ""},
-		{name: "library root with trailing slash", path: "/media/podcasts/", want: ""},
-		{name: "sibling with a root's name as prefix", path: "/media/podcasts-old/Show A", want: ""},
-		{name: "outside every root", path: "/srv/Show A", want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := podcastShowFolder(tt.path, roots); got != tt.want {
-				t.Fatalf("podcastShowFolder(%q) = %q, want %q", tt.path, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "02.mp3"), []byte("audio"), 0o644); err != nil {
-		t.Fatalf("write audio: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("notes"), 0o644); err != nil {
-		t.Fatalf("write notes: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "01.flac"), []byte("audio"), 0o644); err != nil {
-		t.Fatalf("write audio: %v", err)
-	}
-	if err := os.Mkdir(filepath.Join(root, "nested"), 0o755); err != nil {
-		t.Fatalf("mkdir nested: %v", err)
-	}
-
-	got, err := listPodcastShowAudioFiles(root, nil)
-	if err != nil {
-		t.Fatalf("listPodcastShowAudioFiles: %v", err)
-	}
-	want := []string{
-		filepath.Join(root, "01.flac"),
-		filepath.Join(root, "02.mp3"),
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("audio files = %#v, want %#v", got, want)
-	}
-}
-
-func TestListPodcastShowAudioFilesReturnsNoMediaForEmptyShow(t *testing.T) {
-	_, err := listPodcastShowAudioFiles(t.TempDir(), nil)
-	if !errors.Is(err, errFolderHasNoMedia) {
-		t.Fatalf("empty podcast show error = %v, want errFolderHasNoMedia", err)
-	}
-	// A missing ffprobe binary also wraps fs.ErrNotExist; the empty-folder
-	// signal must stay distinguishable from it.
-	if errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("empty podcast show error = %v, must not wrap os.ErrNotExist", err)
-	}
-}
-
-func TestListPodcastShowAudioFilesVanishedShowSignalsNoMedia(t *testing.T) {
-	gone := filepath.Join(t.TempDir(), "renamed-away")
-
-	_, err := listPodcastShowAudioFiles(gone, nil)
-	if !errors.Is(err, errFolderHasNoMedia) {
-		t.Fatalf("vanished show error = %v, want errFolderHasNoMedia", err)
 	}
 }

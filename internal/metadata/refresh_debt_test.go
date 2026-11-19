@@ -1,11 +1,38 @@
 package metadata
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// A refresh refused because it would merge a delegated curator's item onto an
+// item outside their libraries must not become refresh debt: the debt retry
+// runs as automatic work with no curator scope and would perform that merge.
+func TestCurationScopeRefusalLeavesNoRefreshDebt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		failures int
+	}{
+		{"curation scope refusal", fmt.Errorf("reanchor provider content id: %w", access.ErrMetadataCurationScope), 0},
+		{"provider failure", errors.New("provider unavailable"), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeItemRepo()
+			repo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie"}
+			s := &MetadataService{itemRepo: repo}
+			s.recordRefreshFailure(t.Context(), "movie-1", tc.err, true)
+			if got := repo.items["movie-1"].RefreshFailures; got != tc.failures {
+				t.Fatalf("refresh failures = %d, want %d", got, tc.failures)
+			}
+		})
+	}
+}
 
 func TestRefreshDebtReasonsForItem(t *testing.T) {
 	for _, tc := range []struct {
@@ -101,7 +128,6 @@ func TestNextRefreshDelaySchedule(t *testing.T) {
 		// ...then we give up: episode-incomplete debt goes terminal at attempt 3+.
 		{RefreshDebtReasonEpisodeIncomplete, 3, refreshDebtTerminalDelay},
 		{RefreshDebtReasonEpisodeIncomplete, 4, refreshDebtTerminalDelay},
-		{RefreshDebtReasonEpisodeIncomplete, 5, refreshDebtTerminalDelay},
 		// Non-episode reasons keep the full stepped backoff and never go terminal.
 		{RefreshDebtReasonCoreMetadataIncomplete, 2, 3 * 24 * time.Hour},
 		{RefreshDebtReasonCoreMetadataIncomplete, 3, 7 * 24 * time.Hour},

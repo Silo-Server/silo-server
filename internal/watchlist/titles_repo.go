@@ -218,7 +218,19 @@ func (r *titlesRepo) tryAdd(ctx context.Context, userID int, profileID string, s
 		return Entry{}, false, false, fmt.Errorf("beginning watchlist title add: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	entry, inserted, raced, err = addInTx(ctx, tx, userID, profileID, snap, addedAt, now)
+	if err != nil || raced {
+		return entry, inserted, raced, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Entry{}, false, false, fmt.Errorf("committing watchlist title add: %w", err)
+	}
+	return entry, inserted, false, nil
+}
 
+// addInTx is one attempt of add in tx. raced reports that another add
+// created the title first; the caller rolls tx back and tries again.
+func addInTx(ctx context.Context, tx pgx.Tx, userID int, profileID string, snap Snapshot, addedAt, now time.Time) (entry Entry, inserted, raced bool, err error) {
 	titleID, found, err := lockTitleByTMDB(ctx, tx, snap.MediaType, snap.TMDBID)
 	if err != nil {
 		return Entry{}, false, false, err
@@ -244,36 +256,9 @@ func (r *titlesRepo) tryAdd(ctx context.Context, userID int, profileID string, s
 		}
 	}
 	if !found {
-		idText, err := idgen.NextID()
-		if err != nil {
-			return Entry{}, false, false, fmt.Errorf("minting watchlist title id: %w", err)
-		}
-		titleID, err = strconv.ParseInt(idText, 10, 64)
-		if err != nil {
-			return Entry{}, false, false, fmt.Errorf("parsing watchlist title id: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO watchlist_titles (id, media_type, tmdb_id, imdb_id, tvdb_id, title, year, release_date,
-				poster_path, certification, vote_average, checked_at, next_check_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, nullif($5, 0), $6, nullif($7, 0), $8, $9, $10, round($11::numeric, 1), $12, $13, $12, $12)`,
-			titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID, snap.Title, snap.Year, snap.ReleaseDate,
-			snap.PosterPath, snap.Certification, snap.VoteAverage, now, nextCheckAfterSuccess(now, snap.ReleaseDate)); err != nil {
-			return Entry{}, false, false, fmt.Errorf("creating watchlist title: %w", err)
-		}
-		// The TMDB alias is the title's identity. If another add created the
-		// title first, start over and attach to that one.
-		tag, err := tx.Exec(ctx, `
-			INSERT INTO watchlist_title_aliases (title_id, media_type, provider, provider_id)
-			VALUES ($1, $2, 'tmdb', $3)
-			ON CONFLICT DO NOTHING`, titleID, snap.MediaType, strconv.Itoa(snap.TMDBID))
-		if err != nil {
-			return Entry{}, false, false, fmt.Errorf("recording watchlist title tmdb alias: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
-			return Entry{}, false, true, nil
-		}
-		if err := insertAliases(ctx, tx, titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID); err != nil {
-			return Entry{}, false, false, err
+		titleID, raced, err = createTitle(ctx, tx, snap, now)
+		if err != nil || raced {
+			return Entry{}, false, raced, err
 		}
 	}
 
@@ -299,10 +284,44 @@ func (r *titlesRepo) tryAdd(ctx context.Context, userID int, profileID string, s
 	if err != nil {
 		return Entry{}, false, false, fmt.Errorf("reading watchlist title: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Entry{}, false, false, fmt.Errorf("committing watchlist title add: %w", err)
-	}
 	return Entry{Title: title, AddedAt: entryAddedAt}, inserted, false, nil
+}
+
+// createTitle inserts a title for the snapshot with its aliases. The TMDB
+// alias is the title's identity: raced reports that another add holds it
+// first, and the caller rolls back and attaches to that one instead. The new
+// row is this transaction's, so it is as good as locked.
+func createTitle(ctx context.Context, tx pgx.Tx, snap Snapshot, now time.Time) (titleID int64, raced bool, err error) {
+	idText, err := idgen.NextID()
+	if err != nil {
+		return 0, false, fmt.Errorf("minting watchlist title id: %w", err)
+	}
+	titleID, err = strconv.ParseInt(idText, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("parsing watchlist title id: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO watchlist_titles (id, media_type, tmdb_id, imdb_id, tvdb_id, title, year, release_date,
+			poster_path, certification, vote_average, checked_at, next_check_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, nullif($5, 0), $6, nullif($7, 0), $8, $9, $10, round($11::numeric, 1), $12, $13, $12, $12)`,
+		titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID, snap.Title, snap.Year, snap.ReleaseDate,
+		snap.PosterPath, snap.Certification, snap.VoteAverage, now, nextCheckAfterSuccess(now, snap.ReleaseDate)); err != nil {
+		return 0, false, fmt.Errorf("creating watchlist title: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO watchlist_title_aliases (title_id, media_type, provider, provider_id)
+		VALUES ($1, $2, 'tmdb', $3)
+		ON CONFLICT DO NOTHING`, titleID, snap.MediaType, strconv.Itoa(snap.TMDBID))
+	if err != nil {
+		return 0, false, fmt.Errorf("recording watchlist title tmdb alias: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return 0, true, nil
+	}
+	if err := insertAliases(ctx, tx, titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID); err != nil {
+		return 0, false, err
+	}
+	return titleID, false, nil
 }
 
 // removeByTMDB removes the profile's entry for the title holding the TMDB ID
@@ -321,6 +340,9 @@ func (r *titlesRepo) removeByTMDB(ctx context.Context, userID int, profileID, me
 	title, err := scanTitle(tx.QueryRow(ctx, `SELECT `+titleColumns+` FROM watchlist_titles t WHERE t.id = $1`, titleID))
 	if err != nil {
 		return nil, false, fmt.Errorf("reading watchlist title: %w", err)
+	}
+	if err := keepSyncTitleIDsLocked(ctx, tx, userID, profileID, titleID); err != nil {
+		return nil, false, err
 	}
 	removed, err := deleteEntryLocked(ctx, tx, userID, profileID, titleID)
 	if err != nil {
@@ -341,38 +363,56 @@ func (r *titlesRepo) removeByTMDB(ctx context.Context, userID int, profileID, me
 // entry, which is what makes promotion side effects fire once.
 //
 // add writes through another connection. A node that dies after it rolls the
-// delete back, so the entry stays and the next read finishes the move.
-func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, add func(context.Context) error) (bool, error) {
+// delete back, so the entry stays and the next read finishes the move. add
+// reports whether the library entry is new to the user; when it is and this
+// call removed the entry, the move is recorded in watchlist_title_promotions
+// in the same transaction, so the watchlist arrival notice finds the profile
+// whichever user store holds its library watchlist (see Arrivals).
+func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, contentID string, add func(ctx context.Context, entryAddedAt time.Time) (bool, error)) (moved, newToUser bool, err error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("beginning watchlist title promotion: %w", err)
+		return false, false, fmt.Errorf("beginning watchlist title promotion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	locked, err := lockTitleByID(ctx, tx, titleID)
 	if err != nil || !locked {
-		return false, err
+		return false, false, err
 	}
-	var present bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM user_watchlist_titles
-			WHERE user_id = $1 AND profile_id = $2 AND title_id = $3)`, userID, profileID, titleID).Scan(&present); err != nil {
-		return false, fmt.Errorf("reading promoted watchlist title entry: %w", err)
+	// The entry is read under the title lock: the profile may have removed
+	// and re-added it since the caller listed it, and the library entry
+	// (when add writes it under this lock) and the promotion record must
+	// carry the time of the entry that is moved.
+	var currentAddedAt time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT added_at FROM user_watchlist_titles
+		WHERE user_id = $1 AND profile_id = $2 AND title_id = $3`, userID, profileID, titleID).Scan(&currentAddedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
 	}
-	if !present {
-		return false, nil
+	if err != nil {
+		return false, false, fmt.Errorf("reading promoted watchlist title entry: %w", err)
 	}
-	if err := add(ctx); err != nil {
-		return false, err
+	newToUser, err = add(ctx, currentAddedAt)
+	if err != nil {
+		return false, false, err
+	}
+	// Recorded before the delete, which can take the title and its aliases.
+	if newToUser {
+		if err := recordPromotion(ctx, tx, userID, profileID, titleID, contentID, currentAddedAt); err != nil {
+			return false, false, err
+		}
+	}
+	if err := keepSyncTitleIDsLocked(ctx, tx, userID, profileID, titleID); err != nil {
+		return false, false, err
 	}
 	removed, err := deleteEntryLocked(ctx, tx, userID, profileID, titleID)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("committing watchlist title promotion: %w", err)
+		return false, false, fmt.Errorf("committing watchlist title promotion: %w", err)
 	}
-	return removed, nil
+	return removed, newToUser, nil
 }
 
 // entryExists reports whether the profile still has an entry on the title.
@@ -385,6 +425,33 @@ func (r *titlesRepo) entryExists(ctx context.Context, userID int, profileID stri
 		return false, fmt.Errorf("reading watchlist title entry: %w", err)
 	}
 	return present, nil
+}
+
+// keepSyncTitleIDsLocked adds the title's IDs to the profile's watch
+// provider sync rows for it, the "watchlist-title:<kind>:<tmdb id>" rows of
+// its connections. Removing the last entry deletes the title and its
+// aliases, and sync needs them afterwards to find the library item promotion
+// moved the entry onto, or to recognize the title under another TMDB ID. It
+// runs with the title row locked, before the entry goes.
+func keepSyncTitleIDsLocked(ctx context.Context, tx pgx.Tx, userID int, profileID string, titleID int64) error {
+	if _, err := tx.Exec(ctx, `
+		WITH held AS (
+			SELECT ARRAY(SELECT provider || ':' || provider_id FROM watchlist_title_aliases WHERE title_id = $3) AS ids
+		)
+		UPDATE watch_provider_list_items AS item
+		SET title_ids = ARRAY(SELECT DISTINCT id FROM unnest(item.title_ids || held.ids) AS ids(id) ORDER BY id),
+			updated_at = now()
+		FROM watch_provider_connections AS conn, held
+		WHERE conn.id = item.connection_id
+		  AND conn.user_id = $1 AND conn.profile_id = $2
+		  AND item.list_kind = 'watchlist'
+		  AND item.media_item_id IN (
+			SELECT 'watchlist-title:' || a.media_type || ':' || a.provider_id
+			FROM watchlist_title_aliases a WHERE a.title_id = $3 AND a.provider = 'tmdb')
+		  AND NOT item.title_ids @> held.ids`, userID, profileID, titleID); err != nil {
+		return fmt.Errorf("keeping watch sync title ids: %w", err)
+	}
+	return nil
 }
 
 // deleteEntryLocked runs with the title row already locked.
@@ -433,6 +500,9 @@ func (r *titlesRepo) purgeProfile(ctx context.Context, userID int, profileID str
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_watchlist_titles WHERE user_id = $1 AND profile_id = $2`, userID, profileID); err != nil {
 		return fmt.Errorf("purging watchlist title entries: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM watchlist_title_promotions WHERE user_id = $1 AND profile_id = $2`, userID, profileID); err != nil {
+		return fmt.Errorf("purging watchlist title promotions: %w", err)
 	}
 	if len(ids) > 0 {
 		if _, err := tx.Exec(ctx, `
@@ -668,6 +738,23 @@ func (r *titlesRepo) aliasesOf(ctx context.Context, titleID int64) ([]titleAlias
 		ORDER BY provider, provider_id`, titleID))
 	if err != nil {
 		return nil, fmt.Errorf("reading watchlist title aliases: %w", err)
+	}
+	return aliases, nil
+}
+
+// aliasesOfTMDBOwners returns every alias of the titles holding any of the
+// TMDB IDs, current or former.
+func (r *titlesRepo) aliasesOfTMDBOwners(ctx context.Context, mediaType string, tmdbIDs []string) ([]titleAlias, error) {
+	aliases, err := collectAliases(r.pool.Query(ctx, `
+		SELECT a.title_id, a.media_type, a.provider, a.provider_id
+		FROM watchlist_title_aliases a
+		WHERE a.title_id IN (
+			SELECT o.title_id FROM watchlist_title_aliases o
+			WHERE o.media_type = $1 AND o.provider = 'tmdb' AND o.provider_id = ANY($2)
+		)
+		ORDER BY a.title_id, a.provider, a.provider_id`, mediaType, tmdbIDs))
+	if err != nil {
+		return nil, fmt.Errorf("reading watchlist title aliases by tmdb id: %w", err)
 	}
 	return aliases, nil
 }

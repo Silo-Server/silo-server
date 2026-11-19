@@ -17,6 +17,9 @@ import (
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
+	// SourceGrant is the core's source grant for Input when the request runs
+	// on a transcode node, naming that node. A local run ignores it.
+	SourceGrant string `json:"source_grant,omitempty" required:"true"`
 	// Window samples a contiguous span of the file.
 	Window *Window `json:"window,omitempty"`
 	// Samples decodes one video keyframe for each of a list of times.
@@ -53,6 +56,9 @@ type Request struct {
 	// mode; see keyframeSkipFor and keyframeLowDelayFor.
 	skipFrame string
 	lowDelay  bool
+	// timingAudio are the audio streams (0:K) a Sheets window copies to its
+	// packet timing file, the probe's AudioStreams.
+	timingAudio []int
 }
 
 // Window is a contiguous span of the input, in media seconds.
@@ -219,7 +225,7 @@ func (r Request) Validate() error {
 			return errors.New("samples take only a stats or sheets output")
 		}
 		if _, err := concatPath(r.Input); err != nil {
-			return err
+			return fmt.Errorf("sampled input: %w", err)
 		}
 	}
 	if r.At != nil {

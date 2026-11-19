@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -38,7 +41,7 @@ func lanOnlyProxyPlanner(connected bool) (*nodepool.Planner, *nodepool.ProxyPool
 	}
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{node})
-	return nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), proxies
+	return nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), proxies
 }
 
 func assertAPIRelative(t *testing.T, rawURL string) {
@@ -65,8 +68,9 @@ func TestPrepareTransportV3ProviderPathNeverReceivesALANOrigin(t *testing.T) {
 		{"authorized origins", authorizedOriginsModeV3()},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			handler.JWTSecret = "test-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 			planner, proxies := lanOnlyProxyPlanner(false)
 			handler.NodePlanner = planner
 			grants := &recordingRecipeCardStoreV3{}
@@ -115,8 +119,9 @@ func TestPrepareTransportV3ProviderPathNeverReceivesALANOrigin(t *testing.T) {
 // Once the proxy reports a connected origin on the client's provider, that
 // origin — and only that origin — is what the client is handed.
 func TestPrepareTransportV3ProviderPathUsesTheProviderOrigin(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	planner, _ := lanOnlyProxyPlanner(true)
 	handler.NodePlanner = planner
 	handler.ProxyGrantStore = &recordingRecipeCardStoreV3{}
@@ -173,8 +178,9 @@ func TestPrepareTransportV3ProviderPathUsesTheProviderOrigin(t *testing.T) {
 // gets the existing capacity-unavailable refusal rather than a LAN URL it
 // cannot open or an API fallback the operator forbade.
 func TestPrepareTransportV3ProviderPathProxyOnlyRefusesWithoutAReachableProxy(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	planner, _ := lanOnlyProxyPlanner(false)
 	handler.NodePlanner = planner
 	policy := config.DefaultPlaybackRoutingPolicy()
@@ -194,8 +200,9 @@ func TestPrepareTransportV3ProviderPathProxyOnlyRefusesWithoutAReachableProxy(t 
 // The URL builders are the last line: even a caller that forgot the predicate
 // cannot mint a LAN URL for a provider-path client.
 func TestProxyURLBuildersRefuseALANOnlyProxyOnAProviderPath(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	file := v3HandlerFixtureFile(t)
 	lanOnly := &nodepool.Node{ID: 41, URL: testLANProxyURL}
 	tailnet := netaccess.Path{Provider: testTailnetProvider}

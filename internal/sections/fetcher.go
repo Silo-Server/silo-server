@@ -35,6 +35,9 @@ type SectionWithItems struct {
 	Items      []*models.MediaItem `json:"items"`
 	TotalCount int                 `json:"total_count"`
 	ItemMeta   map[string]SectionItemMeta
+	// Collections are the cards of a row of collections
+	// (SectionCollectionPosters), which has no Items.
+	Collections []CollectionCard `json:"-"`
 }
 
 // SectionItemMeta carries optional per-item metadata for richer section UIs.
@@ -137,6 +140,10 @@ type Fetcher struct {
 	// CollectionOwners limits a row of another profile's shared personal
 	// collection to its owner's access. Without it such a row fails.
 	CollectionOwners catalog.PersonalCollectionAccess
+
+	// CollectionCards builds the cards of a row of collections. Nil shows
+	// such rows empty.
+	CollectionCards CollectionCardSource
 
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
@@ -348,6 +355,12 @@ func writeSortedInts(b *strings.Builder, values []int) {
 
 // FetchOne runs one section query and returns it with items.
 func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
+	result, err := f.fetchOne(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+	keepTitleKeyForOwnTitle(resolved, &result)
+	return result, err
+}
+
+func (f *Fetcher) fetchOne(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
 	start := time.Now()
 	var result SectionWithItems
 	var err error
@@ -364,6 +377,10 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 			result, err = f.fetchRecommendationRowWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
 			return result, err
 		}
+	}
+	if HoldsCollections(resolved.SectionType) {
+		result, err = f.fetchCollectionPosters(ctx, resolved, libraryID, userID, profileID, filter)
+		return result, err
 	}
 	if resolved.SectionType == SectionContinueWatching {
 		result, err = f.fetchContinueWatchingSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
@@ -437,7 +454,7 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 	// callers that bypass SectionWithItems construction.
 	if resolved.SectionType == SectionSeasonalThemed && len(items) > 0 {
 		if pick, ok := f.activeSeasonalPick(resolved.Config); ok && pick.Title != "" {
-			resolved.Title = pick.Title
+			resolved.Title, resolved.TitleKey, resolved.TitleArgs = pick.Title, pick.TitleKey, nil
 		}
 	}
 
@@ -524,9 +541,10 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 
 	// Ebook resume points live in ebook_reader_progress rather than the
 	// watch-progress store, so reading sections pull from that table and skip
-	// the next-up handling below.
+	// the next-up handling below. In-progress chapters of one manga collapse
+	// to one card while paging, as episodes do.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, false, orderedItems, itemMeta, completedCache,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, true, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -536,14 +554,6 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 			})
 		if err != nil {
 			return SectionWithItems{}, err
-		}
-		// Manga chapters are ebook items linked to a series; collapse multiple
-		// in-progress chapters of the same manga to a single card (keeping the
-		// most recently read), mirroring the episode→series collapse. Resolve
-		// the linkage into itemMeta so the shared collapse can group by series.
-		if len(orderedItems) > 1 {
-			f.applyMangaChapterSeriesMeta(ctx, orderedItems, itemMeta)
-			orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, itemMeta)
 		}
 		return SectionWithItems{
 			ResolvedSection: resolved,
@@ -556,8 +566,11 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	combined := ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp &&
 		NextUpMode(ctx, store, f.AdminDefaults, profileID) == NextUpModeCombined
 
+	// Home rows show one card per series, separate or combined with next up.
+	// Callers that suppress next up want every resume point instead.
+	collapseSeries := !resolved.SuppressNextUp
 	dropped := f.activeDroppedSeries(ctx, userID, profileID)
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, combined, orderedItems, itemMeta, completedCache,
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, collapseSeries, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -620,8 +633,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 // past the requested limit matters because dismissal filtering and
 // library/access scoping happen after the source query: trimming at the
 // source LIMIT would under-fill the section whenever dismissals exist. With
-// collapseSeries, a series' in-progress episodes count as one card, as the
-// combined row shows them.
+// collapseSeries, a series' in-progress episodes count as one card.
 func (f *Fetcher) collectContinueProgressItems(
 	ctx context.Context,
 	store userstore.UserStore,
@@ -672,6 +684,11 @@ func (f *Fetcher) collectContinueProgressItems(
 			return nil, err
 		}
 		maps.Copy(itemMeta, pageMeta)
+		if continueType == ContinueTypeReading {
+			// Manga chapters are ebooks; link each to its series so the
+			// collapse below groups them like a series' episodes.
+			f.applyMangaChapterSeriesMeta(ctx, pageItems, itemMeta)
+		}
 		orderedItems = appendContinuePage(orderedItems, pageItems, itemMeta, seen, limit, collapseSeries)
 		if rawProgressCount < pageLimit {
 			break
@@ -938,14 +955,13 @@ func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID st
 		Limit:         limit,
 		DateCutoff:    since,
 		RankByRelease: newReleasesFirst,
+		// Excluded in the query, not afterwards, so dismissals never leave
+		// the row short while more series are eligible.
+		ExcludeEpisodeIDs: f.nextUpDismissedEpisodeIDs(ctx, userID, profileID),
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(results) == 0 {
-		return nil, nil, nil
-	}
-	results = f.filterNextUpDismissals(ctx, userID, profileID, results)
 	if len(results) == 0 {
 		return nil, nil, nil
 	}
@@ -1165,39 +1181,28 @@ func (f *Fetcher) FilterDroppedProgress(ctx context.Context, userID int, profile
 	return f.progressFilter.FilterDroppedProgress(ctx, userID, profileID, entries)
 }
 
-func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profileID string, results []catalog.NextUpResult) []catalog.NextUpResult {
-	if len(results) == 0 || f.StoreProvider == nil || userID <= 0 || profileID == "" {
-		return results
+// nextUpDismissedEpisodeIDs lists the episodes the profile dismissed from
+// Home's Next Up, read through the user store so either backend's dismissals
+// apply. A failure leaves Next Up unfiltered, like Continue Watching.
+func (f *Fetcher) nextUpDismissedEpisodeIDs(ctx context.Context, userID int, profileID string) []string {
+	if f.StoreProvider == nil || userID <= 0 || profileID == "" {
+		return nil
 	}
-
 	store, err := f.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "getting user store for next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
-		return results
+		return nil
 	}
-
 	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceNextUp)
 	if err != nil {
 		slog.ErrorContext(ctx, "listing next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
-		return results
+		return nil
 	}
-	if len(dismissals) == 0 {
-		return results
+	ids := make([]string, len(dismissals))
+	for i, dismissal := range dismissals {
+		ids[i] = dismissal.MediaItemID
 	}
-
-	dismissedIDs := make(map[string]struct{}, len(dismissals))
-	for _, dismissal := range dismissals {
-		dismissedIDs[dismissal.MediaItemID] = struct{}{}
-	}
-
-	filtered := make([]catalog.NextUpResult, 0, len(results))
-	for _, result := range results {
-		if _, dismissed := dismissedIDs[result.ContentID]; dismissed {
-			continue
-		}
-		filtered = append(filtered, result)
-	}
-	return filtered
+	return ids
 }
 
 // FetchAll runs all section queries in parallel and returns sections with items.
@@ -1205,7 +1210,7 @@ func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profil
 // Because You Watched would otherwise each make.
 func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) []SectionWithItems {
 	start := time.Now()
-	ctx = recommendations.WithWatchedSetMemo(ctx)
+	ctx = WithCollectionCardGate(recommendations.WithWatchedSetMemo(ctx))
 	results := fetchAllWithRunner(ctx, resolved, fetchAllMaxConcurrency, func(ctx context.Context, sec ResolvedSection) (SectionWithItems, error) {
 		return f.FetchOne(ctx, sec, libraryID, libraryIDs, userID, profileID, filter)
 	})
@@ -1429,7 +1434,7 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 	// sort applies here — a viewer's personal override is honored on the
 	// collection's own browse page.
 	queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
-	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess.AllowedLibraryIDs)
+	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess)
 	if err != nil {
 		// The stored query no longer parses or validates, e.g. a legacy
 		// per-profile rule. Like jellycompat, list nothing rather than fail
@@ -1514,12 +1519,15 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 			qd = qd.Normalize()
 			// Build a synthetic resolved section with the query definition as config.
 			cfgBytes, _ := json.Marshal(qd)
+			// fetchFiltered replaces the query's limit with the row's, so a
+			// collection limit below the row size has to cap the row itself.
+			itemLimit := min(s.ItemLimit, *catalog.ApplySmartCollectionItemLimit(qd).Limit)
 			synth := ResolvedSection{
 				ID:          s.ID,
 				SectionType: SectionCustomFilter,
 				Title:       s.Title,
 				Featured:    s.Featured,
-				ItemLimit:   s.ItemLimit,
+				ItemLimit:   itemLimit,
 				Config:      cfgBytes,
 				Position:    s.Position,
 			}
@@ -1535,16 +1543,22 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		if qd.Limit != nil && *qd.Limit > 0 {
 			limit = *qd.Limit
 		}
+		// Both queries read the viewer's own state, as fetchFiltered does for
+		// the collection without a display filter.
+		viewerAccess := filter
+		viewerAccess.UserID = userID
+		viewerAccess.ProfileID = profileID
+		baseAccess := filter
+		if qd.IsPersonalized() {
+			baseAccess = viewerAccess
+		}
 		executor := &catalog.QueryExecutor{Pool: f.pool}
-		items, _, err := executor.Preview(ctx, qd, filter, limit)
+		items, _, err := executor.Preview(ctx, qd, baseAccess, limit)
 		if err != nil {
 			return nil, 0, err
 		}
 
-		displayAccess := filter
-		displayAccess.UserID = userID
-		displayAccess.ProfileID = profileID
-		items, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, f.pool, items, collection.DisplayQueryDefinition, displayAccess)
+		items, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, f.pool, items, collection.DisplayQueryDefinition, viewerAccess)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -2831,9 +2845,16 @@ func buildRecentlyReleasedQuery(s ResolvedSection, libraryID *int, libraryIDs []
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
+	// The row's See All page orders by exactly these terms (both paging paths),
+	// so the row is always its first page. Titles with no date come last. A
+	// movie-only row sorts by the movie release date alone, as See All does.
+	releaseDate := catalog.ReleaseDateSortSQL("mi")
+	if cfgFilters.FilterType == mediaScopeMovie {
+		releaseDate = "mi.release_date"
+	}
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s %s ORDER BY mi.year DESC, mi.created_at DESC LIMIT $%d`,
-		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, argIdx,
+		`SELECT %s FROM %s %s ORDER BY %s DESC NULLS LAST, mi.content_id ASC LIMIT $%d`,
+		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, releaseDate, argIdx,
 	)
 	args = append(args, s.ItemLimit)
 	return query, args
@@ -3113,6 +3134,15 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 	}
 
 	catalog.ApplySectionAccessFilter("si", filter, &conditions, &args, &argIdx)
+	// An episode with no version within the viewer's playback-quality ceiling
+	// cannot start, so it makes no card.
+	if playable := catalog.EpisodePlayableUnderCeilingSQL("e.content_id", filter, func(value any) int {
+		args = append(args, value)
+		argIdx = len(args) + 1
+		return len(args)
+	}); playable != "" {
+		conditions = append(conditions, playable)
+	}
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -3439,6 +3469,8 @@ func newTrendingEntry(tmdbID, tvdbID int, imdbID, mediaType string) trendingDisc
 
 // fetchTrendingDiscover surfaces external global trending (TMDB),
 // mixing movies + series, matched to titles in the viewer's enabled libraries.
+// A filter_type of "movie" or "series" keeps one of them. Every row reads the
+// same mixed snapshot, so the filter runs before the display limit.
 // The external fetch + ID resolution are cached briefly so it does not hit the
 // upstream API on every home-page load.
 func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
@@ -3461,7 +3493,7 @@ func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, 
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	items, err := f.fetchItemsByContentIDs(ctx, orderedIDs, libraryID, libraryIDs, filter)
+	items, err := f.fetchItemsByContentIDsFiltered(ctx, orderedIDs, libraryID, libraryIDs, SectionConfigFilters{FilterType: p.FilterType}, filter)
 	if err != nil {
 		return nil, 0, err
 	}

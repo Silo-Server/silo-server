@@ -1,7 +1,8 @@
-import { useEffect, useMemo, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useRef, type ReactNode } from "react";
 import { RotateCcw, X } from "lucide-react";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import { usePercentDraft } from "@/hooks/usePercentDraft";
+import { useT } from "@/i18n";
 import {
   BACKGROUND_STYLE_OPTIONS,
   BG_COLOR_PALETTE,
@@ -12,9 +13,10 @@ import {
   computeSubtitleStyles,
   type SubtitleAppearance,
 } from "@/lib/subtitleAppearance";
+import { isImeComposing } from "@/lib/imeComposition";
 
 export interface SubtitleAppearancePanelViewProps {
-  /** Whether the panel is rendered. Mounting the portal is gated on this. */
+  /** Whether the panel is open. */
   open: boolean;
   /** Current appearance value. Parent owns parsing and serialization. */
   value: SubtitleAppearance;
@@ -24,7 +26,7 @@ export interface SubtitleAppearancePanelViewProps {
    * expected to feed the next value back via `value` (optimistic OK).
    */
   onChange: (patch: Partial<SubtitleAppearance>) => void;
-  /** Close affordance (Escape key + backdrop click + chrome × button). */
+  /** Close affordance (Escape key + backdrop press + chrome × button). */
   onClose: () => void;
   /** Whether to render the footer reset action. */
   canReset?: boolean;
@@ -54,200 +56,207 @@ export function SubtitleAppearancePanelView({
   onClose,
   canReset = true,
   onReset,
-  resetLabel = "Use fallback style",
-  eyebrow = "Captions",
-  status = "Changes saved automatically",
+  resetLabel: resetLabelProp,
+  eyebrow: eyebrowProp,
+  status: statusProp,
 }: SubtitleAppearancePanelViewProps) {
+  const t = useT();
+  const resetLabel = resetLabelProp ?? t("web.settings.subtitlePanel.resetDefault");
+  const eyebrow = eyebrowProp ?? t("web.settings.subtitlePanel.eyebrowDefault");
+  const status = statusProp ?? t("web.settings.subtitlePanel.statusDefault");
   const previewStyles = useMemo(() => computeSubtitleStyles(value), [value]);
 
-  // Close on Escape. Blur first: the panel unmounts on close, and React does
-  // not dispatch blur for a removed input, so a typed opacity would be lost.
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  // Escape, a press outside the panel, and the × button all close through
+  // here. Blur first: the panel unmounts on close, and React does not
+  // dispatch blur for a removed input, so a typed opacity would be lost.
+  const close = () => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    onClose();
+  };
 
-  if (!open) return null;
+  // Radix returns focus only to a Dialog.Trigger, and the panel opens from
+  // plain buttons, so remember what had focus on open and go back there.
+  const openerRef = useRef<HTMLElement | null>(null);
 
-  const portalHost = document.fullscreenElement ?? document.body;
-
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Subtitle appearance"
-      className="player-subtitle-panel fixed inset-0 z-[70] flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      {/* Backdrop — dims whatever's behind the panel. */}
-      <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-
-      <div
-        role="document"
-        className="relative z-10 w-full max-w-[640px] overflow-hidden rounded-2xl border border-white/10 bg-[#111114]/95 text-white shadow-2xl ring-1 ring-black/40 backdrop-blur-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-3.5">
-          <div className="flex flex-col">
-            <div className="text-xs font-semibold tracking-[0.22em] text-white/65 uppercase">
-              {eyebrow}
-            </div>
-            <div className="text-[17px] font-semibold tracking-tight text-white">
-              Subtitle appearance
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-          >
-            <X className="h-[18px] w-[18px]" />
-          </button>
-        </div>
-
-        {/* Live preview */}
-        <div className="relative mx-5 mt-5 flex h-28 items-center justify-center overflow-hidden rounded-lg border border-white/[0.06] bg-[linear-gradient(135deg,#1f2937_0%,#0b0f1a_60%,#1e293b_100%)]">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 opacity-[0.12] mix-blend-overlay"
-            style={{
-              backgroundImage: "radial-gradient(rgba(255,255,255,0.7) 1px, transparent 1px)",
-              backgroundSize: "3px 3px",
+  // Radix Dialog traps focus in the panel and hides the page behind it from
+  // assistive tech. Inside a
+  // fullscreen player only the fullscreen element is painted, so the panel
+  // portals there.
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={(next) => !next && close()}>
+      <DialogPrimitive.Portal container={document.fullscreenElement ?? document.body}>
+        {/* Backdrop — dims whatever's behind the panel. A press that starts on
+            it closes the panel; a text selection dragged out of the panel
+            does not. */}
+        <DialogPrimitive.Overlay className="player-subtitle-panel fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <DialogPrimitive.Content
+            aria-describedby={undefined}
+            onOpenAutoFocus={() => {
+              openerRef.current =
+                document.activeElement instanceof HTMLElement ? document.activeElement : null;
             }}
-          />
-          <div
-            className="absolute inset-x-0 flex flex-col items-center gap-1 px-4 text-center"
-            style={previewStyles.containerStyle}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              openerRef.current?.focus();
+            }}
+            className="relative w-full max-w-[640px] overflow-hidden rounded-2xl border border-white/10 bg-[#111114]/95 text-white shadow-2xl ring-1 ring-black/40 backdrop-blur-xl outline-none"
           >
-            <span
-              className="inline-block rounded px-3 py-1 leading-snug"
-              style={{ ...previewStyles.cueStyle, whiteSpace: "pre-line" }}
-            >
-              The quick brown fox
-            </span>
-            <span
-              className="inline-block rounded px-3 py-1 leading-snug"
-              style={{ ...previewStyles.cueStyle, whiteSpace: "pre-line" }}
-            >
-              jumps over the lazy dog.
-            </span>
-          </div>
-        </div>
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-3.5">
+              <div className="flex flex-col">
+                <div className="text-xs font-semibold tracking-[0.22em] text-white/65 uppercase">
+                  {eyebrow}
+                </div>
+                <DialogPrimitive.Title className="text-[17px] font-semibold tracking-tight text-white">
+                  {t("web.settings.subtitlePanel.title")}
+                </DialogPrimitive.Title>
+              </div>
+              <button
+                type="button"
+                onClick={close}
+                aria-label={t("web.settings.subtitlePanel.close")}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+              >
+                <X className="h-[18px] w-[18px]" />
+              </button>
+            </div>
 
-        {/* Scrollable body */}
-        <div className="overlay-scroll max-h-[52vh] space-y-6 overflow-y-auto px-5 py-5">
-          {/* Text */}
-          <Section label="Text">
-            <Row label="Size">
-              <PillGroup
-                options={FONT_SIZE_OPTIONS}
-                value={value.fontSize}
-                onChange={(v) => onChange({ fontSize: v })}
+            {/* Live preview */}
+            <div className="relative mx-5 mt-5 flex h-28 items-center justify-center overflow-hidden rounded-lg border border-white/[0.06] bg-[linear-gradient(135deg,#1f2937_0%,#0b0f1a_60%,#1e293b_100%)]">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 opacity-[0.12] mix-blend-overlay"
+                style={{
+                  backgroundImage: "radial-gradient(rgba(255,255,255,0.7) 1px, transparent 1px)",
+                  backgroundSize: "3px 3px",
+                }}
               />
-            </Row>
-            <Row label="Font">
-              <PillGroup
-                options={FONT_FAMILY_OPTIONS}
-                value={value.fontFamily}
-                onChange={(v) => onChange({ fontFamily: v })}
-              />
-            </Row>
-            <Row label="Color">
-              <ColorSwatchRow
-                colors={FONT_COLOR_PALETTE}
-                value={value.fontColor}
-                onChange={(v) => onChange({ fontColor: v })}
-              />
-            </Row>
-            <Row label="Opacity">
-              <PercentField
-                value={value.textOpacity}
-                onChange={(v) => onChange({ textOpacity: v })}
-                ariaLabel="Text opacity"
-              />
-            </Row>
-            <Row label="Outline">
-              <ToggleSwitch
-                checked={value.textOutline}
-                onChange={(v) => onChange({ textOutline: v })}
-                label="Text outline"
-              />
-            </Row>
-          </Section>
+              <div
+                className="absolute inset-x-0 flex flex-col items-center gap-1 px-4 text-center"
+                style={previewStyles.containerStyle}
+              >
+                <span
+                  className="inline-block rounded px-3 py-1 leading-snug"
+                  style={{ ...previewStyles.cueStyle, whiteSpace: "pre-line" }}
+                >
+                  {t("web.settings.subtitlePanel.previewLine1")}
+                </span>
+                <span
+                  className="inline-block rounded px-3 py-1 leading-snug"
+                  style={{ ...previewStyles.cueStyle, whiteSpace: "pre-line" }}
+                >
+                  {t("web.settings.subtitlePanel.previewLine2")}
+                </span>
+              </div>
+            </div>
 
-          <Divider />
-
-          {/* Background */}
-          <Section label="Background">
-            <Row label="Style">
-              <PillGroup
-                options={BACKGROUND_STYLE_OPTIONS}
-                value={value.backgroundStyle}
-                onChange={(v) => onChange({ backgroundStyle: v })}
-              />
-            </Row>
-            {value.backgroundStyle === "box" && (
-              <>
-                <Row label="Opacity">
-                  <PercentField
-                    min={0}
-                    value={value.backgroundOpacity}
-                    onChange={(v) => onChange({ backgroundOpacity: v })}
-                    ariaLabel="Background opacity"
+            {/* Scrollable body */}
+            <div className="overlay-scroll max-h-[52vh] space-y-6 overflow-y-auto px-5 py-5">
+              {/* Text */}
+              <Section label={t("web.settings.subtitlePanel.text")}>
+                <Row label={t("web.settings.subtitlePanel.size")}>
+                  <PillGroup
+                    options={FONT_SIZE_OPTIONS}
+                    value={value.fontSize}
+                    onChange={(v) => onChange({ fontSize: v })}
                   />
                 </Row>
-                <Row label="Color">
+                <Row label={t("web.settings.subtitlePanel.font")}>
+                  <PillGroup
+                    options={FONT_FAMILY_OPTIONS}
+                    value={value.fontFamily}
+                    onChange={(v) => onChange({ fontFamily: v })}
+                  />
+                </Row>
+                <Row label={t("web.settings.subtitlePanel.color")}>
                   <ColorSwatchRow
-                    colors={BG_COLOR_PALETTE}
-                    value={value.backgroundColor}
-                    onChange={(v) => onChange({ backgroundColor: v })}
+                    colors={FONT_COLOR_PALETTE}
+                    value={value.fontColor}
+                    onChange={(v) => onChange({ fontColor: v })}
                   />
                 </Row>
-              </>
-            )}
-          </Section>
+                <Row label={t("web.settings.subtitlePanel.opacity")}>
+                  <PercentField
+                    value={value.textOpacity}
+                    onChange={(v) => onChange({ textOpacity: v })}
+                    ariaLabel={t("web.settings.subtitlePanel.textOpacity")}
+                  />
+                </Row>
+                <Row label={t("web.settings.subtitlePanel.outline")}>
+                  <ToggleSwitch
+                    checked={value.textOutline}
+                    onChange={(v) => onChange({ textOutline: v })}
+                    label={t("web.settings.subtitlePanel.textOutline")}
+                  />
+                </Row>
+              </Section>
 
-          <Divider />
+              <Divider />
 
-          {/* Position */}
-          <Section label="Position">
-            <Row label="Vertical">
-              <PillGroup
-                options={POSITION_OPTIONS}
-                value={value.position}
-                onChange={(v) => onChange({ position: v })}
-              />
-            </Row>
-          </Section>
-        </div>
+              {/* Background */}
+              <Section label={t("web.settings.subtitlePanel.background")}>
+                <Row label={t("web.settings.subtitlePanel.style")}>
+                  <PillGroup
+                    options={BACKGROUND_STYLE_OPTIONS}
+                    value={value.backgroundStyle}
+                    onChange={(v) => onChange({ backgroundStyle: v })}
+                  />
+                </Row>
+                {value.backgroundStyle === "box" && (
+                  <>
+                    <Row label={t("web.settings.subtitlePanel.opacity")}>
+                      <PercentField
+                        min={0}
+                        value={value.backgroundOpacity}
+                        onChange={(v) => onChange({ backgroundOpacity: v })}
+                        ariaLabel={t("web.settings.subtitlePanel.backgroundOpacity")}
+                      />
+                    </Row>
+                    <Row label={t("web.settings.subtitlePanel.color")}>
+                      <ColorSwatchRow
+                        colors={BG_COLOR_PALETTE}
+                        value={value.backgroundColor}
+                        onChange={(v) => onChange({ backgroundColor: v })}
+                      />
+                    </Row>
+                  </>
+                )}
+              </Section>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-3 border-t border-white/[0.08] bg-black/30 px-5 py-3">
-          {canReset && onReset ? (
-            <button
-              type="button"
-              onClick={onReset}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              {resetLabel}
-            </button>
-          ) : (
-            <span aria-hidden="true" />
-          )}
-          <div className="text-xs tracking-wide text-white/65 uppercase">{status}</div>
-        </div>
-      </div>
-    </div>,
-    portalHost,
+              <Divider />
+
+              {/* Position */}
+              <Section label={t("web.settings.subtitlePanel.position")}>
+                <Row label={t("web.settings.subtitlePanel.vertical")}>
+                  <PillGroup
+                    options={POSITION_OPTIONS}
+                    value={value.position}
+                    onChange={(v) => onChange({ position: v })}
+                  />
+                </Row>
+              </Section>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between gap-3 border-t border-white/[0.08] bg-black/30 px-5 py-3">
+              {canReset && onReset ? (
+                <button
+                  type="button"
+                  onClick={onReset}
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {resetLabel}
+                </button>
+              ) : (
+                <span aria-hidden="true" />
+              )}
+              <div className="text-xs tracking-wide text-white/65 uppercase">{status}</div>
+            </div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Overlay>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -359,6 +368,8 @@ function ColorSwatchRow({
 /** A typed percentage value, for controls where dragging a slider is more
  * fiddly than just typing the number — opacity wants precision at the low
  * end where a few percent is the difference between legible and not. */
+const PERCENT_SIGN = "%";
+
 function PercentField({
   value,
   onChange,
@@ -384,11 +395,11 @@ function PercentField({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Enter" && !isImeComposing(e)) e.currentTarget.blur();
         }}
-        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-right text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-end text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <span className="text-[13px] text-white/60">%</span>
+      <span className="text-[13px] text-white/60">{PERCENT_SIGN}</span>
     </div>
   );
 }
@@ -415,7 +426,9 @@ function ToggleSwitch({
     >
       <span
         className={`inline-block h-5 w-5 transform rounded-full shadow-md transition-transform ${
-          checked ? "translate-x-[22px] bg-black" : "translate-x-[2px] bg-white"
+          checked
+            ? "translate-x-[22px] bg-black rtl:-translate-x-[22px]"
+            : "translate-x-[2px] bg-white rtl:-translate-x-[2px]"
         }`}
       />
     </button>

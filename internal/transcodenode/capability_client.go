@@ -17,17 +17,21 @@ import (
 
 const maxHWCapabilitiesResponseBytes = 1 << 20
 
-// FetchHWCapabilities performs the authenticated node capability request with
-// redirect refusal and a bounded response. The supplied client is shallow-
-// cloned so its transport, timeout, and cookie jar remain available without
-// mutating its redirect policy.
-func FetchHWCapabilities(ctx context.Context, baseClient *http.Client, nodeURL, jwtSecret string) (playback.HWAccelInfo, int, error) {
-	info, _, status, err := FetchHWCapabilitiesPayload(ctx, baseClient, nodeURL, jwtSecret)
+// FetchHWCapabilities performs the authenticated capability request to the
+// worker of kind target at nodeURL with redirect refusal and a bounded
+// response. Proxies serve the same route, so the caller names the kind it
+// holds the URL as: the keyring signs a proxy with the shared secret and a
+// transcode node with its own key, and refuses a kind not registered there.
+// The supplied client is shallow-cloned so its transport, timeout, and cookie
+// jar remain available without mutating its redirect policy.
+func FetchHWCapabilities(ctx context.Context, baseClient *http.Client, nodeURL string, target nodeauth.Target, keys nodeauth.Keyring) (playback.HWAccelInfo, int, error) {
+	info, _, status, err := FetchHWCapabilitiesPayload(ctx, baseClient, nodeURL, target, keys)
 	return info, status, err
 }
 
-// FetchHWCapabilitiesPayload is FetchHWCapabilities with the node's own
-// response bytes returned alongside the decoded report.
+// FetchHWCapabilitiesPayload is FetchHWCapabilities for a worker of kind
+// target, with the node's own response bytes returned alongside the decoded
+// report.
 //
 // A caller that *persists* the report must use this form. Re-marshaling the
 // decoded struct instead drops every field this build does not know about, and
@@ -38,12 +42,12 @@ func FetchHWCapabilities(ctx context.Context, baseClient *http.Client, nodeURL, 
 // reads, until some unrelated capability change or a manual re-probe moves the
 // hash. The bytes are already bounded and parsed by the time they are returned,
 // which is what makes storing them verbatim safe.
-func FetchHWCapabilitiesPayload(ctx context.Context, baseClient *http.Client, nodeURL, jwtSecret string) (playback.HWAccelInfo, []byte, int, error) {
+func FetchHWCapabilitiesPayload(ctx context.Context, baseClient *http.Client, nodeURL string, target nodeauth.Target, keys nodeauth.Keyring) (playback.HWAccelInfo, []byte, int, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(nodeURL, "/")+"/hw-capabilities", nil)
 	if err != nil {
 		return playback.HWAccelInfo{}, nil, 0, logredact.SanitizeURLError(err)
 	}
-	if err := nodeauth.Sign(request, nodeURL, jwtSecret); err != nil {
+	if err := nodeauth.SignWith(request, target, nodeURL, keys); err != nil {
 		return playback.HWAccelInfo{}, nil, 0, err
 	}
 

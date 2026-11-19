@@ -19,7 +19,7 @@ type ActingAdminRequest struct {
 
 // ActingAdminDecider decides whether an admin-role caller may exercise admin
 // powers as the profile it acts as: the account's primary profile, or no
-// profile while the household does not require one. RequireActingAdmin
+// profile while the household does not require one. RequireActingAdminWith
 // enforces it on the admin route groups, and ActingAdmin answers it anywhere
 // else. Callers check the admin role first.
 type ActingAdminDecider func(ctx context.Context, in ActingAdminRequest) (bool, error)

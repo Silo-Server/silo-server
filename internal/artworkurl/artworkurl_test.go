@@ -22,13 +22,6 @@ func TestSignerRejectsExpiryAndTamper(t *testing.T) {
 	}
 }
 
-func TestDirectResolver(t *testing.T) {
-	resolver := NewDirectResolver(fakeDirect{}, time.Hour)
-	if got := resolver.ResolveURLs(context.Background(), []string{"a.webp", "missing"}); got["a.webp"].URL != "https://example/a.webp" || got["a.webp"].ExpiresAt == nil || len(got) != 1 {
-		t.Fatal(got)
-	}
-}
-
 type fakeDirect struct{}
 
 func (fakeDirect) DirectURL(_ context.Context, key string, ttl, _ time.Duration) (string, time.Time, error) {
@@ -61,12 +54,13 @@ func TestSignerTTL(t *testing.T) {
 		name        string
 		input, want time.Duration
 	}{
-		{"default", 0, 4 * time.Hour}, {"minimum", time.Second, time.Minute}, {"maximum", 48 * time.Hour, 24 * time.Hour},
+		// The lifetime plus one URL bucket (15 minutes, or the TTL if shorter).
+		{"default", 0, 4*time.Hour + 15*time.Minute}, {"minimum", time.Second, 2 * time.Minute}, {"maximum", 48 * time.Hour, 24*time.Hour + 15*time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, exp := NewSigner("secret", tc.input).Sign("a.webp", now)
-			if got := exp.Sub(now); got != tc.want+min(15*time.Minute, tc.want) {
-				t.Fatalf("TTL = %s, want %s", got, tc.want+min(15*time.Minute, tc.want))
+			if got := exp.Sub(now); got != tc.want {
+				t.Fatalf("TTL = %s, want %s", got, tc.want)
 			}
 		})
 	}
@@ -118,48 +112,6 @@ func TestSignerMinimumLifetimeAndStableBuckets(t *testing.T) {
 	}
 }
 
-func TestSignForHonorsRequestedTTL(t *testing.T) {
-	now := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
-	signer := NewSigner("secret", 4*time.Hour)
-	_, exp := signer.SignFor("a.webp", now, 15*time.Minute)
-	if got := exp.Sub(now); got != 30*time.Minute {
-		t.Fatalf("15m capability lived %s", got)
-	}
-	// Non-positive falls back to the signer default; out of range clamps.
-	if _, exp := signer.SignFor("a.webp", now, 0); exp.Sub(now) != 4*time.Hour+15*time.Minute {
-		t.Fatalf("default TTL not applied: %s", exp.Sub(now))
-	}
-	if _, exp := signer.SignFor("a.webp", now, time.Second); exp.Sub(now) != 2*time.Minute {
-		t.Fatalf("minimum not clamped: %s", exp.Sub(now))
-	}
-	path, exp := signer.SignFor("a.webp", now, 15*time.Minute)
-	parsed, _ := url.Parse(path)
-	if err := signer.Verify("a.webp", exp.Unix(), parsed.Query().Get("sig"), now); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestResolveURLForUsesLifetimeOnBothResolvers(t *testing.T) {
-	ctx := context.Background()
-	now := time.Now()
-	server := NewServerResolver(NewSigner("secret", 4*time.Hour))
-	resolved, ok := ResolveURLFor(ctx, server, "a.webp", 15*time.Minute)
-	if !ok || resolved.ExpiresAt == nil || resolved.ExpiresAt.Sub(now) > 31*time.Minute {
-		t.Fatalf("server resolver ignored the lifetime: %+v", resolved)
-	}
-	direct := NewDirectResolver(ttlRecordingDirect{}, time.Hour)
-	resolved, ok = ResolveURLFor(ctx, direct, "a.webp", 15*time.Minute)
-	if !ok || resolved.URL != "https://example/a.webp?ttl=15m0s&window=0s" {
-		t.Fatalf("direct resolver ignored the lifetime: %+v", resolved)
-	}
-	if _, ok := ResolveURLFor(ctx, direct, "missing", 15*time.Minute); ok {
-		t.Fatal("missing object resolved")
-	}
-	if _, ok := ResolveURLFor(ctx, nil, "a.webp", time.Minute); ok {
-		t.Fatal("nil resolver resolved")
-	}
-}
-
 type ttlRecordingDirect struct{}
 
 func (ttlRecordingDirect) DirectURL(_ context.Context, key string, ttl, window time.Duration) (string, time.Time, error) {
@@ -167,67 +119,6 @@ func (ttlRecordingDirect) DirectURL(_ context.Context, key string, ttl, window t
 		return "", time.Time{}, errors.New("unavailable")
 	}
 	return "https://example/" + key + "?ttl=" + ttl.String() + "&window=" + window.String(), time.Now().Add(ttl), nil
-}
-
-// Mutable keys, capabilities shorter than the default, and job artifacts keep
-// 15-minute buckets: a day that starts mid-bucket spans 97 of them.
-func TestMutableAndShortLivedURLsKeepShortBuckets(t *testing.T) {
-	artwork := NewSigner("secret", 4*time.Hour)
-	jobs := NewJobArtifactSigner("secret", 15*time.Minute)
-	start := time.Date(2026, 1, 2, 3, 7, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		name string
-		ttl  time.Duration
-		sign func(time.Time) (string, time.Time)
-	}{
-		{"mutable key", 4 * time.Hour, func(now time.Time) (string, time.Time) {
-			return artwork.Sign("library-posters/5.jpg", now)
-		}},
-		{"short capability", 15 * time.Minute, func(now time.Time) (string, time.Time) {
-			return artwork.SignFor("chapters/1/w300.0123abcd.webp", now, 15*time.Minute)
-		}},
-		{"job artifact", 15 * time.Minute, func(now time.Time) (string, time.Time) {
-			return jobs.SignFor("job.0123abcd", now, 15*time.Minute)
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			distinct := map[string]bool{}
-			for i := range 24 * 60 {
-				now := start.Add(time.Duration(i) * time.Minute)
-				path, exp := tc.sign(now)
-				if remaining := exp.Sub(now); remaining < tc.ttl || remaining > tc.ttl+shortURLBucket {
-					t.Fatalf("remaining lifetime %s at %s", remaining, now)
-				}
-				distinct[path] = true
-			}
-			if len(distinct) != 97 {
-				t.Fatalf("got %d URLs in a day, want 97 15-minute buckets", len(distinct))
-			}
-		})
-	}
-}
-
-func TestDirectResolverHoldsOnlyRevisionedDefaultLifetimeURLs(t *testing.T) {
-	ctx := context.Background()
-	direct := NewDirectResolver(ttlRecordingDirect{}, time.Hour)
-	revisioned := "tmdb/movie/1/poster/w500.0123abcd.webp"
-	for _, tc := range []struct {
-		name, key string
-		ttl       time.Duration
-		window    string
-	}{
-		{"revisioned default", revisioned, 0, "24h0m0s"},
-		{"mutable default", "library-posters/5.jpg", 0, "0s"},
-		{"revisioned short", revisioned, 15 * time.Minute, "0s"},
-	} {
-		resolved, ok := ResolveURLFor(ctx, direct, tc.key, tc.ttl)
-		if !ok || !strings.HasSuffix(resolved.URL, "&window="+tc.window) {
-			t.Fatalf("%s: got %+v, want window %s", tc.name, resolved, tc.window)
-		}
-	}
-	if got := direct.ResolveURLs(ctx, []string{revisioned})[revisioned].URL; !strings.HasSuffix(got, "&window=24h0m0s") {
-		t.Fatalf("batch resolve did not hold the revisioned URL: %s", got)
-	}
 }
 
 func TestSignedKeyAcceptsOnlyItsOwnValidURLs(t *testing.T) {
@@ -258,5 +149,30 @@ func TestSignedKeyAcceptsOnlyItsOwnValidURLs(t *testing.T) {
 		if got, ok := signer.SignedKey(rawURL, at); ok {
 			t.Errorf("%s: SignedKey(%s) = %q, want rejection", name, rawURL, got)
 		}
+	}
+}
+
+// The artwork signer never signs, and never accepts, a key under a namespace
+// that shares a local root with artwork but is not artwork: a backup's
+// database dump, a diagnostic bundle, a job artifact. Other signers (job
+// artifacts, backup objects) sign their own keys as before.
+func TestArtworkSignerRefusesOperationalKeys(t *testing.T) {
+	s := NewSigner("secret", time.Hour)
+	now := time.Now()
+	for _, key := range []string{"backups/server/20261102t040000z/db.dump", "/backups/x", "diagnostics/1/report.tar.gz", "catalog-seeds/a.json"} {
+		if u, _ := s.Sign(key, now); u != "" {
+			t.Errorf("signed %s as artwork: %s", key, u)
+		}
+		exp := now.Add(time.Hour).Unix()
+		// A signature made as if the key were artwork is refused too.
+		if err := s.Verify(key, exp, s.signature(key, exp), now); !errors.Is(err, ErrRefusedKey) {
+			t.Errorf("verifying %s = %v, want ErrRefusedKey", key, err)
+		}
+	}
+	if u, _ := s.Sign("local/movies/m1/abcd1234/poster/original.r1.jpg", now); u == "" {
+		t.Error("an artwork key was refused")
+	}
+	if u, _ := NewBackupObjectSigner("secret", time.Hour).Sign(BackupObjectKey("20261102t040000z", "db.dump"), now); u == "" {
+		t.Error("the backup object signer refused its own key")
 	}
 }

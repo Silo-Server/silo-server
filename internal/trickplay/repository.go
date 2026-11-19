@@ -12,9 +12,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // Repository keeps media_file_trickplay: the queue of files to generate and
@@ -77,35 +79,39 @@ type Job struct {
 }
 
 // Claim leases the next due file for owner, for a server at recipe version
-// AlgorithmVersion, or returns nil when none is due. Mutations must use the
+// AlgorithmVersion, or returns nil when none is due. The next file is one
+// Regenerate queued, else the newest: what was just added is what viewers
+// play next, and a backlog must not hold it back. Mutations must use the
 // returned Job.LeaseToken, which changes on every claim.
 func (r *Repository) Claim(ctx context.Context, owner string, lease time.Duration) (*Job, error) {
-	return r.claim(ctx, owner, lease, 0)
+	return r.claim(ctx, r.pool, owner, lease, nil)
 }
 
 // ClaimFile leases fileID if it is due.
 func (r *Repository) ClaimFile(ctx context.Context, fileID int, owner string, lease time.Duration) (*Job, error) {
-	return r.claim(ctx, owner, lease, fileID)
+	return r.claim(ctx, r.pool, owner, lease, []int{fileID})
 }
 
-func (r *Repository) claim(ctx context.Context, owner string, lease time.Duration, fileID int) (*Job, error) {
+// claim leases the next due file on db, any file when among is nil and one
+// of those files otherwise.
+func (r *Repository) claim(ctx context.Context, db reconcileConn, owner string, lease time.Duration, among []int) (*Job, error) {
 	var job Job
 	leaseToken := owner + ":" + rand.Text()
 	var videoTracks []byte
 	var container, codec *string
 	var hdr *bool
 	var duration *int
-	err := r.pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		WITH next AS (
 			SELECT t.media_file_id FROM public.media_file_trickplay t
 			JOIN public.media_files mf ON mf.id = t.media_file_id
 			JOIN public.media_folders f ON f.id = mf.media_folder_id
 			WHERE t.state = 'pending' AND t.available_at <= now() AND t.recipe_version <= $3
-			  AND ($4::bigint = 0 OR t.media_file_id = $4)
+			  AND ($4::bigint[] IS NULL OR t.media_file_id = ANY($4))
 			  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
 			  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 			  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
-			ORDER BY t.available_at, t.media_file_id
+			ORDER BY (t.available_at = '-infinity'::timestamptz) DESC, t.media_file_id DESC
 			LIMIT 1
 			FOR UPDATE OF t SKIP LOCKED
 		)
@@ -120,7 +126,7 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
 		RETURNING t.media_file_id, mf.file_path, mf.container, mf.codec_video, mf.duration, mf.hdr,
 		          COALESCE(mf.video_tracks, '[]'::jsonb), t.failure_count, t.lease_owner`,
-		leaseToken, lease.Seconds(), AlgorithmVersion, fileID, videoLibraryTypes,
+		leaseToken, lease.Seconds(), AlgorithmVersion, among, videoLibraryTypes,
 	).Scan(&job.FileID, &job.FilePath, &container, &codec, &duration, &hdr, &videoTracks, &job.Failures, &job.LeaseToken)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -200,6 +206,8 @@ func newRevision() int64 {
 type Published struct {
 	Recipe        Recipe
 	StoreIdentity string
+	// ToneMapSource names the sheets' HDR conversion (see toneMapKey).
+	ToneMapSource string
 	Height        int
 	Count         int
 	SheetBytes    []int
@@ -241,10 +249,11 @@ func (r *Repository) Publish(ctx context.Context, fileID int, leaseToken string,
 			    width = $4, height = $5, tile_columns = $6, tile_rows = $7, interval_ms = $8,
 			    thumbnail_count = $9, sheet_count = $10, bandwidth = $11, sheet_bytes = $12,
 			    decoder = $13, filled = $14, delivery_scope = NULLIF($15, ''), delivery_checked_at = now(),
-			    generated_at = now(), updated_at = now()
+			    tone_map_source = NULLIF($16, ''), generated_at = now(), updated_at = now()
 			WHERE media_file_id = $1`,
 			fileID, p.Recipe.String(), p.StoreIdentity, p.Recipe.Width, p.Height, columns, rows, p.Recipe.IntervalMS,
-			p.Count, len(p.SheetBytes), p.Recipe.Bandwidth(p.SheetBytes), total, p.Decoder, p.Filled, p.DeliveryScope)
+			p.Count, len(p.SheetBytes), p.Recipe.Bandwidth(p.SheetBytes), total, p.Decoder, p.Filled, p.DeliveryScope,
+			p.ToneMapSource)
 		if err != nil {
 			return false, fmt.Errorf("publish trickplay: %w", err)
 		}
@@ -419,19 +428,32 @@ type ReconcileStats struct {
 	Added     int `json:"added"`
 	Removed   int `json:"removed"`
 	Stale     int `json:"stale"`
+	// ToneMapStale counts rows requeued because their file's catalog facts
+	// now call for another HDR conversion than their sheets were made with.
+	ToneMapStale int `json:"tone_map_stale"`
 }
 
 // Reconcile brings the queue in line with the libraries, files, settings,
 // and storage: it reclaims leases that ran out, adds files of opted-in
 // libraries, removes rows of libraries that opted out or became ineligible
 // (their sheets are queued for deletion), and requeues rows whose sheets no longer match
-// their file, recipe, or storage. Each step handles at most batch rows.
+// their file, recipe, or storage, then checks the next batch of finished rows'
+// HDR conversion against their file's catalog facts. Each step handles at
+// most batch rows.
 func (r *Repository) Reconcile(ctx context.Context, recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
-	return r.reconcile(ctx, r.pool.Exec, recipe, storeIdentity, batch)
+	return r.reconcile(ctx, r.pool, recipe, storeIdentity, batch)
+}
+
+// reconcileConn is the session a reconcile pass runs on: the pool, or the
+// connection holding the pass's advisory lock.
+type reconcileConn interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // reconcile runs on the caller's session when an advisory lock guards the pass.
-func (r *Repository) reconcile(ctx context.Context, exec func(context.Context, string, ...any) (pgconn.CommandTag, error), recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
+func (r *Repository) reconcile(ctx context.Context, conn reconcileConn, recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
 	var stats ReconcileStats
 	steps := []struct {
 		count *int
@@ -444,14 +466,160 @@ func (r *Repository) reconcile(ctx context.Context, exec func(context.Context, s
 		{&stats.Stale, staleSQL, []any{AlgorithmVersion, recipe.String(), storeIdentity, batch, videoLibraryTypes}},
 	}
 	for _, step := range steps {
-		tag, err := exec(ctx, step.sql, step.args...)
+		tag, err := conn.Exec(ctx, step.sql, step.args...)
 		if err != nil {
 			return stats, fmt.Errorf("reconcile trickplay: %w", err)
 		}
 		*step.count = int(tag.RowsAffected())
 	}
+	var err error
+	stats.ToneMapStale, err = r.sweepToneMaps(ctx, conn, batch)
+	if err != nil {
+		return stats, fmt.Errorf("reconcile trickplay tone maps: %w", err)
+	}
 	return stats, nil
 }
+
+// sweepToneMaps checks the HDR conversion of the finished rows among the next
+// batch of queue rows, in file order, wrapping around at the end: a row whose
+// file's catalog facts now call for another conversion than its sheets were
+// made with (a rescan or backfill rewrote its color facts, or a newer server
+// classifies them differently) is requeued, and a row published before
+// conversions were recorded takes the conversion its facts call for or is
+// requeued (see toneMapStale). It returns the rows requeued. A pass checks a
+// bounded slice so its cost does not grow with the library; the whole queue
+// is covered over successive passes, on whichever servers run them, from a
+// cursor kept in the database.
+func (r *Repository) sweepToneMaps(ctx context.Context, conn reconcileConn, batch int) (int, error) {
+	var after int64
+	err := conn.QueryRow(ctx, `SELECT after_id FROM public.trickplay_tone_map_cursor`).Scan(&after)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	rows, err := conn.Query(ctx, toneMapCandidatesSQL, after, AlgorithmVersion, batch, videoLibraryTypes)
+	if err != nil {
+		return 0, err
+	}
+	var ids, revisions []int64
+	var stored []pgtype.Text
+	var keys []string
+	var requeue []bool
+	read, last := 0, int64(0)
+	for rows.Next() {
+		var id, revision int64
+		var source pgtype.Text
+		var checkable, hdr bool
+		var tracks []byte
+		if err := rows.Scan(&id, &revision, &source, &checkable, &hdr, &tracks); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		read, last = read+1, id
+		// Rows that are not finished, or whose file is no longer eligible, are
+		// left to the other steps.
+		if !checkable {
+			continue
+		}
+		// Classify the facts as a claim reads them.
+		file := models.MediaFile{HDR: hdr}
+		if err := json.Unmarshal(tracks, &file.VideoTracks); err != nil {
+			file.VideoTracks = nil
+		}
+		key := toneMapKey(sheetsToneMap(&file))
+		ids, revisions = append(ids, id), append(revisions, revision)
+		stored, keys, requeue = append(stored, source), append(keys, key), append(requeue, toneMapStale(source, key))
+	}
+	// Free the session for the updates.
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	// Continue after the last row of a full batch; start over after a short one.
+	next := int64(0)
+	if read == batch {
+		next = last
+	}
+	requeued := 0
+	if len(ids) > 0 {
+		if _, err := conn.Exec(ctx, adoptToneMapSQL, ids, revisions, stored, keys, requeue, AlgorithmVersion); err != nil {
+			return 0, err
+		}
+		tag, err := conn.Exec(ctx, requeueToneMapSQL, ids, revisions, stored, keys, requeue, AlgorithmVersion)
+		if err != nil {
+			return 0, err
+		}
+		requeued = int(tag.RowsAffected())
+	}
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO public.trickplay_tone_map_cursor (singleton, after_id, updated_at) VALUES (true, $1, now())
+		ON CONFLICT (singleton) DO UPDATE SET after_id = EXCLUDED.after_id, updated_at = EXCLUDED.updated_at`, next); err != nil {
+		return 0, err
+	}
+	return requeued, nil
+}
+
+// toneMapStale reports whether sheets recorded as made with stored must be
+// made again for a file whose facts call for key. Sheets with no record take
+// key, except when key is pq_full_range: that conversion arrived after
+// sheets were first published (before it, such files were converted as
+// limited-range PQ), and a file only reaches it when its facts say or show
+// full range, which a later probe or backfill can record without the file
+// changing, so the sheets may predate it.
+func toneMapStale(stored pgtype.Text, key string) bool {
+	if !stored.Valid {
+		return key == string(tonemap.SourcePQFullRange)
+	}
+	return stored.String != key
+}
+
+// toneMapCandidatesSQL reads the next queue rows after a file, with whether
+// each is a finished row of an eligible file that a server at this version
+// may change, and the catalog facts a claim reads. The slice is the next rows
+// by key whatever their state, so a pass reads a bounded number of rows
+// however large the library or its backlog is; a row that is not finished
+// records its conversion when it publishes. Foreign keys keep every row's
+// file and library, so the joins return the whole slice.
+const toneMapCandidatesSQL = `
+	WITH slice AS MATERIALIZED (
+		SELECT media_file_id, state, revision, recipe_version, tone_map_source
+		FROM public.media_file_trickplay
+		WHERE media_file_id > $1
+		ORDER BY media_file_id
+		LIMIT $3
+	)
+	SELECT s.media_file_id, COALESCE(s.revision, 0), s.tone_map_source,
+	       COALESCE(s.state = 'ready' AND s.revision IS NOT NULL AND s.recipe_version <= $2
+	       AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($4::text[])
+	       AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+	       AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0, false),
+	       COALESCE(mf.hdr, false), COALESCE(mf.video_tracks, '[]'::jsonb)
+	FROM slice s
+	JOIN public.media_files mf ON mf.id = s.media_file_id
+	JOIN public.media_folders f ON f.id = mf.media_folder_id
+	ORDER BY s.media_file_id`
+
+// adoptToneMapSQL records the conversion on rows that have none and keep
+// their sheets, if they still serve the revision that was read.
+const adoptToneMapSQL = `
+	UPDATE public.media_file_trickplay t
+	SET tone_map_source = c.key
+	FROM unnest($1::bigint[], $2::bigint[], $3::text[], $4::text[], $5::boolean[]) AS c(id, revision, stored, key, requeue)
+	WHERE t.media_file_id = c.id AND c.stored IS NULL AND NOT c.requeue
+	  AND t.state = 'ready' AND t.revision = c.revision AND t.tone_map_source IS NULL AND t.recipe_version <= $6`
+
+// requeueToneMapSQL requeues the rows toneMapStale picked, if they still
+// serve the revision and conversion that were read. Like staleSQL, it leaves
+// the published sheets serving until their replacement publishes, and
+// forgets their conversion, so sheets republished by a server that does not
+// record one are adopted rather than requeued again.
+const requeueToneMapSQL = `
+	UPDATE public.media_file_trickplay t
+	SET state = 'pending', available_at = now(), failure_count = 0, last_error = '',
+	    recipe_version = $6, tone_map_source = NULL, updated_at = now()
+	FROM unnest($1::bigint[], $2::bigint[], $3::text[], $4::text[], $5::boolean[]) AS c(id, revision, stored, key, requeue)
+	WHERE t.media_file_id = c.id AND c.requeue
+	  AND t.state = 'ready' AND t.revision = c.revision AND t.tone_map_source IS NOT DISTINCT FROM c.stored
+	  AND t.recipe_version <= $6`
 
 func backoffSeconds() []float64 {
 	seconds := make([]float64, len(failureBackoff))
@@ -524,7 +692,7 @@ const removeSQL = `
 const staleSQL = `
 	UPDATE public.media_file_trickplay t
 	SET state = 'pending', available_at = now(), failure_count = 0, last_error = '',
-	    recipe_version = $1, updated_at = now()
+	    recipe_version = $1, tone_map_source = NULL, updated_at = now()
 	FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
 	WHERE mf.id = t.media_file_id
 	  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])

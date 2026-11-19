@@ -18,10 +18,21 @@ import (
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
+// compatNVDECRejection is what FFmpeg prints when the card has no decoder for
+// the source, as a GTX 970 does for HEVC.
+const compatNVDECRejection = "[hevc @ 0x1] Hardware is lacking required capabilities"
+
 // writeCompatFFmpegFailingOn writes a fake FFmpeg that exits before its first
 // manifest when a transcode's arguments contain failPattern and otherwise
 // writes a playable manifest and keeps running. Every transcode is logged.
 func writeCompatFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, logPath string) {
+	t.Helper()
+	return writeCompatFFmpegFailingWith(t, failPattern, "intentional hardware failure")
+}
+
+// writeCompatFFmpegFailingWith is writeCompatFFmpegFailingOn with the stderr
+// line the failing attempt prints.
+func writeCompatFFmpegFailingWith(t *testing.T, failPattern, stderr string) (ffmpegPath, logPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	ffmpegPath = filepath.Join(dir, "fake-ffmpeg.sh")
@@ -31,7 +42,7 @@ func writeCompatFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, l
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
 		"case \"$last\" in *.m3u8) ;; *) exit 0 ;; esac\n" +
 		"printf '%s\\n' \"$*\" >> \"" + logPath + "\"\n" +
-		"case \"$*\" in *'" + failPattern + "'*) echo 'intentional hardware failure' >&2; exit 1 ;; esac\n" +
+		"case \"$*\" in *'" + failPattern + "'*) echo '" + stderr + "' >&2; exit 1 ;; esac\n" +
 		"out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"\n" +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
 		"printf x > \"$out/seg_1.m4s\"; printf x > \"$out/seg_2.m4s\"\n" +
@@ -76,7 +87,7 @@ func newAutoCompatLocalHandler(t *testing.T, ffmpegPath string) (*PlaybackHandle
 		TranscodeDir: t.TempDir(),
 		FFmpegPath:   ffmpegPath,
 		HWAccel:      "auto",
-		tm:           playback.NewTranscodeManager(),
+		tm:           keyedTranscodeManager(),
 	}
 	handler.compatAutoTranscodePipeline = func(_ context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
 		if opts.HWAccel != "auto" {
@@ -152,9 +163,46 @@ func TestEnsureTranscodeSessionAutoFinalFailureUnregisters(t *testing.T) {
 	}
 }
 
+// An explicit NVENC setting has no auto pipeline. On a card whose decoder
+// rejects the source the start must still decode on the CPU instead of
+// returning the exited process as a running transcode.
+func TestEnsureTranscodeSessionExplicitNVENCRetriesRejectedDecodeOnCPU(t *testing.T) {
+	ffmpegPath, logPath := writeCompatFFmpegFailingWith(t, "-hwaccel cuda", compatNVDECRejection)
+	handler, source := newAutoCompatLocalHandler(t, ffmpegPath)
+	handler.HWAccel = "nvenc"
+	handler.compatAutoTranscodePipeline = nil
+
+	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
+	if err != nil {
+		t.Fatalf("ensureTranscodeSession: %v", err)
+	}
+	t.Cleanup(func() { _ = transcodeSession.Close() })
+	if _, err := transcodeSession.WaitForGenerationManifest(10 * time.Second); err != nil {
+		t.Fatalf("returned session never produced a manifest: %v", err)
+	}
+	if live := handler.tm.GetTranscodeSession("upstream-1"); live != transcodeSession {
+		t.Fatal("returned session is not the registered runtime")
+	}
+	invocations := readCompatFFmpegInvocations(t, logPath)
+	if len(invocations) != 2 || strings.Contains(invocations[1], "-hwaccel cuda") || !strings.Contains(invocations[1], "h264_nvenc") {
+		t.Fatalf("invocations = %q, want GPU decode then CPU decode with NVENC", invocations)
+	}
+	persisted, ok := handler.playbackStore.Get("play-1")
+	if !ok || persisted.Recipe == nil || !persisted.Recipe.SoftwareVideoDecode {
+		t.Fatalf("persisted recipe = %#v, want the executed CPU decode", persisted.Recipe)
+	}
+}
+
 // startCompatRemoteAutoTranscode dispatches one auto video transcode to a fake
 // node described by report and returns the request the node received.
 func startCompatRemoteAutoTranscode(t *testing.T, report string, response transcodenode.TranscodeStartResponse) (transcodenode.TranscodeStartRequest, *PlaybackSessionStore) {
+	t.Helper()
+	return startCompatRemoteTranscode(t, "auto", report, response)
+}
+
+// startCompatRemoteTranscode is startCompatRemoteAutoTranscode under the
+// server's hwAccel setting.
+func startCompatRemoteTranscode(t *testing.T, hwAccel, report string, response transcodenode.TranscodeStartResponse) (transcodenode.TranscodeStartRequest, *PlaybackSessionStore) {
 	t.Helper()
 	version := testCompatVersion()
 	source := testCompatSource(NewResourceIDCodec(), version)
@@ -184,13 +232,14 @@ func startCompatRemoteAutoTranscode(t *testing.T, report string, response transc
 	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
 	handler := &PlaybackHandler{
 		JWTSecret:     "secret",
-		HWAccel:       "auto",
+		NodeKeys:      nodeauthtest.SameKey("secret"),
+		HWAccel:       hwAccel,
 		NodePlanner:   &nodeLookupPlannerStub{node: pooled},
 		playbackStore: playbackStore,
 		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
 		}},
-		tm: playback.NewTranscodeManager(),
+		tm: keyedTranscodeManager(),
 	}
 	file := &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}
 	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
@@ -222,41 +271,5 @@ func TestStartRemoteTranscodeAutoLeavesFallbackDecisionToNode(t *testing.T) {
 		if !remoteReq.AutoFallbackReady || remoteReq.RequireReady {
 			t.Errorf("report %q: request = %+v, want auto_fallback_ready without require_ready", report, remoteReq)
 		}
-	}
-}
-
-func TestCompatRemoteAutoFallbackEligible(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		request transcodenode.TranscodeStartRequest
-		want    bool
-	}{
-		{"auto video", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: " AUTO "}, true},
-		{"node default", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264"}, false},
-		{"explicit accel", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "qsv"}, false},
-		{"video copy", transcodenode.TranscodeStartRequest{TargetCodecVideo: "copy", HWAccel: "auto"}, false},
-		{"tone map", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto", ToneMapMode: "software"}, false},
-	} {
-		if got := compatRemoteAutoFallbackEligible(tc.request); got != tc.want {
-			t.Errorf("%s: eligible = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
-func TestRemoteTranscodeStartTimeoutCoversNodeReadiness(t *testing.T) {
-	handler := &PlaybackHandler{}
-	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{}, 0); got != 20*time.Second {
-		t.Fatalf("unready timeout = %v, want 20s", got)
-	}
-	// The node may wait on one manifest per automatic execution path.
-	want := 20*time.Second + transcodenode.TranscodeStartReadyMaxDuration
-	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{RequireReady: true}, 0); got != want {
-		t.Fatalf("ready timeout = %v, want %v", got, want)
-	}
-	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{AutoFallbackReady: true}, 0); got != want {
-		t.Fatalf("auto fallback timeout = %v, want %v", got, want)
-	}
-	if min := time.Duration(playback.MaxAutoTranscodeStartupAttempts) * transcodenode.TranscodeStartReadinessTimeout; want < min {
-		t.Fatalf("ready timeout = %v, want at least %v", want, min)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/worker"
 )
 
 type finishHistoryReplica struct {
@@ -25,7 +26,7 @@ type finishHistoryReplica struct {
 // user store and admin log every replica shares.
 func newFinishHistoryReplica(store userstore.UserStore, admin PlaybackAdminStore, file *models.MediaFile) finishHistoryReplica {
 	mgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(mgr, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(mgr, testPlaybackFileResolver{file: file})
 	handler.StoreProvider = testUserStoreProvider{store: store}
 	handler.AdminStore = admin
 	return finishHistoryReplica{mgr: mgr, handler: handler}
@@ -48,7 +49,7 @@ func (r finishHistoryReplica) holdCopy(t *testing.T, session playback.Session, p
 
 // expire finalizes this replica's copy the way idle cleanup does.
 func (r finishHistoryReplica) expire(session *playback.Session) {
-	r.handler.finalizeSessionStop(context.Background(), session, false, "", "")
+	r.handler.finalizeSessionStopWithResult(context.Background(), session, false, "", "")
 }
 
 func compatFinishSession() playback.Session {
@@ -296,9 +297,9 @@ func TestNativeSessionKeepsHistoryRowPerStop(t *testing.T) {
 		Position: 1800, StartedAt: time.Now().Add(-time.Hour),
 	}
 
-	replica.handler.finalizeSessionStop(context.Background(), session, false, "", "")
+	replica.handler.finalizeSessionStopWithResult(context.Background(), session, false, "", "")
 	session.Position = 3500
-	replica.handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
+	replica.handler.finalizeSessionStopWithResult(context.Background(), session, false, "", PlaybackEndStopped)
 
 	if got := len(listFinishHistory(t, store)); got != 2 {
 		t.Fatalf("watch history rows = %d, want 2", got)
@@ -531,6 +532,35 @@ func (s *liveRowAdminStore) LiveSession(_ context.Context, sessionID string) (*p
 	return &live, nil
 }
 
+// A session rebuilt from a stream token, whose card carries no client, takes
+// back the client its live row kept, never one from another account's row.
+func TestReconstructedSessionRestoresItsClient(t *testing.T) {
+	for name, tc := range map[string]struct {
+		rowOwner               int
+		wantClient, wantDevice string
+	}{
+		"own row":               {rowOwner: 7, wantClient: "Silo Android", wantDevice: "device-1"},
+		"another account's row": {rowOwner: 8},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
+			h.AdminStore = &liveRowAdminStore{live: &playback.Session{
+				ID: "token-session", UserID: tc.rowOwner, ProfileID: "profile",
+				ClientName: "Silo Android", DeviceID: "device-1",
+			}}
+			card := playback.NewDirectRecipeCard("token-session", 7, "profile", 9)
+
+			got := h.tm.ReconstructSession(t.Context(), card.SessionID, 7, card)
+			if got == nil {
+				t.Fatal("the token's recipe was not reconstructed")
+			}
+			if got.ClientName != tc.wantClient || got.DeviceID != tc.wantDevice {
+				t.Fatalf("client = %q, device = %q, want %q, %q", got.ClientName, got.DeviceID, tc.wantClient, tc.wantDevice)
+			}
+		})
+	}
+}
+
 // TestEveryEndRecordsTheAdminLog covers ends that wrote no admin history: an
 // abort, a Jellyfin method switch, and a stop that reached a replica without
 // the session's copy. Each records one row with its reason; a replaced play
@@ -615,8 +645,9 @@ func TestEveryEndRecordsTheAdminLog(t *testing.T) {
 	}
 }
 
-// TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end reads
-// from the shared live row, including a row that never recorded a start.
+// TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end and a
+// rebuilt session read from the shared live row, including a row that never
+// recorded a start, and from the start row once no live row is left.
 func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -666,6 +697,28 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	}
 	if _, err = store.LiveSession(ctx, "missing-"+suffix); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("missing row: err = %v, want ErrSessionNotFound", err)
+	}
+
+	// Once no live row is left, as after a graceful restart, the session is
+	// read from the row it stored when it started.
+	startOnly := uuid.NewString()
+	row, err := worker.SessionSyncRowJSON(worker.SessionSync{
+		SessionID: startOnly, UserID: account, ProfileID: "p-1", ClientName: "Silo Android TV",
+		ClientUserAgent: "ktor-client", DeviceID: "device-1", DevicePlatform: "android-tv",
+	}, "node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.StartLifecycle(ctx, LifecycleStart{
+		SessionID: startOnly, Frontend: LifecycleFrontendNative, UserID: account, ProfileID: "p-1",
+		MediaFileID: 7, RequestedMediaFileID: 7, StartedAt: started, LiveRow: row,
+	}); err != nil || !ok {
+		t.Fatalf("start lifecycle: ok=%v err=%v", ok, err)
+	}
+	if live, err = store.LiveSession(ctx, startOnly); err != nil || live.UserID != account || live.ProfileID != "p-1" ||
+		live.ClientName != "Silo Android TV" || live.ClientUserAgent != "ktor-client" ||
+		live.DeviceID != "device-1" || live.DevicePlatform != "android-tv" {
+		t.Fatalf("start row = %+v, %v; want the client the session started on", live, err)
 	}
 }
 
@@ -718,7 +771,7 @@ func (missingFileResolver) GetByID(context.Context, int) (*models.MediaFile, err
 // still gets its row, without the item and duration only the file gave.
 func TestEndRecordsAPlayWhoseFileLeftTheCatalog(t *testing.T) {
 	admin := &recordingPlaybackAdminStore{}
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), missingFileResolver{})
+	h := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), missingFileResolver{})
 	h.AdminStore = admin
 	session := compatFinishSession()
 	session.IsJellyfinCompat, session.Position = false, 900

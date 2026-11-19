@@ -124,7 +124,7 @@
   .setup-rail-item::before {
     content: "";
     position: absolute;
-    left: 0.5625rem;
+    inset-inline-start: 0.5625rem;
     top: 0;
     bottom: 0;
     width: 1px;
@@ -147,15 +147,17 @@
   align-items: flex-start;
   gap: 0.75rem;
   width: 100%;
-  padding: 0.4rem 0.5rem 0.4rem 0;
-  text-align: left;
+  padding-block: 0.4rem;
+  padding-inline: 0 0.5rem;
+  text-align: start;
   color: var(--muted-foreground);
   border-radius: 0.5rem;
 }
 
 @media (min-width: 52rem) {
   .setup-rail-row {
-    padding: 0.5rem 0.5rem 0.5rem 0;
+    padding-block: 0.5rem;
+    padding-inline: 0 0.5rem;
   }
 }
 
@@ -243,7 +245,7 @@
     display: none;
   }
   .setup-rail-row {
-    padding-right: 0.75rem;
+    padding-inline-end: 0.75rem;
   }
 }
 
@@ -343,8 +345,8 @@
 @media (min-width: 40rem) {
   .setup-footnote {
     flex-basis: auto;
-    margin-left: auto;
-    text-align: right;
+    margin-inline-start: auto;
+    text-align: end;
   }
 }
 

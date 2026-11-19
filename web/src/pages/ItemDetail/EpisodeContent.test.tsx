@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -52,7 +52,10 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("@/hooks/queries/qualityPreference", () => ({
   // The resolution cap comes from the settings contract; these tests render
   // without a QueryClient, so the hook stands in for the resolved answer.
-  useQualityPreference: (fallback?: string | null) => fallback ?? null,
+  useQualityPreferenceState: (fallback?: string | null) => ({
+    preference: fallback ?? null,
+    settled: true,
+  }),
 }));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
@@ -260,45 +263,23 @@ describe("EpisodeContent", () => {
     mocks.useRating.mockReturnValue({ data: { rating: 3, rated_at: "2026-03-22T00:00:00Z" } });
   });
 
-  it("links the season breadcrumb segment to the resolved season page", () => {
+  it("keeps the page's library on the season reads and breadcrumbs but not on Play", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/item/episode-1"]}>
-          <EpisodeContent item={makeEpisodeItem()} />
+        <MemoryRouter initialEntries={["/item/episode-1?libraryId=4"]}>
+          <EpisodeContent item={makeEpisodeItem()} libraryId={4} />
         </MemoryRouter>
       </QueryClientProvider>,
     );
 
-    expect(countOccurrences(markup, 'href="/item/series-1"')).toBe(1);
-    expect(countOccurrences(markup, 'href="/item/season-1"')).toBe(1);
-    expect(markup).toContain(">Season 1<");
-  });
-
-  it("uses season navigation state before season detail finishes loading", () => {
-    mocks.useSeasonDetail.mockReturnValue({
-      data: undefined,
-    });
-
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter
-          initialEntries={[
-            {
-              pathname: "/item/episode-1",
-              state: {
-                parentSeasonHref: "/item/season-99",
-                parentSeasonLabel: "Season 99",
-              },
-            },
-          ]}
-        >
-          <EpisodeContent item={makeEpisodeItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
+    expect(mocks.useSeasonDetail).toHaveBeenLastCalledWith("series-1", 1, 4);
+    expect(mocks.useSeasonEpisodes).toHaveBeenLastCalledWith("series-1", 1, 4);
+    expect(countOccurrences(markup, 'href="/item/series-1?libraryId=4"')).toBe(1);
+    expect(countOccurrences(markup, 'href="/item/season-1?libraryId=4"')).toBe(1);
+    // Playback always sees every version, so Play carries no library.
+    expect(mocks.capturedActionBarProps.value?.playHref).toBe(
+      `/watch/${makeEpisodeItem().content_id}`,
     );
-
-    expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
-    expect(markup).toContain(">Season 99<");
   });
 
   it("hides an unwatched episode's overview until the viewer reveals it", () => {
@@ -491,11 +472,12 @@ describe("EpisodeContent", () => {
       return requests;
     }
 
-    function renderWithTracks(versions = [makeFileVersion({ audio_tracks: tracks })]) {
+    function renderWithTracks(
+      versions = [makeFileVersion({ audio_tracks: tracks })],
+      client = new QueryClient({ defaultOptions: { mutations: { retry: false } } }),
+    ) {
       render(
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
-        >
+        <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={["/item/episode-1"]}>
             <EpisodeContent item={makeEpisodeItem({ versions })} />
           </MemoryRouter>
@@ -623,6 +605,36 @@ describe("EpisodeContent", () => {
           explicitAudioTrackIndex: 1,
         }),
       );
+    });
+
+    it("keeps a saved pick when a later pick fails while the detail still refetches", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+      // An open detail page: the save's invalidation refetches it, and that
+      // refetch never finishes here.
+      let detailFetches = 0;
+      const detail = new QueryObserver(client, {
+        queryKey: catalogKeys.itemDetail("episode-1"),
+        queryFn: () => (++detailFetches === 1 ? Promise.resolve({}) : new Promise(() => {})),
+      });
+      const unsubscribe = detail.subscribe(() => {});
+      await waitFor(() => expect(detail.getCurrentResult().isSuccess).toBe(true));
+      renderWithTracks(undefined, client);
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(detailFetches).toBe(2));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+      unsubscribe();
     });
 
     it("puts the selector back to the last saved choice when quick picks all fail", async () => {

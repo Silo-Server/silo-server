@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate } from "react-router";
 import { captureSessionIdentity, isSessionIdentityCurrent, getAccessToken } from "@/api/client";
 import {
   acceptPublicInvitation,
@@ -16,17 +16,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthBackground } from "@/components/auth/AuthBackground";
+import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { clearHouseholdSetupDone, setTourSuppressed } from "@/lib/onboarding";
 import { buildInviteDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
 import { Smartphone } from "lucide-react";
 import { toast } from "sonner";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
-
-const EMAIL_TAKEN_MESSAGE =
-  "An account already uses this email address. Sign in instead, or use a different address.";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { useLinkToken } from "@/hooks/useLinkToken";
+import { useT } from "@/i18n";
 
 export default function InviteClaim() {
-  const { token = "" } = useParams();
+  const token = useLinkToken();
   return <ClaimForm key={token} token={token} />;
 }
 
@@ -42,17 +42,26 @@ function ClaimForm({ token }: { token: string }) {
   const [accepted, setAccepted] = useState(false);
   const { user, loading, completeLogin } = useAuth();
   const navigate = useNavigate();
+  const t = useT();
 
   const [lookup, setLookup] = useState<{
     data?: InvitationLookup;
     pending: boolean;
     unavailable?: boolean;
-  }>({ pending: true });
+  }>(
+    // Opened without its token, as when something on the way dropped the
+    // link's fragment, there is nothing to look up: the invitation is
+    // unavailable, and a fresh one is the remedy.
+    token ? { pending: true } : { pending: false, unavailable: true },
+  );
   const [reload, setReload] = useState(0);
   const [recovery, setRecovery] = useState(false);
   // The server refused the acceptance because password sign-in is off; the
   // invitation stays unspent, and no account was created.
   const [localLoginDisabled, setLocalLoginDisabled] = useState(false);
+  // The server refused the acceptance before anything committed: no account
+  // was created and the invitation is unspent, so the invitee can try again.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [createdUsername, setCreatedUsername] = useState<string | null>(null);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
@@ -62,7 +71,7 @@ function ClaimForm({ token }: { token: string }) {
     return () => controller.abort();
   }, []);
   useEffect(() => {
-    if (loading || user) return;
+    if (loading || user || !token) return;
     const controller = new AbortController();
     const identity = captureSessionIdentity();
     lookupPublicInvitation(token, controller.signal)
@@ -95,28 +104,34 @@ function ClaimForm({ token }: { token: string }) {
     return (
       <div className="auth-shell">
         <AuthBackground />
+        <AuthLanguagePicker />
         <Card className="auth-card glass panel-border w-full max-w-sm border-0">
           <CardHeader>
             <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
-              {lookup.unavailable ? "Invitation unavailable" : "Could not load invitation"}
+              {lookup.unavailable
+                ? t("web.auth.invite.unavailableTitle")
+                : t("web.auth.invite.loadFailedTitle")}
             </CardTitle>
             <CardDescription className="mt-2 text-sm leading-6">
               {lookup.unavailable
-                ? "This link may have been used, revoked, or expired. Sign in if you already created your account, or ask for a fresh invitation."
-                : "The server could not confirm this invitation. Try loading it again."}
+                ? t("web.auth.invite.unavailable")
+                : t("web.auth.invite.loadFailed")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {!lookup.unavailable && (
               <Button className="mb-4 w-full" onClick={reloadLookup}>
-                Reload invitation
+                {t("web.auth.invite.reload")}
               </Button>
             )}
             <p className="text-muted-foreground text-center text-sm">
-              Already have an account?{" "}
-              <Link to="/login" className="text-foreground underline hover:no-underline">
-                Sign in
-              </Link>
+              {t("web.auth.passwordRules.alreadyHaveAccount", {
+                link: (chunks) => (
+                  <Link to="/login" className="text-foreground underline hover:no-underline">
+                    {chunks}
+                  </Link>
+                ),
+              })}
             </p>
           </CardContent>
         </Card>
@@ -145,6 +160,26 @@ function ClaimForm({ token }: { token: string }) {
     setReload((value) => value + 1);
   }
 
+  // A refusal the server answers before anything commits, as the accept
+  // contract states: a rate limit, a store that can't create the profile, an
+  // address already in use, or a request that didn't validate. Anything else,
+  // a 5xx or a lost response included, may have created the account.
+  function unspentRefusalMessage(error: unknown): string | null {
+    if (!(error instanceof V2ProblemError)) return null;
+    switch (error.problemType) {
+      case "rate_limited":
+        return t("web.auth.forgotPassword.rateLimited");
+      case "capability_unsupported":
+        return t("web.auth.invite.profileUnavailable");
+      case "conflict":
+        return t("web.auth.invite.emailTaken");
+      case "validation_failed":
+        return error.message;
+      default:
+        return null;
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (
@@ -159,15 +194,15 @@ function ClaimForm({ token }: { token: string }) {
     // A link invitation has no address yet: the invitee enters theirs.
     const enteredEmail = invitation.email_required ? email.trim() : undefined;
     if (enteredEmail !== undefined && !isValidEmail(enteredEmail)) {
-      setEmailError(INVALID_EMAIL_MESSAGE);
+      setEmailError(invalidEmailMessage());
       return;
     }
     if (password !== confirmPassword) {
-      toast.error("Passwords do not match");
+      toast.error(t("web.auth.passwordRules.mismatch"));
       return;
     }
     if ([...password].length < 8 || new TextEncoder().encode(password).length > 72) {
-      toast.error("Use at least 8 characters and no more than 72 UTF-8 bytes.");
+      toast.error(t("web.auth.invite.passwordLength"));
       return;
     }
     const controller = lifetime.current;
@@ -175,6 +210,7 @@ function ClaimForm({ token }: { token: string }) {
     const identity = captureSessionIdentity();
     busy.current = true;
     setSubmitting(true);
+    setRefusal(null);
     try {
       const data = await acceptPublicInvitation(token, password, controller.signal, enteredEmail);
       if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
@@ -205,16 +241,21 @@ function ClaimForm({ token }: { token: string }) {
       // the link still works, so the invitee can correct it and retry.
       if (enteredEmail !== undefined && error instanceof V2ProblemError) {
         if (error.problemType === "conflict") {
-          setEmailError(EMAIL_TAKEN_MESSAGE);
+          setEmailError(t("web.auth.invite.emailTaken"));
           return;
         }
         if (
           error.problemType === "validation_failed" &&
           error.problem.errors?.some((e) => e.location === "body.email")
         ) {
-          setEmailError(INVALID_EMAIL_MESSAGE);
+          setEmailError(invalidEmailMessage());
           return;
         }
+      }
+      const refused = unspentRefusalMessage(error);
+      if (refused) {
+        setRefusal(refused);
+        return;
       }
       setRecovery(true);
     } finally {
@@ -226,25 +267,28 @@ function ClaimForm({ token }: { token: string }) {
   return (
     <div className="auth-shell">
       <AuthBackground />
+      <AuthLanguagePicker />
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           {invitation.inviter_name && (
             <p className="text-muted-foreground font-mono text-[11px] font-semibold tracking-[0.1em] uppercase">
-              Invited by {invitation.inviter_name}
+              {t("web.auth.invite.invitedBy", { inviter: invitation.inviter_name })}
             </p>
           )}
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
-            Welcome to {invitation.server_name}
+            {t("web.auth.invite.title", { server: invitation.server_name })}
           </CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">
             {invitation.email_required
-              ? "Enter your email address and choose a password. You'll sign in with your email address."
-              : "Choose a password and you're in. You'll sign in with your email address."}
+              ? t("web.auth.invite.descriptionEmailRequired")
+              : t("web.auth.invite.description")}
           </CardDescription>
           {invitation.note && (
-            <blockquote className="border-border mt-4 border-l-2 py-1 pl-3 text-sm leading-relaxed">
+            <blockquote className="border-border mt-4 border-s-2 py-1 ps-3 text-sm leading-relaxed">
               <span className="text-muted-foreground block text-xs">
-                {invitation.inviter_name ? `Note from ${invitation.inviter_name}` : "Note"}
+                {invitation.inviter_name
+                  ? t("web.auth.invite.noteFrom", { inviter: invitation.inviter_name })
+                  : t("web.auth.invite.note")}
               </span>
               <span className="break-words whitespace-pre-line">{invitation.note}</span>
             </blockquote>
@@ -255,16 +299,16 @@ function ClaimForm({ token }: { token: string }) {
             <div className="mb-6 space-y-3">
               <Button asChild size="lg" className="h-12 w-full text-base font-semibold">
                 <a href={appLink}>
-                  <Smartphone className="mr-2 h-5 w-5" /> Open in the Silo app
+                  <Smartphone className="me-2 h-5 w-5" /> {t("web.auth.openInApp")}
                 </a>
               </Button>
               <p className="text-muted-foreground text-center text-xs">
-                Nothing happens? The app isn&apos;t installed — just continue below.
+                {t("web.auth.invite.appMissing")}
               </p>
               <div className="flex items-center gap-3">
                 <div className="border-border flex-1 border-t" />
                 <span className="text-muted-foreground text-xs uppercase">
-                  or set up in the browser
+                  {t("web.auth.invite.orBrowser")}
                 </span>
                 <div className="border-border flex-1 border-t" />
               </div>
@@ -272,42 +316,41 @@ function ClaimForm({ token }: { token: string }) {
           )}
           {createdUsername ? (
             <div role="status" className="space-y-4">
-              <p>
-                Your account was created. Sign in as {createdUsername} with the password you chose.
-              </p>
+              <p>{t("web.auth.invite.created", { username: createdUsername })}</p>
               <Button asChild className="w-full">
-                <Link to="/login">Sign in</Link>
+                <Link to="/login">{t("web.auth.signIn")}</Link>
               </Button>
             </div>
           ) : (
             <>
               {!invitation.acceptance_available && (
                 <p role="alert" className="mb-4">
-                  This server cannot create the profile required by this invitation. Ask the
-                  administrator for help.
+                  {t("web.auth.invite.profileUnavailable")}
                 </p>
               )}
               {localLoginDisabled && (
                 <p role="alert" className="mb-4">
-                  Password sign-in is turned off on this server, so this invitation cannot create an
-                  account. Ask {invitation.inviter_name || "the person who invited you"} to add you
-                  through the server&apos;s sign-in provider instead.
+                  {invitation.inviter_name
+                    ? t("web.auth.invite.localLoginDisabled", { inviter: invitation.inviter_name })
+                    : t("web.auth.invite.localLoginDisabledNoInviter")}
+                </p>
+              )}
+              {refusal && (
+                <p role="alert" className="mb-4">
+                  {refusal}
                 </p>
               )}
               {recovery && (
                 <div role="alert" className="mb-4 space-y-3">
-                  <p>
-                    We could not confirm the result. Your account may have been created. Try signing
-                    in, or reload this invitation before making another attempt.
-                  </p>
+                  <p>{t("web.auth.invite.recovery")}</p>
                   <Button type="button" variant="outline" onClick={reloadLookup}>
-                    Reload invitation
+                    {t("web.auth.invite.reload")}
                   </Button>
                 </div>
               )}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="invite-email">Email</Label>
+                  <Label htmlFor="invite-email">{t("web.auth.email")}</Label>
                   {invitation.email_required ? (
                     <>
                       <Input
@@ -320,7 +363,7 @@ function ClaimForm({ token }: { token: string }) {
                         }}
                         disabled={submitting}
                         autoComplete="email"
-                        placeholder="you@example.com"
+                        placeholder={t("web.auth.invite.emailPlaceholder")}
                         aria-invalid={emailError ? true : undefined}
                         aria-describedby={emailError ? "invite-email-error" : undefined}
                         autoFocus={!appLink}
@@ -337,8 +380,10 @@ function ClaimForm({ token }: { token: string }) {
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="invite-password">Password</Label>
-                  <p className="text-muted-foreground text-xs">At least 8 characters</p>
+                  <Label htmlFor="invite-password">{t("web.auth.password")}</Label>
+                  <p className="text-muted-foreground text-xs">
+                    {t("web.auth.passwordRules.minLength")}
+                  </p>
                   <PasswordInput
                     id="invite-password"
                     value={password}
@@ -353,7 +398,7 @@ function ClaimForm({ token }: { token: string }) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="invite-confirm-password">Confirm password</Label>
+                  <Label htmlFor="invite-confirm-password">{t("web.auth.confirmPassword")}</Label>
                   <PasswordInput
                     id="invite-confirm-password"
                     value={confirmPassword}
@@ -363,7 +408,9 @@ function ClaimForm({ token }: { token: string }) {
                     required
                   />
                   {confirmPassword && password !== confirmPassword && (
-                    <p className="text-destructive text-xs">Passwords do not match</p>
+                    <p className="text-destructive text-xs">
+                      {t("web.auth.passwordRules.mismatch")}
+                    </p>
                   )}
                 </div>
                 <Button
@@ -373,16 +420,21 @@ function ClaimForm({ token }: { token: string }) {
                     submitting || recovery || localLoginDisabled || !invitation.acceptance_available
                   }
                 >
-                  {submitting ? "Creating account..." : "Create account"}
+                  {submitting
+                    ? t("web.auth.passwordRules.creatingAccount")
+                    : t("web.auth.createAccount")}
                 </Button>
               </form>
             </>
           )}
           <p className="text-muted-foreground mt-4 text-center text-sm">
-            Already set this up?{" "}
-            <Link to="/login" className="text-foreground underline hover:no-underline">
-              Sign in
-            </Link>
+            {t("web.auth.invite.alreadySetUp", {
+              link: (chunks) => (
+                <Link to="/login" className="text-foreground underline hover:no-underline">
+                  {chunks}
+                </Link>
+              ),
+            })}
           </p>
         </CardContent>
       </Card>

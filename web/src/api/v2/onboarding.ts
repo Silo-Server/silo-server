@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   isCapturedProfileAuthorityActive,
   StaleApiRequestContextError,
@@ -19,7 +20,7 @@ export async function readOnboardingState(context: ProfileRequestContextSnapshot
     },
   });
   requireOnboardingAuthority(context);
-  if (!etag) throw new Error("Onboarding state has no revision. Reload to continue.");
+  if (!etag) throw new Error(t("web.common.errors.onboardingStateNoRevision"));
   return { state, etag };
 }
 export async function readOnboardingFlow(context: ProfileRequestContextSnapshot) {
@@ -40,8 +41,8 @@ export function createOnboardingWriter(context: ProfileRequestContextSnapshot) {
   let stopped = false;
   return async (body: OnboardingProgressInput) => {
     requireOnboardingAuthority(context);
-    if (stopped) throw new Error("Reload the tour before continuing.");
-    if (inFlight) throw new Error("Onboarding progress is still being saved.");
+    if (stopped) throw new Error(t("web.common.errors.onboardingReloadTour"));
+    if (inFlight) throw new Error(t("web.common.errors.onboardingStillSaving"));
     inFlight = true;
     try {
       etag ??= (await readOnboardingState(context)).etag;
@@ -56,7 +57,7 @@ export function createOnboardingWriter(context: ProfileRequestContextSnapshot) {
         },
       });
       requireOnboardingAuthority(context);
-      if (!nextTag) throw new Error("Onboarding progress has no revision. Reload to continue.");
+      if (!nextTag) throw new Error(t("web.common.errors.onboardingProgressNoRevision"));
       etag = nextTag;
       return state;
     } catch (error) {

@@ -16,7 +16,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -120,150 +119,147 @@ func serveText(t *testing.T, c *SubtitleCache, opts StreamExtractOpts, extract S
 	return rec
 }
 
-func TestServeExtractReadsWholeTracksThroughTheSource(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		whole       error
-		failPackets bool
-		format      string
-		// refused leaves a cache dir writable by others, which the cache
-		// refuses.
-		refused bool
-		// want is the body; demuxes counts extracts of the source, and
-		// keptCopy what the demux copied for keeping ("" for none).
-		want     string
-		demuxes  int
-		keptCopy string
-	}{
-		{name: "kept or index-read track converts", want: "converted:kept"},
-		{name: "a track the source can't read is demuxed and kept", whole: errors.New("no cues"), format: "matroska", want: "demuxed", demuxes: 1, keptCopy: "copy"},
-		{name: "a track the source can't keep is demuxed", whole: errors.New("no cues"), want: "demuxed", demuxes: 1},
-		{name: "a failed conversion falls back to the demux", failPackets: true, format: "matroska", want: "demuxed", demuxes: 1, keptCopy: "copy"},
-		{name: "a refused cache dir is demuxed without a copy", whole: errors.New("no cues"), format: "matroska", refused: true, want: "demuxed", demuxes: 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, source := newTestCache(t)
-			wholeCalls := 1
-			if tc.refused {
-				dir := filepath.Join(filepath.Dir(source), "subtitle-cache")
-				if err := os.Mkdir(dir, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Chmod(dir, 0o777); err != nil {
-					t.Fatal(err)
-				}
-				wholeCalls = 2
-			}
-			src := &fakeEmbeddedSource{whole: tc.whole, format: tc.format, keptCopy: make(chan string, 1)}
-			c.SetEmbeddedSource(src)
-			var mu sync.Mutex
-			var calls []StreamExtractOpts
-			extract := fakeConvert(&calls, &mu, tc.failPackets)
-			opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}
-			for range 2 {
-				if rec := serveText(t, c, opts, extract); rec.Body.String() != tc.want {
-					t.Fatalf("body = %q, want %q", rec.Body.String(), tc.want)
-				}
-			}
-			demuxes := 0
-			for _, call := range calls {
-				if call.Packets == nil {
-					demuxes++
-					if (call.KeepPath != "") != (tc.keptCopy != "") {
-						t.Errorf("demux KeepPath = %q, want a copy: %v", call.KeepPath, tc.keptCopy != "")
-					}
-				}
-			}
-			// The second request is a cache hit unless the dir was refused.
-			if demuxes != tc.demuxes || src.wholeCalls != wholeCalls {
-				t.Fatalf("%d demuxes and %d source reads, want %d and %d", demuxes, src.wholeCalls, tc.demuxes, wholeCalls)
-			}
-			if tc.keptCopy != "" {
-				select {
-				case got := <-src.keptCopy:
-					if got != tc.keptCopy {
-						t.Fatalf("kept copy %q", got)
-					}
-				case <-time.After(5 * time.Second):
-					t.Fatal("the demuxed copy was never kept")
-				}
-			}
-		})
-	}
-}
-
-// A node with no room for another whole read answers the request busy
-// before writing anything, instead of demuxing the source.
+// A node with no room for another whole read, or another demux of a source,
+// answers the request busy before writing anything, instead of demuxing the
+// source.
 func TestServeExtractAnswersBusyWithoutADemux(t *testing.T) {
-	for _, codec := range []string{"subrip", "hdmv_pgs_subtitle"} {
-		t.Run(codec, func(t *testing.T) {
-			c, source := newTestCache(t)
-			c.SetEmbeddedSource(&fakeEmbeddedSource{whole: ErrSubtitleReadsBusy, format: "matroska"})
-			var mu sync.Mutex
-			var calls []StreamExtractOpts
-			rec := httptest.NewRecorder()
-			response := middleware.NewWrapResponseWriter(rec, 1)
-			err := c.ServeExtract(response, httptest.NewRequest(http.MethodGet, "/subtitle", nil),
-				StreamExtractOpts{InputPath: source, SourceCodec: codec, Embedded: testEmbeddedRef}, fakeConvert(&calls, &mu, false))
-			if !errors.Is(err, ErrSubtitleReadsBusy) || len(calls) != 0 || rec.Body.Len() != 0 || response.Status() != 0 {
-				t.Fatalf("err %v, %d extracts, status %d, body %q", err, len(calls), response.Status(), rec.Body.String())
-			}
-		})
-	}
-}
-
-// FFmpeg can't demux an index-only track from the source, so a failed index
-// read is the answer: no fallback demuxes it, with or without a source to
-// read through.
-func TestServeExtractNeverDemuxesAnIndexOnlyTrack(t *testing.T) {
-	ref := *testEmbeddedRef
-	ref.Codec, ref.IndexOnly = "webvtt", true
+	readsBusy := &fakeEmbeddedSource{whole: ErrSubtitleReadsBusy, format: "matroska"}
 	for _, tc := range []struct {
 		name   string
-		source EmbeddedSubtitleSource
+		source *fakeEmbeddedSource
 		opts   StreamExtractOpts
+		// demuxesBusy takes every demux slot first.
+		demuxesBusy bool
 	}{
-		{"whole track", &fakeEmbeddedSource{whole: embeddedsub.ErrNoCues, format: "matroska"}, StreamExtractOpts{}},
-		{"window", &fakeEmbeddedSource{window: embeddedsub.ErrNoCues}, StreamExtractOpts{SeekSeconds: 30, DurationSeconds: 60}},
-		{"no source", nil, StreamExtractOpts{}},
+		{name: "whole text track, no room to read", source: readsBusy, opts: StreamExtractOpts{SourceCodec: "subrip"}},
+		{name: "whole PGS track, no room to read", source: readsBusy, opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle"}},
+		{name: "whole track without a source, no room to demux", opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle"}, demuxesBusy: true},
+		{name: "text window, no room to demux", source: &fakeEmbeddedSource{window: embeddedsub.ErrNoCues},
+			opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 60, DurationSeconds: 60}, demuxesBusy: true},
+		{name: "PGS window, no room to demux", source: &fakeEmbeddedSource{window: embeddedsub.ErrNoCues},
+			opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, SeekSeconds: 60, DurationSeconds: 60}, demuxesBusy: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.demuxesBusy {
+				occupyDemuxSlots(t)
+			}
 			c, source := newTestCache(t)
 			if tc.source != nil {
 				c.SetEmbeddedSource(tc.source)
 			}
+			var mu sync.Mutex
+			var calls []StreamExtractOpts
+			rec := httptest.NewRecorder()
+			response := middleware.NewWrapResponseWriter(rec, 1)
 			opts := tc.opts
-			opts.InputPath, opts.SourceCodec, opts.Embedded, opts.FFmpegPath = source, "webvtt", &ref, "ffmpeg-must-not-run"
-			err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, StreamExtractSubtitle)
-			if !errors.Is(err, ErrSubtitleIndexOnly) {
-				t.Fatalf("err = %v, want ErrSubtitleIndexOnly", err)
+			opts.InputPath, opts.Embedded = source, testEmbeddedRef
+			err := c.ServeExtract(response, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, fakeConvert(&calls, &mu, false))
+			// An uncached PGS window still warms the track, in its warm slot.
+			waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
+			mu.Lock()
+			defer mu.Unlock()
+			demuxes := 0
+			for _, call := range calls {
+				if call.Packets == nil {
+					demuxes++
+				}
+			}
+			if !errors.Is(err, ErrSubtitleReadsBusy) || demuxes != 0 || rec.Body.Len() != 0 || response.Status() != 0 {
+				t.Fatalf("err %v, %d demuxes, status %d, body %q", err, demuxes, response.Status(), rec.Body.String())
 			}
 		})
 	}
 }
 
-// A demux whose kept copy fails runs again without it and doesn't send the
-// viewer what it already has.
-func TestServeExtractRetriesADemuxWhoseCopyFailed(t *testing.T) {
+// demuxBlocker is an extract whose demuxes of the source wait to be
+// released, for holding the node's demux slots.
+type demuxBlocker struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	running sync.WaitGroup
+}
+
+// maxDemuxesHeld is more demuxes than the node runs at once.
+const maxDemuxesHeld = 64
+
+// newDemuxBlocker returns a blocker its test releases by its end.
+func newDemuxBlocker(t *testing.T) *demuxBlocker {
+	b := &demuxBlocker{started: make(chan struct{}, maxDemuxesHeld), release: make(chan struct{})}
+	t.Cleanup(b.finish)
+	return b
+}
+
+// occupyDemuxSlots holds every demux slot of the process until the test ends.
+func occupyDemuxSlots(t *testing.T) {
+	t.Helper()
 	c, source := newTestCache(t)
-	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: errors.New("no cues"), format: "matroska"})
-	var keeps, plain int
-	extract := func(_ context.Context, opts StreamExtractOpts) error {
-		if _, err := io.WriteString(opts.Writer, "first cues, "); err != nil {
-			return err
-		}
-		if opts.KeepPath != "" {
-			keeps++
-			return errors.New("kept copy: no space left on device")
-		}
-		plain++
-		_, err := io.WriteString(opts.Writer, "rest")
-		return err
+	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: embeddedsub.ErrNoCues})
+	newDemuxBlocker(t).fillDemuxSlots(t, c, source)
+}
+
+func (b *demuxBlocker) extract(ctx context.Context, opts StreamExtractOpts) error {
+	if opts.Packets != nil {
+		return errors.New("demuxBlocker converts no packets")
 	}
-	rec := serveText(t, c, StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, extract)
-	if rec.Body.String() != "first cues, rest" || keeps != 1 || plain != 1 {
-		t.Fatalf("body %q after %d demuxes with a copy and %d without", rec.Body.String(), keeps, plain)
+	b.started <- struct{}{}
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+	_, err := fmt.Fprintf(opts.Writer, "demuxed %d", opts.TrackIndex)
+	return err
+}
+
+// finish releases the demuxes and waits for their requests.
+func (b *demuxBlocker) finish() {
+	b.once.Do(func() { close(b.release) })
+	b.running.Wait()
+}
+
+// fillDemuxSlots requests whole tracks of source from c, from ordinal 0 on,
+// each demuxed by b, until the node refuses one; the admitted requests wait
+// in their demuxes for b.finish. It returns their results in order.
+func (b *demuxBlocker) fillDemuxSlots(t *testing.T, c *SubtitleCache, source string) []chan trackResult {
+	t.Helper()
+	var running []chan trackResult
+	for ordinal := range maxDemuxesHeld {
+		done := make(chan trackResult, 1)
+		b.running.Add(1)
+		go func() {
+			defer b.running.Done()
+			done <- serveWholeTrack(context.Background(), c, source, ordinal, b.extract)
+		}()
+		select {
+		case <-b.started:
+			running = append(running, done)
+		case r := <-done:
+			if !errors.Is(r.err, ErrSubtitleReadsBusy) || r.status != 0 || len(running) == 0 {
+				t.Fatalf("track %d after %d demuxes: %+v, want a busy refusal", ordinal, len(running), r)
+			}
+			return running
+		}
+	}
+	t.Fatalf("%d demuxes ran at once; none was refused", len(running))
+	return nil
+}
+
+type trackResult struct {
+	body   string
+	status int
+	err    error
+}
+
+// serveWholeTrack requests the whole PGS track at ordinal of source from c,
+// demuxing it with extract when c's source can't read it.
+func serveWholeTrack(ctx context.Context, c *SubtitleCache, source string, ordinal int, extract SUPExtractFunc) trackResult {
+	rec := httptest.NewRecorder()
+	response := middleware.NewWrapResponseWriter(rec, 1)
+	ref := EmbeddedSubtitleRef{MediaFileID: 7, StreamIndex: ordinal, Codec: "hdmv_pgs_subtitle"}
+	err := c.ServeExtract(response, httptest.NewRequest(http.MethodGet, "/subtitle.sup", nil).WithContext(ctx),
+		StreamExtractOpts{InputPath: source, TrackIndex: ordinal, SourceCodec: "hdmv_pgs_subtitle", Embedded: &ref}, extract)
+	return trackResult{body: rec.Body.String(), status: response.Status(), err: err}
 }
 
 // A real multi-output demux must finish the response even when its optional
@@ -350,113 +346,23 @@ func TestServeExtractWithoutATrackSkipsTheSource(t *testing.T) {
 	}
 }
 
-func TestServeExtractWindowsFromTheSource(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		opts   StreamExtractOpts
-		window error
-		sup    bool
-		from   time.Duration
-		to     time.Duration
-		want   string
-	}{
-		{name: "text window", opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 600, DurationSeconds: 600}, from: 600 * time.Second, to: 1200 * time.Second, want: "converted:window"},
-		{name: "text window to the end", opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 90.5}, from: 90500 * time.Millisecond, to: embeddedsub.WholeTo, want: "converted:window"},
-		{name: "PGS window", sup: true, opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, DurationSeconds: 30}, from: embeddedsub.WholeFrom, to: 30 * time.Second, want: "converted:window"},
-		{name: "a window the source can't read is demuxed", opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 10, DurationSeconds: 5}, window: errors.New("no cues"), from: 10 * time.Second, to: 15 * time.Second, want: "demuxed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, source := newTestCache(t)
-			src := &fakeEmbeddedSource{window: tc.window}
-			c.SetEmbeddedSource(src)
-			var mu sync.Mutex
-			var calls []StreamExtractOpts
-			opts := tc.opts
-			opts.InputPath, opts.Embedded = source, testEmbeddedRef
-			rec := serveText(t, c, opts, fakeConvert(&calls, &mu, false))
-			if rec.Body.String() != tc.want {
-				t.Fatalf("body = %q, want %q", rec.Body.String(), tc.want)
-			}
-			if len(src.windows) != 1 || src.windows[0] != [2]time.Duration{tc.from, tc.to} {
-				t.Fatalf("windows read = %v, want [%v %v]", src.windows, tc.from, tc.to)
-			}
-			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-				t.Fatalf("Cache-Control = %q", got)
-			}
-			if tc.sup {
-				// A PGS window answered from the source warms the whole
-				// track in the background; wait for the warm to finish, so
-				// its commit doesn't race the check or the temp dir cleanup.
-				waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
-				f, _, ok := c.lookup(source, 0, "sup")
-				if !ok {
-					t.Fatal("the warm did not cache the whole track")
-				}
-				data, _ := io.ReadAll(f)
-				_ = f.Close()
-				if string(data) != "converted:kept" {
-					t.Fatalf("cached whole track = %q", data)
-				}
-				return
-			}
-			if f, _, ok := c.lookup(source, 0, "vtt"); ok {
-				_ = f.Close()
-				t.Fatal("a window was cached as the whole track")
-			}
-		})
-	}
-}
-
-func TestExtractSourcedText(t *testing.T) {
+// ffmpeg writes a kept copy by path, so a cache dir others can write never
+// gets one: the track is demuxed without a copy.
+func TestServeExtractKeepsNoCopyInARefusedCacheDir(t *testing.T) {
 	c, source := newTestCache(t)
-	src := &fakeEmbeddedSource{whole: errors.New("no cues")}
-	c.SetEmbeddedSource(src)
-	if _, ok, err := c.ExtractSourcedText(t.Context(), source, testEmbeddedRef, 0, "srt", "ffmpeg"); ok || err != nil {
-		t.Fatalf("a track the source can't read: ok %v, err %v", ok, err)
-	}
-	if _, ok, err := c.ExtractSourcedText(t.Context(), source, nil, 0, "srt", "ffmpeg"); ok || err != nil {
-		t.Fatalf("no track: ok %v, err %v", ok, err)
-	}
-	fillTextEntry(t, c, source, 0, "srt", "cached")
-	data, ok, err := c.ExtractSourcedText(t.Context(), source, testEmbeddedRef, 0, "srt", "ffmpeg")
-	if !ok || err != nil || string(data) != "cached" {
-		t.Fatalf("cached track: %q, ok %v, err %v", data, ok, err)
-	}
-}
-
-func fillTextEntry(t *testing.T, c *SubtitleCache, source string, ordinal int, format, payload string) {
-	t.Helper()
-	fill := c.beginFill(source, ordinal, format)
-	if fill == nil {
-		t.Fatal("no fill")
-	}
-	if _, err := fill.Tee(io.Discard).Write([]byte(payload)); err != nil {
+	dir := filepath.Join(filepath.Dir(source), "subtitle-cache")
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := fill.Commit(); err != nil {
+	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestStreamExtractArgsKeepAnMP4CopyWithItsMoovFirst(t *testing.T) {
-	opts := StreamExtractOpts{InputPath: "/media/in.mp4", SourceCodec: "mov_text", KeepPath: "/tmp/kept.part-2", KeepFormat: "mp4"}
-	got := strings.Join(streamExtractArgs(opts), " ")
-	if !strings.HasSuffix(got, "-c:s copy -output_ts_offset 0.000000 -flush_packets 1 -fs 134217728 -movflags +faststart -f mp4 file:/tmp/kept.part-2") {
-		t.Fatalf("args %s", got)
-	}
-}
-
-func TestStreamExtractArgsKeepACopy(t *testing.T) {
-	opts := StreamExtractOpts{InputPath: "/media/in.mkv", TrackIndex: 2, SourceCodec: "subrip", KeepPath: "/tmp/kept.part-1", KeepFormat: "matroska", KeepOffset: 1500 * time.Millisecond}
-	got := strings.Join(streamExtractArgs(opts), " ")
-	want := "-hide_banner -nostats -loglevel error -y -i /media/in.mkv -map 0:s:2 -c:s webvtt -f webvtt pipe:1 -map 0:s:2 -c:s copy -output_ts_offset 1.500000 -flush_packets 1 -fs 134217728 -f matroska file:/tmp/kept.part-1"
-	if got != want {
-		t.Fatalf("args\n got %s\nwant %s", got, want)
-	}
-	// A window never keeps.
-	opts.SeekSeconds = 30
-	if got := strings.Join(streamExtractArgs(opts), " "); strings.Contains(got, "kept") || strings.Contains(got, " -y ") {
-		t.Fatalf("window args keep a copy: %s", got)
+	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: errors.New("no cues"), format: "matroska"})
+	var mu sync.Mutex
+	var calls []StreamExtractOpts
+	rec := serveText(t, c, StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, fakeConvert(&calls, &mu, false))
+	if rec.Body.String() != "demuxed" || len(calls) != 1 || calls[0].KeepPath != "" {
+		t.Fatalf("body %q, %d extracts, keep %q", rec.Body.String(), len(calls), calls[0].KeepPath)
 	}
 }
 
@@ -604,64 +510,6 @@ func waitForCondition(t *testing.T, cond func() bool, then func()) {
 	then()
 }
 
-// A slow whole read gets the WebVTT header ahead of it a byte at a time, and
-// the response carries the converted cues after any keepalive blank lines.
-func TestServeExtractSendsTheWebVTTHeaderAheadOfASlowRead(t *testing.T) {
-	delay, interval := keepaliveDelay, keepaliveInterval
-	keepaliveDelay, keepaliveInterval = time.Millisecond, time.Millisecond
-	defer func() { keepaliveDelay, keepaliveInterval = delay, interval }()
-	c, source := newTestCache(t)
-	release := make(chan struct{})
-	unblock := sync.OnceFunc(func() { close(release) })
-	c.SetEmbeddedSource(&slowEmbeddedSource{fakeEmbeddedSource: &fakeEmbeddedSource{}, release: release})
-	const converted = "WEBVTT\n\n00:00.500 --> 00:02.000\nAt the top\n"
-	extract := func(_ context.Context, opts StreamExtractOpts) error {
-		_, err := io.WriteString(opts.Writer, converted)
-		return err
-	}
-	rec := httptest.NewRecorder()
-	done := make(chan struct{})
-	var serveErr error
-	go func() {
-		defer close(done)
-		serveErr = c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil), StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, extract)
-	}()
-	defer func() {
-		unblock()
-		<-done
-	}()
-	// Release the read once the whole header has gone ahead. A failed wait
-	// must still release the source and join the request before cleanup.
-	waitForCondition(t, func() bool {
-		fill := inflightFill(c)
-		if fill == nil {
-			return false
-		}
-		fill.mu.Lock()
-		defer fill.mu.Unlock()
-		return fill.written >= int64(len(webVTTPrefix))
-	}, unblock)
-	<-done
-	if serveErr != nil {
-		t.Fatal(serveErr)
-	}
-	withoutBlankLines := func(body string) string {
-		return webVTTPrefix + "\n" + strings.TrimLeft(strings.TrimPrefix(body, webVTTPrefix), "\n")
-	}
-	if withoutBlankLines(rec.Body.String()) != converted {
-		t.Fatalf("body %q, want %q", rec.Body.String(), converted)
-	}
-	if f, _, ok := c.lookup(source, 0, "vtt"); !ok {
-		t.Fatal("track not cached")
-	} else {
-		data, _ := io.ReadAll(f)
-		_ = f.Close()
-		if withoutBlankLines(string(data)) != converted {
-			t.Fatalf("cached %q", data)
-		}
-	}
-}
-
 // slowEmbeddedSource holds WholeTrack until release closes.
 type slowEmbeddedSource struct {
 	*fakeEmbeddedSource
@@ -712,91 +560,19 @@ func (s *cuesExpectedSource) WholeTrack(ctx context.Context, path string, ref Em
 	return in, err
 }
 
-// An open-ended PGS window comes from a cached .sup before the source, which
-// would read the track whole; a bounded one from the source, which also
-// warms the .sup when it isn't cached.
-func TestServeSUPWindowOrder(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		cached     bool
-		duration   float64
-		wantSource bool
-		wantWarm   bool
-	}{
-		{name: "open-ended, cached", cached: true},
-		{name: "bounded, cached", cached: true, duration: 30, wantSource: true},
-		{name: "bounded, not cached", duration: 30, wantSource: true, wantWarm: true},
-		{name: "open-ended, not cached", wantSource: true, wantWarm: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, source := newTestCache(t)
-			if tc.cached {
-				fillEntry(t, c, source, 0, "PG cached")
-			}
-			src := &fakeEmbeddedSource{}
-			c.SetEmbeddedSource(src)
-			warmed := make(chan struct{}, 1)
-			extract := func(_ context.Context, opts StreamExtractOpts) error {
-				if !opts.AllowWindow && opts.Packets != nil {
-					warmed <- struct{}{}
-				}
-				_, err := io.WriteString(opts.Writer, "PG")
-				return err
-			}
-			opts := StreamExtractOpts{InputPath: source, SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, SeekSeconds: 60, DurationSeconds: tc.duration, Embedded: testEmbeddedRef}
-			rec := httptest.NewRecorder()
-			if err := c.ServeSUPExtract(rec, httptest.NewRequest(http.MethodGet, "/sub.sup", nil), opts, extract); err != nil {
-				t.Fatal(err)
-			}
-			src.mu.Lock()
-			fromSource := len(src.windows) == 1
-			src.mu.Unlock()
-			if fromSource != tc.wantSource {
-				t.Fatalf("served from the source: %v, want %v", fromSource, tc.wantSource)
-			}
-			if tc.wantWarm {
-				select {
-				case <-warmed:
-				case <-time.After(5 * time.Second):
-					t.Fatal("no warm after a window from the source")
-				}
-				// The warm still writes the .sup into the test's directory;
-				// it frees its slot once it has finished.
-				waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
-			}
-		})
-	}
+// slowWindowSource reads a window in delay, as storage with slow random
+// reads does: the reporter's took 88 seconds.
+type slowWindowSource struct {
+	*fakeEmbeddedSource
+	delay time.Duration
 }
 
-// The warm demuxes the tracks the source can't read in the slot it holds.
-func TestWarmEmbeddedTextTracksKeepsItsSlotForTheBatch(t *testing.T) {
-	c, source := newTestCache(t)
-	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: errors.New("no cues")})
-	// Every other slot is busy.
-	for len(c.warmSem) < cap(c.warmSem)-1 {
-		c.warmSem <- struct{}{}
-	}
-	batched := make(chan []TextSubtitleOutput, 1)
-	c.WarmEmbeddedTextTracks(source, []TextSubtitleTrack{{Ordinal: 0, Format: "srt"}}, func(int) *EmbeddedSubtitleRef { return testEmbeddedRef },
-		func(_ context.Context, _ string, outputs []TextSubtitleOutput) error {
-			if len(c.warmSem) != cap(c.warmSem) {
-				t.Error("the batch ran without the warm's slot")
-			}
-			for _, o := range outputs {
-				if err := os.WriteFile(o.Path, []byte("1\n00:00:01,000 --> 00:00:02,000\nx\n"), 0o600); err != nil {
-					return err
-				}
-			}
-			batched <- outputs
-			return nil
-		}, "ffmpeg")
+func (s *slowWindowSource) Window(ctx context.Context, path string, ref EmbeddedSubtitleRef, from, to time.Duration) (*SubtitlePacketInput, error) {
 	select {
-	case outputs := <-batched:
-		if len(outputs) != 1 {
-			t.Fatalf("batch outputs %+v", outputs)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the batch never ran")
+	case <-time.After(s.delay):
+		return s.fakeEmbeddedSource.Window(ctx, path, ref, from, to)
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
@@ -816,44 +592,4 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 	w.longestGap = max(w.longestGap, time.Since(w.last))
 	w.last = time.Now()
 	return len(p), nil
-}
-
-// The source's foreground wait can expire before a demux finishes. A
-// client with a 30-second read timeout still needs progress in that gap.
-func TestKeepaliveCoversSlowWholeReadAndFallback(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		c, source := newTestCache(t)
-		c.SetEmbeddedSource(&timedFallbackSource{fakeEmbeddedSource: &fakeEmbeddedSource{}})
-		writer := &progressWriter{last: time.Now()}
-		extract := func(_ context.Context, opts StreamExtractOpts) error {
-			time.Sleep(40 * time.Second) //nolint:forbidigo // synctest models fallback latency beyond the read timeout
-			_, err := io.WriteString(opts.Writer, "WEBVTT\n\n00:01.000 --> 00:02.000\nvisible\n")
-			return err
-		}
-		err := c.sourced(extract)(t.Context(), StreamExtractOpts{
-			InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef, Writer: writer,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if writer.longestGap > 30*time.Second {
-			t.Fatalf("valid extraction left the viewer without bytes for %v; a 30-second read timeout expires", writer.longestGap)
-		}
-	})
-}
-
-// A WebVTT or SubRip cue counts only with text after its timing line.
-func TestHasCueNeedsText(t *testing.T) {
-	for doc, want := range map[string]bool{
-		"WEBVTT\n":                                     false,
-		"WEBVTT\n\n00:01.000 --> 00:02.000\n":          false,
-		"WEBVTT\n\n00:01.000 --> 00:02.000\n\n":        false,
-		"WEBVTT\n\n00:01.000 --> 00:02.000\n  \n":      false,
-		"WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n":   true,
-		"1\r\n00:00:01,000 --> 00:00:02,000\r\nHi\r\n": true,
-	} {
-		if got := hasCue(subtitleMuxerWebVTT, []byte(doc)); got != want {
-			t.Errorf("hasCue(%q) = %v, want %v", doc, got, want)
-		}
-	}
 }

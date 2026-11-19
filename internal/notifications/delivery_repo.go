@@ -3,7 +3,6 @@ package notifications
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -33,23 +32,6 @@ type Cursor struct {
 func (c Cursor) Encode() string {
 	raw := c.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
-}
-
-// DecodeCursor parses an opaque cursor produced by Encode.
-func DecodeCursor(encoded string) (Cursor, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return Cursor{}, errors.New("invalid cursor")
-	}
-	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return Cursor{}, errors.New("invalid cursor")
-	}
-	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
-	if err != nil {
-		return Cursor{}, errors.New("invalid cursor")
-	}
-	return Cursor{CreatedAt: createdAt, ID: parts[1]}, nil
 }
 
 // deliveryRowSelect joins display metadata so clients can render a row
@@ -188,6 +170,10 @@ func (r *DeliveryRepository) HasRequestFulfilled(ctx context.Context, userID int
 // complete recipient union first. The insert trigger then assigns timestamps
 // strictly above the preceding committed delivery for each profile.
 func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) error {
+	return lockInboxProfiles(ctx, tx, profileIDs)
+}
+
+func lockInboxProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) error {
 	profiles := slices.Clone(profileIDs)
 	slices.Sort(profiles)
 	for _, profile := range slices.Compact(profiles) {
@@ -199,28 +185,6 @@ func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, p
 		}
 	}
 	return nil
-}
-
-// ListInbox returns inbox rows newest-first for the profile.
-func (r *DeliveryRepository) ListInbox(ctx context.Context, userID int, profileID string, unreadOnly bool, limit int, before *Cursor) ([]DeliveryRow, error) {
-	conditions := []string{"d.user_id = $1 AND d.profile_id = $2"}
-	args := []any{userID, profileID}
-	if unreadOnly {
-		conditions = append(conditions, "d.read_at IS NULL")
-	}
-	if before != nil {
-		args = append(args, before.CreatedAt, before.ID)
-		conditions = append(conditions, fmt.Sprintf("(d.created_at, d.id) < ($%d, $%d)", len(args)-1, len(args)))
-	}
-	args = append(args, limit)
-	query := deliveryRowSelect +
-		" WHERE " + strings.Join(conditions, " AND ") +
-		fmt.Sprintf(" ORDER BY d.created_at DESC, d.id DESC LIMIT $%d", len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list inbox: %w", err)
-	}
-	return scanDeliveryRows(rows)
 }
 
 // ListSync returns rows ascending from the cursor for forward sync (the
@@ -451,19 +415,6 @@ func (r *DeliveryRepository) Exists(ctx context.Context, userID int, profileID, 
 	return exists, err
 }
 
-// MarkAllRead marks every unread delivery read for the profile.
-func (r *DeliveryRepository) MarkAllRead(ctx context.Context, userID int, profileID string) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE notification_deliveries
-		SET read_at = now()
-		WHERE user_id = $1 AND profile_id = $2 AND read_at IS NULL`,
-		userID, profileID)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
-}
-
 // DeleteAllForProfile removes every delivery for a deleted profile (profiles
 // may live outside Postgres, so no cascade).
 func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
@@ -475,12 +426,29 @@ func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int
 // DeleteOld applies retention: rows read longer ago than readCutoff, unread
 // rows created before unreadCutoff. Read rows age from read_at, not
 // created_at — an old notification read today starts a fresh read window.
-func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff time.Time) (int64, error) {
+// A watchlist.available row created at or after arrivalCutoff, the fanout
+// staleness horizon, is kept whatever the retention settings: it is what
+// stops a later episode inside the horizon from telling the profile again.
+// A row with a webhook or plugin destination attempt still to finish is
+// kept, since its deletion would cascade to the attempt: always while the
+// attempt is claimed or scheduled (retrying with next_retry_at ahead, which
+// covers a live claim lease), and while it waits otherwise for as long as
+// the row is younger than pluginAttemptMaxAge, past which a plugin attempt
+// is finished without a send. The bound lets the row go when an attempt is
+// stranded, such as while webhooks are turned off.
+func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff, arrivalCutoff time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM notification_deliveries
-		WHERE (read_at IS NOT NULL AND read_at < $1)
-		   OR (read_at IS NULL AND created_at < $2)`,
-		readCutoff, unreadCutoff)
+		DELETE FROM notification_deliveries d
+		WHERE ((d.read_at IS NOT NULL AND d.read_at < $1)
+		       OR (d.read_at IS NULL AND d.created_at < $2))
+		  AND NOT (d.type = '`+DeliveryTypeWatchlistAvailable+`' AND d.created_at >= $3)
+		  AND NOT EXISTS (SELECT 1 FROM webhook_delivery_attempts a
+		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))
+		  AND NOT EXISTS (SELECT 1 FROM plugin_destination_delivery_attempts a
+		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))`,
+		readCutoff, unreadCutoff, arrivalCutoff, pluginAttemptMaxAge)
 	if err != nil {
 		return 0, err
 	}

@@ -2,14 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"strconv"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -42,13 +37,16 @@ type APIKeyHandler struct {
 	// the server Owner's account. Minting a key for another account always
 	// applies the same rule, in the store, under the accounts' locks.
 	Owners ownerTargetChecker
-	// Stores and ProfileTokens hold personal key creation to the household
-	// manager (canManageHouseholdAs). A key skips profile PIN verification, so
-	// minting one from a child profile would hand that profile every other
-	// profile on the account. Without Stores creation fails closed;
-	// ProfileTokens verifies a PIN-locked primary on v1.
-	Stores        userstore.UserStoreProvider
-	ProfileTokens *access.ProfileTokenService
+	// Stores holds personal key creation to the household manager
+	// (canManageHouseholdAs). A key skips profile PIN verification, so minting
+	// one from a child profile would hand that profile every other profile on
+	// the account. Without Stores creation fails closed.
+	Stores userstore.UserStoreProvider
+	// ProfilesOutsidePostgres is set when the profile store is not the
+	// Postgres one (userdb.backend=sqlite). A user key's profile binding and
+	// the PIN recheck at its insert both read user_profiles in Postgres, so
+	// user keys are off there whatever the server setting says.
+	ProfilesOutsidePostgres bool
 }
 
 // MayCreatePersonalAPIKey reports whether the caller acting as
@@ -58,6 +56,128 @@ type APIKeyHandler struct {
 // The admin-role check stays with the callers, which run it first.
 func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profile *userstore.Profile) error) (bool, error) {
 	return mayManageHouseholdOf(ctx, h.Stores, userID, activeProfileID, verify)
+}
+
+// personalAPIKeyStore is the storage behind keys an account creates for
+// itself; auth.APIKeyRepository provides it.
+type personalAPIKeyStore interface {
+	UserAPIKeysEnabled(ctx context.Context) (bool, error)
+	CreatePersonal(ctx context.Context, userID int, acting auth.APIKeyActingProfile, profileID, label string, scopes []string) (*models.APIKey, error)
+	ListByUserProfilePage(ctx context.Context, userID int, profileID string, after *auth.APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error)
+	DeleteForProfile(ctx context.Context, id int64, userID int, profileID string) error
+}
+
+func (h *APIKeyHandler) personal() (personalAPIKeyStore, error) {
+	store, ok := h.repo.(personalAPIKeyStore)
+	if !ok {
+		return nil, apiError(501, "capability_unsupported", "Personal API keys are unavailable")
+	}
+	return store, nil
+}
+
+// UserAPIKeysEnabled reports whether accounts that are not admins, and
+// profiles other than the primary one, may create keys for themselves.
+func (h *APIKeyHandler) UserAPIKeysEnabled(ctx context.Context) (bool, error) {
+	store, err := h.personal()
+	if err != nil || h.ProfilesOutsidePostgres {
+		return false, nil //nolint:nilerr // A store without personal keys has them off.
+	}
+	return store.UserAPIKeysEnabled(ctx)
+}
+
+// MayCreateProfileAPIKey reports whether the caller acting as activeProfileID
+// may mint a personal key that is not an admin's account key: one bound to
+// targetProfileID, or (empty target) an account key on an account that is not
+// an admin. The household manager may mint either, for any profile on the
+// account. Every other profile may mint only a key bound to itself, and only
+// with its own PIN proof: verify returns access.ErrProfileUnverified without
+// it. Only the account's own login session mints these, never a view-as
+// session or a remote-playback handoff. The acting profile comes back at the
+// PIN revision it was verified against, for CreatePersonalAPIKey to recheck
+// where the key is stored.
+func (h *APIKeyHandler) MayCreateProfileAPIKey(ctx context.Context, userID int, activeProfileID, targetProfileID string, verify func(profile *userstore.Profile) error) (bool, auth.APIKeyActingProfile, error) {
+	none := auth.APIKeyActingProfile{}
+	if !apimw.GetClaims(ctx).IsOwnLoginSession() || h.Stores == nil || h.ProfilesOutsidePostgres {
+		return false, none, nil
+	}
+	store, err := h.Stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, none, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return false, none, nil
+	}
+	if verify == nil {
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
+	}
+	manager, active, err := householdManagerAs(ctx, store, activeProfileID, verify)
+	if err != nil {
+		return false, none, err
+	}
+	if !manager {
+		if activeProfileID == "" || targetProfileID != activeProfileID {
+			return false, none, nil
+		}
+		if active, err = store.GetProfile(ctx, activeProfileID); err != nil || active == nil {
+			return false, none, err
+		}
+		if err := verify(active); err != nil {
+			return false, none, err
+		}
+	}
+	if active == nil {
+		// A profile-less household manager has no PIN proof to recheck.
+		return true, none, nil
+	}
+	return true, auth.APIKeyActingProfile{ID: active.ID, PINRevision: active.PINRevision}, nil
+}
+
+// CreatePersonalAPIKey mints the key MayCreateProfileAPIKey authorized. The
+// store holds it to user scopes, the server setting and the account's key
+// limit in the inserting transaction.
+func (h *APIKeyHandler) CreatePersonalAPIKey(ctx context.Context, userID int, acting auth.APIKeyActingProfile, profileID, label string, scopes []string) (*models.APIKey, error) {
+	if userID <= 0 || label == "" {
+		return nil, ErrInvalidAPIKeyCreation
+	}
+	normalized, err := auth.NormalizeAPIKeyScopes(scopes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAPIKeyCreation, err)
+	}
+	store, err := h.personal()
+	if err != nil {
+		return nil, err
+	}
+	return store.CreatePersonal(ctx, userID, acting, profileID, label, normalized)
+}
+
+// PersonalAPIKeyView decides which of the account's keys the caller acting as
+// activeProfileID may list and revoke. The primary profile sees them all. Any
+// other profile sees only the keys bound to it, returned as only. A request
+// naming no profile sees them all: the operations run the household profile
+// gate first, which refuses one on a household with a limited profile, so a
+// device cannot drop the header to reach another profile's keys.
+func (h *APIKeyHandler) PersonalAPIKeyView(ctx context.Context, userID int, activeProfileID string) (only string, allowed bool, err error) {
+	if h.Stores == nil {
+		return "", false, nil
+	}
+	store, err := h.Stores.ForUser(ctx, userID)
+	if err != nil {
+		return "", false, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return "", false, nil
+	}
+	if activeProfileID == "" {
+		return "", true, nil
+	}
+	active, err := store.GetProfile(ctx, activeProfileID)
+	if err != nil || active == nil {
+		return "", false, err
+	}
+	if active.IsPrimary {
+		return "", true, nil
+	}
+	return active.ID, true, nil
 }
 
 // checkOwnerAccount refuses the admin key operations on the Owner's account
@@ -96,22 +216,6 @@ func NewAPIKeyHandler(repo APIKeyStore) *APIKeyHandler {
 
 // --- Request/Response types ---
 
-type createAPIKeyRequest struct {
-	Label  string   `json:"label"`
-	Scopes []string `json:"scopes,omitempty"`
-}
-
-type apiKeyResponse struct {
-	ID         int64      `json:"id"`
-	UserID     int        `json:"user_id"`
-	Label      string     `json:"label"`
-	Key        string     `json:"key"`
-	RateTier   string     `json:"rate_tier"`
-	Scopes     []string   `json:"scopes"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-}
-
 // apiKeyScopesOrEmpty renders a key's scopes for JSON. An unscoped key stores
 // NULL/nil scopes; the API always reports an array so clients never have to
 // distinguish null from empty.
@@ -120,19 +224,6 @@ func apiKeyScopesOrEmpty(scopes []string) []string {
 		return []string{}
 	}
 	return scopes
-}
-
-func toAPIKeyResponse(k *models.APIKey) apiKeyResponse {
-	return apiKeyResponse{
-		ID:         k.ID,
-		UserID:     k.UserID,
-		Label:      k.Label,
-		Key:        k.Key,
-		RateTier:   k.RateTier,
-		Scopes:     apiKeyScopesOrEmpty(k.Scopes),
-		CreatedAt:  k.CreatedAt,
-		LastUsedAt: k.LastUsedAt,
-	}
 }
 
 // APIKeyConfiguration is the canonical editor representation. Usage and owner
@@ -145,6 +236,7 @@ type APIKeyConfiguration struct {
 	KeyPrefix string    `json:"key_prefix"`
 	RateTier  string    `json:"rate_tier"`
 	Scopes    []string  `json:"scopes"`
+	ProfileID string    `json:"profile_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Revision  int64     `json:"revision"`
 }
@@ -160,296 +252,13 @@ type AdminAPIKeyListItem struct {
 }
 
 func apiKeyConfigurationOf(k *models.APIKeyMetadata) APIKeyConfiguration {
-	return APIKeyConfiguration{ID: k.ID, UserID: k.UserID, Label: k.Label, KeyPrefix: k.KeyPrefix, RateTier: k.RateTier, Scopes: apiKeyScopesOrEmpty(k.Scopes), CreatedAt: k.CreatedAt, Revision: k.Revision}
+	return APIKeyConfiguration{ID: k.ID, UserID: k.UserID, Label: k.Label, KeyPrefix: k.KeyPrefix, RateTier: k.RateTier, Scopes: apiKeyScopesOrEmpty(k.Scopes), ProfileID: k.ProfileID, CreatedAt: k.CreatedAt, Revision: k.Revision}
 }
 func apiKeyListItemOf(k *models.APIKeyMetadataWithUsage) APIKeyListItem {
 	return APIKeyListItem{APIKeyConfiguration: apiKeyConfigurationOf(&k.APIKeyMetadata), LastUsedAt: k.LastUsedAt}
 }
 func adminAPIKeyListItemOf(k *models.APIKeyMetadataWithUser) AdminAPIKeyListItem {
 	return AdminAPIKeyListItem{APIKeyListItem: apiKeyListItemOf(&k.APIKeyMetadataWithUsage), Username: k.Username}
-}
-
-type adminCreateAPIKeyRequest struct {
-	Label  string   `json:"label"`
-	UserID *int     `json:"user_id,omitempty"`
-	Scopes []string `json:"scopes,omitempty"`
-}
-
-// requireJWTAuth checks that the request was authenticated with a JWT, not an API key.
-// Returns the claims if valid, or writes a 403 and returns nil.
-func requireJWTAuth(w http.ResponseWriter, r *http.Request) *auth.Claims {
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return nil
-	}
-	if claims.TokenType == auth.TokenTypeAPIKey {
-		writeError(w, http.StatusForbidden, "forbidden", "API key management is not accessible via API key authentication")
-		return nil
-	}
-	return claims
-}
-
-// HandleCreateAPIKey handles POST /api-keys.
-func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
-	claims := requireJWTAuth(w, r)
-	if claims == nil {
-		return
-	}
-	// Only server admins create API keys (#1189 AC2), the same rule as v2
-	// createPersonalAPIKey. Listing and revocation stay open so any account can
-	// still see and revoke keys it already owns.
-	if claims.Role != models.RoleAdmin {
-		writeError(w, http.StatusForbidden, "forbidden", "Only server admins can create API keys")
-		return
-	}
-	// The admin acts only through the account's primary profile, verified
-	// when it has a PIN; a child profile on the admin's account may not mint
-	// a key that would skip every profile's PIN. The body is read first so a
-	// PIN change during a slow upload revokes the proof.
-	if !readHouseholdRequestBody(w, r) {
-		return
-	}
-	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profile *userstore.Profile) error {
-		return verifyProfileTokenFor(r, h.ProfileTokens, profile)
-	})
-	if err != nil {
-		writeProfileManagementPermissionError(w, err)
-		return
-	}
-	if !allowed {
-		writeError(w, http.StatusForbidden, "forbidden", "Creating API keys requires the account's primary profile")
-		return
-	}
-
-	var req createAPIKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if req.Label == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Label is required")
-		return
-	}
-
-	scopes, err := auth.NormalizeV1APIKeyScopes(req.Scopes)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	key, err := h.repo.Create(r.Context(), claims.UserID, req.Label, scopes)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, toAPIKeyResponse(key))
-}
-
-// apiKeyScopesResponse is the feature-detection payload for API key scopes:
-// clients read the scopes this server understands instead of sniffing the
-// server version before offering them.
-type apiKeyScopesResponse struct {
-	Scopes []auth.APIKeyScope `json:"scopes"`
-}
-
-// HandleListAPIKeyScopes handles GET /api-keys/scopes.
-func (h *APIKeyHandler) HandleListAPIKeyScopes(w http.ResponseWriter, r *http.Request) {
-	if apimw.GetClaims(r.Context()) == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	writeJSON(w, http.StatusOK, apiKeyScopesResponse{Scopes: auth.V1APIKeyScopeCatalog()})
-}
-
-// HandleListAPIKeys handles GET /api-keys.
-func (h *APIKeyHandler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
-	claims := requireJWTAuth(w, r)
-	if claims == nil {
-		return
-	}
-
-	keys, err := h.repo.ListByUser(r.Context(), claims.UserID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list API keys")
-		return
-	}
-
-	resp := make([]APIKeyListItem, 0, len(keys))
-	for _, k := range keys {
-		resp = append(resp, apiKeyListItemOf(k))
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleDeleteAPIKey handles DELETE /api-keys/{id}.
-func (h *APIKeyHandler) HandleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
-	claims := requireJWTAuth(w, r)
-	if claims == nil {
-		return
-	}
-
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid API key ID")
-		return
-	}
-
-	if err := h.repo.Delete(r.Context(), id, claims.UserID); err != nil {
-		if errors.Is(err, auth.ErrAPIKeyNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "API key not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete API key")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleAdminListUserAPIKeys handles GET /admin/users/{userId}/api-keys.
-func (h *APIKeyHandler) HandleAdminListUserAPIKeys(w http.ResponseWriter, r *http.Request) {
-	userID, err := strconv.Atoi(chi.URLParam(r, "userId"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
-		return
-	}
-
-	keys, err := h.repo.ListByUserAdmin(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list API keys")
-		return
-	}
-
-	resp := make([]APIKeyListItem, 0, len(keys))
-	for _, k := range keys {
-		resp = append(resp, apiKeyListItemOf(k))
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleAdminDeleteAPIKey handles DELETE /admin/api-keys/{id}.
-func (h *APIKeyHandler) HandleAdminDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid API key ID")
-		return
-	}
-	if err := h.checkOwnerKey(r.Context(), id); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	if err := h.repo.DeleteByAdmin(r.Context(), id); err != nil {
-		if errors.Is(err, auth.ErrAPIKeyNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "API key not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete API key")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleAdminListAllAPIKeys handles GET /admin/api-keys.
-func (h *APIKeyHandler) HandleAdminListAllAPIKeys(w http.ResponseWriter, r *http.Request) {
-	keys, err := h.repo.ListAll(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list API keys")
-		return
-	}
-
-	resp := make([]AdminAPIKeyListItem, 0, len(keys))
-	for _, k := range keys {
-		resp = append(resp, adminAPIKeyListItemOf(k))
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleAdminUpdateTier handles PUT /admin/api-keys/{id}/tier.
-func (h *APIKeyHandler) HandleAdminUpdateTier(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid API key ID")
-		return
-	}
-
-	var req struct {
-		Tier string `json:"tier"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if req.Tier != "standard" && req.Tier != "elevated" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Tier must be 'standard' or 'elevated'")
-		return
-	}
-	if err := h.checkOwnerKey(r.Context(), id); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	if err := h.repo.UpdateTier(r.Context(), id, req.Tier); err != nil {
-		if errors.Is(err, auth.ErrAPIKeyNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "API key not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update tier")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-// HandleAdminCreateAPIKey handles POST /admin/api-keys.
-func (h *APIKeyHandler) HandleAdminCreateAPIKey(w http.ResponseWriter, r *http.Request) {
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	var req adminCreateAPIKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if req.Label == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Label is required")
-		return
-	}
-
-	scopes, err := auth.NormalizeV1APIKeyScopes(req.Scopes)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	targetUserID := claims.UserID
-	if req.UserID != nil {
-		targetUserID = *req.UserID
-	}
-	key, err := h.createAsActor(r.Context(), targetUserID, req.Label, scopes)
-	if _, refused := errors.AsType[*APIError](err); refused {
-		writeAPIError(w, err)
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, toAPIKeyResponse(key))
 }
 
 // These application methods are shared by the canonical admin editor. HTTP
@@ -534,20 +343,30 @@ func (h *APIKeyHandler) ListAdminUserAPIKeysPage(ctx context.Context, userID int
 	return out, more, nil
 }
 
-// ListPersonalAPIKeysPage returns only metadata belonging to the login account.
-func (h *APIKeyHandler) ListPersonalAPIKeysPage(ctx context.Context, userID int, after *auth.APIKeyPageKey, limit int) ([]APIKeyListItem, bool, error) {
-	rows, more, err := h.ListAdminUserAPIKeysPage(ctx, userID, after, limit)
+// ListPersonalAPIKeysPage returns only metadata belonging to the login
+// account, narrowed to the keys bound to profileID when it is set.
+func (h *APIKeyHandler) ListPersonalAPIKeysPage(ctx context.Context, userID int, profileID string, after *auth.APIKeyPageKey, limit int) ([]APIKeyListItem, bool, error) {
+	store, err := h.personal()
+	if err != nil {
+		return nil, false, err
+	}
+	rows, more, err := store.ListByUserProfilePage(ctx, userID, profileID, after, limit)
 	if err != nil {
 		return nil, false, err
 	}
 	items := make([]APIKeyListItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, row.APIKeyListItem)
+		items = append(items, apiKeyListItemOf(&row.APIKeyMetadataWithUsage))
 	}
 	return items, more, nil
 }
 
-// RevokePersonalAPIKey checks ownership in the deleting statement.
-func (h *APIKeyHandler) RevokePersonalAPIKey(ctx context.Context, userID int, id int64) error {
-	return h.repo.Delete(ctx, id, userID)
+// RevokePersonalAPIKey checks ownership, and the profile binding when
+// profileID is set, in the deleting statement.
+func (h *APIKeyHandler) RevokePersonalAPIKey(ctx context.Context, userID int, profileID string, id int64) error {
+	store, err := h.personal()
+	if err != nil {
+		return err
+	}
+	return store.DeleteForProfile(ctx, id, userID, profileID)
 }

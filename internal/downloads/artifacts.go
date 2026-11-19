@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 
 	"github.com/google/uuid"
@@ -96,12 +97,14 @@ type ArtifactNotifier func(ctx context.Context, d *Download)
 // jobs, drains them through a bounded worker pool with leased heartbeats, and
 // recovers stranded jobs on startup.
 type ArtifactManager struct {
-	repo                 *ArtifactRepository
-	downloads            *Repository
-	fileRepo             FileResolver
-	preparer             EncodePreparer
-	owner                string
-	liveCfg              func() *config.Config
+	repo      *ArtifactRepository
+	downloads *Repository
+	fileRepo  FileResolver
+	preparer  EncodePreparer
+	owner     string
+	liveCfg   func() *config.Config
+	// nodeKeys signs requests to transcode nodes; see SetNodeKeys.
+	nodeKeys             nodeauth.Keyring
 	settings             SettingsReader
 	notify               ArtifactNotifier
 	remoteRecoveryBudget time.Duration
@@ -657,6 +660,13 @@ func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
 			changed[d.ArtifactID] = struct{}{}
 		}
 	}
+	// Retire jobs no download needs before anything claims them. A create
+	// that links one meanwhile is repaired by the requeue below.
+	if retired, err := m.repo.RetireStaleAbandonedPreparations(ctx); err != nil {
+		slog.WarnContext(ctx, "retiring preparations no download needs failed", "component", "downloads", "error", err)
+	} else {
+		m.announceRetired(ctx, retired)
+	}
 	// A replica that predates expiry links new downloads to an expired row
 	// as if it were queued. Requeue those so they are prepared.
 	if requeued, err := m.repo.RequeueExpiredWithWaiters(ctx); err != nil {
@@ -1117,6 +1127,11 @@ func validateArtifactToneMapRevision(file *models.MediaFile, artifact *Artifact)
 	if frozen != tonemap.RevisionForFile(file) {
 		return fmt.Errorf("%w: tone-map source revision changed", tonemap.ErrSourceRevisionChanged)
 	}
+	// The HDR10+ backfill records the first frame's range without a new
+	// probe, so the revision stays the same while the source kind can change.
+	if kind := tonemap.ResolveSource(tonemap.MetadataForFile(file)).Kind; kind != artifact.ToneMapSourceKind {
+		return fmt.Errorf("%w: tone-map source kind changed from %q to %q", tonemap.ErrSourceRevisionChanged, artifact.ToneMapSourceKind, kind)
+	}
 	return nil
 }
 
@@ -1217,6 +1232,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 	m.mu.Unlock()
 	return playback.TranscodeOpts{
 		InputPath:                  file.FilePath,
+		MediaFileID:                file.ID,
 		SessionID:                  playback.DownloadPrepareLogSessionID(a.ID),
 		SourceVideoCodec:           sourceVideoCodec,
 		SourceVideoProfile:         sourceVideoProfile,
@@ -1245,6 +1261,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		HWAccel:                    cfg.Playback.HWAccel,
 		HWDevice:                   cfg.Playback.HWDevice,
 		TotalDuration:              float64(file.Duration),
+		SourceFrameRate:            playback.FileFrameRate(file),
 		NodeType:                   "integrated",
 		ExecutionMode:              "download_prepare",
 		FFmpegLogSink:              ffmpegLogs,

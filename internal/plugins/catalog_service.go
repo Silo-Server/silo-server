@@ -29,6 +29,9 @@ type CatalogPackage struct {
 	ArchiveURL   string                    `json:"archive_url,omitempty"`
 	ChecksumsURL string                    `json:"checksums_url,omitempty"`
 	Binaries     map[string]PlatformBinary `json:"binaries,omitempty"`
+	// BundleURL is the release's Sigstore bundle (plugin.sigstore.json),
+	// which attests every binary in Binaries.
+	BundleURL string `json:"bundle_url,omitempty"`
 }
 
 type RepositoryIndex struct {
@@ -58,6 +61,14 @@ type ResolvedCatalogInstall struct {
 	ArchiveURL    string
 	Checksum      string
 	LegacyArchive bool
+	// BundleURL is the resolved bundle_url, empty when the entry has none.
+	BundleURL string
+	// BundleURLErr is set when the entry's bundle_url doesn't resolve. The
+	// signature check decides what that means, like a bundle that fails.
+	BundleURLErr error
+	// RepoURL is the entry's repo_url, which the advisory signature policy
+	// checks a third-party release against.
+	RepoURL string
 }
 
 // ArchiveRequest is the installer request for a legacy archive target, with
@@ -74,15 +85,19 @@ func (t *ResolvedCatalogInstall) ArchiveRequest() InstallArchiveRequest {
 
 // BinaryRequest is the installer request for a non-legacy target. It carries
 // the catalog's plugin ID and version so the installer refuses a binary that
-// names another plugin.
+// names another plugin, and what the installer needs to check its release
+// signature.
 func (t *ResolvedCatalogInstall) BinaryRequest() InstallBinaryRequest {
 	repositoryID := t.RepositoryID
 	return InstallBinaryRequest{
-		BinaryURL:    t.ArchiveURL,
-		Checksum:     t.Checksum,
-		RepositoryID: &repositoryID,
-		PluginID:     t.PluginID,
-		Version:      t.Version,
+		BinaryURL:     t.ArchiveURL,
+		Checksum:      t.Checksum,
+		BundleURL:     t.BundleURL,
+		BundleURLErr:  t.BundleURLErr,
+		SourceRepoURL: t.RepoURL,
+		RepositoryID:  &repositoryID,
+		PluginID:      t.PluginID,
+		Version:       t.Version,
 	}
 }
 
@@ -91,6 +106,9 @@ type CatalogServiceOptions struct {
 	SiloAPIVersion string
 	CurrentOS      string
 	CurrentArch    string
+	// Signatures is the release signature policy, shared with the
+	// installer. Nil refuses nothing.
+	Signatures *SignatureChecker
 }
 
 type CatalogService struct {
@@ -99,6 +117,7 @@ type CatalogService struct {
 	siloAPIVersion string
 	currentOS      string
 	currentArch    string
+	signatures     *SignatureChecker
 }
 
 func NewCatalogService(repositories *RepositoryStore, opts CatalogServiceOptions) *CatalogService {
@@ -127,6 +146,7 @@ func NewCatalogService(repositories *RepositoryStore, opts CatalogServiceOptions
 		siloAPIVersion: apiVersion,
 		currentOS:      currentOS,
 		currentArch:    currentArch,
+		signatures:     opts.Signatures,
 	}
 }
 
@@ -324,6 +344,8 @@ func (s *CatalogService) catalogEntryFromPackage(repository *Repository, pkg Cat
 				return CatalogEntry{}, false, err
 			}
 		}
+		// A bundle_url that doesn't resolve is a signature outcome decided at
+		// install, not a broken entry.
 		if strings.TrimSpace(pkg.ChecksumsURL) != "" {
 			if _, err := resolveRepositoryURL(repository.URL, pkg.ChecksumsURL); err != nil {
 				return CatalogEntry{}, false, err
@@ -373,6 +395,9 @@ func (s *CatalogService) installTargetFromPackage(ctx context.Context, repositor
 		if pkg.Manifest.GetSiloApiVersion() != s.siloAPIVersion {
 			return nil, unsupportedAPIVersionError(pkg.Manifest.GetSiloApiVersion(), s.siloAPIVersion)
 		}
+		if err := s.signatures.checkCatalogPackage(ctx, pkg.Manifest.GetPluginId(), false, pkg.BundleURL); err != nil {
+			return nil, err
+		}
 
 		platformKey := s.currentOS + "/" + s.currentArch
 		binary, ok := pkg.Binaries[platformKey]
@@ -410,11 +435,20 @@ func (s *CatalogService) installTargetFromPackage(ctx context.Context, repositor
 			}
 		}
 
+		var bundleURL string
+		var bundleURLErr error
+		if strings.TrimSpace(pkg.BundleURL) != "" {
+			bundleURL, bundleURLErr = resolveRepositoryURL(repository.URL, pkg.BundleURL)
+		}
+
 		return &ResolvedCatalogInstall{
 			RepositoryID:  repository.ID,
 			ArchiveURL:    resolvedURL,
 			Checksum:      checksum,
 			LegacyArchive: false,
+			BundleURL:     bundleURL,
+			BundleURLErr:  bundleURLErr,
+			RepoURL:       pkg.RepoURL,
 		}, nil
 	}
 
@@ -426,6 +460,11 @@ func (s *CatalogService) installTargetFromPackage(ctx context.Context, repositor
 	}
 	if !supportsPlatform(pkg.Manifest, s.currentOS, s.currentArch) {
 		return nil, unsupportedPlatformError(pkg.Manifest, s.currentOS+"/"+s.currentArch)
+	}
+	// A legacy archive has no release signature and its manifest is read
+	// from the archive, so a first-party plugin can't take this path.
+	if err := s.signatures.checkCatalogPackage(ctx, pkg.Manifest.GetPluginId(), true, ""); err != nil {
+		return nil, err
 	}
 
 	resolvedURL, err := resolveRepositoryURL(repository.URL, pkg.ArchiveURL)

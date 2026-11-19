@@ -36,6 +36,7 @@ type Profile struct {
 	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none" example:"PG-13"`
 	MaxAdvisoryAge             *int    `json:"max_advisory_age" nullable:"true" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null means no limit" example:"12"`
 	RequireAdvisoryAge         bool    `json:"require_advisory_age" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"false"`
+	RequestsAllowed            bool    `json:"requests_allowed" doc:"Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager" example:"true"`
 	QualityPreference          string  `json:"quality_preference" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto; empty when unset" example:"auto"`
 	Language                   string  `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"Preferred audio language: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR), or x-silo-original for each item's original language; empty inherits" example:"en"`
 	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"Metadata language: BCP 47 tag (en, pt-BR), or x-silo-original for each item's original language; empty inherits the library's" example:"en"`
@@ -46,7 +47,7 @@ type Profile struct {
 	AutoSkipRecap              bool    `json:"auto_skip_recap" example:"false"`
 	AutoPlayNextPreview        bool    `json:"auto_play_next_preview" example:"false"`
 	ShowForcedSubtitles        bool    `json:"show_forced_subtitles" example:"false"`
-	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled" example:"false"`
+	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled" doc:"Whether the profile is limited to allowed_library_ids within its account's libraries. The primary profile is never limited: it sees every library its account can access and hides libraries through its settings instead" example:"false"`
 	AllowedLibraryIDs          []ID    `json:"allowed_library_ids" doc:"Libraries the profile may see when restrictions are enabled" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         string  `json:"max_playback_quality" doc:"Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values" example:"1080p"`
 	CreatedAt                  Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
@@ -63,6 +64,7 @@ type ProfileUpdate struct {
 	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
 	MaxAdvisoryAge             Patch[int]    `json:"max_advisory_age,omitzero" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it" example:"12"`
 	RequireAdvisoryAge         *bool         `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
+	RequestsAllowed            *bool         `json:"requests_allowed,omitempty" nullable:"false" doc:"Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager" example:"false"`
 	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto" example:"auto"`
 	Language                   Patch[string] `json:"language,omitzero" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; null inherits" example:"en"`
 	PreferredMetadataLanguage  Patch[string] `json:"preferred_metadata_language,omitzero" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Metadata language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; null inherits the library's" example:"en"`
@@ -73,7 +75,7 @@ type ProfileUpdate struct {
 	AutoSkipRecap              *bool         `json:"auto_skip_recap,omitempty" nullable:"false" example:"false"`
 	AutoPlayNextPreview        *bool         `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
 	ShowForcedSubtitles        *bool         `json:"show_forced_subtitles,omitempty" nullable:"false" example:"false"`
-	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
+	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false" doc:"Limits the profile to allowed_library_ids. The primary profile can't be limited: true, or a non-empty allowed_library_ids, fails validation on it" example:"false"`
 	AllowedLibraryIDs          *[]ID         `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Replaces the allowlist with these unique library identifiers; an empty array allows none" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         Patch[string] `json:"max_playback_quality,omitzero" enum:"1080p,2160p" doc:"Playback ceiling; null removes it" example:"1080p"`
 }
@@ -137,6 +139,11 @@ type ProfileCollection struct {
 	// require_advisory_age, which arrived after max_advisory_age: a server can
 	// report the first and not the second.
 	RequireAdvisoryAgeSupported bool `json:"require_advisory_age_supported" doc:"Whether profiles accept require_advisory_age and the server enforces it" example:"true"`
+	// RequestsAllowedSupported is the same kind of flag for requests_allowed.
+	RequestsAllowedSupported bool `json:"requests_allowed_supported" doc:"Whether profiles accept requests_allowed and the server enforces it" example:"true"`
+	// MaxProfiles is the household limit createProfile enforces, so a client
+	// can stop offering a new profile the server would refuse.
+	MaxProfiles *int `json:"max_profiles,omitempty" nullable:"false" minimum:"1" doc:"How many profiles this account may have, from its effective access policy; createProfile answers 409 once the household holds this many. Omitted on a remote-playback handoff, which lists only its own profile and cannot create one, and when the server could not read the limit; in that second case a client keeps offering new profiles and createProfile stays the check" example:"5"`
 }
 
 // ProfileCollectionOutput is the listProfiles response.
@@ -156,6 +163,7 @@ type ProfileCreate struct {
 	MaxContentRating           *string `json:"max_content_rating,omitempty" nullable:"false" doc:"Content-rating ceiling" example:"PG-13"`
 	MaxAdvisoryAge             *int    `json:"max_advisory_age,omitempty" nullable:"false" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set" example:"12"`
 	RequireAdvisoryAge         *bool   `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
+	RequestsAllowed            *bool   `json:"requests_allowed,omitempty" nullable:"false" doc:"Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager. Omitted means allowed" example:"false"`
 	QualityPreference          *string `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto" example:"auto"`
 	Language                   *string `json:"language,omitempty" nullable:"false" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; omitted or empty inherits" example:"en"`
 	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty" nullable:"false" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Metadata language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; omitted or empty inherits the library's" example:"en"`
@@ -166,8 +174,8 @@ type ProfileCreate struct {
 	AutoSkipRecap              *bool   `json:"auto_skip_recap,omitempty" nullable:"false" example:"false"`
 	AutoPlayNextPreview        *bool   `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
 	ShowForcedSubtitles        *bool   `json:"show_forced_subtitles,omitempty" nullable:"false" doc:"Defaults to true when omitted" example:"true"`
-	LibraryRestrictionsEnabled *bool   `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
-	AllowedLibraryIDs          *[]ID   `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Unique library identifiers the profile may see when restrictions are enabled" example:"[\"1\",\"2\"]"`
+	LibraryRestrictionsEnabled *bool   `json:"library_restrictions_enabled,omitempty" nullable:"false" doc:"Limits the profile to allowed_library_ids. Must be false or omitted on an account's first profile, which becomes its primary profile" example:"false"`
+	AllowedLibraryIDs          *[]ID   `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Unique library identifiers the profile may see when restrictions are enabled. Must be empty on an account's first profile, which becomes its primary profile, even with restrictions off" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         *string `json:"max_playback_quality,omitempty" nullable:"false" enum:"1080p,2160p" doc:"Playback ceiling" example:"1080p"`
 }
 
@@ -388,7 +396,7 @@ type PlaybackSession struct {
 	PlayMethod               string  `json:"play_method" doc:"The negotiated method as the node reported it" example:"direct"`
 	ReportingNode            string  `json:"reporting_node" doc:"Identifier of the node serving the stream" example:"api"`
 	NodeDisplayName          string  `json:"node_display_name" doc:"Empty when the node has no display name" example:""`
-	FileDuration             *int    `json:"file_duration" nullable:"true" doc:"Seconds; null when unknown" example:"8520"`
+	FileDuration             *int    `json:"file_duration" nullable:"true" doc:"Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown" example:"8520"`
 	StartedAt                Instant `json:"started_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt                Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	PositionSeconds          float64 `json:"position_seconds" example:"1234.5"`
@@ -490,7 +498,7 @@ func playbackSessionOf(v handlers.PlaybackSessionView) PlaybackSession {
 		ContentID: v.ContentID, MediaTitle: v.MediaTitle, MediaType: v.MediaType,
 		SeriesName: v.SeriesName, EpisodeName: v.EpisodeName, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		PosterURL: v.PosterURL, PlayMethod: v.PlayMethod, ReportingNode: v.ReportingNode, NodeDisplayName: v.NodeDisplayName,
-		FileDuration: v.FileDuration, StartedAt: NewInstant(v.StartedAt), UpdatedAt: NewInstant(v.UpdatedAt),
+		FileDuration: v.MeasuredDuration(), StartedAt: NewInstant(v.StartedAt), UpdatedAt: NewInstant(v.UpdatedAt),
 		PositionSeconds: v.PositionSeconds, IsPaused: v.IsPaused, HasPlaybackControl: v.HasPlaybackControl,
 		ClientIP: v.ClientIP, ClientName: v.ClientName, ClientVersion: v.ClientVersion, ClientBuild: v.ClientBuild,
 		ClientChannel: v.ClientChannel, ClientLabel: v.ClientLabel, ClientLabelFull: v.ClientLabelFull, ClientUserAgent: v.ClientUserAgent,
@@ -672,17 +680,29 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 		if claims.IsRemotePlayback() && v.ID != claims.ProfileID {
 			continue
 		}
+		// So does a profile-bound API key.
+		if claims.APIKeyProfileID != "" && v.ID != claims.APIKeyProfileID {
+			continue
+		}
 		profile, p := profileOf(v)
 		if p != nil {
 			return nil, p
 		}
 		items = append(items, profile)
 	}
+	var maxProfiles *int
+	// The handoff list is filtered to one profile, so its length says nothing
+	// about room left in the household.
+	if view.MaxProfiles >= 1 && !claims.IsRemotePlayback() && claims.APIKeyProfileID == "" {
+		maxProfiles = &view.MaxProfiles
+	}
 	return &ProfileCollectionOutput{Body: ProfileCollection{
 		Collection:                  NewCollection(items),
 		AvatarUploadEnabled:         view.AvatarUploadEnabled,
 		MaxAdvisoryAgeSupported:     true,
 		RequireAdvisoryAgeSupported: true,
+		RequestsAllowedSupported:    true,
+		MaxProfiles:                 maxProfiles,
 	}}, nil
 }
 
@@ -764,6 +784,7 @@ func (c ProfileCreate) toRequest() (handlers.ProfileCreateRequest, *Problem) {
 		MaxContentRating:           str(c.MaxContentRating),
 		MaxAdvisoryAge:             number(c.MaxAdvisoryAge),
 		RequireAdvisoryAge:         flag(c.RequireAdvisoryAge),
+		RequestsBlocked:            c.RequestsAllowed != nil && !*c.RequestsAllowed,
 		QualityPreference:          str(c.QualityPreference),
 		Language:                   str(c.Language),
 		PreferredMetadataLanguage:  str(c.PreferredMetadataLanguage),
@@ -932,6 +953,7 @@ func (u ProfileUpdate) toRequest() (handlers.ProfileUpdateRequest, *Problem) {
 		MaxContentRating:           clear(u.MaxContentRating),
 		MaxAdvisoryAge:             advisoryAgePatch(u.MaxAdvisoryAge),
 		RequireAdvisoryAge:         u.RequireAdvisoryAge,
+		RequestsBlocked:            negate(u.RequestsAllowed),
 		QualityPreference:          u.QualityPreference,
 		Language:                   clear(u.Language),
 		PreferredMetadataLanguage:  clear(u.PreferredMetadataLanguage),
@@ -953,6 +975,16 @@ func (u ProfileUpdate) toRequest() (handlers.ProfileUpdateRequest, *Problem) {
 		req.AllowedLibraryIDs = &ids
 	}
 	return req, nil
+}
+
+// negate lowers requests_allowed onto the stored block: nil stays nil (leave
+// it untouched), and a value flips.
+func negate(b *bool) *bool {
+	if b == nil {
+		return nil
+	}
+	v := !*b
+	return &v
 }
 
 // advisoryAgePatch lowers the advisory-age member onto the v1 request, where
@@ -1013,6 +1045,7 @@ func profileOf(v handlers.ProfileView) (Profile, *Problem) {
 		MaxContentRating:           v.MaxContentRating,
 		MaxAdvisoryAge:             advisoryAgeOf(v.MaxAdvisoryAge),
 		RequireAdvisoryAge:         v.RequireAdvisoryAge,
+		RequestsAllowed:            !v.RequestsBlocked,
 		QualityPreference:          v.QualityPreference,
 		Language:                   v.Language,
 		PreferredMetadataLanguage:  v.PreferredMetadataLanguage,

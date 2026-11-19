@@ -12,7 +12,7 @@ import {
 } from "@/lib/sectionLibraryFilter";
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
 import { randomUUID } from "@/lib/uuid";
-import { rowKindLabel } from "./catalog";
+import { rowKindName } from "./catalog";
 import type { RowDraft } from "./rowDraft";
 import { stableJson } from "./stableJson";
 import type { PageRef, Surface } from "./types";
@@ -245,6 +245,7 @@ export function buildBulkCopyPayload(
 /** Kinds whose form edits the config itself: the picked collection's id key, the rules. */
 const FORM_OWNED_CONFIG_TYPES: ReadonlySet<string> = new Set([
   "collection",
+  "collection_posters",
   ...FILTER_SECTION_TYPES,
 ]);
 
@@ -285,7 +286,7 @@ export function buildRowUpdateRequest(
     ...(section.scope === "library" && section.library_id != null
       ? { library_id: section.library_id }
       : {}),
-    title: title.trim() || rowKindLabel(draft.sectionType),
+    title: title.trim() || rowKindName(draft.sectionType),
     section_type: draft.sectionType,
     item_limit: draft.itemLimit,
     featured: draft.hero,
@@ -332,7 +333,7 @@ export function buildProfileRowUpdate(
   return {
     id: section.id,
     section_type: draft.sectionType,
-    title: title || rowKindLabel(draft.sectionType),
+    title: title || rowKindName(draft.sectionType),
     featured: draft.hero,
     item_limit: draft.itemLimit,
     hidden: section.hidden ?? false,
@@ -340,6 +341,8 @@ export function buildProfileRowUpdate(
     customized: section.customized ?? false,
     position: section.position ?? 0,
     default_title: section.default_title,
+    default_title_key: section.default_title_key,
+    default_title_args: section.default_title_args,
     config,
   };
 }

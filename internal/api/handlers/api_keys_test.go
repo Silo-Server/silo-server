@@ -2,16 +2,10 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -50,74 +44,6 @@ func (s *fakeAPIKeyStore) UpdateTier(context.Context, int64, string) error {
 	return nil
 }
 
-func createAPIKey(t *testing.T, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
-	t.Helper()
-	return createAPIKeyAs(t, models.RoleAdmin, body)
-}
-
-func createAPIKeyAs(t *testing.T, role, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
-	t.Helper()
-	store := &fakeAPIKeyStore{}
-	h := NewAPIKeyHandler(store)
-	// A household with no limited profile: the profile-less admin request
-	// below keeps creating keys.
-	h.Stores = householdGateStores{store: householdGateStore{}}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(body))
-	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
-		UserID:    7,
-		Role:      role,
-		TokenType: auth.TokenTypeAccess,
-		SessionID: "s1",
-	}))
-	rec := httptest.NewRecorder()
-	h.HandleCreateAPIKey(rec, req)
-	return rec, store
-}
-
-func TestHandleCreateAPIKeyHonorsRequestedScopes(t *testing.T) {
-	rec, store := createAPIKey(t, `{"label":"ci","scopes":["admin:access-groups:read","admin:users","admin:users"]}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
-	}
-
-	want := []string{auth.ScopeAdminAccessGroupsRead, auth.ScopeAdminUsers}
-	if !reflect.DeepEqual(store.createdScopes, want) {
-		t.Fatalf("stored scopes = %v, want %v (normalized: deduplicated and sorted)", store.createdScopes, want)
-	}
-
-	var resp apiKeyResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !reflect.DeepEqual(resp.Scopes, want) {
-		t.Fatalf("response scopes = %v, want %v", resp.Scopes, want)
-	}
-}
-
-func TestHandleCreateAPIKeyRejectsUnknownScope(t *testing.T) {
-	rec, store := createAPIKey(t, `{"label":"ci","scopes":["admin:everything"]}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body %s)", rec.Code, rec.Body.String())
-	}
-	if store.created {
-		t.Fatal("an unknown scope must not create a key")
-	}
-}
-
-// Only server admins create API keys (#1189 AC2). The role check runs before
-// the body is read, so a regular account is refused even with a bad body.
-func TestHandleCreateAPIKeyRequiresAdmin(t *testing.T) {
-	for _, body := range []string{`{"label":"ci"}`, `{"label":""}`, `x`} {
-		rec, store := createAPIKeyAs(t, models.RoleUser, body)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("body %q: status = %d, want 403 (body %s)", body, rec.Code, rec.Body.String())
-		}
-		if store.created {
-			t.Fatalf("body %q: a regular account must not create a key", body)
-		}
-	}
-}
-
 func (s *fakeAPIKeyStore) GetMetadataByID(context.Context, int64) (*models.APIKeyMetadata, error) {
 	return nil, auth.ErrAPIKeyNotFound
 }
@@ -154,9 +80,8 @@ func TestCreateAdminAPIKeyApplicationValidatesBeforeStorage(t *testing.T) {
 	}
 }
 
-// The v2 surface is the canonical editor, so the shared creation method
-// validates against the full catalog; the frozen v1 transports keep the v1
-// catalog.
+// The shared creation method accepts every scope in the catalog and refuses
+// an unknown one before storage.
 func TestCreateAdminAPIKeyAcceptsFullScopeCatalog(t *testing.T) {
 	for _, scope := range auth.APIKeyScopeCatalog() {
 		store := &fakeAPIKeyStore{}
@@ -173,58 +98,56 @@ func TestCreateAdminAPIKeyAcceptsFullScopeCatalog(t *testing.T) {
 	}
 }
 
-// The v1 catalog is frozen: scopes added for v2 must not become creatable on
-// either v1 create transport.
-func TestV1CreateRejectsV2OnlyScopes(t *testing.T) {
-	for _, scope := range []string{auth.ScopeLibrariesRead, auth.ScopeAdminSessionsSummaryRead} {
-		body := `{"label":"ci","scopes":["` + scope + `"]}`
-		rec, store := createAPIKey(t, body)
-		if rec.Code != http.StatusBadRequest || store.created {
-			t.Fatalf("v1 personal create accepted %q: %d %s", scope, rec.Code, rec.Body.String())
-		}
-
-		adminStore := &fakeAPIKeyStore{}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/api-keys", strings.NewReader(body))
-		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		adminRec := httptest.NewRecorder()
-		NewAPIKeyHandler(adminStore).HandleAdminCreateAPIKey(adminRec, req)
-		if adminRec.Code != http.StatusBadRequest || adminStore.created {
-			t.Fatalf("v1 admin create accepted %q: %d %s", scope, adminRec.Code, adminRec.Body.String())
-		}
-	}
-}
-
-// Account filtering must survive the transport-to-store boundary: the personal
-// service cannot accidentally call the unfiltered administrator delete.
-type personalAPIKeyStore struct {
+// Account and profile filtering must survive the transport-to-store boundary:
+// the personal service cannot accidentally call the unfiltered administrator
+// delete, or drop the profile a non-primary caller is limited to.
+type personalKeySpy struct {
 	fakeAPIKeyStore
-	userID int
-	keyID  int64
-	limit  int
-	after  *auth.APIKeyPageKey
+	userID  int
+	profile string
+	keyID   int64
+	limit   int
+	after   *auth.APIKeyPageKey
 }
 
-func (s *personalAPIKeyStore) Delete(_ context.Context, id int64, userID int) error {
-	s.keyID, s.userID = id, userID
+func (s *personalKeySpy) UserAPIKeysEnabled(context.Context) (bool, error) { return true, nil }
+func (s *personalKeySpy) CreatePersonal(context.Context, int, auth.APIKeyActingProfile, string, string, []string) (*models.APIKey, error) {
+	panic("unexpected create")
+}
+func (s *personalKeySpy) DeleteForProfile(_ context.Context, id int64, userID int, profileID string) error {
+	s.keyID, s.userID, s.profile = id, userID, profileID
 	return auth.ErrAPIKeyNotFound
 }
-func (s *personalAPIKeyStore) DeleteByAdmin(context.Context, int64) error { panic("unfiltered delete") }
-func (s *personalAPIKeyStore) ListByUserAdminPage(_ context.Context, userID int, after *auth.APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error) {
-	s.userID, s.after, s.limit = userID, after, limit
+func (s *personalKeySpy) DeleteByAdmin(context.Context, int64) error { panic("unfiltered delete") }
+func (s *personalKeySpy) ListByUserProfilePage(_ context.Context, userID int, profileID string, after *auth.APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error) {
+	s.userID, s.profile, s.after, s.limit = userID, profileID, after, limit
 	return []*models.APIKeyMetadataWithUser{}, false, nil
 }
 func TestPersonalAPIKeyServiceAccountBoundary(t *testing.T) {
-	store := new(personalAPIKeyStore)
+	store := new(personalKeySpy)
 	handler := NewAPIKeyHandler(store)
-	if err := handler.RevokePersonalAPIKey(t.Context(), 42, 7); !errors.Is(err, auth.ErrAPIKeyNotFound) {
+	if err := handler.RevokePersonalAPIKey(t.Context(), 42, "kid", 7); !errors.Is(err, auth.ErrAPIKeyNotFound) {
 		t.Fatal(err)
 	}
-	if store.userID != 42 || store.keyID != 7 {
-		t.Fatal(store.userID, store.keyID)
+	if store.userID != 42 || store.keyID != 7 || store.profile != "kid" {
+		t.Fatal(store.userID, store.keyID, store.profile)
 	}
 	after := &auth.APIKeyPageKey{ID: 9}
-	rows, more, err := handler.ListPersonalAPIKeysPage(t.Context(), 42, after, 25)
-	if err != nil || more || rows == nil || store.userID != 42 || store.after != after || store.limit != 25 {
+	rows, more, err := handler.ListPersonalAPIKeysPage(t.Context(), 42, "kid", after, 25)
+	if err != nil || more || rows == nil || store.userID != 42 || store.profile != "kid" || store.after != after || store.limit != 25 {
 		t.Fatal(rows, more, err, store)
+	}
+}
+
+// User keys read profiles from Postgres, so a server whose profile store is
+// elsewhere keeps them off whatever its setting says.
+func TestUserAPIKeysOffOutsidePostgres(t *testing.T) {
+	h := NewAPIKeyHandler(new(personalKeySpy))
+	if on, err := h.UserAPIKeysEnabled(t.Context()); !on || err != nil {
+		t.Fatalf("postgres profiles: %v, %v", on, err)
+	}
+	h.ProfilesOutsidePostgres = true
+	if on, err := h.UserAPIKeysEnabled(t.Context()); on || err != nil {
+		t.Fatalf("profiles outside postgres: %v, %v", on, err)
 	}
 }

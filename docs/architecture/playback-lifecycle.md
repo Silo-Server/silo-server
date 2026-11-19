@@ -14,7 +14,10 @@ It starts once and ends once; an id never starts again.
 
 - Native (v2 and the v1 bridge): starts when `startPlannedPlaybackV3` commits the
   transport; ends when its attempt row is stopped. A stopped attempt never
-  reconstructs, and reconstruction after a restart announces nothing.
+  reconstructs, and reconstruction after a restart announces nothing. A
+  reconstruction from a stream token, whose recipe card carries no client, takes
+  the client and device from the session's live row, or from its start row once
+  no live row is left.
 - Jellyfin: one upstream native session is one logical session, and the PlaySessionId
   is not exposed. It starts when a new upstream id wins the attach CAS in
   `ensureUpstreamPlayback`. It ends on a Stopped report or ActiveEncodings teardown,
@@ -22,6 +25,17 @@ It starts once and ends once; an id never starts again.
   or on a method switch, where the new upstream id starts as a new session.
 - Audiobookshelf (beta): starts at `startNativePlaybackSession`, ends on `/close` or
   expiry.
+- Audiobookshelf reported play (beta): a play a client reports only through
+  `/session/local` (Plappa and Prologue never call `/play`). No server holds it in
+  memory: it is its `abs_playback_sessions` row (`client_session_id` set) and its
+  lifecycle row, so it never counts toward stream limits and no media route can load
+  it; the public track route refuses its id. A live report (client `updatedAt` within a
+  minute) starts it, under a new id, when the client session has no open play;
+  `ReportPlay` finds or admits that play under a per-account lock, so every server
+  applies reports to the same play and the account's ten-play cap holds cluster-wide.
+  A report also records the start again while the play has no lifecycle row. It ends
+  only through the sweep, once reports stop; the client session's next report starts a
+  new play with its own id and history row.
 
 ## State and order
 
@@ -74,6 +88,11 @@ hold:
 - A Jellyfin session ends through the shared compatibility expiry claim
   (`ClaimNativeSessionExpiry`), which re-checks the play row's activity under its lock.
 - An Audiobookshelf session ends after 24 hours without a holder.
+- An Audiobookshelf reported play ends 90 seconds after its last report. Closing its
+  row is the claim, made only while no report has arrived since the cutoff, so a play
+  whose report lands after the sweep looked goes on. The history row takes the row's
+  position and the listening its reports credited. A row already closed (an end whose
+  history write failed, a sign-out, the stale-row cleaner) ends from what it holds.
 
 A Jellyfin copy that saw no progress records no end, because it cannot tell whether
 another server holds the copy that took the play's reports; a Jellyfin play that ends
@@ -88,6 +107,11 @@ an admin history row with an `end_reason` and `lifecycle_seq` within its idle gr
 plus one sweep interval after its last activity, while at least one API server runs.
 Each sweep ends at most 100 sessions per server, oldest activity first, so a larger
 backlog (a server dying with many sessions) drains over the following sweeps.
+When the history write of an end the sweep makes from the start row fails, the
+session stays live and the failure counts as activity: a session selected by its
+idleness is tried again after another grace instead of every 15 seconds, and sessions
+that keep failing move behind the others, so they never fill a batch. The row is
+recorded once the cause is fixed.
 Lifecycle events themselves are at most once.
 
 ## Listing
@@ -95,7 +119,8 @@ Lifecycle events themselves are at most once.
 The native session list (`ReadAdminPlaybackSessions`) joins the lifecycle row: `is_paused`
 and `lifecycle_seq` come from it together, ended sessions are excluded, and a native
 session whose attempt is live but that no server has a live row for is listed from its
-start row at the attempt's position. The frozen v1 snapshot keeps its own query.
+start row at the attempt's position. An open Audiobookshelf reported play is listed the
+same way, at its row's position. The frozen v1 snapshot keeps its own query.
 
 `worker.SessionSyncRowJSON` renders a session exactly as a sync stores its row, so a
 start event and the start row read through `jsonb_populate_record` match the live list.

@@ -32,8 +32,12 @@ var throttleCodes = map[string]struct{}{
 }
 
 // isThrottle reports a provider rate limit: HTTP 429, which also covers bodiless
-// HEAD responses, or a known throttle code.
+// HEAD responses, or a known throttle code. A response refused for its size is
+// not a throttle, whatever its status.
 func isThrottle(err error) bool {
+	if isOversizedResponse(err) {
+		return false
+	}
 	var status interface{ HTTPStatusCode() int }
 	if errors.As(err, &status) && status.HTTPStatusCode() == http.StatusTooManyRequests {
 		return true
@@ -67,6 +71,15 @@ func markThrottled(stack *middleware.Stack) error {
 	}), middleware.Before)
 }
 
+// skipOversized runs before the SDK's status checks, which would otherwise
+// retry an oversized reply that carries a 5xx or 429.
+var skipOversized = retry.IsErrorRetryableFunc(func(err error) aws.Ternary {
+	if isOversizedResponse(err) {
+		return aws.FalseTernary
+	}
+	return aws.UnknownTernary
+})
+
 var retryThrottles = retry.IsErrorRetryableFunc(func(err error) aws.Ternary {
 	if isThrottle(err) {
 		return aws.TrueTernary
@@ -93,6 +106,6 @@ func (r throttleExemptRetryer) GetRetryToken(ctx context.Context, opErr error) (
 func newRetryer() aws.Retryer {
 	return throttleExemptRetryer{retry.NewStandard(func(o *retry.StandardOptions) {
 		o.MaxAttempts = retryMaxAttempts
-		o.Retryables = append([]retry.IsErrorRetryable{retryThrottles}, o.Retryables...)
+		o.Retryables = append([]retry.IsErrorRetryable{skipOversized, retryThrottles}, o.Retryables...)
 	})}
 }

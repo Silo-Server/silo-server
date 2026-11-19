@@ -278,7 +278,7 @@ func registerCatalogActions(reg *Registry) {
 	Register(reg, translateOperation, reg.translateCatalogItemDescription)
 
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people", "listPeople", "catalog",
-		"Search people by name, with exact matches first and optional media scope.")), reg.listPeople)
+		"Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.")), reg.listPeople)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people/{id}", "getPerson", "catalog",
 		"One person; viewing queues a provider refresh when one is due, unless the read is a prefetch.")), reg.getPerson)
 	refreshPerson := humaOp(http.MethodPost, Prefix+"/catalog/people/{id}/refresh", "refreshPerson", "catalog",
@@ -381,6 +381,9 @@ func (reg *Registry) translateCatalogItemDescription(ctx context.Context, in *Tr
 	if p != nil {
 		return nil, p
 	}
+	// The request names no library, but the native episode pages it translates
+	// for open under a library that holds only the series.
+	viewer.Access.SeriesLibraryCoversEpisodes = true
 	job, err := reg.deps.MetadataAI.TranslateOnView(ctx, viewer.Access, in.ID, in.Body.TargetLanguage, requestedBy)
 	if err != nil {
 		return nil, catalogActionProblem(err)

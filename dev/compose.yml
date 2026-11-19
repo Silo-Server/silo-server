@@ -44,7 +44,7 @@ services:
       dockerfile_inline: |
         FROM node:22-slim AS node_runtime
 
-        FROM golang:1.26
+        FROM golang:1.27
 
         ENV CGO_ENABLED=1
         ENV GOPROXY=direct

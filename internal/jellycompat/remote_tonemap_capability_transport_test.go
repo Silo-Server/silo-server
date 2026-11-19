@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 func TestRemoteToneMapCapabilityInfoDoesNotForwardAuthorizationAcrossRedirect(t *testing.T) {
@@ -23,8 +26,8 @@ func TestRemoteToneMapCapabilityInfoDoesNotForwardAuthorizationAcrossRedirect(t 
 	}))
 	t.Cleanup(redirector.Close)
 
-	handler := &PlaybackHandler{JWTSecret: "node-secret"}
-	if _, err := handler.remoteToneMapCapabilityInfo(context.Background(), redirector.URL); err == nil {
+	handler := &PlaybackHandler{NodeKeys: nodeauthtest.SameKey("node-secret")}
+	if _, err := handler.remoteToneMapCapabilityInfo(context.Background(), nodeauth.TargetTranscode, redirector.URL); err == nil {
 		t.Fatal("remoteToneMapCapabilityInfo followed a redirect, want redirect rejection")
 	}
 	if redirectedAuthorization != "" {
@@ -39,8 +42,8 @@ func TestRemoteToneMapCapabilityInfoRejectsResponseOverOneMiB(t *testing.T) {
 	}))
 	t.Cleanup(node.Close)
 
-	handler := &PlaybackHandler{JWTSecret: "node-secret"}
-	if _, err := handler.remoteToneMapCapabilityInfo(context.Background(), node.URL); err == nil || !strings.Contains(err.Error(), "exceeds") {
+	handler := &PlaybackHandler{NodeKeys: nodeauthtest.SameKey("node-secret")}
+	if _, err := handler.remoteToneMapCapabilityInfo(context.Background(), nodeauth.TargetTranscode, node.URL); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("remoteToneMapCapabilityInfo error = %v, want oversized-response rejection", err)
 	}
 }

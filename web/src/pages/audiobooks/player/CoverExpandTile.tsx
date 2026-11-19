@@ -1,18 +1,29 @@
 import { Maximize2 } from "lucide-react";
+import { useT } from "@/i18n";
 
 interface CoverExpandTileProps {
   contentId: string;
   posterUrl?: string;
   title?: string;
   onExpand?: () => void;
+  /** Take focus on mount, so collapsing Now Listening returns focus here. */
+  autoFocus?: boolean;
 }
 
-export function CoverExpandTile({ contentId, posterUrl, title, onExpand }: CoverExpandTileProps) {
+export function CoverExpandTile({
+  contentId,
+  posterUrl,
+  title,
+  onExpand,
+  autoFocus,
+}: CoverExpandTileProps) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onExpand}
-      aria-label="Open Now Listening"
+      autoFocus={autoFocus}
+      aria-label={t("web.audiobooks.player.openNowListening")}
       className="group/tile bg-muted relative h-[54px] w-[36px] shrink-0 overflow-hidden rounded-md transition-transform hover:scale-[1.04] focus-visible:scale-[1.04] focus-visible:outline-none"
       style={{ viewTransitionName: `audiobook-cover-${contentId}` }}
     >

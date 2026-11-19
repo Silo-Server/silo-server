@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -24,31 +25,47 @@ const adminCatalogItemsMaxContentIDs = 200
 // AdminCatalogItemsInput is the listAdminCatalogItems query.
 type AdminCatalogItemsInput struct {
 	LimitParam
-	Cursor     string   `query:"cursor" maxLength:"8192" doc:"Opaque cursor from page.next_cursor; valid only with the filters that produced it"`
-	LibraryID  ID       `query:"library_id" doc:"Only items present in this library; added_at and added_after then use the item's first-seen time in this library" example:"1"`
-	Type       string   `query:"type" enum:"movie,series,episode" doc:"Only items of this type"`
-	AddedAfter string   `query:"added_after" format:"date-time" doc:"Only items whose added_at is at or after this instant"`
-	ContentIDs []string `query:"content_ids,explode" maxItems:"200" doc:"Only these items, one content_ids parameter per id; ids that are not present movies, series or episodes are left out" example:"[\"movie-tmdb-949\"]"`
+	Cursor           string   `query:"cursor" maxLength:"8192" doc:"Opaque cursor from page.next_cursor; valid only with the filters that produced it"`
+	LibraryID        ID       `query:"library_id" doc:"Only items present in this library; added_at and added_after then use the item's first-seen time in this library" example:"1"`
+	Type             string   `query:"type" enum:"movie,series,episode" doc:"Only items of this type"`
+	AddedAfter       string   `query:"added_after" format:"date-time" doc:"Only items whose added_at is at or after this instant"`
+	ContentIDs       []string `query:"content_ids,explode" maxItems:"200" doc:"Only these items, one content_ids parameter per id; ids that are not present movies, series or episodes are left out" example:"[\"movie-tmdb-949\"]"`
+	IncludePeople    bool     `query:"include_people" doc:"Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata"`
+	IncludeFilePaths bool     `query:"include_file_paths" doc:"Also return each version's file_path. Send it only when getAdminCatalogCapabilities reports item_file_paths; a key whose scopes lack admin:catalog:paths receives 403"`
 }
 
 // AdminCatalogItem is one movie, series or episode present in an enabled
 // library, with the files that make it playable.
 type AdminCatalogItem struct {
-	ContentID     string                    `json:"content_id" example:"movie-tmdb-949"`
-	Type          string                    `json:"type" enum:"movie,series,episode"`
-	Title         string                    `json:"title" doc:"Episode title for an episode; empty when the episode has none"`
-	Year          int                       `json:"year,omitempty" doc:"Release year; an episode's air-date year. Absent when unknown"`
-	Status        string                    `json:"status,omitempty" doc:"Metadata match state of a movie or series; absent for an episode" example:"matched"`
-	ImdbID        string                    `json:"imdb_id,omitempty"`
-	TmdbID        string                    `json:"tmdb_id,omitempty"`
-	TvdbID        string                    `json:"tvdb_id,omitempty"`
-	SeriesID      string                    `json:"series_id,omitempty" doc:"An episode's series content_id; absent otherwise"`
-	SeriesTitle   string                    `json:"series_title,omitempty" doc:"An episode's series title; absent otherwise"`
-	SeasonNumber  *int                      `json:"season_number,omitempty" doc:"An episode's season; absent otherwise"`
-	EpisodeNumber *int                      `json:"episode_number,omitempty" doc:"An episode's number in its season; absent otherwise"`
-	LibraryIDs    []ID                      `json:"library_ids" doc:"Every enabled library the item is present in, whatever library_id filters"`
-	AddedAt       Instant                   `json:"added_at" doc:"When Silo first saw the item: the earliest first-seen time across its libraries, or its first-seen time in library_id when that filter is set. Not a change cursor; metadata and file changes do not move it"`
-	Versions      []AdminCatalogItemVersion `json:"versions" doc:"Each present file in an enabled library, ordered by file_id. Empty for a series, never null"`
+	ContentID        string                    `json:"content_id" example:"movie-tmdb-949"`
+	Type             string                    `json:"type" enum:"movie,series,episode"`
+	Title            string                    `json:"title" doc:"Episode title for an episode; empty when the episode has none"`
+	Year             int                       `json:"year,omitempty" doc:"Release year; an episode's air-date year. Absent when unknown"`
+	Status           string                    `json:"status,omitempty" doc:"Metadata match state of a movie or series; absent for an episode" example:"matched"`
+	ImdbID           string                    `json:"imdb_id,omitempty"`
+	TmdbID           string                    `json:"tmdb_id,omitempty"`
+	TvdbID           string                    `json:"tvdb_id,omitempty"`
+	SeriesID         string                    `json:"series_id,omitempty" doc:"An episode's series content_id; absent otherwise"`
+	SeriesTitle      string                    `json:"series_title,omitempty" doc:"An episode's series title; absent otherwise"`
+	SeasonNumber     *int                      `json:"season_number,omitempty" doc:"An episode's season; absent otherwise"`
+	EpisodeNumber    *int                      `json:"episode_number,omitempty" doc:"An episode's number in its season; absent otherwise"`
+	LibraryIDs       []ID                      `json:"library_ids" doc:"Every enabled library the item is present in, whatever library_id filters"`
+	AddedAt          Instant                   `json:"added_at" doc:"When Silo first saw the item: the earliest first-seen time across its libraries, or its first-seen time in library_id when that filter is set. Not a change cursor; metadata and file changes do not move it"`
+	Versions         []AdminCatalogItemVersion `json:"versions" doc:"Each present file in an enabled library, ordered by file_id. Empty for a series, never null"`
+	Genres           []string                  `json:"genres,omitempty" doc:"Stored genres of a movie or series, not localized; absent when there are none and for an episode"`
+	ContentRating    string                    `json:"content_rating,omitempty" doc:"Stored content rating of a movie or series; absent when unknown and for an episode" example:"PG-13"`
+	Studios          []string                  `json:"studios,omitempty" doc:"Production studios of a movie or series; absent when there are none and for an episode"`
+	Networks         []string                  `json:"networks,omitempty" doc:"Networks a series aired on; absent when there are none and for a movie or episode"`
+	RatingIMDB       *float64                  `json:"rating_imdb,omitempty" doc:"Stored IMDb rating of a movie or series on IMDb's 0-10 scale"`
+	RatingTMDB       *float64                  `json:"rating_tmdb,omitempty" doc:"Stored TMDB rating of a movie or series on TMDB's 0-10 scale"`
+	RatingRTCritic   *int                      `json:"rating_rt_critic,omitempty" doc:"Stored Rotten Tomatoes critic score of a movie or series, a percentage, whether or not title pages show it"`
+	RatingRTAudience *int                      `json:"rating_rt_audience,omitempty" doc:"Stored Rotten Tomatoes audience score of a movie or series, a percentage, whether or not title pages show it"`
+	ReleaseDate      *string                   `json:"release_date,omitempty" format:"date" doc:"Release date of a movie or series (a series may store its first air date here), YYYY-MM-DD; absent when unknown and for an episode"`
+	FirstAirDate     *string                   `json:"first_air_date,omitempty" format:"date" doc:"First air date of a series, YYYY-MM-DD; absent when unknown and for a movie or episode"`
+	LastAirDate      *string                   `json:"last_air_date,omitempty" format:"date" doc:"Last air date of a series as its metadata provider reports it, YYYY-MM-DD; absent when unknown and for a movie or episode"`
+	AirDate          *string                   `json:"air_date,omitempty" format:"date" doc:"Air date of an episode, YYYY-MM-DD; absent when unknown and for a movie or series"`
+	Cast             []catalogpkg.CastCredit   `json:"cast,omitempty" doc:"Actors and guest stars of a movie or series in credit order, only with include_people; absent when there are none. No photos"`
+	Crew             []catalogpkg.CrewCredit   `json:"crew,omitempty" doc:"Other credits of a movie or series, only with include_people; absent when there are none. No photos"`
 }
 
 // AdminCatalogItemVersion is one present file. Video facts come from the
@@ -67,6 +84,7 @@ type AdminCatalogItemVersion struct {
 	BitrateKbps   int    `json:"bitrate_kbps,omitempty" doc:"Overall file bitrate in kilobits per second"`
 	FileSize      int64  `json:"file_size" doc:"Bytes"`
 	Edition       string `json:"edition,omitempty" doc:"Edition label, such as Director's Cut" example:"Extended"`
+	FilePath      string `json:"file_path,omitempty" doc:"The file's path as the scanning server stores it, only with include_file_paths. Map it to another host's mounts through the library's paths. Bytes of a name that are not UTF-8 are stored as private-use code points" example:"/media/movies/Heat (1995)/Heat.mkv"`
 }
 
 // AdminCatalogItemCollection is the named envelope the contract carries.
@@ -84,6 +102,10 @@ type AdminCatalogCapabilities struct {
 	ItemListing           bool `json:"item_listing" doc:"listAdminCatalogItems is served"`
 	ItemListingContentIDs int  `json:"item_listing_max_content_ids" doc:"Most content_ids one listAdminCatalogItems request accepts"`
 	ItemChangeEvents      bool `json:"item_change_events" doc:"catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators"`
+	ItemMatchHints        bool `json:"item_match_hints" doc:"getAdminItemMatchHints is served: the title, year and provider IDs the scanner parsed from an item's folder and file names"`
+	ItemMetadata          bool `json:"item_metadata" doc:"listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people"`
+	ItemMetadataReset     bool `json:"item_metadata_reset" doc:"refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers"`
+	ItemFilePaths         bool `json:"item_file_paths" doc:"listAdminCatalogItems accepts include_file_paths from this caller: a login session, an unscoped key, or a key holding admin:catalog:paths"`
 }
 type AdminCatalogCapabilitiesOutput struct {
 	Status       int
@@ -95,13 +117,17 @@ type AdminCatalogCapabilitiesOutput struct {
 const opListAdminCatalogItems = "listAdminCatalogItems"
 
 func registerAdminCatalogItems(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/catalog/capabilities", "getAdminCatalogCapabilities", "admin-catalog", "Discover the administrator catalog reads this server offers."), Class: ClassActingAdmin}, func(context.Context, *CapabilityInput) (*AdminCatalogCapabilitiesOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/catalog/capabilities", "getAdminCatalogCapabilities", "admin-catalog", "Discover the administrator catalog reads this server offers."), Class: ClassActingAdmin}, func(ctx context.Context, _ *CapabilityInput) (*AdminCatalogCapabilitiesOutput, error) {
 		served := reg.deps.AdminCatalogItems != nil
 		return &AdminCatalogCapabilitiesOutput{Body: AdminCatalogCapabilities{
 			Capability:            Capability{State: configuredCapabilityState(served)},
 			ItemListing:           served,
 			ItemListingContentIDs: adminCatalogItemsMaxContentIDs,
 			ItemChangeEvents:      served,
+			ItemMatchHints:        reg.deps.AdminCatalogMatch != nil,
+			ItemMetadata:          served,
+			ItemMetadataReset:     reg.deps.AdminItemMetadata != nil,
+			ItemFilePaths:         served && adminCatalogFilePathsAllowed(ctx),
 		}}, nil
 	})
 
@@ -111,7 +137,10 @@ func registerAdminCatalogItems(reg *Registry) {
 		if reg.deps.AdminCatalogItems == nil {
 			return nil, unavailable("catalog listing")
 		}
-		filter := catalogpkg.AdminCatalogItemFilter{Type: in.Type}
+		if in.IncludeFilePaths && !adminCatalogFilePathsAllowed(ctx) {
+			return nil, NewProblem(TypePermissionDenied, "This API key needs the admin:catalog:paths scope to read file paths.")
+		}
+		filter := catalogpkg.AdminCatalogItemFilter{Type: in.Type, People: in.IncludePeople, FilePaths: in.IncludeFilePaths}
 		if in.LibraryID != "" {
 			n, err := intOfID(in.LibraryID)
 			if err != nil || n <= 0 || n > math.MaxInt32 {
@@ -163,6 +192,11 @@ func registerAdminCatalogItems(reg *Registry) {
 				SeriesID: row.SeriesID, SeriesTitle: row.SeriesTitle, SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber,
 				LibraryIDs: make([]ID, 0, len(row.LibraryIDs)), AddedAt: NewInstant(row.AddedAt),
 				Versions: make([]AdminCatalogItemVersion, 0, len(row.Versions)),
+				Genres:   row.Genres, ContentRating: row.ContentRating, Studios: row.Studios, Networks: row.Networks,
+				RatingIMDB: row.RatingIMDB, RatingTMDB: row.RatingTMDB, RatingRTCritic: row.RatingRTCritic, RatingRTAudience: row.RatingRTAudience,
+				ReleaseDate: calendarDatePtr(row.ReleaseDate), FirstAirDate: calendarDatePtr(row.FirstAirDate),
+				LastAirDate: calendarDatePtr(row.LastAirDate), AirDate: calendarDatePtr(row.AirDate),
+				Cast: row.Cast, Crew: row.Crew,
 			}
 			for _, id := range row.LibraryIDs {
 				item.LibraryIDs = append(item.LibraryIDs, IDFromInt(int64(id)))
@@ -172,7 +206,7 @@ func registerAdminCatalogItems(reg *Registry) {
 					FileID: IDFromInt(int64(v.FileID)), LibraryID: IDFromInt(int64(v.LibraryID)),
 					Resolution: v.Resolution, CodecVideo: v.CodecVideo, DynamicRange: v.DynamicRange,
 					CodecAudio: v.CodecAudio, AudioChannels: v.AudioChannels, Atmos: v.Atmos, Container: v.Container,
-					BitrateKbps: v.BitrateKbps, FileSize: v.FileSize, Edition: v.Edition,
+					BitrateKbps: v.BitrateKbps, FileSize: v.FileSize, Edition: v.Edition, FilePath: v.FilePath,
 				})
 			}
 			items = append(items, item)
@@ -189,4 +223,13 @@ func registerAdminCatalogItems(reg *Registry) {
 		}
 		return &AdminCatalogItemCollectionOutput{Body: AdminCatalogItemCollection{Collection: Paginated(items, next)}}, nil
 	})
+}
+
+// adminCatalogFilePathsAllowed reports whether the caller may read file paths
+// from listAdminCatalogItems. The route already requires an acting
+// administrator; a scoped key also needs admin:catalog:paths, because the
+// admin:monitor:read scope that admits the route never returns paths.
+func adminCatalogFilePathsAllowed(ctx context.Context) bool {
+	claims := claimsFrom(ctx)
+	return claims != nil && (len(claims.APIKeyScopes) == 0 || slices.Contains(claims.APIKeyScopes, auth.ScopeAdminCatalogPaths))
 }

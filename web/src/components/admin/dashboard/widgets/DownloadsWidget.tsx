@@ -7,6 +7,8 @@ import { BarList, BarListSkeleton } from "../charts";
 import type { BarListItem } from "../charts";
 import { SectionError } from "../feedback";
 import { WidgetHeader } from "../WidgetHeader";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 const ROW_LIMIT = 8;
 
@@ -21,17 +23,20 @@ const ROW_LIMIT = 8;
  * "No offline downloads".
  */
 export function DownloadsWidget() {
+  const t = useT();
   const query = useAdminDownloadsStats();
   const stats = query.data;
   const items = useMemo<BarListItem[]>(
     () =>
       (stats?.top_users ?? []).slice(0, ROW_LIMIT).map((user) => ({
         id: String(user.user_id),
-        label: user.username || `User #${user.user_id}`,
+        label:
+          user.username ||
+          t("web.admin.dashboard.widgets.downloads.userFallback", { id: String(user.user_id) }),
         value: user.downloads,
         secondary: formatFileSize(user.total_bytes, { fallback: "" }),
       })),
-    [stats],
+    [stats, t],
   );
 
   const hasDownloads =
@@ -39,11 +44,13 @@ export function DownloadsWidget() {
 
   return (
     <Card className="h-full">
-      <WidgetHeader title="Offline downloads">
+      <WidgetHeader title={t("web.admin.dashboard.widgets.downloads.title")}>
         {stats && hasDownloads ? (
           <span className="text-muted-foreground text-[11px] tabular-nums">
-            {stats.downloads_started_24h.toLocaleString()} started ·{" "}
-            {stats.downloads_completed_24h.toLocaleString()} finished (24h)
+            {t("web.admin.dashboard.widgets.downloads.summary24h", {
+              started: stats.downloads_started_24h.toLocaleString(formatLocale()),
+              finished: stats.downloads_completed_24h.toLocaleString(formatLocale()),
+            })}
           </span>
         ) : null}
       </WidgetHeader>
@@ -51,23 +58,36 @@ export function DownloadsWidget() {
         {query.isLoading ? (
           <BarListSkeleton />
         ) : query.error ? (
-          <SectionError message="Failed to load download activity." />
+          <SectionError message={t("web.admin.dashboard.widgets.downloads.loadFailed")} />
         ) : !stats || !hasDownloads ? (
-          <div className="text-muted-foreground py-4 text-center text-sm">No offline downloads</div>
+          <div className="text-muted-foreground py-4 text-center text-sm">
+            {t("web.admin.dashboard.widgets.downloads.empty")}
+          </div>
         ) : (
           <>
             <dl className="grid shrink-0 grid-cols-3 gap-2">
-              <DownloadsStat label="Users" value={stats.users_with_downloads.toLocaleString()} />
-              <DownloadsStat label="Items" value={stats.active_downloads.toLocaleString()} />
               <DownloadsStat
-                label="On devices"
+                label={t("web.admin.dashboard.widgets.downloads.users")}
+                value={stats.users_with_downloads.toLocaleString(formatLocale())}
+              />
+              <DownloadsStat
+                label={t("web.admin.dashboard.widgets.downloads.items")}
+                value={stats.active_downloads.toLocaleString(formatLocale())}
+              />
+              <DownloadsStat
+                label={t("web.admin.dashboard.widgets.downloads.onDevices")}
                 value={formatFileSize(stats.total_bytes, { fallback: "0 B" })}
               />
             </dl>
             <BarList
               items={items}
-              formatValue={(count) => `${count.toLocaleString()} ${count === 1 ? "item" : "items"}`}
-              emptyLabel="No offline downloads"
+              formatValue={(count) =>
+                t("web.admin.dashboard.widgets.downloads.itemCount", {
+                  count,
+                  count_text: count.toLocaleString(formatLocale()),
+                })
+              }
+              emptyLabel={t("web.admin.dashboard.widgets.downloads.empty")}
             />
           </>
         )}

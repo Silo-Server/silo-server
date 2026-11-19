@@ -1,9 +1,14 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { catalogItemFromV2, type CatalogCardItem } from "@/api/v2/catalog";
+import { captureProfileRequestContext } from "@/api/client";
 import { v2 } from "@/api/v2/request";
 import { recKeys, favoriteKeys } from "./keys";
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
+import {
+  PERSONAL_STATE_WRITE_TIMEOUT_MS,
+  personalStateMutationOptions,
+} from "./personalStateWrites";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { storage } from "@/utils/storage";
 
@@ -83,27 +88,81 @@ function scheduleTasteSeedRefetches(queryClient: QueryClient) {
   );
 }
 
+/** What the picker changed: titles to add to favourites and favourites to remove. */
+export interface TasteSeedChanges {
+  add: string[];
+  remove: string[];
+}
+
+export interface TasteSeedSaveResult {
+  /** Favourites the server actually created; titles already favourited don't count. */
+  added: number;
+  removed: number;
+}
+
 /**
- * Submits a batch of selected content IDs as favorites and triggers a single
- * taste-profile refresh. Uses the dedicated POST /api/v2/recommendations/taste-seed
- * endpoint so the server can debounce the refresh into one request rather than
- * one-per-favorite.
+ * Saves the picker: submits the new picks as one batch, so the server triggers
+ * a single taste-profile refresh rather than one per favourite, then removes
+ * the favourites the user unselected.
+ *
+ * The batch goes first because the server waits for its refresh before
+ * answering, and only when no refresh is already queued or running for the
+ * profile; a removal sent before it would queue one and cut that wait short.
+ * Each removal asks for a further refresh, which the delayed refetches pick up.
+ * The batch endpoint needs at least one title, so a save that only removes
+ * favourites skips it. Adding and removing are both idempotent, so a save that
+ * failed partway can simply be sent again.
+ *
+ * Every request carries the profile captured when the save started, so a
+ * profile switch partway through (in another tab, say) cannot send the rest of
+ * the save as the newly active profile.
  */
 export function useSubmitTasteSeed() {
   const queryClient = useQueryClient();
+  // Favourites and recommendation surfaces. The server waits for the
+  // profile's refresh before answering the batch, so the rows usually already
+  // reflect the picks; the delayed refetches cover a refresh that took longer
+  // than that wait, and the ones the removals asked for.
+  const refreshSurfaces = async () => {
+    await queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
+    await queryClient.invalidateQueries({ queryKey: recKeys.all });
+    await invalidateMediaSurfaceQueries(queryClient);
+    bumpHomeRefreshSignal(queryClient);
+    scheduleTasteSeedRefetches(queryClient);
+  };
   return useMutation({
-    mutationFn: (itemIds: string[]) =>
-      v2("POST /api/v2/recommendations/taste-seed", { body: { item_ids: itemIds } }),
-    onSuccess: async () => {
-      // Invalidate favorites and recommendation surfaces. The server waits
-      // for the profile's refresh before answering, so the rows usually
-      // already reflect the picks; the delayed refetches cover a refresh that
-      // took longer than that wait.
-      await queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
-      await queryClient.invalidateQueries({ queryKey: recKeys.all });
-      await invalidateMediaSurfaceQueries(queryClient);
-      bumpHomeRefreshSignal(queryClient);
-      scheduleTasteSeedRefetches(queryClient);
+    // Run even while the browser reports itself offline. A paused save would
+    // only capture its profile once it resumed, so a profile switch in
+    // another tab meanwhile would send these removals as that profile; this
+    // way an offline save fails at once and the page shows the error.
+    ...personalStateMutationOptions,
+    mutationFn: async ({ add, remove }: TasteSeedChanges): Promise<TasteSeedSaveResult> => {
+      const profileContext = captureProfileRequestContext() ?? undefined;
+      const added =
+        add.length > 0
+          ? (
+              await v2("POST /api/v2/recommendations/taste-seed", {
+                body: { item_ids: add },
+                profileContext,
+              })
+            ).added
+          : 0;
+      // One at a time: each removal also notifies connected watch providers,
+      // and the save stops at the first failure.
+      for (const itemId of remove) {
+        await v2("DELETE /api/v2/favorites/{item_id}", {
+          path: { item_id: itemId },
+          timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+          profileContext,
+        });
+      }
+      return { added, removed: remove.length };
+    },
+    onSuccess: refreshSurfaces,
+    // Part of the save may have landed, so refresh the same surfaces, without
+    // holding up the error.
+    onError: () => {
+      void refreshSurfaces();
     },
   });
 }

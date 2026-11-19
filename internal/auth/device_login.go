@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/clientmetadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -68,7 +69,6 @@ const (
 	DeviceLoginPurposeQuickConnect = "jellyfin_quick_connect"
 
 	deviceLoginTTL           = 15 * time.Minute
-	legacyDeviceLoginTTL     = 10 * time.Minute
 	deviceLoginPollInterval  = 3 * time.Second
 	remotePlaybackSessionTTL = 24 * time.Hour
 	deviceCodeBytes          = 32
@@ -119,10 +119,6 @@ type DeviceLoginStartInput struct {
 	BaseURL        string
 	ClientPurpose  string
 	Temporary      bool
-	// Legacy keeps the frozen /api/v1 start answer: a 10-minute request
-	// whose link carries the browser code (?token=) rather than the user
-	// code. The user code is digits either way.
-	Legacy bool
 	// Binding is base64url (no padding) of SHA-256 of a secret the device
 	// keeps; empty starts an unbound request. Every poll of a bound request
 	// must present the secret (see "Session binding" in
@@ -363,9 +359,8 @@ func (s *DeviceLoginService) createWithFreshCodes(
 		if codes.deviceCode, err = newDeviceCode(); err != nil {
 			return codes, record, fmt.Errorf("generate device code: %w", err)
 		}
-		// Only the frozen v1 link still carries the browser code; lookups by
-		// it keep working for those links and for links issued before user
-		// codes moved into the URL.
+		// No start answer hands out the browser code any more; lookups by it
+		// keep working for links issued before user codes moved into the URL.
 		if codes.browserCode, err = randomToken(browserCodeBytes); err != nil {
 			return codes, record, fmt.Errorf("generate browser code: %w", err)
 		}
@@ -419,10 +414,6 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 		}
 		binding = &input.Binding
 	}
-	ttl := deviceLoginTTL
-	if input.Legacy {
-		ttl = legacyDeviceLoginTTL
-	}
 	codes, record, err := s.createWithFreshCodes(ctx, deviceLoginRecord{
 		DeviceName:         fallbackDeviceName(input.DeviceName, input.UserAgent),
 		DevicePlatform:     trimDeviceField(input.DevicePlatform, maxDevicePlatformLen),
@@ -431,24 +422,20 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 		ClientPurpose:      purpose,
 		Temporary:          temporary,
 		BindingHash:        binding,
-	}, ttl, func() (string, error) { return randomToken(deviceCodeBytes) }, func(string) (string, error) { return s.newUserCode() })
+	}, deviceLoginTTL, func() (string, error) { return randomToken(deviceCodeBytes) }, func(string) (string, error) { return s.newUserCode() })
 	if err != nil {
 		return nil, err
 	}
 
 	verificationURI := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/") + "/activate"
-	complete := verificationURI + "?code=" + normalizeUserCode(codes.userCode)
-	if input.Legacy {
-		complete = verificationURI + "?token=" + codes.browserCode
-	}
 	return &DeviceLoginStartResult{
 		DeviceCode:              codes.deviceCode,
 		UserCode:                codes.userCode,
 		MatchCode:               codes.matchCode,
 		VerificationURI:         verificationURI,
-		VerificationURIComplete: complete,
+		VerificationURIComplete: verificationURI + "?code=" + normalizeUserCode(codes.userCode),
 		ExpiresAt:               record.ExpiresAt,
-		ExpiresIn:               int(ttl.Seconds()),
+		ExpiresIn:               int(deviceLoginTTL.Seconds()),
 		Interval:                int(deviceLoginPollInterval.Seconds()),
 		DeviceName:              record.DeviceName,
 		DevicePlatform:          record.DevicePlatform,
@@ -1459,16 +1446,12 @@ func fallbackDeviceName(deviceName, userAgent string) string {
 	return "This device"
 }
 
+// trimDeviceField turns each whitespace run, tabs and line breaks included,
+// into one space, then drops invalid UTF-8 and the remaining control
+// characters and keeps at most limit characters. Postgres text rejects both
+// invalid UTF-8 and NUL, which would fail the whole request insert.
 func trimDeviceField(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	value = strings.Join(strings.Fields(value), " ")
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
+	return clientmetadata.Normalize(strings.Join(strings.Fields(value), " "), limit)
 }
 
 func maskDeviceIPAddress(ip string) string {

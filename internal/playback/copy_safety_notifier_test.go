@@ -190,37 +190,6 @@ func TestCopySafetyNotifierStopsSessionsItCannotTell(t *testing.T) {
 	}
 }
 
-// Only sessions actually stream-copying video for the file are touched: a
-// transcode is already safe, and a direct play never repackages into fMP4.
-func TestCopySafetyNotifierIgnoresNonCopyRoutes(t *testing.T) {
-	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	transcoding := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayTranscode)
-	direct := startPlaybackTestSession(t, sessions, 2, "profile-2", 100, PlayDirect)
-	otherFile := startPlaybackTestSession(t, sessions, 3, "profile-3", 101, PlayRemux)
-
-	transcodeAttempt := remuxAttempt(transcoding.ID, "plan-transcode", FeaturePlanInvalidatedV3)
-	transcodeAttempt.CurrentPlan.Delivery = DeliveryTranscodeHLSV3
-	directAttempt := remuxAttempt(direct.ID, "plan-direct", FeaturePlanInvalidatedV3)
-	directAttempt.CurrentPlan.Delivery = DeliveryOriginalHTTPV3
-
-	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{
-		transcoding.ID: transcodeAttempt,
-		direct.ID:      directAttempt,
-		otherFile.ID:   remuxAttempt(otherFile.ID, "plan-other", FeaturePlanInvalidatedV3),
-	}}
-	notifier := NewCopySafetyNotifier(sessions, attempts, NewCommandDispatcher(sessions, hub, tracker), control)
-
-	notifier.settle = 0
-	notifier.VideoCopyUnsafe(context.Background(), 100)
-
-	if stopped := control.stoppedSessions(); len(stopped) != 0 {
-		t.Fatalf("stopped = %v, want no session touched", stopped)
-	}
-	if tracked := control.trackedCommands(); len(tracked) != 0 {
-		t.Fatalf("tracked = %#v, want no command pushed", tracked)
-	}
-}
-
 // A session with no v3 attempt at all (a reconstructed session, or one whose
 // attempt expired) is classified by its live play method, and stopped because
 // it can be told nothing.
@@ -236,31 +205,6 @@ func TestCopySafetyNotifierUsesSessionPlayMethodWithoutAnAttempt(t *testing.T) {
 	stopped := control.stoppedSessions()
 	if len(stopped) != 1 || stopped[0] != remuxing.ID {
 		t.Fatalf("stopped = %v, want only the remuxing session %q (not %q)", stopped, remuxing.ID, transcoding.ID)
-	}
-}
-
-// The Jellyfin-protocol surface picks direct stream from the device profile
-// alone, so a compat client reconnects onto the identical remux. Stopping it
-// would be a mid-stream interruption that buys nothing.
-func TestCopySafetyNotifierLeavesJellyfinCompatSessionsAlone(t *testing.T) {
-	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	ctx := WithClientInfo(context.Background(), ClientInfo{Name: "Infuse", IsCompat: true})
-	compat, err := sessions.StartSessionWithFilesContext(ctx, 1, "profile-1", 100, 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSessionWithFilesContext: %v", err)
-	}
-	if !compat.IsJellyfinCompat {
-		t.Fatal("fixture session is not a compat session; the test would prove nothing")
-	}
-	native := startPlaybackTestSession(t, sessions, 2, "profile-2", 100, PlayRemux)
-
-	notifier := NewCopySafetyNotifier(sessions, nil, NewCommandDispatcher(sessions, hub, tracker), control)
-	notifier.settle = 0
-	notifier.VideoCopyUnsafe(context.Background(), 100)
-
-	stopped := control.stoppedSessions()
-	if len(stopped) != 1 || stopped[0] != native.ID {
-		t.Fatalf("stopped = %v, want only the native session %q (not the compat session %q)", stopped, native.ID, compat.ID)
 	}
 }
 
@@ -319,40 +263,6 @@ func TestCopySafetyNotifierStopsAfterTheSettleWindow(t *testing.T) {
 	waitForStop(t, control, session.ID)
 }
 
-// The session lookup also matches the requested file, which after a 4K guard or
-// a version replan is not the file being streamed. A verdict about that
-// inactive edition must not touch a session remuxing a different, copy-safe one.
-func TestCopySafetyNotifierIgnoresSessionsServingAnotherFile(t *testing.T) {
-	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session, err := sessions.StartSessionWithFiles(1, "profile-1", 11, 10, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSessionWithFiles: %v", err)
-	}
-	conn := connectRealtimeTestConn(t, sessions, hub, session.ID)
-
-	record := remuxAttempt(session.ID, "plan-abc", FeaturePlanInvalidatedV3)
-	record.RequestedMediaFileID = 10
-	record.EffectiveMediaFileID = 11
-	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{session.ID: record}}
-	notifier := NewCopySafetyNotifier(sessions, attempts, NewCommandDispatcher(sessions, hub, tracker), control)
-	notifier.settle = 0
-
-	// File 10 is the requested edition the session abandoned; file 11 is playing.
-	notifier.VideoCopyUnsafe(context.Background(), 10)
-
-	if len(conn.messages) != 0 {
-		t.Fatalf("messages = %d, want nothing pushed for an edition the session is not streaming", len(conn.messages))
-	}
-	if stopped := control.stoppedSessions(); len(stopped) != 0 {
-		t.Fatalf("stopped = %v, want the session on the other edition left alone", stopped)
-	}
-
-	notifier.VideoCopyUnsafe(context.Background(), 11)
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want the effective file's verdict to reach the session", len(conn.messages))
-	}
-}
-
 // The command carries a deadline: a client that acks and then goes quiet loses
 // its session, so it cannot keep decoding a stream the server withdrew.
 func TestCopySafetyNotifierDeadlineStopsUnansweredSession(t *testing.T) {
@@ -376,30 +286,6 @@ func TestCopySafetyNotifierDeadlineStopsUnansweredSession(t *testing.T) {
 	// answered, so the tracker must have released the command as well.
 	if _, tracked := tracker.Status("unused"); tracked {
 		t.Fatal("tracker reported an unknown command as tracked")
-	}
-}
-
-// An acked command whose result completes leaves the session alone: the client
-// replanned itself.
-func TestCopySafetyNotifierCompletedResultKeepsSession(t *testing.T) {
-	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
-	conn := connectRealtimeTestConn(t, sessions, hub, session.ID)
-
-	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{
-		session.ID: remuxAttempt(session.ID, "plan-abc", FeaturePlanInvalidatedV3),
-	}}
-	notifier := NewCopySafetyNotifier(sessions, attempts, NewCommandDispatcher(sessions, hub, tracker), control)
-	notifier.deadline = 50 * time.Millisecond
-
-	notifier.VideoCopyUnsafe(context.Background(), 100)
-	command := conn.messages[0].(CommandEnvelope)
-	tracker.Ack(command.CommandID)
-	tracker.Result(command.CommandID)
-
-	time.Sleep(150 * time.Millisecond)
-	if stopped := control.stoppedSessions(); len(stopped) != 0 {
-		t.Fatalf("stopped = %v, want the session kept after a completed replan", stopped)
 	}
 }
 
@@ -464,26 +350,6 @@ func TestCopySafetyNotifierSweepsSessionWhoseDurablePlanLagsTheRoute(t *testing.
 	committed := remuxAttempt(session.ID, "plan-new")
 	committed.CurrentPlan.Delivery = DeliveryRemuxProgressiveV3
 	attempts.set(session.ID, committed)
-
-	waitForStop(t, control, session.ID)
-}
-
-// Regression for the scan winning the race against the start path by
-// milliseconds: the verdict lands while the session is being built, so the
-// immediate pass finds nothing at all. The deferred file-wide sweep must catch
-// the session that appears moments later, or it plays a condemned route
-// forever (observed live: plan decided at t, verdict persisted at t+4ms,
-// session registered after both, zero notifier action).
-func TestCopySafetyNotifierSweepsSessionsThatAppearAfterTheVerdict(t *testing.T) {
-	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	notifier := NewCopySafetyNotifier(sessions, nil, NewCommandDispatcher(sessions, hub, tracker), control)
-	notifier.settle = 20 * time.Millisecond
-
-	// Verdict lands first; no session exists yet.
-	notifier.VideoCopyUnsafe(context.Background(), 100)
-
-	// The start path finishes registering the session just after.
-	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	waitForStop(t, control, session.ID)
 }

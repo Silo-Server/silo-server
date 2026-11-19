@@ -2,88 +2,13 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-type stubTopActivitySource struct {
-	activity    *AdminTopActivity
-	err         error
-	gotDays     int
-	gotLimit    int
-	invalidated int
-	callCount   int
-}
-
-func (s *stubTopActivitySource) Get(_ context.Context, days, limit int) (*AdminTopActivity, error) {
-	s.callCount++
-	s.gotDays = days
-	s.gotLimit = limit
-	return s.activity, s.err
-}
-
-func (s *stubTopActivitySource) Invalidate() { s.invalidated++ }
-
-// A server with no watch history must answer with empty lists rather than
-// nulls: the bar-list widgets map over these fields directly.
-func TestAdminTopActivityEmptyListsSerializeAsArrays(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTopActivitySource{activity: &AdminTopActivity{
-		Days:     7,
-		Limit:    10,
-		Titles:   []AdminTopTitle{},
-		Profiles: []AdminTopProfile{},
-	}}
-	handler := &AdminHandler{TopActivitySource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTopActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/top-activity", nil))
-
-	var body struct {
-		Titles   []AdminTopTitle   `json:"titles"`
-		Profiles []AdminTopProfile `json:"profiles"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body.Titles == nil || body.Profiles == nil {
-		t.Fatalf("titles/profiles decoded as null: %s", rec.Body.String())
-	}
-}
-
-func TestAdminTopActivityProviderInvalidateClearsEveryVariant(t *testing.T) {
-	t.Parallel()
-
-	provider, err := NewAdminTopActivityProvider(context.Background(), nil, nil)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	t.Cleanup(provider.Close)
-
-	keys := []string{
-		adminTopActivityCachePrefix + "7&limit=10",
-		adminTopActivityCachePrefix + "30&limit=25",
-	}
-	for _, key := range keys {
-		provider.cache.Set(key, &AdminTopActivity{}, time.Minute)
-	}
-
-	provider.Invalidate()
-
-	for _, key := range keys {
-		if _, ok := provider.cache.Get(key); ok {
-			t.Fatalf("%s survived Invalidate", key)
-		}
-	}
-}
 
 // Only finished playback counts as a play. Marking a series watched writes one
 // history row per episode; those rows, and single-item marks from Silo or

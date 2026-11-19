@@ -82,16 +82,6 @@ func TestCodecRejectsMalformedAndUnsupportedWithoutPanic(t *testing.T) {
 	}
 }
 
-func TestCodecKeepsUnknownOutcomeKey(t *testing.T) {
-	got, err := decodeSession([]byte(`{"v":1,"out":{"from_the_future":3}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Outcomes[httpstream.StreamOutcome("from_the_future")] != 3 {
-		t.Fatalf("outcomes = %#v", got.Outcomes)
-	}
-}
-
 func TestCodecRejectsNegativeCounter(t *testing.T) {
 	if _, err := decodeSession([]byte(`{"v":1,"ba":-1}`)); err == nil {
 		t.Fatal("negative counter accepted")

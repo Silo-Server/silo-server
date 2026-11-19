@@ -1,29 +1,25 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { CheckSquare, RefreshCw, Search, Shuffle, Trash2, X } from "lucide-react";
+import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
 import { cn } from "@/lib/utils";
+import { formatLocale } from "@/lib/appLocale";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import CastCarousel from "@/components/CastCarousel";
-import { RequestToAddSection } from "@/components/RequestToAddSection";
 import { Button } from "@/components/ui/button";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import SearchScopeChips from "@/components/catalog/SearchScopeChips";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
-import { usePersonSearch } from "@/hooks/queries/personSearch";
-import { useBoxSetSearch } from "@/hooks/queries/boxSets";
-import BoxSetSearchResults from "@/components/boxsets/BoxSetSearchResults";
 import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
-import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
+import { useSearchScopeChips } from "@/hooks/useSearchMediaScope";
 import { useRemoveHistory } from "@/hooks/queries/history";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
-import { useRequestFeatureStatus, useRequestSearch } from "@/hooks/queries/useRequests";
+import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useWatchlistTitles } from "@/hooks/queries/watchlistTitles";
 import WatchlistTabs, { WatchlistTabPanel } from "@/components/watchlist/WatchlistTabs";
 import WatchlistTitlesTab from "@/components/watchlist/WatchlistTitlesTab";
@@ -34,18 +30,19 @@ import {
   watchlistTitlesAvailable,
   type WatchlistTab,
 } from "@/lib/watchlistTitles";
-import { useCanRequest } from "@/hooks/useCanRequest";
-import { useDebounce } from "@/hooks/useDebounce";
+import { useCatalogVisibleRange } from "@/hooks/useCatalogVisibleRange";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { requestSearchTypeForScope } from "@/lib/mediaRequests";
+import { numberText, useT, type Translate } from "@/i18n";
 import SearchBar from "@/components/SearchBar";
+import SearchResults from "./SearchResults";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ReadOnlyCollectionCallout } from "@/components/collections/CollectionPageActions";
 import {
-  CollectionByline,
-  CollectionPageActions,
-  ReadOnlyCollectionCallout,
-} from "@/components/collections/CollectionPageActions";
-import { useCollectionPageAccess } from "@/hooks/useCollectionPageAccess";
+  useCollectionPageAccess,
+  type CollectionPageTarget,
+} from "@/hooks/useCollectionPageAccess";
+import { useCollectionPageHeader } from "@/hooks/useCollectionPageHeader";
+import { CollectionPageHero } from "@/components/collections/CollectionPageHero";
 import {
   buildHistoryRemovalTarget,
   historyRemovalDialogDescription,
@@ -57,27 +54,22 @@ import {
   buildCatalogQueryUpdateHref,
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
-  readCatalogRequestPage,
-  withCatalogRequestPage,
 } from "./catalogSearchParams";
 import type { CatalogSearchState } from "./catalogSearchParams";
 
-const REQUEST_SEARCH_DEBOUNCE_MS = 100;
-const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
-
-function defaultCatalogTitle(source: string, searchQuery?: string) {
-  if (source === "favorites") return "Favorites";
-  if (source === "watchlist") return "Watchlist";
-  if (source === "history") return "History";
-  if (searchQuery) return `Results for "${searchQuery}"`;
-  return "Catalog";
+function defaultCatalogTitle(t: Translate, source: string, searchQuery?: string) {
+  if (source === "favorites") return t("web.catalog.page.favorites");
+  if (source === "watchlist") return t("web.catalog.page.watchlist");
+  if (source === "history") return t("web.catalog.page.history");
+  if (searchQuery) return t("web.catalog.page.resultsFor", { query: searchQuery });
+  return t("web.catalog.page.catalog");
 }
 
-function defaultCatalogSubtitle(source: string): string {
-  if (source === "favorites") return "Movies and shows you've marked as favorites.";
-  if (source === "watchlist") return "Things you've saved to watch later.";
-  if (source === "history") return "Everything you've recently watched.";
-  return "Refine the archive by type, era, rating, or genre.";
+function defaultCatalogSubtitle(t: Translate, source: string): string {
+  if (source === "favorites") return t("web.catalog.page.favoritesSubtitle");
+  if (source === "watchlist") return t("web.catalog.page.watchlistSubtitle");
+  if (source === "history") return t("web.catalog.page.historySubtitle");
+  return t("web.catalog.page.catalogSubtitle");
 }
 
 export default function Catalog() {
@@ -91,22 +83,29 @@ export default function Catalog() {
     return <EmptySearch />;
   }
 
+  if (state.source === "query" && state.q) {
+    return (
+      <SearchResults searchParams={searchParams} setSearchParams={setSearchParams} state={state} />
+    );
+  }
+
   return (
     <CatalogResults searchParams={searchParams} setSearchParams={setSearchParams} state={state} />
   );
 }
 
 function EmptySearch() {
-  useDocumentTitle("Search");
+  const t = useT();
+  useDocumentTitle(t("web.catalog.page.searchTitle"));
 
   return (
     <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
       <div className="text-muted-foreground mb-6">
         <Search className="h-10 w-10" strokeWidth={1.5} />
       </div>
-      <h1 className="page-title mb-4">Search</h1>
+      <h1 className="page-title mb-4">{t("web.catalog.page.searchTitle")}</h1>
       <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
-        Find films, series, performances, and rediscover things you forgot you saved.
+        {t("web.catalog.page.searchSubtitle")}
       </p>
       <SearchBar autoFocus prominent />
     </section>
@@ -122,22 +121,10 @@ function CatalogResults({
   setSearchParams: (nextInit: URLSearchParams) => void;
   state: ReturnType<typeof parseCatalogSearchParams>;
 }) {
+  const t = useT();
   const limit = 60;
-  // Paging the Request to add grid is not a new search: it keeps the library
-  // results' loaded range and selection.
-  const searchKey = withCatalogRequestPage(searchParams, 1).toString();
-  const [visibleRangeState, setVisibleRangeState] = useState<{
-    key: string;
-    range: [number, number];
-  }>({
-    key: searchKey,
-    range: [0, limit - 1],
-  });
-  const visibleRange =
-    visibleRangeState.key === searchKey
-      ? visibleRangeState.range
-      : ([0, limit - 1] as [number, number]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const searchKey = searchParams.toString();
+  const [visibleRange, handleVisibleRangeChange] = useCatalogVisibleRange(searchKey, limit);
   const isHistorySource = state.source === "history";
   const isCollectionSource =
     state.source === "library_collection" || state.source === "user_collection";
@@ -149,62 +136,17 @@ function CatalogResults({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
-  const handleVisibleRangeChange = useCallback(
-    (start: number, end: number) => {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        setVisibleRangeState({ key: searchKey, range: [start, end] });
-      }, 50);
-    },
-    [searchKey],
-  );
 
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
-
-  const isQuerySource = state.source === "query" && Boolean(state.q);
-  const { scope: preferredScope, setScope: setPreferredScope } = useSearchMediaScope();
-  // The URL `type` param is the explicit search scope ("all" included as a
-  // sentinel). When it's absent — fresh navigation, bookmark, global search —
-  // the user's preferred scope applies as the default.
-  const hasExplicitScope = !isQuerySource || searchParams.has("type");
-  const effectiveState = useMemo(() => {
-    if (hasExplicitScope || preferredScope === "all") {
-      return state;
-    }
-    return {
-      ...state,
-      query_definition: { ...state.query_definition, media_scope: preferredScope },
-    };
-  }, [hasExplicitScope, preferredScope, state]);
   const buildSearchHref = useCallback(
-    (query: string) => buildCatalogQueryUpdateHref(effectiveState, query),
-    [effectiveState],
+    (query: string) => buildCatalogQueryUpdateHref(state, query),
+    [state],
   );
 
-  const mediaScope = effectiveState.query_definition.media_scope;
-  const peopleQuery = usePersonSearch(state.q ?? "", 20, isQuerySource, mediaScope);
-  // Box sets are movies; a scope without movies leaves them out.
-  const boxSetsInScope =
-    isQuerySource && (!mediaScope || mediaScope === "movie" || mediaScope === "video");
-  const boxSetQuery = useBoxSetSearch(state.q ?? "", {
-    enabled: boxSetsInScope,
-    libraryId: state.library_id ? String(state.library_id) : undefined,
-  });
-  // A disabled query still holds its last answer, so another scope hides it.
-  const boxSets = boxSetsInScope ? (boxSetQuery.data ?? []) : [];
-  const people = peopleQuery.data ?? [];
-  const activeChipScope: SearchMediaScope =
-    mediaScope === "audiobook" ? "audiobook" : mediaScope ? "video" : "all";
-  const handleChipScopeChange = useCallback(
-    (scope: SearchMediaScope) => {
-      setPreferredScope(scope);
-      // Another scope searches other TMDB types, so its grid starts at page 1.
-      const next = withCatalogRequestPage(searchParams, 1);
-      next.set("type", scope);
-      setSearchParams(next);
-    },
-    [searchParams, setPreferredScope, setSearchParams],
-  );
+  const mediaScope = state.query_definition.media_scope;
+  // A text search renders SearchResults; this page lists a source or browses
+  // a library, so it applies only the scope its URL names.
+  const { activeScope: activeChipScope, onScopeChange: handleChipScopeChange } =
+    useSearchScopeChips(mediaScope, searchParams, setSearchParams);
 
   // The watchlist splits into the library grid and the titles the library
   // doesn't have yet, once the server keeps watchlist entries for those.
@@ -235,9 +177,8 @@ function CatalogResults({
     [searchParams, setSearchParams],
   );
 
-  const showExactResultCount =
-    state.source !== "section" && !isQuerySource && !showingWatchlistTitles;
-  const catalogQuery = useCatalogWindow(effectiveState, {
+  const showExactResultCount = state.source !== "section" && !showingWatchlistTitles;
+  const catalogQuery = useCatalogWindow(state, {
     limit,
     visibleRange,
     includeTotal: showExactResultCount,
@@ -249,19 +190,19 @@ function CatalogResults({
   // lets a later change to the saved preference take effect on the next visit.
   const effectiveSort = catalogQuery.data?.effectiveSort;
   const sortedState = useMemo(() => {
-    if (!hasSavedSortPreference || !effectiveState.uses_source_order || !effectiveSort?.field) {
-      return effectiveState;
+    if (!hasSavedSortPreference || !state.uses_source_order || !effectiveSort?.field) {
+      return state;
     }
     return {
-      ...effectiveState,
+      ...state,
       uses_source_order: false,
       sort_from_server: true,
       query_definition: {
-        ...effectiveState.query_definition,
+        ...state.query_definition,
         sort: { field: effectiveSort.field, order: effectiveSort.order },
       },
     };
-  }, [effectiveSort, effectiveState, hasSavedSortPreference]);
+  }, [effectiveSort, state, hasSavedSortPreference]);
 
   const saveCollectionSortPreference = useSetCollectionSortPreference();
   const rememberCollectionSort = useCallback(
@@ -303,37 +244,6 @@ function CatalogResults({
     [saveCollectionSortPreference, sortedState],
   );
 
-  const canRequest = useCanRequest();
-  // Add a short TMDB debounce on top of SearchBar's input debounce so the
-  // TMDB plugin isn't hit at the same cadence as the local library query.
-  const tmdbDebouncedQ = useDebounce(state.q ?? "", REQUEST_SEARCH_DEBOUNCE_MS);
-  // TMDB follows the search scope: movies, series, or both; nothing for books.
-  const requestSearchType = requestSearchTypeForScope(mediaScope);
-  const tmdbQuery = useRequestSearch(requestSearchType ?? "all", tmdbDebouncedQ, 1, {
-    enabled: canRequest.discoveryEnabled && isQuerySource && requestSearchType !== null,
-    requireProfile: true,
-    staleTime: 5 * 60 * 1000,
-    gcTime: INTERACTIVE_SEARCH_GC_TIME_MS,
-    retry: false,
-  });
-  // A disabled query still reads its cache, so a book scope counts nothing.
-  const tmdbMissingCount = requestSearchType
-    ? (tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0)
-    : 0;
-  const libraryResultsKnown =
-    !catalogQuery.isLoading && !catalogQuery.isPlaceholderData && !catalogQuery.isError;
-  const libraryHasResults = libraryResultsKnown && (catalogQuery.data?.totalItems ?? 0) > 0;
-  const libraryEmpty = libraryResultsKnown && !libraryHasResults;
-  const showPeopleSection =
-    isQuerySource && (peopleQuery.isLoading || peopleQuery.isError || people.length > 0);
-  // When the library is empty and the request section will (or might) render,
-  // hide ItemGrid entirely. The previous approach pinned ItemGrid's `loading`
-  // prop to true, which renders 24 skeleton tiles forever above the section.
-  const tmdbMayRescueLibrary =
-    isQuerySource &&
-    libraryEmpty &&
-    (canRequest.isResolving ||
-      (canRequest.discoveryEnabled && (tmdbQuery.isLoading || tmdbMissingCount > 0)));
   const loadedHistoryItems = useMemo(() => {
     if (!isHistorySource) {
       return [] as BrowseItem[];
@@ -362,18 +272,19 @@ function CatalogResults({
   // A collection the viewer cannot reach answers 404, the same for a deleted
   // collection and one they were never shown, so the page says neither.
   const collectionUnavailable = isCollectionSource && isNotFoundProblem(catalogQuery.sourceError);
-  const collectionAccess = useCollectionPageAccess(
+  const collectionTarget: CollectionPageTarget | null =
     isCollectionSource && state.collection_id
       ? {
           scope: state.source === "library_collection" ? "server" : "personal",
           id: state.collection_id,
           libraryId: state.library_id,
         }
-      : null,
-  );
+      : null;
+  const collectionAccess = useCollectionPageAccess(collectionTarget);
+  const collectionHeader = useCollectionPageHeader(collectionUnavailable ? null : collectionTarget);
   const title = collectionUnavailable
-    ? "Not found"
-    : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
+    ? t("web.catalog.page.notFound")
+    : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(t, state.source, state.q));
 
   useDocumentTitle(title);
 
@@ -397,22 +308,33 @@ function CatalogResults({
 
   const totalItems = catalogQuery.data?.totalItems ?? 0;
   const shuffleCollectionId = isCollectionSource ? state.collection_id?.trim() : undefined;
-  const canShuffleCollection = Boolean(shuffleCollectionId) && totalItems > 0;
-  // For an in-app search the count reflects local library hits only; requestable
-  // matches live in a separate section, so scope the label to avoid a "0 results"
-  // reading while an outside-library result is visible.
-  const resultNoun =
-    state.source === "query" ? "in library" : `result${totalItems === 1 ? "" : "s"}`;
+  const shuffleKind = state.source === "user_collection" ? "user_collection" : "library_collection";
+  const collectionShuffle =
+    shuffleCollectionId && totalItems > 0
+      ? {
+          starting: isStartingShuffle,
+          onShuffle: () => startShuffle({ kind: shuffleKind, id: shuffleCollectionId }),
+        }
+      : undefined;
+  // A library browse (a query source without search text) counts titles in
+  // the person's libraries, so the label says "in library".
+  const inLibrary = state.source === "query";
+  const resultNoun = inLibrary
+    ? t("web.catalog.page.inLibraryNoun")
+    : t("web.catalog.page.resultNoun", { count: totalItems });
+  const resultCount = inLibrary
+    ? t("web.catalog.page.inLibraryCount", { count: totalItems })
+    : t("web.catalog.page.resultCount", { count: totalItems, shown: totalItems });
 
   if (collectionUnavailable) {
     return (
       <PageUnavailable
-        title="This collection isn't available"
-        description="It may have been deleted, or you may not have access to it."
+        title={t("web.catalog.page.collectionUnavailable")}
+        description={t("web.catalog.page.collectionUnavailableBody")}
       >
         <Button asChild variant="outline">
           <ViewTransitionLink to="/collections" up>
-            All collections
+            {t("web.catalog.page.allCollections")}
           </ViewTransitionLink>
         </Button>
       </PageUnavailable>
@@ -425,56 +347,40 @@ function CatalogResults({
       {searchParams.get("notice") === "read-only" ? (
         <ReadOnlyCollectionCallout access={collectionAccess} collectionName={title} />
       ) : null}
-      <header className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
-          <CollectionByline access={collectionAccess} />
-          <p className="page-subtitle text-sm sm:text-base">
-            {defaultCatalogSubtitle(state.source)}
-          </p>
-        </div>
-        <div className="flex flex-col items-start gap-3 sm:items-end">
-          <CollectionPageActions access={collectionAccess} libraryId={state.library_id} />
-          <div
-            className={cn(
-              "items-baseline gap-3 sm:flex",
-              canShuffleCollection && "flex items-center",
-            )}
-          >
-            {canShuffleCollection && shuffleCollectionId ? (
-              <Button
-                variant="outline"
-                className="self-center rounded-full"
-                disabled={isStartingShuffle}
-                onClick={() =>
-                  startShuffle({
-                    kind:
-                      state.source === "user_collection" ? "user_collection" : "library_collection",
-                    id: shuffleCollectionId,
-                  })
-                }
-              >
-                <Shuffle aria-hidden="true" />
-                Shuffle
-              </Button>
-            ) : null}
-            <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
-            {showExactResultCount ? (
-              <div className="text-right tabular-nums" role="status" aria-live="polite">
-                <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
-                  {totalItems}
-                </span>
-                <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
-                  {resultNoun}
-                </span>
-                <span className="text-muted-foreground text-xs sm:hidden">
-                  {totalItems} {resultNoun}
-                </span>
-              </div>
-            ) : null}
+      {isCollectionSource ? (
+        <CollectionPageHero
+          title={title}
+          access={collectionAccess}
+          header={collectionHeader}
+          libraryId={state.library_id}
+          shuffle={collectionShuffle}
+        />
+      ) : (
+        <header className="page-header">
+          <div className="space-y-3">
+            <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
+            <p className="page-subtitle text-sm sm:text-base">
+              {defaultCatalogSubtitle(t, state.source)}
+            </p>
           </div>
-        </div>
-      </header>
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            <div className="items-baseline gap-3 sm:flex">
+              <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
+              {showExactResultCount ? (
+                <div className="text-end tabular-nums" role="status" aria-live="polite">
+                  <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
+                    {numberText(totalItems)}
+                  </span>
+                  <span className="text-muted-foreground ms-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
+                    {resultNoun}
+                  </span>
+                  <span className="text-muted-foreground text-xs sm:hidden">{resultCount}</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </header>
+      )}
 
       {showWatchlistTabs ? (
         <WatchlistTabs
@@ -500,12 +406,7 @@ function CatalogResults({
         <WatchlistTabPanel idBase={watchlistTabsId} value="library" tabs={showWatchlistTabs}>
           {state.source === "query" ? (
             <div className="flex flex-col items-center gap-3">
-              <SearchBar
-                prominent
-                initialQuery={state.q ?? ""}
-                autoFocus
-                buildSearchHref={buildSearchHref}
-              />
+              <SearchBar prominent autoFocus buildSearchHref={buildSearchHref} />
               <SearchScopeChips
                 activeScope={activeChipScope}
                 onScopeChange={handleChipScopeChange}
@@ -515,6 +416,18 @@ function CatalogResults({
 
           <CatalogFiltersPanel
             state={sortedState}
+            // A collection's hero has no count of its own; the filter bar shows it.
+            resultCountLabel={
+              isCollectionSource && showExactResultCount
+                ? t("web.catalog.page.titleCount", {
+                    count: totalItems,
+                    shown: totalItems.toLocaleString(formatLocale()),
+                  })
+                : undefined
+            }
+            resultCountLoading={
+              isCollectionSource && (catalogQuery.isLoading || catalogQuery.isPlaceholderData)
+            }
             onStateChange={(nextState) => {
               const sortChanged =
                 nextState.uses_source_order !== sortedState.uses_source_order ||
@@ -543,22 +456,21 @@ function CatalogResults({
           {isHistorySource && (
             <section className="surface-panel flex flex-col gap-3 rounded-2xl border-0 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
-                <p className="text-sm font-semibold">Watch History</p>
+                <p className="text-sm font-semibold">{t("web.catalog.page.historyHeading")}</p>
                 <p className="text-muted-foreground text-xs sm:text-sm">
-                  Removing items clears watch history, watched status, and resume progress for this
-                  profile.
+                  {t("web.catalog.page.historyBody")}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {!selectionMode ? (
                   <Button variant="outline" size="sm" onClick={() => setSelectionMode(true)}>
                     <CheckSquare className="size-4" />
-                    Select
+                    {t("web.catalog.page.select")}
                   </Button>
                 ) : (
                   <>
                     <span className="text-muted-foreground text-sm">
-                      {selectedIds.size} selected
+                      {t("web.catalog.page.selectedCount", { count: selectedIds.size })}
                     </span>
                     <Button
                       variant="outline"
@@ -567,10 +479,10 @@ function CatalogResults({
                         setSelectedIds(new Set(loadedHistoryItems.map((item) => item.content_id)))
                       }
                     >
-                      Select Loaded
+                      {t("web.catalog.page.selectLoaded")}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
-                      Clear
+                      {t("web.catalog.page.clearSelection")}
                     </Button>
                     <Button
                       variant="destructive"
@@ -579,7 +491,7 @@ function CatalogResults({
                       onClick={() => setRemoveConfirmOpen(true)}
                     >
                       <Trash2 className="size-4" />
-                      Remove Selected
+                      {t("web.catalog.page.removeSelected")}
                     </Button>
                     <Button
                       variant="ghost"
@@ -590,7 +502,7 @@ function CatalogResults({
                       }}
                     >
                       <X className="size-4" />
-                      Done
+                      {t("web.catalog.page.doneSelecting")}
                     </Button>
                   </>
                 )}
@@ -598,58 +510,21 @@ function CatalogResults({
             </section>
           )}
 
-          {isQuerySource && boxSets.length > 0 ? <BoxSetSearchResults boxSets={boxSets} /> : null}
-
-          {showPeopleSection ? (
-            <section aria-label="People" className="space-y-3">
-              <h2 className="text-lg font-semibold">People</h2>
-              {peopleQuery.isError ? (
-                <div role="alert" className="space-y-2">
-                  <p className="text-muted-foreground text-sm">Could not load people results.</p>
-                  <Button variant="outline" size="sm" onClick={() => void peopleQuery.refetch()}>
-                    <RefreshCw className="size-4" />
-                    Retry people search
-                  </Button>
-                </div>
-              ) : peopleQuery.isLoading ? (
-                <p role="status" className="text-muted-foreground text-sm">
-                  Searching people...
-                </p>
-              ) : (
-                <CastCarousel
-                  cast={people.map((person, index) => ({
-                    person_id: person.id,
-                    name: person.name,
-                    photo_url: person.photo_url,
-                    character: "",
-                    order: index,
-                  }))}
-                />
-              )}
-            </section>
-          ) : null}
-
           {catalogQuery.isError ? (
             <div
               className="search-paint-surface flex flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-16 text-center"
               role="alert"
             >
-              <p className="font-medium">
-                {isQuerySource
-                  ? "Could not load search results."
-                  : "Could not load catalog results."}
-              </p>
+              <p className="font-medium">{t("web.catalog.page.catalogFailed")}</p>
               <p className="text-muted-foreground max-w-md text-sm">
-                {isQuerySource
-                  ? "The search request failed. Please retry."
-                  : "The catalog request failed. Please retry."}
+                {t("web.catalog.page.catalogFailedBody")}
               </p>
               <Button variant="outline" size="sm" onClick={() => void catalogQuery.refetch()}>
                 <RefreshCw className="size-4" />
-                {isQuerySource ? "Retry search" : "Retry catalog"}
+                {t("web.catalog.page.retryCatalog")}
               </Button>
             </div>
-          ) : tmdbMayRescueLibrary || (libraryEmpty && showPeopleSection) ? null : (
+          ) : (
             <ItemGrid
               totalItems={catalogQuery.data?.totalItems ?? 0}
               knownItems={catalogQuery.data?.knownItems}
@@ -662,29 +537,18 @@ function CatalogResults({
               selectionMode={isHistorySource && selectionMode}
               selectedIds={selectedIds}
               onToggleSelect={toggleHistorySelection}
+              posterAspect={mediaScope === "audiobook" ? "square" : "portrait"}
             />
           )}
         </WatchlistTabPanel>
       )}
-
-      {isQuerySource && canRequest.discoveryEnabled && requestSearchType ? (
-        <RequestToAddSection
-          variant="grid"
-          query={tmdbDebouncedQ}
-          mediaType={requestSearchType}
-          libraryHadHits={libraryHasResults}
-          libraryResultsKnown={libraryResultsKnown}
-          page={readCatalogRequestPage(searchParams)}
-          onPageChange={(page) => setSearchParams(withCatalogRequestPage(searchParams, page))}
-        />
-      ) : null}
 
       <ConfirmDialog
         open={removeConfirmOpen}
         onOpenChange={setRemoveConfirmOpen}
         title={historyRemovalDialogTitle(selectedHistoryTargets)}
         description={historyRemovalDialogDescription(selectedHistoryTargets)}
-        confirmLabel="Remove"
+        confirmLabel={t("web.catalog.page.removeConfirm")}
         variant="destructive"
         isPending={removeHistory.isPending}
         onConfirm={() => {

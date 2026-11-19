@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -53,9 +54,14 @@ type PlaybackSession struct {
 	// so the client never learns the server id). Playback reports carrying
 	// that id resolve to this session directly instead of by ambiguous route.
 	ClientPlaySessionID string
-	UserID              string
-	InitialSeekSeconds  float64
-	MediaSources        []PlaybackMediaSource
+	// PreferenceKey is the series (or movie) id the play's remembered audio
+	// and subtitle tracks are saved under; empty saves none. Only PlaybackInfo
+	// sets it: a static play never offered the client its defaults, so its
+	// reports cannot tell a pick from the client's own choice.
+	PreferenceKey      string
+	UserID             string
+	InitialSeekSeconds float64
+	MediaSources       []PlaybackMediaSource
 	// UpstreamMediaFileID survives API restarts so previews can follow the
 	// selected source without consulting a process-local native session.
 	UpstreamMediaFileID        int
@@ -152,7 +158,18 @@ type PlaybackMediaSource struct {
 	SelectedAudioStreamIndex    *int
 	DefaultSubtitleStreamIndex  *int
 	SelectedSubtitleStreamIndex *int
-	ETag                        string
+	// RememberedAudioStreamIndex and RememberedSubtitleStreamIndex are the
+	// last tracks a playback report settled as the series' remembered tracks
+	// (-1 is subtitles off). Nil until then: the Default*StreamIndex, which
+	// already comes from the remembered tracks, stands in.
+	RememberedAudioStreamIndex    *int
+	RememberedSubtitleStreamIndex *int
+	// DownloadedSubtitleIDs are the stored subtitles PlaybackInfo offered, in
+	// stream index order from nextDownloadedSubtitleIndex. Deleting an earlier
+	// one moves the later ones' indexes, so a report's index is resolved through
+	// these IDs. Nil when the play was negotiated without them.
+	DownloadedSubtitleIDs []int
+	ETag                  string
 	// SubtitleDeliveries preserves client delivery capabilities for tracks that
 	// may be enabled later. The scalar fields above retain the selected track's
 	// delivery for sessions read by older binaries during a rolling update.
@@ -173,6 +190,10 @@ type PlaybackMediaSource struct {
 	// hlsRemuxInTS marks a copy the client accepts only as MPEG-TS. PlaybackInfo
 	// reads it once the route is final, so it is not stored.
 	hlsRemuxInTS bool
+	// progressiveRemuxFallback marks a progressive remux the client could
+	// direct stream, offered only if PlaybackInfo leaves no TranscodingUrl.
+	// It is read once the route is final, so it is not stored.
+	progressiveRemuxFallback bool
 
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
@@ -197,14 +218,29 @@ type CompatPlaybackStore interface {
 	Put(session PlaybackSession)
 	// PutNegotiated stores a PlaybackInfo negotiation and atomically replaces
 	// older, still-unstarted negotiations for the same client device and item.
-	PutNegotiated(session PlaybackSession)
-	// Get returns a session when it exists and is not expired.
+	// An error means the negotiation was not stored, so its PlaySessionId
+	// must not be handed to the client.
+	PutNegotiated(session PlaybackSession) error
+	// Get returns a session when it exists and is not expired. A failed
+	// durable read with no cached copy reads as not found; code that grants
+	// access uses Lookup instead.
 	Get(id string) (*PlaybackSession, bool)
+	// Lookup is Get for callers that grant access by PlaySessionId: it
+	// returns an error, instead of not-found, when the store could not be
+	// read and holds no usable copy of the session.
+	Lookup(id string) (*PlaybackSession, bool, error)
 	// Delete removes a session.
 	Delete(id string)
 	// HideFromRouting immediately makes a caller-owned session unavailable to
 	// stream/progress routing before slower durable terminal staging begins.
 	HideFromRouting(id, compatToken string) error
+	// RetireUpstreamSession hides the play attached to an upstream session
+	// from routing, as HideFromRouting does, for every server process that
+	// shares the store. It retires only a play whose stream the server
+	// produces (adminEndRetiresPlay) and reports whether it retired one. An
+	// error means the retirement may not have reached the other processes,
+	// so the caller retries it.
+	RetireUpstreamSession(upstreamSessionID string) (bool, error)
 	// StageTerminal hides a session from playback routing and durably records
 	// the provider event. An authoritative Stopped event replaces a fallback;
 	// a later fallback can never replace an authoritative event.
@@ -227,6 +263,10 @@ type CompatPlaybackStore interface {
 	Update(id string, fn func(*PlaybackSession) error) error
 	// FindByRoute resolves a route item / media-source id to a session.
 	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
+	// LookupByRoute is FindByRoute for callers that grant access by route: it
+	// returns an error, instead of not-found, when the store could not be
+	// read and holds no cached session for the route.
+	LookupByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool, error)
 	// FindUnidentifiedPlayback resolves an item/source pair to exactly one started,
 	// active session owned by the caller. Pending negotiations are not playback.
 	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error)
@@ -296,8 +336,9 @@ func (s *PlaybackSessionStore) Put(session PlaybackSession) {
 // and Stopped reports. Replacing only unstarted sessions keeps real concurrent
 // playback intact while preventing the abandoned negotiation from later
 // publishing a stale pause.
-func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) {
+func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) error {
 	s.putNegotiatedNormalized(session)
+	return nil
 }
 
 // putNormalized stores or replaces a compat playback session and returns the
@@ -314,12 +355,12 @@ func (s *PlaybackSessionStore) putNormalized(session PlaybackSession) PlaybackSe
 	return session
 }
 
-func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) (PlaybackSession, []string) {
+func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) (PlaybackSession, []PlaybackSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	session = s.normalizeSession(session)
-	removed := make([]string, 0, 1)
+	removed := make([]PlaybackSession, 0, 1)
 	if session.CompatToken != "" && session.ClientDeviceID != "" && session.RouteItemID != "" {
 		for id, existing := range s.sessions {
 			if id == session.ID || existing.Terminal || existing.UpstreamSessionID != "" {
@@ -330,12 +371,26 @@ func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) 
 				mediaSourceIDsEqual(existing.RouteItemID, session.RouteItemID) &&
 				existing.NegotiationVariant == session.NegotiationVariant {
 				delete(s.sessions, id)
-				removed = append(removed, id)
+				removed = append(removed, existing)
 			}
 		}
 	}
 	s.sessions[session.ID] = session
 	return session, removed
+}
+
+// undoNegotiated reverses putNegotiatedNormalized: it drops the negotiation id
+// and restores the sessions it displaced, unless one was stored again since.
+func (s *PlaybackSessionStore) undoNegotiated(id string, displaced []PlaybackSession) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.sessions, id)
+	for _, session := range displaced {
+		if _, ok := s.sessions[session.ID]; !ok {
+			s.sessions[session.ID] = session
+		}
+	}
 }
 
 func (s *PlaybackSessionStore) normalizeSession(session PlaybackSession) PlaybackSession {
@@ -369,6 +424,12 @@ func (s *PlaybackSessionStore) Get(id string) (*PlaybackSession, bool) {
 	return &cp, true
 }
 
+// Lookup implements CompatPlaybackStore. The in-memory store cannot fail.
+func (s *PlaybackSessionStore) Lookup(id string) (*PlaybackSession, bool, error) {
+	session, ok := s.Get(id)
+	return session, ok, nil
+}
+
 // Delete removes a playback session.
 func (s *PlaybackSessionStore) Delete(id string) {
 	s.mu.Lock()
@@ -395,6 +456,45 @@ func (s *PlaybackSessionStore) HideFromRouting(id, compatToken string) error {
 	session.UpdatedAt = s.now()
 	s.sessions[id] = session
 	return nil
+}
+
+// adminEndRetiredMethods are the upstream play methods whose play an
+// administrator's end retires: the streams the server produces. A direct play
+// stays routable. Its next request rebuilds the session under the same id,
+// which a proxy's deny marker refuses; with its row retired, a Static=true
+// client would start a new play under an id no marker covers. The method is
+// the row's current one, so a play that switched method is judged by the
+// stream it serves now.
+var adminEndRetiredMethods = []string{string(playback.PlayTranscode), string(playback.PlayRemux)}
+
+func adminEndRetiresPlay(upstreamPlayMethod string) bool {
+	return slices.Contains(adminEndRetiredMethods, upstreamPlayMethod)
+}
+
+// RetireUpstreamSession implements CompatPlaybackStore.
+func (s *PlaybackSessionStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
+	play, ok := s.FindByUpstreamSessionID(upstreamSessionID)
+	return ok && s.retireIfOnUpstream(play.ID, upstreamSessionID), nil
+}
+
+// retireIfOnUpstream hides a play from routing only while it still names
+// upstreamSessionID with a play method an administrator's end retires. The
+// check and the mark share one lock, so a method or upstream switch that
+// lands after the caller looked the play up leaves the play it attached
+// alone.
+func (s *PlaybackSessionStore) retireIfOnUpstream(id, upstreamSessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	now := s.now()
+	if !ok || session.Terminal || !session.ExpiresAt.After(now) ||
+		session.UpstreamSessionID != upstreamSessionID || !adminEndRetiresPlay(session.UpstreamPlayMethod) {
+		return false
+	}
+	session.Terminal = true
+	session.UpdatedAt = now
+	s.sessions[id] = session
+	return true
 }
 
 func (s *PlaybackSessionStore) terminalIDsByCompatToken(compatToken string) map[string]struct{} {
@@ -700,6 +800,12 @@ func (s *PlaybackSessionStore) findByClientPlaySessionID(
 // FindByUpstreamSessionID resolves the unique compat play attached to a local
 // upstream session.
 func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool) {
+	return s.findOnUpstream(upstreamSessionID, false)
+}
+
+// findOnUpstream resolves the play attached to an upstream session: the
+// routable one, or with hidden the one already hidden from routing.
+func (s *PlaybackSessionStore) findOnUpstream(upstreamSessionID string, hidden bool) (*PlaybackSession, bool) {
 	if upstreamSessionID == "" {
 		return nil, false
 	}
@@ -708,7 +814,7 @@ func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string)
 
 	now := s.now()
 	for _, session := range s.sessions {
-		if session.ExpiresAt.After(now) && !session.Terminal && session.UpstreamSessionID == upstreamSessionID {
+		if session.ExpiresAt.After(now) && session.Terminal == hidden && session.UpstreamSessionID == upstreamSessionID {
 			copy := session
 			return &copy, true
 		}
@@ -776,6 +882,12 @@ func streamGrantMatches(session *PlaybackSession, routeItemID, mediaSourceID, cl
 }
 
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.
+// LookupByRoute is FindByRoute; the in-memory store is always readable.
+func (s *PlaybackSessionStore) LookupByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool, error) {
+	session, source, ok := s.FindByRoute(compatToken, routeID)
+	return session, source, ok, nil
+}
+
 func (s *PlaybackSessionStore) FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool) {
 	return s.findByRoute(compatToken, routeID, false, false)
 }

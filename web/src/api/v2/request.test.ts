@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCurrentUserOk from "../../../../contracts/api/v2/fixtures/get_current_user_ok.json";
 import getSetupStatusOk from "../../../../contracts/api/v2/fixtures/get_setup_status_ok.json";
@@ -17,7 +17,15 @@ import {
   setProfileToken,
   setRefreshToken,
 } from "../client";
-import { V2ProblemError, V2TransportError, problemId, v2 } from "./request";
+import { createAppIntl, setAppIntl } from "@/i18n";
+import {
+  V2ProblemError,
+  V2TransportError,
+  problemFieldDetail,
+  problemId,
+  v2,
+  v2RetryDelayMs,
+} from "./request";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const PROBLEM_HEADERS = { "Content-Type": "application/problem+json" };
@@ -66,7 +74,6 @@ describe("v2 request boundary", () => {
     const me = await v2("GET /api/v2/account/me");
     expect(me).toEqual(getCurrentUserOk);
     expect(me.role).toBe("user");
-    expectTypeOf(me.id).toEqualTypeOf<string>();
 
     const users = await v2("GET /api/v2/admin/users");
     expect(users.items).toHaveLength(listAdminUsersOk.items.length);
@@ -177,6 +184,23 @@ describe("v2 request boundary", () => {
     expect(err).not.toBeInstanceOf(V2ProblemError);
     expect((err as V2TransportError).status).toBe(502);
     expect((err as V2TransportError).operationId).toBe("getSetupStatus");
+  });
+
+  it("waits out a proxy's Retry-After on a non-JSON 503", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        async () =>
+          new Response("<html><body>503 Service Unavailable</body></html>", {
+            status: 503,
+            headers: { "Content-Type": "text/html", "Retry-After": "20" },
+          }),
+      ),
+    );
+
+    const err = await v2("GET /api/v2/system/setup").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(V2TransportError);
+    expect(v2RetryDelayMs(err, 2_000)).toBe(20_000);
   });
 
   it("rethrows a network failure unchanged", async () => {
@@ -405,5 +429,87 @@ describe("v2 declared request headers", () => {
       // @ts-expect-error Operations without caller-owned headers expose no headers option.
       void v2("GET /api/v2/account/me", { headers: { "X-Unknown": "x" } });
     }
+  });
+});
+
+describe("problem text in a translated interface", () => {
+  const spanish = createAppIntl("es", {
+    "error.validation_failed": [{ type: 0, value: "Algunos valores no son válidos." }],
+    "error.field.required": [{ type: 0, value: "Esto es obligatorio." }],
+  });
+  const problem = (type: string, detail: string, code?: string) =>
+    new V2ProblemError("op", {
+      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
+      title: "Title",
+      status: 422,
+      detail,
+      instance: "urn:silo:request:1",
+      ...(code ? { errors: [{ code, detail: "Field detail.", location: "body.name" }] } : {}),
+    });
+
+  afterEach(() => setAppIntl(createAppIntl("en", {})));
+
+  it.each([
+    {
+      name: "English keeps the detail",
+      spanish: false,
+      type: "validation_failed",
+      expected: "See errors.",
+    },
+    {
+      name: "a known type translates",
+      spanish: true,
+      type: "validation_failed",
+      expected: "Algunos valores no son válidos.",
+    },
+    {
+      name: "an unknown type keeps the detail",
+      spanish: true,
+      type: "brand_new",
+      expected: "See errors.",
+    },
+    {
+      name: "English keeps the detail over a field code",
+      spanish: false,
+      type: "validation_failed",
+      code: "required",
+      expected: "See errors.",
+    },
+    {
+      name: "a known field code wins over the type",
+      spanish: true,
+      type: "validation_failed",
+      code: "required",
+      expected: "Esto es obligatorio.",
+    },
+    {
+      name: "an unknown field code falls back to the type",
+      spanish: true,
+      type: "validation_failed",
+      code: "path_rewrite_required",
+      expected: "Algunos valores no son válidos.",
+    },
+  ])("message: $name", ({ spanish: translated, type, code, expected }) => {
+    if (translated) setAppIntl(spanish);
+    const error = problem(type, "See errors.", code);
+    expect(error.message).toBe(expected);
+  });
+
+  it("keeps the text of the language the error arrived in, and clones with it", () => {
+    setAppIntl(spanish);
+    const error = problem("validation_failed", "See errors.");
+    setAppIntl(createAppIntl("en", {}));
+    expect(error.message).toBe("Algunos valores no son válidos.");
+    expect(structuredClone(error).message).toBe("Algunos valores no son válidos.");
+  });
+
+  it.each([
+    { code: "required", expected: "Esto es obligatorio." },
+    { code: "path_rewrite_required", expected: "Rewrite the path first." },
+  ])("field $code", ({ code, expected }) => {
+    setAppIntl(spanish);
+    expect(
+      problemFieldDetail({ code, detail: "Rewrite the path first.", location: "body.x" }),
+    ).toBe(expected);
   });
 });

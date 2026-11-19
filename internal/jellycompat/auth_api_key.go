@@ -180,8 +180,10 @@ func (a *AdminAPIKeyAuthenticator) validate(ctx context.Context, token string) (
 	}
 	// Scoped keys are allowlist credentials for the versioned API only; no
 	// compat route is in any scope's allowlist, so they are refused here
-	// outright rather than inheriting the owning admin's compat access.
-	if len(apiKey.Scopes) > 0 {
+	// outright rather than inheriting the owning admin's compat access. A
+	// profile-bound key is always scoped, and is refused by name in case one
+	// is not.
+	if len(apiKey.Scopes) > 0 || apiKey.ProfileID != "" {
 		return nil, nil, adminAPIKeyAuthResult{
 			status:  http.StatusForbidden,
 			code:    "Forbidden",

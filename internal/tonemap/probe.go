@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -119,10 +121,12 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 		}
 		probeCtx, cancel := context.WithTimeout(context.Background(), ProbeTotalTimeout(hardwareBackend, hardwareDevice))
 		defer cancel()
-		result, dolbyVisionUnsettled, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
+		result, verdict, dolbyVisionUnsettled, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
 		if err != nil {
+			logProbeUnfinished(probeCtx, key, ffmpegPath, hardwareBackend, hardwareDevice, verdict, err)
 			return nil, err
 		}
+		logProbeResult(probeCtx, key, ffmpegPath, hardwareBackend, hardwareDevice, result, verdict)
 		entry := probeCacheEntry{capabilities: append(Capabilities(nil), result...)}
 		switch {
 		case !probeCapabilitiesComplete(result, hardwareBackend):
@@ -169,8 +173,9 @@ func probeWithRunner(
 	ctx context.Context,
 	ffmpegPath, hardwareBackend, hardwareDevice string,
 	run CommandRunner,
-) (Capabilities, bool, error) {
+) (Capabilities, hardwareProbeVerdict, bool, error) {
 	var transientErr error
+	timedOut := ""
 	dolbyVisionUnsettled := false
 	trackingRunner := func(commandCtx context.Context, name string, args ...string) ([]byte, error) {
 		output, err := run(commandCtx, name, args...)
@@ -183,19 +188,27 @@ func probeWithRunner(
 			}
 			return output, err
 		}
-		if commandErr := commandCtx.Err(); commandErr != nil {
+		commandErr := commandCtx.Err()
+		if commandErr == nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			commandErr = err
+		}
+		if commandErr != nil {
 			transientErr = errors.Join(transientErr, commandErr)
-		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			transientErr = errors.Join(transientErr, err)
+			if timedOut == "" {
+				timedOut = probeCommandKind(args)
+			}
 		}
 		return output, err
 	}
-	capabilities := ProbeWithRunner(ctx, ffmpegPath, hardwareBackend, hardwareDevice, trackingRunner)
+	capabilities, verdict := probeInventory(ctx, ffmpegPath, hardwareBackend, hardwareDevice, trackingRunner)
 	transientErr = errors.Join(transientErr, ctx.Err())
 	if transientErr != nil {
-		return nil, false, transientErr
+		if timedOut == "" {
+			timedOut = "the probe as a whole"
+		}
+		return nil, hardwareProbeVerdict{filter: verdict.filter, timedOut: timedOut}, false, transientErr
 	}
-	return capabilities, dolbyVisionUnsettled, nil
+	return capabilities, verdict, dolbyVisionUnsettled, nil
 }
 
 // dolbyVisionSmokeCommand reports whether a probe command smoke-tests RPU
@@ -249,6 +262,8 @@ func InvalidateProbeCache() {
 	defer probeCache.Unlock()
 	probeCache.generation++
 	probeCache.entries = make(map[string]probeCacheEntry)
+	// Every key just moved to a new generation; the old lines are dead.
+	probeResultLogged.Clear()
 }
 
 // probesInFlight counts tone-map probes this process has claimed the encoder
@@ -398,17 +413,57 @@ func ProbeWithRunner(
 	ffmpegPath, hardwareBackend, hardwareDevice string,
 	run CommandRunner,
 ) Capabilities {
+	capabilities, _ := probeInventory(ctx, ffmpegPath, hardwareBackend, hardwareDevice, run)
+	return capabilities
+}
+
+// hardwareProbeVerdict says why a configured hardware executor did or did not
+// validate, for the line logProbeResult writes. Playback never reads it.
+type hardwareProbeVerdict struct {
+	filter string
+	// listed is true when the FFmpeg build lists every filter and the encoder
+	// the hardware graph needs, so the smoke conversions ran.
+	listed bool
+	// failure is the first failed smoke conversion's last FFmpeg error line.
+	failure string
+	// timedOut names the first command that ran out of time when the probe
+	// did not finish.
+	timedOut string
+}
+
+// probeCommandKind names a probe command for the unfinished-probe log line.
+func probeCommandKind(args []string) string {
+	switch {
+	case slices.Contains(args, "-filters") || slices.Contains(args, "-encoders"):
+		return "FFmpeg filter and encoder listing"
+	case slices.Contains(args, "-init_hw_device") || slices.Contains(args, "-hwaccel"):
+		return "hardware test conversion"
+	default:
+		return "software test conversion"
+	}
+}
+
+// probeInventory is ProbeWithRunner plus the hardware verdict.
+func probeInventory(
+	ctx context.Context,
+	ffmpegPath, hardwareBackend, hardwareDevice string,
+	run CommandRunner,
+) (Capabilities, hardwareProbeVerdict) {
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
 	}
+	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
+	verdict := hardwareProbeVerdict{filter: hardwareFilter(backend, hardwareDevice)}
 	filters, filterErr := runBounded(ctx, run, ffmpegPath, ffmpegHideBannerArg, "-filters")
 	encoders, encoderErr := runBounded(ctx, run, ffmpegPath, ffmpegHideBannerArg, "-encoders")
 	if filterErr != nil || encoderErr != nil {
-		return Capabilities{}
+		verdict.failure = "could not list FFmpeg filters and encoders"
+		return Capabilities{}, verdict
 	}
 	fixturePath, cleanupFixture, fixtureErr := writeDecodeProbeFixture()
 	if fixtureErr != nil {
-		return Capabilities{}
+		verdict.failure = "could not write the probe's test frame"
+		return Capabilities{}, verdict
 	}
 	defer cleanupFixture()
 
@@ -418,7 +473,7 @@ func ProbeWithRunner(
 		softwareFilter = selected
 	}
 	if softwareFilter != "" && hasToken(encoders, "libx264") {
-		kinds := smokeSourceKinds(ctx, run, ffmpegPath, probeCommandTimeout, smokeKindsForFilter(softwareFilter), func(kind SourceKind) []string {
+		kinds, _ := smokeSourceKinds(ctx, run, ffmpegPath, probeCommandTimeout, smokeKindsForFilter(softwareFilter), func(kind SourceKind) []string {
 			return softwareSmokeArgs(fixturePath, kind, softwareFilter)
 		})
 		if len(kinds) > 0 {
@@ -426,20 +481,23 @@ func ProbeWithRunner(
 		}
 	}
 
-	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
-	filter := hardwareFilter(backend, hardwareDevice)
+	filter := verdict.filter
 	if hardwareProbeAvailable(backend, filter, filters, encoders) {
-		kinds := hardwareSmokeSourceKinds(ctx, run, ffmpegPath, fixturePath, backend, filter, hardwareDevice)
+		verdict.listed = true
+		kinds, failure := hardwareSmokeSourceKinds(ctx, run, ffmpegPath, fixturePath, backend, filter, hardwareDevice)
+		verdict.failure = failure
 		if len(kinds) > 0 {
 			capabilities = append(capabilities, Capability{Mode: ModeHardware, Backend: backend, Filter: filter, SourceKinds: kinds})
 		}
 	}
-	return capabilities
+	return capabilities, verdict
 }
 
 // hardwareSmokeSourceKinds returns only source kinds converted successfully on
-// every configured device so the advertised union is safe for later selection.
-func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath, fixturePath, backend, filter, hardwareDevice string) []SourceKind {
+// every configured device so the advertised union is safe for later selection,
+// and the first failed conversion's error line.
+func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath, fixturePath, backend, filter, hardwareDevice string) ([]SourceKind, string) {
+	firstFailure := ""
 	devices := probeDevices(hardwareDevice, backend)
 	validated := smokeKindsForFilter(filter)
 	for _, device := range devices {
@@ -449,15 +507,18 @@ func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath
 					"component", "tonemap", "device", device)
 			}
 		}
-		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), validated, func(kind SourceKind) []string {
+		supported, failure := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), validated, func(kind SourceKind) []string {
 			return hardwareSmokeArgs(fixturePath, backend, filter, device, kind)
 		})
+		if firstFailure == "" {
+			firstFailure = failure
+		}
 		validated = intersectSourceKinds(validated, supported)
 		if len(validated) == 0 {
 			break
 		}
 	}
-	return validated
+	return validated, firstFailure
 }
 
 // hardwareProbeCommandTimeout allows CUDA and NVENC to finish cold driver
@@ -625,7 +686,8 @@ func requiredSourceKinds(filter string) []SourceKind {
 }
 
 // smokeSourceKinds runs one bounded conversion per source kind and returns only
-// the kinds whose command completed successfully.
+// the kinds whose command completed successfully, and the first failure's
+// error line.
 func smokeSourceKinds(
 	ctx context.Context,
 	run CommandRunner,
@@ -633,14 +695,149 @@ func smokeSourceKinds(
 	commandTimeout time.Duration,
 	candidates []SourceKind,
 	argsFor func(SourceKind) []string,
-) []SourceKind {
+) ([]SourceKind, string) {
 	kinds := make([]SourceKind, 0, len(candidates))
+	firstFailure := ""
 	for _, kind := range candidates {
-		if _, err := runBoundedWithTimeout(ctx, commandTimeout, run, ffmpegPath, argsFor(kind)...); err == nil {
+		output, err := runBoundedWithTimeout(ctx, commandTimeout, run, ffmpegPath, argsFor(kind)...)
+		if err == nil {
 			kinds = append(kinds, kind)
+		} else if firstFailure == "" {
+			firstFailure = smokeFailureLine(output, err)
 		}
 	}
-	return kinds
+	return kinds, firstFailure
+}
+
+// maxSmokeFailureLineBytes bounds the FFmpeg error a probe log line carries.
+// The last line alone is often FFmpeg's generic "Error parsing global
+// options", so smokeFailureLine keeps the line before it too.
+const maxSmokeFailureLineBytes = 300
+
+// smokeFailureLine returns the last two non-empty lines FFmpeg printed, which name
+// the failing device or filter, or the process error when it printed nothing.
+func smokeFailureLine(output []byte, err error) string {
+	var lines []string
+	for _, candidate := range strings.Split(string(output), "\n") {
+		if trimmed := strings.TrimSpace(ffmpegContextAddress.ReplaceAllString(candidate, "")); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	if len(lines) > 2 {
+		lines = lines[len(lines)-2:]
+	}
+	line := strings.Join(lines, " | ")
+	if line == "" && err != nil {
+		line = err.Error()
+	}
+	if len(line) > maxSmokeFailureLineBytes {
+		line = strings.ToValidUTF8(line[:maxSmokeFailureLineBytes], "")
+	}
+	return line
+}
+
+// ffmpegContextAddress matches the pointer FFmpeg prints in a log prefix such
+// as "[AVHWDeviceContext @ 0x55e4c6a3a2c0]". It differs on every run, so it is
+// dropped to keep an unchanged failure from looking like a new one.
+var ffmpegContextAddress = regexp.MustCompile(`\s*@\s*0x[0-9a-fA-F]+`)
+
+// probeResultLogged holds the last result line logged under each probe cache
+// key, which covers the FFmpeg binary, the hardware configuration, the driver
+// and the cache generation. A result that misses a configured hardware
+// executor is re-probed every probeNegativeTTL, so it is logged when it first
+// appears or changes, not on every retry. A re-probe after
+// InvalidateProbeCache has a new generation and so always logs.
+var probeResultLogged sync.Map
+
+// logProbeResult records which tone-map executors validated. Without it an
+// operator whose GPU fails the hardware smoke sees only software transcodes,
+// or a refused HDR playback, and nothing saying why.
+func logProbeResult(ctx context.Context, cacheKey, ffmpegPath, hardwareBackend, hardwareDevice string, capabilities Capabilities, verdict hardwareProbeVerdict) {
+	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
+	device := strings.TrimSpace(hardwareDevice)
+	attrs := []any{"component", "tonemap", "ffmpeg", ffmpegPath}
+	software := capabilityFor(capabilities, ModeSoftware, BackendSoftware)
+	attrs = append(attrs, "software_filter", software.Filter, "software_kinds", joinSourceKinds(software.SourceKinds))
+	hardwareConfigured := false
+	switch backend {
+	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
+		hardwareConfigured = true
+		hardware := capabilityFor(capabilities, ModeHardware, backend)
+		attrs = append(attrs,
+			"hardware_backend", backend, "hardware_device", device,
+			"hardware_filter", verdict.filter, "hardware_kinds", joinSourceKinds(hardware.SourceKinds))
+		if len(hardware.SourceKinds) == 0 {
+			switch {
+			case verdict.listed:
+				attrs = append(attrs, "reason", "the hardware tone-map test conversion failed", "ffmpeg_error", verdict.failure)
+			case verdict.failure != "":
+				attrs = append(attrs, "reason", verdict.failure)
+			default:
+				attrs = append(attrs, "reason", "this FFmpeg build does not list the filters or encoder the hardware graph needs")
+			}
+		} else if verdict.failure != "" {
+			// Some kinds, or some devices, failed; say why.
+			attrs = append(attrs, "ffmpeg_error", verdict.failure)
+		}
+	}
+	summary := fmt.Sprint(attrs...)
+	if previous, loaded := probeResultLogged.Swap(cacheKey, summary); loaded && previous == summary {
+		return
+	}
+	if hardwareConfigured && len(capabilityFor(capabilities, ModeHardware, backend).SourceKinds) == 0 {
+		slog.WarnContext(ctx, "hardware HDR tone mapping is unavailable, so HDR transcodes tone map in software or are refused when software tone mapping is off", attrs...)
+		return
+	}
+	slog.InfoContext(ctx, "tone-map probe finished", attrs...)
+}
+
+// logProbeUnfinished records a probe that ran out of time. Nothing is cached
+// then, so the next request that needs tone mapping probes again; the line is
+// logged once per distinct failure for the same reason logProbeResult is.
+func logProbeUnfinished(ctx context.Context, cacheKey, ffmpegPath, hardwareBackend, hardwareDevice string, verdict hardwareProbeVerdict, err error) {
+	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
+	device := strings.TrimSpace(hardwareDevice)
+	errText := distinctErrorLines(err)
+	summary := verdict.timedOut + "\x00" + errText
+	// A slot of its own, so a probe that alternates between finishing and
+	// timing out does not log on every flip.
+	if previous, loaded := probeResultLogged.Swap(cacheKey+"\x00unfinished", summary); loaded && previous == summary {
+		return
+	}
+	slog.WarnContext(ctx, "tone-map probe did not finish in time, so it runs again on the next request that needs tone mapping",
+		"component", "tonemap", "ffmpeg", ffmpegPath, "hardware_backend", backend, "hardware_device", device,
+		"hardware_filter", verdict.filter, "timed_out", verdict.timedOut, "error", errText)
+}
+
+// distinctErrorLines collapses a joined error whose commands all timed out the
+// same way into one line per distinct cause.
+func distinctErrorLines(err error) string {
+	var lines []string
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !slices.Contains(lines, line) {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "; ")
+}
+
+// capabilityFor returns the capability for an executor, or the zero value.
+func capabilityFor(capabilities Capabilities, mode Mode, backend string) Capability {
+	for _, capability := range capabilities {
+		if capability.Mode == mode && capability.Backend == backend {
+			return capability
+		}
+	}
+	return Capability{}
+}
+
+// joinSourceKinds formats source kinds for a log attribute.
+func joinSourceKinds(kinds []SourceKind) string {
+	names := make([]string, len(kinds))
+	for i, kind := range kinds {
+		names[i] = string(kind)
+	}
+	return strings.Join(names, ",")
 }
 
 // softwareSmokeArgs builds a single-frame software conversion command for the

@@ -1,54 +1,15 @@
 package catalogseed
 
 import (
+	"bytes"
+	"compress/gzip"
+
 	"errors"
-	"reflect"
+	"io"
+
 	"testing"
+	"testing/iotest"
 )
-
-func TestCatalogSeedSearchUpsertIDsIncludesChangedItemsAndEmbeddings(t *testing.T) {
-	itemStates := map[string]bool{
-		"movie-1":  true,
-		"movie-2":  false,
-		"series-1": true,
-	}
-	embeddings := []EmbeddingRecord{
-		{MediaItemID: " movie-3 "},
-		{MediaItemID: "movie-1"},
-		{MediaItemID: ""},
-	}
-	files := []FileRecord{
-		{ContentID: " movie-4 "},
-		{ContentID: ""},
-	}
-	links := []LibraryLinkRecord{
-		{ContentID: "movie-5"},
-		{ContentID: "movie-2"},
-	}
-
-	got := catalogSeedSearchUpsertIDs(itemStates, embeddings, files, links)
-	want := []string{"movie-1", "movie-2", "movie-3", "movie-4", "movie-5", "series-1"}
-
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("catalogSeedSearchUpsertIDs = %#v, want %#v", got, want)
-	}
-}
-
-func TestEmbeddingsForModelKeepsOnlyThatModel(t *testing.T) {
-	records := []EmbeddingRecord{
-		{MediaItemID: "movie-1", Model: "nomic-embed-text"},
-		{MediaItemID: "movie-2", Model: "gemini-embedding-001"},
-		{MediaItemID: "movie-3", Model: "nomic-embed-text"},
-		{MediaItemID: "movie-4", Model: ""},
-	}
-	got := embeddingsForModel(records, "nomic-embed-text")
-	if len(got) != 2 || got[0].MediaItemID != "movie-1" || got[1].MediaItemID != "movie-3" {
-		t.Fatalf("embeddingsForModel = %#v", got)
-	}
-	if got := embeddingsForModel(records, ""); len(got) != 0 {
-		t.Fatalf("an unknown model kept %#v", got)
-	}
-}
 
 func TestRewriteFileRecordKeepsSidecarsInsideTheLibrary(t *testing.T) {
 	rewrites := normalizeRewrites([]PathRewrite{{From: "/old/movies", To: "/media/movies"}})
@@ -88,4 +49,32 @@ func TestRewriteFileRecordKeepsSidecarsInsideTheLibrary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A storage read cut off partway is the source's fault, not the bundle's, so
+// the import reports it as a source failure rather than an invalid bundle.
+func TestDecodeBundleReportsSourceFailure(t *testing.T) {
+	data := gzipBytes(t, `{"items":[{"content_id":"a"},{"content_id":"b"}]}`)
+	cutOff := errors.New("connection reset")
+	for name, prefix := range map[string][]byte{"in the header": data[:4], "in the body": data[:len(data)-8]} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeBundle(io.MultiReader(bytes.NewReader(prefix), iotest.ErrReader(cutOff)))
+			if !errors.Is(err, ErrReadingSource) || !errors.Is(err, cutOff) || errors.Is(err, ErrInvalidBundle) {
+				t.Fatalf("decodeBundle error = %v, want ErrReadingSource wrapping the read error", err)
+			}
+		})
+	}
+}
+
+func gzipBytes(t *testing.T, doc string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write([]byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

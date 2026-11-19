@@ -3,7 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
-import { useDashboardLayout, DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS } from "./useDashboardLayout";
+import {
+  dashboardLayoutStorageKey,
+  useDashboardLayout,
+  DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS,
+} from "./useDashboardLayout";
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: 1 } }) }));
 const document = (span: number) => ({ version: 1, entries: [{ id: "users", span, rows: 4 }] });
 const read = (tag: string, span: number) =>
@@ -210,4 +214,145 @@ it("unmount retains queued edit until the in-flight write acknowledges its versi
   expect(writes).toHaveLength(2);
   expect(ifMatch(writes[1])).toBe('"B"');
   expect(JSON.parse(String(writes[1]!.body)).layout.entries[0].span).toBe(7);
+});
+
+/** Mounts with span 5 cached locally and the first layout read held until `respond`. */
+async function mountWithReadHeld(
+  onPut: (write: number) => Promise<Response> = () => Promise.resolve(saved('"B"')),
+  later: () => Promise<Response> = () => Promise.resolve(read('"A"', 5)),
+) {
+  localStorage.setItem(dashboardLayoutStorageKey(1), JSON.stringify(document(5)));
+  let respond!: (r: Response) => void;
+  const writes = stubFetch(onPut, (n) =>
+    n === 1
+      ? new Promise<Response>((r) => {
+          respond = r;
+        })
+      : later(),
+  );
+  const view = renderHook(useDashboardLayout, fixture());
+  await settle();
+  act(() => view.result.current.resizeWidget("users", { span: 7 }));
+  return { ...view, writes, respond };
+}
+it("saves an edit made before the first read against the version that read returns", async () => {
+  const { result, writes, respond } = await mountWithReadHeld();
+  expect(result.current.serverSaveBlocked).toBe(false);
+  await act(async () => respond(read('"A"', 5)));
+  await settle();
+  await debounce();
+  expect(writes).toHaveLength(1);
+  expect(ifMatch(writes[0])).toBe('"A"');
+  expect(JSON.parse(String(writes[0]!.body)).layout.entries[0].span).toBe(7);
+  expect(result.current.serverSaveBlocked).toBe(false);
+});
+it("does not overwrite a different server layout with an edit made before the first read", async () => {
+  const { result, writes, respond } = await mountWithReadHeld();
+  await act(async () => respond(read('"A"', 9)));
+  await settle();
+  await debounce();
+  expect(writes).toHaveLength(0);
+  expect(result.current.entries[0]?.span).toBe(7);
+  expect(result.current.serverSaveBlocked).toBe(true);
+});
+it("does not send an edit made before the first read under a PIN that is no longer active", async () => {
+  const { result, rerender, writes } = await mountWithReadHeld();
+  act(() => {
+    setProfileToken("pin-b");
+    rerender();
+  });
+  await settle();
+  await debounce();
+  expect(writes).toHaveLength(0);
+  expect(result.current.serverSaveBlocked).toBe(true);
+});
+it("reports an edit made before a failed first read as unsaved", async () => {
+  const { result, writes, respond } = await mountWithReadHeld();
+  await act(async () => respond(new Response(null, { status: 500 })));
+  await settle();
+  expect(writes).toHaveLength(0);
+  expect(result.current.serverSaveBlocked).toBe(true);
+});
+it("saves an edit made before the first read once the dashboard is opened again", async () => {
+  const { unmount, writes } = await mountWithReadHeld();
+  unmount();
+  await settle();
+  expect(writes).toHaveLength(0);
+  const { result } = await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(1);
+  expect(ifMatch(writes[0])).toBe('"A"');
+  expect(JSON.parse(String(writes[0]!.body)).layout.entries[0].span).toBe(7);
+  expect(result.current.entries[0]?.span).toBe(7);
+  expect(result.current.serverSaveBlocked).toBe(false);
+});
+it("reports an edit made before the first read as unsaved on return when the server layout changed", async () => {
+  const { unmount, writes } = await mountWithReadHeld(undefined, () =>
+    Promise.resolve(read('"C"', 9)),
+  );
+  unmount();
+  await settle();
+  const { result, unmount: leave } = await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(0);
+  expect(result.current.entries[0]?.span).toBe(7);
+  expect(result.current.serverSaveBlocked).toBe(true);
+  // Leaving without reloading keeps reporting the edit rather than dropping it.
+  leave();
+  await settle();
+  const again = await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(0);
+  expect(again.result.current.entries[0]?.span).toBe(7);
+  expect(again.result.current.serverSaveBlocked).toBe(true);
+});
+it("keeps an earlier visit's edit unsaved under a different profile", async () => {
+  const { unmount, writes } = await mountWithReadHeld();
+  unmount();
+  await settle();
+  setProfileId("b");
+  setProfileToken("pin-b");
+  const other = await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(0);
+  expect(other.result.current.entries[0]?.span).toBe(7);
+  expect(other.result.current.serverSaveBlocked).toBe(true);
+  // The other profile's own edit neither saves nor drops the pending one.
+  act(() => other.result.current.resizeWidget("users", { rows: 5 }));
+  await debounce();
+  other.unmount();
+  await settle();
+  setProfileId("a");
+  setProfileToken("pin-a");
+  await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0]!.body)).layout.entries[0]).toMatchObject({ span: 7, rows: 5 });
+});
+it("saves the edit another tab left pending, not this tab's older copy", async () => {
+  localStorage.setItem(dashboardLayoutStorageKey(1), JSON.stringify(document(5)));
+  const held: ((r: Response) => void)[] = [];
+  const writes = stubFetch(
+    () => Promise.resolve(saved('"B"')),
+    () =>
+      new Promise<Response>((r) => {
+        held.push(r);
+      }),
+  );
+  const waiting = renderHook(useDashboardLayout, fixture());
+  await settle();
+  const editing = renderHook(useDashboardLayout, fixture());
+  await settle();
+  act(() => editing.result.current.resizeWidget("users", { span: 7 }));
+  editing.unmount();
+  await settle();
+  const empty = new Response(JSON.stringify({ layout: null, updated_at: null }), {
+    headers: { "Content-Type": "application/json", ETag: '"A"' },
+  });
+  await act(async () => held[0]!(empty));
+  await settle();
+  await debounce();
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0]!.body)).layout.entries[0].span).toBe(7);
+  expect(waiting.result.current.entries[0]?.span).toBe(7);
 });

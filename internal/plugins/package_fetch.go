@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // Plugin catalogs, checksum files and packages are fetched without a
@@ -45,17 +46,19 @@ var defaultPackageFetchTimeouts = packageFetchTimeouts{
 }
 
 // newPackageFetchClient returns the client used when the catalog service or
-// installer is given none. It keeps the default transport's proxy and
-// connection-pool settings and redirect handling.
+// installer is given none. Repository catalogs, checksum files and packages
+// all come through it, and the catalog JSON, which a third party publishes,
+// chooses the package addresses. Its netguard transport checks every address
+// it dials, redirect hops included; fetchPackageResource trusts it with the
+// server's local network so LAN-hosted repositories keep working, while
+// blocked ranges such as link-local and cloud metadata stay refused. Like
+// every netguard transport it ignores proxy environment variables. See
+// docs/architecture/outbound-address-guard.md.
 func newPackageFetchClient(timeouts packageFetchTimeouts) *http.Client {
-	base, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		base = &http.Transport{Proxy: http.ProxyFromEnvironment}
-	}
-	transport := base.Clone()
-	transport.DialContext = (&net.Dialer{Timeout: timeouts.dial, KeepAlive: 30 * time.Second}).DialContext
-	transport.TLSHandshakeTimeout = timeouts.tlsHandshake
-	transport.ResponseHeaderTimeout = timeouts.responseHeader
+	transport := netguard.NewTransport(netguard.DialTimeout(timeouts.dial), func(t *http.Transport) {
+		t.TLSHandshakeTimeout = timeouts.tlsHandshake
+		t.ResponseHeaderTimeout = timeouts.responseHeader
+	})
 	return &http.Client{Transport: transport}
 }
 

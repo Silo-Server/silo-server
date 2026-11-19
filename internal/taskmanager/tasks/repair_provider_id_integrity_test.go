@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
-	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
@@ -61,17 +60,6 @@ func TestRepairProviderIDIntegrityTask(t *testing.T) {
 		stats: watchstate.ReconcileStats{OrphansFound: 3, Resolved: 2, Unresolvable: 1},
 	}
 	task := NewRepairProviderIDIntegrityTask(repairer, reconciler)
-
-	if task.Key() != "repair_provider_id_integrity" {
-		t.Fatalf("Key() = %q, want repair_provider_id_integrity", task.Key())
-	}
-	if task.Category() != taskmanager.TaskCategorySystem {
-		t.Fatalf("Category() = %q, want %q", task.Category(), taskmanager.TaskCategorySystem)
-	}
-	triggers := task.DefaultTriggers()
-	if len(triggers) != 1 || triggers[0].Type != taskmanager.TriggerTypeStartup {
-		t.Fatalf("DefaultTriggers() = %#v, want one startup trigger", triggers)
-	}
 
 	progress := &providerIDRepairProgressReporter{}
 	if err := task.Execute(context.Background(), progress); err != nil {

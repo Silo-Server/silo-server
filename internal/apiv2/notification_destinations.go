@@ -23,7 +23,7 @@ type NotificationDestinationService interface {
 	RotateNotificationWebhookSecret(context.Context, int, string, string) (string, error)
 	DeleteNotificationServerChannel(context.Context, string) error
 	DeleteNotificationWebhook(context.Context, int, string, string, func(int64) error) error
-	SubscribeNotificationWebPush(context.Context, int, string, string, string, string, string) (*notifications.WebPushSubscription, error)
+	SubscribeNotificationWebPush(context.Context, int, string, string, string, string, string, string) (*notifications.WebPushSubscription, error)
 	UnsubscribeNotificationWebPush(context.Context, int, string, string) error
 	DeleteNotificationWebPushSubscription(context.Context, int, string, string) error
 
@@ -71,44 +71,38 @@ type NotificationWebPushSubscriptionListOutput struct {
 }
 
 type NotificationWebhookDestination struct {
-	ETag                   string          `json:"etag" doc:"Original validator for conditional deletion; preserve unchanged with the observed row."`
-	ID                     ID              `json:"id"`
-	Name                   string          `json:"name"`
-	Type                   string          `json:"type" enum:"discord,generic"`
-	URLHost                string          `json:"url_host"`
-	Enabled                bool            `json:"enabled"`
-	NotifyFavorites        bool            `json:"notify_favorites"`
-	NotifyWatchlist        bool            `json:"notify_watchlist"`
-	NotifyContinueWatching bool            `json:"notify_continue_watching"`
-	NotifyNextUp           bool            `json:"notify_next_up"`
-	NotifyRequests         bool            `json:"notify_requests"`
-	ConsecutiveFailures    int             `json:"consecutive_failures"`
-	DisabledReason         *string         `json:"disabled_reason"`
-	LastSuccessAt          NullableInstant `json:"last_success_at"`
-	LastFailureAt          NullableInstant `json:"last_failure_at"`
-	LastFailureStatus      *int            `json:"last_failure_status"`
-	LastFailureMessage     *string         `json:"last_failure_message"`
+	ETag                string          `json:"etag" doc:"Original validator for conditional deletion; preserve unchanged with the observed row."`
+	ID                  ID              `json:"id"`
+	Name                string          `json:"name"`
+	Type                string          `json:"type" enum:"discord,generic"`
+	URLHost             string          `json:"url_host"`
+	Enabled             bool            `json:"enabled"`
+	NotifyNextUp        bool            `json:"notify_next_up"`
+	NotifyRequests      bool            `json:"notify_requests"`
+	ConsecutiveFailures int             `json:"consecutive_failures"`
+	DisabledReason      *string         `json:"disabled_reason"`
+	LastSuccessAt       NullableInstant `json:"last_success_at"`
+	LastFailureAt       NullableInstant `json:"last_failure_at"`
+	LastFailureStatus   *int            `json:"last_failure_status"`
+	LastFailureMessage  *string         `json:"last_failure_message"`
 }
 
 func notificationWebhookDestinationOf(row notifications.Webhook) NotificationWebhookDestination {
 	return NotificationWebhookDestination{
-		ETag:                   notificationWebhookTag(row.ProfileID, row.ID, row.Revision).String(),
-		ID:                     ID(row.ID),
-		Name:                   row.Name,
-		Type:                   row.Type,
-		URLHost:                row.URLHost,
-		Enabled:                row.Enabled,
-		NotifyFavorites:        row.NotifyFavorites,
-		NotifyWatchlist:        row.NotifyWatchlist,
-		NotifyContinueWatching: row.NotifyContinueWatching,
-		NotifyNextUp:           row.NotifyNextUp,
-		NotifyRequests:         row.NotifyRequests,
-		ConsecutiveFailures:    row.ConsecutiveFailures,
-		DisabledReason:         row.DisabledReason,
-		LastSuccessAt:          destinationInstant(row.LastSuccessAt),
-		LastFailureAt:          destinationInstant(row.LastFailureAt),
-		LastFailureStatus:      row.LastFailureStatus,
-		LastFailureMessage:     row.LastFailureMessage,
+		ETag:                notificationWebhookTag(row.ProfileID, row.ID, row.Revision).String(),
+		ID:                  ID(row.ID),
+		Name:                row.Name,
+		Type:                row.Type,
+		URLHost:             row.URLHost,
+		Enabled:             row.Enabled,
+		NotifyNextUp:        row.NotifyNextUp,
+		NotifyRequests:      row.NotifyRequests,
+		ConsecutiveFailures: row.ConsecutiveFailures,
+		DisabledReason:      row.DisabledReason,
+		LastSuccessAt:       destinationInstant(row.LastSuccessAt),
+		LastFailureAt:       destinationInstant(row.LastFailureAt),
+		LastFailureStatus:   row.LastFailureStatus,
+		LastFailureMessage:  row.LastFailureMessage,
 	}
 }
 
@@ -326,7 +320,7 @@ func registerNotificationDestinations(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		row, err := reg.deps.NotificationDestinations.SubscribeNotificationWebPush(ctx, user, profile, in.Body.Endpoint, in.Body.Keys.P256dh, in.Body.Keys.Auth, in.Body.DeviceName)
+		row, err := reg.deps.NotificationDestinations.SubscribeNotificationWebPush(ctx, user, profile, in.Body.Endpoint, in.Body.Keys.P256dh, in.Body.Keys.Auth, in.Body.DeviceName, claimsFrom(ctx).SessionID)
 		if errors.Is(err, notifications.ErrWebPushInvalid) {
 			return nil, NewProblem(TypeValidationFailed, "Invalid browser push subscription.")
 		}

@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func ebookProgressTestPool(t *testing.T) *pgxpool.Pool {
@@ -190,4 +191,27 @@ func TestEbookProgressAuthorizationBeforeWrite(t *testing.T) {
 	if !ok || apiErr.Field != "updated_at" || store.upserted != nil {
 		t.Fatalf("future event: %v", err)
 	}
+}
+
+type fakeEbookProgressStore struct {
+	progress *EbookReaderProgress
+	upserted *EbookReaderProgress
+	err      error
+}
+
+func (s *fakeEbookProgressStore) Get(
+	context.Context,
+	int,
+	string,
+	string,
+) (*EbookReaderProgress, error) {
+	return s.progress, s.err
+}
+
+func (s *fakeEbookProgressStore) Upsert(_ context.Context, progress EbookReaderProgress) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.upserted = &progress
+	return nil
 }

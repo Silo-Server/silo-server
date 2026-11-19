@@ -204,6 +204,20 @@ func (r *ChainRepository) AppendProviderToAllChains(
 	capabilityID string,
 	placement func(contentLevel string) SeedPlacement,
 ) error {
+	return r.AppendProviderToAllChainsChecked(ctx, pluginInstallationID, capabilityID, func(level string) (SeedPlacement, error) {
+		return placement(level), nil
+	})
+}
+
+// AppendProviderToAllChainsChecked is AppendProviderToAllChains with a
+// placement that can fail. Every level's placement is resolved before any
+// chain changes, so a failed lookup writes nothing.
+func (r *ChainRepository) AppendProviderToAllChainsChecked(
+	ctx context.Context,
+	pluginInstallationID int,
+	capabilityID string,
+	placement func(contentLevel string) (SeedPlacement, error),
+) error {
 	// Find every distinct (folder, level) pair that has chain entries.
 	rows, err := r.pool.Query(ctx,
 		`SELECT DISTINCT media_folder_id, content_level
@@ -228,13 +242,26 @@ func (r *ChainRepository) AppendProviderToAllChains(
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterating chain groups: %w", err)
 	}
+	rows.Close()
+
+	placements := map[string]SeedPlacement{}
+	for _, g := range groups {
+		if _, done := placements[g.contentLevel]; done {
+			continue
+		}
+		p, err := placement(g.contentLevel)
+		if err != nil {
+			return fmt.Errorf("resolving provider placement for %q: %w", g.contentLevel, err)
+		}
+		placements[g.contentLevel] = p
+	}
 
 	for _, g := range groups {
 		// Only attach the provider to levels it actually serves. A single-purpose
 		// provider (e.g. audiobook/ebook/manga metadata, or a sports provider that
 		// only declares series levels) must not clutter every library's chain with
 		// a disabled row for content it cannot handle.
-		p := placement(g.contentLevel)
+		p := placements[g.contentLevel]
 		if !p.SupportsLevel {
 			continue
 		}

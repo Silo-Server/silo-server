@@ -4,8 +4,10 @@ import { Check, ChevronsUpDown } from "lucide-react";
 
 import { usePersonSearch } from "@/hooks/queries/personSearch";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";
+import { isImeComposing } from "@/lib/imeComposition";
 
 interface PersonSearchSelectProps {
   value: string;
@@ -17,9 +19,10 @@ interface PersonSearchSelectProps {
 export function PersonSearchSelect({
   value,
   onChange,
-  placeholder = "Search people...",
+  placeholder,
   disabled = false,
 }: PersonSearchSelectProps) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [focusedIndex, setFocusedIndex] = React.useState(-1);
@@ -51,6 +54,7 @@ export function PersonSearchSelect({
   }, [open]);
 
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setFocusedIndex((prev) => (prev < allItems.length - 1 ? prev + 1 : prev));
@@ -86,8 +90,10 @@ export function PersonSearchSelect({
             !value && "text-muted-foreground",
           )}
         >
-          <span className="truncate">{value || placeholder}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <span className="truncate">
+            {value || (placeholder ?? t("web.ui.personSearch.placeholder"))}
+          </span>
+          <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverPrimitive.Trigger>
 
@@ -107,8 +113,8 @@ export function PersonSearchSelect({
                 setFocusedIndex(-1);
               }}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search people..."
-              aria-label="Search people"
+              placeholder={t("web.ui.personSearch.placeholder")}
+              aria-label={t("web.ui.personSearch.searchLabel")}
               aria-controls={listboxId}
               aria-activedescendant={
                 focusedIndex >= 0 ? `${listboxId}-opt-${focusedIndex}` : undefined
@@ -124,10 +130,14 @@ export function PersonSearchSelect({
             className="max-h-60 overflow-y-auto overscroll-contain p-1"
           >
             {resultsQuery.isLoading ? (
-              <p className="text-muted-foreground py-4 text-center text-sm">Loading...</p>
+              <p className="text-muted-foreground py-4 text-center text-sm">
+                {t("web.ui.loading")}
+              </p>
             ) : options.length === 0 ? (
               <p className="text-muted-foreground py-4 text-center text-sm">
-                {debouncedQuery ? "No people found" : "Start typing to search"}
+                {debouncedQuery
+                  ? t("web.ui.personSearch.noResults")
+                  : t("web.ui.select.startTyping")}
               </p>
             ) : (
               <>
@@ -147,9 +157,9 @@ export function PersonSearchSelect({
                   }}
                 >
                   <Check
-                    className={cn("mr-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
+                    className={cn("me-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
                   />
-                  <span className="text-muted-foreground italic">Any</span>
+                  <span className="text-muted-foreground italic">{t("web.ui.select.any")}</span>
                 </button>
 
                 {options.map((option, index) => (
@@ -171,7 +181,7 @@ export function PersonSearchSelect({
                   >
                     <Check
                       className={cn(
-                        "mr-2 h-4 w-4 shrink-0",
+                        "me-2 h-4 w-4 shrink-0",
                         value === option ? "opacity-100" : "opacity-0",
                       )}
                     />

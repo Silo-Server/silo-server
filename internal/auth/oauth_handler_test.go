@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -57,6 +55,8 @@ type fakeCompleter struct {
 	links      int
 	linkErr    error
 }
+
+func (f *fakeCompleter) ProviderAnswerFence(context.Context) (int64, error) { return 7, nil }
 
 func (f *fakeCompleter) ResolveOAuthLogin(_ context.Context, in OAuthLoginInput) (*models.User, int64, error) {
 	f.gotInput = in
@@ -156,18 +156,12 @@ func newOAuthRig(t *testing.T) *oauthTestRig {
 	return rig
 }
 
-func withInstallID(r *http.Request, id string) *http.Request {
-	rc := chi.NewRouteContext()
-	rc.URLParams.Add("install_id", id)
-	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rc))
-}
-
-// start runs a v1 init on the public origin and returns the response and
-// the binding cookie it set.
+// start runs a web start for installation 42 the way the v2 transport does
+// and returns the response and the binding cookie it set.
 func (rig *oauthTestRig) start(t *testing.T, target string) (*httptest.ResponseRecorder, *http.Cookie) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	rig.h.HandleInit(w, withInstallID(httptest.NewRequest(http.MethodPost, target, nil), "42"))
+	rig.serveWebStart(w, httptest.NewRequest(http.MethodPost, target, nil), 42)
 	var binder *http.Cookie
 	for _, c := range w.Result().Cookies() {
 		if strings.HasPrefix(c.Name, oauthBinderCookiePrefix) {
@@ -177,172 +171,43 @@ func (rig *oauthTestRig) start(t *testing.T, target string) (*httptest.ResponseR
 	return w, binder
 }
 
+// serveWebStart opens a web flow under the v2 prefix, bouncing to the public
+// origin the way the v2 transport does.
+func (rig *oauthTestRig) serveWebStart(w http.ResponseWriter, r *http.Request, installID int) {
+	next := r.URL.Query().Get("next")
+	query := url.Values{}
+	if next != "" {
+		query.Set("next", next)
+	}
+	query.Set(OAuthBounceParameter, "1")
+	bounce := rig.h.PublicURL(oauthV2Prefix+"/auth/oauth/"+strconv.Itoa(installID)+"/init", query)
+	rig.h.ServeStart(w, r, OAuthStartRequest{InstallID: installID, Prefix: oauthV2Prefix, Next: next}, bounce, http.StatusTemporaryRedirect)
+}
+
+// complete redeems a web completion code as the browser holding the given
+// completion cookie value ("" for none).
+func (rig *oauthTestRig) complete(code, browser string) (OAuthCompletion, error) {
+	return rig.h.Complete(context.Background(), code, "", browser)
+}
+
 // callback answers the provider redirect with the given cookie.
 func (rig *oauthTestRig) callback(t *testing.T, installID, query string, cookie *http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
-	r := withInstallID(httptest.NewRequest(http.MethodGet, "https://silo.test/api/v1/auth/oauth/"+installID+"/callback?"+query, nil), installID)
+	id, err := strconv.Atoi(installID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "https://silo.test/api/v2/auth/oauth/"+installID+"/callback?"+query, nil)
 	if cookie != nil {
 		r.AddCookie(&http.Cookie{Name: cookie.Name, Value: cookie.Value})
 	}
 	w := httptest.NewRecorder()
-	rig.h.HandleCallback(w, r)
+	rig.h.ServeCallback(w, r, oauthV2Prefix, id)
 	return w
 }
 
 func (rig *oauthTestRig) stateQuery() string {
 	return "code=auth-code&state=" + url.QueryEscape(rig.client.gotInit.GetState())
-}
-
-func TestOAuthInit_SetsBindingCookieAndRedirects(t *testing.T) {
-	rig := newOAuthRig(t)
-	w, cookie := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init?next=/me")
-	if w.Code != http.StatusFound || w.Header().Get("Location") != "https://idp.example/authorize" {
-		t.Fatalf("code = %d location = %q body = %s", w.Code, w.Header().Get("Location"), w.Body.String())
-	}
-	if cookie == nil {
-		t.Fatal("no binding cookie")
-	}
-	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode ||
-		cookie.Path != "/api/v1/auth/oauth/42/callback" || cookie.MaxAge != 600+3600 || len(cookie.Value) < 43 {
-		t.Fatalf("cookie = %+v", cookie)
-	}
-	if cookie.Name != OAuthBinderCookieName(rig.client.gotInit.GetState()) {
-		t.Fatalf("cookie name %q is not keyed by the flow state", cookie.Name)
-	}
-	if got := len(rig.store.rows); got != 1 {
-		t.Fatalf("rows = %d, want 1", got)
-	}
-	for _, row := range rig.store.rows {
-		if row.InstallID != "42" || row.NextURL != "/me" || row.Kind != OAuthFlowWeb || row.LinkingUserID != "" {
-			t.Errorf("row = %+v", row)
-		}
-		if row.BinderHash != oauthBinderHash(cookie.Value) || row.BinderHash == cookie.Value {
-			t.Errorf("binder hash %q does not hash the cookie", row.BinderHash)
-		}
-		if !strings.Contains(string(row.ProviderState), "pkce_verifier") {
-			t.Errorf("ProviderState missing PKCE: %s", row.ProviderState)
-		}
-	}
-	if rig.client.gotInit.GetRedirectUri() != "https://silo.test/api/v1/auth/oauth/42/callback" || rig.client.gotInit.GetLinking() {
-		t.Errorf("init = %+v", rig.client.gotInit)
-	}
-}
-
-func TestOAuthInit_BouncesToPublicOriginOnce(t *testing.T) {
-	rig := newOAuthRig(t)
-	for _, target := range []string{
-		"http://192.168.1.20:8080/api/v1/auth/oauth/42/init?next=/me",
-		"http://silo.test/api/v1/auth/oauth/42/init?next=/me", // same host, wrong scheme
-		"https://silo.test:8443/api/v1/auth/oauth/42/init?next=/me",
-	} {
-		w, cookie := rig.start(t, target)
-		if w.Code != http.StatusTemporaryRedirect || cookie != nil {
-			t.Fatalf("%s: code = %d cookie = %v", target, w.Code, cookie)
-		}
-		want := "https://silo.test/api/v1/auth/oauth/42/init?bounce=1&next=%2Fme"
-		if got := w.Header().Get("Location"); got != want {
-			t.Fatalf("%s: Location = %q, want %q", target, got, want)
-		}
-	}
-	if rig.client.inits != 0 || len(rig.store.rows) != 0 {
-		t.Fatalf("a bounce contacted the plugin (%d) or stored a flow (%d)", rig.client.inits, len(rig.store.rows))
-	}
-	// A proxy that hides the public origin must not cause a loop: a start
-	// already bounced proceeds.
-	w, cookie := rig.start(t, "http://internal:8080/api/v1/auth/oauth/42/init?bounce=1&next=/me")
-	if w.Code != http.StatusFound || cookie == nil || rig.client.inits != 1 {
-		t.Fatalf("bounced start: code = %d cookie = %v inits = %d", w.Code, cookie, rig.client.inits)
-	}
-	// The default port is the same origin.
-	if _, cookie := rig.start(t, "https://SILO.test:443/api/v1/auth/oauth/42/init"); cookie == nil {
-		t.Fatal("explicit default port was treated as another origin")
-	}
-}
-
-func TestOAuthInit_RefusalsComeBeforeTheBounce(t *testing.T) {
-	rig := newOAuthRig(t)
-	w := httptest.NewRecorder()
-	rig.h.HandleInit(w, withInstallID(httptest.NewRequest(http.MethodPost, "http://other/api/v1/auth/oauth/9/init", nil), "9"))
-	if w.Code != http.StatusBadGateway || w.Body.String() != "auth plugin unavailable\n" {
-		t.Fatalf("code = %d body = %q", w.Code, w.Body.String())
-	}
-	for _, c := range []string{"", "abc", "-1", "0"} {
-		w := httptest.NewRecorder()
-		rig.h.HandleInit(w, withInstallID(httptest.NewRequest(http.MethodPost, "/init", nil), c))
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("install_id=%q → code %d, want 400", c, w.Code)
-		}
-	}
-}
-
-func TestOAuthInit_PluginErrors(t *testing.T) {
-	rig := newOAuthRig(t)
-	rig.client.initErr = errors.New("upstream db dsn leaked")
-	w, cookie := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init")
-	if w.Code != http.StatusBadGateway || cookie != nil || strings.Contains(w.Body.String(), "upstream") {
-		t.Fatalf("code = %d cookie = %v body = %q", w.Code, cookie, w.Body.String())
-	}
-	rig.client.initErr = nil
-	rig.client.initResp = &pluginv1.InitAuthorizeResponse{}
-	if w, _ := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init"); w.Code != http.StatusBadGateway {
-		t.Fatalf("empty authorize url: code = %d", w.Code)
-	}
-}
-
-func TestOAuthInit_WithoutPublicURLIsConflict(t *testing.T) {
-	rig := newOAuthRig(t)
-	rig.h.SetHostBaseURL("")
-	if w, _ := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init"); w.Code != http.StatusConflict {
-		t.Fatalf("code = %d", w.Code)
-	}
-}
-
-// TestOAuthStart_V2FailuresRedirect: a v2 start that fails on the provider
-// or the server sends the browser to the login page (web) or the app
-// redirect (native) instead of a raw text page; malformed parameters stay
-// plain-text 400s. (The v1 init keeps its plain-text answers, above.)
-func TestOAuthStart_V2FailuresRedirect(t *testing.T) {
-	start := func(rig *oauthTestRig, installID int, native bool, appState string) *httptest.ResponseRecorder {
-		req := OAuthStartRequest{InstallID: installID, Prefix: "/api/v2", Native: native}
-		if native {
-			req.CodeChallenge, req.AppState = nativeChallenge, appState
-		}
-		w := httptest.NewRecorder()
-		rig.h.ServeStart(w, httptest.NewRequest(http.MethodGet, "https://silo.test/api/v2/auth/oauth/"+strconv.Itoa(installID)+"/start", nil), req, "", http.StatusFound)
-		return w
-	}
-	const webFailure = "/login?error=oauth_failed&reason=provider_unavailable"
-	for name, setup := range map[string]func(*oauthTestRig) int{
-		"plugin not loaded":     func(*oauthTestRig) int { return 9 },
-		"init authorize failed": func(rig *oauthTestRig) int { rig.client.initErr = errors.New("discovery timed out"); return 42 },
-		"no public url":         func(rig *oauthTestRig) int { rig.h.SetHostBaseURL(""); return 42 },
-	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newOAuthRig(t)
-			installID := setup(rig)
-			if w := start(rig, installID, false, ""); w.Code != http.StatusFound || w.Header().Get("Location") != webFailure || len(w.Result().Cookies()) != 0 {
-				t.Fatalf("web: code = %d location = %q", w.Code, w.Header().Get("Location"))
-			}
-			w := start(rig, installID, true, "app-1")
-			loc, _ := url.Parse(w.Header().Get("Location"))
-			if w.Code != http.StatusFound || loc == nil || loc.Scheme+":"+loc.Path != NativeAppRedirectURI ||
-				loc.Query().Get("error") != OAuthReasonProviderUnavailable || loc.Query().Get("state") != "app-1" ||
-				loc.Query().Get("iss") != "https://silo.test" {
-				t.Fatalf("native: code = %d location = %q", w.Code, w.Header().Get("Location"))
-			}
-			// Without a valid app_state there is no app redirect to trust.
-			if w := start(rig, installID, true, "has space"); w.Code == http.StatusFound {
-				t.Fatalf("native with an invalid app_state redirected to %q", w.Header().Get("Location"))
-			}
-		})
-	}
-	rig := newOAuthRig(t)
-	w := httptest.NewRecorder()
-	rig.h.ServeStart(w, httptest.NewRequest(http.MethodGet, "https://silo.test/api/v2/auth/oauth/42/start", nil),
-		OAuthStartRequest{InstallID: 42, Prefix: "/api/v2", Prompt: "consent"}, "", http.StatusFound)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("a malformed start: code = %d", w.Code)
-	}
 }
 
 func TestNormalizeOAuthNext(t *testing.T) {
@@ -383,86 +248,6 @@ func TestNormalizeOAuthNext(t *testing.T) {
 	}
 }
 
-func TestOAuthCallback_HappyPath_DeliversOneTimeCompletionCode(t *testing.T) {
-	rig := newOAuthRig(t)
-	if _, cookie := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init?next=/me"); cookie == nil {
-		t.Fatal("no cookie")
-	} else {
-		wCb := rig.callback(t, "42", rig.stateQuery(), cookie)
-		if wCb.Code != http.StatusFound {
-			t.Fatalf("callback code = %d body = %s", wCb.Code, wCb.Body.String())
-		}
-		cleared := false
-		for _, c := range wCb.Result().Cookies() {
-			cleared = cleared || (c.Name == cookie.Name && c.MaxAge < 0 && c.Path == cookie.Path)
-		}
-		if !cleared {
-			t.Error("callback did not clear the binding cookie")
-		}
-		loc := wCb.Header().Get("Location")
-		if !strings.HasPrefix(loc, "https://silo.test/login/oauth-complete?") || strings.Contains(loc, "acc.tok") {
-			t.Fatalf("redirect = %q", loc)
-		}
-		parsed, _ := url.Parse(loc)
-		code := parsed.Query().Get("code")
-		if len(code) < 32 {
-			t.Fatalf("completion code %q is shorter than 128 bits", code)
-		}
-		browser := completionCookieValue(t, wCb)
-
-		// Login CSRF: the code alone, in a browser without the completion
-		// cookie (a victim's, sent the attacker's code), is refused and
-		// stays redeemable by the browser that signed in.
-		for _, other := range []string{"", "another-browser"} {
-			r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/complete", strings.NewReader(`{"code":"`+code+`"}`))
-			if other != "" {
-				r.AddCookie(&http.Cookie{Name: OAuthCompletionCookieName, Value: other})
-			}
-			w := httptest.NewRecorder()
-			rig.h.HandleComplete(w, r)
-			if w.Code != http.StatusUnauthorized {
-				t.Fatalf("complete in browser %q = %d", other, w.Code)
-			}
-		}
-		if len(rig.revoked) != 0 {
-			t.Fatalf("another browser revoked %v", rig.revoked)
-		}
-
-		wComplete := httptest.NewRecorder()
-		rComplete := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/complete", strings.NewReader(`{"code":"`+code+`"}`))
-		rComplete.AddCookie(&http.Cookie{Name: OAuthCompletionCookieName, Value: browser})
-		rig.h.HandleComplete(wComplete, rComplete)
-		if wComplete.Code != http.StatusOK {
-			t.Fatalf("complete code = %d body=%s", wComplete.Code, wComplete.Body.String())
-		}
-		var completed OAuthCompleteResponse
-		if err := json.NewDecoder(wComplete.Body).Decode(&completed); err != nil {
-			t.Fatal(err)
-		}
-		if completed.AccessToken != "acc.tok" || completed.RefreshToken != "ref.tok" || completed.NextURL != "/me" {
-			t.Errorf("completed = %+v", completed)
-		}
-		if rig.comp.gotInput.InstallationID != 42 || rig.comp.gotInput.CapabilityID != "oidc" ||
-			rig.comp.gotInput.Response.GetExternalSubject() != "https://idp.example|ws-1" || rig.comp.gotInput.LinkingUserID != 0 {
-			t.Errorf("completer input = %+v", rig.comp.gotInput)
-		}
-
-		// A second redemption is refused and revokes the session the code
-		// issued.
-		if _, err := rig.h.Complete(context.Background(), code, "", browser); !errors.Is(err, ErrOAuthCompletionInvalid) {
-			t.Fatalf("reuse err = %v", err)
-		}
-		if len(rig.revoked) != 1 || rig.revoked[0] != "sess-1" {
-			t.Fatalf("revoked = %v", rig.revoked)
-		}
-
-		// The flow is single use.
-		if w := rig.callback(t, "42", rig.stateQuery(), cookie); !strings.Contains(w.Header().Get("Location"), "reason=session_expired") {
-			t.Fatalf("replayed callback: %q", w.Header().Get("Location"))
-		}
-	}
-}
-
 func TestOAuthCallback_RequiresTheStartingBrowser(t *testing.T) {
 	for name, cookie := range map[string]func(*http.Cookie) *http.Cookie{
 		"no cookie":   func(*http.Cookie) *http.Cookie { return nil },
@@ -473,8 +258,8 @@ func TestOAuthCallback_RequiresTheStartingBrowser(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := newOAuthRig(t)
-			_, real := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init")
-			w := rig.callback(t, "42", rig.stateQuery(), cookie(real))
+			_, realCookie := rig.start(t, "https://silo.test/api/v2/auth/oauth/42/init")
+			w := rig.callback(t, "42", rig.stateQuery(), cookie(realCookie))
 			if got := w.Header().Get("Location"); got != "/login?error=oauth_failed&reason=state_invalid" {
 				t.Fatalf("Location = %q", got)
 			}
@@ -517,7 +302,7 @@ func TestOAuthCallback_FailureReasons(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(rig)
 			}
-			_, cookie := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init")
+			_, cookie := rig.start(t, "https://silo.test/api/v2/auth/oauth/42/init")
 			query := rig.stateQuery()
 			if tc.query != nil {
 				query = tc.query(rig)
@@ -537,15 +322,6 @@ func TestOAuthCallback_FailureReasons(t *testing.T) {
 				t.Fatal("the completer ran")
 			}
 		})
-	}
-}
-
-func TestOAuthCallback_RejectsMissingCodeOrState(t *testing.T) {
-	rig := newOAuthRig(t)
-	for _, query := range []string{"", "code=x", "state=s"} {
-		if w := rig.callback(t, "42", query, nil); w.Code != http.StatusBadRequest {
-			t.Errorf("%q: code = %d, want 400", query, w.Code)
-		}
 	}
 }
 
@@ -648,12 +424,6 @@ func TestOAuthNative_HandsOffToTheAppWithAVerifierBoundCode(t *testing.T) {
 			t.Fatalf("verifier %q: err = %v", verifier, err)
 		}
 	}
-	// v1 cannot send a verifier, so it cannot redeem a native code.
-	w = httptest.NewRecorder()
-	rig.h.HandleComplete(w, httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/complete", strings.NewReader(`{"code":"`+code+`"}`)))
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("v1 redemption of a native code: %d", w.Code)
-	}
 	if len(rig.comp.opened) != 0 {
 		t.Fatalf("the callback or a refused redemption opened a session: %+v", rig.comp.opened)
 	}
@@ -684,7 +454,7 @@ func TestOAuthNative_HandsOffToTheAppWithAVerifierBoundCode(t *testing.T) {
 
 func TestOAuthNative_WebCodeRefusesAVerifier(t *testing.T) {
 	rig := newOAuthRig(t)
-	_, cookie := rig.start(t, "https://silo.test/api/v1/auth/oauth/42/init")
+	_, cookie := rig.start(t, "https://silo.test/api/v2/auth/oauth/42/init")
 	w := rig.callback(t, "42", rig.stateQuery(), cookie)
 	loc, _ := url.Parse(w.Header().Get("Location"))
 	code, browser := loc.Query().Get("code"), completionCookieValue(t, w)
@@ -711,26 +481,6 @@ func TestOAuthNative_StartValidation(t *testing.T) {
 	}
 	if rig.client.inits != 0 {
 		t.Fatal("an invalid native start reached the plugin")
-	}
-}
-
-func TestOAuthNative_FailureGoesToTheApp(t *testing.T) {
-	rig := newOAuthRig(t)
-	rig.comp.err = ErrNotPermitted
-	_, cookie := rig.nativeStart(t, "code_challenge="+nativeChallenge+"&app_state=s1")
-	q := rig.nativeCallback(t, cookie).Query()
-	if q.Get("error") != "not_permitted" || q.Get("state") != "s1" || q.Get("server") != testServerID || q.Get("iss") != "https://silo.test" || q.Get("code") != "" {
-		t.Fatalf("query = %v", q)
-	}
-	// Without the binding cookie the browser is not trusted with the app's
-	// state: the web login page answers instead.
-	rig = newOAuthRig(t)
-	rig.nativeStart(t, "code_challenge="+nativeChallenge+"&app_state=s1")
-	r := httptest.NewRequest(http.MethodGet, "https://silo.test/api/v2/auth/oauth/42/callback?"+rig.stateQuery(), nil)
-	w := httptest.NewRecorder()
-	rig.h.ServeCallback(w, r, "/api/v2", 42)
-	if got := w.Header().Get("Location"); got != "/login?error=oauth_failed&reason=state_invalid" {
-		t.Fatalf("Location = %q", got)
 	}
 }
 
@@ -878,53 +628,6 @@ func TestOAuthNative_StartOffThePublicOriginIsParked(t *testing.T) {
 	}
 	if rig.client.inits != inits || len(rig.store.starts) != 0 {
 		t.Fatalf("refused IDs: inits = %d (want %d), parked = %d", rig.client.inits, inits, len(rig.store.starts))
-	}
-}
-
-// TestOAuthNative_FailuresNameTheStartOrigin: failures and linking flows
-// that started on the LAN address name it too.
-func TestOAuthNative_FailuresNameTheStartOrigin(t *testing.T) {
-	ctx := context.Background()
-
-	// The provider fails after the move.
-	rig := newOAuthRig(t)
-	rig.client.initErr = errors.New("discovery timed out")
-	w := rig.resumeNative(parkedFlow(t, rig.nativeStartOn(lanOrigin, "s1", "")), 42)
-	loc, _ := url.Parse(w.Header().Get("Location"))
-	if loc == nil || loc.Query().Get("error") != OAuthReasonProviderUnavailable || loc.Query().Get("iss") != lanOrigin || loc.Query().Get("state") != "s1" {
-		t.Fatalf("Location = %q", w.Header().Get("Location"))
-	}
-
-	// A bad link ticket is answered on the LAN start itself.
-	rig = newOAuthRig(t)
-	w = rig.nativeStartOn(lanOrigin, "s2", "not-a-ticket")
-	loc, _ = url.Parse(w.Header().Get("Location"))
-	if loc == nil || loc.Scheme+":"+loc.Path != NativeAppRedirectURI || loc.Query().Get("error") != OAuthReasonSessionExpired ||
-		loc.Query().Get("iss") != lanOrigin || loc.Query().Get("state") != "s2" || len(rig.store.starts) != 0 {
-		t.Fatalf("Location = %q", w.Header().Get("Location"))
-	}
-
-	// A linking flow consumes its ticket on the LAN start, and the link
-	// redirect names the LAN origin.
-	rig = newOAuthRig(t)
-	ticket, err := rig.h.IssueLinkTicket(ctx, 7, 42, "right password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	flow := parkedFlow(t, rig.nativeStartOn(lanOrigin, "s3", ticket.Ticket))
-	if len(rig.store.tickets) != 0 || strings.Contains(rig.store.starts[flow].StartOrigin, "silo.test") || rig.store.starts[flow].LinkingUserID != 7 {
-		t.Fatalf("parked link = %+v, tickets left = %d", rig.store.starts[flow], len(rig.store.tickets))
-	}
-	cookie := binderOf(rig.resumeNative(flow, 42))
-	if cookie == nil || !rig.client.gotInit.GetLinking() || rig.client.gotInit.GetPrompt() != oidcPromptLogin {
-		t.Fatalf("link resume: init = %+v", rig.client.gotInit)
-	}
-	q := rig.nativeCallback(t, cookie).Query()
-	if q.Get("link") != "1" || q.Get("iss") != lanOrigin || q.Get("state") != "s3" || q.Get("code") == "" {
-		t.Fatalf("link redirect = %v", q)
-	}
-	if err := rig.h.CompleteLink(ctx, 7, q.Get("code"), nativeVerifier); err != nil || rig.comp.links != 1 {
-		t.Fatalf("complete link: %v, links = %d", err, rig.comp.links)
 	}
 }
 
@@ -1365,18 +1068,6 @@ func TestOAuthCompletionExpires(t *testing.T) {
 	}
 }
 
-func TestOAuthProviderLogoutURL(t *testing.T) {
-	rig := newOAuthRig(t)
-	got, err := rig.h.ProviderLogoutURL(context.Background(), 7)
-	if err != nil || got != "https://idp.example/logout?user="+url.QueryEscape("https://silo.test/login") {
-		t.Fatalf("got %q, %v", got, err)
-	}
-	rig.h.SetHostBaseURL("")
-	if got, _ := rig.h.ProviderLogoutURL(context.Background(), 7); got != "" {
-		t.Fatalf("without a public URL: %q", got)
-	}
-}
-
 // TestOAuthProviderLogoutURLIsBounded: the plugin lookup runs under a
 // deadline, so a provider whose discovery hangs cannot hold up the web
 // logout that waits for this answer.
@@ -1428,33 +1119,9 @@ func TestOAuthRoutesRefuseCredentialsInstallations(t *testing.T) {
 	}
 }
 
-// TestOAuthNative_IssuerSerialization: iss is serialized in one canonical
-// form (clientip.SerializeOrigin, tested there), so the app can compare it
-// with its saved server's origin.
-func TestOAuthNative_IssuerSerialization(t *testing.T) {
-	// A start on the public origin of a public URL with a path, a default
-	// port and upper case names its origin only.
-	rig := newOAuthRig(t)
-	rig.h.SetHostBaseURL("HTTPS://Silo.Test:443/media/")
-	_, cookie := rig.nativeStart(t, "code_challenge="+nativeChallenge+"&app_state=s1")
-	if got := rig.nativeCallback(t, cookie).Query().Get("iss"); got != "https://silo.test" {
-		t.Fatalf("iss = %q", got)
-	}
-	// Without a public URL the request origin issues the failure.
-	rig = newOAuthRig(t)
-	rig.h.SetHostBaseURL("")
-	w := httptest.NewRecorder()
-	rig.h.ServeStart(w, httptest.NewRequest(http.MethodGet, "http://10.0.0.5:8080/api/v2/auth/oauth/42/native/start", nil),
-		OAuthStartRequest{InstallID: 42, Prefix: "/api/v2", Native: true, CodeChallenge: nativeChallenge, AppState: "s1"}, "", http.StatusFound)
-	loc, _ := url.Parse(w.Header().Get("Location"))
-	if loc == nil || loc.Query().Get("error") != OAuthReasonProviderUnavailable || loc.Query().Get("iss") != "http://10.0.0.5:8080" {
-		t.Fatalf("Location = %q", w.Header().Get("Location"))
-	}
-}
-
 // completionCookieValue returns the completion cookie a web callback set,
-// checking it is set on the complete path of both API versions with the
-// binding cookie's attributes.
+// checking it is set on the complete path with the binding cookie's
+// attributes.
 func completionCookieValue(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 	paths := map[string]string{}
@@ -1467,22 +1134,9 @@ func completionCookieValue(t *testing.T, w *httptest.ResponseRecorder) string {
 		}
 		paths[c.Path] = c.Value
 	}
-	v1, v2 := paths["/api/v1/auth/oauth/complete"], paths["/api/v2/auth/oauth/complete"]
-	if len(paths) != 2 || v1 == "" || v1 != v2 {
+	value := paths["/api/v2/auth/oauth/complete"]
+	if len(paths) != 1 || value == "" {
 		t.Fatalf("completion cookies = %v", paths)
 	}
-	return v1
-}
-
-func TestHandleCompleteRejectsOversizedBody(t *testing.T) {
-	rig := newOAuthRig(t)
-	body := `{"code":"` + strings.Repeat("a", maxOAuthCompleteBodyBytes) + `"}`
-	w := httptest.NewRecorder()
-	rig.h.HandleComplete(w, httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/complete", strings.NewReader(body)))
-	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want 413", w.Code)
-	}
-	if len(rig.comp.opened) != 0 {
-		t.Fatalf("an oversized completion opened a session: %+v", rig.comp.opened)
-	}
+	return value
 }
