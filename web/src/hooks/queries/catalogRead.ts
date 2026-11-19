@@ -121,9 +121,8 @@ export function useCatalogItemDetail(id: string | undefined, libraryId?: number)
 /**
  * Reads an item's detail from the server whatever the cache holds, and returns
  * the item only once that read has landed; from then on it follows the cache.
- * A cached copy can look fresh yet predate a write: an unobserved query isn't
- * refetched when invalidated, and a cache update such as a favorite toggle
- * clears the invalidation.
+ * A cached copy can predate a write: an unobserved query isn't refetched when
+ * invalidated, so a stale copy renders while the reopening refetch runs.
  */
 export function useFreshCatalogItemDetail(id: string, libraryId?: number) {
   const queryClient = useQueryClient();
