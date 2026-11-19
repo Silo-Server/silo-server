@@ -58,7 +58,6 @@ func (h *countingHerdHost) Stop(id int) error {
 }
 
 func (h *countingHerdHost) Shutdown(context.Context) error { return nil }
-func (h *countingHerdHost) NextStartSeq() uint64           { return 0 }
 
 func (h *countingHerdHost) startCount() int {
 	h.mu.Lock()
@@ -159,7 +158,6 @@ func (h *ctxCaptureHost) Stop(id int) error {
 }
 
 func (h *ctxCaptureHost) Shutdown(context.Context) error { return nil }
-func (h *ctxCaptureHost) NextStartSeq() uint64           { return 0 }
 
 func (h *ctxCaptureHost) canceledDuringLaunch() bool {
 	h.mu.Lock()
@@ -257,7 +255,7 @@ func TestOnlyLazyPluginsAreStartedWithStopWhenIdle(t *testing.T) {
 	residentStore := installedPluginStore(t, 8, resident)
 	residentHost := &fakeServiceHost{}
 	residentService := &Service{installations: residentStore, host: residentHost}
-	if _, err := residentService.start(context.Background(), 8, true); err != nil {
+	if _, err := residentService.Start(t.Context(), 8); err != nil {
 		t.Fatalf("start resident: %v", err)
 	}
 	if len(residentHost.started) != 1 || residentHost.started[0].StopWhenIdle {

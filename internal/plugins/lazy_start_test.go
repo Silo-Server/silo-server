@@ -35,7 +35,7 @@ func TestSupervisedStartIsNotRecordedAsLazyFailure(t *testing.T) {
 	host := &countingHerdHost{startErr: errors.New("boom")}
 	service := &Service{installations: newFakeServiceInstallationStore(installation), host: host}
 
-	if _, err := service.start(context.Background(), 7, true); err == nil {
+	if _, err := service.Start(t.Context(), 7); err == nil {
 		t.Fatal("start succeeded, want the start error")
 	}
 	if got := service.RuntimeStateOf(installation); got.State != ResidentStopped || got.LastError != "" {
@@ -75,19 +75,23 @@ func TestFailedLazyStartIsRecordedAgainstTheTriedSnapshot(t *testing.T) {
 	service, _, installation := newLazyStartService(t)
 	tried := *installation
 	tried.InstallPath = filepath.Join(t.TempDir(), "missing", "plugin")
-	service.installationCache = map[int]*Installation{7: &tried}
+	store := newFakeServiceInstallationStore(&tried)
+	service.installations = store
 
-	updated := *installation
-	updated.Version = "0.0.37"
-	service.installations = newFakeServiceInstallationStore(&updated)
-
-	if _, err := service.ensureClient(context.Background(), 7); err == nil {
+	if _, err := service.ensureClient(t.Context(), 7); err == nil {
 		t.Fatal("ensureClient succeeded, want the manifest load error")
+	}
+	if err := store.Update(t.Context(), 7, UpdateInstallationInput{Version: new("0.0.37")}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.GetByID(t.Context(), 7)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if got := service.RuntimeStateOf(&tried); got.State != ResidentFailed {
 		t.Fatalf("RuntimeStateOf for the tried release = %+v, want failed", got)
 	}
-	if got := service.RuntimeStateOf(&updated); got.State != ResidentStopped || got.LastError != "" {
+	if got := service.RuntimeStateOf(updated); got.State != ResidentStopped || got.LastError != "" {
 		t.Fatalf("RuntimeStateOf for the updated release = %+v, want stopped", got)
 	}
 }

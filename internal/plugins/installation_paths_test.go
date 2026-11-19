@@ -93,7 +93,7 @@ func TestPluginPathReplacementRejectsDifferentPlugin(t *testing.T) {
 	store := newRecordingInstallationStore()
 	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
 	existing := &Installation{ID: 7, PluginID: "silo.example", Version: "1.2.2", InstallPath: "unused/plugin"}
-	_, binaryErr := installer.prepareBinary(existing, data, manifest.Checksum, manifest, nil, nil, unsignedSignature)
+	_, binaryErr := installer.prepareBinary(existing, data, manifest.Checksum, manifest, nil, nil, unsignedSignature, false)
 	_, archiveErr := installer.prepareArchive(existing, archive, InstallArchiveRequest{})
 	// The identity is checked before any asset is decompressed, so an archive
 	// for another plugin is refused without reading its assets.
@@ -115,28 +115,41 @@ func TestPluginPathReplacementRejectsDifferentPlugin(t *testing.T) {
 	}
 }
 
-// Uninstall trusts a valid row's host-written path, legacy layouts included,
-// and leaves a pre-check row's files alone: with plugin id and version ".." a
-// legacy layout's directory is the grandparent of the plugin root. Either way
-// the row goes and Delete succeeds, so the handler finishes the uninstall.
+// Uninstall deletes the local legacy executable while retaining the version
+// directory, which may also contain a staged replacement.
 func TestInstallationStoreDeleteRemovesOnlyTrustedFiles(t *testing.T) {
 	pool := builtinGuardTestPool(t)
 	store := NewInstallationStore(pool)
 	parent := t.TempDir()
 	base := filepath.Join(parent, "data", "plugins")
-	sentinel := filepath.Join(parent, "data", "keep")
+	store.cacheRoot = base
+	sentinel := filepath.Join(parent, "data", "plugin")
 	legacyRelease := filepath.Join(base, "silo.example", "1.2.3")
-	for _, dir := range []string{sentinel, legacyRelease} {
+	staged := filepath.Join(legacyRelease, "install-staged")
+	for _, dir := range []string{filepath.Dir(sentinel), staged} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
+	}
+	legacyBinary := filepath.Join(legacyRelease, "plugin")
+	for _, file := range []string{sentinel, legacyBinary} {
+		if err := os.WriteFile(file, []byte("binary"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := protojson.Marshal(testPluginManifest(t, "silo.example", "1.2.3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(InstalledManifestPath(legacyBinary), raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		pluginID, version string
 		removed, kept     string
 	}{
 		{"..", "..", "", sentinel},
-		{"silo.example", "1.2.3", legacyRelease, sentinel},
+		{"silo.example", "1.2.3", legacyBinary, staged},
 	} {
 		installation, err := store.Create(t.Context(), CreateInstallationInput{
 			PluginID: tc.pluginID, Version: tc.version,

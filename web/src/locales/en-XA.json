@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "⟦Šéţ ƀý ţĥé ñöđé’š éñṽîŕöñɱéñţ. Çĥåñĝé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé ñöđé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šéţ ƀý ţĥé éñṽîŕöñɱéñţ. Çĥåñĝé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé åƒƒéçţéđ šéŕṽîçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "error.field.out_of_range": [
@@ -57041,6 +57041,68 @@
     {
       "type": 0,
       "value": "⟦Þļûĝîñš~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "⟦Åþþļîéđ~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "⟦Ĥéļđ~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ļöåđ þļûĝîñ þŕöṽîšîöñîñĝ šţåţûš.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñåĝéđ ƀý ţĥé éñṽîŕöñɱéñţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "⟦Þéñđîñĝ~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéƒûšéđ~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé đéþļöýɱéñţ çöñţŕöļš ţĥé þåçķåĝé šöûŕçé åñđ ŕéɱöṽåļ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöṽîšîöñîñĝ šţåţûš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé đéþļöýɱéñţ þîñš ţĥîš þļûĝîñ ţö "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.plugins.rail.about": [

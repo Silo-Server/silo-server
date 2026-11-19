@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
@@ -1759,7 +1760,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		}
 		_, rotated := rotatedSettings[key]
 		switch {
-		case rotated:
+		case rotated || key == plugins.ProvisionRestoreHoldKey:
 			if got == nil || *got != "backup" {
 				t.Errorf("%s = %v, want the restore's own value kept", key, got)
 			}

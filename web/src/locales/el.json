@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ορίζεται από το περιβάλλον του κόμβου. Αλλάξτε το εκεί και επανεκκινήστε τον κόμβο."
+      "value": "Ορίζεται από το περιβάλλον. Αλλάξτε το εκεί και επανεκκινήστε την υπηρεσία που επηρεάζεται."
     }
   ],
   "error.field.out_of_range": [
@@ -52417,6 +52417,68 @@
     {
       "type": 0,
       "value": "Πρόσθετα"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Εφαρμόστηκε"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Σε αναστολή"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση της κατάστασης παροχής πρόσθετων."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Διαχειρίζεται από το περιβάλλον"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Σε εκκρεμότητα"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Απορρίφθηκε"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Η πηγή του πακέτου και η αφαίρεσή του ελέγχονται από τη διαμόρφωση ανάπτυξης."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Κατάσταση παροχής"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Η διαμόρφωση ανάπτυξης κλειδώνει αυτό το πρόσθετο στην έκδοση "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [

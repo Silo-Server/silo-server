@@ -80,6 +80,32 @@ describe("PluginConfigForm secrets", () => {
     );
   });
 
+  it("locks a managed secret and saves edits to the rest of its config entry", async () => {
+    const onSave = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <PluginConfigForm
+        schema={schema}
+        value={{ region: "us-east" }}
+        configuredSecrets={["api_key"]}
+        managedFields={["api_key"]}
+        onSave={onSave}
+      />,
+    );
+
+    const secret = screen.getByLabelText("API Key");
+    expect(secret).toBeDisabled();
+    expect(secret).toHaveValue("");
+    expect(secret).toHaveAccessibleDescription("Managed by the environment");
+    expect(screen.queryByRole("button", { name: "Clear saved secret" })).toBeNull();
+
+    const region = screen.getByLabelText("Region");
+    await user.clear(region);
+    await user.type(region, "eu");
+    await user.click(screen.getByRole("button", { name: "Save config" }));
+    expect(onSave).toHaveBeenCalledWith("account", { region: "eu" }, []);
+  });
+
   it("sends an emptied field as an explicit clear so the stored value goes", async () => {
     const onSave = vi.fn();
     render(

@@ -1,10 +1,13 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"math/big"
 	"reflect"
 
 	"github.com/jackc/pgx/v5"
@@ -121,6 +124,21 @@ func (s *Service) RestoreInstallation(ctx context.Context, tx pgx.Tx, in Restore
 		return result, nil, ErrPluginNotInstalled
 	}
 	inst := installs[0]
+	if err := lockPluginInstallation(ctx, tx, inst.ID); err != nil {
+		if errors.Is(err, ErrInstallationNotFound) {
+			return result, nil, ErrPluginNotInstalled
+		}
+		return result, nil, err
+	}
+	inst, err = txStore.GetByID(ctx, inst.ID)
+	if err != nil {
+		return result, nil, err
+	}
+	ownership, err := LoadProvisionOwnership(ctx, tx, inst.ID)
+	if err != nil {
+		return result, nil, err
+	}
+
 	// The installation and its manifest are read through the transaction:
 	// it may hold the pool's last connection.
 	manifest, err := s.readInstalledManifestFrom(ctx, inst, txStore)
@@ -144,6 +162,24 @@ func (s *Service) RestoreInstallation(ctx context.Context, tx pgx.Tx, in Restore
 			result.Rejected = append(result.Rejected, RestoreConfigProblem{Key: c.Key, Reason: "it cannot be decrypted with this server's key"})
 			continue
 		}
+		if fields := ownership.ConfigFields[c.Key]; len(fields) > 0 {
+			have, err := readGlobalConfigInTx(ctx, tx, configs.cipher, result.InstallationID, c.Key)
+			if err != nil {
+				result.Rejected = append(result.Rejected, RestoreConfigProblem{Key: c.Key, Reason: "the managed config entry cannot be read"})
+				continue
+			}
+			if err := requireUnchangedOwnedConfig(c.Key, fields, have, value); err != nil {
+				result.Rejected = append(result.Rejected, RestoreConfigProblem{Key: c.Key, Reason: err.Error()})
+			}
+			merged := make(map[string]any, len(have)+len(value))
+			maps.Copy(merged, have)
+			maps.Copy(merged, value)
+			value = preserveOwnedConfig(fields, have, merged)
+			if have == nil && len(value) == 0 {
+				continue
+			}
+		}
+
 		if err := ValidateGlobalConfigValue(manifest, c.Key, globalConfigValidationProjection(manifest, c.Key, value, value)); err != nil {
 			result.Rejected = append(result.Rejected, RestoreConfigProblem{Key: c.Key, Reason: err.Error()})
 			continue
@@ -157,18 +193,11 @@ func (s *Service) RestoreInstallation(ctx context.Context, tx pgx.Tx, in Restore
 		result.Written = append(result.Written, c.Key)
 	}
 
-	id, changed := result.InstallationID, result.Changed()
+	changed := result.Changed()
 	after := func(ctx context.Context) {
-		if !changed {
-			return
+		if changed {
+			s.OnLifecycleChange(ctx)
 		}
-		if s.host != nil {
-			// A stop that fails leaves a stale process; the lifecycle
-			// change below and the advanced runtime generation replace it.
-			_ = s.host.Stop(id)
-		}
-		s.resident.Reset(id)
-		s.OnLifecycleChange(ctx)
 	}
 	return result, after, nil
 }
@@ -200,20 +229,26 @@ func storedConfigs(ctx context.Context, tx pgx.Tx, store *RuntimeConfigStore, in
 // installation id and advances its runtime generation, as an admin save
 // does, in the caller's transaction.
 func putConfigInTx(ctx context.Context, tx pgx.Tx, store *RuntimeConfigStore, installationID int, key string, value map[string]any) error {
-	valueJSON, err := encodeRuntimeConfigValue(store.cipher, installationID, key, value)
+	if err := lockPluginInstallation(ctx, tx, installationID); err != nil {
+		return err
+	}
+	ownership, err := LoadProvisionOwnership(ctx, tx, installationID)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations WHERE id = $1 FOR NO KEY UPDATE`, installationID); err != nil {
-		return fmt.Errorf("lock plugin installation for config update: %w", err)
+	if fields := ownership.ConfigFields[key]; len(fields) > 0 {
+		current, err := readGlobalConfigInTx(ctx, tx, store.cipher, installationID, key)
+		if err != nil {
+			return err
+		}
+		if err := requireUnchangedOwnedConfig(key, fields, current, value); err != nil {
+			return err
+		}
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO plugin_runtime_configs (plugin_installation_id, config_key, config_value)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (plugin_installation_id, config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = NOW()
-	`, installationID, key, valueJSON); err != nil {
-		return fmt.Errorf("writing plugin runtime config: %w", err)
+	if err := upsertGlobalConfig(ctx, tx, store.cipher, installationID, key, value); err != nil {
+		return err
 	}
+
 	if _, err := tx.Exec(ctx, `UPDATE plugin_installations SET runtime_generation = runtime_generation + 1, updated_at = NOW() WHERE id = $1`, installationID); err != nil {
 		return fmt.Errorf("advance plugin runtime generation: %w", err)
 	}
@@ -229,11 +264,55 @@ func SameConfig(a, b map[string]any) bool {
 	if errA != nil || errB != nil {
 		return reflect.DeepEqual(a, b)
 	}
-	var x, y any
-	if json.Unmarshal(left, &x) != nil || json.Unmarshal(right, &y) != nil {
-		return string(left) == string(right)
+	if bytes.Equal(left, right) {
+		return true
 	}
-	return reflect.DeepEqual(x, y)
+	var x, y any
+	ld, rd := json.NewDecoder(bytes.NewReader(left)), json.NewDecoder(bytes.NewReader(right))
+	ld.UseNumber()
+	rd.UseNumber()
+	if ld.Decode(&x) != nil || rd.Decode(&y) != nil {
+		return false
+	}
+	return sameConfigValue(x, y)
+}
+
+func sameConfigValue(a, b any) bool {
+	switch a := a.(type) {
+	case map[string]any:
+		b, ok := b.(map[string]any)
+		if !ok || len(a) != len(b) {
+			return false
+		}
+		for key, left := range a {
+			right, ok := b[key]
+			if !ok || !sameConfigValue(left, right) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		b, ok := b.([]any)
+		if !ok || len(a) != len(b) {
+			return false
+		}
+		for i, left := range a {
+			if !sameConfigValue(left, b[i]) {
+				return false
+			}
+		}
+		return true
+	case json.Number:
+		b, ok := b.(json.Number)
+		if !ok || a == b {
+			return ok
+		}
+		left, leftOK := new(big.Rat).SetString(a.String())
+		right, rightOK := new(big.Rat).SetString(b.String())
+		return leftOK && rightOK && left.Cmp(right) == 0
+	default:
+		return reflect.DeepEqual(a, b)
+	}
 }
 
 // DecodeStoredConfig decrypts a stored plugin_runtime_configs value with

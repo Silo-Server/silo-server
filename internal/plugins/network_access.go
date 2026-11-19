@@ -486,7 +486,7 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 	if reason := s.resident.GateError(); reason != "" {
 		return fail(reason)
 	}
-	pc, err := s.host.Client(provider.InstallationID)
+	pc, err := s.ensureClient(ctx, provider.InstallationID)
 	if err != nil {
 		return fail(networkAccessUnavailableReason(err, s.RuntimeState(provider.InstallationID)))
 	}
@@ -509,12 +509,12 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 
 func networkAccessUnavailableReason(err error, state RuntimeState) string {
 	switch {
-	case errors.Is(err, pluginhost.ErrPluginUnhealthy):
-		return "plugin process is unhealthy"
 	case state.LastError != "":
 		return fmt.Sprintf("plugin process is %s: %s", state.State, state.LastError)
 	case state.State != "" && state.State != ResidentRunning:
 		return "plugin process is " + string(state.State)
+	case errors.Is(err, pluginhost.ErrPluginUnhealthy):
+		return "plugin process is unhealthy"
 	}
 	return "plugin process is not running"
 }

@@ -17,6 +17,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -168,7 +169,8 @@ type PluginInstallationView struct {
 	// ConnectionCheckSupported reports whether the config test endpoint has
 	// a check to run for this plugin, exposed by v2 as
 	// `connection_check_supported`. The frozen v1 bridge does not carry it.
-	ConnectionCheckSupported bool `json:"-"`
+	ConnectionCheckSupported bool                       `json:"-"`
+	ProvisionOwnership       plugins.ProvisionOwnership `json:"-"`
 }
 
 // PluginRuntimeView is one installation's process state. Resident marks a
@@ -248,6 +250,7 @@ type PluginConfigValueView struct {
 }
 
 type PluginAuthBindingView struct {
+	CallbackMode  string    `json:"-"`
 	CapabilityID  string    `json:"capability_id"`
 	Enabled       bool      `json:"enabled"`
 	DisplayOrder  int       `json:"display_order"`
@@ -482,6 +485,7 @@ type PluginConnectionCheckResult struct {
 
 // PluginAuthBindingInput is the whole-row auth binding assignment.
 type PluginAuthBindingInput struct {
+	CallbackMode  string
 	CapabilityID  string
 	Enabled       bool
 	DisplayOrder  int
@@ -565,7 +569,7 @@ func (h *PluginHandler) SetAdminPluginAuthBinding(ctx context.Context, id int, i
 	if err := h.pluginMutationTarget(ctx, id); err != nil {
 		return err
 	}
-	if err := h.configs.UpsertAuthBinding(ctx, plugins.AuthBinding{InstallationID: id, CapabilityID: in.CapabilityID, Enabled: in.Enabled, DisplayOrder: in.DisplayOrder, AutoProvision: in.AutoProvision, DefaultLogin: in.DefaultLogin}); err != nil {
+	if err := h.configs.UpsertAuthBinding(ctx, plugins.AuthBinding{InstallationID: id, CapabilityID: in.CapabilityID, Enabled: in.Enabled, DisplayOrder: in.DisplayOrder, AutoProvision: in.AutoProvision, DefaultLogin: in.DefaultLogin, CallbackMode: in.CallbackMode}); err != nil {
 		return err
 	}
 	h.notifyAuthProvidersChanged(ctx)
@@ -583,7 +587,18 @@ func (h *PluginHandler) TestAdminPluginAuthConnection(ctx context.Context, id in
 	if err := h.pluginMutationTarget(ctx, id); err != nil {
 		return plugins.AuthConnectionTestResult{}, err
 	}
-	return h.service.TestAuthProviderConnection(ctx, id, capabilityID, staged)
+	result, err := h.service.TestAuthProviderConnection(ctx, id, capabilityID, staged)
+	if err != nil || h.configs == nil || auth.ProviderModeForAuthModes(result.AuthModes) != auth.ProviderModeOAuth {
+		return result, err
+	}
+	binding, err := h.configs.GetAuthBinding(ctx, id, result.CapabilityID)
+	if err != nil && !errors.Is(err, plugins.ErrAuthBindingNotFound) {
+		return plugins.AuthConnectionTestResult{}, err
+	}
+	if binding != nil {
+		result.CallbackMode = binding.CallbackMode
+	}
+	return result, nil
 }
 
 // SetAdminPluginTaskBinding replaces one task binding row and applies it to
@@ -863,6 +878,11 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		return PluginInstallationView{}, err
 	}
 
+	ownership, err := h.installations.GetProvisionOwnership(ctx, installation.ID)
+	if err != nil {
+		return PluginInstallationView{}, err
+	}
+
 	var (
 		globalConfigSchema []PluginConfigSchemaView
 		userConfigSchema   []PluginConfigSchemaView
@@ -942,6 +962,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		Signature:          installation.Signature,
 
 		ConnectionCheckSupported: plugins.SupportsConnectionCheck(manifest),
+		ProvisionOwnership:       ownership,
 	}, nil
 }
 
@@ -1099,6 +1120,7 @@ func authBindingsForInstallation(installationID int, bindings []*plugins.AuthBin
 			DisplayOrder:  binding.DisplayOrder,
 			AutoProvision: binding.AutoProvision,
 			DefaultLogin:  binding.DefaultLogin,
+			CallbackMode:  binding.CallbackMode,
 			CreatedAt:     binding.CreatedAt,
 			UpdatedAt:     binding.UpdatedAt,
 		})

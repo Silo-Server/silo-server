@@ -49,10 +49,6 @@ type Host interface {
 	Client(installationID int) (pluginClient, error)
 	Stop(installationID int) error
 	Shutdown(ctx context.Context) error
-	// NextStartSeq returns the host's monotonic start counter. A client whose
-	// StartSeq is at or below the value read before a launch was issued by
-	// an earlier launch that the singleflight joined.
-	NextStartSeq() uint64
 	// Running reports whether the installation's process is up. Unlike
 	// Client it does not count as a use, so a status read cannot keep an
 	// idle plugin running.
@@ -83,26 +79,31 @@ type serviceConfigStore interface {
 }
 
 type Service struct {
-	repositories     *RepositoryStore
-	installations    serviceInstallationStore
-	configs          serviceConfigStore
-	catalog          *CatalogService
-	installer        *Installer
-	archiveCache     *ArchiveCache
-	host             Host
-	testConfigSeq    atomic.Int64
-	dispatcher       *EventDispatcher
-	lifecycleMu      sync.RWMutex
-	lifecycleHooks   []func(context.Context)
-	launchGroup      singleflight.Group
-	runtimeRefreshMu sync.RWMutex
-	resident         *ResidentSupervisor
+	repositories   *RepositoryStore
+	installations  serviceInstallationStore
+	configs        serviceConfigStore
+	catalog        *CatalogService
+	installer      *Installer
+	archiveCache   *ArchiveCache
+	host           Host
+	testConfigSeq  atomic.Int64
+	dispatcher     *EventDispatcher
+	lifecycleMu    sync.RWMutex
+	lifecycleHooks []func(context.Context)
+	launchGroup    singleflight.Group
+	// Serialize operations on a process, including configuration and the
+	// supervisor's acceptance of a launch. Distinct installations can
+	// still launch independently.
+	runtimeLocksMu sync.Mutex
+	runtimeLocks   map[int]*sync.Mutex
+	running        runningInstallations
+	resident       *ResidentSupervisor
 	// lazyStartFailures records failed launches of non-resident plugins for
 	// the admin runtime state; see RuntimeState.
 	lazyStartFailures lazyStartFailures
-	// lifecycleBus, when set by PublishLifecycleChanges, carries every
-	// lifecycle change to the proxy nodes running the same installations.
-	lifecycleBus cache.EventBus
+	lifecycleBus      cache.EventBus // protected by lifecycleMu
+	reconcileMu       sync.Mutex
+	reconciled        map[int]*Installation
 
 	// networkAccessHostInfo and networkAccessStatus back the network access
 	// admin reads; see network_access.go.
@@ -113,8 +114,7 @@ type Service struct {
 	// installationCache memoizes plugin_installations rows keyed by ID so the
 	// hot plugin-RPC path (ensureClient -> loadInstallation) and the metadata
 	// chain enabled-check answer from memory instead of a per-call DB read. It
-	// is wiped wholesale by InvalidateInstallationCache, registered as a
-	// lifecycle hook, so a cached row is at most one lifecycle event stale.
+	// is wiped when lifecycle reconciliation observes changed rows.
 	//
 	// installationCacheGen guards the read-through against an invalidate that
 	// races an in-flight GetByID: the generation is captured before the store
@@ -160,8 +160,16 @@ func (s *Service) OnLifecycleChange(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	if !s.reconcileInstallations(ctx) {
+		s.InvalidateInstallationCache()
+	}
+	s.publishPluginsChanged(ctx, PluginsChangedEvent{})
+	s.runLifecycleHooks(ctx)
+}
+
+func (s *Service) runLifecycleHooks(ctx context.Context) {
 	s.lifecycleMu.RLock()
-	hooks := append([]func(context.Context){}, s.lifecycleHooks...)
+	hooks := slices.Clone(s.lifecycleHooks)
 	s.lifecycleMu.RUnlock()
 	for _, hook := range hooks {
 		func(hook func(context.Context)) {
@@ -187,20 +195,22 @@ func NewService(
 	installer *Installer,
 	host Host,
 ) *Service {
+	var cacheDir string
+	if installer != nil {
+		cacheDir = installer.baseDir
+	}
+	if installations != nil {
+		installations.cacheRoot = cacheDir
+	}
 	svc := &Service{
 		repositories:  repositories,
 		installations: installations,
 		configs:       configs,
 		catalog:       catalog,
 		installer:     installer,
-		archiveCache:  NewArchiveCache(installations),
+		archiveCache:  NewArchiveCacheAt(installations, cacheDir),
 		host:          host,
 	}
-	// Self-register the installation-cache invalidation so it can never be
-	// silently forgotten by a new caller: every OnLifecycleChange (install /
-	// enable / disable / update / uninstall) wipes the cache, keeping the
-	// memoized rows correct without any external wiring.
-	svc.AddLifecycleHook(func(context.Context) { svc.InvalidateInstallationCache() })
 	// Resident plugins (network access providers) are reconciled after every
 	// lifecycle change; the supervisor stays inert until StartResidents arms
 	// it once the API listener is bound.
@@ -332,12 +342,14 @@ func (s *Service) installArchive(ctx context.Context, data []byte, req InstallAr
 	}
 	var result *InstallResult
 	if existing != nil {
+		if err := s.preflightManagedReplacement(ctx, existing, nil); err != nil {
+			return nil, err
+		}
+
 		var prepared *PreparedReplacement
 		prepared, err = s.installer.prepareArchive(existing, data, req)
 		if err == nil {
-			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return prepared.Apply(ctx)
-			})
+			result, err = s.applyReplacement(ctx, existing, prepared)
 		}
 		if errors.Is(err, ErrInstallationNotFound) {
 			// The installation this install replaces was uninstalled since it
@@ -378,6 +390,16 @@ func (s *Service) installCatalog(ctx context.Context, req InstallCatalogRequest,
 		return nil, err
 	}
 
+	if existing != nil {
+		var repositoryID *int
+		if !target.LegacyArchive {
+			repositoryID = &target.RepositoryID
+		}
+		if err := s.preflightManagedReplacement(ctx, existing, repositoryID); err != nil {
+			return nil, err
+		}
+	}
+
 	var result *InstallResult
 	switch {
 	case existing != nil:
@@ -386,9 +408,7 @@ func (s *Service) installCatalog(ctx context.Context, req InstallCatalogRequest,
 		var prepared *PreparedReplacement
 		prepared, err = s.installer.PrepareCatalogReplacement(ctx, existing, target)
 		if err == nil {
-			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return prepared.Apply(ctx)
-			})
+			result, err = s.applyReplacement(ctx, existing, prepared)
 		}
 	case target.LegacyArchive:
 		result, err = s.installer.InstallRemote(ctx, target.ArchiveRequest())
@@ -446,7 +466,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("binary data is required")
 	}
 
-	manifest, manifestJSON, err := loadManifestFromBinary(ctx, binaryData)
+	manifest, manifestJSON, err := s.installer.loadManifestFromBinary(ctx, binaryData)
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +475,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	var result *InstallResult
 	if s.installations == nil {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature, false)
 		if err != nil {
 			return nil, err
 		}
@@ -468,7 +488,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("list existing plugin installations for %q: %w", manifest.GetPluginId(), err)
 	}
 	if len(existing) == 0 {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature, false)
 		if err != nil {
 			return nil, err
 		}
@@ -479,18 +499,40 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("multiple existing installations found for plugin %q", manifest.GetPluginId())
 	}
 
-	prepared, err := s.installer.prepareBinary(existing[0], binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+	if err := s.preflightManagedReplacement(ctx, existing[0], nil); err != nil {
+		return nil, err
+	}
+
+	prepared, err := s.installer.prepareBinary(existing[0], binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature, false)
 	if err != nil {
 		return nil, err
 	}
-	result, err = s.replaceStopped(ctx, existing[0], func() (*InstallResult, error) {
-		return prepared.Apply(ctx)
-	})
+	result, err = s.applyReplacement(ctx, existing[0], prepared)
 	if err != nil {
 		return nil, err
 	}
 	s.OnLifecycleChange(ctx)
 	return result, nil
+}
+
+// preflightManagedReplacement refuses an incompatible source before download. The installation transaction checks
+// ownership again because a declaration may land during preparation.
+func (s *Service) preflightManagedReplacement(ctx context.Context, existing *Installation, repositoryID *int) error {
+	store, ok := s.installations.(*InstallationStore)
+	if !ok {
+		return nil
+	}
+	ownership, err := store.GetProvisionOwnership(ctx, existing.ID)
+	if err != nil || !ownership.Managed {
+		return err
+	}
+	if ownership.VersionPin != "" {
+		return &ManagedByEnvironmentError{Field: managedVersionField}
+	}
+	if repositoryID == nil || existing.RepositoryID == nil || *repositoryID != *existing.RepositoryID {
+		return &ManagedByEnvironmentError{Field: managedInstallationField}
+	}
+	return nil
 }
 
 func (s *Service) existingInstallationByPluginID(ctx context.Context, pluginID string) (*Installation, error) {
@@ -511,45 +553,16 @@ func (s *Service) existingInstallationByPluginID(ctx context.Context, pluginID s
 	return existing[0], nil
 }
 
-// stopInstallationIfRunning stops the installation's process whatever its
-// enabled flag said when it was loaded: an admin may have turned it on since,
-// and a process left running would keep serving the replaced release.
-func (s *Service) stopInstallationIfRunning(existing *Installation) error {
-	if existing == nil || s.host == nil {
-		return nil
-	}
-	if err := s.host.Stop(existing.ID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
-		return fmt.Errorf("stop existing plugin installation %d: %w", existing.ID, err)
-	}
-	return nil
-}
-
-// replaceStopped stops the existing installation's process and runs replace.
-// Callers check the new package before calling it, so a refused package
-// never stops the running plugin. An installation that another install or
-// update changed while the package downloaded is refused before its newer
-// process is stopped, and replace itself refuses one changed after that
-// check.
-//
-// When replace fails the row still names the old release but its process is
-// gone: a lazily started plugin comes back on its next RPC, while a resident
-// only restarts on a lifecycle reconcile, so the hooks run before the error
-// is returned. On success the caller runs them after the row has changed.
-// The replacement leaves the row's enabled flag alone, so an admin's switch
-// made while the package downloaded stands, and the result reports the flag
-// as stored.
-func (s *Service) replaceStopped(ctx context.Context, existing *Installation, replace func() (*InstallResult, error)) (*InstallResult, error) {
+// applyReplacement checks the expected package before committing and reports the
+// current enabled flag. The caller reconciles running processes after commit.
+func (s *Service) applyReplacement(ctx context.Context, existing *Installation, prepared *PreparedReplacement) (*InstallResult, error) {
 	if s.installations != nil {
 		if err := checkUnchanged(ctx, s.installations.GetByID, existing); err != nil {
 			return nil, err
 		}
 	}
-	if err := s.stopInstallationIfRunning(existing); err != nil {
-		return nil, err
-	}
-	result, err := replace()
+	result, err := prepared.Apply(ctx)
 	if err != nil {
-		s.OnLifecycleChange(ctx)
 		return nil, err
 	}
 	if result.Installation != nil && s.installations != nil {
@@ -613,17 +626,31 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 }
 
 func (s *Service) Start(ctx context.Context, installationID int) (pluginClient, error) {
-	s.runtimeRefreshMu.RLock()
-	defer s.runtimeRefreshMu.RUnlock()
-	return s.start(ctx, installationID, true)
+	lock := s.runtimeLock(installationID)
+	lock.Lock()
+	defer lock.Unlock()
+	return s.start(ctx, installationID, true, nil)
 }
 
-func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (client pluginClient, err error) {
-	installation, err := s.loadInstallation(ctx, installationID, true)
+// start is called with the process lock held. Read the row directly on
+// launches, and check it again after configuration and the host handshake.
+// The configuration read may overlap a commit on another host.
+func (s *Service) start(ctx context.Context, installationID int, allowResident bool, expected *installationRuntime) (client pluginClient, err error) {
+	installation, err := s.installations.GetByID(ctx, installationID)
 	if err != nil {
 		// No launch was attempted: a disabled, missing or unreadable row says
 		// nothing about whether the plugin can start.
 		return nil, err
+	}
+	if installation.IsBuiltin() {
+		return nil, ErrInstallationNotFound
+	}
+	if !installation.Enabled {
+		return nil, ErrInstallationDisabled
+	}
+	runtime := runtimeOf(installation)
+	if expected != nil && *expected != runtime {
+		return nil, ErrInstallationChanged
 	}
 	// Record why a lazy launch failed, including an archive or config that
 	// cannot be loaded, so the admin API can show a plugin that cannot start.
@@ -638,7 +665,7 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 		switch {
 		case err == nil:
 			s.lazyStartFailures.clear(installationID)
-		case !supervised && !refusedResident:
+		case !supervised && !refusedResident && !errors.Is(err, ErrInstallationChanged):
 			s.lazyStartFailures.record(installation, err)
 		}
 	}()
@@ -655,11 +682,17 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 	if err != nil {
 		return nil, err
 	}
+	if s.configs != nil {
+		if err := s.checkStartRuntime(ctx, installationID, runtime); err != nil {
+			return nil, err
+		}
+	}
 	binaryPath, err := s.localInstallPath(installation)
 	if err != nil {
 		return nil, err
 	}
-	return s.host.Start(ctx, pluginhost.StartRequest{
+	s.running.delete(installationID)
+	client, err = s.host.Start(ctx, pluginhost.StartRequest{
 		InstallationID: installation.ID,
 		BinaryPath:     binaryPath,
 		Manifest:       manifest,
@@ -669,11 +702,49 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 		// supervisor's to keep up.
 		StopWhenIdle: !isResidentManifest(manifest),
 	})
+	if err != nil || client == nil {
+		return client, err
+	}
+	if err := s.checkStartRuntime(ctx, installationID, runtime); err != nil {
+		return nil, errors.Join(err, s.stopRuntime(installationID))
+	}
+	s.running.store(installationID, runtime)
+	return client, nil
+}
+
+func (s *Service) checkStartRuntime(ctx context.Context, id int, expected installationRuntime) error {
+	current, err := s.installations.GetByID(ctx, id)
+	if err != nil && !errors.Is(err, ErrInstallationNotFound) {
+		return err
+	}
+	if current == nil || runtimeOf(current) != expected {
+		s.InvalidateInstallationCache()
+		return ErrInstallationChanged
+	}
+	return nil
+}
+
+func (s *Service) runtimeLock(id int) *sync.Mutex {
+	s.runtimeLocksMu.Lock()
+	defer s.runtimeLocksMu.Unlock()
+	lock := s.runtimeLocks[id]
+	if lock == nil {
+		if s.runtimeLocks == nil {
+			s.runtimeLocks = make(map[int]*sync.Mutex)
+		}
+		lock = new(sync.Mutex)
+		s.runtimeLocks[id] = lock
+	}
+	return lock
+}
+
+func (s *Service) runtimeMatches(installation *Installation) bool {
+	running, ok := s.running.load(installation.ID)
+	return ok && running == runtimeOf(installation)
 }
 
 // localInstallPath is where this host keeps the installation's binary: the
-// recorded install path on the API server, the archive cache's own copy on a
-// host with its own cache root (a proxy node).
+// archive cache's copy under this host's configured root.
 func (s *Service) localInstallPath(installation *Installation) (string, error) {
 	var cache *ArchiveCache
 	if s != nil {
@@ -683,10 +754,22 @@ func (s *Service) localInstallPath(installation *Installation) (string, error) {
 }
 
 func (s *Service) Stop(installationID int) error {
+	lock := s.runtimeLock(installationID)
+	lock.Lock()
+	defer lock.Unlock()
+	return s.stopRuntime(installationID)
+}
+
+// stopRuntime stops a process with its lock held.
+func (s *Service) stopRuntime(installationID int) error {
 	if s.host == nil {
 		return nil
 	}
-	return s.host.Stop(installationID)
+	err := s.host.Stop(installationID)
+	if err == nil || errors.Is(err, pluginhost.ErrClientNotFound) {
+		s.running.delete(installationID)
+	}
+	return err
 }
 
 // RefreshMarkerRuntime discards local state after the marker registry observes
@@ -694,13 +777,10 @@ func (s *Service) Stop(installationID int) error {
 // Waiting for concurrent launches prevents an old process from appearing after
 // the stop and being reused with the new revision.
 func (s *Service) RefreshMarkerRuntime(installationID int) error {
-	s.runtimeRefreshMu.Lock()
 	s.InvalidateInstallationCache()
 	if err := s.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
-		s.runtimeRefreshMu.Unlock()
 		return err
 	}
-	s.runtimeRefreshMu.Unlock()
 	// A plugin can expose both marker and resident capabilities. Restart under
 	// supervision so a stopped resident does not wait for another lifecycle
 	// event. Restart waits for a launch, so it must run outside the launch lock.
@@ -957,30 +1037,36 @@ func (s *Service) ManifestForInstallation(
 // only use the process the supervisor owns; RPCs cannot launch or replace it.
 func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginClient, error) {
 	if state, tracked := s.resident.State(installationID); tracked {
-		if _, err := s.loadInstallation(ctx, installationID, true); err != nil {
-			return nil, err
-		}
 		if state.State != ResidentRunning {
 			return nil, fmt.Errorf("%w: resident plugin installation %d is %s", pluginhost.ErrPluginUnhealthy, installationID, state.State)
 		}
+		lock := s.runtimeLock(installationID)
+		lock.Lock()
+		defer lock.Unlock()
+		installation, err := s.loadInstallation(ctx, installationID, true)
+		if err != nil {
+			return nil, err
+		}
+		if state, tracked = s.resident.State(installationID); !tracked || state.State != ResidentRunning || !s.runtimeMatches(installation) {
+			return nil, fmt.Errorf("%w: resident plugin installation %d is changing", pluginhost.ErrPluginUnhealthy, installationID)
+		}
 		return s.host.Client(installationID)
 	}
-	return s.ensureClientForStart(ctx, installationID, false)
-}
-
-// ensureClientForStart collapses concurrent launches for a cold installation.
-// Only accepted supervisor starts may launch resident-capability plugins.
-// Separate flights keep a lazy RPC from joining an accepted resident launch,
-// or making that launch fail because the RPC is forbidden from starting it.
-func (s *Service) ensureClientForStart(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
-	s.runtimeRefreshMu.RLock()
-	defer s.runtimeRefreshMu.RUnlock()
-	key := strconv.Itoa(installationID) + ":" + strconv.FormatBool(allowResident)
-	v, err, _ := s.launchGroup.Do(key, func() (any, error) {
+	v, err, _ := s.launchGroup.Do(strconv.Itoa(installationID), func() (any, error) {
 		// Isolate the shared launch from the leader caller's cancellation: other
 		// waiters depend on this in-flight launch, so a single caller's canceled
 		// request must not tear it down. Values (tracing, auth) are preserved.
-		return s.doEnsureClient(context.WithoutCancel(ctx), installationID, allowResident)
+		ctx := context.WithoutCancel(ctx)
+		lock := s.runtimeLock(installationID)
+		lock.Lock()
+		defer lock.Unlock()
+		for range 3 {
+			client, err := s.doEnsureClient(ctx, installationID)
+			if !errors.Is(err, ErrInstallationChanged) {
+				return client, err
+			}
+		}
+		return nil, ErrInstallationChanged
 	})
 	if err != nil {
 		return nil, err
@@ -993,7 +1079,7 @@ func (s *Service) ensureClientForStart(ctx context.Context, installationID int, 
 	return client, nil
 }
 
-func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
+func (s *Service) doEnsureClient(ctx context.Context, installationID int) (pluginClient, error) {
 	installation, err := s.loadInstallation(ctx, installationID, true)
 	if err != nil {
 		return nil, err
@@ -1001,8 +1087,25 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 	client, err := s.host.Client(installationID)
 	if err == nil {
 		cachedManifest := client.Manifest()
-		if !allowResident && isResidentManifest(cachedManifest) {
+		if isResidentManifest(cachedManifest) {
 			return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
+		}
+		running, recorded := s.running.load(installationID)
+		if (recorded && running != runtimeOf(installation)) || (!recorded && installation.RuntimeGeneration != 0) {
+			// The installation cache may have been populated just before a
+			// launch read a newer row directly. Keep that current process.
+			if recorded {
+				if err := s.checkStartRuntime(ctx, installationID, running); err == nil {
+					s.InvalidateInstallationCache()
+					return client, nil
+				} else if !errors.Is(err, ErrInstallationChanged) {
+					return nil, err
+				}
+			}
+			if stopErr := s.stopRuntime(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
+				return nil, fmt.Errorf("stop stale plugin installation %d: %w", installationID, stopErr)
+			}
+			return s.start(ctx, installationID, false, nil)
 		}
 		binaryPath, pathErr := s.localInstallPath(installation)
 		if pathErr != nil {
@@ -1020,10 +1123,10 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 					"cached_version", manifestVersion(cachedManifest),
 					"installed_version", installation.Version,
 				)
-				if stopErr := s.host.Stop(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
+				if stopErr := s.stopRuntime(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
 					return nil, fmt.Errorf("stop stale plugin installation %d: %w", installationID, stopErr)
 				}
-				return s.start(ctx, installationID, allowResident)
+				return s.start(ctx, installationID, false, nil)
 			}
 			slog.WarnContext(ctx, "plugin installed manifest unavailable; reusing healthy client", "component", "plugins",
 				"installation_id", installation.ID,
@@ -1046,19 +1149,19 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 			"cached_version", manifestVersion(cachedManifest),
 			"installed_version", installedManifest.GetVersion(),
 		)
-		if stopErr := s.host.Stop(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
+		if stopErr := s.stopRuntime(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
 			return nil, fmt.Errorf("stop stale plugin installation %d: %w", installationID, stopErr)
 		}
-		return s.start(ctx, installationID, allowResident)
+		return s.start(ctx, installationID, false, nil)
 	}
 	if errors.Is(err, pluginhost.ErrPluginUnhealthy) {
-		if stopErr := s.host.Stop(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
+		if stopErr := s.stopRuntime(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
 			return nil, fmt.Errorf("stop unhealthy plugin installation %d: %w", installationID, stopErr)
 		}
-		return s.start(ctx, installationID, allowResident)
+		return s.start(ctx, installationID, false, nil)
 	}
 	if errors.Is(err, pluginhost.ErrClientNotFound) {
-		return s.start(ctx, installationID, allowResident)
+		return s.start(ctx, installationID, false, nil)
 	}
 	return nil, err
 }
@@ -1162,10 +1265,8 @@ func (s *Service) cachedInstallation(ctx context.Context, installationID int) (*
 	return installation, nil
 }
 
-// InvalidateInstallationCache clears the in-memory installation cache. It is
-// registered as a lifecycle hook (see NewService) so OnLifecycleChange evicts
-// stale rows after every install / enable / disable / update / uninstall.
-// Periodic provider reloads call it before reading changes made on other API nodes.
+// InvalidateInstallationCache clears installation rows after a lifecycle
+// mutation or before a periodic provider reload.
 func (s *Service) InvalidateInstallationCache() {
 	if s == nil {
 		return

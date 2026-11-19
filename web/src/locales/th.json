@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "ค่านี้กำหนดโดยสภาพแวดล้อมของโหนด โปรดเปลี่ยนค่าในสภาพแวดล้อมนั้นแล้วรีสตาร์ตโหนด"
+      "value": "ค่านี้กำหนดโดยสภาพแวดล้อม โปรดเปลี่ยนค่าในสภาพแวดล้อมนั้นแล้วรีสตาร์ทบริการที่เกี่ยวข้อง"
     }
   ],
   "error.field.out_of_range": [
@@ -47148,6 +47148,64 @@
     {
       "type": 0,
       "value": "ปลั๊กอิน"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "ใช้แล้ว"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "ระงับไว้"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "โหลดสถานะการจัดเตรียมปลั๊กอินไม่ได้"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "จัดการโดยสภาพแวดล้อม"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "รอดำเนินการ"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "ปฏิเสธแล้ว"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "การปรับใช้เป็นผู้ควบคุมแหล่งที่มาของแพ็กเกจและการนำปลั๊กอินออก"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "สถานะการจัดเตรียม"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "การปรับใช้ตรึงปลั๊กอินนี้ไว้ที่เวอร์ชัน "
+    },
+    {
+      "type": 1,
+      "value": "version"
     }
   ],
   "web.admin.plugins.rail.about": [

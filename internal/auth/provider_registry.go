@@ -36,9 +36,13 @@ type PluginProviderRegistryConfig struct {
 	Manifests interface {
 		ManifestForInstallation(ctx context.Context, installationID int) (*pluginv1.PluginManifest, error)
 	}
-	Clients  PluginAuthClientResolver
-	Sessions *SessionRepository
-	Resolver *AccountResolver
+	// NeedsSetup uses the same first-account predicate as the auth service.
+	NeedsSetup func(context.Context) (bool, error)
+	// OAuthAvailable reports whether there is a public redirect URL.
+	OAuthAvailable func() bool
+	Clients        PluginAuthClientResolver
+	Sessions       *SessionRepository
+	Resolver       *AccountResolver
 }
 
 // PluginProviderRegistry holds the sign-in providers built from enabled
@@ -133,6 +137,17 @@ func (r *PluginProviderRegistry) Rebuild(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.cfg.NeedsSetup != nil {
+		pending, err := r.cfg.NeedsSetup(ctx)
+		if err != nil {
+			return fmt.Errorf("check sign-in setup: %w", err)
+		}
+		if pending {
+			empty := []RegisteredProvider{}
+			r.current.Store(&empty)
+			return nil
+		}
+	}
 	bindings, err := r.cfg.Bindings.ListAuthBindings(ctx)
 	if err != nil {
 		return fmt.Errorf("list plugin auth bindings: %w", err)
@@ -159,6 +174,9 @@ func (r *PluginProviderRegistry) Rebuild(ctx context.Context) error {
 		provider, err := r.providerFor(ctx, binding)
 		if err != nil {
 			return err
+		}
+		if provider.Info.Mode == ProviderModeOAuth && r.cfg.OAuthAvailable != nil && !r.cfg.OAuthAvailable() {
+			continue
 		}
 		providers = append(providers, provider)
 	}
@@ -252,6 +270,7 @@ func (r *PluginProviderRegistry) providerFor(ctx context.Context, binding *plugi
 				CapabilityID:   binding.CapabilityID,
 				DisplayName:    displayName,
 				AutoProvision:  binding.AutoProvision,
+				CallbackMode:   binding.CallbackMode,
 			},
 			r.cfg.Sessions,
 			r.cfg.Resolver,

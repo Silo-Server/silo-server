@@ -45,6 +45,9 @@ type ArchiveCache struct {
 	// verified holds, per installation, the binary this cache last hashed
 	// and found matching its manifest. Only Manifest consults it.
 	verified map[int]verifiedBinary
+	// A read of the archive may finish after this host retired its release.
+	// Keep the path retired so that read cannot bring the files back.
+	retired map[string]struct{}
 	// newHash, when set, replaces sha256.New for checking an installed
 	// binary against its manifest checksum. Tests use it to count the bytes a
 	// read hashes.
@@ -67,9 +70,8 @@ func NewArchiveCache(archives archiveStore) *ArchiveCache {
 }
 
 // NewArchiveCacheAt returns a cache that keeps its copies of every
-// installation under root, the host's own plugin cache dir. A proxy node uses
-// it: the API server's install paths are release identities to it, never
-// paths it reads or writes.
+// installation under root, the host's own plugin cache dir. Recorded paths
+// identify releases and can name a directory on another host.
 func NewArchiveCacheAt(archives archiveStore, root string) *ArchiveCache {
 	cache := NewArchiveCache(archives)
 	if cache != nil {
@@ -107,12 +109,15 @@ func (c *ArchiveCache) LocalInstallPath(installation *Installation) (string, err
 	if err != nil {
 		return "", err
 	}
-	releaseName := filepath.Base(filepath.Dir(installation.InstallPath))
-	release, err := pluginPathSegment(releaseName, "plugin release")
-	if err != nil || releaseName == string(filepath.Separator) {
-		release = "install"
+	release := filepath.Base(filepath.Dir(installation.InstallPath))
+	if !strings.HasPrefix(release, "install-") || filepath.Base(installation.InstallPath) != pluginBinaryName {
+		// Legacy packages put their binary directly in the version directory.
+		// They get a separate cache directory so retirement can never remove
+		// a replacement staged beside their binary.
+		sum := sha256.Sum256([]byte(installation.InstallPath))
+		release = "legacy-" + hex.EncodeToString(sum[:])
 	}
-	return pluginPathUnder(c.root, id, version, release, "plugin")
+	return pluginPathUnder(c.root, id, version, release, pluginBinaryName)
 }
 
 // Ensure makes the installation's files present at LocalInstallPath,
@@ -198,7 +203,7 @@ func (c *ArchiveCache) ensureFrom(
 	}
 	// Concurrent loads of one installation from the cache's own store share
 	// one read of its archive.
-	key := fmt.Sprintf("%d/%t", installation.ID, trustVerified)
+	key := fmt.Sprintf("%d/%t/%q/%q", installation.ID, trustVerified, installation.Version, installation.InstallPath)
 	result := c.loads.DoChan(key, func() (any, error) {
 		ctx := context.WithoutCancel(ctx)
 		c.mu.Lock()
@@ -221,7 +226,13 @@ func (c *ArchiveCache) ensureFrom(
 // load reads the installation's stored archive, without mu, rehydrates
 // its files, and, when persist is set, stores an archive it repaired.
 func (c *ArchiveCache) load(ctx context.Context, installation *Installation, trustVerified bool, archives archiveStore, persist bool) (*pluginv1.PluginManifest, error) {
-	archive, err := archives.GetArchive(ctx, installation.ID)
+	var archive *InstallationArchive
+	var err error
+	if store, ok := archives.(*InstallationStore); ok {
+		archive, err = store.archiveForRelease(ctx, installation)
+	} else {
+		archive, err = archives.GetArchive(ctx, installation.ID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load stored plugin archive for installation %d: %w", installation.ID, err)
 	}
@@ -232,11 +243,26 @@ func (c *ArchiveCache) load(ctx context.Context, installation *Installation, tru
 	// Persist the repaired archive so future preloads skip recovery, but don't
 	// fail startup over a write error — the in-memory archive is already valid
 	// and recovery will retry on the next preload.
-	if err := archives.SaveArchive(ctx, installation.ID, repaired.manifest, manifest.GetChecksum(), repaired.archive); err != nil {
+	if store, ok := archives.(*InstallationStore); ok {
+		err = store.repairArchive(ctx, archive, repaired.archive)
+	} else {
+		err = archives.SaveArchive(ctx, installation.ID, repaired.manifest, manifest.GetChecksum(), repaired.archive)
+	}
+	if err != nil {
 		slog.WarnContext(ctx, "failed to persist recovered legacy plugin archive; will retry on next preload",
 			"component", "plugins", "installation_id", installation.ID, "error", err)
 	}
 	return manifest, nil
+}
+
+// matchingInstalledManifest returns nil if the manifest is unusable or belongs
+// to a different release.
+func matchingInstalledManifest(path string, installation *Installation) *pluginv1.PluginManifest {
+	manifest, err := LoadManifestFile(path)
+	if err != nil || manifest.GetPluginId() != installation.PluginID || manifest.GetVersion() != installation.Version {
+		return nil
+	}
+	return manifest
 }
 
 // installed returns the installed manifest when the installed files pass
@@ -251,19 +277,25 @@ func (c *ArchiveCache) installed(ctx context.Context, installation *Installation
 	if err != nil {
 		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
 	}
-	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
-		if trustVerified && c.stillVerified(installation.ID, binaryPath, manifest) {
-			return manifest, nil
-		}
-		if info, err := c.validateInstalledFiles(binaryPath, manifest); err == nil {
-			if c.root != "" {
-				if err := checkBinaryPlatform(binaryPath); err != nil {
-					return nil, fmt.Errorf("cached plugin for installation %d: %w", installation.ID, err)
-				}
+	if _, retired := c.retired[binaryPath]; retired {
+		return nil, ErrInstallationChanged
+	}
+	manifest := matchingInstalledManifest(InstalledManifestPath(binaryPath), installation)
+	if manifest == nil {
+		delete(c.verified, installation.ID)
+		return nil, nil
+	}
+	if trustVerified && c.stillVerified(installation.ID, binaryPath, manifest) {
+		return manifest, nil
+	}
+	if info, err := c.validateInstalledFiles(binaryPath, manifest); err == nil {
+		if c.root != "" {
+			if err := checkBinaryPlatform(binaryPath); err != nil {
+				return nil, fmt.Errorf("cached plugin for installation %d: %w", installation.ID, err)
 			}
-			c.markVerified(installation.ID, binaryPath, manifest, info)
-			return manifest, nil
 		}
+		c.markVerified(installation.ID, binaryPath, manifest, info)
+		return manifest, nil
 	}
 	// The installed files failed the check; forget any earlier verification.
 	delete(c.verified, installation.ID)
@@ -279,6 +311,9 @@ func (c *ArchiveCache) rehydratedMeanwhile(installation *Installation, trustVeri
 	binaryPath, err := c.LocalInstallPath(installation)
 	if err != nil {
 		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
+	}
+	if _, retired := c.retired[binaryPath]; retired {
+		return nil, ErrInstallationChanged
 	}
 	manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath))
 	if err != nil || !c.stillVerified(installation.ID, binaryPath, manifest) {
@@ -366,7 +401,6 @@ func (c *ArchiveCache) rehydrate(ctx context.Context, installation *Installation
 		}
 	}
 	c.markVerified(installation.ID, binaryPath, manifest, info)
-	c.pruneStaleReleases(ctx, installation, installDir)
 	return manifest, repaired, nil
 }
 
@@ -393,50 +427,31 @@ func (c *ArchiveCache) markVerified(installationID int, binaryPath string, manif
 	c.verified[installationID] = verifiedBinary{path: binaryPath, checksum: manifest.GetChecksum(), info: info}
 }
 
-// pruneStaleReleases drops this host's copies of the plugin's other releases
-// once a new one is in place, the way the API server's installer removes the
-// previous install dir on replace. Only runs under an own root: without one
-// the directories belong to the installer. Best effort; a failure is logged
-// and costs disk, not correctness.
-func (c *ArchiveCache) pruneStaleReleases(ctx context.Context, installation *Installation, keepDir string) {
+// retire removes only the observed retired release, after a committed row
+// change. Other directories may hold packages another operation is staging.
+func (c *ArchiveCache) retire(previous, current *Installation) error {
 	if c == nil || c.root == "" {
-		return
+		return nil
 	}
-	// keepDir must be the release LocalInstallPath derived under the root:
-	// <root>/<id>/<version>/<release>. Its grandparent is then this plugin's
-	// directory under the root, and nothing outside it is listed or removed.
-	binaryPath, err := c.LocalInstallPath(installation)
-	keepDir = filepath.Clean(keepDir)
-	if err != nil || keepDir != filepath.Dir(binaryPath) {
-		return
-	}
-	pluginRoot := filepath.Dir(filepath.Dir(keepDir))
-	versions, err := os.ReadDir(pluginRoot)
+	binaryPath, err := c.LocalInstallPath(previous)
 	if err != nil {
-		return
+		return err
 	}
-	for _, version := range versions {
-		if !version.IsDir() {
-			continue
+	if current != nil {
+		if path, err := c.LocalInstallPath(current); err != nil || path == binaryPath {
+			return err
 		}
-		versionDir := filepath.Join(pluginRoot, version.Name())
-		releases, err := os.ReadDir(versionDir)
-		if err != nil {
-			continue
-		}
-		for _, release := range releases {
-			releaseDir := filepath.Join(versionDir, release.Name())
-			if !release.IsDir() || releaseDir == keepDir {
-				continue
-			}
-			if err := os.RemoveAll(releaseDir); err != nil {
-				slog.WarnContext(ctx, "remove stale plugin release from cache", "component", "plugins",
-					"installation_id", installation.ID, "path", releaseDir, "error", err)
-			}
-		}
-		// Drop the version dir once it is empty; a non-empty one stays.
-		_ = os.Remove(versionDir)
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.retired == nil {
+		c.retired = make(map[string]struct{})
+	}
+	c.retired[binaryPath] = struct{}{}
+	if c.verified[previous.ID].path == binaryPath {
+		delete(c.verified, previous.ID)
+	}
+	return errors.Join(os.RemoveAll(filepath.Dir(binaryPath)), removeInstallationFiles(c.root, previous))
 }
 
 // recoverLegacyBinaryArchive rebuilds a legacy archive (a raw binary

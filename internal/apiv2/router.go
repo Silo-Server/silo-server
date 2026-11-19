@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
@@ -234,6 +235,7 @@ type Dependencies struct {
 	AdminPluginRepositoryUpdates  AdminPluginRepositoryUpdateService
 	AdminPluginRepositoryDeletes  AdminPluginRepositoryDeleteService
 	AdminPluginInventory          AdminPluginInventoryService
+	AdminPluginProvisionStatus    func(context.Context) ([]plugins.ProvisionStatus, error)
 	AdminPluginConfiguration      AdminPluginConfigurationService
 	AdminPluginLifecycle          AdminPluginLifecycleService
 	AdminPluginUploads            AdminPluginUploadService
@@ -1274,7 +1276,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 // tickets and provider logout.
 type OAuthService interface {
 	Complete(ctx context.Context, code, verifier, browser string) (auth.OAuthCompletion, error)
-	CallbackURL(prefix string, installID int) string
+	CallbackURL(prefix string, installID int, mode string) string
 	PublicURL(path string, query url.Values) string
 	NativeSignInAvailable() bool
 	ServeStart(w http.ResponseWriter, r *http.Request, req auth.OAuthStartRequest, bounceURL string, bounceStatus int)

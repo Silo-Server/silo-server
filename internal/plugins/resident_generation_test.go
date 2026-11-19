@@ -16,8 +16,7 @@ import (
 // seqFakeHost is a Host whose first Start assigns its start sequence and then
 // parks until the test releases it, without registering the client. That is
 // the window the real host has between spawning a process and completing the
-// handshake, during which a newer supervisor generation can join the
-// in-flight launch through Service.ensureClient's singleflight.
+// handshake, during which the supervisor can observe a newer generation.
 type seqFakeHost struct {
 	mu          sync.Mutex
 	seq         atomic.Uint64
@@ -27,17 +26,19 @@ type seqFakeHost struct {
 	gate        chan struct{}
 	entered     chan struct{}
 	release     sync.Once
-	floorReads  atomic.Int32
 }
 
 type seqFakeClient struct {
 	*pluginhost.Client
 	manifest *pluginv1.PluginManifest
+	config   []*pluginv1.ConfigEntry
 	seq      uint64
 }
 
 func (c *seqFakeClient) Manifest() *pluginv1.PluginManifest { return c.manifest }
-func (c *seqFakeClient) StartSeq() uint64                   { return c.seq }
+func (c *seqFakeClient) AuthProvider(string) (*pluginhost.AuthProviderClient, error) {
+	return nil, nil
+}
 
 func newSeqFakeHost() *seqFakeHost {
 	return &seqFakeHost{clients: map[int]*seqFakeClient{}, gate: make(chan struct{}), entered: make(chan struct{})}
@@ -53,7 +54,7 @@ func (h *seqFakeHost) Start(_ context.Context, req pluginhost.StartRequest) (plu
 		close(h.entered)
 		<-h.gate
 	}
-	client := &seqFakeClient{manifest: req.Manifest, seq: seq}
+	client := &seqFakeClient{manifest: req.Manifest, config: req.Config, seq: seq}
 	h.mu.Lock()
 	h.clients[req.InstallationID] = client
 	h.mu.Unlock()
@@ -82,18 +83,6 @@ func (h *seqFakeHost) Stop(installationID int) error {
 }
 
 func (h *seqFakeHost) Shutdown(context.Context) error { return nil }
-
-// NextStartSeq mirrors pluginhost.Host. The second floor read is the newer
-// generation's runStart, one instruction before it joins the in-flight
-// launch, so releasing the parked leader here makes the join as likely as it
-// can be without a hook inside singleflight. The assertions hold either way:
-// a generation that misses the join relaunches through manifest drift.
-func (h *seqFakeHost) NextStartSeq() uint64 {
-	if h.floorReads.Add(1) == 2 {
-		h.release.Do(func() { close(h.gate) })
-	}
-	return h.seq.Load()
-}
 
 func (h *seqFakeHost) snapshot() (starts int, stopped []uint64) {
 	h.mu.Lock()
@@ -133,6 +122,7 @@ func TestResidentSupervisorNewGenerationNeverAdoptsInFlightOlderLaunch(t *testin
 		t.Fatal(err)
 	}
 	service.OnLifecycleChange(ctx)
+	host.release.Do(func() { close(host.gate) })
 
 	state := waitState(t, service, 5, "generation 2 running", running)
 	if state.LastError != "" || state.RestartCount != 0 {

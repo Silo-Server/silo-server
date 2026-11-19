@@ -562,6 +562,52 @@ describe("SignInSettings saving provider changes", () => {
     expect(state.save).not.toHaveBeenCalled();
   });
 
+  it("shows an enabled OAuth binding waiting for its callback URL as pending", () => {
+    const installation = oidcInstallation();
+    installation.auth_bindings[0]!.callback_pending = true;
+    installation.auth_bindings[0]!.callback_url = "";
+    state.installations = [installation];
+
+    mount();
+    const oidc = providerPanel("OpenID Connect");
+    expect(within(oidc).getByTestId("sign-in-provider-state")).toHaveTextContent("Pending");
+    expect(
+      within(oidc).queryByDisplayValue("https://silo.example.test/api/v2/auth/oauth/5/callback"),
+    ).toBeNull();
+  });
+
+  it("preserves a managed provider binding and managed config while saving another field", async () => {
+    const user = userEvent.setup();
+    const installation = oidcInstallation();
+    installation.capabilities[0]!.env_managed = ["enabled"];
+    installation.env_managed = {
+      config_fields: { connection: ["issuer_url", "client_secret"] },
+      binding_fields: { oidc: ["enabled"] },
+    };
+    state.installations = [installation];
+
+    mount();
+    const oidc = providerPanel("OpenID Connect");
+    expect(within(oidc).getByRole("button", { name: "Turn off" })).toBeDisabled();
+    expect(within(oidc).getByLabelText("Issuer URL")).toBeDisabled();
+    const secret = within(oidc).getByLabelText("Client secret");
+    expect(secret).toBeDisabled();
+    expect(secret).toHaveValue("");
+
+    const providerLogout = within(oidc).getByRole("switch", { name: "Sign out at the provider" });
+    await user.click(providerLogout);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        opCalls("PUT /api/v2/admin/plugins/installations/{id}/config")[0]?.options?.body,
+      ).toEqual({
+        key: "connection",
+        value: { provider_logout: true },
+        clear_secrets: [],
+      }),
+    );
+  });
+
   it("saves edited configuration from the save bar, then the server settings", async () => {
     const user = userEvent.setup();
     state.dirty = new Set(["auth.email_auto_match"]);

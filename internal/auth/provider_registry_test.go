@@ -137,3 +137,43 @@ func (f *lockedRegistryStores) waitForReads(t *testing.T, n int) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestPluginProviderRegistryWaitsForSetupAndPublicURL(t *testing.T) {
+	stores := &fakeRegistryStores{
+		bindings: []*plugins.AuthBinding{
+			{InstallationID: 3, CapabilityID: "oidc", Enabled: true, CallbackMode: plugins.AuthCallbackStable},
+			{InstallationID: 4, CapabilityID: "network", Enabled: true},
+		},
+		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}, 4: {ID: 4, Enabled: true}},
+		capabilities: map[int][]*plugins.Capability{
+			3: {{Type: "auth_provider.v1", ID: "oidc", Metadata: map[string]any{"auth_modes": []string{"oauth2"}}}},
+			4: {{Type: "auth_provider.v1", ID: "network", Metadata: map[string]any{"auth_modes": []string{"network"}}}},
+		},
+	}
+	needsSetup, publicURL := true, false
+	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{
+		Bindings: stores, Installations: stores,
+		NeedsSetup:     func(context.Context) (bool, error) { return needsSetup, nil },
+		OAuthAvailable: func() bool { return publicURL },
+	})
+	rebuild := func() []RegisteredProvider {
+		t.Helper()
+		if err := registry.Rebuild(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		return registry.Providers()
+	}
+	if providers := rebuild(); len(providers) != 0 {
+		t.Fatalf("providers before setup = %+v", providers)
+	}
+	needsSetup = false
+	if providers := rebuild(); len(providers) != 1 || providers[0].Info.Mode != ProviderModeNetwork {
+		t.Fatalf("providers without public URL = %+v", providers)
+	}
+	publicURL = true
+	providers := rebuild()
+	if len(providers) != 2 || providers[0].Info.Mode != ProviderModeOAuth ||
+		providers[0].Provider.(*PluginProvider).CallbackMode() != plugins.AuthCallbackStable {
+		t.Fatalf("providers with public URL = %+v", providers)
+	}
+}

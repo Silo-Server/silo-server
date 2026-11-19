@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "ノードの環境で設定されています。そこで変更してから、ノードを再起動してください。"
+      "value": "環境で設定されています。環境側で変更してから、影響を受けるサービスを再起動してください。"
     }
   ],
   "error.field.out_of_range": [
@@ -46392,6 +46392,68 @@
     {
       "type": 0,
       "value": "プラグイン"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "適用済み"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "保留"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "プラグインのプロビジョニング状況を読み込めませんでした。"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "環境で管理"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "処理待ち"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "拒否"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "パッケージのソースと削除はデプロイ環境で管理されています。"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "プロビジョニング状況"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "このプラグインはデプロイ環境でバージョン"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "に固定されています。"
     }
   ],
   "web.admin.plugins.rail.about": [

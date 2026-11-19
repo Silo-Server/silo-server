@@ -306,6 +306,8 @@
 ./internal/auth TestCreatePersonalAPIKeyDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
+./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
+./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
@@ -849,6 +851,7 @@
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.
 ./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
+./internal/plugins TestArchiveCacheRejectsSupersededSameVersionDB
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
 
 # An enabled plugin whose stored archive won't open stays in the installation
@@ -859,6 +862,13 @@
 # A refused automatic plugin update stays on its installation until it is
 # cleared or the installed version changes.
 ./internal/plugins TestInstallationStoreUpdateFailureDB
+
+# Provisioned settings remain protected when runtime and admin writes share
+# an entry, and release puts its settings back under ordinary admin control.
+./internal/plugins TestProvisionOwnershipGuardsDB
+./internal/plugins TestProvisionedReplacementValidatesStoredConfigDB
+./internal/plugins TestProvisionedReplacementProtectsNestedCredentialDB
+./internal/plugins TestReenableRejectsIneligibleStableBindingDB
 
 # Updating an installed plugin from its catalog stops the running plugin only
 # after the new package passed its download and checksum checks.
@@ -871,6 +881,7 @@
 # A plugin has one installation: an archive link for an installed plugin
 # replaces it, and a second create for the same plugin is refused.
 ./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
+./internal/plugins TestProvisionPackageCommitAndRollbackDB
 
 # Cleaning up duplicate installations keeps a break-glass account's local
 # credentials and moves a deleted duplicate's marker provider settings.
@@ -1275,6 +1286,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestRestorePluginProvisioningDB
 ./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestCarryDropsAProfileKeyItCannotBindDB
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB
@@ -1453,3 +1465,9 @@
 # Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
 ./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
 ./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB
+
+# Provisioning rolls back an entire conflicting declaration, fences a second
+# writer on a dedicated session, and preserves generations on identical input.
+./internal/plugins TestProvisionWriterAtomicOfflineDB
+./internal/plugins TestProvisionWriterMetadataPlacementRecoveryDB
+./internal/plugins TestAutomaticInstallHonorsRestoreHoldDB

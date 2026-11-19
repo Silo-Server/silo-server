@@ -620,8 +620,8 @@ func registerExternalSignIn(reg *Registry) {
 		out := &AuthConnectionTestOutput{Body: AuthConnectionTestResult{OK: result.OK, Steps: make([]AuthConnectionTestStep, 0, len(result.Steps))}}
 		// Only an OAuth provider has a redirect URI to register; a password
 		// (LDAP) provider's result leaves it empty.
-		if svc := reg.deps.OAuth; svc != nil && svc.PublicURL("/", nil) != "" && auth.ProviderModeForAuthModes(result.AuthModes) == auth.ProviderModeOAuth {
-			out.Body.CallbackURL = svc.CallbackURL(Prefix, id)
+		if svc := reg.deps.OAuth; svc != nil && auth.ProviderModeForAuthModes(result.AuthModes) == auth.ProviderModeOAuth {
+			out.Body.CallbackURL = svc.CallbackURL(Prefix, id, result.CallbackMode)
 		}
 		for _, step := range result.Steps {
 			out.Body.Steps = append(out.Body.Steps, AuthConnectionTestStep{ID: step.ID, Label: step.Label, OK: step.OK, Message: step.Message})

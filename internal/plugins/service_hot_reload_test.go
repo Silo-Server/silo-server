@@ -125,8 +125,6 @@ func (f *fakeServiceHost) Stop(installationID int) error {
 	return nil
 }
 
-func (f *fakeServiceHost) NextStartSeq() uint64 { return 0 }
-
 func (f *fakeServiceHost) Shutdown(context.Context) error {
 	return nil
 }

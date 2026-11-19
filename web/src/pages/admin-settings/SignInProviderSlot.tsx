@@ -24,6 +24,7 @@ import {
   activeSignInInstallation,
   adminSignInErrorText,
   authBindingOf,
+  authBindingFieldIsManaged,
   authCapabilityOf,
   primarySignInInstallations,
   authProviderLabel,
@@ -90,7 +91,11 @@ function providerState(
 ): ProviderState {
   if (!installation.enabled)
     return { word: t("web.admin.settings.signIn.provider.state.pluginOff"), tone: "off" };
-  if (authBindingOf(installation)?.enabled === true) {
+  const binding = authBindingOf(installation);
+  if (binding?.callback_pending) {
+    return { word: t("web.admin.plugins.provisioning.pending"), tone: "warn" };
+  }
+  if (binding?.enabled === true) {
     return missing.length > 0
       ? { word: t("web.admin.settings.signIn.provider.state.onNeedsSetup"), tone: "warn" }
       : { word: t("web.admin.settings.signIn.provider.state.on"), tone: "ok" };
@@ -331,7 +336,10 @@ function useBindingSwitch({
   const bindingWrites = useIsMutating({ mutationKey: signInBindingMutationKey });
   const [confirmOff, setConfirmOff] = useState(false);
 
+  const managed = authBindingFieldIsManaged(installation, "enabled");
+
   function write(enabled: boolean, success: string) {
+    if (managed) return;
     updateBinding.mutate(
       {
         installationId: installation.id,
@@ -379,6 +387,7 @@ function useBindingSwitch({
 
   return {
     pending: bindingWrites > 0 || pageSaving,
+    managed,
     turnOn: () =>
       write(true, t("web.admin.settings.signIn.provider.binding.turnedOn", { name: label })),
     askOff: () => setConfirmOff(true),
@@ -422,6 +431,10 @@ function ProviderPanel({
   // with, so those say its button label ("Keycloak"), not the plugin's name.
   const label = authProviderLabel(installation);
   const enabled = binding?.enabled === true;
+  const callbackPending = binding?.callback_pending === true;
+  const enablementNote = useId();
+  const autoProvisionManaged = authBindingFieldIsManaged(installation, "auto_provision");
+  const callbackManaged = authBindingFieldIsManaged(installation, "callback_mode");
   const mode = signInModeOf(installation);
   const missing = missingSignInSetup(layout);
   const state = providerState(installation, missing, t);
@@ -435,12 +448,19 @@ function ProviderPanel({
     const saved = ref ? layout.entries.get(ref.schemaKey)?.saved?.[ref.field.key] : undefined;
     return typeof saved === "string" ? saved : "";
   });
+  const testUsernameManaged = layout.testUsername
+    ? layout.entries
+        .get(layout.testUsername.schemaKey)
+        ?.managedFields.includes(layout.testUsername.field.key)
+    : false;
   const statusRef = useRef<HTMLParagraphElement>(null);
   const testHeadingRef = useRef<HTMLHeadingElement>(null);
   const testErrorRef = useRef<HTMLParagraphElement>(null);
   const autoProvisionId = useId();
   const autoProvisionDescription = useId();
+  const autoProvisionNote = useId();
   const testUsernameId = useId();
+  const testUsernameNote = useId();
   const headingId = useId();
   const idPrefix = `sign-in-${installation.id}`;
 
@@ -473,7 +493,7 @@ function ProviderPanel({
         capabilityId: capability.id,
         config: drafts.stagedForTest(
           installation,
-          ref
+          ref && !testUsernameManaged
             ? { schemaKey: ref.schemaKey, fieldKey: ref.field.key, value: testUsername }
             : undefined,
         ),
@@ -505,6 +525,7 @@ function ProviderPanel({
           idPrefix={`${idPrefix}-${group.schemaKey}`}
           dirty={fieldChanged(entry, draft, field)}
           secretSaved={entry.configuredSecrets.includes(field.key)}
+          managed={entry.managedFields.includes(field.key)}
           clearing={draft?.clearSecrets.includes(field.key) ?? false}
           onChange={(value) => drafts.setField(installation, entry, field.key, value)}
           onToggleClear={() => drafts.toggleClearSecret(installation, entry, field.key)}
@@ -520,8 +541,9 @@ function ProviderPanel({
     );
   }
 
-  const callbackUrl =
-    capability.callback_url || binding?.callback_url || testResult?.callback_url || "";
+  const callbackUrl = callbackPending
+    ? ""
+    : capability.callback_url || binding?.callback_url || testResult?.callback_url || "";
   const postLogoutUrl =
     capability.post_logout_redirect_url || binding?.post_logout_redirect_url || "";
 
@@ -534,11 +556,23 @@ function ProviderPanel({
       dirty={autoProvision !== savedAutoProvision(installation)}
       description={t("web.admin.settings.signIn.provider.autoProvision.description")}
       descriptionId={autoProvisionDescription}
+      status={
+        autoProvisionManaged ? (
+          <SettingFieldStatus>
+            <span id={autoProvisionNote}>{t("web.admin.plugins.provisioning.managed")}</span>
+          </SettingFieldStatus>
+        ) : null
+      }
     >
       <Switch
         id={autoProvisionId}
-        aria-describedby={autoProvisionDescription}
+        aria-describedby={
+          autoProvisionManaged
+            ? `${autoProvisionDescription} ${autoProvisionNote}`
+            : autoProvisionDescription
+        }
         checked={autoProvision}
+        disabled={autoProvisionManaged}
         onCheckedChange={(checked) => drafts.setAutoProvision(installation, checked)}
       />
     </SettingFieldRow>
@@ -552,7 +586,7 @@ function ProviderPanel({
       description: t("web.admin.settings.signIn.provider.register.description"),
       body: (
         <>
-          {!publicUrlSet ? (
+          {!publicUrlSet || callbackPending ? (
             <div className="py-3.5">
               <SettingFieldStatus tone="warn">
                 <span>
@@ -566,6 +600,11 @@ function ProviderPanel({
                 </span>
               </SettingFieldStatus>
             </div>
+          ) : null}
+          {callbackManaged ? (
+            <p className="settings-field-note text-muted-foreground py-2 text-xs">
+              {t("web.admin.plugins.provisioning.managed")}
+            </p>
           ) : null}
           {callbackUrl ? (
             <CopyField
@@ -628,7 +667,17 @@ function ProviderPanel({
                 </label>
                 <Input
                   id={testUsernameId}
-                  value={testUsername}
+                  value={
+                    testUsernameManaged
+                      ? String(
+                          layout.entries.get(layout.testUsername.schemaKey)?.saved?.[
+                            layout.testUsername.field.key
+                          ] ?? "",
+                        )
+                      : testUsername
+                  }
+                  disabled={testUsernameManaged}
+                  aria-describedby={testUsernameManaged ? testUsernameNote : undefined}
                   onChange={(event) => setTestUsername(event.target.value)}
                   placeholder={t("web.admin.settings.signIn.provider.test.usernamePlaceholder")}
                   autoComplete="off"
@@ -652,8 +701,10 @@ function ProviderPanel({
             </Button>
           </div>
           {layout.testUsername ? (
-            <p className="text-muted-foreground text-xs">
-              {t("web.admin.settings.signIn.provider.test.lookUpNote")}
+            <p id={testUsernameNote} className="text-muted-foreground text-xs">
+              {testUsernameManaged
+                ? t("web.admin.plugins.provisioning.managed")
+                : t("web.admin.settings.signIn.provider.test.lookUpNote")}
             </p>
           ) : null}
           <div aria-live="polite">
@@ -691,6 +742,7 @@ function ProviderPanel({
             values={values}
             idPrefix={`${idPrefix}-${ref.schemaKey}`}
             dirty={fieldChanged(entry, drafts.draftOf(installation, ref.schemaKey), ref.field)}
+            managed={entry.managedFields.includes(ref.field.key)}
             onChange={(value) => drafts.setField(installation, entry, ref.field.key, value)}
             label={
               mode === "credentials"
@@ -755,7 +807,7 @@ function ProviderPanel({
           <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
             <StateDot tone={state.tone} />
             <span data-testid="sign-in-provider-state">{state.word}</span>
-            {enabled && installation.enabled ? (
+            {enabled && installation.enabled && !callbackPending ? (
               <>
                 <span aria-hidden="true">{SEPARATOR}</span>
                 <span>
@@ -779,7 +831,8 @@ function ProviderPanel({
               type="button"
               size="sm"
               variant="outline"
-              disabled={bindingSwitch.pending}
+              disabled={bindingSwitch.pending || bindingSwitch.managed}
+              aria-describedby={bindingSwitch.managed ? enablementNote : undefined}
               onClick={bindingSwitch.askOff}
             >
               {t("web.admin.settings.signIn.provider.header.turnOff")}
@@ -788,7 +841,8 @@ function ProviderPanel({
             <Button
               type="button"
               size="sm"
-              disabled={bindingSwitch.pending || turnOnBlocked}
+              disabled={bindingSwitch.pending || bindingSwitch.managed || turnOnBlocked}
+              aria-describedby={bindingSwitch.managed ? enablementNote : undefined}
               onClick={bindingSwitch.turnOn}
             >
               {bindingSwitch.pending ? (
@@ -800,6 +854,11 @@ function ProviderPanel({
         </div>
       </div>
 
+      {bindingSwitch.managed ? (
+        <p id={enablementNote} className="text-muted-foreground pt-1 text-sm">
+          {t("web.admin.plugins.provisioning.managed")}
+        </p>
+      ) : null}
       <FeedbackLine feedback={feedback} focusRef={statusRef} />
       {blockedReason ? <p className="text-muted-foreground pt-1 text-sm">{blockedReason}</p> : null}
       {missing.length > 0 ? (
@@ -906,6 +965,7 @@ function TurnOffActiveProvider({
   const [feedback, setFeedback] = useState<Feedback>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
   const label = authProviderLabel(active);
+  const enablementNote = useId();
   const bindingSwitch = useBindingSwitch({
     installation: active,
     label,
@@ -926,12 +986,18 @@ function TurnOffActiveProvider({
           type="button"
           size="sm"
           variant="outline"
-          disabled={bindingSwitch.pending}
+          disabled={bindingSwitch.pending || bindingSwitch.managed}
+          aria-describedby={bindingSwitch.managed ? enablementNote : undefined}
           onClick={bindingSwitch.askOff}
         >
           {t("web.admin.settings.signIn.provider.none.turnOffActive", { name: label })}
         </Button>
       </div>
+      {bindingSwitch.managed ? (
+        <p id={enablementNote} className="text-muted-foreground pt-1 text-sm">
+          {t("web.admin.plugins.provisioning.managed")}
+        </p>
+      ) : null}
       <FeedbackLine feedback={feedback} focusRef={statusRef} />
       {bindingSwitch.dialog}
     </div>

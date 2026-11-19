@@ -287,9 +287,9 @@ func (s *legacyArchiveStore) SaveArchive(
 
 // A cache with its own root (a proxy node's) never touches the install path
 // the API server recorded: it rehydrates under <root>/<plugin>/<version>/
-// <release>/plugin, reuses that copy on the next Ensure, and drops the
-// previous release once a replacement is in place.
-func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T) {
+// <release>/plugin, reuses that copy on the next Ensure, and removes only
+// the observed previous release when the host reconciles a replacement.
+func TestArchiveCacheAtOwnRootRehydratesAndRetiresObservedRelease(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "proxy-cache")
 	apiInstallRoot := filepath.Join(t.TempDir(), "api-machine", "plugins", "silo.metadb")
@@ -339,6 +339,10 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	}
 
 	second, secondStore := release("0.0.20", "install-bbbb", "#!/bin/sh\nexit 1\n")
+	staged := filepath.Join(root, "silo.metadb", "0.0.20", "install-staged")
+	if err := os.MkdirAll(staged, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cache = NewArchiveCacheAt(secondStore, root)
 	if _, err := cache.Ensure(ctx, second); err != nil {
 		t.Fatalf("Ensure(second) returned error: %v", err)
@@ -347,8 +351,76 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	if _, err := os.Stat(wantSecond); err != nil {
 		t.Fatalf("second release was not rehydrated: %v", err)
 	}
+	if err := cache.retire(first, second); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(filepath.Dir(wantFirst)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("previous release still present after the replacement: %v", err)
+	}
+	if _, err := os.Stat(staged); err != nil {
+		t.Fatalf("retiring a release removed a staged package: %v", err)
+	}
+	if _, err := cache.Ensure(ctx, first); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("stale cache read returned %v, want ErrInstallationChanged", err)
+	}
+}
+
+func TestArchiveCacheRejectsSupersededSameVersionDB(t *testing.T) {
+	ctx := t.Context()
+	store := NewInstallationStore(builtinGuardTestPool(t))
+	archive := func(script string) ArchiveInput {
+		t.Helper()
+		binary := []byte(script)
+		manifest := testPluginManifest(t, "silo.archive.release-race", "1.0.0")
+		manifest.Checksum = sha256Hex(binary)
+		raw, err := protojson.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := buildBinaryPluginArchive(raw, binary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ArchiveInput{ManifestJSON: raw, Checksum: manifest.Checksum, Bytes: data}
+	}
+	initial := archive("#!/bin/sh\nexit 0\n")
+	replacement := archive("#!/bin/sh\nexit 1\n")
+	writer := t.TempDir()
+	old, err := store.Create(ctx, CreateInstallationInput{
+		PluginID: "silo.archive.release-race", Version: "1.0.0",
+		InstallPath: filepath.Join(writer, "install-old", "plugin"), Archive: initial,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Delete(context.Background(), old.ID); err != nil {
+			t.Error(err)
+		}
+	})
+	original, err := store.GetArchive(ctx, old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextPath := filepath.Join(writer, "install-new", "plugin")
+	if err := store.Update(ctx, old.ID, UpdateInstallationInput{InstallPath: &nextPath, Archive: &replacement}); err != nil {
+		t.Fatal(err)
+	}
+	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
+	follower := NewService(nil, store, nil, nil, installer, nil)
+	cache := follower.archiveCache
+	if _, err := cache.Ensure(ctx, old); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("Ensure on a superseded package returned %v, want ErrInstallationChanged", err)
+	}
+	if err := store.repairArchive(ctx, original, initial.Bytes); err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.GetByID(ctx, old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest, err := cache.Ensure(ctx, current); err != nil || manifest.GetChecksum() != replacement.Checksum {
+		t.Fatalf("rehydrate committed replacement after late repair: %v", err)
 	}
 }
 
