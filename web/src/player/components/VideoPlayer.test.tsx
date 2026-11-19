@@ -838,6 +838,48 @@ describe("VideoPlayer source timeline", () => {
       await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
     });
 
+    it("asks for that stream when the queued change is refused before the stream loads", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { video, rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      // The remux's keyframe origin is the seek, and it starts 10 s later.
+      const originStream = {
+        ...remuxStream,
+        plan: fixturePlanV3({
+          ...remuxPlan,
+          timeline: {
+            ...remuxPlan.timeline,
+            source_start_seconds: 40,
+            player_start_seconds: 10,
+            stream_origin_seconds: 30,
+            timeline_offset_seconds: 30,
+          },
+        }),
+      };
+      rerenderPlayer({ ...originStream, replanning: true });
+      await act(async () => Promise.resolve());
+      // Not loaded yet: its clock reads the origin.
+      video.currentTime = 0;
+
+      rerenderPlayer({ ...originStream, replanning: false, replanError: "Replan refused." });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("waits for a version switch to settle before asking for that stream", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      rerenderPlayer({ ...remuxStream, replanning: true });
+      await act(async () => Promise.resolve());
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replacing: true });
+      await act(async () => Promise.resolve());
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replacing: false });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
     it("starts the browser decoder that takes over the original at the seek", async () => {
       engineRoute.chosen = true;
       attachBrowserEngine.mockClear();

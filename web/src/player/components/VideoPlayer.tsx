@@ -1144,20 +1144,30 @@ export function VideoPlayer({
     // Where the stream that never took the seek started.
     carriedFrom?: number;
   } | null>(null);
+  // A version switch started meanwhile settles first: one that lands a stream
+  // replaces this session, and the request would pair its new attempt with the
+  // old session.
+  const replanSeekChangeInFlight = replanning || replacing;
   useEffect(() => {
     const replanSeek = replanSeekRef.current;
-    if (replanning || replanSeek?.revision !== planRevision) return;
+    if (replanSeekChangeInFlight || replanSeek?.revision !== planRevision) return;
     replanSeekRef.current = null;
     const from = replanSeek.carriedFrom;
     const video = videoRef.current;
     if (from === undefined || !video || replanSeek.sessionId !== sessionIdRef.current) return;
-    // A stream that started before the seek and has played up to it took it.
+    // A stream that has reached its own start, started before the seek and
+    // played up to it took it. Until the stream loads, its clock reads the
+    // stream's origin, which can be short of its start.
     const position = toMediaTime(video.currentTime, timelineOffsetRef.current);
+    const settled = (target: number) =>
+      resolvePendingSeekTime(position, target).pendingSeekTime === null;
+    const started = settled(from) || position >= from;
     const reached =
-      resolvePendingSeekTime(position, replanSeek.seconds).pendingSeekTime === null ||
-      (replanSeek.seconds >= from && position >= replanSeek.seconds);
+      started &&
+      (settled(replanSeek.seconds) ||
+        (replanSeek.seconds >= from && position >= replanSeek.seconds));
     if (!reached) reanchorAtRef.current(replanSeek.seconds);
-  }, [planRevision, replanning]);
+  }, [planRevision, replanSeekChangeInFlight]);
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
   // delivers.
