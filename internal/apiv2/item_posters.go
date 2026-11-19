@@ -61,11 +61,11 @@ func registerItemPosters(reg *Registry) {
 		Class: ClassPublic, ServiceBacked: true}
 	op.Parameters = []*huma.Param{
 		{Name: "content_id", In: paramInPath, Required: true, Description: "Content ID of the movie or series whose poster the link names.", Schema: &huma.Schema{Type: huma.TypeString}},
-		{Name: "exp", In: artworkParamQuery, Required: true, Schema: &huma.Schema{Type: artworkIntegerType, Format: "int64"}},
-		{Name: "sig", In: artworkParamQuery, Required: true, Schema: &huma.Schema{Type: huma.TypeString}},
+		{Name: signedLinkExpiryParam, In: artworkParamQuery, Required: true, Schema: &huma.Schema{Type: artworkIntegerType, Format: playbackIntegerFormat}},
+		{Name: signedLinkSigParam, In: artworkParamQuery, Required: true, Schema: &huma.Schema{Type: huma.TypeString}},
 	}
 	op.Responses = map[string]*huma.Response{
-		"200": {Description: "Poster bytes of art not cached yet", Content: map[string]*huma.MediaType{"image/*": {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
+		"200": {Description: "Poster bytes of art not cached yet", Content: map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
 		"302": {Description: "Redirect to the cached poster's signed URL", Headers: map[string]*huma.Header{"Location": {Schema: &huma.Schema{Type: huma.TypeString, Format: "uri-reference"}}}},
 		"404": {Description: "Link invalid or expired, item gone, no poster, or the provider refused or failed"},
 		"503": {Description: "Poster fetches are busy or not configured; retry after Retry-After"},
@@ -85,8 +85,8 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		notFound()
 		return
 	}
-	exp, err := strconv.ParseInt(r.URL.Query().Get("exp"), 10, 64)
-	if err != nil || h.posters.Verify(contentID, exp, r.URL.Query().Get("sig"), time.Now()) != nil {
+	exp, err := strconv.ParseInt(r.URL.Query().Get(signedLinkExpiryParam), 10, 64)
+	if err != nil || h.posters.Verify(contentID, exp, r.URL.Query().Get(signedLinkSigParam), time.Now()) != nil {
 		notFound()
 		return
 	}
@@ -165,6 +165,7 @@ func (h *itemPosterHandler) redirect(w http.ResponseWriter, r *http.Request, tar
 		writeProblem(w, r, unavailable("artwork storage"))
 		return
 	}
+	//nolint:gosec // G710: target is the signed URL this server resolved for the item's stored poster, not request input
 	http.Redirect(w, r, target, http.StatusFound)
 }
 

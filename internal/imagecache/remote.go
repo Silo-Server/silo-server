@@ -110,7 +110,7 @@ func (f *RemoteFetcher) fetch(ctx context.Context, rawURL string) (RemoteImage, 
 // ServedImageType returns the media type data is served as when its bytes are
 // a raster format every client renders: JPEG, PNG, WebP or GIF. The type comes
 // from the bytes, never from the provider's Content-Type header, so an SVG or
-// an HTML page labelled image/jpeg is refused.
+// an HTML page labeled image/jpeg is refused.
 func ServedImageType(data []byte) (string, bool) {
 	switch sniffed := http.DetectContentType(data); sniffed {
 	case "image/jpeg", "image/png", "image/webp", "image/gif":
