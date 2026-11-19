@@ -378,9 +378,9 @@ select **Suggest a change** at the bottom of the page, or use the
 [Suggest a docs change](https://github.com/Silo-Server/siloserver.org/issues/new?template=docs.yml)
 form. For a guide that doesn't exist yet, give the closest page under
 **Page**, as [Improve these docs](https://siloserver.org/docs/improve-the-docs)
-describes. Only collaborators open pull requests in that repository. When a
-code change here leaves the site wrong or incomplete, open a docs issue there
-as well.
+describes. Contributors don't open pull requests in that repository;
+maintainers make the change from the issue. When a code change here leaves the
+site wrong or incomplete, open a docs issue there as well.
 
 A change needs a docs issue when it:
 
