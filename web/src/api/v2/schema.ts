@@ -20049,7 +20049,7 @@ export interface components {
       reason?: string;
     };
     AdminPlaybackTerminateReceipt: {
-      /** @description The session was already terminated before this request; the call converged without dispatching another command */
+      /** @description The server had already ended the session for an administrator before this request: an earlier terminate, or a stop the player did not confirm. The call converged: nothing was dispatched, delivery is none and client_notified is false. A session no longer live because its player stopped it (including a player that carried out an administrator's stop) or it expired is not found (404), as is any ended session once its playback attempt record lapses, at least 24 hours after the play started */
       already_revoked: boolean;
       /** @description The session's playback authority is durably revoked: media tokens and progress writes for it are refused from now on. Buffered media already delivered may still play out */
       authority_revoked: boolean;
@@ -20058,7 +20058,7 @@ export interface components {
       /** @description The dismissal command identity when one was issued */
       command_id?: string;
       /**
-       * @description dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)
+       * @description dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing was sent because the session was already revoked
        * @enum {string}
        */
       delivery: "dispatched" | "unavailable" | "failed" | "none";

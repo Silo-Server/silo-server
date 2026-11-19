@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -25,6 +26,10 @@ type nativeEndClaim struct {
 	// attempt row (an unsequenced bridge play, or a store that keeps none)
 	// cannot be arbitrated, so its caller owns its end as before.
 	owned bool
+	// earlierStopID is the stop id of an end that won the row before this
+	// caller and that another caller finished or is finishing; this caller
+	// holds nothing of it.
+	earlierStopID string
 }
 
 // claimNativeEnd denies the session's tokens everywhere, stops its attempt
@@ -47,18 +52,18 @@ func claimNativeEnd(ctx context.Context, planStore playback.PlanStoreV3, deny *p
 		}
 		return claim
 	}
-	receipt, _, err := store.StopAttempt(ctx, sessionID, stopID, nil)
+	receipt, stopped, err := store.StopAttempt(ctx, sessionID, stopID, nil)
 	if err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "failed to stop playback attempt server-side", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		}
 		return claim
 	}
-	if receipt.Finalized {
-		return nativeEndClaim{}
-	}
-	if !claimStopFinalization(ctx, store, sessionID, receipt.StopID) {
-		return nativeEndClaim{}
+	if receipt.Finalized || !claimStopFinalization(ctx, store, sessionID, receipt.StopID) {
+		if stopped {
+			return nativeEndClaim{}
+		}
+		return nativeEndClaim{earlierStopID: receipt.StopID}
 	}
 	return nativeEndClaim{store: store, record: record, receipt: receipt, owned: true}
 }
@@ -185,7 +190,10 @@ var _ compatAdminEnder = (*playback.SessionManager)(nil)
 // history: from this replica's live copy, or from the attempt row when
 // another replica holds the copy. A session another stop already ended only
 // loses this replica's copy. ErrSessionNotFound means there was nothing here
-// to end.
+// to end; ErrSessionEndedByAdmin, which wraps it, means there was nothing
+// here because the server already ended it for an administrator (the
+// attempt row carries adminStopID). A copy still live here is ended either
+// way, so its player is told.
 //
 // A Jellyfin play has no attempt row: its own routing row is what lets any
 // replica rebuild the session. For a play the server transcodes or remuxes,
@@ -215,6 +223,16 @@ func (h *PlaybackHandler) endSessionAsAdmin(ctx context.Context, sessionID strin
 		}
 		return err
 	default:
-		return h.dropLiveSessionByID(ctx, sessionID)
+		err := h.dropLiveSessionByID(ctx, sessionID)
+		if errors.Is(err, playback.ErrSessionNotFound) && claim.earlierStopID == adminStopID(sessionID) {
+			return ErrSessionEndedByAdmin
+		}
+		return err
 	}
 }
+
+// ErrSessionEndedByAdmin means the server already ended the session for an
+// administrator: its attempt row was stopped under adminStopID. It wraps
+// playback.ErrSessionNotFound, so a caller that only needs to know the
+// session is gone treats it as such.
+var ErrSessionEndedByAdmin = fmt.Errorf("%w: already ended by an administrator", playback.ErrSessionNotFound)

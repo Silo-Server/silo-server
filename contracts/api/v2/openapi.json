@@ -16508,7 +16508,7 @@
         "additionalProperties": false,
         "properties": {
           "already_revoked": {
-            "description": "The session was already terminated before this request; the call converged without dispatching another command",
+            "description": "The server had already ended the session for an administrator before this request: an earlier terminate, or a stop the player did not confirm. The call converged: nothing was dispatched, delivery is none and client_notified is false. A session no longer live because its player stopped it (including a player that carried out an administrator's stop) or it expired is not found (404), as is any ended session once its playback attempt record lapses, at least 24 hours after the play started",
             "type": "boolean"
           },
           "authority_revoked": {
@@ -16524,7 +16524,7 @@
             "type": "string"
           },
           "delivery": {
-            "description": "dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)",
+            "description": "dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing was sent because the session was already revoked",
             "enum": [
               "dispatched",
               "unavailable",
