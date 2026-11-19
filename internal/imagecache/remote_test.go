@@ -3,10 +3,12 @@ package imagecache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netguard"
 )
@@ -88,5 +90,27 @@ func TestRemoteFetcherDoesNotShareAcrossSources(t *testing.T) {
 	image, err := f.Fetch(ctx, "movie-1", srv.URL+"/new.png")
 	if err != nil || string(image.Data) != "\x89PNG\r\n\x1a\nnew" {
 		t.Fatalf("Fetch of the new source = %q, %v", image.Data, err)
+	}
+}
+
+// More large posters than the byte budget holds: the ones that lose their
+// bytes answer busy until their window ends, and are not downloaded again.
+func TestRemoteFetcherKeepsAMarkerForEvictedImages(t *testing.T) {
+	f := newRemoteFetcher(http.DefaultClient)
+	now := time.Now()
+	big := RemoteImage{Data: make([]byte, remoteResultMaxBytes), ContentType: "image/png"}
+	posters := remoteResultsBudget/remoteResultMaxBytes + 1
+	for i := range posters {
+		f.remember(fmt.Sprint(i), big, nil, now.Add(time.Duration(i)*time.Second))
+	}
+	if f.bytes > remoteResultsBudget {
+		t.Fatalf("memory holds %d bytes, over its %d budget", f.bytes, remoteResultsBudget)
+	}
+	evicted, ok := f.recent("0", now.Add(time.Minute))
+	if !ok || !errors.Is(evicted.err, ErrRemoteBusy) || len(evicted.image.Data) != 0 {
+		t.Fatalf("the evicted poster = %v, found %v; want a busy marker", evicted.err, ok)
+	}
+	if kept, ok := f.recent(fmt.Sprint(posters-1), now.Add(time.Minute)); !ok || kept.err != nil {
+		t.Fatalf("the newest poster = %v, found %v; want its image", kept.err, ok)
 	}
 }

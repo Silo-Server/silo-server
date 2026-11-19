@@ -116,18 +116,34 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 		f.bytes -= len(old.image.Data)
 		delete(f.results, id)
 	}
-	// Every outcome is kept: when there is no room, the entries nearest
-	// their expiry make way. An outcome that was not kept would let its link
-	// repeat the download on every request.
-	for len(f.results) > 0 && (f.bytes+len(image.Data) > remoteResultsBudget || len(f.results) >= remoteResultsMax) {
-		oldest, soonest := "", time.Time{}
+	// Every outcome is kept, or its link could repeat the download on every
+	// request. When the bytes do not fit, the images nearest their expiry
+	// give theirs up but stay as a marker that answers busy until that
+	// expiry, so rotating through more large posters than the budget holds
+	// still costs one download per poster per window.
+	for f.bytes+len(image.Data) > remoteResultsBudget {
+		victim, soonest := "", time.Time{}
 		for key, result := range f.results {
-			if oldest == "" || result.until.Before(soonest) {
-				oldest, soonest = key, result.until
+			if len(result.image.Data) > 0 && (victim == "" || result.until.Before(soonest)) {
+				victim, soonest = key, result.until
 			}
 		}
-		f.bytes -= len(f.results[oldest].image.Data)
-		delete(f.results, oldest)
+		if victim == "" {
+			break
+		}
+		f.bytes -= len(f.results[victim].image.Data)
+		f.results[victim] = remoteResult{err: ErrRemoteBusy, until: soonest}
+	}
+	// The count limit drops whole entries, nearest expiry first.
+	for len(f.results) >= remoteResultsMax {
+		victim, soonest := "", time.Time{}
+		for key, result := range f.results {
+			if victim == "" || result.until.Before(soonest) {
+				victim, soonest = key, result.until
+			}
+		}
+		f.bytes -= len(f.results[victim].image.Data)
+		delete(f.results, victim)
 	}
 	f.results[id] = remoteResult{image: image, err: err, until: now.Add(ttl)}
 	f.bytes += len(image.Data)
