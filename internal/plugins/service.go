@@ -338,6 +338,12 @@ func (s *Service) installArchive(ctx context.Context, data []byte, req InstallAr
 				return prepared.Apply(ctx)
 			})
 		}
+		if errors.Is(err, ErrInstallationNotFound) {
+			// The installation this install replaces was uninstalled since it
+			// was read: the request conflicts with that change, as when another
+			// install replaced it.
+			err = ErrInstallationChanged
+		}
 	} else {
 		result, err = s.installer.installArchive(ctx, data, req)
 	}
