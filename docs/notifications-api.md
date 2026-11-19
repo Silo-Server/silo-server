@@ -628,14 +628,22 @@ returns the channels enabled plugins provide now, unpaginated. Each names its
 `plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
 `display_name` and `description`, and `settings_form`
 (`NotificationPluginSettingsForm`): one flat list of `fields`, rendered in
-order. Each field has its `key` in `settings`, `label`, `description` and
-`placeholder` (the plugin's text, empty when it gives none), `control`
+order. Each field has its `key` in `settings`, its `label`, `control`
 (`text`, `password`, `number`, `switch` or `select`), `type`, the JSON type the
-value is sent as (`string`, `integer`, `number` or `boolean`), `required`,
-`secret`, `default_value` (absent when there is none), `options` (a select
-field's `value` and `label` pairs, values as strings, sent as `type`), and
-the checks the server applies on save: `minimum`/`maximum` (inclusive),
-`min_length`/`max_length` and `pattern`, each null or empty when unset. The
+value is sent as (`string`, `integer`, `number` or `boolean`), `required` and
+`secret`. These members are optional and absent when the plugin declares
+none, never null or empty: `description` and `placeholder` (the plugin's
+text), `default_value` (of the field's `type`), `options` (a select field's
+`value` and `label` pairs, each `value` of the field's `type`, so a number
+for an `integer` or `number` field), and the checks the server applies on
+save: `minimum`/`maximum` (inclusive), `min_length`/`max_length` and
+`pattern`. `pattern` is Go RE2 syntax and matches anywhere in the string
+unless anchored; a client may check a value against it before saving, but
+the server's check is the one that counts. `required` is what the server
+enforces: it refuses a save without that setting, and a stored secret left
+blank on an edit counts as present. A client that meets a `control` it
+doesn't know renders the field by its `type`: a switch for `boolean`, a
+number input for `integer` and `number`, a text input otherwise. The
 SDK's `manifest.ValidateDestinationSchema` keeps a destination form to this
 shape, and the server refuses to install or upgrade a plugin whose form
 breaks it. A setting is write-only (`secret: true`) when the plugin marks
@@ -683,7 +691,8 @@ Each failing setting answers `422` with a field error at
 message, with the destination's secret values masked, in the problem's
 error detail at `body.settings`. A profile deleted meanwhile answers `404`.
 A channel no enabled plugin provides answers `422` with a field error at
-`body.capability_id`. A plugin that provides it but fails to answer (it
+`body.capability_id`; so does a channel whose stored form the server can't
+use (its schema doesn't compile), which it treats as not provided. A plugin that provides it but fails to answer (it
 returns an error, times out or can't start) answers `503
 dependency_unavailable` with `Retry-After`; ten destinations answer `422`.
 Success is `201` with the destination and its `ETag`. The operation is
