@@ -27,31 +27,12 @@
  * It subclasses `UrlSource` and overrides its private `_runWorker`, so
  * Mediabunny keeps its read orchestrator, its cache, its read workers and its
  * prefetch profile. Besides the way the bytes arrive, at a seek the source changes worker
- * admission, worker targets and the queued reads. The Mediabunny internals it relies on:
- *
- * - `UrlSource`: `_orchestrator`, `_abortControllers`, `_requestInit`, `_url`,
- *   `_getRetryDelay`, `_fileSizeDetermined`, `_dispatchRead`, and `_runWorker`,
- *   which a plan URL that ignores `Range` hands each worker to. The parent
- *   constructor binds `this._runWorker`, so the override runs.
- * - `ReadOrchestrator`: `fileSize`, `supplyFileSize`, `supplyWorkerData`,
- *   `signalWorkerStoppedRunning`, and `options.prefetchProfile`, which the
- *   read-ahead floor wraps. `signalWorkerStoppedRunning` clears a stopped worker's reads unless
- *   the worker is aborted, so a trim must cover the bytes those reads wait for.
- *   - `createWorker`, which the source wraps: its name, its `null` while every worker runs, and
- *     that `read()` and the queue restart call it through `this`. The restart starts the oldest
- *     queued read with that read's exact hole.
- *   - `workers`, which a retired worker leaves.
- *   - `queuedReads`, sorted by `hole.start` with no overlaps, and each entry's `hole`,
- *     `strictTarget`, `pendingSlices` and `age`.
- *   - `nextAge`, the age of the next queued read.
- * - `ReadWorker`: `currentPos`, `targetPos`, `aborted`, and `pendingSlices`, whose entries are
- *   each read's identity, `start` and `bytes.length`.
- *
- * `mediabunny` is pinned to an exact version for that reason. Upgrading it
- * must re-run `parallelRangeSource.test.ts`, which drives the real orchestrator.
+ * admission, worker targets and the queued reads. `mediabunnyInternals.ts` lists the Mediabunny
+ * internals it relies on and why `mediabunny` is pinned.
  */
-import { UrlSource, type Source, type UrlSourceOptions } from "mediabunny";
+import type { UrlSourceOptions } from "mediabunny";
 import type { createMeteredFetch, MediaRun } from "./mediaFetch";
+import { InternalUrlSource, type PendingSlice, type ReadWorker } from "./mediabunnyInternals";
 
 /** The size of one range. The last range of a stretch is cut at the worker's target. */
 const RANGE_BYTES = 2 * 2 ** 20;
@@ -78,64 +59,6 @@ const STRIPE_INACTIVITY_MS = 8_000;
 const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/;
 
 type MeteredFetch = Pick<ReturnType<typeof createMeteredFetch>, "fetch" | "newRun">;
-
-/** One read Mediabunny waits on: the bytes `[start, start + bytes.length)`. */
-interface PendingSlice {
-  start: number;
-  bytes: Uint8Array;
-}
-
-interface ReadWorker {
-  currentPos: number;
-  targetPos: number;
-  aborted: boolean;
-  pendingSlices: PendingSlice[];
-}
-
-/** A read that found every worker running, waiting for one to stop. */
-interface QueuedRead {
-  hole: { start: number; end: number };
-  strictTarget: boolean;
-  pendingSlices: PendingSlice[];
-  age: number;
-}
-
-type PrefetchProfile = (
-  start: number,
-  end: number,
-  workers: unknown,
-) => { start: number; end: number };
-
-interface ReadOrchestrator {
-  fileSize: number | null;
-  options: { prefetchProfile: PrefetchProfile };
-  supplyFileSize(size: number): void;
-  supplyWorkerData(worker: ReadWorker, bytes: Uint8Array): void;
-  signalWorkerStoppedRunning(worker: ReadWorker): void;
-  createWorker(startPos: number, targetPos: number, strictTarget: boolean): ReadWorker | null;
-  workers: ReadWorker[];
-  /** Sorted by `hole.start`, holes never overlapping. */
-  queuedReads: QueuedRead[];
-  nextAge: number;
-}
-
-/** The private surface of `UrlSource` this file reads and writes. */
-interface UrlSourceInternals {
-  _url: string | URL | Request;
-  /** The constructor normalizes headers to a plain record. */
-  _requestInit: RequestInit & { headers?: Record<string, string> };
-  _getRetryDelay: (attempts: number, error: unknown, url: string | URL | Request) => number | null;
-  _orchestrator: ReadOrchestrator;
-  _abortControllers: Map<ReadWorker, AbortController>;
-  _fileSizeDetermined: boolean;
-  _dispatchRead(start: number, end: number): void;
-  _runWorker(worker: ReadWorker): Promise<void>;
-}
-
-const InternalUrlSource = UrlSource as unknown as new (
-  url: string,
-  options: UrlSourceOptions,
-) => Source & UrlSourceInternals;
 
 /** One closed range, read into `chunks` for delivery in file order. */
 interface StripeRange {
