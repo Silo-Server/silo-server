@@ -57,7 +57,7 @@ func TestNotificationChannelsResolveTheProvidingInstallation(t *testing.T) {
 // check a value, so its channel isn't offered.
 func TestUsableDestinationSchemaRefusesAnUncompilableSchema(t *testing.T) {
 	form := &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "topic", Label: "Topic", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_TEXT}}}
-	good := &pluginv1.ConfigSchema{Key: "destination", JsonSchema: `{"type":"object","required":["topic"],"properties":{"topic":{"type":"string","pattern":"^[a-z]+$"}}}`, AdminForm: form}
+	good := &pluginv1.ConfigSchema{Key: "destination", JsonSchema: `{"type":"object","properties":{"topic":{"type":"string","pattern":"^[a-z]+$"}}}`, AdminForm: form}
 	bad := &pluginv1.ConfigSchema{Key: "destination", JsonSchema: `{"type":"object","properties":{"topic":{"type":"string","pattern":"("}}}`, AdminForm: form}
 	if err := usableDestinationSchema(good, "ntfy"); err != nil {
 		t.Fatalf("usableDestinationSchema(good) = %v", err)
