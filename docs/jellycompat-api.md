@@ -742,6 +742,21 @@ whatever `{index}` says, and answers 404 once it is deleted, for an ID that is
 not one of that file's, or for a malformed ID. A URL without it, as a client
 builds from the index, resolves the index against the current list.
 
+### Subtitle search and download
+
+| Routes | Behavior |
+|---|---|
+| `GET /Items/{itemId}/RemoteSearch/Subtitles/{language}` | Searches the server's configured subtitle providers for the item's media file, as the native `searchSubtitles` does, and returns Jellyfin `RemoteSubtitleInfo` objects. `{language}` takes a two- or three-letter code. The file is the media source the route's id names, else the `MediaSourceId` query when it is one of the item's versions, else the item's first version. |
+| `POST /Items/{itemId}/RemoteSearch/Subtitles/{subtitleId}` | Downloads and stores the result a search returned, as the native `downloadSubtitle` does, and answers 204. The stored subtitle then appears in `PlaybackInfo` as an external subtitle. |
+
+A result's `Id` is opaque: it carries the media file the search ran for and the
+provider result, so a download needs no server-side state. A download answers
+404 for an `Id` that is not a search result or that names a file outside the
+route's item, and 403 on a demo server, where only the web app's administrators
+can download subtitles. Either route answers 503 when no subtitle service is
+configured. Access follows the native routes: any signed-in profile that can
+see the item.
+
 An external subtitle's `Path`, sidecar or stored, is its stream route
 `/Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/stream.{format}` with no
 query, so a client that loads external subtitles by `Path` gets the subtitle.

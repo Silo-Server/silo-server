@@ -30,6 +30,14 @@ func (e *APIError) Unwrap() error { return e.cause }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 
+// HTTPStatus, ErrorCode and PublicMessage let a listener that can't import
+// this package (the Jellyfin-compatible one) answer with the same refusal.
+func (e *APIError) HTTPStatus() int { return e.Status }
+
+func (e *APIError) ErrorCode() string { return e.Code }
+
+func (e *APIError) PublicMessage() string { return e.Message }
+
 // WithCause records err as the error's cause, so a caller can branch on it
 // with errors.Is while the status, code and message stay as they are.
 func (e *APIError) WithCause(err error) *APIError {

@@ -1506,12 +1506,16 @@ func main() {
 	// The API routes connect the subtitle sync service to this hook; the
 	// Jellyfin routes share it, so a first play from either side syncs.
 	subtitlePlaySync := &subtitles.PlaySyncHook{}
+	// The API routes build the subtitle search; the Jellyfin remote subtitle
+	// routes search and download through it once it is set.
+	var subtitleSearch atomic.Pointer[handlers.SubtitleSearchHandler]
 	// Set when shutdown begins; /api/v1/ready fails from then on.
 	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
 		ShuttingDown:                 shuttingDown.Load,
 		AdminDefaults:                adminDefaults,
 		SubtitlePlaySync:             subtitlePlaySync,
+		SubtitleSearchReady:          subtitleSearch.Store,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
 		OnConfigChange:               configWatcher.OnChange,
@@ -4145,6 +4149,12 @@ func main() {
 			StreamDeny:       playback.NewStreamDeny(apiRedisClient),
 			SessionSyncer:    deps.SessionSyncer,
 			SubtitlePlaySync: subtitlePlaySync,
+			RemoteSubtitles: func() jellycompat.RemoteSubtitleService {
+				if search := subtitleSearch.Load(); search != nil {
+					return search
+				}
+				return nil
+			},
 			// One PIN budget per profile across the native and Jellyfin logins.
 			ProfilePINAttempts: deps.ProfilePINAttempts,
 			// The native limiter itself, so budgets, reloads, and counters

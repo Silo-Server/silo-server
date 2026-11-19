@@ -134,6 +134,10 @@ type Dependencies struct {
 	// synced is aligned the first time it is played. The routes here connect
 	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
 	SubtitlePlaySync *subtitles.PlaySyncHook
+	// SubtitleSearchReady receives the subtitle search handler once the
+	// routes here built it, so the Jellyfin listener's remote subtitle routes
+	// search and download through the same providers. May be nil.
+	SubtitleSearchReady func(*handlers.SubtitleSearchHandler)
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig func() *config.Config
@@ -2059,6 +2063,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		if subtitleAINotifier != nil {
 			subtitleSearchHandler.SetSubtitleReadyAnnouncer(subtitleAINotifier)
+		}
+		if deps.SubtitleSearchReady != nil {
+			deps.SubtitleSearchReady(subtitleSearchHandler)
 		}
 		if deps.FileRepo != nil && settingsRepo != nil {
 			syncService := newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier)

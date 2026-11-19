@@ -193,6 +193,11 @@ type Dependencies struct {
 	// Settings (optional; reads server_settings for watched threshold, etc.)
 	SettingsRepo SettingsReader
 
+	// RemoteSubtitles returns the native subtitle search and download, or
+	// nil until the API listener has built it. Optional; without it the
+	// remote subtitle routes answer 503.
+	RemoteSubtitles func() RemoteSubtitleService
+
 	// RatingSources is the administrator's choice of external ratings, the
 	// native API's. Items carry CriticRating only when it shows the Rotten
 	// Tomatoes critic score. Nil shows only IMDb and TMDB.
