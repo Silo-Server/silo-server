@@ -568,16 +568,12 @@ func (s *Scanner) reconcileEbookFileWithSkipState(ctx context.Context, folder *m
 		}
 	}
 
-	var unchangedID string
 	var isUnchanged bool
 	var skipErr error
 	if skipState != nil {
-		unchangedID, isUnchanged = unchangedEbookFile(skipState[filePath], filePath, size, modifiedAt)
+		_, isUnchanged = unchangedEbookFile(skipState[filePath], filePath, size, modifiedAt)
 	} else {
-		unchangedID, isUnchanged, skipErr = s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
-	}
-	if isUnchanged && ebookFileRereadRequested(ctx, unchangedID) {
-		isUnchanged = false
+		_, isUnchanged, skipErr = s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
 	}
 	if skipErr != nil {
 		slog.WarnContext(ctx, "ebook scan: skip-check failed, falling through", "component", "scanner",

@@ -674,11 +674,6 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	case req.Mode == ItemRefreshModeQuick || audiobook:
 		scanCtx = scanner.WithAudiobookTagReread(scanCtx, req.RefreshContentID)
 	}
-	// An ebook's reset reads its file again even when it is unchanged, so the
-	// reset starts from the file's own metadata.
-	if req.RequestedType == itemTypeEbook && req.Mode == ItemRefreshModeReset {
-		scanCtx = scanner.WithEbookFileReread(scanCtx, req.RefreshContentID)
-	}
 	ingestResult, err := ingest(scanCtx, folder, req.ScanPath)
 	stopScanHeartbeat()
 	if err != nil {
@@ -830,9 +825,10 @@ const (
 // reset. A complete refresh clears the scope's content links, and the book
 // scanners find an existing book only through a linked file, so the book
 // would come back under a new content ID while its progress, favorites and
-// provider IDs stayed on the old one. A reset reads the book's tags or file
-// again and resets its metadata on the item it already has. Other types and
-// modes pass through.
+// provider IDs stayed on the old one. A reset keeps the item: an audiobook's
+// reset reads its tags again and resets its metadata, and an ebook's reset
+// looks the book up again through its providers on the item it already has.
+// Other types and modes pass through.
 func bookRefreshMode(itemType string, mode ItemRefreshMode) ItemRefreshMode {
 	if mode == ItemRefreshModeComplete && (itemType == itemTypeAudiobook || itemType == itemTypeEbook) {
 		return ItemRefreshModeReset

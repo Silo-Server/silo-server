@@ -284,7 +284,7 @@
 ./internal/adminjob TestCompleteItemRefreshKeepsPodcastIDsDB
 
 # A complete metadata refresh of an ebook keeps its content ID, its ISBN and
-# its reader progress, and reads the unchanged file again.
+# its reader progress.
 ./internal/adminjob TestCompleteItemRefreshKeepsEbookIDDB
 
 # A complete metadata refresh of a series, season or episode relinks its files

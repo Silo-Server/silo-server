@@ -376,8 +376,7 @@ on every scan, so clearing them would replace the show and episode IDs that
 favorites and progress refer to. An audiobook or ebook runs `complete` as
 `reset`: the book scanners find a book only through its linked files, so
 clearing them would give the book a new content ID and leave its progress,
-favorites and provider IDs on the old one. An ebook's reset reads its file
-again even when the file is unchanged.
+favorites and provider IDs on the old one.
 
 `reset` is Reset to Provider: a quick refresh of the movie, series, season or
 episode that also removes its `locked_fields` and gives every lockable field,

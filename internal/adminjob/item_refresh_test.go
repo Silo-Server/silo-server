@@ -881,8 +881,7 @@ func (podcastRefreshNoMatcher) RetryUnmatchedItemsByFolderAndPathPrefix(context.
 }
 
 // A complete refresh of an ebook keeps the book's content ID, so its ISBN,
-// reader progress and other per-user rows stay on it, and it still reads the
-// unchanged file again.
+// reader progress and other per-user rows stay on it.
 func TestCompleteItemRefreshKeepsEbookIDDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -930,23 +929,18 @@ func TestCompleteItemRefreshKeepsEbookIDDB(t *testing.T) {
 		t.Fatalf("isbn owner after refresh = %q, want %q", got, f.contentID)
 	}
 	var progressRows, ebookItems int
-	var title string
 	if err := pool.QueryRow(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM ebook_reader_progress WHERE user_id = $1 AND content_id = $2),
 			(SELECT COUNT(*) FROM media_items mi
 			   JOIN media_item_libraries mil ON mil.content_id = mi.content_id
-			  WHERE mil.media_folder_id = $3 AND mi.type = 'ebook'),
-			(SELECT title FROM media_items WHERE content_id = $2)`,
+			  WHERE mil.media_folder_id = $3 AND mi.type = 'ebook')`,
 		f.userID, f.contentID, f.folderID,
-	).Scan(&progressRows, &ebookItems, &title); err != nil {
+	).Scan(&progressRows, &ebookItems); err != nil {
 		t.Fatalf("load refreshed state: %v", err)
 	}
 	if progressRows != 1 || ebookItems != 1 {
 		t.Fatalf("after complete refresh: reader progress rows=%d ebook items=%d, want 1 and 1", progressRows, ebookItems)
-	}
-	if title != "Dune" {
-		t.Fatalf("title = %q, want the file's title Dune read again", title)
 	}
 }
 
@@ -961,8 +955,7 @@ type ebookRefreshFixture struct {
 }
 
 // newEbookRefreshFixture scans an ebook library holding one EPUB with an
-// ISBN, gives a profile reading progress on it, and edits its title so a test
-// can tell whether a refresh read the unchanged file again.
+// ISBN and gives a profile reading progress on it.
 func newEbookRefreshFixture(t *testing.T, pool *pgxpool.Pool, isbn string) *ebookRefreshFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -1022,9 +1015,6 @@ func newEbookRefreshFixture(t *testing.T, pool *pgxpool.Pool, isbn string) *eboo
 		VALUES ($1, 'profile-1', $2, $3, 'epubcfi(/6/4)', 0.4)`, f.userID, f.contentID, f.fileID,
 	); err != nil {
 		t.Fatalf("seed reader progress: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE media_items SET title = 'Edited Title' WHERE content_id = $1`, f.contentID); err != nil {
-		t.Fatalf("edit title: %v", err)
 	}
 	f.executor = newItemRefreshDBExecutor(pool, scan, fileRepo, f.refresher)
 	return f
