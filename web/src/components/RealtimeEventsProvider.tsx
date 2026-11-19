@@ -346,10 +346,12 @@ function catalogEventLibraryID(data: unknown) {
     return undefined;
   }
   // The server sends v2 string IDs; the query keys hold the library's number.
+  // A node still on an older build sends the number itself.
   const value = (data as { library_id?: unknown }).library_id;
-  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value)) return undefined;
-  const id = Number(value);
-  return Number.isSafeInteger(id) ? id : undefined;
+  let id = NaN;
+  if (typeof value === "number") id = value;
+  else if (typeof value === "string" && /^[1-9][0-9]*$/.test(value)) id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
 function catalogEventContentID(data: unknown) {
