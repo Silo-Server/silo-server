@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
 )
@@ -355,6 +356,9 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		slog.ErrorContext(ctx, "fetching updated library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch updated library")
 	}
+	if oldFolder.Enabled != folder.Enabled {
+		h.publishLibraryEnabledChanged(ctx, folder)
+	}
 	if folder.BoxSetsEnabled && (!oldFolder.BoxSetsEnabled || req.Paths != nil || req.Enabled != nil) {
 		h.syncBoxSets()
 	}
@@ -407,6 +411,24 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	}
 
 	return h.toLibraryResponseWithPoster(ctx, folder), nil
+}
+
+// publishLibraryEnabledChanged tells catalog subscribers that turning the
+// library on or off changed which items the admin listing returns.
+func (h *LibraryHandler) publishLibraryEnabledChanged(ctx context.Context, folder *models.MediaFolder) {
+	if h.RealtimeHub == nil {
+		return
+	}
+	reason := "library_disabled"
+	if folder.Enabled {
+		reason = "library_enabled"
+	}
+	if err := h.RealtimeHub.PublishCatalogLibraryChanged(ctx, notifications.LibraryChangeEvent{
+		LibraryID: folder.ID,
+		Reason:    reason,
+	}); err != nil {
+		slog.WarnContext(ctx, "publish library enabled change", "component", "api", "library_id", folder.ID, "error", err)
+	}
 }
 
 // DeleteLibrary disables the library, queues its deletion job and cancels
