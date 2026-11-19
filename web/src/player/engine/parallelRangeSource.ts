@@ -531,7 +531,12 @@ export class ParallelRangeSource extends InternalUrlSource {
       this.wakeWorkers();
     }
     // The plan's URL ignores `Range`, or the striped URL shares one connection: the stock source
-    // reads the file from here on.
+    // reads the file from here on. A worker already at its target has nothing left to read, and
+    // the stock source would ask for the bytes after it.
+    if (!worker.aborted && worker.currentPos >= worker.targetPos) {
+      orchestrator.signalWorkerStoppedRunning(worker);
+      return;
+    }
     return super._runWorker(worker);
   }
 

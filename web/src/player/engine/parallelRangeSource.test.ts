@@ -413,6 +413,26 @@ describe("ParallelRangeSource failures", () => {
     }
   });
 
+  // The range that tells the source its URL is multiplexed can also be the one that takes its
+  // worker to the end of the file. That worker has nothing left for the stock reader.
+  it("asks for no bytes past the end of the file when it hands over at a worker's target", async () => {
+    vi.stubGlobal("ReadableStream", ReadableStream);
+    const timing = performance as { getEntriesByName?: unknown };
+    timing.getEntriesByName = () => [{ nextHopProtocol: "h2" }];
+    try {
+      const server = new FakeServer(pattern(SIZE));
+      const { source } = makeSource(server, {}, HEAD_URL);
+      expect(
+        same(await read(source, SIZE - MIB, SIZE), server.bytes.subarray(SIZE - MIB, SIZE)),
+      ).toBe(true);
+      await vi.waitFor(() => expect(server.inFlight).toBe(0));
+      expect(server.requests.some((r) => r.start >= SIZE)).toBe(false);
+    } finally {
+      delete timing.getEntriesByName;
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("fails a range at its fourth failure in a row that delivered nothing", async () => {
     const server = new FakeServer(pattern(SIZE));
     const failures: Fault[] = [
