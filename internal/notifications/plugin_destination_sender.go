@@ -92,6 +92,29 @@ const (
 
 // keptEnabledFailure reports whether an attempt's stored failure message is
 // one of a failure the destination isn't at fault for.
+// agedAttemptFinish closes an attempt whose delivery passed the age cap,
+// without a send. Long retry waits can reach the cap before the schedule runs
+// out, so the cap applies the exhausted schedule's rule to the attempt's last
+// failure: an ordinary one disables a destination that stayed quiet since the
+// message was queued. attempt_number counts sends, so zero means none was
+// made; a failed send with no message (a plugin's bare RETRY) is ordinary.
+func agedAttemptFinish(attempt DeliveryAttempt, queued time.Time) pluginAttemptFinish {
+	aged := pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "not delivered in time"}
+	lastFailure := ""
+	if attempt.FailureMessage != nil {
+		lastFailure = *attempt.FailureMessage
+	}
+	if attempt.AttemptNumber == 0 || keptEnabledFailure(lastFailure) {
+		return aged
+	}
+	if lastFailure != "" {
+		aged.message = lastFailure
+	}
+	aged.disableReason = "Deliveries failed for 24 hours"
+	aged.quietSince = &queued
+	return aged
+}
+
 func keptEnabledFailure(message string) bool {
 	return message == pluginUnavailableText || message == pluginNoAnswerText || message == pluginSettingsUnreadableText
 }
@@ -310,26 +333,7 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 		return
 	}
 	if time.Since(row.CreatedAt) > pluginAttemptMaxAge {
-		// Long retry waits can reach the age cap before the schedule runs
-		// out, so the cap applies the exhausted schedule's rule to the
-		// attempt's last failure: an ordinary one disables a destination
-		// that stayed quiet since the message was queued.
-		// attempt_number counts sends: zero means none was made. A failed send
-		// with no message (a plugin's bare RETRY) is an ordinary failure too.
-		aged := pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "not delivered in time"}
-		lastFailure := ""
-		if attempt.FailureMessage != nil {
-			lastFailure = *attempt.FailureMessage
-		}
-		if attempt.AttemptNumber > 0 && !keptEnabledFailure(lastFailure) {
-			queued := row.CreatedAt
-			if lastFailure != "" {
-				aged.message = lastFailure
-			}
-			aged.disableReason = "Deliveries failed for 24 hours"
-			aged.quietSince = &queued
-		}
-		s.finish(ctx, attempt, d, aged)
+		s.finish(ctx, attempt, d, agedAttemptFinish(attempt, row.CreatedAt))
 		return
 	}
 
