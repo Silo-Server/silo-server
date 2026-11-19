@@ -2,13 +2,17 @@ package notifications
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -151,10 +155,29 @@ func TestPluginSettingsSavedSecretOutlivesItsMarking(t *testing.T) {
 		t.Fatalf("replaced under v2 = %+v, %v; want nothing secret", replaced, err)
 	}
 
-	// Settings stored before the record follow the current schema.
-	legacy, err := decodePluginSettings([]byte(`{"topic":"alerts","token":"s3cret"}`))
-	if err != nil || legacy.WriteOnly != nil || legacy.Values["token"] != "s3cret" {
-		t.Fatalf("legacy envelope = %+v, %v", legacy, err)
+	// Settings stored without a write_only record don't say which values
+	// were secret: under v2, which unmarked token, every value stays hidden
+	// until the owner's next save writes the record.
+	for _, raw := range []string{
+		`{"topic":"alerts","token":"s3cret"}`,
+		`{"settings":{"topic":"alerts","token":"s3cret"}}`,
+		`{"settings":{"topic":"alerts","token":"s3cret"},"secret_keys":["token"]}`,
+	} {
+		legacy, err := decodePluginSettings([]byte(raw))
+		if err != nil || legacy.Values["token"] != "s3cret" {
+			t.Fatalf("decode %s = %+v, %v", raw, legacy, err)
+		}
+		public, set := publicPluginSettings(v2, legacy)
+		if len(public) != 0 || !reflect.DeepEqual(set, []string{"token", "topic"}) {
+			t.Fatalf("%s under v2: settings %v, set %v; want every value write-only", raw, public, set)
+		}
+		if got := redactPluginText("bad token s3cret", &v2, legacy); strings.Contains(got, "s3cret") {
+			t.Fatalf("%s: redactPluginText() = %q, leaks the value", raw, got)
+		}
+		saved, err := mergePluginSettings(v2, legacy, map[string]any{"topic": "news"}, nil)
+		if err != nil || saved.unrecorded || saved.Values["token"] != "s3cret" || len(saved.WriteOnly) != 0 {
+			t.Fatalf("%s: save under v2 = %+v, %v; want the record written from v2", raw, saved, err)
+		}
 	}
 }
 
@@ -244,5 +267,35 @@ func TestRedactPluginText(t *testing.T) {
 	}
 	if !strings.Contains(got, "alerts") || !strings.Contains(got, "loud true") {
 		t.Fatalf("redactPluginText() = %q, want public values kept", got)
+	}
+
+	// A provider can quote a credential encoded. A value too short for its
+	// encodings to be telling ("4321") is masked only as written.
+	secret := "tk_live_123/+?"
+	for _, encoded := range []string{
+		base64.StdEncoding.EncodeToString([]byte(secret)), base64.RawStdEncoding.EncodeToString([]byte(secret)),
+		base64.URLEncoding.EncodeToString([]byte(secret)), base64.RawURLEncoding.EncodeToString([]byte(secret)),
+		url.QueryEscape(secret), url.PathEscape(secret), hex.EncodeToString([]byte(secret)), strings.ToUpper(hex.EncodeToString([]byte(secret))),
+	} {
+		withSecret := pluginSettings{Values: map[string]any{"token": secret}, WriteOnly: []string{}}
+		if got := redactPluginText("auth header "+encoded+" refused", channel, withSecret); strings.Contains(got, encoded) {
+			t.Fatalf("redactPluginText() = %q, leaks the encoded secret %q", got, encoded)
+		}
+	}
+	if got := redactPluginText("code NDMyMQ== at 34333231", channel, stored); !strings.Contains(got, "NDMyMQ==") || !strings.Contains(got, "34333231") {
+		t.Fatalf("redactPluginText() = %q, masked encodings of a short value", got)
+	}
+}
+
+// Plugin text is stored as PostgreSQL text: a NUL byte or invalid UTF-8
+// would fail the finalize and resend the message forever.
+func TestRedactPluginTextIsStorable(t *testing.T) {
+	got := redactPluginText("bad\x00 gate\xff\xfeway\x1b[31m\nline two\t"+strings.Repeat("é", 400), nil)
+	if strings.ContainsRune(got, 0) || !utf8.ValidString(got) || strings.ContainsRune(got, 0x1b) {
+		t.Fatalf("redactPluginText() = %q, not storable", got)
+	}
+	if !strings.HasPrefix(got, "bad gateway[31m\nline two\t") || utf8.RuneCountInString(got) != maxPluginTextRunes {
+		t.Fatalf("redactPluginText() = %q (%d runes), want control bytes dropped, newline and tab kept, %d runes",
+			got, utf8.RuneCountInString(got), maxPluginTextRunes)
 	}
 }

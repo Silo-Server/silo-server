@@ -2,12 +2,17 @@ package notifications
 
 import (
 	"cmp"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
@@ -88,26 +93,33 @@ type pluginSettings struct {
 	// WriteOnly names the keys saved as secret. They stay write-only whatever a
 	// later manifest says, until the owner replaces or clears them, so a
 	// plugin upgrade that drops a field's secret marking can't expose a
-	// saved credential. nil for settings stored before the record existed,
-	// which follow the current schema alone.
+	// saved credential.
 	WriteOnly []string `json:"write_only"`
+	// unrecorded marks settings stored without a write_only record (a bare
+	// settings object, or an envelope from a build that named the record
+	// differently). Nothing tells which of their values were secret, so every
+	// one is write-only until the owner's next settings save writes the
+	// record from the schema then current.
+	unrecorded bool
 }
 
 // isSecret reports whether key is write-only: the channel marks it secret,
-// or it was saved as secret.
+// it was saved as secret, or the settings carry no record of which were.
 func (p pluginSettings) isSecret(channel PluginChannel, key string) bool {
-	return slices.Contains(channel.SecretFields, key) || slices.Contains(p.WriteOnly, key)
+	return p.unrecorded || slices.Contains(channel.SecretFields, key) || slices.Contains(p.WriteOnly, key)
 }
 
 // isPublic reports whether key may be returned: the channel declares it
-// public and it wasn't saved as secret. A nil channel has no public keys.
+// public and it wasn't saved as secret. A nil channel has no public keys,
+// and neither do settings without a write_only record.
 func (p pluginSettings) isPublic(channel *PluginChannel, key string) bool {
-	return channel != nil && slices.Contains(channel.PublicFields, key) && !slices.Contains(p.WriteOnly, key)
+	return channel != nil && !p.unrecorded && slices.Contains(channel.PublicFields, key) && !slices.Contains(p.WriteOnly, key)
 }
 
 // decodePluginSettings reads a decrypted settings envelope. One written
 // before the secret record is the bare settings object; its fields are flat
-// scalars, so a top-level "settings" object marks the current shape.
+// scalars, so a top-level "settings" object marks the envelope. Settings
+// without a write_only array are unrecorded (pluginSettings.unrecorded).
 func decodePluginSettings(raw []byte) (pluginSettings, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -122,6 +134,7 @@ func decodePluginSettings(raw []byte) (pluginSettings, error) {
 			out.Values = map[string]any{}
 		}
 		if out.WriteOnly == nil {
+			out.unrecorded = true
 			out.WriteOnly = []string{}
 		}
 		return out, nil
@@ -130,17 +143,32 @@ func decodePluginSettings(raw []byte) (pluginSettings, error) {
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return pluginSettings{}, err
 	}
-	return pluginSettings{Values: values}, nil
+	return pluginSettings{Values: values, WriteOnly: []string{}, unrecorded: true}, nil
 }
 
-// redactPluginText masks text a plugin wrote (an error, a refusal, a send
-// result) before it is stored, returned or logged. A plugin or its provider
-// may quote a rejected credential, so every value of each settings map that
-// may not be returned is masked, which covers secret fields, fields saved as
-// secret, and stored fields the current schema no longer declares; then
-// credential assignments and URL userinfo are masked as everywhere else. A
-// nil channel masks every value.
+// maxPluginTextRunes bounds text a plugin wrote once it is stored or shown.
+const maxPluginTextRunes = 256
+
+// minEncodedSecretLen is the shortest secret whose encoded forms are masked
+// too. An encoding of a short value is short enough to turn up in ordinary
+// text, and masking it would garble messages for nothing.
+const minEncodedSecretLen = 8
+
+// redactPluginText makes text a plugin wrote (an error, a refusal, a send
+// result) safe to store, return or log. Every such text goes through here.
+//
+// It is first made storable: valid UTF-8 without NUL or other control
+// characters but newline and tab, at most maxPluginTextRunes runes, so
+// PostgreSQL can't refuse it and a finalize can't fail over it. Then a
+// plugin or its provider may quote a rejected credential, so every value of
+// each settings map that may not be returned is masked, as written and, when
+// long enough, base64 (standard and URL alphabets, padded or not), URL-escaped
+// and hex encoded. That covers secret fields, fields saved as secret, and
+// stored fields the current schema no longer declares. Last, credential
+// assignments and URL userinfo are masked as everywhere else. A nil channel
+// masks every value.
 func redactPluginText(text string, channel *PluginChannel, settings ...pluginSettings) string {
+	text = storablePluginText(text)
 	if text == "" {
 		return text
 	}
@@ -150,9 +178,7 @@ func redactPluginText(text string, channel *PluginChannel, settings ...pluginSet
 			if stored.isPublic(channel, key) {
 				continue
 			}
-			if secret := pluginSecretText(value); secret != "" {
-				secrets = append(secrets, secret)
-			}
+			secrets = append(secrets, pluginSecretForms(pluginSecretText(value))...)
 		}
 	}
 	// Longest first, so a secret containing another is masked whole.
@@ -160,7 +186,55 @@ func redactPluginText(text string, channel *PluginChannel, settings ...pluginSet
 	for _, secret := range secrets {
 		text = strings.ReplaceAll(text, secret, logredact.Placeholder)
 	}
-	return logredact.SanitizeText(text)
+	return truncateRunes(logredact.SanitizeText(text), maxPluginTextRunes)
+}
+
+// storablePluginText drops what PostgreSQL text can't hold or a reader
+// shouldn't see: invalid UTF-8, NUL and other control characters.
+func storablePluginText(text string) string {
+	text = strings.ToValidUTF8(text, "")
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			return r
+		}
+		return -1
+	}, text)
+}
+
+func truncateRunes(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	return string([]rune(text)[:limit])
+}
+
+// pluginSecretForms is how a secret can appear in text: as written and, when
+// at least minEncodedSecretLen bytes, in the encodings a provider or plugin
+// is likely to quote it in.
+func pluginSecretForms(secret string) []string {
+	if secret == "" {
+		return nil
+	}
+	forms := []string{secret}
+	if len(secret) < minEncodedSecretLen {
+		return forms
+	}
+	raw := []byte(secret)
+	for _, form := range []string{
+		base64.StdEncoding.EncodeToString(raw),
+		base64.RawStdEncoding.EncodeToString(raw),
+		base64.URLEncoding.EncodeToString(raw),
+		base64.RawURLEncoding.EncodeToString(raw),
+		url.QueryEscape(secret),
+		url.PathEscape(secret),
+		hex.EncodeToString(raw),
+		strings.ToUpper(hex.EncodeToString(raw)),
+	} {
+		if !slices.Contains(forms, form) {
+			forms = append(forms, form)
+		}
+	}
+	return forms
 }
 
 // pluginSecretText is how a setting value can appear in text. A boolean
