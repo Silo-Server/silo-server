@@ -18,6 +18,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 
 	publicconfig "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/config"
+	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
@@ -64,10 +65,9 @@ func checkPluginSettings(channel PluginChannel, merged map[string]any) error {
 
 // maxSafePluginInteger is the largest integer a JSON or protobuf number
 // carries exactly, 2^53-1. Settings reach a plugin as a protobuf Struct,
-// whose numbers are doubles, so a larger integer would arrive rounded. The
-// SDK's manifest.MaxSafeInteger, in a newer SDK than the one pinned here, is
-// the same bound for manifest options and defaults.
-const maxSafePluginInteger = 1<<53 - 1
+// whose numbers are doubles, so a larger integer would arrive rounded. It is
+// the SDK's bound for manifest options and defaults.
+const maxSafePluginInteger = publicmanifest.MaxSafeInteger
 
 // unsafePluginIntegers returns the keys of integer fields whose value is
 // beyond maxSafePluginInteger in magnitude.
