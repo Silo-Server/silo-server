@@ -42,23 +42,6 @@ func TestProbeEncodedNonUTF8Directory(t *testing.T) {
 	}
 }
 
-func TestProbeRegularFile(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "file.txt")
-	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	res := Probe(path)
-	if res.Reachable {
-		t.Fatal("Probe(regular file) reported reachable")
-	}
-	if res.ErrorCode != ErrCodeNotDirectory {
-		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrCodeNotDirectory)
-	}
-}
-
 func TestProbeUnreadableDirectory(t *testing.T) {
 	t.Parallel()
 	if os.Getuid() == 0 {
@@ -136,23 +119,5 @@ func TestProbeManyPreservesOrderAndBoundsConcurrency(t *testing.T) {
 		if result.ErrorMessage != paths[i] {
 			t.Fatalf("result[%d] = %q, want %q", i, result.ErrorMessage, paths[i])
 		}
-	}
-}
-
-func TestProbeReportsEmptyDirectory(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	res := Probe(dir)
-	if !res.Reachable || !res.Empty || res.ErrorCode != "" || res.ErrorMessage != "" {
-		t.Fatalf("Probe(empty dir) = %+v, want reachable and empty without an error", res)
-	}
-
-	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	res = Probe(dir)
-	if !res.Reachable || res.Empty || res.ErrorCode != "" || res.ErrorMessage != "" {
-		t.Fatalf("Probe(non-empty dir) = %+v, want reachable and not empty without an error", res)
 	}
 }

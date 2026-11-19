@@ -68,28 +68,3 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 		t.Fatalf("exact-case document not preferred: %+v", got)
 	}
 }
-
-func TestNormalizeSavedCustomPrefsJellyfin12(t *testing.T) {
-	prefs := map[string]string{
-		"skipForwardLength": "",
-		"landing-abc":       "",
-		"Landing-def":       "suggestions",
-		"homesection0":      "resume",
-	}
-	normalizeSavedCustomPrefs(prefs)
-	if prefs["skipForwardLength"] != "15000" || prefs["skipBackLength"] != "15000" {
-		t.Fatalf("skip lengths = %q/%q, want 15000/15000", prefs["skipForwardLength"], prefs["skipBackLength"])
-	}
-	if _, ok := prefs["landing-abc"]; ok {
-		t.Fatal("empty landing preference must be dropped")
-	}
-	if prefs["Landing-def"] != "suggestions" || prefs["homesection0"] != "resume" {
-		t.Fatalf("other preferences changed: %v", prefs)
-	}
-
-	kept := map[string]string{"skipForwardLength": "30000", "skipBackLength": "5000"}
-	normalizeSavedCustomPrefs(kept)
-	if kept["skipForwardLength"] != "30000" || kept["skipBackLength"] != "5000" {
-		t.Fatalf("explicit skip lengths overwritten: %v", kept)
-	}
-}

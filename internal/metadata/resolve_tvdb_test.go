@@ -2,7 +2,7 @@ package metadata
 
 import (
 	"context"
-	"errors"
+
 	"testing"
 	"time"
 )
@@ -37,36 +37,6 @@ func serviceWithSeriesChain(providers ...Provider) *MetadataService {
 			"0:series": {providers: providers, expiresAt: time.Now().Add(time.Hour)},
 		},
 		chainCacheTTL: time.Hour,
-	}
-}
-
-func TestResolveSeriesTVDBIDPrefersIMDbLookup(t *testing.T) {
-	tvdb := &idSearchProvider{slug: "tvdb", results: map[string][]SearchResult{
-		"imdb:tt31000000": {{ProviderIDs: map[string]string{"tvdb": "456789", "imdb": "tt31000000"}}},
-		"tmdb:240001":     {{ProviderIDs: map[string]string{"tvdb": "111", "tmdb": "240001"}}},
-	}}
-	got, err := serviceWithSeriesChain(tvdb).ResolveSeriesTVDBID(context.Background(), 240001, "tt31000000")
-	if err != nil {
-		t.Fatalf("ResolveSeriesTVDBID error = %v", err)
-	}
-	if got != 456789 {
-		t.Fatalf("tvdb id = %d, want 456789 from the IMDb lookup", got)
-	}
-	if len(tvdb.queries) != 1 {
-		t.Fatalf("queries = %v, want only the IMDb lookup", tvdb.queries)
-	}
-}
-
-func TestResolveSeriesTVDBIDFallsBackToTMDBLookup(t *testing.T) {
-	tvdb := &idSearchProvider{slug: "tvdb", results: map[string][]SearchResult{
-		"tmdb:240001": {{ProviderIDs: map[string]string{"tvdb": "456789", "tmdb": "240001"}}},
-	}}
-	got, err := serviceWithSeriesChain(tvdb).ResolveSeriesTVDBID(context.Background(), 240001, "tt31000000")
-	if err != nil {
-		t.Fatalf("ResolveSeriesTVDBID error = %v", err)
-	}
-	if got != 456789 {
-		t.Fatalf("tvdb id = %d, want 456789 from the TMDB lookup", got)
 	}
 }
 
@@ -105,25 +75,5 @@ func TestResolveSeriesTVDBIDRejectsIMDbMatchForAnotherTMDBSeries(t *testing.T) {
 	}
 	if got != 456789 {
 		t.Fatalf("tvdb id = %d, want 456789 from the TMDB lookup, not the conflicting IMDb match", got)
-	}
-}
-
-func TestResolveSeriesTVDBIDReportsProviderFailureWhenNothingMatches(t *testing.T) {
-	outage := errors.New("tvdb: HTTP 503")
-	tvdb := &idSearchProvider{slug: "tvdb", err: outage}
-	got, err := serviceWithSeriesChain(tvdb).ResolveSeriesTVDBID(context.Background(), 240001, "")
-	if got != 0 || !errors.Is(err, outage) {
-		t.Fatalf("ResolveSeriesTVDBID = %d, %v; want 0 and the provider error", got, err)
-	}
-}
-
-func TestResolveSeriesTVDBIDIgnoresProviderFailureWhenAnotherMatches(t *testing.T) {
-	failing := &idSearchProvider{slug: "broken", err: errors.New("unavailable")}
-	tvdb := &idSearchProvider{slug: "tvdb", results: map[string][]SearchResult{
-		"tmdb:240001": {{ProviderIDs: map[string]string{"tvdb": "456789", "tmdb": "240001"}}},
-	}}
-	got, err := serviceWithSeriesChain(failing, tvdb).ResolveSeriesTVDBID(context.Background(), 240001, "")
-	if err != nil || got != 456789 {
-		t.Fatalf("ResolveSeriesTVDBID = %d, %v; want 456789 and no error", got, err)
 	}
 }

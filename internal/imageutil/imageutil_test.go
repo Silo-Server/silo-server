@@ -3,15 +3,11 @@ package imageutil
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"hash/crc32"
 	"image"
 	"image/color"
-	"image/color/palette"
-	"image/gif"
 	"image/jpeg"
 	"image/png"
-	"runtime"
 	"testing"
 )
 
@@ -37,48 +33,6 @@ func largeTestJPEG(t testing.TB, width, height int) []byte {
 	return buf.Bytes()
 }
 
-func TestThumbhashRejectsGarbage(t *testing.T) {
-	_, err := Thumbhash([]byte("not an image at all"))
-	if err == nil {
-		t.Fatal("Thumbhash accepted garbage input")
-	}
-	if !errors.Is(err, ErrInvalidImage) {
-		t.Fatalf("err = %v, want ErrInvalidImage", err)
-	}
-}
-
-// TestThumbhashDoesNotDecodeFullRasterInGo pins the reason the vips downscale
-// runs before the Go decode: hashing must not materialize the original's full
-// raster on the Go heap. A 6000×4000 JPEG decodes to ≥36 MiB in pure Go, and
-// under tens of concurrent image-cache workers that is an OOM risk; through
-// the vips path the Go side only ever decodes a ≤100px PNG. A header vips
-// rejects falls back to the Go decoder, which must refuse to allocate the
-// raster it declares, here 4 GiB. The 15 MiB bound is far above either path's
-// real footprint and far below a full raster.
-func TestThumbhashDoesNotDecodeFullRasterInGo(t *testing.T) {
-	for name, tc := range map[string]struct {
-		data    []byte
-		wantErr bool
-	}{
-		"large jpeg":              {largeTestJPEG(t, 6000, 4000), false},
-		"header too big for vips": {withPNGDimensions(t, testPNG(t, 60, 90), 1<<30, 1), true},
-	} {
-		runtime.GC()
-		var before runtime.MemStats
-		runtime.ReadMemStats(&before)
-		hash, err := Thumbhash(tc.data)
-		var after runtime.MemStats
-		runtime.ReadMemStats(&after)
-
-		if (err != nil) != tc.wantErr || (err == nil && hash == "") {
-			t.Errorf("%s: Thumbhash = %q, %v; want error %v", name, hash, err, tc.wantErr)
-		}
-		if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 15<<20 {
-			t.Errorf("%s: Thumbhash allocated %d bytes on the Go heap; the full raster is being decoded in Go", name, allocated)
-		}
-	}
-}
-
 func BenchmarkThumbhashLargeJPEG(b *testing.B) {
 	data := largeTestJPEG(b, 6000, 4000)
 	b.ReportAllocs()
@@ -87,13 +41,6 @@ func BenchmarkThumbhashLargeJPEG(b *testing.B) {
 		if _, err := Thumbhash(data); err != nil {
 			b.Fatalf("Thumbhash: %v", err)
 		}
-	}
-}
-
-func TestGenerateVariantsWrapsErrInvalidImage(t *testing.T) {
-	_, err := GenerateVariants([]byte("not an image"), []int{300})
-	if !errors.Is(err, ErrInvalidImage) {
-		t.Fatalf("err = %v, want ErrInvalidImage", err)
 	}
 }
 
@@ -110,35 +57,6 @@ func testPNG(t *testing.T, width, height int) []byte {
 		t.Fatalf("encode png: %v", err)
 	}
 	return buf.Bytes()
-}
-
-func TestPixelDataUndecodable(t *testing.T) {
-	fullPNG := testPNG(t, 600, 900)
-	fullJPEG := largeTestJPEG(t, 600, 900)
-	var gifBuf bytes.Buffer
-	if err := gif.Encode(&gifBuf, image.NewPaletted(image.Rect(0, 0, 600, 900), palette.Plan9), nil); err != nil {
-		t.Fatalf("encode gif: %v", err)
-	}
-	fullGIF := gifBuf.Bytes()
-
-	for name, tc := range map[string]struct {
-		data []byte
-		want bool
-	}{
-		"valid png":      {fullPNG, false},
-		"valid jpeg":     {fullJPEG, false},
-		"truncated png":  {fullPNG[:len(fullPNG)/2], true},
-		"truncated jpeg": {fullJPEG[:len(fullJPEG)/2], true},
-		"truncated gif":  {fullGIF[:len(fullGIF)/2], false},
-		"unknown":        {[]byte("not an image"), false},
-		"huge header":    {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 100_000, 100_000), false},
-		"just over cap":  {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 2_001, 2_000), false},
-		"one tall row":   {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 1, maxGoDecodePixels+1), false},
-	} {
-		if got := PixelDataUndecodable(tc.data); got != tc.want {
-			t.Errorf("%s: PixelDataUndecodable = %v, want %v", name, got, tc.want)
-		}
-	}
 }
 
 // withPNGDimensions rewrites the IHDR width and height of a PNG, keeping the

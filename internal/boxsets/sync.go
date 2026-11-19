@@ -6,6 +6,7 @@
 package boxsets
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -38,16 +39,16 @@ const (
 // TMDB is the slice of *tmdb.Client the sync uses.
 type TMDB interface {
 	GetMovieCollection(ctx context.Context, movieID int) (*tmdb.CollectionRef, error)
-	GetCollection(ctx context.Context, id int) (*tmdb.Collection, error)
+	GetCollection(ctx context.Context, id int, language string) (*tmdb.Collection, error)
 }
 
 // Store is the slice of *catalog.BoxSetRepository the sync uses.
 type Store interface {
 	MoviesNeedingCollectionLookup(ctx context.Context, staleBefore time.Time, limit int, skip []string) ([]catalog.MovieCollectionLookup, error)
 	RecordMovieCollection(ctx context.Context, contentID string, tmdbID int64, collectionID *int64) error
-	CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]int64, error)
+	CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]catalog.CollectionFetch, error)
 	UpsertCollection(ctx context.Context, c catalog.TMDBMovieCollection) error
-	TouchCollection(ctx context.Context, id int64) error
+	TouchCollection(ctx context.Context, id int64, language string) error
 	DeleteUnusedCollections(ctx context.Context) (int64, error)
 	CollectionArtworkNeedingCache(ctx context.Context, limit int, skip []int64) ([]catalog.CollectionArtworkDue, error)
 	SetCollectionArtwork(ctx context.Context, id int64, slot catalog.CollectionArtworkSlot, sourcePath, path, thumbhash string) error
@@ -68,18 +69,29 @@ type Syncer struct {
 	// images returns the image cacher, or nil while artwork is served from
 	// the provider (no artwork store, or metadata.cache_images off).
 	images func() metadata.ImageCacher
-	now    func() time.Time
+	// fallbackLanguage returns metadata.fallback_language, empty when off.
+	fallbackLanguage func() string
+	now              func() time.Time
 }
 
-// NewSyncer returns a syncer over store and client.
+// NewSyncer returns a syncer over store and client. Until WithFallbackLanguage
+// says otherwise, it falls back to English, the setting's default.
 func NewSyncer(store Store, client TMDB) *Syncer {
-	return &Syncer{store: store, tmdb: client, now: time.Now}
+	return &Syncer{store: store, tmdb: client, fallbackLanguage: func() string { return "en" }, now: time.Now}
 }
 
 // WithImages caches collection artwork through the cacher images returns,
 // the way item artwork is cached.
 func (s *Syncer) WithImages(images func() metadata.ImageCacher) *Syncer {
 	s.images = images
+	return s
+}
+
+// WithFallbackLanguage fills the text a collection's translation lacks in the
+// language fallback returns (metadata.fallback_language), the way item
+// metadata falls back; empty fills nothing.
+func (s *Syncer) WithFallbackLanguage(fallback func() string) *Syncer {
+	s.fallbackLanguage = fallback
 	return s
 }
 
@@ -165,7 +177,8 @@ func (s *Syncer) lookUpMovies(ctx context.Context, res *Result, failed *[]string
 	}
 }
 
-// fetchCollections stores every due collection. tried collects the
+// fetchCollections stores every due collection in the language it is due
+// in. tried collects the
 // collections this run could not store: failed fetches, and ones TMDB no
 // longer serves that were never stored.
 func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int64, report func(float64, string)) error {
@@ -175,16 +188,17 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 		if err != nil || len(due) == 0 {
 			return err
 		}
-		for _, id := range due {
+		for _, fetch := range due {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			c, err := s.tmdb.GetCollection(ctx, int(id))
+			id := fetch.ID
+			c, err := s.fetchCollection(ctx, fetch)
 			if errors.Is(err, tmdb.ErrNotFound) {
 				// Keep a stored copy rather than refetching a collection TMDB
 				// no longer serves on every run. One never stored stays due
 				// for the next run.
-				if err := s.store.TouchCollection(ctx, id); err != nil {
+				if err := s.store.TouchCollection(ctx, id, fetch.Language); err != nil {
 					return err
 				}
 				*tried = append(*tried, id)
@@ -199,13 +213,35 @@ func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int
 				}
 				continue
 			}
-			if err := s.store.UpsertCollection(ctx, storedCollection(id, c)); err != nil {
+			if err := s.store.UpsertCollection(ctx, storedCollection(id, fetch.Language, c)); err != nil {
 				return err
 			}
 			res.CollectionsFetched++
 		}
 		report(75, fmt.Sprintf("Fetched %d collections", res.CollectionsFetched))
 	}
+}
+
+// fetchCollection fetches a collection in the language it is due in. TMDB
+// leaves the overview empty where its translation lacks one (and may do the
+// same for the name), so those come from its answer in the fallback language,
+// the way item metadata falls back. TMDB falls back for artwork itself. When
+// that answer fails, the fetch fails: the stored copy keeps its text and the
+// collection stays due for the next run.
+func (s *Syncer) fetchCollection(ctx context.Context, fetch catalog.CollectionFetch) (*tmdb.Collection, error) {
+	c, err := s.tmdb.GetCollection(ctx, int(fetch.ID), fetch.Language)
+	fallback := s.fallbackLanguage()
+	if err != nil || fallback == "" || fallback == fetch.Language || (c.Name != "" && c.Overview != "") {
+		return c, err
+	}
+	other, err := s.tmdb.GetCollection(ctx, int(fetch.ID), fallback)
+	if err != nil {
+		return nil, fmt.Errorf("fetching in fallback language %s: %v", fallback, err) //nolint:errorlint // not ErrNotFound: a collection TMDB serves in one language is not gone
+	}
+	localized := *c
+	localized.Name = cmp.Or(c.Name, other.Name)
+	localized.Overview = cmp.Or(c.Overview, other.Overview)
+	return &localized, nil
 }
 
 // cacheArtwork stores a copy of each collection image still served from
@@ -267,7 +303,7 @@ func tmdbOriginalURL(path string) string {
 // storedCollection converts a fetched collection, listing its movies in
 // release order. TMDB returns parts in no reliable order, and a part without
 // a release date (an announced sequel) goes last.
-func storedCollection(id int64, c *tmdb.Collection) catalog.TMDBMovieCollection {
+func storedCollection(id int64, language string, c *tmdb.Collection) catalog.TMDBMovieCollection {
 	parts := append([]tmdb.CollectionPart(nil), c.Parts...)
 	sort.SliceStable(parts, func(i, j int) bool {
 		a, b := parts[i].ReleaseDate, parts[j].ReleaseDate
@@ -289,5 +325,6 @@ func storedCollection(id int64, c *tmdb.Collection) catalog.TMDBMovieCollection 
 		PosterSourcePath:   tmdbOriginalURL(c.PosterPath),
 		BackdropSourcePath: tmdbOriginalURL(c.BackdropPath),
 		MemberTMDBIDs:      members,
+		Language:           language,
 	}
 }

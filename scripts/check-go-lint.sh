@@ -111,7 +111,7 @@ if command -v golangci-lint >/dev/null 2>&1; then
 	fi
 else
 	printf '%s\n' "skipping golangci-lint: not installed. Install with:" >&2
-	printf '%s\n' "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2" >&2
+	printf '%s\n' "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0" >&2
 fi
 
 if [[ "$failed" -ne 0 ]]; then

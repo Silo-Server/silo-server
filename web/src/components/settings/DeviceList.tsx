@@ -13,7 +13,7 @@ import {
   deviceRecencyGroup,
   type DeviceRecencyGroup,
 } from "@/hooks/queries/devices";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
 import { lastSeenLabel } from "./lastSeenLabel";
 import { cn } from "@/lib/utils";
 
@@ -342,7 +342,7 @@ function ProfileChip({
       )}
     >
       {label}
-      <span className="text-muted-foreground text-xs">{count}</span>
+      <span className="text-muted-foreground text-xs">{numberText(count)}</span>
     </button>
   );
 }
@@ -416,7 +416,7 @@ function ChangedCount({ count }: { count: number }) {
       className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-xs font-semibold text-amber-300"
       aria-label={t("web.settings.deviceList.changedCount", { count, count_text: count })}
     >
-      {count}
+      {numberText(count)}
     </span>
   );
 }

@@ -8,9 +8,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
-// The node admits only requests signed for exactly the route they reach, plus
-// the previous release's bearer while a deployment upgrades.
-func TestNodeRoutesRequireASignatureForTheRequest(t *testing.T) {
+// The node admits only requests signed with its own key for exactly the route
+// they reach. The shared secret, signed or sent as a bearer, is refused: a
+// transcode node never accepts a credential another worker also holds.
+func TestNodeRoutesRequireASignatureWithTheNodeKey(t *testing.T) {
 	server := newTestServer(t)
 	status := func(r *http.Request) int {
 		recorder := httptest.NewRecorder()
@@ -19,7 +20,7 @@ func TestNodeRoutesRequireASignatureForTheRequest(t *testing.T) {
 	}
 
 	signed := httptest.NewRequest(http.MethodGet, "/status", nil)
-	nodeauthtest.Sign(t, signed, testSecret)
+	nodeauthtest.Sign(t, signed, testNodeKey)
 	if code := status(signed); code != http.StatusOK {
 		t.Fatalf("signed request: status %d, want 200", code)
 	}
@@ -34,16 +35,24 @@ func TestNodeRoutesRequireASignatureForTheRequest(t *testing.T) {
 		t.Fatalf("signature reused on another route: status %d, want 401", code)
 	}
 
-	otherSecret := httptest.NewRequest(http.MethodGet, "/status", nil)
-	nodeauthtest.Sign(t, otherSecret, "another-secret")
-	if code := status(otherSecret); code != http.StatusUnauthorized {
-		t.Fatalf("request signed with another secret: status %d, want 401", code)
+	sharedSecret := httptest.NewRequest(http.MethodGet, "/status", nil)
+	nodeauthtest.Sign(t, sharedSecret, testSecret)
+	if code := status(sharedSecret); code != http.StatusUnauthorized {
+		t.Fatalf("request signed with the shared secret: status %d, want 401", code)
 	}
 
-	// Remove with the legacy bearer in nodeauth.Verify.
-	legacy := httptest.NewRequest(http.MethodGet, "/status", nil)
-	legacy.Header.Set("Authorization", "Bearer "+testSecret)
-	if code := status(legacy); code != http.StatusOK {
-		t.Fatalf("legacy bearer during the upgrade window: status %d, want 200", code)
+	for _, credential := range []string{testSecret, testNodeKey} {
+		bearer := httptest.NewRequest(http.MethodGet, "/status", nil)
+		bearer.Header.Set("Authorization", "Bearer "+credential)
+		if code := status(bearer); code != http.StatusUnauthorized {
+			t.Fatalf("bearer credential: status %d, want 401", code)
+		}
+	}
+
+	server.nodeKey = ""
+	keyless := httptest.NewRequest(http.MethodGet, "/status", nil)
+	nodeauthtest.Sign(t, keyless, testNodeKey)
+	if code := status(keyless); code != http.StatusUnauthorized {
+		t.Fatalf("node without a key: status %d, want 401", code)
 	}
 }

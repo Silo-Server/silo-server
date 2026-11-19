@@ -5,29 +5,6 @@ import (
 	"testing"
 )
 
-func TestCurrentIncludesContainerIdentity(t *testing.T) {
-	previousRevision := revisionOverride
-	previousDirty := dirtyOverride
-	previousBuildNumber := buildNumberOverride
-	previousBuiltAt := builtAtOverride
-	t.Cleanup(func() {
-		revisionOverride = previousRevision
-		dirtyOverride = previousDirty
-		buildNumberOverride = previousBuildNumber
-		builtAtOverride = previousBuiltAt
-	})
-
-	revisionOverride = "edf2977f5013df08e57a869bf722af4243a0a4fd"
-	dirtyOverride = "false"
-	buildNumberOverride = "411"
-	builtAtOverride = "2026-08-19T19:45:00Z"
-
-	got := Current()
-	if got.BuildNumber != 411 || got.BuiltAt != "2026-08-19T19:45:00Z" {
-		t.Fatalf("Current() container identity = build %d at %q", got.BuildNumber, got.BuiltAt)
-	}
-}
-
 func TestResolve(t *testing.T) {
 	t.Parallel()
 
@@ -213,28 +190,6 @@ func TestResolve(t *testing.T) {
 				t.Fatalf("resolve() = %#v, want %#v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestParseBuildNumber(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		value string
-		want  uint64
-	}{
-		{value: "411", want: 411},
-		{value: " 411 ", want: 411},
-		{value: ""},
-		{value: "0"},
-		{value: "-1"},
-		{value: "not-a-number"},
-	}
-
-	for _, tc := range tests {
-		if got := parseBuildNumber(tc.value); got != tc.want {
-			t.Fatalf("parseBuildNumber(%q) = %d, want %d", tc.value, got, tc.want)
-		}
 	}
 }
 

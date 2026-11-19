@@ -150,7 +150,8 @@ type AdminSectionPreviewInput struct {
 }
 type AdminSectionPreviewResult struct {
 	Collection[CatalogItem]
-	TotalCount int `json:"total_count" minimum:"0"`
+	TotalCount  int                     `json:"total_count" minimum:"0"`
+	Collections []SectionCollectionCard `json:"collections,omitempty" doc:"The cards a row of collections (section_type collection_posters) shows the acting admin, in order; items is then empty and total_count is their number. Absent for every other section type"`
 }
 type AdminSectionPreviewOutput struct{ Body AdminSectionPreviewResult }
 

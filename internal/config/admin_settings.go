@@ -144,6 +144,20 @@ const (
 	DownloadLocalTranscodeFallbackSettingKey      = "download.local_transcode_fallback"
 )
 
+// JellyfinCompatAddressStreamGrantSettingKey turns on the Jellyfin API's
+// address-only stream grant: a static video stream that carries no credential
+// is served as the owner of a live PlaybackInfo negotiation made from the same
+// client address. Anyone sharing that address (household or carrier NAT, a VPN
+// exit, a proxy that collapses clients to one address) who knows the item and
+// source IDs can then stream the file. The Jellyfin API reads it live on each
+// request that reaches that grant.
+const JellyfinCompatAddressStreamGrantSettingKey = "jellyfin_compat.address_stream_grant_enabled"
+
+// DefaultJellyfinCompatAddressStreamGrantEnabled is the address-only stream
+// grant's value while the setting is unset. Every default of that setting
+// derives from this constant.
+const DefaultJellyfinCompatAddressStreamGrantEnabled = false
+
 // ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
 // stored alongside server settings for durability but must not be exposed or
 // edited through the administrator settings API.
@@ -219,6 +233,9 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // without an address. The responder starts with the API listener, so a change
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
+
+// serverLogFormatSettingKey selects text or JSON console logs.
+const serverLogFormatSettingKey = "server.log_format"
 
 // Backup settings (docs/architecture/backups.md). internal/backup reads them
 // live at each run, so none needs a restart.
@@ -300,6 +317,12 @@ const (
 	// address on a Silo account first is the one matched; the match ends the
 	// account's existing sessions, device approvals and API keys.
 	AuthEmailAutoMatchSettingKey = "auth.email_auto_match"
+	// AuthUserAPIKeysSettingKey lets accounts that are not admins, and
+	// profiles other than the primary one, create API keys for themselves.
+	// Those keys carry user scopes only. Off by default: only a server admin
+	// creates keys. Turning it off stops new keys and leaves existing ones
+	// working until they are revoked.
+	AuthUserAPIKeysSettingKey = "auth.user_api_keys" //nolint:gosec // A setting name, not a credential.
 	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
 	// provider check may be before a session refresh asks the provider again.
 	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
@@ -384,6 +407,7 @@ var adminSettingDefaults = map[string]string{
 	ServerLocalURLSettingKey:                  "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
+	AuthUserAPIKeysSettingKey:                 "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
 	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
 
@@ -460,16 +484,17 @@ var adminSettingDefaults = map[string]string{
 	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
 	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
 
-	"audiobookshelf_compat.enabled":           "true",
-	"jellyfin_compat.enabled":                 "true",
-	"jellyfin_compat.public_url":              "http://127.0.0.1:8096",
-	"jellyfin_compat.emulated_server_version": DefaultJellyfinCompatEmulatedServerVersion,
-	"jellyfin_compat.server_name":             "Silo",
-	"jellyfin_compat.web_enabled":             "true",
-	"jellyfin_compat.web_version":             DefaultJellyfinWebVersion,
-	"jellyfin_compat.web_install_dir":         DefaultJellyfinWebInstallDir,
-	"jellyfin_compat.session_ttl":             "87600h",
-	"jellyfin_compat.playback_session_ttl":    defaultJellyfinCompatPlaybackSessionTTL,
+	"audiobookshelf_compat.enabled":            "true",
+	"jellyfin_compat.enabled":                  "true",
+	"jellyfin_compat.public_url":               "http://127.0.0.1:8096",
+	"jellyfin_compat.emulated_server_version":  DefaultJellyfinCompatEmulatedServerVersion,
+	"jellyfin_compat.server_name":              "Silo",
+	"jellyfin_compat.web_enabled":              "true",
+	"jellyfin_compat.web_version":              DefaultJellyfinWebVersion,
+	"jellyfin_compat.web_install_dir":          DefaultJellyfinWebInstallDir,
+	"jellyfin_compat.session_ttl":              "87600h",
+	"jellyfin_compat.playback_session_ttl":     defaultJellyfinCompatPlaybackSessionTTL,
+	JellyfinCompatAddressStreamGrantSettingKey: strconv.FormatBool(DefaultJellyfinCompatAddressStreamGrantEnabled),
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
@@ -528,7 +553,6 @@ var adminSettingDefaults = map[string]string{
 	"notifications.fanout_enabled":                             "true",
 	"notifications.ui_enabled":                                 "true",
 	"notifications.fanout.settle_seconds":                      "30",
-	"notifications.fanout.max_series_burst":                    "3",
 	"notifications.fanout.max_event_age_hours":                 "72",
 	"notifications.retention.read_days":                        "90",
 	"notifications.retention.unread_days":                      "180",
@@ -579,7 +603,7 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.matching_strategy":        "last",
 	"catalog.search.meilisearch.sync_batch_size":          "500",
 	"catalog.search.meilisearch.rebuild_batch_size":       "5000",
-	"catalog.search.meilisearch.rebuild_task_queue_depth": "4",
+	"catalog.search.meilisearch.rebuild_task_queue_depth": "16",
 	"catalog.search.meilisearch.semantic_enabled":         "false",
 	"catalog.search.meilisearch.semantic_ratio":           "0.5",
 	"catalog.search.meilisearch.embedder":                 "silo_recommendations",
@@ -731,7 +755,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
-		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
+		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", JellyfinCompatAddressStreamGrantSettingKey, "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
@@ -747,7 +771,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey,
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, AuthUserAPIKeysSettingKey, ServerLANDiscoverySettingKey,
 		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
 		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)
@@ -873,8 +897,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 65535)
 	case "notifications.fanout.settle_seconds":
 		return normalizeAdminInt(key, value, 0, 3600)
-	case "notifications.fanout.max_series_burst":
-		return normalizeAdminInt(key, value, 1, 1000)
 	case "notifications.fanout.max_event_age_hours":
 		return normalizeAdminInt(key, value, 1, 24*365)
 	case "notifications.retention.read_days", "notifications.retention.unread_days",
@@ -928,6 +950,12 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	case "server.log_level":
 		return normalizeAdminEnum(key, value, "debug", "info", "warn", "error")
+	case serverLogFormatSettingKey:
+		// Empty keeps the text default, as an unset row does.
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminEnum(key, value, "text", "json")
 	case "opslog.capture_level":
 		// "warning" is accepted because the startup reader in cmd/silo treats
 		// it as an alias for "warn".

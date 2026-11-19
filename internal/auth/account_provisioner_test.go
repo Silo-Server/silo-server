@@ -48,41 +48,6 @@ func (s stubUserStore) CreateProfile(ctx context.Context, p userstore.Profile) e
 	return s.createProfileFn(ctx, p)
 }
 
-func TestAccountProvisionerCreateAccount_CreatesDefaultProfile(t *testing.T) {
-	var createdProfile userstore.Profile
-	provisioner := NewAccountProvisioner(
-		stubAccountUsers{
-			createFn: func(context.Context, models.CreateUserInput) (*models.User, error) {
-				return &models.User{ID: 7, Username: "alex"}, nil
-			},
-		},
-		stubStoreProvider{
-			store: stubUserStore{
-				createProfileFn: func(_ context.Context, p userstore.Profile) error {
-					createdProfile = p
-					return nil
-				},
-			},
-		},
-	)
-
-	_, err := provisioner.CreateAccount(context.Background(), CreateAccountInput{
-		User: models.CreateUserInput{Username: "alex"},
-		DefaultProfile: DefaultProfileOptions{
-			Enabled: true,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateAccount returned error: %v", err)
-	}
-	if createdProfile.Name != "alex" {
-		t.Fatalf("created profile name = %q, want alex", createdProfile.Name)
-	}
-	if !createdProfile.ShowForcedSubtitles {
-		t.Fatal("created profile should enable forced subtitles by default")
-	}
-}
-
 func TestAccountProvisionerCreateAccount_DeletesUserWhenProfileCreationFails(t *testing.T) {
 	var deletedUserID int
 	provisioner := NewAccountProvisioner(

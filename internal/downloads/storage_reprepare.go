@@ -80,11 +80,13 @@ func (s *Service) PrepareAgain(ctx context.Context, userID int, profileID, devic
 }
 
 // prepareAgainActivates reports whether PrepareDownloadAgain would return d
-// to preparing, which makes it count toward the concurrent cap: a finished or
-// ready entry whose file is no longer ready. A missing file row is left to
-// PrepareDownloadAgain, which refuses it.
+// to preparing, which makes it count toward the concurrent cap: a finished,
+// ready, or downloading entry whose file is no longer ready. A missing file
+// row is left to PrepareDownloadAgain, which refuses it.
 func (m *ArtifactManager) prepareAgainActivates(ctx context.Context, d *Download) (bool, error) {
-	if d.Status != StatusCompleted && d.Status != StatusReady {
+	switch d.Status {
+	case StatusCompleted, StatusReady, StatusDownloading:
+	default:
 		return false, nil
 	}
 	a, err := m.repo.GetByID(ctx, d.ArtifactID)

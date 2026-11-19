@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useId, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -28,6 +28,7 @@ import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
 import { useCriticalContentLoaded } from "@/lib/startupPriority";
 import { useMyMediaRequests, useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
+import { menuItemPinRef, usePinLabel } from "@/hooks/queries/pinLabels";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
@@ -201,6 +202,7 @@ interface ResolvedPrimaryMenuLink {
 
 export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
   const t = useT();
+  const pinLabelIdBase = useId();
   const dir = Direction.useDirection();
   const entrance = useSidebarEntrance(swap);
   const location = useLocation();
@@ -272,6 +274,18 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   // Grouped view of the Apps entries (null → keep the flat list under the
   // single "Apps" header). See groupAppNavLinks for the SDK category contract.
   const pluginNavGroups = useMemo(() => groupAppNavLinks(pluginNavLinks), [pluginNavLinks]);
+  // Pins and menu shortcuts store the title from when they were pinned; show
+  // the row's or collection's current title instead.
+  const pinRefs = useMemo(
+    () => [
+      ...(primaryMenu?.items ?? []).flatMap((item) => menuItemPinRef(item) ?? []),
+      ...Object.entries(pins).flatMap(([libraryId, libraryPins]) =>
+        libraryPins.map((pin) => ({ ...pin, libraryId: Number(libraryId) })),
+      ),
+    ],
+    [pins, primaryMenu],
+  );
+  const pinLabel = usePinLabel(pinRefs);
   const primaryMenuLinks = useMemo<ResolvedPrimaryMenuLink[] | null>(() => {
     if (!primaryMenu) return null;
 
@@ -291,6 +305,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
       }
       if (item.type === "section") {
         if (!libraries?.some((candidate) => candidate.id === item.library_id)) return [];
+        const label = pinLabel(menuItemPinRef(item));
         return [
           {
             key,
@@ -298,9 +313,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               scope: "library",
               libraryId: item.library_id,
               sectionId: item.section_id,
-              title: item.label,
+              title: label,
             }),
-            label: item.label,
+            label,
             icon: <LayoutGrid className="h-[18px] w-[18px] shrink-0" />,
           },
         ];
@@ -312,18 +327,15 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
         ) {
           return [];
         }
+        const label = pinLabel(menuItemPinRef(item));
         return [
           {
             key,
             href:
               item.library_id === undefined
-                ? buildUserCollectionCatalogHref(item.collection_id, item.label)
-                : buildLibraryCollectionCatalogHref(
-                    item.collection_id,
-                    item.label,
-                    item.library_id,
-                  ),
-            label: item.label,
+                ? buildUserCollectionCatalogHref(item.collection_id, label)
+                : buildLibraryCollectionCatalogHref(item.collection_id, label, item.library_id),
+            label,
             icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" />,
           },
         ];
@@ -369,7 +381,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
           return [];
       }
     });
-  }, [libraries, primaryMenu, t]);
+  }, [libraries, pinLabel, primaryMenu, t]);
   const showDiscoverNav = primaryMenuLinks === null || showRequestsNav || showNotificationsNav;
 
   const catalogState = useMemo(
@@ -718,16 +730,18 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         {showLabels && hasPins && isExpanded && (
                           <div className="border-sidebar-border ms-3 space-y-0.5 border-s ps-2">
                             {libraryPins.map((pin) => {
+                              const label = pinLabel({ ...pin, libraryId: lib.id });
                               const pinHref =
                                 pin.type === "collection"
-                                  ? buildLibraryCollectionCatalogHref(pin.id, pin.label, lib.id)
+                                  ? buildLibraryCollectionCatalogHref(pin.id, label, lib.id)
                                   : buildSectionCatalogHref({
                                       scope: "library",
                                       libraryId: lib.id,
                                       sectionId: pin.id,
-                                      title: pin.label,
+                                      title: label,
                                     });
                               const pinActive = isPinnedCatalogActive(lib.id, pin);
+                              const pinLabelId = `${pinLabelIdBase}-${lib.id}-${pin.type}-${pin.id}`;
 
                               return (
                                 <div
@@ -748,7 +762,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                     ) : (
                                       <LayoutGrid className="h-3.5 w-3.5 opacity-60" />
                                     )}
-                                    <span className="truncate">{pin.label}</span>
+                                    <span id={pinLabelId} className="truncate">
+                                      {label}
+                                    </span>
                                   </ViewTransitionLink>
                                   {canToggle ? (
                                     <button
@@ -762,6 +778,8 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                       }
                                       className="text-muted-foreground hover:text-destructive absolute end-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
                                       title={t("web.shell.sidebar.unpin")}
+                                      aria-label={t("web.shell.sidebar.unpin")}
+                                      aria-describedby={pinLabelId}
                                     >
                                       <PinOff className="h-3 w-3" />
                                     </button>

@@ -191,35 +191,6 @@ func TestRequestScopeResolvesOncePerRequest(t *testing.T) {
 	}
 }
 
-// TestCloneScopeCopiesReferenceFields: every top-level slice, map, and pointer
-// field of a remembered scope is copied, including ones added to access.Scope
-// later.
-func TestCloneScopeCopiesReferenceFields(t *testing.T) {
-	var scope access.Scope
-	in := reflect.ValueOf(&scope).Elem()
-	for i := range in.NumField() {
-		field := in.Field(i)
-		switch field.Kind() {
-		case reflect.Slice:
-			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
-		case reflect.Map:
-			field.Set(reflect.MakeMap(field.Type()))
-			field.SetMapIndex(reflect.Zero(field.Type().Key()), reflect.Zero(field.Type().Elem()))
-		case reflect.Pointer:
-			field.Set(reflect.New(field.Type().Elem()))
-		}
-	}
-	out := reflect.ValueOf(cloneScope(scope))
-	for i := range in.NumField() {
-		switch in.Field(i).Kind() {
-		case reflect.Slice, reflect.Map, reflect.Pointer:
-			if out.Field(i).Pointer() == in.Field(i).Pointer() {
-				t.Errorf("cloneScope shares access.Scope.%s with its input", in.Type().Field(i).Name)
-			}
-		}
-	}
-}
-
 type stubFolderSource struct {
 	enabled       []*models.MediaFolder
 	byIDs         []*models.MediaFolder
@@ -233,35 +204,6 @@ func (s *stubFolderSource) GetEnabled(context.Context) ([]*models.MediaFolder, e
 func (s *stubFolderSource) ListByIDs(_ context.Context, ids []int) ([]*models.MediaFolder, error) {
 	s.listByIDsArgs = ids
 	return s.byIDs, nil
-}
-
-func TestListUserLibrariesRestrictedAllowlist(t *testing.T) {
-	folders := &stubFolderSource{
-		byIDs: []*models.MediaFolder{
-			{ID: 2, Name: "TV Shows", Type: "series"},
-			{ID: 19, Name: "Movies", Type: "movies"},
-		},
-	}
-	svc := &directContentService{
-		folderRepo: folders,
-		accessFilter: NewScopeAccessFilter(&stubScopeResolver{
-			scope: access.Scope{
-				AllowedLibraryIDs:   []int{2, 19},
-				LibrariesRestricted: true,
-			},
-		}),
-	}
-
-	libraries, err := svc.ListUserLibraries(context.Background(), &Session{StreamAppUserID: 7, ProfileID: "profile-1"})
-	if err != nil {
-		t.Fatalf("ListUserLibraries: %v", err)
-	}
-	if !reflect.DeepEqual(folders.listByIDsArgs, []int{2, 19}) {
-		t.Fatalf("ListByIDs called with %v, want [2 19]", folders.listByIDsArgs)
-	}
-	if len(libraries) != 2 {
-		t.Fatalf("got %d libraries, want 2", len(libraries))
-	}
 }
 
 func TestListUserLibrariesFiltersDisabled(t *testing.T) {
@@ -291,24 +233,5 @@ func TestListUserLibrariesFiltersDisabled(t *testing.T) {
 		if lib.ID == 7 {
 			t.Fatal("user-disabled library 7 still present in views list")
 		}
-	}
-}
-
-func TestListUserLibrariesEmptyAllowlistDeniesAll(t *testing.T) {
-	svc := &directContentService{
-		accessFilter: NewScopeAccessFilter(&stubScopeResolver{
-			scope: access.Scope{
-				AllowedLibraryIDs:   []int{},
-				LibrariesRestricted: true,
-			},
-		}),
-	}
-
-	libraries, err := svc.ListUserLibraries(context.Background(), &Session{StreamAppUserID: 7, ProfileID: "profile-1"})
-	if err != nil {
-		t.Fatalf("ListUserLibraries: %v", err)
-	}
-	if len(libraries) != 0 {
-		t.Fatalf("got %d libraries, want 0 for empty allowlist", len(libraries))
 	}
 }

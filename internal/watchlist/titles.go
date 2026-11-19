@@ -369,25 +369,43 @@ func (s *Titles) PurgeProfile(ctx context.Context, userID int, profileID string)
 // The IDs a stored title holding one of the TMDB IDs has kept count too, so
 // add and remove find the item promotion would move the title onto.
 func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbIDs []int, imdbID string, tvdbID int) ([]string, error) {
-	aliases := make([]catalog.ProviderAlias, 0, len(tmdbIDs)+2)
-	tmdbAliases := make([]string, 0, len(tmdbIDs))
+	ids := make([]string, 0, len(tmdbIDs)+2)
 	for _, id := range tmdbIDs {
-		tmdbID := strconv.Itoa(id)
-		tmdbAliases = append(tmdbAliases, tmdbID)
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: tmdbID})
-	}
-	stored, err := s.repo.aliasesOfTMDBOwners(ctx, mediaType, tmdbAliases)
-	if err != nil {
-		return nil, err
-	}
-	for _, a := range stored {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: a.MediaType, Provider: a.Provider, ProviderID: a.ProviderID})
+		ids = append(ids, contentid.ProviderTMDB+":"+strconv.Itoa(id))
 	}
 	if imdbID != "" {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderIMDB, ProviderID: imdbID})
+		ids = append(ids, contentid.ProviderIMDB+":"+imdbID)
 	}
 	if tvdbID > 0 {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTVDB, ProviderID: strconv.Itoa(tvdbID)})
+		ids = append(ids, contentid.ProviderTVDB+":"+strconv.Itoa(tvdbID))
+	}
+	return s.libraryMatchesIDs(ctx, mediaType, ids)
+}
+
+// libraryMatchesIDs is LibraryMatches for prefixed provider IDs ("tmdb:550",
+// "imdb:tt0137523", "tvdb:121361"), any number of each.
+func (s *Titles) libraryMatchesIDs(ctx context.Context, mediaType string, ids []string) ([]string, error) {
+	aliases := make([]catalog.ProviderAlias, 0, len(ids))
+	var tmdbAliases []string
+	for _, id := range ids {
+		// ResolveProviderAliases skips empty IDs and other providers.
+		provider, providerID, _ := strings.Cut(id, ":")
+		if provider == contentid.ProviderTMDB && providerID != "" {
+			tmdbAliases = append(tmdbAliases, providerID)
+		}
+		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: provider, ProviderID: providerID})
+	}
+	if len(tmdbAliases) > 0 {
+		stored, err := s.repo.aliasesOfTMDBOwners(ctx, mediaType, tmdbAliases)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range stored {
+			aliases = append(aliases, catalog.ProviderAlias{MediaType: a.MediaType, Provider: a.Provider, ProviderID: a.ProviderID})
+		}
+	}
+	if len(aliases) == 0 {
+		return nil, nil
 	}
 	matches, err := s.catalog.ResolveProviderAliases(ctx, aliases)
 	if err != nil {
@@ -519,21 +537,21 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		return false, false, ctx.Err()
 	}
 	defer func() { <-s.promoteSlots }()
-	addToLibrary := func(ctx context.Context) error {
-		inserted, err := store.AddToWatchlistAt(ctx, v.ProfileID, contentID, entryAddedAt)
+	// addedAt is the moved entry's time: the caller's read before the title
+	// lock, or the entry as it is under the lock.
+	addToLibrary := func(ctx context.Context, addedAt time.Time) (bool, error) {
+		inserted, err := store.AddToWatchlistAt(ctx, v.ProfileID, contentID, addedAt)
 		if err != nil {
-			return fmt.Errorf("adding promoted watchlist item: %w", err)
+			return false, fmt.Errorf("adding promoted watchlist item: %w", err)
 		}
 		if inserted {
-			newToUser = true
-			return nil
+			return true, nil
 		}
 		existing, err := store.GetWatchlistEntry(ctx, v.ProfileID, contentID)
 		if err != nil {
-			return fmt.Errorf("reading promoted watchlist item: %w", err)
+			return false, fmt.Errorf("reading promoted watchlist item: %w", err)
 		}
-		newToUser = existing != nil && sameStoredTime(existing.AddedAt, entryAddedAt)
-		return nil
+		return existing != nil && sameStoredTime(existing.AddedAt, addedAt), nil
 	}
 	if !s.addUnderLock {
 		// Skip an entry a remove already took, so the window in which a
@@ -541,14 +559,13 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		if present, err := s.repo.entryExists(ctx, v.UserID, v.ProfileID, titleID); err != nil || !present {
 			return false, false, err
 		}
-		if err := addToLibrary(ctx); err != nil {
+		added, err := addToLibrary(ctx, entryAddedAt)
+		if err != nil {
 			return false, false, err
 		}
-		moved, err = s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, func(context.Context) error { return nil })
-		return moved, newToUser, err
+		return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, func(context.Context, time.Time) (bool, error) { return added, nil })
 	}
-	moved, err = s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, addToLibrary)
-	return moved, newToUser, err
+	return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, addToLibrary)
 }
 
 // sameStoredTime reports whether a user store timestamp is t. Stores keep

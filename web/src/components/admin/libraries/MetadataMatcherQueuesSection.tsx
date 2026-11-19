@@ -26,6 +26,7 @@ import {
   useRetryLibraryMetadataMatchQueue,
 } from "@/hooks/queries/admin/libraries";
 import { useT, type Translate } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import { formatDecimal } from "@/lib/numberFormat";
 import { cn } from "@/lib/utils";
 
@@ -401,11 +402,11 @@ function MatcherQueueDetail({
                         })}
                       </span>
                     ) : null}
-                    {candidate.reasons?.length ? <span>{candidate.reasons.join(", ")}</span> : null}
+                    {candidate.reasons?.length ? <span>{joinList(candidate.reasons)}</span> : null}
                     {candidate.sources?.length ? (
                       <span>
                         {t("web.admin.common.libraryEditor.matcher.via", {
-                          sources: candidate.sources.join(", "),
+                          sources: joinList(candidate.sources),
                         })}
                       </span>
                     ) : null}

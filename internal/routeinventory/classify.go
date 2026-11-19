@@ -42,10 +42,14 @@ const (
 
 // Auth classes, from least to most privileged.
 const (
-	authPublic          = "public"
-	authOptional        = "optional_auth"
-	authAuthenticated   = "authenticated"
-	authNodeBearer      = "node_bearer"
+	authPublic        = "public"
+	authOptional      = "optional_auth"
+	authAuthenticated = "authenticated"
+	authNodeBearer    = "node_bearer"
+	// authNodeSigned admits only a transcode node signing with its own key
+	// (nodecontrol.RequireNode). node_bearer is the other direction: a node's
+	// listener admitting API servers and proxies.
+	authNodeSigned      = "node_signed"
 	authProfileScoped   = "profile_scoped"
 	authPermissionGated = "permission_gated"
 	authActingAdmin     = "acting_admin"
@@ -788,6 +792,7 @@ var authRules = []authRule{
 	{marker: markerDisplayMiddlewares, class: authProfileScoped, trait: traitProfileReq, rank: 40},
 	{marker: "RequireAuth", class: authAuthenticated, trait: traitAuthenticated, rank: 30},
 	{marker: "requireBearer", class: authNodeBearer, trait: "node_bearer", rank: 30},
+	{marker: "RequireNode", class: authNodeSigned, trait: "node_signed", rank: 30},
 	{marker: "OptionalAuth", class: authOptional, trait: "optional_auth", rank: 20},
 }
 
@@ -796,6 +801,9 @@ var authRules = []authRule{
 var traitOnlyRules = []authRule{
 	{marker: "RateLimitMW", trait: traitRateLimited},
 	{marker: "AuthEndpointHandler", trait: traitRateLimited},
+	// The per-node budgets on the node control routes (LimitNode and
+	// LimitNodePlayback, which the marker matches too).
+	{marker: "LimitNode", trait: traitRateLimited},
 	{marker: "demoGuard", trait: "demo_guarded"},
 	{marker: "meterEgress", trait: "egress_metered"},
 	{marker: "cors.Handler", trait: "cors"},

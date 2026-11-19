@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -18,9 +19,38 @@ type fakePersonalAPIKeys struct {
 	account int
 	deleted int64
 	reads   int
+	// userKeys is the server setting; only narrows list and revoke to one
+	// profile; mayCreate answers MayCreateProfileAPIKey.
+	userKeys, mayCreate bool
+	only                string
+	listedFor           string
+	boundTo             *string
+	acting, target      string
 }
 
-func (f *fakePersonalAPIKeys) ListPersonalAPIKeysPage(_ context.Context, user int, after *auth.APIKeyPageKey, _ int) ([]handlers.APIKeyListItem, bool, error) {
+func (f *fakePersonalAPIKeys) PersonalAPIKeyView(context.Context, int, string) (string, bool, error) {
+	return f.only, true, nil
+}
+func (f *fakePersonalAPIKeys) UserAPIKeysEnabled(context.Context) (bool, error) {
+	return f.userKeys, nil
+}
+func (f *fakePersonalAPIKeys) MayCreateProfileAPIKey(_ context.Context, _ int, acting, target string, _ func(*userstore.Profile) error) (bool, auth.APIKeyActingProfile, error) {
+	f.acting, f.target = acting, target
+	return f.mayCreate, auth.APIKeyActingProfile{ID: acting, PINRevision: 3}, nil
+}
+func (f *fakePersonalAPIKeys) CreatePersonalAPIKey(_ context.Context, user int, verified auth.APIKeyActingProfile, profile, label string, scopes []string) (*models.APIKey, error) {
+	if verified.PINRevision != 3 {
+		return nil, auth.ErrAPIKeyActingProfileChanged
+	}
+	f.writes++
+	f.boundTo = &profile
+	if !auth.UserAPIKeyScopesOnly(scopes) {
+		return nil, auth.ErrAPIKeyUserScopesRequired
+	}
+	return &models.APIKey{ID: 9, UserID: user, Label: label, Key: "creation-secret", Scopes: scopes, ProfileID: profile, RateTier: adminAPIKeyStandardTier, CreatedAt: fixedTime()}, nil
+}
+func (f *fakePersonalAPIKeys) ListPersonalAPIKeysPage(_ context.Context, user int, only string, after *auth.APIKeyPageKey, _ int) ([]handlers.APIKeyListItem, bool, error) {
+	f.listedFor = only
 	f.account = user
 	f.after = after
 	f.reads++
@@ -28,7 +58,7 @@ func (f *fakePersonalAPIKeys) ListPersonalAPIKeysPage(_ context.Context, user in
 	row.UserID = user
 	return []handlers.APIKeyListItem{{APIKeyConfiguration: row}}, after == nil, nil
 }
-func (f *fakePersonalAPIKeys) RevokePersonalAPIKey(_ context.Context, user int, id int64) error {
+func (f *fakePersonalAPIKeys) RevokePersonalAPIKey(_ context.Context, user int, _ string, id int64) error {
 	f.account = user
 	f.deleted = id
 	f.writes++
@@ -136,5 +166,37 @@ func TestPersonalAPIKeysCursorIsolation(t *testing.T) {
 	next := do(t, h, "GET", path, "", with(bearer(memberToken), "X-Profile-Id", "p-owner"))
 	if next.Code != 200 || f.after == nil || f.after.ID != 7 {
 		t.Fatal(next.Code, next.Body.String())
+	}
+}
+
+// With the server setting on, an account that is not an admin mints keys, but
+// only ones that carry user scopes, and a profile-bound key is asked for the
+// acting profile and the one it binds. A profile limited to its own keys
+// lists only those.
+func TestPersonalAPIKeysUserKeys(t *testing.T) {
+	h, f := personalKeyHandler()
+	f.userKeys, f.mayCreate = true, true
+	asKid := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	created := do(t, h, "POST", Prefix+"/api-keys", `{"label":"Sync","scopes":["watch:read"],"profile_id":"p-owner"}`, asKid)
+	if created.Code != 201 || f.boundTo == nil || *f.boundTo != "p-owner" || f.acting != "p-owner" || f.target != "p-owner" ||
+		!strings.Contains(created.Body.String(), `"profile_id":"p-owner"`) {
+		t.Fatal(created.Code, created.Body.String(), f.boundTo, f.acting, f.target)
+	}
+	for _, body := range []string{`{"label":"Sync"}`, `{"label":"Sync","scopes":["admin:users"]}`} {
+		requireProblem(t, do(t, h, "POST", Prefix+"/api-keys", body, asKid), TypeValidationFailed)
+	}
+	// An admin binding a key to a profile takes the same path.
+	f.boundTo = nil
+	if bound := do(t, h, "POST", Prefix+"/api-keys", `{"label":"Kid","scopes":["watch:read"],"profile_id":"p-owner"}`, bearer(adminToken)); bound.Code != 201 || f.boundTo == nil {
+		t.Fatal(bound.Code, bound.Body.String())
+	}
+	f.mayCreate, f.boundTo = false, nil
+	requireProblem(t, do(t, h, "POST", Prefix+"/api-keys", `{"label":"Sync","scopes":["watch:read"],"profile_id":"p-other"}`, asKid), TypePermissionDenied)
+	if f.boundTo != nil {
+		t.Fatal("a refused profile key reached storage")
+	}
+	f.only = "p-owner"
+	if listed := do(t, h, "GET", Prefix+"/api-keys", "", asKid); listed.Code != 200 || f.listedFor != "p-owner" {
+		t.Fatal(listed.Code, listed.Body.String(), f.listedFor)
 	}
 }

@@ -394,15 +394,21 @@ func humaDetail(t ProblemType, msg string, bodyLimit int64) string {
 // Error codes carried in Problem.errors[].code. They are contract values
 // (docs/architecture/api-contract.md, "Problem Details"); add, never rename.
 const (
-	codeInvalid          = "invalid"
-	codeInvalidType      = "invalid_type"
-	codeInvalidEnum      = "invalid_enum"
-	codeRequired         = "required"
-	codeOutOfRange       = "out_of_range"
+	codeInvalid     = "invalid"
+	codeInvalidType = "invalid_type"
+	codeInvalidEnum = "invalid_enum"
+	codeRequired    = "required"
+	codeOutOfRange  = "out_of_range"
+	// codeDuplicate: the value, such as a name, is already taken by another
+	// item of the same kind.
+	codeDuplicate        = "duplicate"
 	codeUnknownField     = "unknown_field"
 	codeUnknownParameter = "unknown_parameter"
 	codeMalformedJSON    = "malformed_json"
 	codeMalformedForm    = "malformed_form"
+	// codeManagedByEnvironment refuses a change to a field a stream node
+	// declares from its own environment (env_managed on an admin node).
+	codeManagedByEnvironment = "managed_by_environment"
 
 	locationBody     = "body"
 	locationBodyFile = "body.file"

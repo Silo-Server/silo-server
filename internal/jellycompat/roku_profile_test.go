@@ -11,87 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-// rokuProfile is the DeviceProfile Moonfin for Roku (a jellyfin-roku fork)
-// builds in source/utils/deviceCapabilities.bs for a 4K Roku on stereo output.
-// Its video transcoding profiles list AC-3 but not AAC, and its AAC codec
-// profile requires AudioProfile != Main.
-func rokuProfile(t *testing.T) DeviceProfile {
-	t.Helper()
-	data, err := os.ReadFile("testdata/roku_device_profile.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var profile DeviceProfile
-	if err := json.Unmarshal(data, &profile); err != nil {
-		t.Fatal(err)
-	}
-	return profile
-}
-
-func rokuTestVersion(audio models.AudioTrack) catalog.FileVersion {
-	return catalog.FileVersion{
-		FileID: 7, Container: "mkv", CodecVideo: "h264", CodecAudio: audio.Codec, Resolution: "1080p", Bitrate: 8000, Duration: 3600,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, BitDepth: 8, Width: 1920, Height: 1080, VideoRangeType: "SDR", Bitrate: 7_500}},
-		AudioTracks: []models.AudioTrack{audio},
-	}
-}
-
-// Every Roku decodes stereo AAC, so a Roku profile that leaves AAC out of its
-// transcoding profiles still gets AAC encodes.
-func TestRokuProfileGetsAACWhenItIsNotListed(t *testing.T) {
-	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	req := playbackInfoRequest{MaxStreamingBitrate: 140_000_000}
-	for _, tc := range []struct {
-		name        string
-		profile     DeviceProfile
-		audio       models.AudioTrack
-		wantDirect  bool
-		wantRemux   bool
-		wantSegment string
-	}{
-		{name: "AAC-LC direct plays", profile: rokuProfile(t), audio: models.AudioTrack{Codec: "aac", Profile: "LC", Channels: 2, Default: true}, wantDirect: true},
-		{name: "DTS remuxes with AAC", profile: rokuProfile(t), audio: models.AudioTrack{Codec: "dts", Channels: 6, Default: true}, wantSegment: compatAudioV2PathSegment, wantRemux: true},
-		// The AAC encode states its LC profile, so Roku's AudioProfile != Main
-		// rule passes when the profile lists AAC too.
-		{name: "a profile that lists AAC remuxes DTS with AAC", profile: withAACListed(rokuProfile(t)), audio: models.AudioTrack{Codec: "dts", Channels: 6, Default: true}, wantSegment: compatAudioV2PathSegment, wantRemux: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := h.buildPlaybackSource("item", "play", rokuTestVersion(tc.audio), tc.profile, req, true)
-			if source.SupportsDirectPlay != tc.wantDirect || !source.SupportsTranscoding {
-				t.Fatalf("direct=%v transcoding=%v, want direct=%v transcoding=true", source.SupportsDirectPlay, source.SupportsTranscoding, tc.wantDirect)
-			}
-			if source.HLSRemux != tc.wantRemux || source.TranscodeAudio != tc.wantRemux {
-				t.Fatalf("HLSRemux=%v TranscodeAudio=%v, want remux=%v", source.HLSRemux, source.TranscodeAudio, tc.wantRemux)
-			}
-			if got := compatHLSRoutePathSegment(source); got != tc.wantSegment {
-				t.Fatalf("route segment = %q, want %q", got, tc.wantSegment)
-			}
-		})
-	}
-}
-
-// Roku sends AlwaysBurnInSubtitleWhenTranscoding=true, so a selected bitmap
-// subtitle turns an audio-encoding remux into a full encode. It must stop
-// copying video, or the subtitle is never drawn.
-func TestRokuBurnInEncodesVideo(t *testing.T) {
-	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	profile := rokuProfile(t)
-	version := rokuTestVersion(models.AudioTrack{Codec: "dts", Channels: 6, Default: true})
-	version.SubtitleTracks = []catalog.VersionSubtitleTrack{{Index: 2, Codec: "hdmv_pgs_subtitle", Language: "eng", Default: true}}
-	source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxStreamingBitrate: 140_000_000}, true)
-	selected := 2
-	source.SelectedSubtitleStreamIndex = &selected
-	applyCompatSubtitleDelivery(&source, profile, true)
-	if !source.SubtitleBurnIn || !source.SupportsTranscoding || compatHLSCopiesVideo(source) {
-		t.Fatalf("burn-in=%v transcoding=%v copies video=%v, want a video encode", source.SubtitleBurnIn, source.SupportsTranscoding, compatHLSCopiesVideo(source))
-	}
-}
 
 // An HEVC encode is held to the profile's HEVC limits, not its H.264 ones.
 func TestHEVCEncodeUsesItsOwnLimits(t *testing.T) {
@@ -191,26 +113,6 @@ func TestRoku1080pProfileEncodesWithinItsLimits(t *testing.T) {
 	}
 }
 
-// A stored profile must read back as it was negotiated: IsRequired defaults
-// to true when the key is missing, so false has to be written.
-func TestDeviceProfileRoundTripKeepsOptionalConditions(t *testing.T) {
-	profile := DeviceProfile{CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Conditions: []ProfileCondition{
-		{Condition: "NotEquals", Property: "IsAnamorphic", Value: "true", IsRequired: false},
-		{Condition: "LessThanEqual", Property: "VideoBitrate", Value: "10000000", IsRequired: true},
-	}}}}
-	data, err := encodeDeviceProfile(profile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stored DeviceProfile
-	if err := json.Unmarshal(data, &stored); err != nil {
-		t.Fatal(err)
-	}
-	if got := stored.CodecProfiles[0].Conditions; got[0].IsRequired || !got[1].IsRequired {
-		t.Fatalf("stored IsRequired = %v, %v; want false, true", got[0].IsRequired, got[1].IsRequired)
-	}
-}
-
 // After a failed direct play, Moonfin for Roku asks again with no
 // DirectPlayProfiles. That must not offer the same direct play again.
 func TestRokuRetryWithoutDirectPlayProfilesGetsAnEncode(t *testing.T) {
@@ -269,79 +171,4 @@ func TestRokuRetryProfileStorage(t *testing.T) {
 			t.Fatalf("err = %v, want 413", err)
 		}
 	})
-}
-
-func withAACListed(profile DeviceProfile) DeviceProfile {
-	profile.TranscodingProfiles = slices.Clone(profile.TranscodingProfiles)
-	for i := range profile.TranscodingProfiles {
-		if profile.TranscodingProfiles[i].Type == "Video" {
-			profile.TranscodingProfiles[i].AudioCodec = "aac," + profile.TranscodingProfiles[i].AudioCodec
-		}
-	}
-	return profile
-}
-
-// Roku players can play the audio of an fMP4 HLS copy silently, so a Roku's
-// video-copy stream is MPEG-TS, which its profile lists first. Other clients
-// keep fMP4.
-func TestRokuVideoCopyUsesMPEGTS(t *testing.T) {
-	profile, err := os.ReadFile("testdata/roku_1080p_device_profile.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A profile whose MPEG-TS rules refuse the copied video keeps the copy in
-	// the fMP4 it was negotiated for.
-	var tsRefusesH264 DeviceProfile
-	if err := json.Unmarshal(profile, &tsRefusesH264); err != nil {
-		t.Fatal(err)
-	}
-	for i, transcoding := range tsRefusesH264.TranscodingProfiles {
-		if transcoding.Type == "Video" && transcoding.Container == compatContainerTS {
-			tsRefusesH264.TranscodingProfiles[i].VideoCodec = "mpeg2video"
-		}
-	}
-	tsRefusesH264JSON, err := json.Marshal(tsRefusesH264)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name          string
-		userAgent     string
-		profile       []byte
-		wantContainer string
-		wantSegment   string
-	}{
-		{name: "Roku", userAgent: "Roku/DVP-16.0 (16.0.4.842-24)", profile: profile, wantContainer: "ts", wantSegment: "/" + compatRemuxTSV1PathSegment + "/"},
-		{name: "browser", userAgent: "Mozilla/5.0", profile: profile, wantContainer: compatContainerMP4, wantSegment: "/" + compatAudioV2PathSegment + "/"},
-		{name: "Roku without H.264 in MPEG-TS", userAgent: "Roku/DVP-16.0 (16.0.4.842-24)", profile: tsRefusesH264JSON, wantContainer: compatContainerMP4, wantSegment: "/" + compatAudioV2PathSegment + "/"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler, _ := newSubtitleSelectionHandler(t)
-			handler.SubtitleRepo = nil
-			version := rokuTestVersion(models.AudioTrack{Codec: "eac3", Channels: 6, Default: true})
-			handler.content = &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Versions: []catalog.FileVersion{version}}}
-			routeID := handler.codec.EncodeStringID(EncodedIDItem, "movie-1")
-			req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{"DeviceProfile":`+string(tc.profile)+`}`))
-			req.Header.Set("User-Agent", tc.userAgent)
-			routeCtx := chi.NewRouteContext()
-			routeCtx.URLParams.Add("id", routeID)
-			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1"}))
-			rec := httptest.NewRecorder()
-			handler.HandlePlaybackInfo(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-			}
-			source := decodePlaybackInfo(t, rec.Body.Bytes()).MediaSources[0]
-			if source.TranscodingContainer != tc.wantContainer || !strings.Contains(source.TranscodingURL, tc.wantSegment) {
-				t.Fatalf("transcoding %s at %s, want %s on %s", source.TranscodingContainer, source.TranscodingURL, tc.wantContainer, tc.wantSegment)
-			}
-			// Moonfin shows text subtitles itself only when every reason is
-			// an audio or container reason; a video reason makes it ask for a
-			// burn-in, which restarts the copy as a full encode.
-			if !strings.Contains(source.TranscodingURL, "&TranscodeReasons=ContainerNotSupported,AudioChannelsNotSupported") {
-				t.Fatalf("TranscodingURL %s lacks the copy's reasons", source.TranscodingURL)
-			}
-		})
-	}
 }

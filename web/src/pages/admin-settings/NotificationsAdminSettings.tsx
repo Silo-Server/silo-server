@@ -74,7 +74,6 @@ const PIPELINE_KEYS = ["notifications.release_events_enabled", "notifications.fa
 /** Batching and flood control; all advanced. */
 const FANOUT_KEYS = [
   "notifications.fanout.settle_seconds",
-  "notifications.fanout.max_series_burst",
   "notifications.fanout.max_event_age_hours",
 ];
 
@@ -1146,7 +1145,7 @@ export default function NotificationsAdminSettings() {
                 <SettingField
                   label={t("web.admin.settings.notifications.digestHour")}
                   description={t("web.admin.settings.notifications.digestHourDescription")}
-                  unit="0-23"
+                  unit={t("web.admin.common.units.hourRange")}
                   type="number"
                   value={numberValue("notifications.email.digest_hour", "8")}
                   onChange={(v) => form.setValue("notifications.email.digest_hour", v)}
@@ -1222,7 +1221,7 @@ export default function NotificationsAdminSettings() {
                 <SettingField
                   label={t("web.admin.settings.notifications.digestHour")}
                   description={t("web.admin.settings.notifications.digestHourDescription")}
-                  unit="0-23"
+                  unit={t("web.admin.common.units.hourRange")}
                   type="number"
                   value={numberValue("notifications.discord.digest_hour", "8")}
                   onChange={(v) => form.setValue("notifications.discord.digest_hour", v)}
@@ -1401,14 +1400,6 @@ export default function NotificationsAdminSettings() {
                 value={numberValue("notifications.fanout.settle_seconds", "30")}
                 onChange={(v) => form.setValue("notifications.fanout.settle_seconds", v)}
                 restartRequired={needsRestart("notifications.fanout.settle_seconds")}
-              />
-              <SettingField
-                label={t("web.admin.settings.notifications.processing.maxPerShow")}
-                description={t("web.admin.settings.notifications.processing.maxPerShowDescription")}
-                type="number"
-                value={numberValue("notifications.fanout.max_series_burst", "3")}
-                onChange={(v) => form.setValue("notifications.fanout.max_series_burst", v)}
-                restartRequired={needsRestart("notifications.fanout.max_series_burst")}
               />
               <SettingField
                 label={t("web.admin.settings.notifications.processing.maxAge")}

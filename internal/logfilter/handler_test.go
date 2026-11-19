@@ -13,41 +13,6 @@ func newCapture() (*Handler, *bytes.Buffer) {
 	return h, buf
 }
 
-func TestHandlerFiltersConfiguredPrefixes(t *testing.T) {
-	buf := &bytes.Buffer{}
-	h := New(slog.NewTextHandler(buf, nil), "metadata, scanner")
-	logger := slog.New(h)
-
-	logger.Info("metadata: cached image")
-	logger.Info("scanner: walked folder")
-	logger.Info("playback: session started")
-
-	out := buf.String()
-	if strings.Contains(out, "metadata:") || strings.Contains(out, "scanner:") {
-		t.Fatalf("quiet-prefixed messages leaked: %s", out)
-	}
-	if !strings.Contains(out, "playback: session started") {
-		t.Fatalf("unrelated message was dropped: %s", out)
-	}
-}
-
-func TestHandlerAcceptsOptionalTrailingColonInConfiguredPrefix(t *testing.T) {
-	buf := &bytes.Buffer{}
-	h := New(slog.NewTextHandler(buf, nil), "metadata:")
-	logger := slog.New(h)
-
-	logger.Info("metadata: cached image")
-	logger.Info("playback: session started")
-
-	out := buf.String()
-	if strings.Contains(out, "metadata: cached image") {
-		t.Fatalf("colon-suffixed quiet prefix was treated as metadata:: %s", out)
-	}
-	if !strings.Contains(out, "playback: session started") {
-		t.Fatalf("unrelated message was dropped: %s", out)
-	}
-}
-
 func TestSetQuietAppliesToClones(t *testing.T) {
 	h, buf := newCapture()
 

@@ -104,6 +104,10 @@ func creditsFingerprintKey() mediaartifact.Key {
 // lacked what they need, is analyzed again once they can run. It never
 // equals an intro analysis hash, so the two kinds keep separate season state.
 func CreditsAnalysisConfigHash(creditsTail bool) string {
+	return creditsAnalysisConfigHash(creditsTail, CreditsBehaviorVersion)
+}
+
+func creditsAnalysisConfigHash(creditsTail bool, behaviorVersion int) string {
 	tailHash := "none"
 	if creditsTail {
 		tailHash = creditsTailKey().ConfigHash
@@ -111,9 +115,26 @@ func CreditsAnalysisConfigHash(creditsTail bool) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("credits:%s:%s:%d",
 		creditsFingerprintKey().ConfigHash,
 		tailHash,
-		CreditsBehaviorVersion,
+		behaviorVersion,
 	)))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// creditsFirstTailBehaviorVersion is the first CreditsBehaviorVersion whose
+// analyses ran tail passes.
+const creditsFirstTailBehaviorVersion = 2
+
+// creditsTailSettledHashes keys the season state a tail-capable run settles a
+// group under, for this and every earlier behavior version with tail passes.
+// A run without tail passes keeps off all of them: a behavior bump re-runs
+// settled groups, and its audio-only result would replace the audio and video
+// credits an earlier version wrote.
+func creditsTailSettledHashes() []string {
+	hashes := make([]string, 0, CreditsBehaviorVersion-creditsFirstTailBehaviorVersion+1)
+	for version := CreditsBehaviorVersion; version >= creditsFirstTailBehaviorVersion; version-- {
+		hashes = append(hashes, creditsAnalysisConfigHash(true, version))
+	}
+	return hashes
 }
 
 // creditsInputSignature is InputSignature plus whether each file's probe

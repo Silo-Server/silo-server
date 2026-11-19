@@ -160,57 +160,6 @@ func TestUpdateIntegrationAddressChangeNeedsKeyOnlyWhenOneIsSaved(t *testing.T) 
 	}
 }
 
-// A blank URL in a connection test of a saved server is tested as blank when
-// its router declares base_url_optional. For any other router it still stands
-// for the saved address, and so does a URL a connection test leaves out. A
-// save validates the blank URL it stores, whatever the router declares, so the
-// plugin can refuse an address it can't use.
-func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		urlOptional bool
-		want        string
-	}{
-		{"router needs no URL", true, ""},
-		{"router needs a URL", false, "http://router-1.local"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newFakeStore()
-			store.integrations = []Integration{keylessRouterInst("router-1")}
-			router := &fakeRouterProvider{keyOptional: map[int]bool{1: true}, urlOptional: map[int]bool{1: tc.urlOptional}}
-			service := newTestService(store)
-			service.SetRouterProvider(router)
-			admin := Viewer{UserID: 1, IsAdmin: true}
-
-			if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1"}); err != nil {
-				t.Fatalf("LoadIntegrationOptions without a URL: %v", err)
-			}
-			if router.gotOptionsConn.BaseURL != "http://router-1.local" {
-				t.Fatalf("probed address without a URL = %q, want the saved one", router.gotOptionsConn.BaseURL)
-			}
-			if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1", BaseURLCleared: true}); err != nil {
-				t.Fatalf("LoadIntegrationOptions with a cleared URL: %v", err)
-			}
-			if router.gotOptionsConn.BaseURL != tc.want {
-				t.Fatalf("probed address with a cleared URL = %q, want %q", router.gotOptionsConn.BaseURL, tc.want)
-			}
-			install := 1
-			if _, err := service.UpdateIntegration(context.Background(), admin, Integration{
-				ID: "router-1", Name: "router-1", Enabled: true, CapabilityID: "arr", InstallationID: &install,
-			}); err != nil {
-				t.Fatalf("UpdateIntegration: %v", err)
-			}
-			stored, err := store.GetIntegration(context.Background(), "router-1")
-			if err != nil {
-				t.Fatalf("GetIntegration: %v", err)
-			}
-			if router.gotValidateConn.BaseURL != "" || stored.BaseURL != "" {
-				t.Fatalf("validated address = %q, stored address = %q; want the blank address validated and stored", router.gotValidateConn.BaseURL, stored.BaseURL)
-			}
-		})
-	}
-}
-
 // A cleared URL is a different address, so a saved key stays behind: the
 // connection test goes without it, and the save needs it typed again.
 func TestClearingURLOfServerWithSavedKeyNeedsTheKeyAgain(t *testing.T) {

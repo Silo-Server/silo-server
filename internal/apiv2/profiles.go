@@ -396,7 +396,7 @@ type PlaybackSession struct {
 	PlayMethod               string  `json:"play_method" doc:"The negotiated method as the node reported it" example:"direct"`
 	ReportingNode            string  `json:"reporting_node" doc:"Identifier of the node serving the stream" example:"api"`
 	NodeDisplayName          string  `json:"node_display_name" doc:"Empty when the node has no display name" example:""`
-	FileDuration             *int    `json:"file_duration" nullable:"true" doc:"Seconds; null when unknown" example:"8520"`
+	FileDuration             *int    `json:"file_duration" nullable:"true" doc:"Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown" example:"8520"`
 	StartedAt                Instant `json:"started_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt                Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	PositionSeconds          float64 `json:"position_seconds" example:"1234.5"`
@@ -498,7 +498,7 @@ func playbackSessionOf(v handlers.PlaybackSessionView) PlaybackSession {
 		ContentID: v.ContentID, MediaTitle: v.MediaTitle, MediaType: v.MediaType,
 		SeriesName: v.SeriesName, EpisodeName: v.EpisodeName, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		PosterURL: v.PosterURL, PlayMethod: v.PlayMethod, ReportingNode: v.ReportingNode, NodeDisplayName: v.NodeDisplayName,
-		FileDuration: v.FileDuration, StartedAt: NewInstant(v.StartedAt), UpdatedAt: NewInstant(v.UpdatedAt),
+		FileDuration: v.MeasuredDuration(), StartedAt: NewInstant(v.StartedAt), UpdatedAt: NewInstant(v.UpdatedAt),
 		PositionSeconds: v.PositionSeconds, IsPaused: v.IsPaused, HasPlaybackControl: v.HasPlaybackControl,
 		ClientIP: v.ClientIP, ClientName: v.ClientName, ClientVersion: v.ClientVersion, ClientBuild: v.ClientBuild,
 		ClientChannel: v.ClientChannel, ClientLabel: v.ClientLabel, ClientLabelFull: v.ClientLabelFull, ClientUserAgent: v.ClientUserAgent,
@@ -680,6 +680,10 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 		if claims.IsRemotePlayback() && v.ID != claims.ProfileID {
 			continue
 		}
+		// So does a profile-bound API key.
+		if claims.APIKeyProfileID != "" && v.ID != claims.APIKeyProfileID {
+			continue
+		}
 		profile, p := profileOf(v)
 		if p != nil {
 			return nil, p
@@ -689,7 +693,7 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 	var maxProfiles *int
 	// The handoff list is filtered to one profile, so its length says nothing
 	// about room left in the household.
-	if view.MaxProfiles >= 1 && !claims.IsRemotePlayback() {
+	if view.MaxProfiles >= 1 && !claims.IsRemotePlayback() && claims.APIKeyProfileID == "" {
 		maxProfiles = &view.MaxProfiles
 	}
 	return &ProfileCollectionOutput{Body: ProfileCollection{

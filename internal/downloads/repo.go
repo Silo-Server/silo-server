@@ -163,17 +163,23 @@ const (
 	transferLease        = 5 * transferLeaseRenewal
 )
 
-// CountActiveByUser returns the number of active downloads for a user,
-// leaving out the downloads named in except.
-// 'preparing' counts: an artifact-backed row holds encode work in flight, so
-// it must consume the concurrent quota like a live transfer does. An
-// account-level 'downloading' row counts only while its transfer lease holds.
+// concurrentSlotPredicate matches the download rows that count toward an
+// account's concurrent limit: an entry whose file is being prepared, and an
+// account-level row that is queued or transferring, whose transitions the
+// server makes itself (a transferring row only while its transfer lease
+// holds; $3 is transferLease in seconds). A device entry is downloading
+// because its device said so, and nothing ends that report when the transfer
+// fails, is paused, or the app is removed, so it holds no slot.
+const concurrentSlotPredicate = `(status = 'preparing' OR (device_id IS NULL AND (status = 'queued'
+	OR (status = 'downloading' AND updated_at >= now() - make_interval(secs => $3)))))`
+
+// CountActiveByUser returns how many of a user's downloads hold a slot of the
+// concurrent limit, leaving out the downloads named in except.
 func (r *Repository) CountActiveByUser(ctx context.Context, userID int, except ...string) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading', 'preparing')
-		   AND id <> ALL($2::text[])
-		   AND NOT (device_id IS NULL AND status = 'downloading' AND updated_at < now() - make_interval(secs => $3))`,
+		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND `+concurrentSlotPredicate+`
+		   AND id <> ALL($2::text[])`,
 		userID, append([]string{}, except...), // never nil: a NULL array would match no row
 		transferLease.Seconds(),
 	).Scan(&count)

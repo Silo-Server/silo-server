@@ -79,7 +79,9 @@ type TMDBMovieCollection struct {
 	BackdropThumbhash  string
 	// MemberTMDBIDs lists the collection's movies in release order.
 	MemberTMDBIDs []int64
-	FetchedAt     time.Time
+	// Language is the metadata language the collection was fetched in.
+	Language  string
+	FetchedAt time.Time
 }
 
 // BoxSetGroup is one box set of a library as a viewer sees it: the
@@ -109,7 +111,7 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 		return out, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT tmdb_collection_id, name, overview, poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, member_tmdb_ids, fetched_at
+		SELECT tmdb_collection_id, name, overview, poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, member_tmdb_ids, language, fetched_at
 		FROM tmdb_movie_collections WHERE tmdb_collection_id = ANY($1)`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("querying tmdb collections: %w", err)
@@ -117,7 +119,7 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 	defer rows.Close()
 	for rows.Next() {
 		var c TMDBMovieCollection
-		if err := rows.Scan(&c.ID, &c.Name, &c.Overview, &c.PosterPath, &c.PosterThumbhash, &c.BackdropPath, &c.BackdropThumbhash, &c.MemberTMDBIDs, &c.FetchedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Overview, &c.PosterPath, &c.PosterThumbhash, &c.BackdropPath, &c.BackdropThumbhash, &c.MemberTMDBIDs, &c.Language, &c.FetchedAt); err != nil {
 			return nil, fmt.Errorf("scanning tmdb collection: %w", err)
 		}
 		out[c.ID] = c
@@ -185,45 +187,69 @@ func (r *BoxSetRepository) RecordMovieCollection(ctx context.Context, contentID 
 	return nil
 }
 
-// currentBoxSetMember holds when the collection lookup row m is current (its
-// movie still has the TMDB ID it was looked up under) and its movie is in an
-// enabled library with box sets on. Only such rows keep a collection stored
-// and refreshed: a library that turns box sets off, or a rematched movie,
-// leaves its lookup rows behind.
-const currentBoxSetMember = `EXISTS (
-			SELECT 1 FROM media_items cmi
+// currentBoxSetMemberLibraries selects, as cf, the libraries that make the
+// collection lookup row m current: its movie still has the TMDB ID it was
+// looked up under, and they are enabled libraries with box sets on holding
+// it. Only such rows keep a collection stored and refreshed: a library that
+// turns box sets off, or a rematched movie, leaves its lookup rows behind.
+const currentBoxSetMemberLibraries = `
+			FROM media_items cmi
 			JOIN media_item_libraries cmil ON cmil.content_id = cmi.content_id
 			JOIN media_folders cf ON cf.id = cmil.media_folder_id
 			WHERE cmi.content_id = m.content_id AND cmi.tmdb_id = m.checked_tmdb_id::text
-			  AND cf.box_sets_enabled AND cf.enabled IS NOT FALSE)`
+			  AND cf.box_sets_enabled AND cf.enabled IS NOT FALSE`
+
+// currentBoxSetMember holds when the collection lookup row m is current.
+const currentBoxSetMember = `EXISTS (SELECT 1 ` + currentBoxSetMemberLibraries + `)`
+
+// CollectionFetch is a collection due for a fetch and the metadata language
+// to fetch it in.
+type CollectionFetch struct {
+	ID       int64
+	Language string
+}
 
 // CollectionsNeedingFetch returns up to limit collections a movie of a box
-// set library belongs to that are not stored yet or were fetched before
-// staleBefore.
-func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]int64, error) {
+// set library belongs to that are not stored yet, were fetched before
+// staleBefore, or were fetched in another language than the one they are
+// due in. A collection is due in the metadata language of the first library,
+// in library order, that shows it: one with box sets on holding at least its
+// box set minimum of the collection's movies, or failing that any library
+// holding one of them. One collection serves every library, so a deployment
+// whose box set libraries differ in language shows it in one of them.
+func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]CollectionFetch, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT m.tmdb_collection_id, c.fetched_at
-		FROM media_item_tmdb_collections m
-		LEFT JOIN tmdb_movie_collections c ON c.tmdb_collection_id = m.tmdb_collection_id
-		WHERE m.tmdb_collection_id IS NOT NULL AND (c.tmdb_collection_id IS NULL OR c.fetched_at < $1)
-		  AND `+currentBoxSetMember+`
-		  AND NOT (m.tmdb_collection_id = ANY($3::bigint[]))
-		ORDER BY c.fetched_at NULLS FIRST, m.tmdb_collection_id
-		LIMIT $2`, staleBefore, limit, nonNilSlice(skip))
+		SELECT due.tmdb_collection_id, due.language
+		FROM (
+			SELECT DISTINCT ON (m.tmdb_collection_id) m.tmdb_collection_id, lib.language
+			FROM media_item_tmdb_collections m
+			CROSS JOIN LATERAL (
+				SELECT cf.id, cf.sort_order, cf.box_set_min_movies,
+					COALESCE(NULLIF(BTRIM(cf.metadata_language), ''), 'en') AS language
+				`+currentBoxSetMemberLibraries+`
+			) lib
+			WHERE m.tmdb_collection_id IS NOT NULL
+			  AND NOT (m.tmdb_collection_id = ANY($3::bigint[]))
+			GROUP BY m.tmdb_collection_id, lib.id, lib.sort_order, lib.box_set_min_movies, lib.language
+			ORDER BY m.tmdb_collection_id, count(*) >= GREATEST(lib.box_set_min_movies, $4) DESC, lib.sort_order, lib.id
+		) due
+		LEFT JOIN tmdb_movie_collections c ON c.tmdb_collection_id = due.tmdb_collection_id
+		WHERE c.tmdb_collection_id IS NULL OR c.fetched_at < $1 OR c.language <> due.language
+		ORDER BY c.fetched_at NULLS FIRST, due.tmdb_collection_id
+		LIMIT $2`, staleBefore, limit, nonNilSlice(skip), MinBoxSetMinMovies)
 	if err != nil {
 		return nil, fmt.Errorf("querying collections needing a fetch: %w", err)
 	}
 	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		var fetchedAt *time.Time
-		if err := rows.Scan(&id, &fetchedAt); err != nil {
-			return nil, fmt.Errorf("scanning collection needing a fetch: %w", err)
-		}
-		ids = append(ids, id)
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (CollectionFetch, error) {
+		var c CollectionFetch
+		err := row.Scan(&c.ID, &c.Language)
+		return c, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading collections needing a fetch: %w", err)
 	}
-	return ids, rows.Err()
+	return out, nil
 }
 
 // UpsertCollection stores a fetched collection with the provider URLs of its
@@ -236,10 +262,11 @@ func (r *BoxSetRepository) UpsertCollection(ctx context.Context, c TMDBMovieColl
 		members = []int64{}
 	}
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO tmdb_movie_collections (tmdb_collection_id, name, overview, poster_path, poster_source_path, backdrop_path, backdrop_source_path, member_tmdb_ids, fetched_at)
-		VALUES ($1, $2, $3, $4, $4, $5, $5, $6, now())
+		INSERT INTO tmdb_movie_collections (tmdb_collection_id, name, overview, poster_path, poster_source_path, backdrop_path, backdrop_source_path, member_tmdb_ids, language, fetched_at)
+		VALUES ($1, $2, $3, $4, $4, $5, $5, $6, $7, now())
 		ON CONFLICT (tmdb_collection_id) DO UPDATE SET
 			name = EXCLUDED.name,
+			language = EXCLUDED.language,
 			overview = EXCLUDED.overview,
 			poster_path = CASE WHEN tmdb_movie_collections.poster_source_path = EXCLUDED.poster_source_path
 				THEN tmdb_movie_collections.poster_path ELSE EXCLUDED.poster_path END,
@@ -254,7 +281,7 @@ func (r *BoxSetRepository) UpsertCollection(ctx context.Context, c TMDBMovieColl
 			member_tmdb_ids = EXCLUDED.member_tmdb_ids,
 			fetched_at = EXCLUDED.fetched_at,
 			updated_at = now()`,
-		c.ID, c.Name, c.Overview, c.PosterSourcePath, c.BackdropSourcePath, members)
+		c.ID, c.Name, c.Overview, c.PosterSourcePath, c.BackdropSourcePath, members, c.Language)
 	if err != nil {
 		return fmt.Errorf("storing tmdb collection: %w", err)
 	}
@@ -323,10 +350,10 @@ func (r *BoxSetRepository) SetCollectionArtwork(ctx context.Context, id int64, s
 	return nil
 }
 
-// TouchCollection marks a collection fetched without changing it, so one
-// TMDB no longer serves is not fetched again on every run.
-func (r *BoxSetRepository) TouchCollection(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET fetched_at = now() WHERE tmdb_collection_id = $1`, id)
+// TouchCollection marks a collection fetched in language without changing
+// it, so one TMDB no longer serves is not fetched again on every run.
+func (r *BoxSetRepository) TouchCollection(ctx context.Context, id int64, language string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET fetched_at = now(), language = $2 WHERE tmdb_collection_id = $1`, id, language)
 	if err != nil {
 		return fmt.Errorf("touching tmdb collection: %w", err)
 	}

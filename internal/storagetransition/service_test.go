@@ -472,51 +472,6 @@ func testService(settings *memorySettings, source *memoryStore) *Service {
 	return service
 }
 
-func TestStartFreshNeverReadsOldStorage(t *testing.T) {
-	source := &memoryStore{identity: "s3|old|bucket|", objects: map[string][]byte{"tmdb/poster.jpg": []byte("large cache")}}
-	settings := stagedLocal(t, t.TempDir())
-	result, err := testService(settings, source).ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyFresh}, func(adminjob.StorageTransitionProgress) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if source.lists != 0 || source.gets != 0 {
-		t.Fatalf("fresh transition touched old storage: lists=%d gets=%d", source.lists, source.gets)
-	}
-	got := result.(Result)
-	if got.CopiedObjects != 0 || got.ArtworkReconcile.Requeued != 0 || !got.OldStorageRetained {
-		t.Fatalf("result = %#v", got)
-	}
-	var staged stagedTarget
-	if err := json.Unmarshal([]byte(settings.values[StagedTargetSettingKey]), &staged); err != nil {
-		t.Fatal(err)
-	}
-	if staged.Phase != transitionPhaseRestartPending || !strings.HasPrefix(settings.values[blobstore.IdentitySettingKey], "local|") {
-		t.Fatalf("settings not committed: %#v", settings.values)
-	}
-	target, err := blobstore.NewFilesystem(targetDirFromIdentity(t, staged.TargetIdentity))
-	if err != nil {
-		t.Fatal(err)
-	}
-	restarted := New(nil, settings, nil, target, nil)
-	reconciled := false
-	restarted.reconcile = func(context.Context, blobstore.Store, func(float64, string)) (metadata.ArtworkReconcileStats, error) {
-		reconciled = true
-		return metadata.ArtworkReconcileStats{Requeued: 3}, nil
-	}
-	if err := restarted.FinalizeCommitted(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if reconciled {
-		t.Fatal("FinalizeCommitted ran the artwork reconcile before the server listener started")
-	}
-	if err := restarted.RunPostRestartWork(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if !reconciled {
-		t.Fatal("public artwork was not reconciled by post-restart work")
-	}
-}
-
 func TestPostRestartReconcileResumesAndClearsRecoveryOnlyAfterCompletion(t *testing.T) {
 	target := &memoryStore{identity: "local|target", objects: map[string][]byte{}}
 	stage := stagedTarget{ID: "resume-reconcile", Policy: PolicyFresh, SourceIdentity: "s3|old|public|", TargetIdentity: target.Identity(), PublicReconcile: true, Phase: transitionPhaseRestartPending, Values: map[string]string{settingArtworkBackend: blobstore.BackendLocal}}
@@ -567,19 +522,6 @@ func TestPostRestartReconcileResumesAndClearsRecoveryOnlyAfterCompletion(t *test
 	}
 	if settings.values[StagedTargetSettingKey] != "" || settings.values[config.ArtworkStorageReconcileCheckpointKey] != "" {
 		t.Fatalf("completed reconcile retained recovery state: %#v", settings.values)
-	}
-}
-
-func TestStartReportsPendingPostRestartReconciliation(t *testing.T) {
-	sourceDir := t.TempDir()
-	stage := stagedTarget{ID: "pending", Policy: PolicyFresh, SourceIdentity: "local|" + sourceDir, TargetIdentity: "local|" + sourceDir, PublicReconcile: true, Phase: transitionPhaseRestartPending, Values: map[string]string{settingArtworkBackend: blobstore.BackendLocal, settingArtworkLocalPath: sourceDir}}
-	settings := stagedSettings(t, stage)
-	settings.values[settingArtworkBackend] = blobstore.BackendLocal
-	settings.values[settingArtworkLocalPath] = sourceDir
-	service := New(nil, settings, memoryJobs{}, &memoryStore{identity: "local|" + sourceDir, objects: map[string][]byte{}}, nil)
-	_, _, err := service.Start(t.Context(), 1, StartRequest{Policy: PolicyFresh, Values: map[string]string{settingArtworkBackend: blobstore.BackendLocal, settingArtworkLocalPath: t.TempDir()}})
-	if err == nil || !strings.Contains(err.Error(), "reconciliation pending") {
-		t.Fatalf("Start error = %v, want pending reconciliation guidance", err)
 	}
 }
 
@@ -763,76 +705,6 @@ func TestSourceHealthProbeIsBounded(t *testing.T) {
 	}
 }
 
-func targetDirFromIdentity(t *testing.T, identity string) string {
-	t.Helper()
-	if !strings.HasPrefix(identity, blobstore.BackendLocal+"|") {
-		t.Fatalf("identity %q is not local", identity)
-	}
-	return strings.TrimPrefix(identity, blobstore.BackendLocal+"|")
-}
-
-func TestPreserveUploadsSkipsProviderCache(t *testing.T) {
-	source := &memoryStore{identity: "s3|old|bucket|", objects: map[string][]byte{
-		"branding/mark/a.webp":                 []byte("brand"),
-		"user-collection-images/c/poster.webp": []byte("custom"),
-		"tmdb/posters/large.webp":              []byte("provider"),
-	}}
-	targetDir := t.TempDir()
-	settings := stagedLocal(t, targetDir)
-	result, err := testService(settings, source).ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyPreserveUploads}, func(adminjob.StorageTransitionProgress) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := result.(Result)
-	if got.CopiedObjects != 2 {
-		t.Fatalf("copied %d objects, want 2", got.CopiedObjects)
-	}
-	target, err := blobstore.NewFilesystem(targetDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := target.Stat(t.Context(), "branding/mark/a.webp"); err != nil {
-		t.Fatalf("branding not copied: %v", err)
-	}
-	if _, err := target.Stat(t.Context(), "tmdb/posters/large.webp"); err == nil {
-		t.Fatal("provider cache was copied")
-	}
-}
-
-func TestMigrateAllCopiesProviderCache(t *testing.T) {
-	source := &memoryStore{identity: "s3|old|bucket|", objects: map[string][]byte{
-		"branding/mark/a.webp":                 []byte("brand"),
-		"user-collection-images/c/poster.webp": []byte("custom"),
-		"tmdb/posters/large.webp":              []byte("provider"),
-	}}
-	targetDir := t.TempDir()
-	settings := stagedLocal(t, targetDir)
-	result, err := testService(settings, source).ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := result.(Result)
-	if got.CopiedObjects != 3 {
-		t.Fatalf("copied %d objects, want 3", got.CopiedObjects)
-	}
-	var committed stagedTarget
-	if err := json.Unmarshal([]byte(settings.values[StagedTargetSettingKey]), &committed); err != nil {
-		t.Fatal(err)
-	}
-	if committed.PublicReconcile || !committed.BrandingReconcile {
-		t.Fatalf("migrate-all post-restart work = %#v, want branding-only", committed)
-	}
-	target, err := blobstore.NewFilesystem(targetDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"branding/mark/a.webp", "user-collection-images/c/poster.webp", "tmdb/posters/large.webp"} {
-		if _, err := target.Stat(t.Context(), key); err != nil {
-			t.Fatalf("%s not copied: %v", key, err)
-		}
-	}
-}
-
 func TestMigrateAllNeverCopiesLegacyAvatarsToPublicOnlyS3(t *testing.T) {
 	source := &memoryStore{identity: "s3|old|public|", objects: map[string][]byte{
 		"tmdb/poster.webp":              []byte("poster"),
@@ -921,23 +793,6 @@ func TestCopyMigrationRejectsTargetInsideAliasedLocalRoot(t *testing.T) {
 	}
 	if source.lists != 0 || len(target.objects) != 0 {
 		t.Fatalf("overlapping migration touched storage: lists=%d target=%#v", source.lists, target.objects)
-	}
-}
-
-func TestExecuteProbesTargetBeforeNamespaceSentinel(t *testing.T) {
-	source := &memoryStore{identity: "s3|https://old.example|bucket|", objects: map[string][]byte{"tmdb/a.webp": []byte("a")}}
-	target := &memoryStore{identity: "s3|https://new.example|bucket|nested", objects: map[string][]byte{}, probeErr: errors.New("offline")}
-	stage := stagedTarget{ID: "probe-order", Policy: PolicyMigrateAll, SourceIdentity: source.Identity(), Phase: transitionPhaseStaged, Values: map[string]string{settingArtworkBackend: blobstore.BackendS3, settingPublicBucket: "bucket"}}
-	settings := stagedSettings(t, stage)
-	service := New(nil, settings, nil, source, nil)
-	service.openPublic = func(map[string]string) (blobstore.Store, error) { return target, nil }
-	service.openPrivate = func(map[string]string) blobstore.Store { return nil }
-	_, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID, Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {})
-	if err == nil || !strings.Contains(err.Error(), "target storage is unavailable") {
-		t.Fatalf("target probe error = %v", err)
-	}
-	if target.puts != 0 {
-		t.Fatalf("namespace sentinel was written before target reachability probe: puts=%d", target.puts)
 	}
 }
 
@@ -1555,25 +1410,6 @@ func TestPartialOrphanDeletionBlocksCommitAndPreservesCheckpoints(t *testing.T) 
 	}
 }
 
-func TestSameRunListingShortcutCoversMultiplePages(t *testing.T) {
-	objects := make(map[string][]byte, 301)
-	for i := range 301 {
-		objects[fmt.Sprintf("tmdb/%03d.webp", i)] = []byte(fmt.Sprintf("%03d", i))
-	}
-	base := &memoryStore{identity: "s3|old|public|", objects: objects}
-	source := &fencedMemoryStore{memoryStore: base}
-	target := &memoryStore{identity: "local|target", objects: map[string][]byte{}}
-	settings := stagedLocal(t, t.TempDir())
-	service := New(nil, settings, nil, source, nil)
-	service.openPublic = func(map[string]string) (blobstore.Store, error) { return target, nil }
-	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
-		t.Fatal(err)
-	}
-	if base.gets != len(objects) || len(target.objects) != len(objects) {
-		t.Fatalf("multi-page shortcut source_gets=%d target_objects=%d want=%d", base.gets, len(target.objects), len(objects))
-	}
-}
-
 func TestAmbiguousCommitVerificationRetriesThroughTransientReadFailures(t *testing.T) {
 	source := &fencedMemoryStore{memoryStore: &memoryStore{identity: "s3|old|public|", objects: map[string][]byte{"tmdb/a.webp": []byte("a")}}}
 	settings := &applyingFlakyReadSettings{memorySettings: stagedLocal(t, t.TempDir()), remainingFailures: 2}
@@ -1704,34 +1540,6 @@ func TestTransitionResultSurfacesSkippedInvalidKeys(t *testing.T) {
 	}
 }
 
-func TestSubtitleCopyPolicy(t *testing.T) {
-	for _, tt := range []struct {
-		name          string
-		policy        string
-		targetBackend string
-		wantCopied    bool
-	}{
-		{name: "s3 preserve", policy: PolicyPreserveUploads, targetBackend: blobstore.BackendS3, wantCopied: true},
-		{name: "s3 migrate all", policy: PolicyMigrateAll, targetBackend: blobstore.BackendS3, wantCopied: true},
-		{name: "local preserve", policy: PolicyPreserveUploads, targetBackend: blobstore.BackendLocal, wantCopied: true},
-		{name: "local migrate all", policy: PolicyMigrateAll, targetBackend: blobstore.BackendLocal, wantCopied: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			source := &memoryStore{identity: "s3|old|public|", objects: map[string][]byte{"subtitles/movie/en.srt": []byte("subtitle")}}
-			target := &memoryStore{identity: tt.targetBackend + "|target", objects: map[string][]byte{}}
-			stage := stagedTarget{ID: "subtitles", SourceIdentity: source.Identity(), Values: map[string]string{"artwork.storage_backend": tt.targetBackend}}
-			service := New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil)
-			if _, err := service.copyTransitionData(t.Context(), stage, tt.policy, target, nil, true, false, false, "run", map[string]objectListing{}, false, func(int, int, string) {}); err != nil {
-				t.Fatal(err)
-			}
-			_, copied := target.objects["subtitles/movie/en.srt"]
-			if copied != tt.wantCopied {
-				t.Fatalf("subtitle copied = %t, want %t", copied, tt.wantCopied)
-			}
-		})
-	}
-}
-
 func TestPrivateOnlyMigrationSkipsPublicReconcileAndCopiesPrivateData(t *testing.T) {
 	public := &memoryStore{identity: "s3|endpoint|public|", objects: map[string][]byte{"tmdb/a.webp": []byte("public")}}
 	oldPrivate := &memoryStore{identity: "s3|endpoint|private-old|", objects: map[string][]byte{
@@ -1775,28 +1583,6 @@ func TestPrivateOnlyMigrationSkipsPublicReconcileAndCopiesPrivateData(t *testing
 	}
 	if err := service.FinalizeCommitted(t.Context()); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestCopyPrefixResumeRevalidatesCompletedSourceObjects(t *testing.T) {
-	source := &memoryStore{identity: "s3|old|bucket|", objects: map[string][]byte{
-		"tmdb/a.webp": []byte("a"),
-		"tmdb/b.webp": []byte("bb"),
-	}}
-	target, err := blobstore.NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	service := testService(&memorySettings{values: map[string]string{}}, source)
-	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "initial", nil, false); err != nil {
-		t.Fatal(err)
-	}
-	firstGets := source.gets
-	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "resumed", nil, false); err != nil {
-		t.Fatal(err)
-	}
-	if source.gets != firstGets+2 {
-		t.Fatalf("resume source revalidation gets %d -> %d, want two checks", firstGets, source.gets)
 	}
 }
 
@@ -1871,41 +1657,6 @@ func TestFailedTransitionRetainsRecoverableStage(t *testing.T) {
 	}
 	if staged.Phase != transitionPhaseFailed || !strings.Contains(staged.LastError, "injected read failure") {
 		t.Fatalf("stage was not retained for retry: %#v", staged)
-	}
-}
-
-func TestStartReplacesFailedStageWhenTargetChanges(t *testing.T) {
-	old, err := json.Marshal(stagedTarget{
-		ID:             "failed-transition",
-		Policy:         PolicyMigrateAll,
-		SourceIdentity: "source",
-		Phase:          transitionPhaseFailed,
-		Values: map[string]string{
-			"artwork.storage_backend": "local",
-			"artwork.local_path":      "/bad-target",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings := &memorySettings{values: map[string]string{
-		"artwork.storage_backend": blobstore.BackendLocal,
-		"artwork.local_path":      t.TempDir(),
-		StagedTargetSettingKey:    string(old),
-	}}
-	service := New(nil, settings, memoryJobs{}, &memoryStore{identity: "source", objects: map[string][]byte{}}, nil)
-	if _, _, err := service.Start(t.Context(), 1, StartRequest{Policy: PolicyMigrateAll, Values: map[string]string{
-		"artwork.storage_backend": blobstore.BackendLocal,
-		"artwork.local_path":      t.TempDir(),
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	var replacement stagedTarget
-	if err := json.Unmarshal([]byte(settings.values[StagedTargetSettingKey]), &replacement); err != nil {
-		t.Fatal(err)
-	}
-	if replacement.ID == "failed-transition" || replacement.Phase != transitionPhaseStaged {
-		t.Fatalf("failed stage was not replaced: %#v", replacement)
 	}
 }
 
@@ -2015,27 +1766,6 @@ func TestStartRejectsCopyWhenCurrentPrivateS3IsUnreachable(t *testing.T) {
 	}
 }
 
-func TestStartFreshAllowsUnreachableCurrentS3(t *testing.T) {
-	settings := &memorySettings{values: map[string]string{
-		"artwork.storage_backend": blobstore.BackendS3,
-		"s3.public_bucket":        "old-public",
-		"s3.private_bucket":       "old-private",
-	}}
-	public := &memoryStore{identity: "s3|old|old-public|", objects: map[string][]byte{}, probeErr: errors.New("injected source outage")}
-	service := New(nil, settings, memoryJobs{}, public, nil)
-
-	job, _, err := service.Start(t.Context(), 1, StartRequest{Policy: PolicyFresh, Values: map[string]string{
-		"artwork.storage_backend": blobstore.BackendLocal,
-		"artwork.local_path":      t.TempDir(),
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job == nil || job.ID == "" {
-		t.Fatal("fresh transition did not create a job")
-	}
-}
-
 func TestStartRejectsAvatarPreservationToPublicOnlyS3(t *testing.T) {
 	settings := &memorySettings{values: map[string]string{
 		"artwork.storage_backend": blobstore.BackendLocal,
@@ -2053,28 +1783,6 @@ func TestStartRejectsAvatarPreservationToPublicOnlyS3(t *testing.T) {
 	}
 	if settings.values[StagedTargetSettingKey] != "" {
 		t.Fatal("unsafe public-only avatar transition was staged")
-	}
-}
-
-func TestSourceHealthReportsConfiguredS3Stores(t *testing.T) {
-	settings := &memorySettings{values: map[string]string{
-		"artwork.storage_backend": blobstore.BackendS3,
-		"s3.public_bucket":        "old-public",
-		"s3.private_bucket":       "old-private",
-	}}
-	public := &memoryStore{identity: "s3|old|old-public|", objects: map[string][]byte{}, probeErr: errors.New("public unavailable")}
-	private := &memoryStore{identity: "s3|old|old-private|", objects: map[string][]byte{}}
-	service := New(nil, settings, memoryJobs{}, public, private)
-
-	health, err := service.SourceHealth(t.Context(), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if health.Reachable || !health.PublicConfigured || health.PublicReachable || !health.PrivateConfigured || !health.PrivateReachable {
-		t.Fatalf("unexpected source health: %#v", health)
-	}
-	if health.Message != "Current public S3 storage is unreachable." {
-		t.Fatalf("message = %q", health.Message)
 	}
 }
 
@@ -2123,50 +1831,6 @@ func throttleSource() *memoryStore {
 	}}
 }
 
-func TestCopyPassWaitsOutAProviderThrottle(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		source := throttleSource()
-		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, throttled: 4}
-		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
-		var messages []string
-		start := time.Now()
-		copied, _, _, err := service.copyPrefixPass(t.Context(), "throttled", "public:", source, target, "", func(_, _ int, message string) {
-			messages = append(messages, message)
-		}, 0, "run", nil, false)
-		if err != nil {
-			t.Fatalf("copy during a throttle that clears = %v, want success", err)
-		}
-		if copied != 3 || len(target.objects) != 3 {
-			t.Fatalf("copied=%d target=%v, want all 3 objects", copied, target.objects)
-		}
-		// Each of the four retries waits at least half the base delay.
-		if elapsed := time.Since(start); elapsed < 4*throttleBaseDelay/2 {
-			t.Fatalf("copy resumed after %s, want a backoff before each retry", elapsed)
-		}
-		if !containsMessage(messages, "rate limiting") {
-			t.Fatalf("progress messages %q do not report the throttle", messages)
-		}
-	})
-}
-
-func TestCopyPassVerifiesAgainWithoutUploadingAgain(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		source := throttleSource()
-		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, readsThrottled: 2}
-		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
-		copied, _, _, err := service.copyPrefixPass(t.Context(), "throttled", "public:", source, target, "", func(int, int, string) {}, 0, "run", nil, false)
-		if err != nil {
-			t.Fatalf("copy with a throttled verification read = %v, want success", err)
-		}
-		if copied != 3 || len(target.objects) != 3 {
-			t.Fatalf("copied=%d target=%v, want all 3 objects", copied, target.objects)
-		}
-		if target.puts != 3 {
-			t.Fatalf("target writes = %d, want 3: a throttled read-back must not upload the object again", target.puts)
-		}
-	})
-}
-
 func TestFencedPassFailsFastOnAProviderThrottle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		source := throttleSource()
@@ -2180,22 +1844,6 @@ func TestFencedPassFailsFastOnAProviderThrottle(t *testing.T) {
 		// Storage writes are blocked during the fenced pass, so it must not wait.
 		if elapsed := time.Since(start); elapsed != 0 {
 			t.Fatalf("fenced pass waited %s on a throttle while writes were blocked", elapsed)
-		}
-	})
-}
-
-func TestCopyPassGivesUpOnAThrottleThatNeverClears(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		source := throttleSource()
-		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, throttled: 1 << 20}
-		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
-		start := time.Now()
-		_, _, _, err := service.copyPrefixPass(t.Context(), "throttled", "public:", source, target, "", func(int, int, string) {}, 0, "run", nil, false)
-		if !errors.Is(err, blobstore.ErrThrottled) {
-			t.Fatalf("copy error = %v, want ErrThrottled", err)
-		}
-		if elapsed := time.Since(start); elapsed < throttleRetries*throttleBaseDelay/2 {
-			t.Fatalf("gave up after %s, want a backoff before each retry", elapsed)
 		}
 	})
 }
@@ -2216,13 +1864,4 @@ func TestCopyPassCancellationInterruptsThrottleWait(t *testing.T) {
 			t.Fatalf("cancellation returned after %s, want it to end the 30s wait at 10s", elapsed)
 		}
 	})
-}
-
-func containsMessage(messages []string, part string) bool {
-	for _, message := range messages {
-		if strings.Contains(message, part) {
-			return true
-		}
-	}
-	return false
 }

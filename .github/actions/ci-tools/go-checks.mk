@@ -42,8 +42,19 @@ test-dependencies:
 	  } END { exit bad }'
 
 tests: test-dependencies
-	GOFLAGS="$${TEST_GOFLAGS}" $(MAKE) -f Makefile test-go
 	@want="$$(printf '%s\n' $(wildcard $(UNCACHED) $(IMMUTABLE)) | sort -u)"; \
 	got="$$(git grep -l -E '(exec\.Command(Context)?\(([^,]+, )?"(go|git|node)"|LookPath\("(go|git|node)"\))' -- '*_test.go' | sed 's@/[^/]*$$@@' | sort -u)"; \
 	if [ "$$want" != "$$got" ]; then echo "::error::packages whose tests start go, git, or node changed"; echo "want: $$want"; echo "got: $$got"; exit 1; fi
-	go test -count=1 $(addprefix ./,$(UNCACHED))
+	$(MAKE) -f Makefile embed-stub
+	@if [ "$${GITHUB_EVENT_NAME}" = schedule ]; then \
+		GOFLAGS="$${TEST_GOFLAGS}" $(MAKE) -f Makefile test-go; \
+	else \
+		listed="$$(go list -f '{{.ImportPath}} {{.Module.Path}}' ./...)" || exit $$?; \
+		packages="$$(printf '%s\n' "$$listed" | awk -v excluded="$(UNCACHED)" '\
+			BEGIN { n = split(excluded, paths, " "); for (i = 1; i <= n; i++) uncached[paths[i]] = 1 } \
+		NF == 2 && !(substr($$1, length($$2) + 2) in uncached) { printf "%s ", $$1 } \
+		')" || exit $$?; \
+		if [ -z "$$packages" ]; then echo "::error::ordinary Go test package list is empty"; exit 1; fi; \
+		GOFLAGS="$${TEST_GOFLAGS}" $(MAKE) -f Makefile test-go GO_TEST_PACKAGES="$$packages" && \
+			go test -count=1 $(addprefix ./,$(UNCACHED)); \
+	fi

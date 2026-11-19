@@ -50,6 +50,7 @@ func scanWatchHistoryEntry(scanner interface {
 		return nil, err
 	}
 	entry.WatchedAt = timeToString(watchedAt)
+	entry.WatchedAtTime = watchedAt.UTC()
 	if identityJSON != "" && identityJSON != "{}" {
 		_ = json.Unmarshal([]byte(identityJSON), &entry.Identity)
 	}
@@ -721,13 +722,9 @@ func scanProgressRow(row pgx.Row) (*userstore.WatchProgress, error) {
 	return wp, err
 }
 
-// progressListSelect is the projection, profile scope, and hidden-item
-// exclusion every status listing shares ($1 = user_id, $2 = profile_id);
-// callers append the status predicate, any window predicate, ORDER BY, and
-// LIMIT.
-const progressListSelect = `
-		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+// progressVisibleFrom is the profile scope and hidden-item exclusion every
+// progress listing shares ($1 = user_id, $2 = profile_id).
+const progressVisibleFrom = `
 		FROM user_watch_progress
 		WHERE user_id = $1 AND profile_id = $2
 		  AND NOT EXISTS (
@@ -738,6 +735,12 @@ const progressListSelect = `
 			  AND hhi.media_item_id = user_watch_progress.media_item_id
 			  AND user_watch_progress.updated_at <= hhi.hidden_before
 		  )`
+
+// progressListSelect is the projection plus progressVisibleFrom; callers
+// append the status predicate, any window predicate, ORDER BY, and LIMIT.
+const progressListSelect = `
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key` + progressVisibleFrom
 
 // progressStatusPredicate is the `AND ...` clause for a status filter; empty
 // for the full listing.
@@ -783,6 +786,18 @@ func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status 
 		ORDER BY updated_at DESC
 		LIMIT $3 OFFSET $4`
 	return s.queryProgressRows(ctx, query, s.userID, profileID, limit, offset)
+}
+
+func (s *PostgresUserStore) ListProgressItemIDs(ctx context.Context, profileID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT media_item_id`+progressVisibleFrom, s.userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("listing progress item ids: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("scanning progress item ids: %w", err)
+	}
+	return ids, nil
 }
 
 // ListCompletedProgressSince compares on the raw column so
@@ -1473,6 +1488,19 @@ func (s *PostgresUserStore) ListCompletedHistory(ctx context.Context, query user
 		limit = 500
 	}
 	includeSources, excludeSources, mediaItemIDs := completedHistoryFilterArgs(query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
+	args := []any{s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs, limit, query.Offset}
+	// The key compares at watched_at's full precision, and the planner turns
+	// the row comparison into an index bound, so a page reads only its rows.
+	keyset := ""
+	if query.After != nil {
+		watchedAt, err := time.Parse(time.RFC3339Nano, query.After.WatchedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parsing completed history key: %w", err)
+		}
+		args = append(args, watchedAt, query.After.ID)
+		keyset = `
+		  AND (h.watched_at, h.id) > ($8::timestamptz, $9)`
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT h.id, h.profile_id, h.media_item_id, h.watched_at, h.duration_seconds, h.completed, h.source, h.watch_identity::text
 		FROM user_watch_history h
@@ -1482,10 +1510,10 @@ func (s *PostgresUserStore) ListCompletedHistory(ctx context.Context, query user
 		  AND (cardinality($3::text[]) = 0 OR h.source = ANY($3::text[]))
 		  AND (cardinality($4::text[]) = 0 OR h.source <> ALL($4::text[]))
 		  AND (cardinality($5::text[]) = 0 OR h.media_item_id = ANY($5::text[]))
-		`+completedHistoryVisibleSQL+`
+		`+completedHistoryVisibleSQL+keyset+`
 		ORDER BY h.watched_at ASC, h.id ASC
 		LIMIT $6 OFFSET $7`,
-		s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs, limit, query.Offset,
+		profilePlanArgs(args...)...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing completed history: %w", err)
@@ -1509,7 +1537,7 @@ func (s *PostgresUserStore) ListCompletedHistory(ctx context.Context, query user
 func (s *PostgresUserStore) ListCompletedHistoryItems(ctx context.Context, query userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
 	includeSources, excludeSources, mediaItemIDs := completedHistoryFilterArgs(query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
 	rows, err := s.pool.Query(ctx, `
-		SELECT h.media_item_id, MAX(h.watched_at)
+		SELECT h.media_item_id, MAX(h.watched_at), COUNT(*)
 		FROM user_watch_history h
 		WHERE h.user_id = $1
 		  AND h.profile_id = $2
@@ -1531,7 +1559,7 @@ func (s *PostgresUserStore) ListCompletedHistoryItems(ctx context.Context, query
 	for rows.Next() {
 		var item userstore.CompletedHistoryItem
 		var watchedAt time.Time
-		if err := rows.Scan(&item.MediaItemID, &watchedAt); err != nil {
+		if err := rows.Scan(&item.MediaItemID, &watchedAt, &item.PlayCount); err != nil {
 			return nil, fmt.Errorf("scanning completed history item: %w", err)
 		}
 		item.WatchedAt = timeToString(watchedAt)

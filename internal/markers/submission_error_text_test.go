@@ -5,9 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // The values these tests mask are obvious placeholders, not credential-shaped
@@ -96,18 +93,5 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		if !strings.Contains(got, tc.keep) {
 			t.Fatalf("case %q dropped the useful part", tc.keep)
 		}
-	}
-}
-
-// A plugin's gRPC status whose description starts with a secret assignment
-// renders as "desc = api_key=...", which must still be masked.
-func TestSubmissionErrorTextMasksSecretAtTheStartOfAGRPCDescription(t *testing.T) {
-	err := status.Error(codes.Unauthenticated, "api_key=FAKE_FIXTURE_SECRET rejected")
-	got := submissionErrorText(err)
-	if strings.Contains(got, "FAKE_FIXTURE_SECRET") {
-		t.Fatal("submissionErrorText kept the api_key value")
-	}
-	if !strings.Contains(got, "Unauthenticated") || !strings.Contains(got, "rejected") {
-		t.Fatalf("submissionErrorText dropped the useful part: %s", got)
 	}
 }

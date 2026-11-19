@@ -204,7 +204,7 @@ export const DESIGN_PRINCIPLES = [
 // │  BORDERS                                                   │
 // ├─────────────────────────────────────────────────────────────┤
 // │  --border            │ Default border color                │
-// │  --input             │ Input field border/background       │
+// │  --input             │ Form-control border (3:1 boundary)  │
 // └─────────────────────────────────────────────────────────────┘
 
 // ────────────────────────────────────────────────────────────────

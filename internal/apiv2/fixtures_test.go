@@ -1011,9 +1011,9 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/ratings/movie:c",
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "set_rating_out_of_range", operationID: "setRating",
-			scenario: "A rating outside 1 to 5 is a validation failure naming the member.",
+			scenario: "A rating outside 1 to 10 is a validation failure naming the member.",
 			method:   http.MethodPut, path: "/api/v2/ratings/movie:new", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
-			body:   `{"rating":6}`,
+			body:   `{"rating":11}`,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "set_rating_profile_header_required", operationID: "setRating",
 			scenario: "A profile-scoped mutation called without X-Profile-Id.",
@@ -1815,6 +1815,10 @@ func sectionItemLimitFixtureCases() []fixtureCase {
 		{name: "get_home_section_items_capped_ok", operationID: opGetHomeSectionItems,
 			scenario: "A read with item_limit answers at most that many cards, and has_more reports that the section holds more than it answered.",
 			method:   http.MethodGet, path: "/api/v2/home/sections/continue_watching/items?item_limit=1", headers: viewer,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Section"},
+		{name: "get_home_section_items_collections_ok", operationID: opGetHomeSectionItems,
+			scenario: "A row of collections: its cards are the collections the viewer can see, in collections, with no items; total_count is their number.",
+			method:   http.MethodGet, path: "/api/v2/home/sections/franchises/items", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Section"},
 	}
 }

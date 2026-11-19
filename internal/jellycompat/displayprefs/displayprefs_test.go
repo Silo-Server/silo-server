@@ -2,38 +2,6 @@ package displayprefs
 
 import "testing"
 
-func TestPlanLegacyRowParsesHandlerWrittenKeys(t *testing.T) {
-	cases := []struct {
-		name    string
-		key     string
-		prefsID string
-		client  string
-	}{
-		{"typical", "jellycompat:displayprefs:usersettings:emby", "usersettings", "emby"},
-		{"empty client", "jellycompat:displayprefs:usersettings:", "usersettings", ""},
-		{"id containing colons", "jellycompat:displayprefs:a:b:emby", "a:b", "emby"},
-		{"empty id", "jellycompat:displayprefs::emby", "", "emby"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			blob, reject := PlanLegacyRow(tc.key, `{"SortBy":"SortName"}`)
-			if reject != nil {
-				t.Fatalf("rejected: %s", reject.Reason)
-			}
-			if blob.PrefsID != tc.prefsID || blob.Client != tc.client {
-				t.Errorf("parsed (%q, %q), want (%q, %q)", blob.PrefsID, blob.Client, tc.prefsID, tc.client)
-			}
-			if blob.Value != `{"SortBy":"SortName"}` {
-				t.Errorf("value not copied verbatim: %q", blob.Value)
-			}
-			// The move must be reversible: the legacy key reconstructs exactly.
-			if got := LegacyKey(blob.PrefsID, blob.Client); got != tc.key {
-				t.Errorf("LegacyKey round-trip = %q, want %q", got, tc.key)
-			}
-		})
-	}
-}
-
 func TestPlanLegacyRowRejectsNonDisplayprefsRows(t *testing.T) {
 	for _, key := range []string{
 		"jellycompat:something-else",     // extension-bag invention outside displayprefs

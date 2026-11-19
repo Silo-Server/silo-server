@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -145,7 +148,7 @@ func TestValidateLocalTransportCapabilitiesV3MarksOnlyDefiniteMismatchIneligible
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			handler.PlaybackConfig = func() config.PlaybackConfig {
 				return config.PlaybackConfig{HWAccel: playback.HWAccelNone, TranscodeEnabled: true}
 			}
@@ -201,10 +204,11 @@ func TestPrepareTransportV3IneligibleLocalExecutorKeepsPreflightRejection(t *tes
 	}))
 	defer node.Close()
 
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{{URL: node.URL, Enabled: true, Healthy: true}})
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 	handler.PlaybackConfig = func() config.PlaybackConfig {
 		return config.PlaybackConfig{HWAccel: playback.HWAccelNone, TranscodeEnabled: true, Routing: config.DefaultPlaybackRoutingPolicy()}

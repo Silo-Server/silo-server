@@ -205,7 +205,7 @@ func (e *Engine) loadAversion(ctx context.Context, userID int, profileID string,
 		}
 		var ids []string
 		for _, r := range ratings {
-			if r.Rating <= DislikedRatingMax {
+			if r.Score <= DislikedScoreMax {
 				ids = append(ids, r.MediaItemID)
 			}
 		}
@@ -214,7 +214,7 @@ func (e *Engine) loadAversion(ctx context.Context, userID int, profileID string,
 			return nil, fmt.Errorf("resolve low-rated item IDs: %w", err)
 		}
 		for _, r := range ratings {
-			if r.Rating > DislikedRatingMax {
+			if r.Score > DislikedScoreMax {
 				continue
 			}
 			id := r.MediaItemID

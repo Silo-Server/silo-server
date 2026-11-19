@@ -1,6 +1,6 @@
 import "@/styles/player-hud.css";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { MotionConfig, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, Shuffle, X } from "lucide-react";
 import { isStillWatchingGated } from "../stillWatching";
 import type { EpisodeRef, PlaybackStartTrigger } from "../types";
@@ -45,7 +45,17 @@ interface PlayingNextScreenProps {
 
 const COUNTDOWN_SECONDS = 10;
 
-export function PlayingNextScreen({
+// `reducedMotion="user"` drops the slide-up offsets under
+// `prefers-reduced-motion` and keeps the fades.
+export function PlayingNextScreen(props: PlayingNextScreenProps) {
+  return (
+    <MotionConfig reducedMotion="user">
+      <PlayingNextContent {...props} />
+    </MotionConfig>
+  );
+}
+
+function PlayingNextContent({
   seriesId,
   seriesTitle,
   nextEpisode,

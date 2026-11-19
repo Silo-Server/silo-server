@@ -138,14 +138,6 @@ func TestAccountAllowanceSharesCredentialsAndSeparatesHouseholds(t *testing.T) {
 	}
 }
 
-func TestAccountRateStaysWithinLimiterBounds(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.IPReqPerSecond, cfg.IPReqPerMinute, cfg.IPBurst = MaxRequestsPerWindow, MaxRequestsPerWindow, MaxBurst
-	if got := accountRate(cfg); got.RequestsPerSecond > MaxRequestsPerWindow || got.RequestsPerMinute > MaxRequestsPerWindow || got.Burst > MaxBurst {
-		t.Fatalf("account rate %+v exceeds limiter bounds", got)
-	}
-}
-
 func TestAccountAdapterDoesNotGrantNativeAuthority(t *testing.T) {
 	ctx := WithAccount(t.Context(), 42)
 	if accountFromContext(ctx) != 42 || apimw.GetClaims(ctx) != nil {

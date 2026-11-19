@@ -1,0 +1,33 @@
+{
+  "id": "franchises",
+  "section_type": "collection_posters",
+  "title": "Franchises",
+  "featured": false,
+  "item_limit": 20,
+  "total_count": 2,
+  "is_custom": false,
+  "customized": false,
+  "items": [],
+  "collections": [
+    {
+      "id": "01J9Z8C3W4R5T6Y7U8I9O0P1Q2",
+      "source": "library",
+      "title": "Marvel",
+      "poster_url": "https://s3.example.test/marvel.jpg",
+      "poster_is_collage": false,
+      "backdrop_url": "https://s3.example.test/marvel-backdrop.jpg",
+      "backdrop_thumbhash": "3OcRJYB4d3h/iIeHeEh3eIhw+j2w",
+      "item_count": 12,
+      "library_id": "1"
+    },
+    {
+      "id": "c-ghibli",
+      "source": "user",
+      "title": "Ghibli nights",
+      "poster_url": "https://s3.example.test/collage.jpg",
+      "poster_is_collage": true,
+      "item_count": 5,
+      "creator_profile_id": "p-owner"
+    }
+  ]
+}

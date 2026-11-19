@@ -77,8 +77,19 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+const MAX_LABEL_CODE_POINTS = 256;
+
 function isLabel(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && [...value].length <= 256;
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    [...value].length <= MAX_LABEL_CODE_POINTS
+  );
+}
+
+/** `text` trimmed and cut to the length a shortcut label may have. */
+export function shortcutLabel(text: string): string {
+  return [...text.trim()].slice(0, MAX_LABEL_CODE_POINTS).join("");
 }
 
 function isTargetId(value: unknown): value is string {
@@ -259,6 +270,20 @@ export function carouselCardWidthClasses(size: PosterSize): string {
     default:
       return "w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]";
   }
+}
+
+/**
+ * The poster size a row of square (audiobook) covers is drawn at: one step
+ * under the profile's choice, because a square cover at a poster's width
+ * covers half again its area and crowds the row.
+ */
+export function squarePosterSize(size: PosterSize): PosterSize {
+  return size === "large" ? "standard" : "compact";
+}
+
+/** Width classes of square (audiobook cover) carousel cards. */
+export function squareCarouselCardWidthClasses(size: PosterSize): string {
+  return carouselCardWidthClasses(squarePosterSize(size));
 }
 
 /** Width classes of wide (16:9) carousel cards such as Continue Watching episodes. */

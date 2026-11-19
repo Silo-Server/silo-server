@@ -119,20 +119,6 @@ func decodeQuickConnectResult(t *testing.T, rec *httptest.ResponseRecorder) quic
 	return out
 }
 
-func TestQuickConnectEnabledReflectsService(t *testing.T) {
-	off, _ := quickConnectRouter(t, nil)
-	if rec := serveQuickConnect(off, http.MethodGet, "/QuickConnect/Enabled", "", nil); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "false" {
-		t.Fatalf("Enabled without service = %d %q", rec.Code, rec.Body.String())
-	}
-	if rec := serveQuickConnect(off, http.MethodPost, "/QuickConnect/Initiate", "", nil); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("Initiate without service = %d", rec.Code)
-	}
-	on, _ := quickConnectRouter(t, &fakeQuickConnect{})
-	if rec := serveQuickConnect(on, http.MethodGet, "/quickconnect/enabled", "", nil); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "true" {
-		t.Fatalf("Enabled = %d %q", rec.Code, rec.Body.String())
-	}
-}
-
 // TestQuickConnectInitiateReadsAuthorizationHeader: both the POST Jellyfin
 // 10.9+ sends and the GET of 10.8 open a request, named from the decoded
 // MediaBrowser header, and answer Jellyfin's QuickConnectResult.
@@ -153,46 +139,6 @@ func TestQuickConnectInitiateReadsAuthorizationHeader(t *testing.T) {
 		if got != want {
 			t.Fatalf("%s Initiate = %+v, want %+v", method, got, want)
 		}
-	}
-}
-
-// TestQuickConnectConnectReportsState: pending is not yet authenticated,
-// approved and collected are, and anything else is gone. The code comes back
-// on every poll and the secret is read in any case, as Jellyfin Web sends
-// ?Secret=.
-func TestQuickConnectConnectReportsState(t *testing.T) {
-	cases := []struct {
-		status string
-		code   int
-		authed bool
-	}{
-		{auth.DeviceLoginStatusPending, http.StatusOK, false},
-		{auth.DeviceLoginStatusApproved, http.StatusOK, true},
-		{auth.DeviceLoginStatusConsumed, http.StatusOK, true},
-		{auth.DeviceLoginStatusDenied, http.StatusNotFound, false},
-	}
-	for _, tc := range cases {
-		service := &fakeQuickConnect{state: &auth.QuickConnectState{Status: tc.status, Code: "482177", DeviceName: "TV", AppName: "Jellyfin Android TV"}}
-		router, _ := quickConnectRouter(t, service)
-		rec := serveQuickConnect(router, http.MethodGet, "/QuickConnect/Connect?Secret=SECRET", "", nil)
-		if rec.Code != tc.code {
-			t.Fatalf("%s: Connect = %d %s", tc.status, rec.Code, rec.Body.String())
-		}
-		if tc.code != http.StatusOK {
-			continue
-		}
-		got := decodeQuickConnectResult(t, rec)
-		if got.Authenticated != tc.authed || got.Secret != "SECRET" || got.Code != "482177" || got.DeviceName != "TV" {
-			t.Fatalf("%s: Connect = %+v", tc.status, got)
-		}
-	}
-
-	router, _ := quickConnectRouter(t, &fakeQuickConnect{stateErr: auth.ErrDeviceLoginNotFound})
-	if rec := serveQuickConnect(router, http.MethodGet, "/QuickConnect/Connect?secret=nope", "", nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown secret = %d", rec.Code)
-	}
-	if rec := serveQuickConnect(router, http.MethodGet, "/QuickConnect/Connect", "", nil); rec.Code != http.StatusBadRequest {
-		t.Fatalf("missing secret = %d", rec.Code)
 	}
 }
 

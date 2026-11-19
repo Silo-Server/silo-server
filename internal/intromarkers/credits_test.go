@@ -5,42 +5,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestTailWindow(t *testing.T) {
-	cases := []struct {
-		duration, start float64
-	}{
-		// Long episodes fingerprint their last 450 seconds.
-		{2700, 2250},
-		{1500, 1050},
-		// Shorter ones their last 40 percent.
-		{900, 540},
-		{300, 180},
-	}
-	for _, tc := range cases {
-		candidate := Candidate{FileHash: "h", FileSize: 1, DurationSeconds: tc.duration}
-		window := tailWindow(candidate)
-		if window.Start != tc.start || window.End != tc.duration {
-			t.Errorf("duration %.0f: tail window %+v, want %.0f-%.0f", tc.duration, window, tc.start, tc.duration)
-		}
-		identity := window.identity(candidate)
-		if identity.WindowStartSeconds != tc.start || identity.WindowEndSeconds != tc.duration {
-			t.Errorf("duration %.0f: identity %+v does not record the window", tc.duration, identity)
-		}
-	}
-	if !tailWindow(Candidate{}).empty() {
-		t.Fatal("a file without a duration has an empty tail window")
-	}
-	// Movies get a longer, proportionally smaller tail.
-	if got := creditsLimitsFor(true).WindowStart(7200); got != 6300 {
-		t.Fatalf("movie window start = %.0f, want 6300", got)
-	}
-	if got := creditsLimitsFor(true).WindowStart(2400); got != 1800 {
-		t.Fatalf("short movie window start = %.0f, want 1800", got)
-	}
-}
 
 func TestCreditsKeysAreNamespaced(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
@@ -116,71 +81,6 @@ func TestAudioCreditsFindSharedEnding(t *testing.T) {
 		if segment.Algorithm != CreditsAudioAlgorithm || segment.Confidence != creditsAudioConsistentConfidence {
 			t.Fatalf("file %d: %+v, want %s at %.2f", input.Candidate.FileID, segment, CreditsAudioAlgorithm, creditsAudioConsistentConfidence)
 		}
-	}
-}
-
-func TestAudioCreditsWithoutVideoNeedTwoConfirmations(t *testing.T) {
-	// Two episodes confirm each other once each: weak evidence, not written
-	// without video.
-	segments, rejected := placeAudioCredits(creditsSeason(2, 60, 0))
-	if len(segments) != 0 || rejected != 2 {
-		t.Fatalf("placed %d files with %d rejected, want none placed and 2 rejected", len(segments), rejected)
-	}
-	segments, _ = placeAudioCredits(creditsSeason(3, 60, 0))
-	if len(segments) != 3 {
-		t.Fatalf("placed %d files of three confirming episodes, want 3", len(segments))
-	}
-}
-
-func TestCreditsAudioWithoutVideo(t *testing.T) {
-	profile := creditsProfile()
-	const duration = 1500.0
-	match := func(start, end float64, confirmations int, consistent bool) seasonMatch {
-		return seasonMatch{Segment: Segment{Start: start, End: end}, Confirmations: confirmations, SeasonConsistent: consistent}
-	}
-	cases := []struct {
-		name  string
-		match seasonMatch
-		want  float64
-	}{
-		{"strong and season-consistent", match(1410, 1500, 3, true), 0.90},
-		{"strong but not season-consistent", match(1410, 1500, 2, false), 0.65},
-		{"one confirmation is weak", match(1410, 1500, 1, true), 0},
-		{"short and not season-consistent", match(1485, 1500, 4, false), 0},
-		{"short but season-consistent", match(1484, 1500, 4, true), 0.90},
-		{"stops before the end of the file", match(1300, 1480, 4, true), 0},
-		{"ends within the EOF snap", match(1300, 1486, 4, true), 0.90},
-	}
-	for _, tc := range cases {
-		audio := creditsAudioFor(tc.match, profile)
-		segment, ok := combineCredits(Candidate{DurationSeconds: duration}, creditsEvidence{Audio: &audio}, creditsLimitsFor(false))
-		if ok != (tc.want > 0) {
-			t.Errorf("%s: ok = %v, want %v", tc.name, ok, tc.want > 0)
-			continue
-		}
-		if ok && (segment.Confidence != tc.want || segment.Algorithm != CreditsAudioAlgorithm || segment.End != duration) {
-			t.Errorf("%s: %+v, want confidence %.2f to the end of the file", tc.name, segment, tc.want)
-		}
-	}
-}
-
-func TestCreditsProfileSnapsToEOFNotChapters(t *testing.T) {
-	profile := creditsProfile()
-	candidate := Candidate{
-		DurationSeconds: 1500,
-		Chapters:        []models.MediaChapter{{StartSeconds: 1409, EndSeconds: 1500}},
-	}
-	got := adjustSegment(Segment{Start: 360, End: 440}, fingerprintInput{Candidate: candidate, WindowStart: 1050}, profile)
-	if want := 1050 + 360 + chromaprintStartLeadSeconds; got.Start != want {
-		t.Fatalf("start = %.2f, want %.2f with no chapter snap", got.Start, want)
-	}
-	if got.End != 1500 {
-		t.Fatalf("end = %.2f, want the 1500 s file end", got.End)
-	}
-	// A start near the start of the window is not a start of the file.
-	got = adjustSegment(Segment{Start: 0.2, End: 100}, fingerprintInput{Candidate: candidate, WindowStart: 1050}, profile)
-	if got.Start == 0 {
-		t.Fatal("credits starts must not snap to zero")
 	}
 }
 

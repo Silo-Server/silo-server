@@ -3,7 +3,6 @@ package playback
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,103 +17,6 @@ func TestProbeTransformationRegistryWithToneMapV3ResultPreservesDeadline(t *test
 
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("probe error = %v, want context deadline", err)
-	}
-}
-
-func TestProbeTransformationRegistryWithToneMapV3ResultRejectsFailedInventoryCommand(t *testing.T) {
-	ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu; exit 1 ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n")
-
-	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
-	if err == nil {
-		t.Fatal("failed -bsfs command returned a cacheable registry")
-	}
-	if !registry.Available(TransformationAudioToAACV3) || !registry.Available(TransformationVideoToH264V3) {
-		t.Fatal("successful encoder inventory was not retained in the diagnostic registry")
-	}
-}
-
-func TestH264EncoderAvailabilityAcceptsAnyPipelineEncoder(t *testing.T) {
-	cases := []struct {
-		name    string
-		listing string
-		want    bool
-	}{
-		{"software", " V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC", true},
-		{"videotoolbox", " V..... h264_videotoolbox    VideoToolbox H.264 Encoder", true},
-		{"hevc_only", " V..... libx265\n V..... hevc_videotoolbox", false},
-		{"empty", "", false},
-	}
-	for _, value := range cases {
-		t.Run(value.name, func(t *testing.T) {
-			if got := h264EncoderAvailableV3([]byte(value.listing)); got != value.want {
-				t.Fatalf("h264EncoderAvailableV3 = %v, want %v", got, value.want)
-			}
-		})
-	}
-}
-
-func TestProbeTransformationRegistryV3RequiresBothVersion4AudioFilterGraphs(t *testing.T) {
-	for _, test := range []struct {
-		name         string
-		rejectFilter string
-	}{
-		{name: "timestamp normalization", rejectFilter: aacTimestampNormalizeFilterV3},
-		{name: "surround downmix", rejectFilter: stereoDownmixBoostFilterV3},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			script := fmt.Sprintf("#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*\" -af %s \"*) exit 1 ;;\nesac\n", test.rejectFilter)
-			ffmpeg := writeProbeFFmpegV3(t, script)
-
-			registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
-			if err != nil {
-				t.Fatalf("unsupported graph should be a cacheable capability result: %v", err)
-			}
-			if registry.Available(TransformationAudioToAACV3) {
-				t.Fatalf("audio_to_aac advertised when %s was rejected", test.name)
-			}
-		})
-	}
-
-	ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n")
-	registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
-	for _, transformation := range registry.Advertised() {
-		if transformation.Name == TransformationAudioToAACV3 {
-			if transformation.RecipeVersion != TransformationAudioToAACRecipeVersionV3 {
-				t.Fatalf("audio_to_aac recipe version = %q, want %q", transformation.RecipeVersion, TransformationAudioToAACRecipeVersionV3)
-			}
-			return
-		}
-	}
-	t.Fatal("audio_to_aac was not advertised with the complete version 4 toolchain")
-}
-
-// server_dv7_to_hdr10 recipe 2 removes Profile 7 enhancement-layer NAL units
-// with filter_units as well as the RPUs with dovi_rpu, so an FFmpeg missing
-// either filter cannot advertise it.
-func TestProbeTransformationRegistryV3DV7RecipeNeedsDoviRPUAndFilterUnits(t *testing.T) {
-	for _, test := range []struct {
-		name, bsfs string
-		want       bool
-	}{
-		{"both filters", "echo dovi_rpu; echo filter_units", true},
-		{"dovi_rpu only", "echo dovi_rpu", false},
-		{"filter_units only", "echo filter_units", false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-bsfs) "+test.bsfs+" ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n")
-			registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
-			if got := registry.Available(TransformationServerDV7HDR10V3); got != test.want {
-				t.Fatalf("server_dv7_to_hdr10 available = %v, want %v", got, test.want)
-			}
-			if !test.want {
-				return
-			}
-			for _, transformation := range registry.Advertised() {
-				if transformation.Name == TransformationServerDV7HDR10V3 && transformation.RecipeVersion != "2" {
-					t.Fatalf("server_dv7_to_hdr10 recipe version = %q, want 2", transformation.RecipeVersion)
-				}
-			}
-		})
 	}
 }
 

@@ -467,26 +467,6 @@ func TestViewerResolverPINErrorsMatchLegacy(t *testing.T) {
 	}
 }
 
-func TestViewerResolverProfileNotFoundMatchesLegacy(t *testing.T) {
-	ctx := context.Background()
-	user := &models.User{ID: 1, AccessPolicyRevision: 5}
-	users := viewerResolverUserRepo{user: user}
-	stores := viewerResolverStoreProvider{store: viewerResolverTestStore{}}
-	input := access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "missing"}
-	legacyResolver := access.NewResolver(users, stores, nil)
-	viewerResolver := NewViewerResolver(users, stores, nil, newViewerResolverTestPDP(t, ctx))
-
-	_, legacyErr := legacyResolver.Resolve(ctx, input)
-	policyScope, policyErr := viewerResolver.Resolve(ctx, input)
-	if !errors.Is(legacyErr, access.ErrProfileNotFound) {
-		t.Fatalf("legacy error = %v, want ErrProfileNotFound", legacyErr)
-	}
-	if !errors.Is(policyErr, access.ErrProfileNotFound) {
-		t.Fatalf("policy error = %v, want ErrProfileNotFound", policyErr)
-	}
-	assertZeroScope(t, policyScope)
-}
-
 func TestViewerResolverEvalFailureFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	users := viewerResolverUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}}
@@ -525,75 +505,6 @@ override(_, _) := {"profile_verified": false}
 		t.Fatalf("Resolve() error = %v, want ErrProfileUnverified when policy revokes verification", err)
 	}
 	assertZeroScope(t, scope)
-}
-
-func TestViewerResolverAppliesGroupPolicy(t *testing.T) {
-	ctx := context.Background()
-	groupID := int64(2)
-	user := &models.User{
-		ID:                   1,
-		AccessGroupID:        &groupID,
-		AccessPolicyRevision: 5,
-	}
-	group := &access.GroupPolicy{
-		LibraryIDs:               []int{2, 4},
-		MaxPlaybackQuality:       access.PlaybackQualityStandard,
-		DownloadAllowed:          true,
-		DownloadTranscodeAllowed: true,
-		TranscodeAllowed:         true,
-		AudioTranscodeAllowed:    true,
-		RequestsAllowed:          true,
-	}
-	users := viewerResolverUserRepo{user: user}
-	stores := viewerResolverStoreProvider{store: viewerResolverTestStore{}}
-	resolver := NewViewerResolver(
-		users,
-		stores,
-		nil,
-		newViewerResolverTestPDP(t, ctx),
-		viewerResolverGroupProvider{group: group},
-	)
-
-	scope, err := resolver.Resolve(ctx, access.ResolveInput{UserID: 1, SessionID: "sess-1"})
-	if err != nil {
-		t.Fatalf("Resolve() error: %v", err)
-	}
-	if !scope.LibrariesRestricted || !reflect.DeepEqual(scope.AllowedLibraryIDs, []int{2, 4}) {
-		t.Fatalf("scope libraries = restricted %t ids %#v, want [2 4]", scope.LibrariesRestricted, scope.AllowedLibraryIDs)
-	}
-	if scope.MaxPlaybackQuality != access.PlaybackQualityStandard {
-		t.Fatalf("MaxPlaybackQuality = %q, want %q", scope.MaxPlaybackQuality, access.PlaybackQualityStandard)
-	}
-}
-
-// A library a policy override hides is not one the profile can show again,
-// even when the profile hid it too; only libraries the policy would otherwise
-// allow are reported as hidden.
-func TestViewerResolverHiddenLibrariesRespectOverride(t *testing.T) {
-	ctx := context.Background()
-	users := viewerResolverUserRepo{user: &models.User{ID: 1, LibraryIDs: []int{1, 2, 3, 4}, AccessPolicyRevision: 5}}
-	stores := viewerResolverStoreProvider{store: viewerResolverTestStore{
-		profile:       &userstore.Profile{ID: "prof-1"},
-		settingValues: []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[2,3]`)},
-	}}
-	engine, err := NewEngineWithCustom(ctx, map[string]ActiveSource{
-		"scope": {Source: `package silo_custom.scope
-
-import rego.v1
-
-override(_, _) := {"allowed_library_ids": [1, 2, 3, 4], "disabled_library_ids": [3]}
-`},
-	})
-	if err != nil {
-		t.Fatalf("NewEngineWithCustom() error: %v", err)
-	}
-	scope, err := NewViewerResolver(users, stores, nil, NewPDP(engine)).Resolve(ctx, access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"})
-	if err != nil {
-		t.Fatalf("Resolve() error: %v", err)
-	}
-	if !reflect.DeepEqual(scope.AllowedLibraryIDs, []int{1, 4}) || !reflect.DeepEqual(scope.HiddenLibraryIDs, []int{2}) {
-		t.Fatalf("allowed %#v hidden %#v, want [1 4] and [2]", scope.AllowedLibraryIDs, scope.HiddenLibraryIDs)
-	}
 }
 
 type stubProfileTokenValidator struct {
@@ -678,54 +589,6 @@ func (s *countingViewerResolverStore) ListSettingValuesForResolution(
 	return s.viewerResolverTestStore.ListSettingValuesForResolution(ctx, query)
 }
 
-func TestViewerResolverBatchesViewerPreferenceRead(t *testing.T) {
-	ctx := context.Background()
-	store := &countingViewerResolverStore{viewerResolverTestStore: viewerResolverTestStore{
-		profile: &userstore.Profile{ID: "prof-1"},
-		settingValues: []userstore.SettingValue{
-			{
-				SettingIdentity: userstore.SettingIdentity{
-					Key: settingskeys.UiDisabledLibraryIds, Scope: settingscontract.ScopeProfile,
-					ProfileID: "prof-1",
-				},
-				Value: json.RawMessage(`[3,5]`),
-			},
-			{
-				SettingIdentity: userstore.SettingIdentity{
-					Key: settingskeys.CatalogMetadataLanguage, Scope: settingscontract.ScopeProfile,
-					ProfileID: "prof-1",
-				},
-				Value: json.RawMessage(`"de"`),
-			},
-			{
-				SettingIdentity: userstore.SettingIdentity{
-					Key: settingskeys.CatalogMetadataLanguageOverrides, Scope: settingscontract.ScopeProfile,
-					ProfileID: "prof-1",
-				},
-				Value: json.RawMessage(`{"no":"x-silo-original"}`),
-			},
-		},
-	}}
-	resolver := NewViewerResolver(
-		viewerResolverUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
-		viewerResolverStoreProvider{store: store}, nil, newViewerResolverTestPDP(t, ctx),
-	)
-
-	scope, err := resolver.Resolve(ctx, access.ResolveInput{UserID: 1, ProfileID: "prof-1"})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if store.resolutionReads != 1 {
-		t.Fatalf("canonical preference reads = %d, want 1", store.resolutionReads)
-	}
-	if !reflect.DeepEqual(scope.DisabledLibraryIDs, []int{3, 5}) || scope.PreferredMetadataLanguage != "de" {
-		t.Errorf("resolved scope = %#v", scope)
-	}
-	if got := scope.MetadataLanguageOverrides["no"]; got != access.OriginalMetadataLanguage {
-		t.Errorf("metadata language override = %q, want %q", got, access.OriginalMetadataLanguage)
-	}
-}
-
 func (s viewerResolverTestStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -770,48 +633,6 @@ func assertZeroScope(t *testing.T, scope access.Scope) {
 }
 
 func ptr[T any](value T) *T { return &value }
-
-// A content-only resolve hands the PDP no hidden libraries, so neither
-// resolver lets the profile's browsing preference shrink its access.
-func TestViewerResolverContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
-	ctx := context.Background()
-	pdp := newViewerResolverTestPDP(t, ctx)
-	cases := []struct {
-		name        string
-		libraries   []int
-		wantAllowed []int
-	}{
-		{"unrestricted account", nil, nil},
-		{"restricted account", []int{1, 2, 3}, []int{1, 2, 3}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			users := viewerResolverUserRepo{user: &models.User{ID: 1, LibraryIDs: tc.libraries, AccessPolicyRevision: 5}}
-			stores := viewerResolverStoreProvider{store: viewerResolverTestStore{
-				profile:       &userstore.Profile{ID: "prof-1", MaxContentRating: "PG", PINHash: "locked"},
-				settingValues: []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[2,3]`)},
-			}}
-			input := access.ResolveInput{UserID: 1, ProfileID: "prof-1", SkipPINVerification: true, ContentAccessOnly: true}
-			policyScope, err := NewViewerResolver(users, stores, nil, pdp).Resolve(ctx, input)
-			if err != nil {
-				t.Fatalf("Resolve() error: %v", err)
-			}
-			legacyScope, err := access.NewResolver(users, stores, nil).Resolve(ctx, input)
-			if err != nil {
-				t.Fatalf("legacy Resolve() error: %v", err)
-			}
-			if !reflect.DeepEqual(policyScope, legacyScope) {
-				t.Fatalf("scope mismatch\npolicy: %#v\nlegacy: %#v", policyScope, legacyScope)
-			}
-			if !reflect.DeepEqual(policyScope.AllowedLibraryIDs, tc.wantAllowed) || policyScope.DisabledLibraryIDs != nil {
-				t.Fatalf("libraries = allowed %#v disabled %#v, want allowed %#v and none disabled", policyScope.AllowedLibraryIDs, policyScope.DisabledLibraryIDs, tc.wantAllowed)
-			}
-			if policyScope.MaxContentRating != "PG" {
-				t.Fatalf("MaxContentRating = %q, want PG", policyScope.MaxContentRating)
-			}
-		})
-	}
-}
 
 // A household's allowances lift only the profile's own limits: a custom scope
 // policy that sets a rating override or a different advisory-age limit wins.

@@ -71,6 +71,7 @@ import { DeleteShelfDialog, ShelfNameDialog } from "./ShelfDialogs";
 import { ArrangeCardMenu, ShelfMenu } from "./ShelfMenus";
 import { ViewerPreview } from "./ViewerPreview";
 import { useT } from "@/i18n";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** Under this width Arrange has no drag: ⋯ opens a sheet that moves the card. */
 const NARROW_QUERY = "(max-width: 1023px)";
@@ -344,9 +345,10 @@ export function GroupsBoard({
 
   // --- dragging --------------------------------------------------------------
 
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor),
+    useSensor(KeyboardSensor, { scrollBehavior }),
   );
   const [drag, setDrag] = useState<{ data: ArrangeDragData; reads: OrderReads } | null>(null);
   // dnd-kit reports the item as over itself right after pickup; only a change is announced.

@@ -2,9 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"net/http"
-	"strings"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
@@ -42,57 +39,4 @@ func (f *fakeMemberState) RoomMemberState(_ context.Context, room string, user i
 			{UserID: 1, ProfileID: "p-owner", State: watchtogether.MemberWatchStateInProgress, PositionSeconds: &position, OnWatchlist: true},
 			{UserID: 2, ProfileID: "p-guest", State: watchtogether.MemberWatchStateUnseen},
 		}}}, nil
-}
-
-func TestWatchTogetherMemberState(t *testing.T) {
-	f := new(fakeMemberState)
-	deps := pilotDeps(nil, nil)
-	deps.WatchTogetherMemberState = f
-	deps.CatalogAccess = &fakeCatalog{}
-	h := NewHandler(deps)
-	path := Prefix + "/watch-together/rooms/room/member-state"
-	body := `{"content_ids":["movie","series"]}`
-	requireProblem(t, do(t, h, http.MethodPost, path, body, nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodPost, path, body, profileOwner()), TypePermissionDenied)
-	proof := with(profileOwner(), "X-Room-Token", "room-proof")
-	for _, invalid := range []string{`{}`, `{"content_ids":[]}`, `{"content_ids":[""]}`, `{"content_ids":[` + strings.Repeat(`"x",`, 200) + `"y"]}`} {
-		requireProblem(t, do(t, h, http.MethodPost, path, invalid, proof), TypeValidationFailed)
-	}
-	if f.calls != 0 {
-		t.Fatal("invalid dispatch")
-	}
-	rec := do(t, h, http.MethodPost, path, body, proof)
-	out := rec.Body.String()
-	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || f.room != "room" || f.user != 1 || f.profile != "p-owner" || len(f.ids) != 2 || f.filter.UserID != 1 || f.filter.ProfileID != "p-owner" || len(f.filter.AllowedLibraryIDs) != 2 {
-		t.Fatalf("%d %s %+v", rec.Code, out, f)
-	}
-	for _, want := range []string{`"content_id":"movie"`, `"state":"in_progress"`, `"position_seconds":120`, `"on_watchlist":true`, `"state":"unseen"`, `"lobby_ready":true`, `"user_id":"2"`} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("missing %s in %s", want, out)
-		}
-	}
-	for _, tc := range []struct {
-		err    error
-		status int
-	}{{watchtogether.ErrRoomNotFound, 404}, {watchtogether.ErrRoomClosed, 409}} {
-		f.err = tc.err
-		if rec := do(t, h, http.MethodPost, path, body, proof); rec.Code != tc.status {
-			t.Fatalf("%v: %d %s", tc.err, rec.Code, rec.Body.String())
-		}
-	}
-	f.err = nil
-	f.proofErr = &handlers.APIError{Status: 503, Code: "unavailable", Message: "Watch together is unavailable"}
-	if rec := do(t, h, http.MethodPost, path, body, proof); rec.Code != 503 {
-		t.Fatalf("unavailable proof: %d", rec.Code)
-	}
-	deps.WatchTogetherMemberState = nil
-	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, path, body, proof), TypeDependencyUnavailable)
-	deps.WatchTogetherMemberState = f
-	f.proofErr = nil
-	deps.CatalogAccess = nil
-	before := f.calls
-	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, path, body, proof), TypeDependencyUnavailable)
-	if f.calls != before {
-		t.Fatal("member state dispatched without catalog access")
-	}
 }

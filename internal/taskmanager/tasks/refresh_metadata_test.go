@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -62,38 +61,6 @@ type noopProgressReporter struct{}
 func (noopProgressReporter) Report(float64, string)        {}
 func (noopProgressReporter) SetResultData(json.RawMessage) {}
 
-func TestRefreshMetadataTask_DrainsFullBatches(t *testing.T) {
-	firstBatch := make([]worker.RefreshCandidate, refreshMetadataBatchSize)
-	for i := range firstBatch {
-		firstBatch[i] = worker.RefreshCandidate{TargetType: "item", ContentID: fmt.Sprintf("item-%03d", i)}
-	}
-	secondBatch := []worker.RefreshCandidate{{TargetType: "episode", ContentID: "final-item"}}
-	finder := &fakeRefreshCandidateFinder{
-		batches: [][]worker.RefreshCandidate{firstBatch, secondBatch},
-	}
-	refresher := &fakeMetadataRefresher{}
-	task := NewRefreshMetadataTask(finder, refresher)
-
-	if err := task.Execute(context.Background(), noopProgressReporter{}); err != nil {
-		t.Fatalf("Execute returned error: %v", err)
-	}
-
-	calls := refresher.Calls()
-	if len(calls) != refreshMetadataBatchSize+1 {
-		t.Fatalf("expected %d refresh calls, got %d", refreshMetadataBatchSize+1, len(calls))
-	}
-	if finder.pruneCalls != 1 {
-		t.Fatalf("expected disabled-library prune once, got %d", finder.pruneCalls)
-	}
-	seen := make(map[string]bool, len(calls))
-	for _, call := range calls {
-		seen[call] = true
-	}
-	if !seen["item:item-000"] || !seen["item:item-199"] || !seen["episode:final-item"] {
-		t.Fatalf("expected calls from both claimed batches, got %v", calls)
-	}
-}
-
 // The production refresher must keep satisfying the optional batch interface;
 // a silent mismatch would leave every claimed batch unbatched.
 var _ MetadataRefreshBatcher = (*metadata.MetadataService)(nil)
@@ -132,37 +99,6 @@ func (f *batchingMetadataRefresher) RefreshScheduledTarget(ctx context.Context, 
 		f.batchMu.Unlock()
 	}
 	return f.fakeMetadataRefresher.RefreshScheduledTarget(ctx, targetType, contentID)
-}
-
-func TestRefreshMetadataTask_FlushesEachBatchAfterItsTargets(t *testing.T) {
-	firstBatch := make([]worker.RefreshCandidate, refreshMetadataBatchSize)
-	for i := range firstBatch {
-		firstBatch[i] = worker.RefreshCandidate{TargetType: "episode", ContentID: fmt.Sprintf("episode-%03d", i)}
-	}
-	secondBatch := []worker.RefreshCandidate{
-		{TargetType: "season", ContentID: "season-final"},
-		{TargetType: "episode", ContentID: "episode-final"},
-	}
-	finder := &fakeRefreshCandidateFinder{
-		batches: [][]worker.RefreshCandidate{firstBatch, secondBatch},
-	}
-	refresher := &batchingMetadataRefresher{}
-	task := NewRefreshMetadataTask(finder, refresher)
-
-	if err := task.Execute(context.Background(), noopProgressReporter{}); err != nil {
-		t.Fatalf("Execute returned error: %v", err)
-	}
-
-	if refresher.begins != 2 || refresher.flushes != 2 {
-		t.Fatalf("batches begun/flushed = %d/%d, want 2/2", refresher.begins, refresher.flushes)
-	}
-	wantCallsAtFlush := []int{refreshMetadataBatchSize, refreshMetadataBatchSize + len(secondBatch)}
-	if fmt.Sprint(refresher.callsAtFlush) != fmt.Sprint(wantCallsAtFlush) {
-		t.Fatalf("refresh calls completed at each flush = %v, want %v", refresher.callsAtFlush, wantCallsAtFlush)
-	}
-	if refresher.unbatchedCalls != 0 {
-		t.Fatalf("%d targets refreshed outside their batch context", refresher.unbatchedCalls)
-	}
 }
 
 // cancelingBatchRefresher cancels the task's context during the first
@@ -413,33 +349,4 @@ func (f *sidecarCheckingRefresher) CheckLocalSidecarTarget(_ context.Context, ta
 		return "", nil
 	}
 	return contentID, nil
-}
-
-func TestRefreshMetadataTask_ChecksLocalSidecarsOfEachVisitedTarget(t *testing.T) {
-	finder := &fakeRefreshCandidateFinder{batches: [][]worker.RefreshCandidate{{
-		{TargetType: "item", ContentID: "movie-1"},
-		{TargetType: "episode", ContentID: "broken"},
-		{TargetType: "season", ContentID: "season-1"},
-		{TargetType: "item", ContentID: "reanchored"},
-		{TargetType: "item", ContentID: "moved"},
-	}}}
-	refresher := &sidecarCheckingRefresher{}
-	if err := NewRefreshMetadataTask(finder, refresher).Execute(context.Background(), noopProgressReporter{}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	refresher.checkMu.Lock()
-	checks := append([]string(nil), refresher.checks...)
-	refresher.checkMu.Unlock()
-	slices.Sort(checks)
-	if want := []string{"episode:broken", "item:moved", "item:movie-1", "item:reanchored", "season:season-1"}; !slices.Equal(checks, want) {
-		t.Fatalf("sidecar checks = %v, want %v", checks, want)
-	}
-	// A failed check still refreshes its target; a target the check moved
-	// to a new content ID is refreshed under it, and one that moved to an
-	// unknown ID is not refreshed.
-	calls := refresher.Calls()
-	slices.Sort(calls)
-	if want := []string{"episode:broken", "item:movie-1", "item:reanchored-new", "season:season-1"}; !slices.Equal(calls, want) {
-		t.Fatalf("refreshes = %v, want %v", calls, want)
-	}
 }

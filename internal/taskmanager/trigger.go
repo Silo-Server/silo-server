@@ -25,6 +25,23 @@ type TriggerConfig struct {
 	MaxRuntimeMs int64       `json:"max_runtime_ms,omitempty"`
 }
 
+// Normalized keeps the fields Type reads, and MaxRuntimeMs: IntervalMs for
+// interval, TimeOfDay for daily and weekly, DayOfWeek for weekly. The task
+// schedule store keeps day_of_week only on weekly triggers, so comparing
+// normalized configs compares what fires.
+func (c TriggerConfig) Normalized() TriggerConfig {
+	out := TriggerConfig{Type: c.Type, MaxRuntimeMs: c.MaxRuntimeMs}
+	switch c.Type {
+	case TriggerTypeInterval:
+		out.IntervalMs = c.IntervalMs
+	case TriggerTypeDaily:
+		out.TimeOfDay = c.TimeOfDay
+	case TriggerTypeWeekly:
+		out.TimeOfDay, out.DayOfWeek = c.TimeOfDay, c.DayOfWeek
+	}
+	return out
+}
+
 // MaxRuntime is the limit on each run this trigger starts, or 0 for none. The
 // v1 route and plugin manifests accept any int64, so a value too large for a
 // time.Duration counts as no limit instead of wrapping to a tiny or negative one.

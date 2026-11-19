@@ -373,7 +373,7 @@ type UnmatchedItem struct {
 	ContentType string   `json:"content_type" example:"movie"`
 	LibraryID   ID       `json:"library_id" doc:"\"0\" when the item is in no library" example:"1"`
 	LibraryName string   `json:"library_name" example:"Movies"`
-	Status      string   `json:"status" doc:"unmatched, pending or ambiguous" example:"unmatched"`
+	Status      string   `json:"status" doc:"unmatched, pending or ambiguous. An audiobook without a provider match is unmatched" example:"unmatched"`
 	IgnoredAt   *Instant `json:"ignored_at,omitempty" doc:"When an admin marked the item as intentionally unmatched; absent unless it is ignored"`
 }
 

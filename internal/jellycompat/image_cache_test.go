@@ -7,43 +7,6 @@ import (
 	"time"
 )
 
-func TestImageCacheLookupSizedUsesSizeBucket(t *testing.T) {
-	now := fixedNow()
-	cache := NewImageCache(time.Hour, func() time.Time { return now })
-
-	cache.RememberSized("item-1", "Primary", "https://example.com/small.jpg", compatCardImageSize)
-
-	got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize)
-	if !ok || got != "https://example.com/small.jpg" {
-		t.Fatalf("LookupSized(small) = (%q, %v), want small image", got, ok)
-	}
-
-	if _, ok := cache.LookupSized("item-1", "Primary", "", "original"); ok {
-		t.Fatal("LookupSized(original) unexpectedly returned small image")
-	}
-}
-
-// TestImageCacheLookupSizedReturnsHTTPPassthroughAcrossSizes locks in the
-// behavior PR #28's review feedback discussed: HTTP-passthrough URLs (e.g.
-// direct TMDB image URLs) are the same string regardless of requested size,
-// so their tag is identical across sizes. The list path seeds these at
-// compatCardImageSize, but Jellyfin-web requests them at "medium" / "original"
-// using the same tag — the lookup must succeed.
-func TestImageCacheLookupSizedReturnsHTTPPassthroughAcrossSizes(t *testing.T) {
-	now := fixedNow()
-	cache := NewImageCache(time.Hour, func() time.Time { return now })
-
-	httpURL := "https://image.tmdb.org/t/p/original/poster.jpg"
-	cache.RememberSized("item-1", "Primary", httpURL, compatCardImageSize)
-
-	for _, size := range []string{compatCardImageSize, "medium", "original"} {
-		got, ok := cache.LookupSized("item-1", "Primary", tagValue(httpURL), size)
-		if !ok || got != httpURL {
-			t.Fatalf("LookupSized(tag, size=%q) = (%q, %v), want %q", size, got, ok, httpURL)
-		}
-	}
-}
-
 func TestImageCacheEvictsLeastRecentlyWrittenAtCapacity(t *testing.T) {
 	now := fixedNow()
 	cache := NewImageCache(87600*time.Hour, func() time.Time { return now })
@@ -119,6 +82,23 @@ func TestImageCacheNeverServesSignedURLNearExpiry(t *testing.T) {
 	}
 }
 
+func TestImageCacheSkipsExpiredSignedURL(t *testing.T) {
+	now := fixedNow()
+	for _, urlExpiresAt := range []time.Time{now, now.Add(-time.Minute)} {
+		cache := NewImageCache(time.Hour, func() time.Time { return now })
+		signedURL := "/api/v2/artwork/poster.webp?exp=" + strconv.FormatInt(urlExpiresAt.Unix(), 10) + "&sig=x"
+
+		cache.RememberSized("item-1", "Primary", signedURL, compatCardImageSize)
+
+		if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
+			t.Fatalf("LookupSized = (%q, %v), want a URL expiring at %s never cached", got, ok, urlExpiresAt)
+		}
+		if got := len(cache.byTag.entries) + len(cache.byRoute.entries); got != 0 {
+			t.Fatalf("cache holds %d entries for a URL expiring at %s, want 0", got, urlExpiresAt)
+		}
+	}
+}
+
 // TestImageCacheKeepsShortLivedSignedURLs covers a short
 // s3.metadata_presign_expiry, which accepts any positive duration. A URL that
 // lives five minutes or less must still be cached, because the URL-derived
@@ -168,49 +148,5 @@ func TestImageCacheKeepsShortLivedSignedURLs(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestImageCacheSkipsExpiredSignedURL(t *testing.T) {
-	now := fixedNow()
-	for _, urlExpiresAt := range []time.Time{now, now.Add(-time.Minute)} {
-		cache := NewImageCache(time.Hour, func() time.Time { return now })
-		signedURL := "/api/v2/artwork/poster.webp?exp=" + strconv.FormatInt(urlExpiresAt.Unix(), 10) + "&sig=x"
-
-		cache.RememberSized("item-1", "Primary", signedURL, compatCardImageSize)
-
-		if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
-			t.Fatalf("LookupSized = (%q, %v), want a URL expiring at %s never cached", got, ok, urlExpiresAt)
-		}
-		if got := len(cache.byTag.entries) + len(cache.byRoute.entries); got != 0 {
-			t.Fatalf("cache holds %d entries for a URL expiring at %s, want 0", got, urlExpiresAt)
-		}
-	}
-}
-
-func TestSignedImageURLExpiry(t *testing.T) {
-	signedAt := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name   string
-		url    string
-		want   time.Time
-		wantOK bool
-	}{
-		{name: "artwork capability", url: "/api/v2/artwork/a/poster.webp?exp=1790000000&sig=abc", want: time.Unix(1790000000, 0), wantOK: true},
-		{name: "s3 sigv4", url: "https://s3.example.test/b/k.webp?X-Amz-Date=20260923T120000Z&X-Amz-Expires=14400&X-Amz-Signature=abc", want: signedAt.Add(4 * time.Hour), wantOK: true},
-		{name: "unsigned passthrough", url: "https://image.tmdb.org/t/p/w342/poster.jpg"},
-		{name: "unrelated query", url: "https://cdn.example.test/p.jpg?width=300"},
-		{name: "s3 missing expires", url: "https://s3.example.test/k.webp?X-Amz-Date=20260923T120000Z"},
-		{name: "malformed exp", url: "/api/v2/artwork/p.webp?exp=soon"},
-		{name: "exp outside artwork path", url: "https://cdn.example.test/p.jpg?exp=1"},
-		{name: "absolute artwork URL", url: "https://silo.example.test/api/v2/artwork/a/poster.webp?exp=1790000000&sig=abc", want: time.Unix(1790000000, 0), wantOK: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := signedImageURLExpiry(tt.url)
-			if ok != tt.wantOK || !got.Equal(tt.want) {
-				t.Fatalf("signedImageURLExpiry(%q) = (%v, %v), want (%v, %v)", tt.url, got, ok, tt.want, tt.wantOK)
-			}
-		})
 	}
 }

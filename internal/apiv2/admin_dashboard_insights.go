@@ -35,14 +35,20 @@ func cacheRefresh(ctx context.Context, requested bool) bool {
 }
 
 type AdminDashboardTimeseriesPoint struct {
-	T                  Instant          `json:"t"`
-	Streams            int64            `json:"streams"`
-	Direct             int64            `json:"direct"`
-	Remux              int64            `json:"remux"`
-	Transcode          int64            `json:"transcode"`
-	EgressKbps         int64            `json:"egress_kbps"`
-	DownloadEgressKbps int64            `json:"download_egress_kbps"`
-	EgressBySource     map[string]int64 `json:"egress_by_source" doc:"egress_kbps split by egress_sources key, from the bucket's peak-egress minute. Egress no listed source accounts for, such as minutes sampled before per-source rows existed, is egress_kbps minus the sum of these values."`
+	T                  Instant                       `json:"t"`
+	Streams            int64                         `json:"streams"`
+	Direct             int64                         `json:"direct"`
+	Remux              int64                         `json:"remux"`
+	Transcode          int64                         `json:"transcode"`
+	EgressKbps         int64                         `json:"egress_kbps"`
+	DownloadEgressKbps int64                         `json:"download_egress_kbps"`
+	EgressBySource     map[string]int64              `json:"egress_by_source" doc:"egress_kbps split by egress_sources key, from the bucket's peak-egress minute. Egress no listed source accounts for, such as minutes sampled before per-source rows existed, is egress_kbps minus the sum of these values."`
+	StreamsByMethod    AdminDashboardStreamsByMethod `json:"streams_by_method" doc:"streams split by play method, from the bucket's peak-streams minute, so the parts add up to no more than streams and can be stacked. direct, remux and transcode on the point are each their own peak and may come from different minutes. Sessions with any other play method are streams minus the sum of these values."`
+}
+type AdminDashboardStreamsByMethod struct {
+	Direct    int64 `json:"direct"`
+	Remux     int64 `json:"remux"`
+	Transcode int64 `json:"transcode"`
 }
 type AdminDashboardEgressSource struct {
 	Key         string `json:"key" doc:"The key used in a point's egress_by_source: \"api\" or \"node:<node_id>\"."`
@@ -142,7 +148,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 			body.OldestSampleAt = NullableInstant{Valid: true, Time: NewInstant(*s.OldestSampleAt)}
 		}
 		for _, p := range s.Points {
-			body.Points = append(body.Points, AdminDashboardTimeseriesPoint{T: NewInstant(p.T), Streams: p.Streams, Direct: p.Direct, Remux: p.Remux, Transcode: p.Transcode, EgressKbps: p.EgressKbps, DownloadEgressKbps: p.DownloadEgressKbps, EgressBySource: egressBySourceOf(p.EgressBySource)})
+			body.Points = append(body.Points, AdminDashboardTimeseriesPoint{T: NewInstant(p.T), Streams: p.Streams, Direct: p.Direct, Remux: p.Remux, Transcode: p.Transcode, EgressKbps: p.EgressKbps, DownloadEgressKbps: p.DownloadEgressKbps, EgressBySource: egressBySourceOf(p.EgressBySource), StreamsByMethod: AdminDashboardStreamsByMethod{Direct: p.StreamsByMethod.Direct, Remux: p.StreamsByMethod.Remux, Transcode: p.StreamsByMethod.Transcode}})
 		}
 		return &AdminDashboardTimeseriesOutput{Body: body}, nil
 	})

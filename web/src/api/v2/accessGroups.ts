@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { type ProfileRequestContextSnapshot } from "@/api/client";
 import {
   captureAdminAuthority,
@@ -20,7 +21,7 @@ const requireAuthority = requireAdminAuthority;
 function numericID(value: string) {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id <= 0)
-    throw new Error("This group contains an unsupported ID.");
+    throw new Error(t("web.common.errors.accessGroupIdUnsupported"));
   return id;
 }
 function legacy(group: Group, memberCount = 0): AccessGroup {
@@ -34,7 +35,7 @@ function legacy(group: Group, memberCount = 0): AccessGroup {
 }
 function strongTag(value: string | null) {
   if (!value || !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value))
-    throw new Error("Reload this group before saving: a strong ETag is required.");
+    throw new Error(t("web.common.errors.accessGroupReloadBeforeSaving"));
   return value;
 }
 function wire(body: AccessGroupInput): V2Body<"POST /api/v2/admin/access-groups"> {
@@ -58,15 +59,16 @@ export async function listAccessGroups(context = captureAccessGroupAuthority()) 
     });
     requireAuthority(context);
     if (!Array.isArray(body.items) || !body.page || typeof body.page.has_more !== "boolean")
-      throw new Error("Invalid group pagination. Reload the list.");
+      throw new Error(t("web.common.errors.accessGroupPaginationInvalid"));
     result.push(...body.items.map((item) => legacy(item, item.member_count)));
     if (!body.page.has_more) {
-      if (body.page.next_cursor) throw new Error("Invalid group pagination. Reload the list.");
+      if (body.page.next_cursor)
+        throw new Error(t("web.common.errors.accessGroupPaginationInvalid"));
       break;
     }
     const next = body.page.next_cursor;
     if (typeof next !== "string" || !next || seen.has(next))
-      throw new Error("Invalid group pagination. Reload the list.");
+      throw new Error(t("web.common.errors.accessGroupPaginationInvalid"));
     seen.add(next);
     cursor = next;
   } while (cursor !== undefined);

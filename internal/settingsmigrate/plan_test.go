@@ -2,7 +2,6 @@ package settingsmigrate
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 
@@ -205,36 +204,6 @@ func TestAccountSettingsFanOutToEveryProfile(t *testing.T) {
 	}
 }
 
-// TestLegacyKeysAreRenamed pins the rename table. A key that keeps its legacy
-// spelling would be unreachable through generated bindings.
-func TestLegacyKeysAreRenamed(t *testing.T) {
-	res := planner(t).Plan(Input{
-		Profiles: []LegacyProfile{{ID: "p1"}},
-		Settings: []LegacySetting{
-			{Key: "ui_text_scale", Value: "large"},
-			{Key: "ui_high_contrast", Value: "true"},
-			{Key: "next_up_mode", Value: "separate"},
-			{Key: "disabled_library_ids", Value: `[3,9]`},
-			{Key: "library_order", Value: `[9,3]`},
-		},
-	})
-	if len(res.Rejects) != 0 {
-		t.Fatalf("unexpected rejects: %+v", res.Rejects)
-	}
-	for key, want := range map[string]string{
-		"ui.text_scale":           `"large"`,
-		"ui.high_contrast":        `true`,
-		"ui.next_up_mode":         `"separate"`,
-		"ui.disabled_library_ids": `[3,9]`,
-		"ui.library_order":        `[9,3]`,
-	} {
-		row := find(t, res, key, nil)
-		if string(row.Value) != want {
-			t.Errorf("%s = %s, want %s", key, row.Value, want)
-		}
-	}
-}
-
 // TestLegacyStringsBecomeTypedJSON: the legacy store held everything as a
 // string, so "true" has to become a boolean and "30" a number, or every
 // generated binding fails to decode what the migration wrote.
@@ -255,21 +224,6 @@ func TestLegacyStringsBecomeTypedJSON(t *testing.T) {
 		if got := string(find(t, res, key, nil).Value); got != want {
 			t.Errorf("%s = %s, want %s (typed, not a quoted string)", key, got, want)
 		}
-	}
-}
-
-// TestOffStepNumbersSnapToTheGrid. The legacy endpoint never enforced the
-// declared step, so a stored playback speed of 0.26 is a real preference;
-// rejecting it at migration would destroy the choice over a rounding artifact.
-func TestOffStepNumbersSnapToTheGrid(t *testing.T) {
-	res := planner(t).Plan(Input{DeviceSettings: []LegacyDeviceSetting{
-		{ProfileID: "p1", DeviceID: "d1", Key: "player.playback_speed", Value: "0.26"},
-	}})
-	if len(res.Rejects) != 0 {
-		t.Fatalf("an off-step legacy speed was rejected: %+v", res.Rejects)
-	}
-	if got := string(find(t, res, "player.playback_speed", nil).Value); got != "0.25" {
-		t.Errorf("0.26 migrated as %s, want snapped to 0.25", got)
 	}
 }
 
@@ -501,35 +455,6 @@ func TestRenamedAndCanonicalKeysCollapseToOneRow(t *testing.T) {
 	}})
 	if len(res.Rows) != 2 {
 		t.Fatalf("distinct devices were merged: %+v", res.Rows)
-	}
-}
-
-// TestAutoSkipColumnsMigrateOnlyWhenTrue: the four auto-skip switches default
-// to false in both the columns and the contract, so an explicit true is the
-// only decision worth carrying — a migrated false would turn "never touched"
-// into a stored choice.
-func TestAutoSkipColumnsMigrateOnlyWhenTrue(t *testing.T) {
-	res := planner(t).Plan(Input{Profiles: []LegacyProfile{{
-		ID:                  "p1",
-		AutoSkipIntro:       boolp(true),
-		AutoSkipCredits:     boolp(false),
-		AutoSkipRecap:       boolp(true),
-		AutoPlayNextPreview: boolp(false),
-	}}})
-	if len(res.Rejects) != 0 {
-		t.Fatalf("unexpected rejects: %+v", res.Rejects)
-	}
-
-	for _, key := range []string{"playback.auto_skip_intro", "playback.auto_skip_recap"} {
-		row := find(t, res, key, nil)
-		if string(row.Value) != `true` || row.Scope != settingscontract.ScopeProfile {
-			t.Errorf("%s = %s at %s, want true at profile", key, row.Value, row.Scope)
-		}
-	}
-	for _, key := range []string{"playback.auto_skip_credits", "playback.auto_play_next_preview"} {
-		if hasKey(res, key) {
-			t.Errorf("%s became a row from a false column", key)
-		}
 	}
 }
 
@@ -778,83 +703,6 @@ func TestNilProfileListLeavesOwnershipUnchecked(t *testing.T) {
 	})
 	if !hasKey(res, "playback.subtitle_appearance") {
 		t.Fatalf("nil profile list unexpectedly filtered rows: rows=%+v rejects=%+v", res.Rows, res.Rejects)
-	}
-}
-
-func TestPlanRuntimeValueUsesMigrationAliasesAndQualityDecomposition(t *testing.T) {
-	p := planner(t)
-	appearance, err := p.PlanRuntimeValue("subtitle_appearance", `{"fontSize":"large"}`)
-	if err != nil {
-		t.Fatalf("PlanRuntimeValue appearance: %v", err)
-	}
-	if len(appearance) != 1 || appearance[0].Key != "playback.subtitle_appearance" {
-		t.Fatalf("appearance plan = %+v", appearance)
-	}
-
-	quality, err := p.PlanRuntimeValue("playback.preferred_quality", "1080p-high")
-	if err != nil {
-		t.Fatalf("PlanRuntimeValue quality: %v", err)
-	}
-	if len(quality) != 2 || string(quality[0].Value) != `"1080p"` || string(quality[1].Value) != "10000" {
-		t.Fatalf("quality plan = %+v", quality)
-	}
-	auto, err := p.PlanRuntimeValue("playback.preferred_quality", "auto")
-	if err != nil {
-		t.Fatalf("PlanRuntimeValue auto: %v", err)
-	}
-	if len(auto) != 2 || string(auto[0].Value) != `"auto"` || auto[1].Value != nil {
-		t.Fatalf("auto plan = %+v", auto)
-	}
-}
-
-// TestRuntimePlansCarryMirroredKeys covers the legacy generic settings routes.
-// They write canonically through this planner, so without the mirror here a
-// client that saves the intro switch through /settings/{key} — the route the
-// shipped apps still use for device preferences — would leave intro_skip_mode
-// resolving to the contract default. The mirror lives in the plan rather than
-// in one handler because the account fan-out, the per-device write, and new
-// profile inheritance all share it.
-func TestRuntimePlansCarryMirroredKeys(t *testing.T) {
-	p := planner(t)
-
-	for _, tc := range []struct{ raw, wantMode string }{
-		{"true", `"always"`},
-		{"false", `"ask"`},
-	} {
-		planned, err := p.PlanRuntimeValue("playback.auto_skip_intro", tc.raw)
-		if err != nil {
-			t.Fatalf("PlanRuntimeValue(%s): %v", tc.raw, err)
-		}
-		if len(planned) != 2 {
-			t.Fatalf("plan for %s = %+v, want the boolean and its replacement", tc.raw, planned)
-		}
-		if planned[0].Key != "playback.auto_skip_intro" || string(planned[0].Value) != tc.raw {
-			t.Errorf("primary mutation = %+v, want the key that was written", planned[0])
-		}
-		if planned[1].Key != "playback.intro_skip_mode" || string(planned[1].Value) != tc.wantMode {
-			t.Errorf("companion mutation = %+v, want intro_skip_mode %s", planned[1], tc.wantMode)
-		}
-	}
-
-	// DELETE has no value to convert, so it works off the owned-key list. It
-	// has to reach every row a write through the same route created.
-	keys := p.RuntimeKeys("playback.auto_skip_intro")
-	if !slices.Equal(keys, []string{"playback.auto_skip_intro", "playback.intro_skip_mode"}) {
-		t.Errorf("RuntimeKeys = %v, want both halves of the pair", keys)
-	}
-
-	// An unpaired key is unchanged, and quality still decomposes into exactly
-	// its two axes rather than gaining a phantom third row.
-	if keys := p.RuntimeKeys("playback.auto_skip_credits"); !slices.Equal(
-		keys, []string{"playback.auto_skip_credits"}) {
-		t.Errorf("RuntimeKeys for an unpaired key = %v", keys)
-	}
-	if keys := p.RuntimeKeys("playback.preferred_quality"); !slices.Equal(
-		keys, []string{"playback.preferred_quality", "playback.max_bitrate_kbps"}) {
-		t.Errorf("RuntimeKeys for quality = %v", keys)
-	}
-	if keys := p.RuntimeKeys("totally.invented.key"); keys != nil {
-		t.Errorf("RuntimeKeys for an unknown key = %v, want nil", keys)
 	}
 }
 

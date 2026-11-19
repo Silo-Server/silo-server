@@ -154,7 +154,7 @@ func TestStaticStreamGrantSkipsASignedOutCaller(t *testing.T) {
 		now = now.Add(time.Minute) // the signed-out client negotiated last
 	}
 	var reached bool
-	router := clientip.Middleware(clientip.NewResolver(nil))(directPlayRouter(t, sessions, playback, nil, &reached))
+	router := clientip.Middleware(clientip.NewResolver(nil))(directPlayRouter(t, sessions, playback, nil, addressGrantSettings(true), &reached))
 	if status := serveCompat(router, compatRequest("/Videos/item123/stream?static=true&mediaSourceId=src9", "")); status != http.StatusOK || !reached {
 		t.Fatalf("status = %d reached = %v, want the kept client's grant to serve it", status, reached)
 	}

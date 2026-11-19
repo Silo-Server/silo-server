@@ -16,7 +16,6 @@ func TestSkipNativeMediaCompression(t *testing.T) {
 		{http.MethodGet, "/api/v2/playback/transcode/s1/segment/000.m4s", true},
 		{http.MethodGet, "/api/v2/playback/transcode/s1/master.m3u8", false},
 		{http.MethodGet, "/api/v3/stream/s1", false},
-		{http.MethodGet, "/api/v1/stream/s1", false},
 		{http.MethodHead, "/api/v2/playback/transcode/s1/segment/000.ts", true},
 		{http.MethodGet, "/api/v2/downloads/d1/file", true},
 		{http.MethodGet, "/api/v2/downloads/d1/file-proxy", true},

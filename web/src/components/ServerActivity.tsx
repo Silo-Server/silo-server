@@ -40,7 +40,14 @@ import {
   preparationWorker,
 } from "@/pages/adminDownloadPreparationPresentation";
 import { formatLocale } from "@/lib/appLocale";
-import { useAdminMessages, useServerText, useT, type MessageKey, type Translate } from "@/i18n";
+import {
+  numberText,
+  useAdminMessages,
+  useServerText,
+  useT,
+  type MessageKey,
+  type Translate,
+} from "@/i18n";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -401,9 +408,9 @@ function ActivitySection({
 
 function formatBadgeCount(count: number, countIsLowerBound = false) {
   if (countIsLowerBound) {
-    return count > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : `${count}+`;
+    return numberText(count > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : `${count}+`);
   }
-  return count > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : count.toString();
+  return numberText(count > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : count);
 }
 
 function StreamCountRow({ method, count }: { method: string; count: number }) {

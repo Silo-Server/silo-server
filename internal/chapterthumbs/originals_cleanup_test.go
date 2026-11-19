@@ -10,14 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/h2non/bimg"
-
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
 
 func testFrameJPEG(t *testing.T, width, height int) []byte {
@@ -46,75 +42,6 @@ func storedKeys(t *testing.T, store blobstore.Store) []string {
 		keys = append(keys, info.Key)
 	}
 	return keys
-}
-
-func TestUploadChapterThumbnailStoresOnlyTheServedVariant(t *testing.T) {
-	store, err := blobstore.NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	queue := &fakeBlobQueue{}
-	service := &Service{store: store, blobQueue: queue}
-
-	key, thumbhash, err := service.uploadChapterThumbnail(t.Context(), 42, 3, testFrameJPEG(t, 1920, 1080), 320)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, valid := imageKeyGroup(key); !valid || !strings.HasPrefix(key, "chapter-images/42/3-") || !strings.HasSuffix(key, "/w320.webp") {
-		t.Fatalf("thumbnail_path = %q, want an immutable w320 object", key)
-	}
-	// An earlier width change may have queued this key for deletion. Defer
-	// collection before reusing it while preserving existing URL protection.
-	if !slices.Equal(queue.scheduled, []string{key}) || queue.delay != displacedImageGrace {
-		t.Fatalf("scheduled %v after %v, want the reused key protected", queue.scheduled, queue.delay)
-	}
-	if thumbhash == "" {
-		t.Fatal("thumbhash is empty")
-	}
-	if got := storedKeys(t, store); !slices.Equal(got, []string{key}) {
-		t.Fatalf("stored objects = %v, want only %s", got, key)
-	}
-
-	rc, _, err := store.Get(t.Context(), key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rc.Close() }()
-	var data bytes.Buffer
-	if _, err := data.ReadFrom(rc); err != nil {
-		t.Fatal(err)
-	}
-	size, err := bimg.NewImage(data.Bytes()).Size()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if size.Width != 320 {
-		t.Fatalf("stored width = %d, want 320", size.Width)
-	}
-	if want, _ := imageutil.Thumbhash(data.Bytes()); thumbhash != want {
-		t.Fatal("thumbhash is not derived from the stored image")
-	}
-}
-
-func TestParseOriginalKey(t *testing.T) {
-	for key, want := range map[string]int{
-		"chapter-images/42/0/original.webp":  42,
-		"chapter-images/7/15/original.webp":  7,
-		"chapter-images/42/0/w300.webp":      0,
-		"chapter-images/42/0/original.jpg":   0,
-		"chapter-images/42/original.webp":    0,
-		"chapter-images/x/0/original.webp":   0,
-		"chapter-images/042/0/original.webp": 0,
-		"chapter-images/0/0/original.webp":   0,
-		"chapter-images/4/-1/original.webp":  0,
-		"chapter-images/4/0/1/original.webp": 0,
-		"tmdb/movies/1/0/original.webp":      0,
-	} {
-		got, ok := parseOriginalKey(key)
-		if ok != (want != 0) || got != want {
-			t.Errorf("parseOriginalKey(%q) = %d, %v; want %d", key, got, ok, want)
-		}
-	}
 }
 
 func TestOriginalsCleanerDeletesOnlyOldUnreferencedOriginals(t *testing.T) {

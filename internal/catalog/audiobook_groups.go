@@ -112,15 +112,28 @@ func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q Aud
 	if pool == nil {
 		return AudiobookGroupsResult{}, fmt.Errorf("audiobook groups: no database pool")
 	}
+	if q.CursorPaging {
+		result, served, err := listAudiobookGroupsFromStats(ctx, pool, q, filter, maxLimit)
+		if err != nil || served {
+			return result, err
+		}
+	}
 
 	plan, err := buildAudiobookGroupsSQLWithLimit(q, filter, maxLimit)
 	if err != nil {
 		return AudiobookGroupsResult{}, err
 	}
+	return runAudiobookGroupsPlan(ctx, pool, q, plan)
+}
+
+// runAudiobookGroupsPlan runs a page query of either source, live or
+// precomputed; both select the same columns.
+func runAudiobookGroupsPlan(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, plan audiobookGroupsSQLPlan) (AudiobookGroupsResult, error) {
 	if plan.SQL == "" {
 		return AudiobookGroupsResult{Groups: []AudiobookGroup{}, TotalExact: plan.IncludeTotal}, nil
 	}
 
+	var err error
 	var queryer interface {
 		Query(context.Context, string, ...any) (pgx.Rows, error)
 		QueryRow(context.Context, string, ...any) pgx.Row
@@ -226,21 +239,7 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		return audiobookGroupsSQLPlan{}, fmt.Errorf("audiobook groups: library id is required")
 	}
 
-	limit := q.Limit
-	if limit <= 0 {
-		limit = 200
-	}
-	if maxLimit <= 0 {
-		maxLimit = audiobookGroupsPageCap
-	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
-	offset := max(q.Offset, 0)
-	fetchLimit := limit
-	if !q.IncludeTotal || q.CursorPaging {
-		fetchLimit++
-	}
+	limit, fetchLimit, offset := audiobookGroupsPageSize(q, maxLimit)
 
 	args := []any{q.LibraryID}
 	argIdx := 2
@@ -249,7 +248,7 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		"mi.type = 'audiobook'",
 		"mil.media_folder_id = $1",
 	}
-	if !appendAudiobookItemAccessConditions("mi", filter, &conditions, &args, &argIdx) {
+	if !appendLibraryAudiobookAccessConditions("mi", q.LibraryID, filter, &conditions, &args, &argIdx) {
 		return audiobookGroupsSQLPlan{
 			Limit:        limit,
 			FetchLimit:   fetchLimit,
@@ -258,7 +257,9 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		}, nil
 	}
 
-	var joinClause, nameExpr, groupExpr, posterOrder string
+	// nameColumn is the raw group name. Its LOWER(BTRIM) form is the group
+	// identity that cursors and the author/narrator/series filters round-trip.
+	var joinClause, nameColumn, memberColumns, posterOrder string
 	switch q.GroupBy {
 	case AudiobookGroupByAuthor, AudiobookGroupByNarrator:
 		kind := models.PersonKindAuthor
@@ -269,35 +270,24 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 			JOIN people p ON p.id = ip.person_id`, argIdx)
 		args = append(args, int(kind))
 		argIdx++
-		nameExpr = "MIN(BTRIM(p.name))"
-		groupExpr = "LOWER(BTRIM(p.name))"
-		posterOrder = "b.sort_title"
+		nameColumn = "p.name"
+		posterOrder = "m.sort_title, m.content_id"
 	case AudiobookGroupBySeries:
 		joinClause = "JOIN audiobook_series s ON s.content_id = b.content_id"
-		nameExpr = "MIN(BTRIM(s.series_name))"
-		groupExpr = "LOWER(BTRIM(s.series_name))"
-		posterOrder = "s.series_index NULLS LAST, b.sort_title"
+		nameColumn = "s.series_name"
+		memberColumns = ",\n\t\t\t\ts.series_index"
+		posterOrder = "m.series_index NULLS LAST, m.sort_title, m.content_id"
 	default:
 		return audiobookGroupsSQLPlan{}, fmt.Errorf("audiobook groups: unsupported group_by %q", q.GroupBy)
 	}
+	groupExpr := "LOWER(BTRIM(" + nameColumn + "))"
 
-	groupFilters := make([]string, 0, 1)
+	memberWhereClause := ""
 	if search := audiobookGroupSearchPattern(q.SearchPrefix); search != "" {
-		groupFilters = append(groupFilters, fmt.Sprintf(`%s LIKE $%d ESCAPE '\'`, groupExpr, argIdx))
+		memberWhereClause = fmt.Sprintf(`WHERE %s LIKE $%d ESCAPE '\'`, groupExpr, argIdx)
 		args = append(args, search)
 		argIdx++
 	}
-	groupWhereClause := ""
-	if len(groupFilters) > 0 {
-		groupWhereClause = "WHERE " + strings.Join(groupFilters, " AND ")
-	}
-
-	userArg := fmt.Sprintf("$%d", argIdx)
-	args = append(args, filter.UserID)
-	argIdx++
-	profileArg := fmt.Sprintf("$%d", argIdx)
-	args = append(args, filter.ProfileID)
-	argIdx++
 
 	var orderClause string
 	switch strings.ToLower(strings.TrimSpace(q.Sort)) {
@@ -311,30 +301,22 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		return audiobookGroupsSQLPlan{}, fmt.Errorf("audiobook groups: unsupported sort %q", q.Sort)
 	}
 
+	// CountSQL stops at the grouping, so it takes only the arguments so far.
 	countArgs := append([]any(nil), args...)
+
+	userArg := fmt.Sprintf("$%d", argIdx)
+	args = append(args, filter.UserID)
+	argIdx++
+	profileArg := fmt.Sprintf("$%d", argIdx)
+	args = append(args, filter.ProfileID)
+	argIdx++
+
 	seekClause := ""
 	if q.CursorPaging {
-		orderClause = "group_key"
-		sortColumn := ""
-		switch strings.ToLower(strings.TrimSpace(q.Sort)) {
-		case audiobookGroupSortCount:
-			sortColumn = "item_count"
-		case audiobookGroupSortDuration:
-			sortColumn = "total_duration_seconds"
-		}
-		if sortColumn != "" {
-			orderClause = sortColumn + " DESC, group_key"
-		}
-		if q.After != nil {
-			if sortColumn == "" {
-				seekClause = fmt.Sprintf("WHERE group_key > $%d", argIdx)
-				args = append(args, q.After.GroupKey)
-				argIdx++
-			} else {
-				seekClause = fmt.Sprintf("WHERE (%s < $%d OR (%s = $%d AND group_key > $%d))", sortColumn, argIdx, sortColumn, argIdx, argIdx+1)
-				args = append(args, q.After.Value, q.After.GroupKey)
-				argIdx += 2
-			}
+		var seek string
+		orderClause, seek = audiobookGroupSeek(q, &args, &argIdx)
+		if seek != "" {
+			seekClause = "WHERE " + seek
 		}
 	}
 	totalSelect := ""
@@ -353,6 +335,9 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		keyColumn = ", pg.group_key"
 	}
 
+	// members holds one row per (book, group) pair. The groups, and the
+	// progress and cover stack of the page's groups, all read it, so the
+	// group identity is computed once instead of once per page row.
 	base := fmt.Sprintf(`
 		WITH books AS (
 			SELECT
@@ -367,73 +352,134 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 			      AND afs.content_id = mi.content_id
 			WHERE %s
 		),
-		grouped AS (
+		members AS MATERIALIZED (
 			SELECT
 				%s AS group_key,
-				%s AS name,
-				COUNT(*)::int AS item_count,
-				COALESCE(SUM(b.duration_seconds), 0)::bigint AS total_duration_seconds,
-				COUNT(*) FILTER (WHERE uwp.media_item_id IS NOT NULL AND NOT uwp.completed)::int AS in_progress_count,
-				COUNT(*) FILTER (WHERE uwp.completed)::int AS finished_count
+				BTRIM(%s) AS name,
+				b.content_id,
+				b.poster_path,
+				b.sort_title,
+				b.duration_seconds%s
 			FROM books b
 			%s
-			LEFT JOIN user_watch_progress uwp
-			       ON uwp.media_item_id = b.content_id
-			      AND uwp.user_id = %s
-			      AND uwp.profile_id = %s
 			%s
-			GROUP BY %s
-		)`, strings.Join(conditions, " AND "), groupExpr, nameExpr, joinClause, userArg, profileArg, groupWhereClause, groupExpr)
+		),
+		grouped AS (
+			SELECT
+				group_key,
+				MIN(name) AS name,
+				COUNT(*)::int AS item_count,
+				COALESCE(SUM(duration_seconds), 0)::bigint AS total_duration_seconds
+			FROM members
+			GROUP BY group_key
+		)`, strings.Join(conditions, " AND "), groupExpr, nameColumn, memberColumns, joinClause, memberWhereClause)
 	countSQL := base + " SELECT COUNT(*)::int FROM grouped"
+	// No sort reads progress, so progress is counted for the page's groups
+	// only. user_watch_progress has one row per (user, profile, item), so
+	// the join cannot change a group's item count or duration. Every page
+	// group has member rows (names are NOT NULL), so page_stats has a row
+	// for each.
 	query := base + fmt.Sprintf(`,
-        counted_groups AS (SELECT grouped.*%s FROM grouped),
+		counted_groups AS (SELECT grouped.*%s FROM grouped),
 		paged_groups AS (
 			SELECT
 				group_key,
 				name,
 				item_count,
-				total_duration_seconds,
-				in_progress_count,
-				finished_count%s
+				total_duration_seconds%s
 			FROM counted_groups
-            %s
+			%s
 			ORDER BY %s
-            %s
+			%s
+		),
+		page_stats AS (
+			SELECT
+				m.group_key,
+				COUNT(*) FILTER (WHERE uwp.media_item_id IS NOT NULL AND NOT uwp.completed)::int AS in_progress_count,
+				COUNT(*) FILTER (WHERE uwp.completed)::int AS finished_count,
+				(array_agg(m.poster_path ORDER BY %s)
+					FILTER (WHERE NULLIF(m.poster_path, '') IS NOT NULL))[1:4] AS poster_paths
+			FROM members m
+			LEFT JOIN user_watch_progress uwp
+			       ON uwp.media_item_id = m.content_id
+			      AND uwp.user_id = %s
+			      AND uwp.profile_id = %s
+			WHERE m.group_key IN (SELECT group_key FROM paged_groups)
+			GROUP BY m.group_key
 		)
 		SELECT
 			pg.name,
 			pg.item_count,
 			pg.total_duration_seconds,
-			pg.in_progress_count,
-			pg.finished_count,
-			COALESCE(posters.poster_paths, '{}'::text[]) AS poster_paths%s%s
+			ps.in_progress_count,
+			ps.finished_count,
+			COALESCE(ps.poster_paths, '{}'::text[]) AS poster_paths%s%s
 		FROM paged_groups pg
-		LEFT JOIN LATERAL (
-			SELECT ARRAY(
-				SELECT b.poster_path
-				FROM books b
-				%s
-				WHERE %s = pg.group_key
-				  AND NULLIF(b.poster_path, '') IS NOT NULL
-				ORDER BY %s
-				LIMIT 4
-			) AS poster_paths
-		) posters ON TRUE
+		JOIN page_stats ps USING (group_key)
 		ORDER BY %s`,
 		totalSelect, strings.ReplaceAll(totalColumn, "pg.", ""), seekClause, orderClause, pageClause,
-		totalColumn, keyColumn, joinClause, groupExpr, posterOrder, orderClause,
+		posterOrder, userArg, profileArg, totalColumn, keyColumn, orderClause,
 	)
 	args = append(args, pageArgs...)
 
 	return audiobookGroupsSQLPlan{
-		SQL:      query,
-		CountSQL: countSQL, CountArgs: countArgs,
+		SQL:          query,
+		CountSQL:     countSQL,
+		CountArgs:    countArgs,
 		Args:         args,
 		Limit:        limit,
 		FetchLimit:   fetchLimit,
 		Offset:       offset,
 		IncludeTotal: q.IncludeTotal,
 	}, nil
+}
+
+// audiobookGroupsPageSize returns the page size, the rows to fetch for it
+// (one more when the next page's existence is read from the fetch), and the
+// offset.
+func audiobookGroupsPageSize(q AudiobookGroupsQuery, maxLimit int) (limit, fetchLimit, offset int) {
+	limit = q.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	if maxLimit <= 0 {
+		maxLimit = audiobookGroupsPageCap
+	}
+	limit = min(limit, maxLimit)
+	fetchLimit = limit
+	if !q.IncludeTotal || q.CursorPaging {
+		fetchLimit++
+	}
+	return limit, fetchLimit, max(q.Offset, 0)
+}
+
+// audiobookGroupSeek returns the cursor order of q's sort, over a relation
+// with group_key and the sorted aggregate column, and, after a cursor, the
+// condition that resumes past it. The caller has validated the sort.
+func audiobookGroupSeek(q AudiobookGroupsQuery, args *[]any, argIdx *int) (order, seek string) {
+	sortColumn := ""
+	switch strings.ToLower(strings.TrimSpace(q.Sort)) {
+	case audiobookGroupSortCount:
+		sortColumn = "item_count"
+	case audiobookGroupSortDuration:
+		sortColumn = "total_duration_seconds"
+	}
+	if sortColumn == "" {
+		if q.After != nil {
+			seek = fmt.Sprintf("group_key > $%d", *argIdx)
+			*args = append(*args, q.After.GroupKey)
+			*argIdx++
+		}
+		return "group_key", seek
+	}
+	if q.After != nil {
+		// The leading bound lets an index on (column DESC, group_key) start
+		// at the cursor instead of at the top of the list.
+		seek = fmt.Sprintf("%[1]s <= $%[2]d AND (%[1]s < $%[2]d OR group_key > $%[3]d)", sortColumn, *argIdx, *argIdx+1)
+		*args = append(*args, q.After.Value, q.After.GroupKey)
+		*argIdx += 2
+	}
+	return sortColumn + " DESC, group_key", seek
 }
 
 func audiobookGroupSearchPattern(raw string) string {

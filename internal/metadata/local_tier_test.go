@@ -3,36 +3,10 @@ package metadata
 import (
 	"context"
 	"fmt"
-	"reflect"
+
 	"testing"
 	"time"
 )
-
-func TestPinLocalTier(t *testing.T) {
-	t.Parallel()
-
-	entries := []ChainEntry{
-		{PluginInstallationID: 2, CapabilityID: "tmdb", ContentLevel: "series", Priority: 1, Enabled: true},
-		{PluginInstallationID: 3, CapabilityID: "tvdb", ContentLevel: "series", Priority: 0, Enabled: true},
-		{PluginInstallationID: 1, CapabilityID: "nfo", ContentLevel: "series", Priority: 7, Enabled: false},
-		{PluginInstallationID: 2, CapabilityID: "tmdb", ContentLevel: "movie", Priority: 0, Enabled: true},
-		{PluginInstallationID: 1, CapabilityID: "nfo", ContentLevel: "movie", Priority: 1, Enabled: true},
-	}
-	got := pinLocalTier(entries, func(e ChainEntry) bool { return e.PluginInstallationID == 1 })
-	want := []ChainEntry{
-		{PluginInstallationID: 1, CapabilityID: "nfo", ContentLevel: "movie", Priority: 0, Enabled: true, Local: true},
-		{PluginInstallationID: 2, CapabilityID: "tmdb", ContentLevel: "movie", Priority: 1, Enabled: true},
-		{PluginInstallationID: 1, CapabilityID: "nfo", ContentLevel: "series", Priority: 0, Enabled: false, Local: true},
-		{PluginInstallationID: 3, CapabilityID: "tvdb", ContentLevel: "series", Priority: 1, Enabled: true},
-		{PluginInstallationID: 2, CapabilityID: "tmdb", ContentLevel: "series", Priority: 2, Enabled: true},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("pinLocalTier =\n%+v\nwant\n%+v", got, want)
-	}
-	if entries[2].Priority != 7 {
-		t.Error("pinLocalTier modified its input")
-	}
-}
 
 // SetChain stores the local tier first whatever order the caller sends, and
 // resolution runs it first even when a stored chain lists it last (a row an

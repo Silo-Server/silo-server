@@ -33,6 +33,18 @@ export async function fetchRowPreview(
     },
     signal,
   );
+  // A row of collections previews its collections' posters.
+  if (result.collections?.length) {
+    return {
+      items: result.collections.slice(0, limit).map((card) => ({
+        id: `${card.source}:${card.id}`,
+        title: card.title,
+        posterUrl: card.poster_url || undefined,
+        thumbhash: card.poster_thumbhash || undefined,
+      })),
+      totalCount: result.total_count,
+    };
+  }
   return {
     items: result.items.map((item) => ({
       id: item.content_id,
@@ -78,6 +90,14 @@ export function profilePeekKey(page: PageRef, row: HomeRow): readonly unknown[] 
 
 /** A peek's titles from a row as the viewer's Home resolves it. */
 export function peekItemsOf(section: ResolvedSection): PreviewItem[] {
+  if (section.collections?.length) {
+    return section.collections.slice(0, PEEK_ITEM_LIMIT).map((card) => ({
+      id: `${card.source}:${card.id}`,
+      title: card.title,
+      posterUrl: card.poster_url || undefined,
+      thumbhash: card.poster_thumbhash || undefined,
+    }));
+  }
   return section.items.slice(0, PEEK_ITEM_LIMIT).map((item) => ({
     id: item.content_id,
     title: item.title,
