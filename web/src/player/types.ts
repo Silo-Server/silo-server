@@ -271,6 +271,8 @@ export interface PlayerPlaybackStateChange {
   currentTime: number;
   duration: number;
   playing: boolean;
+  /** The file playing now, once the player has chosen one. */
+  fileId?: number;
 }
 
 export interface PlayerPlaybackTransport {

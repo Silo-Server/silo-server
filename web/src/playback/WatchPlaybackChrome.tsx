@@ -64,6 +64,7 @@ import type {
   PlaybackExitState,
   PlaybackStartTrigger,
   PlayerPictureInPictureChange,
+  PlayerPlaybackStateChange,
 } from "@/player/types";
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
 import { formatTime } from "@/player/utils/formatTime";
@@ -999,11 +1000,13 @@ function WatchPlaybackHostContent() {
   const shuffledRef = useRef(false);
   // An item with a later part plays that part when this one ends, so its
   // post-roll waits for the last part rather than offering to skip the rest.
-  const awaitsLaterPartRef = useRef(false);
+  const activeItemRef = useRef(activeItem);
+  const requestFileIdRef = useRef(activeRequest?.fileId);
   useEffect(() => {
     hasPostRollRef.current = Boolean(episodeSeriesId || shuffleId);
     shuffledRef.current = Boolean(shuffleId);
-    awaitsLaterPartRef.current = hasLaterPart(activeItem ?? undefined, activeRequest?.fileId);
+    activeItemRef.current = activeItem;
+    requestFileIdRef.current = activeRequest?.fileId;
   }, [activeItem, activeRequest?.fileId, episodeSeriesId, shuffleId]);
 
   // Reset post-roll tracking when the playback session changes.
@@ -1120,7 +1123,7 @@ function WatchPlaybackHostContent() {
   );
   const inRoom = Boolean(activeRequest?.roomId && activeRequest.roomToken);
   const handlePlaybackStateChange = useCallback(
-    (snapshot: WatchPlaybackSnapshot) => {
+    (snapshot: PlayerPlaybackStateChange) => {
       if (!requestKeyValue) return;
       updatePlaybackSnapshot(requestKeyValue, snapshot);
 
@@ -1143,12 +1146,17 @@ function WatchPlaybackHostContent() {
         !postRollEnteredRef.current &&
         !inRoom &&
         hasPostRollRef.current &&
-        !awaitsLaterPartRef.current &&
         modeRef.current === "foreground" &&
         isInNextUpPromptWindow(
           snapshot.currentTime,
           snapshot.duration,
           nextUpPromptSecondsRef.current,
+        ) &&
+        // The player's file decides, since without one on the request the
+        // item may hold both single- and multi-part versions.
+        !hasLaterPart(
+          activeItemRef.current ?? undefined,
+          snapshot.fileId ?? requestFileIdRef.current,
         )
       ) {
         postRollEnteredRef.current = true;

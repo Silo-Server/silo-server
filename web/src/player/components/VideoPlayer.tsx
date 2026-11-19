@@ -5087,8 +5087,9 @@ export function VideoPlayer({
       currentTime,
       duration,
       playing,
+      fileId: activeFileId ?? selectedVersion?.file_id,
     });
-  }, [currentTime, duration, onPlaybackStateChange, playing]);
+  }, [activeFileId, currentTime, duration, onPlaybackStateChange, playing, selectedVersion]);
 
   useEffect(() => {
     if (!onPlaybackTransportReady) {
