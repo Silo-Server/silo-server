@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -210,6 +211,9 @@ type PlaybackSessionsLoader struct {
 	pool      *pgxpool.Pool
 	storeProv userstore.UserStoreProvider
 	DetailSvc *catalog.DetailService
+	// Posters mints poster_url under the admin poster rule: always a URL
+	// this server issued, empty only when the title has no poster.
+	Posters *artworkurl.ItemPosters
 }
 
 func NewPlaybackSessionsLoader(
@@ -303,6 +307,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			e.season_number,
 			e.episode_number,
 			COALESCE(CASE WHEN e.series_id IS NOT NULL THEN series_mi.poster_path ELSE mi.poster_path END, ''),
+			COALESCE(CASE WHEN e.series_id IS NOT NULL THEN e.series_id ELSE mi.content_id END, ''),
 			s.play_method,
 			s.reporting_node,
 			COALESCE(remote_node.name, ''),
@@ -411,7 +416,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 	var total int
 	for rows.Next() {
 		var s playbackSessionRow
-		var posterPath string
+		var posterPath, posterOwnerID string
 		var episodeTitle *string
 		var streamBitrateKbps *int
 		var targetAudioChannels *int
@@ -423,7 +428,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&total,
 			&s.SessionID, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.MediaItemID,
 			&s.MediaTitle, &s.MediaType, &episodeTitle, &s.SeriesTitle, &s.SeasonNumber, &s.EpisodeNumber,
-			&posterPath,
+			&posterPath, &posterOwnerID,
 			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.TimelineDuration, &s.StartedAt, &s.UpdatedAt,
 			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,
 			&s.ClientBuild, &s.ClientChannel,
@@ -444,7 +449,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			s.MediaTitle, s.MediaType = *episodeTitle, itemTypeEpisode
 		}
 		if !summary {
-			s.PosterURL = l.presignPosterURL(ctx, posterPath)
+			s.PosterURL = l.posterURL(ctx, posterOwnerID, posterPath)
 		}
 		s.StreamBitrateKbps = streamBitrateKbps
 		s.TargetAudioChannels = targetAudioChannels
@@ -472,9 +477,16 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 	return sessions, total, nil
 }
 
-func (l *PlaybackSessionsLoader) presignPosterURL(ctx context.Context, path string) string {
-	if l != nil && l.DetailSvc != nil {
-		return l.DetailSvc.PresignURL(ctx, cardThumbnailPath(path), "card")
+// posterURL applies the admin poster rule. A loader built without the rule
+// (one a handler makes for itself, with no signing secret) still names cached
+// art by its stored URL, and names nothing for art that is not cached: it
+// never hands out a provider's URL.
+func (l *PlaybackSessionsLoader) posterURL(ctx context.Context, ownerID, path string) string {
+	if l.Posters != nil {
+		return l.Posters.URL(ctx, ownerID, path)
+	}
+	if l.DetailSvc != nil && artworkurl.IsStoredArtworkPath(path) {
+		return l.DetailSvc.PresignURL(ctx, artworkurl.StoredPosterVariant(path), "card")
 	}
 	return ""
 }

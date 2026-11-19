@@ -47001,7 +47001,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "任务在服务器启动时注册，因此开启或关闭任务需重启后才会生效。任务创建后，请在其任务页面更改计划。"
+      "value": "开启或关闭任务无需重启即可生效，但其他服务器可能需要片刻才能应用此更改。任务开启后，请在其任务页面更改计划。"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -66735,6 +66735,12 @@
     {
       "type": 0,
       "value": "电视登录：开始"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "海报请求"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

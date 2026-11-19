@@ -46617,7 +46617,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tugas didaftarkan saat server dimulai, jadi mengaktifkan atau menonaktifkan tugas baru berlaku setelah server dimulai ulang. Setelah tugas ada, ubah jadwalnya di halaman tugas tersebut."
+      "value": "Mengaktifkan atau menonaktifkan tugas langsung berlaku tanpa memulai ulang, meskipun server lain mungkin perlu waktu sejenak untuk menerapkannya. Setelah tugas aktif, ubah jadwalnya di halaman tugas tersebut."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -66163,6 +66163,12 @@
     {
       "type": 0,
       "value": "Masuk di TV: mulai"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Permintaan poster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

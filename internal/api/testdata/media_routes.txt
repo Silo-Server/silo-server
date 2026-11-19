@@ -734,6 +734,7 @@ GET /api/v2/invitations/capabilities	non-media
 POST /api/v2/invitations/lookup	non-media
 GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
+GET /api/v2/item-posters/{content_id}	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
 GET /api/v2/libraries/capabilities	non-media
@@ -1803,6 +1804,7 @@ GET /api/v2/invitations/capabilities	non-media
 POST /api/v2/invitations/lookup	non-media
 GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
+GET /api/v2/item-posters/{content_id}	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
 GET /api/v2/libraries/capabilities	non-media

@@ -58658,7 +58658,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "As tarefas são registadas quando o servidor inicia, por isso ativar ou desativar uma tarefa tem efeito após um reinício. Quando uma tarefa existir, altere o agendamento na página da tarefa."
+      "value": "Ativar ou desativar uma tarefa tem efeito sem reiniciar, embora os outros servidores possam demorar um pouco a aplicar a alteração. Depois de ativar uma tarefa, altere o agendamento na página da tarefa."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -80014,6 +80014,12 @@
     {
       "type": 0,
       "value": "Início de sessão na TV: início"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Pedidos de pósteres"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

@@ -58506,7 +58506,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Zadaci se registriraju pri pokretanju poslužitelja pa uključivanje ili isključivanje zadatka stupa na snagu nakon ponovnog pokretanja. Kada zadatak postoji, promijenite njegov raspored na stranici zadatka."
+      "value": "Uključivanje ili isključivanje zadatka primjenjuje se bez ponovnog pokretanja, no drugim poslužiteljima može trebati trenutak da preuzmu promjenu. Kada je zadatak uključen, promijenite njegov raspored na stranici zadatka."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79810,6 +79810,12 @@
     {
       "type": 0,
       "value": "Prijava na TV-u: početak"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Zahtjevi za postere"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

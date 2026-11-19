@@ -58446,7 +58446,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Las tareas se registran al iniciar el servidor, así que activar o desactivar una surte efecto tras un reinicio. Cuando una tarea ya existe, cambia su programación en la página de la tarea."
+      "value": "Activar o desactivar una tarea se aplica sin reiniciar, aunque otros servidores pueden tardar un momento en detectarlo. Cuando una tarea esté activada, cambia su programación en la página de la tarea."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79670,6 +79670,12 @@
     {
       "type": 0,
       "value": "Inicio de sesión en TV: inicio"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Solicitudes de póster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

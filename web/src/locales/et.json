@@ -52966,7 +52966,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Ülesanded registreeritakse serveri käivitumisel, seega jõustub ülesande sisse- või väljalülitamine pärast taaskäivitust. Kui ülesanne on olemas, muutke selle ajakava ülesande lehel."
+      "value": "Ülesande sisse- või väljalülitamine jõustub ilma taaskäivituseta, kuigi teistel serveritel võib selle rakendamiseks veidi aega kuluda. Kui ülesanne on sisse lülitatud, muutke selle ajakava ülesande lehel."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -73507,6 +73507,12 @@
     {
       "type": 0,
       "value": "Teleri sisselogimine: alustamine"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatite päringud"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

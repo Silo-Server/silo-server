@@ -52442,7 +52442,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Opgaver registreres, når serveren starter, så det træder først i kraft efter en genstart, når du slår en opgave til eller fra. Når en opgave findes, kan du ændre dens tidsplan på opgavens side."
+      "value": "Når du slår en opgave til eller fra, træder det i kraft uden genstart, men andre servere kan være et øjeblik om at registrere ændringen. Når en opgave er slået til, kan du ændre dens tidsplan på opgavens side."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -72815,6 +72815,12 @@
     {
       "type": 0,
       "value": "Login på tv: start"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatforespørgsler"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

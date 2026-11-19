@@ -46605,7 +46605,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tugas didaftarkan semasa pelayan bermula, jadi menghidupkan atau mematikan tugas berkuat kuasa selepas dimulakan semula. Setelah tugas wujud, tukar jadualnya di halaman tugas itu."
+      "value": "Menghidupkan atau mematikan tugas berkuat kuasa tanpa perlu dimulakan semula, walaupun pelayan lain mungkin mengambil sedikit masa untuk menerimanya. Setelah tugas dihidupkan, tukar jadualnya di halaman tugas itu."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -66139,6 +66139,12 @@
     {
       "type": 0,
       "value": "Log masuk TV: mula"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Permintaan poster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

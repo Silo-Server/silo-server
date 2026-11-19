@@ -58486,7 +58486,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Les tasques es registren quan s’inicia el servidor, de manera que activar-ne o desactivar-ne una té efecte després d’un reinici. Un cop existeix una tasca, canvia’n la programació a la pàgina de la tasca."
+      "value": "Activar o desactivar una tasca s’aplica sense reiniciar, tot i que els altres servidors poden trigar una mica a detectar-ho. Un cop una tasca està activada, canvia’n la programació a la pàgina de la tasca."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79798,6 +79798,12 @@
     {
       "type": 0,
       "value": "Inici de sessió a la TV: començament"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Sol·licituds de pòsters"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

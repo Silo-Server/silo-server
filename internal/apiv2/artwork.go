@@ -22,6 +22,8 @@ const (
 	artworkRangeHeader  = "Range"
 	artworkIntegerType  = "integer"
 	artworkBinaryFormat = "binary"
+	// artworkImageMediaType is the media type artwork answers document.
+	artworkImageMediaType = "image/*"
 )
 
 type ArtworkRepairService interface {
@@ -51,7 +53,7 @@ func registerArtwork(reg *Registry) {
 		}
 		responses := map[string]*huma.Response{"200": {Description: "Artwork bytes"}, "206": {Description: "Partial artwork bytes"}, "304": {Description: "Artwork not modified"}, "404": {Description: "Artwork not found"}, "503": {Description: "Artwork storage unavailable"}}
 		if method == http.MethodGet {
-			responses["200"].Content = map[string]*huma.MediaType{"image/*": {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}
+			responses["200"].Content = map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}
 			responses["206"].Content = responses["200"].Content
 		}
 		op.Responses = responses

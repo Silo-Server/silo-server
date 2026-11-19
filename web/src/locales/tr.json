@@ -51898,7 +51898,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Görevler sunucu başlatılırken kaydedilir, bu nedenle bir görevi açmak veya kapatmak yeniden başlatmadan sonra etkili olur. Bir görev oluşturulduktan sonra zamanlamasını görev sayfasından değiştirin."
+      "value": "Bir görevi açmak veya kapatmak yeniden başlatma gerektirmeden uygulanır, ancak diğer sunucuların değişikliği algılaması biraz zaman alabilir. Bir görev açıldıktan sonra zamanlamasını görev sayfasından değiştirin."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -72275,6 +72275,12 @@
     {
       "type": 0,
       "value": "TV oturum açma: başlatma"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poster istekleri"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

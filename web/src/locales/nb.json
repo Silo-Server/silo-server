@@ -52502,7 +52502,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Oppgaver registreres når serveren starter, så det å slå en oppgave på eller av trer i kraft etter en omstart. Når oppgaven finnes, endrer du tidsplanen på siden for oppgaven."
+      "value": "Når du slår en oppgave på eller av, trer endringen i kraft uten omstart, men andre servere kan bruke litt tid på å fange den opp. Når en oppgave er slått på, endrer du tidsplanen på siden for oppgaven."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -72887,6 +72887,12 @@
     {
       "type": 0,
       "value": "TV-pålogging: start"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatforespørsler"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
