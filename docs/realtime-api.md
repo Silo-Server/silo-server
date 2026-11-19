@@ -334,8 +334,9 @@ admin log stream, playback-control and Watch Together sockets all use them.
 Only `4001` comes with a frame (`access_changed`) before the close. A failed
 lookup never closes with `4002`, so a client can treat `4002` as final.
 Likewise a ticket mint whose check fails answers `503 dependency_unavailable`
-with `Retry-After` rather than `403`, and an upgrade whose ticket cannot be
-checked answers `503` rather than `401`.
+with `Retry-After` rather than `403`, and an upgrade whose credential cannot
+be checked answers `503` rather than `401`. A ticket store failure during the
+upgrade still answers `401`; mint a new ticket.
 
 Other closes keep their standard codes: `1008` (policy violation) for a
 missing subscribe or a malformed frame, and `1009` for an oversized message. A
@@ -344,6 +345,7 @@ ends without a close frame (`1006` at the client). Two closes still send no
 frame: a playback-control lane that a newer connection from the same owner took
 over, or whose session or installation no longer matches, and a Watch Together
 connection whose room can no longer be read.
+
 ### Owner-bound playback control handshake (v2)
 
 `POST /api/v2/playback/sessions/{session_id}/control/ws-ticket`

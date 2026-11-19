@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -46,6 +47,9 @@ func (h *WatchTogetherSocketV2) MintRoomSocket(ctx context.Context, roomID, proo
 		return "", time.Time{}, apiError(403, "forbidden", "Room proof is required")
 	}
 	validated, effective, err := h.Validate(ctx, identity)
+	if errors.Is(err, evt.ErrSocketAuthorityUnavailable) {
+		return "", time.Time{}, err
+	}
 	if err != nil {
 		return "", time.Time{}, apiError(403, "forbidden", "Current room authority is required")
 	}

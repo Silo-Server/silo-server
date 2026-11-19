@@ -514,10 +514,14 @@ func socketAccount(ctx context.Context, users access.UserRepository, userID int)
 }
 
 // socketResolveError classifies a failed viewer-scope read: a deleted profile
-// ends the credential, any other failure could not be checked.
+// or account ends the credential, a revoked profile verification is an access
+// change, and any other failure could not be checked.
 func socketResolveError(err error) error {
-	if errors.Is(err, access.ErrProfileNotFound) {
+	switch {
+	case errors.Is(err, access.ErrProfileNotFound), errors.Is(err, auth.ErrNotFound):
 		return errSocketCredentialInvalid
+	case errors.Is(err, access.ErrProfileUnverified):
+		return errSocketAccessChanged
 	}
 	return socketAuthorityUnavailable(err)
 }
