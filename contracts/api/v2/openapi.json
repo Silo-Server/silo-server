@@ -15779,6 +15779,88 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "subtitle": {
+            "additionalProperties": false,
+            "description": "The subtitle the play's plan delivered when it ended, in the live session row's shape; null when it showed none, for a Jellyfin-protocol or Audiobookshelf play, and on rows recorded before the server kept it",
+            "properties": {
+              "codec": {
+                "description": "The track's format in its source, as the inventory's codec names it; null when unknown",
+                "examples": [
+                  "subrip"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "delivery": {
+                "description": "How the plan delivers it: burned into the video (subtitle.mode burn_in), carried in the stream the client plays (subtitle.embedded), a WebVTT rendition of the HLS stream (subtitle.hls_rendition), or a sidecar file the client fetches (subtitle.artifact). Clients ignore values they do not know",
+                "enum": [
+                  "burn_in",
+                  "embedded",
+                  "hls_rendition",
+                  "sidecar"
+                ],
+                "type": "string"
+              },
+              "forced": {
+                "type": "boolean"
+              },
+              "format": {
+                "description": "Format the client receives the track in: the sidecar artifact's or the HLS rendition's format. Null when it is burned in or carried in the stream as the source has it",
+                "examples": [
+                  "vtt"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hearing_impaired": {
+                "type": "boolean"
+              },
+              "language": {
+                "description": "The track's language as the inventory names it (BCP 47; older rows may carry a legacy value); null when unknown",
+                "examples": [
+                  "en"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "description": "Where the track comes from, as the inventory's source names it: a track in the media file, a subtitle file beside it, or one the server downloaded or stored",
+                "enum": [
+                  "embedded",
+                  "external",
+                  "downloaded"
+                ],
+                "type": "string"
+              },
+              "track_id": {
+                "description": "The track's inventory track_id, as the plan's subtitle.track_id names it",
+                "examples": [
+                  "file:42:subtitle:2"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "track_id",
+              "language",
+              "codec",
+              "format",
+              "source",
+              "delivery",
+              "forced",
+              "hearing_impaired"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "user_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -15838,6 +15920,7 @@
           "video_decision",
           "audio_decision",
           "end_reason",
+          "subtitle",
           "lifecycle_seq"
         ],
         "type": "object"
@@ -16192,6 +16275,88 @@
             ],
             "type": "string"
           },
+          "subtitle": {
+            "additionalProperties": false,
+            "description": "The subtitle the session's current plan delivers, following each replan (a subtitle switch the client reports, a recovery); null when it shows none, for a session planned before the server recorded it, and for Jellyfin-protocol and Audiobookshelf sessions. A client that turns an already delivered sidecar on or off without a replan is not seen.",
+            "properties": {
+              "codec": {
+                "description": "The track's format in its source, as the inventory's codec names it; null when unknown",
+                "examples": [
+                  "subrip"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "delivery": {
+                "description": "How the plan delivers it: burned into the video (subtitle.mode burn_in), carried in the stream the client plays (subtitle.embedded), a WebVTT rendition of the HLS stream (subtitle.hls_rendition), or a sidecar file the client fetches (subtitle.artifact). Clients ignore values they do not know",
+                "enum": [
+                  "burn_in",
+                  "embedded",
+                  "hls_rendition",
+                  "sidecar"
+                ],
+                "type": "string"
+              },
+              "forced": {
+                "type": "boolean"
+              },
+              "format": {
+                "description": "Format the client receives the track in: the sidecar artifact's or the HLS rendition's format. Null when it is burned in or carried in the stream as the source has it",
+                "examples": [
+                  "vtt"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hearing_impaired": {
+                "type": "boolean"
+              },
+              "language": {
+                "description": "The track's language as the inventory names it (BCP 47; older rows may carry a legacy value); null when unknown",
+                "examples": [
+                  "en"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "description": "Where the track comes from, as the inventory's source names it: a track in the media file, a subtitle file beside it, or one the server downloaded or stored",
+                "enum": [
+                  "embedded",
+                  "external",
+                  "downloaded"
+                ],
+                "type": "string"
+              },
+              "track_id": {
+                "description": "The track's inventory track_id, as the plan's subtitle.track_id names it",
+                "examples": [
+                  "file:42:subtitle:2"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "track_id",
+              "language",
+              "codec",
+              "format",
+              "source",
+              "delivery",
+              "forced",
+              "hearing_impaired"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "target_audio_channels": {
             "format": "int64",
             "type": "integer"
@@ -16266,7 +16431,8 @@
           "stream_bitrate_kbps",
           "target_bitrate_kbps",
           "source_bitrate_kbps",
-          "source_audio_channels"
+          "source_audio_channels",
+          "subtitle"
         ],
         "type": "object"
       },
@@ -16351,6 +16517,10 @@
           "stream_location": {
             "type": "boolean"
           },
+          "subtitle": {
+            "description": "Rows and admin playback history entries carry subtitle",
+            "type": "boolean"
+          },
           "summary": {
             "type": "boolean"
           },
@@ -16395,6 +16565,7 @@
           "device_identity",
           "lifecycle_events",
           "adaptation_reasons",
+          "subtitle",
           "adaptation_reason_values",
           "revision",
           "state",
@@ -46612,6 +46783,84 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "PlaybackSessionSubtitle": {
+        "additionalProperties": false,
+        "properties": {
+          "codec": {
+            "description": "The track's format in its source, as the inventory's codec names it; null when unknown",
+            "examples": [
+              "subrip"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "description": "How the plan delivers it: burned into the video (subtitle.mode burn_in), carried in the stream the client plays (subtitle.embedded), a WebVTT rendition of the HLS stream (subtitle.hls_rendition), or a sidecar file the client fetches (subtitle.artifact). Clients ignore values they do not know",
+            "enum": [
+              "burn_in",
+              "embedded",
+              "hls_rendition",
+              "sidecar"
+            ],
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "format": {
+            "description": "Format the client receives the track in: the sidecar artifact's or the HLS rendition's format. Null when it is burned in or carried in the stream as the source has it",
+            "examples": [
+              "vtt"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hearing_impaired": {
+            "type": "boolean"
+          },
+          "language": {
+            "description": "The track's language as the inventory names it (BCP 47; older rows may carry a legacy value); null when unknown",
+            "examples": [
+              "en"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Where the track comes from, as the inventory's source names it: a track in the media file, a subtitle file beside it, or one the server downloaded or stored",
+            "enum": [
+              "embedded",
+              "external",
+              "downloaded"
+            ],
+            "type": "string"
+          },
+          "track_id": {
+            "description": "The track's inventory track_id, as the plan's subtitle.track_id names it",
+            "examples": [
+              "file:42:subtitle:2"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "track_id",
+          "language",
+          "codec",
+          "format",
+          "source",
+          "delivery",
+          "forced",
+          "hearing_impaired"
         ],
         "type": "object"
       },
@@ -252119,6 +252368,9 @@
             "format": "double",
             "type": "number"
           },
+          "subtitle": {
+            "$ref": "#/x-silo-worker-protocols/schemas/playback_SessionSubtitle"
+          },
           "subtitle_burn_in": {
             "type": "boolean"
           },
@@ -252260,6 +252512,43 @@
         "required": [
           "path",
           "description"
+        ],
+        "type": "object"
+      },
+      "playback_SessionSubtitle": {
+        "additionalProperties": false,
+        "properties": {
+          "codec": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "format": {
+            "type": "string"
+          },
+          "hearing_impaired": {
+            "type": "boolean"
+          },
+          "language": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "track_id",
+          "source",
+          "delivery",
+          "forced",
+          "hearing_impaired"
         ],
         "type": "object"
       },

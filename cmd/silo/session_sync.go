@@ -59,6 +59,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		TranscodeHWAccel:        s.TranscodeHWAccel,
 		ToneMapMode:             string(s.ToneMapMode),
 		AdaptationReasons:       s.AdaptationReasons,
+		Subtitle:                s.Subtitle,
 		RoutingNetworkProvider:  s.RoutingNetworkProvider,
 		RoutingWorkload:         s.RoutingWorkload,
 		RoutingExecution:        s.RoutingExecution,
