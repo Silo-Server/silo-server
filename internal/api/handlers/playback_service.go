@@ -655,9 +655,14 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	}
 	session := h.attemptSessionV2(ctx, record, position, paused)
 	session.Watch = endWatch(ctx)
+	fromRemovedCopy := session.Watch.Measured
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
-	if accepted != nil && accepted.Sequence > record.LastSequence {
-		// The stop's own final sample, newer than any progress a copy saw.
+	if accepted != nil && (accepted.Sequence > record.LastSequence || !fromRemovedCopy) {
+		// The latest accepted sample: the stop's own, or, when the
+		// measurement was restored from the last save rather than handed
+		// over by the copy this end removed, progress accepted since that
+		// save. Progress does not trigger a save, so the saved measurement
+		// can predate it. A sample it already holds credits nothing.
 		observeEndSample(session, time.Now())
 	}
 	result := h.recordStopHistory(ctx, session, reason)
