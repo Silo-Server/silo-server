@@ -21,7 +21,7 @@ type AdminTaskService interface {
 	ListRelevantTasks(context.Context) []taskmanager.TaskInfo
 	GetTaskInfo(string) taskmanager.TaskInfo
 	StartTask(string) (taskmanager.TaskInfo, error)
-	CancelTask(string) error
+	CancelTask(string) (taskmanager.TaskInfo, error)
 	GetSchedule(context.Context, string) (taskmanager.Schedule, error)
 	UpdateSchedule(context.Context, string, int64, []taskmanager.TriggerConfig) (taskmanager.Schedule, error)
 }
@@ -181,7 +181,7 @@ func registerAdminTasks(reg *Registry) {
 	cancel.Errors = append(cancel.Errors, http.StatusConflict)
 	Register(reg, cancel, reg.cancelAdminTask)
 	Register(reg, adminTaskOp("GET", "/{key}/triggers", "getAdminTaskSchedule", "Read persisted schedule configuration and its canonical validator."), reg.getAdminTaskSchedule)
-	update := adminTaskOp("PUT", "/{key}/triggers", "updateAdminTaskSchedule", "Replace a captured schedule and apply it on this process. Other processes reload on restart.")
+	update := adminTaskOp("PUT", "/{key}/triggers", "updateAdminTaskSchedule", "Replace a captured schedule and apply it on this process. Other processes install a plugin task's schedule at their next periodic plugin task sync, and a core task's when they restart.")
 	update.Guarded = true
 	Register(reg, update, reg.updateAdminTaskSchedule)
 	cursors := NewCursors(reg.deps.CursorSecret)
@@ -250,10 +250,11 @@ func (reg *Registry) cancelAdminTask(_ context.Context, in *AdminTaskInput) (*Ad
 	if _, err := reg.taskInfo(in.Key); err != nil {
 		return nil, err
 	}
-	if err := reg.deps.AdminTasks.CancelTask(in.Key); err != nil {
+	info, err := reg.deps.AdminTasks.CancelTask(in.Key)
+	if err != nil {
 		return nil, taskProblem(err)
 	}
-	return &AdminTaskOutput{Body: taskOf(reg.deps.AdminTasks.GetTaskInfo(in.Key))}, nil
+	return &AdminTaskOutput{Body: taskOf(info)}, nil
 }
 
 // taskScheduleTag names one schedule representation. A saved schedule is

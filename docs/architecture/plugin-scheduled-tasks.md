@@ -4,10 +4,10 @@ Each `scheduled_task.v1` capability of an enabled, non-builtin plugin
 installation is one task in the task manager, keyed
 `plugin:<installation id>:<capability id>`, unless its row in
 `plugin_task_bindings` is disabled. `plugins.TaskRegistry`
-(`internal/plugins/task_registry.go`) builds those tasks when an API server
-starts. Every API server runs its own task manager; proxy and transcode nodes
-run none. Each scheduled firing still runs on one API server (see "One run per
-firing").
+(`internal/plugins/task_registry.go`) keeps the task manager in step with
+those tables. Every API server runs its own task manager and its own
+registry; proxy and transcode nodes run none. Each scheduled firing still runs
+on one API server (see "One run per firing").
 
 ## Schedule
 
@@ -21,7 +21,11 @@ A plugin task runs the first of these:
 3. The manifest's `scheduled_task.default_trigger` (SDK
    `docs/scheduled-task.md`), when the task manager can run it and, for an
    interval, `interval_ms` is at least 60000.
-4. One run shortly after the server starts.
+4. One run shortly after the task starts on a server: at server start, and on
+   a running server when the task registers (install or enable) or its
+   schedule changes to this one. That run claims its firing like any other,
+   so it is skipped within 10 minutes of the task's last claim (see "One run
+   per firing").
 
 "Can run" means a type the task manager knows (`interval`, `daily`, `weekly`,
 `startup`) with the fields that type reads: a positive interval, an `HH:MM`
@@ -35,8 +39,8 @@ Sources 2 to 4 are the task's `DefaultTriggers`. A plugin task is a
 schedule is saved and never saves them, unlike core tasks, whose defaults it
 saves the first time they register. So:
 
-- a plugin release that declares or changes `default_trigger` reaches every
-  task without a saved schedule, and a binding trigger reaches it likewise;
+- a plugin release that declares or changes `default_trigger`, or a binding
+  write that changes the trigger, reaches every task without a saved schedule;
 - a task-page edit stands across restarts, plugin updates and binding writes;
 - `GET .../tasks/{key}/triggers` on a task with no saved schedule answers its
   defaults at revision zero, under an ETag that also changes with those
@@ -60,11 +64,58 @@ The page's switch now resends only a trigger set through the API.
 
 ## Applying changes
 
-The registry reads installations, capabilities and bindings once, at server
-start. Installing, enabling, disabling, updating or removing a plugin, and a
-binding write, take effect on each API server when it restarts; the binding
-write answers `restart_required: true`. A task-page edit applies to the
-server that takes it and to the others when they restart.
+`TaskRegistry.Sync` reads enabled installations that declare scheduled
+tasks, their capabilities and task bindings. It registers missing tasks,
+unregisters tasks that are gone or disabled, and updates names and defaults
+in place. For each task it
+already had, it calls `TaskManager.ReloadSchedule`, which installs the task's
+schedule (a saved one, else its defaults) when it differs from the one the
+task runs, so a task-page edit on another server, a changed binding trigger or
+a new manifest default applies here. Both sides are compared normalized
+(`TriggerConfig.Normalized`), because `task_schedules` keeps `day_of_week`
+only on weekly triggers; otherwise a daily trigger carrying a weekday would
+look changed on every sync and restart its timer. When a task is idle, a
+reloaded interval starts from now. A schedule installed during a run arms
+when the run finishes. If the registry scan fails, it keeps the existing
+tasks. A new task whose schedule cannot be
+read is not registered (`TaskManager.RegisterLive`) and fails the sync, so the
+retry registers it. Unregistering stops the task's
+triggers and cancels a run in progress. Registration of the same key waits
+for the local execution to exit. A saved schedule and the history stay.
+A scheduled RPC reads fresh installation state before resolving the plugin client
+so a replica can use a release it just learned about.
+A sync never writes a schedule.
+
+Each API server syncs:
+
+- before a plugin lifecycle change on that server returns (a
+  `Service.AddLifecycleHook` hook: install, enable, disable, upgrade,
+  uninstall, auto-update);
+- before a task binding write on that server returns. The write then
+  publishes `cache.EventPluginTasksChanged` on `cache.ChannelAdmin`. It is
+  its own event type, so listeners that rebuild on `plugins_changed`, such as
+  proxy nodes and plugin event dispatchers, ignore it;
+- on every `cache.EventPluginTasksChanged` and `cache.EventPluginsChanged`,
+  which lifecycle changes on other servers publish;
+- every `plugins.TaskSyncInterval` (one minute), and 10 seconds after a
+  failed sync, so a server that missed an announcement, a sync that failed, or
+  a task-page edit on another server catches up without a restart;
+- right after the task manager starts.
+
+A server that restarts registers from the database at boot, so it sees every
+change made while it was down. At boot plugin tasks register before the task
+manager starts, and `TaskManager.Start` only logs a schedule it can't read,
+leaving that task idle; the sync right after `Start` reloads every plugin
+task's schedule, and if the read still fails, the 10-second retry follows. Binding writes answer `restart_required: false`;
+it is true only on a server with no task manager.
+
+Invariants:
+
+- A task registers on its saved schedule, else the defaults its sync read, so
+  it never starts on a trigger that read replaced. Registering resumes an
+  interval from the last run, as a restart does.
+- A retired worker refuses new runs and schedule writes. A claim that
+  completed before retirement belongs to a reserved run that retirement can cancel.
 
 ## One run per firing
 
@@ -100,9 +151,9 @@ Invariants:
 
 - Of the servers that fire one scheduled firing of a plugin task, at most one
   runs it, whether they fire together or seconds apart. Usually that is
-  exactly one, but a firing can be missed: when the winning server's task is
-  already running (a manual Run now), or the server stops after claiming, no
-  other server runs that firing, and the task runs again at its next one. The lock serializes
+  exactly one. A worker checks its schedule and availability before it
+  claims. A server that stops after claiming can still miss that firing.
+  The lock serializes
   claims of one task; the row, which outlives the transaction, is what a
   later server finds. An advisory lock alone would let a server that fires
   after the winner's run finished run it again.
@@ -131,7 +182,7 @@ Invariants:
 - A claim that cannot be recorded fails closed: the server skips the firing
   and logs a warning, and the next firing tries again. So does a firing with
   no slot every server would agree on, such as a malformed time of day, an
-  interval that isn't positive, or a schedule change that woke the loop.
+  interval that isn't positive.
 - Each claim records its expiry, the longer of its window and eight days
   after it was taken. The transaction that takes a claim prunes expired claims
   of all tasks when no other claim is pruning (a global advisory lock, tried
