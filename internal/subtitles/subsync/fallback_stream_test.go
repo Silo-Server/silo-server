@@ -2,6 +2,7 @@ package subsync
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -72,6 +73,41 @@ func TestExecuteStillReportsNoMatchWhenNoStreamMatches(t *testing.T) {
 	}
 	if !slices.Equal(*streams, []int{0, 1}) {
 		t.Fatalf("decoded streams %v", *streams)
+	}
+}
+
+// A fallback stream that can't be read right now (a busy host, no node, a
+// canceled run) leaves the job unanswered: it fails as unavailable, to be
+// retried, instead of ending no_match on a stream nobody heard. A stream the
+// file itself can't decode is skipped, and the planned stream's no_match
+// stands.
+func TestExecuteKeepsAnUnreadFallbackStreamRetryable(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err        error
+		wantStatus string
+		wantFail   string
+	}{
+		"busy host": {err: &mediasample.Error{Reason: mediasample.ReasonTimeout,
+			Attempts: []mediasample.AttemptError{{Reason: mediasample.ReasonTimeout, Err: errors.New("timed out")}}},
+			wantStatus: JobFailed, wantFail: FailureUnavailable},
+		"canceled":         {err: context.Canceled, wantStatus: JobFailed, wantFail: FailureUnavailable},
+		"unreadable track": {err: &mediasample.Error{Reason: mediasample.ReasonExit, Attempts: []mediasample.AttemptError{{Reason: mediasample.ReasonExit, Err: errors.New("exit status 1"), StderrTail: "Stream map '0:a:1' matches no streams."}}}, wantStatus: string(StatusNoMatch)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := dubbedFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2400})
+			dub := f.svc.sampler.local
+			f.svc.sampler.local = func(ctx context.Context, req mediasample.Request) (mediasample.Result, error) {
+				if req.Audio.Speech.AudioStream == 1 {
+					return mediasample.Result{}, tc.err
+				}
+				return dub(ctx, req)
+			}
+			job := f.run(t, TriggerManual)
+			outcome := f.jobs.finished[job.ID]
+			if outcome.Status != tc.wantStatus || outcome.Failure != tc.wantFail || len(f.jobs.applied) != 0 {
+				t.Fatalf("outcome %+v applied %v, want status %s failure %q", outcome, f.jobs.applied, tc.wantStatus, tc.wantFail)
+			}
+		})
 	}
 }
 
