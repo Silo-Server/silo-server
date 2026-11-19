@@ -210,13 +210,7 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 		if result, ok := f.recent(id, time.Now()); ok {
 			return result.image, result.err
 		}
-		image, err := f.fetch(context.WithoutCancel(ctx), id, rawURL)
-		// A busy server is not an outcome of this artwork; the next request
-		// should try again.
-		if !errors.Is(err, ErrRemoteBusy) {
-			f.remember(id, image, err, time.Now())
-		}
-		return image, err
+		return f.fetch(context.WithoutCancel(ctx), id, rawURL)
 	})
 	select {
 	case <-ctx.Done():
@@ -230,6 +224,10 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 	}
 }
 
+// fetch downloads rawURL in a download slot and remembers the outcome before
+// it gives the slot back, which is what bounds the memory's overshoot. A busy
+// answer is not an outcome of the artwork and is not remembered, so the next
+// request tries again.
 func (f *RemoteFetcher) fetch(ctx context.Context, id, rawURL string) (RemoteImage, error) {
 	wait := time.NewTimer(remoteFetchSlotWait)
 	defer wait.Stop()
@@ -243,6 +241,12 @@ func (f *RemoteFetcher) fetch(ctx context.Context, id, rawURL string) (RemoteIma
 	if !f.admits(id, time.Now()) {
 		return RemoteImage{}, ErrRemoteBusy
 	}
+	image, err := f.download(ctx, rawURL)
+	f.remember(id, image, err, time.Now())
+	return image, err
+}
+
+func (f *RemoteFetcher) download(ctx context.Context, rawURL string) (RemoteImage, error) {
 	data, err := download(ctx, f.client, rawURL, true)
 	if err != nil {
 		return RemoteImage{}, err

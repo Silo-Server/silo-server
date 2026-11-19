@@ -579,7 +579,7 @@ func download(ctx context.Context, client *http.Client, rawURL string, enforcePu
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	if resp.ContentLength > maxDownloadBytes {
-		return nil, fmt.Errorf("image exceeds %d byte limit", maxDownloadBytes)
+		return nil, fmt.Errorf("image exceeds %d byte limit: %w", maxDownloadBytes, ErrRemoteTooLarge)
 	}
 
 	limited := io.LimitReader(resp.Body, maxDownloadBytes+1)
@@ -588,7 +588,7 @@ func download(ctx context.Context, client *http.Client, rawURL string, enforcePu
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 	if int64(len(data)) > maxDownloadBytes {
-		return nil, fmt.Errorf("image exceeds %d byte limit", maxDownloadBytes)
+		return nil, fmt.Errorf("image exceeds %d byte limit: %w", maxDownloadBytes, ErrRemoteTooLarge)
 	}
 
 	return data, nil
