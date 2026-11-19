@@ -53,7 +53,8 @@ type LibraryChangeEvent struct {
 	MatchedFiles           int
 	RetriedItems           int
 	StillUnmatchedWarnings int
-	// AdminOnly limits delivery to administrator connections.
+	// AdminOnly limits catalog.library.changed and library.changed to
+	// administrator connections; library.item_added keeps its audience.
 	AdminOnly bool
 }
 
@@ -106,8 +107,7 @@ func (h *Hub) PublishLibraryChanged(ctx context.Context, event LibraryChangeEven
 	}
 
 	payload := libraryChangePayload(event)
-	opts := evt.PublishOptions{AdminOnly: event.AdminOnly}
-	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeLibraryChanged), payload, opts); err != nil {
+	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeLibraryChanged), payload, evt.PublishOptions{AdminOnly: event.AdminOnly}); err != nil {
 		return err
 	}
 	if event.New <= 0 {
@@ -116,7 +116,7 @@ func (h *Hub) PublishLibraryChanged(ctx context.Context, event LibraryChangeEven
 	return h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeLibraryItemAdded), map[string]any{
 		"library_id": event.LibraryID,
 		"new":        event.New,
-	}, opts)
+	}, evt.PublishOptions{})
 }
 
 func (h *Hub) PublishCatalogLibraryChanged(ctx context.Context, event LibraryChangeEvent) error {
