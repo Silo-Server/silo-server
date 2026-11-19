@@ -34,8 +34,8 @@ func addrString(addr *netip.Addr) string {
 }
 
 // recordCreatedAddress stamps rows about to be inserted with the registering
-// request's address, as both where they were created from and where their
-// device was last seen.
+// request's address as where they were created from and, for a managed row,
+// where its device was last seen. An ephemeral web row has no device to see.
 func recordCreatedAddress(ctx context.Context, ds []*Download) {
 	ip := clientAddress(ctx)
 	if ip == "" {
@@ -43,8 +43,12 @@ func recordCreatedAddress(ctx context.Context, ds []*Download) {
 	}
 	now := time.Now()
 	for _, d := range ds {
-		if d.CreatedClientIP == "" {
-			d.CreatedClientIP, d.LastClientIP, d.LastClientIPAt = ip, ip, &now
+		if d.CreatedClientIP != "" {
+			continue
+		}
+		d.CreatedClientIP = ip
+		if d.IsManaged() {
+			d.LastClientIP, d.LastClientIPAt = ip, &now
 		}
 	}
 }
