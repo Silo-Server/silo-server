@@ -155,8 +155,8 @@ client to the signed object.
 For provider URLs and URLs returned by a plugin, `imagecache.RemoteFetcher`
 downloads the poster through the image cache's guarded transport. Every dial
 and redirect must reach a Public address, even when the URL matches the
-artwork store's direct URL prefix. Downloads use the cache's size limit and
-timeout, and the bytes must sniff as JPEG, PNG, WebP or GIF. An address
+artwork store's direct URL prefix. Downloads use the cache's timeout and a
+4 MiB limit of their own, and the bytes must sniff as JPEG, PNG, WebP or GIF. An address
 refusal returns the same `404` as a missing poster.
 
 Concurrent requests for one item and URL share a download. Each server runs

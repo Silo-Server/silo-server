@@ -59,8 +59,9 @@ const (
 	itemPosterResolveMax = 4096
 )
 
-// errPosterResolveBusy reports that the plugin-answer memo is full, so a new
-// poster path is refused instead of calling its plugin on every request.
+// errPosterResolveBusy reports that a plugin poster path has no answer yet:
+// the plugin-answer memo is full, so the path is refused instead of calling
+// its plugin on every request, or the plugin did not answer in time.
 var errPosterResolveBusy = errors.New("poster resolution is busy")
 
 // itemPosterHandler serves GET /api/v2/item-posters/{content_id}.
@@ -315,6 +316,11 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 		resolveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), itemPosterResolveTimeout)
 		defer cancel()
 		resolved = h.posters.Presign(resolveCtx, posterPath)
+		// A plugin that ran out of time gave no answer. Keeping the empty
+		// result would hide a poster the plugin can still resolve.
+		if resolveCtx.Err() != nil {
+			return "", false, false, errPosterResolveBusy
+		}
 		h.resolved.put(posterPath, resolved, time.Now())
 	}
 	switch {

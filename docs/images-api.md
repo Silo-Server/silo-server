@@ -264,8 +264,9 @@ configuration. Requests over the poster or server-wide budget receive
 An invalid or expired link, a missing item or poster, and a refused or failed
 download all return `404`. Every download and redirect hop must reach a public
 address, including URLs under the artwork store's direct URL prefix. The
-server applies the image cache's size limit and checks the bytes for JPEG,
-PNG, WebP or GIF. See the [outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork).
+server serves an image of up to 4 MiB from a link and checks the bytes for
+JPEG, PNG, WebP or GIF; a larger original is refused, and that answer is kept
+for five minutes, until the image-cache job stores resized copies. See the [outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork).
 
 Concurrent requests for one item share one download, and a
 server runs at most four at once. A server remembers a finished download for

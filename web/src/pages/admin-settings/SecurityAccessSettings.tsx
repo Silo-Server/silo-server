@@ -511,7 +511,7 @@ export default function SecurityAccessSettings() {
             }}
           />
 
-          {endpointRateRow("item_poster", "web.item.images.posters")}
+          {endpointRateRow("item_poster", "web.admin.settings.security.endpoint.itemPoster")}
 
           <SettingsSubheading>
             {t("web.admin.settings.security.session.heading")}
