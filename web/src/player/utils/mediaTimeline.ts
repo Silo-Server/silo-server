@@ -1,3 +1,5 @@
+import type { PlayerFileVersion } from "../types";
+
 export function toMediaTime(playerTimeSeconds: number, timelineOffsetSeconds = 0): number {
   return Math.max(0, playerTimeSeconds + timelineOffsetSeconds);
 }
@@ -62,4 +64,36 @@ export function mediaDurationSeconds(
     return elementDurationSeconds;
   }
   return undefined;
+}
+
+function isStandaloneVersion(version: PlayerFileVersion): boolean {
+  return (
+    !version.presentation_kind &&
+    !version.presentation_group_key &&
+    !version.presentation_part_index &&
+    !version.presentation_part_total &&
+    !version.multi_episode_start &&
+    !version.multi_episode_end
+  );
+}
+
+// Keep the requested source when Auto switched to another copy of a named cut.
+// Parts and different cuts have their own resume timelines.
+export function resumeVersionForPlan(
+  versions: readonly PlayerFileVersion[],
+  requestedFileId: number | undefined,
+  active: PlayerFileVersion | undefined,
+  versionPinned: boolean,
+): PlayerFileVersion | undefined {
+  if (versionPinned || !active?.edition_key || active.file_id === requestedFileId) return undefined;
+  const requested = versions.find((version) => version.file_id === requestedFileId);
+  return requested &&
+    requested.edition_key === active.edition_key &&
+    isStandaloneVersion(requested) &&
+    isStandaloneVersion(active) &&
+    requested.duration > 0 &&
+    active.duration > 0 &&
+    Math.abs(requested.duration - active.duration) <= 5
+    ? requested
+    : undefined;
 }

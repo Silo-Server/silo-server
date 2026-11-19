@@ -251,6 +251,7 @@ interface VideoPlayerProps {
   sessionId: string;
   bufferingTitleId?: string;
   selectedVersion?: PlayerFileVersion;
+  resumeVersion?: PlayerFileVersion;
   versions?: PlayerFileVersion[];
   activeFileId?: number | null;
   chapters?: PlayerChapter[];
@@ -538,6 +539,7 @@ export function VideoPlayer({
   replanErrorTitle = null,
   sessionId,
   selectedVersion,
+  resumeVersion,
   versions = [],
   activeFileId,
   chapters = [],
@@ -2047,17 +2049,18 @@ export function VideoPlayer({
       elementMediaPosition() ?? toMediaTime(currentTime, timelineOffsetRef.current);
     // positionSeconds is media time, so the runtime paired with it must be too.
     const durationSeconds = mediaDurationSeconds(backendDurationRef.current, duration);
+    const version = resumeVersion ?? selectedVersion;
 
     return {
       positionSeconds,
       durationSeconds,
-      lastFileId: activeFileId ?? selectedVersion?.file_id,
-      lastResolution: selectedVersion?.resolution,
-      lastHDR: selectedVersion?.hdr,
-      lastCodecVideo: selectedVersion?.codec_video,
-      lastEditionKey: selectedVersion?.edition_key,
+      lastFileId: resumeVersion?.file_id ?? activeFileId ?? selectedVersion?.file_id,
+      lastResolution: version?.resolution,
+      lastHDR: version?.hdr,
+      lastCodecVideo: version?.codec_video,
+      lastEditionKey: version?.edition_key,
     };
-  }, [activeFileId, currentTime, duration, elementMediaPosition, selectedVersion]);
+  }, [activeFileId, currentTime, duration, elementMediaPosition, resumeVersion, selectedVersion]);
 
   useEffect(() => {
     if (!watchTogetherRoomId || !watchTogether.closedReason || leaveInProgressRef.current) {
@@ -3271,6 +3274,12 @@ export function VideoPlayer({
                 },
                 engine: routeInput.browserEngine,
                 audioTracks: routeInput.audioTracks,
+                navigationProtocol:
+                  (
+                    performance.getEntriesByType?.("navigation")[0] as
+                      | PerformanceNavigationTiming
+                      | undefined
+                  )?.nextHopProtocol ?? "",
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {
@@ -3292,16 +3301,17 @@ export function VideoPlayer({
             if (destroyed || !surface) return;
             startupGuardRef.current?.dispose();
             const meter = meterMedia(false);
-            // The engine numbers its reads from 0 on each attach, and a
+            // The engine numbers its requests from 0 on each attach, and a
             // transport rebuilt for the plan measures into the same meter, so
-            // this attach's reads get keys of their own.
+            // this attach's requests get keys of their own. A striped read is
+            // one request, whatever its ranges; a stock read is one per fetch.
             const reads: object[] = [];
             engineSession = attachBrowserEngine({
               video,
               surface,
               source: { ...route.source, startSeconds: Math.max(0, streamStartPosition()) },
-              onMediaData: (request, bytes, first, last) => {
-                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last);
+              onMediaData: (request, bytes, first, last, spans) => {
+                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last, spans);
               },
               onFailure: (failure) => {
                 if (destroyed) return;

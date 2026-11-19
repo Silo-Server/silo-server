@@ -763,6 +763,12 @@ func (s *Service) ScheduledTaskClient(
 	installationID int,
 	capabilityID string,
 ) (*pluginhost.ScheduledTaskClient, error) {
+	// The task registry sees lifecycle changes on other API servers sooner
+	// than the installation cache refresh. Resolve from the current row.
+	s.installationCacheMu.Lock()
+	delete(s.installationCache, installationID)
+	s.installationCacheGen++
+	s.installationCacheMu.Unlock()
 	client, err := s.ensureClient(ctx, installationID)
 	if err != nil {
 		return nil, err

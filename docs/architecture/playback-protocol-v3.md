@@ -145,6 +145,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `hls_subtitle_renditions_all_v1` | Only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
 | `surround_bitstream_conversion_v1` | Advertised only. A client whose exact audio evidence shows it would decode a surround track to PCM, while its sink validates E-AC-3 or AC-3 5.1 but not the source codec, may receive a copy-video `server_remux_hls` that converts the track to that codec (`decision_reason: surround_bitstream_conversion`, §11) |
+| `parallel_range_origin_v1` | The client sends it in `client_features`; the plan's `stream.parallel_range_url` may then name where to read the file's ranges over several connections (§4.2), unless the client also sends `header_authenticated_media_v1`. The client promises to use that URL exactly as given, adding no account token to it, and to read `stream.url` when the plan has none |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -1013,6 +1014,45 @@ parameter, and never carries a parameter across families.
 | Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — `origin` — the plan's `stream_origin_seconds`, alongside `seek` when the plan asked for the resume leading-picture drop (§ resume leading-picture drop) — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
 | Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
 | Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8); `original=1` on an original-SRT `.srt` URL (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
+
+A plan may also carry `stream.parallel_range_url` beside `stream.url`: a URL
+reference the client may read the file's byte ranges from over several
+connections. The server sets it only on an `original_http` plan, when the start
+or replan request's `client_features` listed `parallel_range_origin_v1`, and
+names one of three:
+
+| The file is served by | `parallel_range_url` |
+|---|---|
+| The API, no media origin | The plan's own stream, relative to the API root: the value of `stream.url` |
+| The API, with a media origin (`server.web_media_url`) | `{web_media_url}/api/v2/stream/{session_id}` plus the same query as `stream.url` (`seek`, `st`) |
+| A proxy node | The node's own direct-play URL: the value of `stream.url` |
+
+The two API forms carry `st`, which authorizes each range of an attempt a login
+session started and no other, so the server sets them only for such an attempt.
+The media origin is named only for a client that arrived by the default access
+path; one that came through a network access provider gets the plan's own stream.
+A node's URL carries its token in the path, signed for that node, on the address
+chosen for the client's access path. A node's header-authorized route
+(`/stream/v3/...`) is never named.
+
+The URL authorizes itself. A client uses it exactly as given and adds no account
+token, header or cookie to it; a client sends its account token to no absolute
+URL. The field is absent when the attempt negotiated
+`header_authenticated_media_v1`, whose URLs carry no credential. The attempt
+keeps `header_authenticated_media_v1` as the start negotiated it, so a replan
+request's own list cannot add or drop it, while `parallel_range_origin_v1`
+follows each start or replan request.
+
+Parallel ranges help only over separate connections, which a browser opens to an
+HTTP/1.1 origin and not to an HTTP/2 or HTTP/3 one. The web player stripes on
+the page's own origin only when the page loaded over HTTP/1.1; it stripes on a
+node's URL and on a media origin as named. The stream answers of the API and of
+a node carry `Timing-Allow-Origin: *`, so the player can read which protocol a
+completed range came over: on HTTP/2 or HTTP/3 it goes back to reading
+`stream.url` over one connection. A browser that does not say leaves it
+striping. A plan without `parallel_range_url`
+is read from `stream.url`. `stream.url` stays valid; a client may also read the
+warm head, overflow ranges, or a natively played file from it.
 
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session
 already names the file it plays, and the media timeline is anchored by `seek`
@@ -2134,6 +2174,12 @@ same-edition candidates with non-4K versions first, then continue through the
 remaining candidates until one produces a plan. A refused lower-resolution
 candidate therefore does not hide a later 4K version that can direct-play or
 remux without video encoding.
+
+Playback uses the same edition alias groups as the native catalog. It checks
+the viewer's live, authorized file inventory and stored durations before
+choosing a new alias source. Grouping adds no media probes. When an automatic
+alias fallback plays a different file, the requested file remains the
+remembered choice so a later Auto start can use it on a faster connection.
 
 A 4K version whose 4K transcoding is disabled takes its lower qualities from a
 lower-resolution version instead, when the item has one and the request allows

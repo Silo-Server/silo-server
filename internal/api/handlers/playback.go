@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2677,6 +2678,11 @@ func (h *PlaybackHandler) findAlternateFiles(ctx context.Context, source *models
 		return nil, err
 	}
 
+	aliases := catalog.ResolveEditionAliases(files, filter)
+	sourceIndex := slices.IndexFunc(files, func(file *models.MediaFile) bool {
+		return file != nil && file.ID == source.ID && file.EditionKey == source.EditionKey &&
+			file.MissingSince == nil && catalog.FileAllowedByAccess(file, filter)
+	})
 	candidates := make([]*models.MediaFile, 0, len(files))
 	for _, f := range files {
 		if f == nil || f.ID == source.ID {
@@ -2685,10 +2691,7 @@ func (h *PlaybackHandler) findAlternateFiles(ctx context.Context, source *models
 		if f.MissingSince != nil || !catalog.FileAllowedByAccess(f, filter) {
 			continue
 		}
-		if source.EditionKey != "" && f.EditionKey != source.EditionKey {
-			continue
-		}
-		if source.EditionKey == "" && f.EditionKey != "" {
+		if f.EditionKey != source.EditionKey && (sourceIndex < 0 || !aliases.AllowsSubstitution(files[sourceIndex], f)) {
 			continue
 		}
 		if source.PresentationGroupKey != "" && f.PresentationGroupKey != "" && f.PresentationGroupKey != source.PresentationGroupKey {
