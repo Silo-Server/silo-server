@@ -61,14 +61,15 @@ type itemPosterHandler struct {
 // posterEnqueueMemo remembers which items' cache jobs this server queued
 // recently. It checks and records under one lock, so concurrent requests for
 // one item queue once, and it starts no goroutine: expired entries are
-// dropped, at most once a minute, once it grows past posterEnqueueMemoSweepAt.
+// dropped, at most once a minute, once it holds posterEnqueueMemoMax items,
+// which is also the most it holds.
 type posterEnqueueMemo struct {
 	mu        sync.Mutex
 	queued    map[string]time.Time
 	nextSweep time.Time
 }
 
-const posterEnqueueMemoSweepAt = 4096
+const posterEnqueueMemoMax = 4096
 
 // claim reports whether the caller should queue contentID's job now, and
 // records that it did.
@@ -83,13 +84,19 @@ func (m *posterEnqueueMemo) claim(contentID string, now time.Time) bool {
 	}
 	// At most one sweep a minute, so a burst of distinct items past the
 	// threshold does not rescan the map on every request.
-	if len(m.queued) >= posterEnqueueMemoSweepAt && !now.Before(m.nextSweep) {
+	if len(m.queued) >= posterEnqueueMemoMax && !now.Before(m.nextSweep) {
 		for id, until := range m.queued {
 			if !now.Before(until) {
 				delete(m.queued, id)
 			}
 		}
 		m.nextSweep = now.Add(time.Minute)
+	}
+	// A full memo queues nothing new: the poster is still served, and a
+	// later request queues its job once entries expire. Forgetting a claim
+	// instead would let cycling links repeat the queue write on each request.
+	if _, ok := m.queued[contentID]; !ok && len(m.queued) >= posterEnqueueMemoMax {
+		return false
 	}
 	m.queued[contentID] = now.Add(itemPosterEnqueueMemo)
 	return true
