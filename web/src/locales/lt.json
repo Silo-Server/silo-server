@@ -2065,6 +2065,132 @@
       "value": "Programos kalba"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Pabaigoje"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutė iki pabaigos"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutės iki pabaigos"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutės iki pabaigos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minučių iki pabaigos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundė iki pabaigos"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundės iki pabaigos"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundės iki pabaigos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundžių iki pabaigos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Rodyti kitą epizodą"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Išjungta"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -114652,6 +114778,12 @@
       "value": "jūsų bibliotekos"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Skaičius nepasiekiamas"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -116772,6 +116904,24 @@
       "value": "Pridėti"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti, ar galima pridėti pavadinimų."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Bandyti įkelti dar kartą"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Tikrinama, ar galima pridėti pavadinimų…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -116790,6 +116940,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Šis serveris negali saugiai pridėti pavadinimų, kai įkelta tik dalis kolekcijos. Vis tiek galite pašalinti pavadinimus ir redaguoti kolekciją."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Prieš pridėdami daugiau, įkelkite pavadinimus iš naujo."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -116804,6 +116966,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Prieš pridedant daugiau, įkeliami pavadinimai…"
     }
   ],
   "web.collections.manual.couldntAdd": [

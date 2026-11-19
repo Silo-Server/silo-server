@@ -2031,6 +2031,104 @@
       "value": "Uygulama dili"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Bölüm sonunda"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dakika önce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dakika önce"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " saniye önce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " saniye önce"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Sıradaki bölümleri göster"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Kapalı"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -94408,6 +94506,12 @@
       "value": "kitaplıklarınız"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Sayı kullanılamıyor"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -96380,6 +96484,24 @@
       "value": "Ekle"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "İçerik eklenip eklenemeyeceği denetlenemedi."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Yeniden yüklemeyi dene"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "İçerik eklenip eklenemeyeceği denetleniyor…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -96392,6 +96514,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Bu sunucu, koleksiyonun yalnızca bir kısmı yüklüyken güvenli bir şekilde içerik ekleyemez. Yine de içerik kaldırabilir ve koleksiyonu düzenleyebilirsiniz."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Daha fazla içerik eklemeden önce içerikleri yeniden yükleyin."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -96408,6 +96542,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Daha fazla içerik eklemeden önce içerikler yükleniyor…"
     }
   ],
   "web.collections.manual.couldntAdd": [

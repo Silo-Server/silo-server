@@ -2027,6 +2027,88 @@
       "value": "Γλώσσα εφαρμογής"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Στο τέλος"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λεπτό πριν από το τέλος"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λεπτά πριν από το τέλος"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " δευτερόλεπτο πριν από το τέλος"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " δευτερόλεπτα πριν από το τέλος"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Εμφάνιση επόμενων επεισοδίων"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Ανενεργό"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -95760,6 +95842,12 @@
       "value": "καμία από τις βιβλιοθήκες σας"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Μη διαθέσιμο πλήθος"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97772,6 +97860,24 @@
       "value": "Προσθήκη"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος για το αν μπορούν να προστεθούν τίτλοι."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Νέα προσπάθεια φόρτωσης"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Έλεγχος για το αν μπορούν να προστεθούν τίτλοι…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97790,6 +97896,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Αυτός ο διακομιστής δεν μπορεί να προσθέσει τίτλους με ασφάλεια όσο έχει φορτωθεί μόνο μέρος της συλλογής. Μπορείτε ακόμα να αφαιρέσετε τίτλους και να επεξεργαστείτε τη συλλογή."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Φορτώστε ξανά τους τίτλους πριν προσθέσετε άλλους."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97804,6 +97922,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Φόρτωση τίτλων πριν από την προσθήκη άλλων…"
     }
   ],
   "web.collections.manual.couldntAdd": [
