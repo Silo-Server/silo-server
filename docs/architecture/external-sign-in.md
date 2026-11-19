@@ -804,6 +804,10 @@ refreshing. The host therefore asks the provider again.
     Audiobookshelf sessions, withdraws device approvals and clears cached
     compatibility sessions on every node), its API keys are deleted (they act
     as the account with no session to re-check), and the refresh is refused.
+    Creating an API key holds the account's row, which the revocation locks
+    first, and checks under it that the request's login session or API key is
+    still live, so a request authenticated before the revocation cannot leave
+    a key behind.
     The account is not disabled; a later sign-in the provider accepts works.
     For a break-glass account only the sessions opened through the identity
     end: its local sessions and API keys stay, since a break-glass account

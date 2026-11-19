@@ -2027,6 +2027,88 @@
       "value": "Γλώσσα εφαρμογής"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Στο τέλος"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λεπτό πριν από το τέλος"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λεπτά πριν από το τέλος"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " δευτερόλεπτο πριν από το τέλος"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " δευτερόλεπτα πριν από το τέλος"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Εμφάνιση επόμενων επεισοδίων"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Ανενεργό"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -53091,6 +53173,12 @@
       "value": "Ανενεργό. Οι εκτελέσεις μόνο εκκαθαρίζουν παλιούς τίτλους."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Η δημιουργία προτάσεων σταμάτησε. Οι αποθηκευμένες προτάσεις παραμένουν ορατές στην Ανακάλυψη μέχρι την επανεκκίνηση του διακομιστή."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -95754,6 +95842,12 @@
       "value": "καμία από τις βιβλιοθήκες σας"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Μη διαθέσιμο πλήθος"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97766,6 +97860,24 @@
       "value": "Προσθήκη"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος για το αν μπορούν να προστεθούν τίτλοι."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Νέα προσπάθεια φόρτωσης"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Έλεγχος για το αν μπορούν να προστεθούν τίτλοι…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97784,6 +97896,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Αυτός ο διακομιστής δεν μπορεί να προσθέσει τίτλους με ασφάλεια όσο έχει φορτωθεί μόνο μέρος της συλλογής. Μπορείτε ακόμα να αφαιρέσετε τίτλους και να επεξεργαστείτε τη συλλογή."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Φορτώστε ξανά τους τίτλους πριν προσθέσετε άλλους."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97798,6 +97922,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Φόρτωση τίτλων πριν από την προσθήκη άλλων…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106594,6 +106724,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Επίσης στις συλλογές"
     }
   ],
   "web.detail.sections.cast": [
@@ -125993,34 +126129,6 @@
       "value": " στη λίστα παρακολούθησής σας"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Επειδή παρακολουθήσατε: "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Επειδή παρακολουθήσατε: "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " και "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -126087,6 +126195,34 @@
     {
       "type": 0,
       "value": "…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Παρόμοιο με τον τίτλο "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Παρόμοιο με τους τίτλους "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " και "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [

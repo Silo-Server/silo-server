@@ -2049,6 +2049,132 @@
       "value": "Jezik aplikacije"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Na koncu"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuto pred koncem"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuti pred koncem"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute pred koncem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minut pred koncem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundo pred koncem"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundi pred koncem"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekunde pred koncem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekund pred koncem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Prikaz naslednje epizode"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Izklopljeno"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -64706,6 +64832,12 @@
       "value": "Izklopljeno. Zagoni samo počistijo stare naslove."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Ustvarjanje se je ustavilo. Shranjena priporočila ostanejo vidna v Odkrivanju, dokler se strežnik znova ne zažene."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -113402,6 +113534,12 @@
       "value": "vaše knjižnice"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Število ni na voljo"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -115456,6 +115594,24 @@
       "value": "Dodaj"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče preveriti, ali je naslove mogoče dodati."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Poskusi znova naložiti"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Preverjanje, ali je naslove mogoče dodati …"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -115472,6 +115628,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ta strežnik ne more varno dodajati naslovov, ko je naložen le del zbirke. Naslove lahko še vedno odstranite in urejate zbirko."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Preden dodate nove naslove, jih znova naložite."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -115492,6 +115660,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Nalaganje naslovov pred dodajanjem novih …"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -125822,6 +125996,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Tudi v zbirkah"
     }
   ],
   "web.detail.sections.cast": [
@@ -147475,34 +147655,6 @@
       "value": " na svoj seznam za ogled"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Ker ste gledali: "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Ker ste gledali: "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " in "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -147569,6 +147721,34 @@
     {
       "type": 0,
       "value": " …"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Podobno naslovu "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Podobno naslovoma "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [

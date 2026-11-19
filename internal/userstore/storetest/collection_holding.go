@@ -76,3 +76,64 @@ func RunManualCollectionsHolding(t *testing.T, store userstore.UserStore) {
 		t.Fatalf("after removal = %v, want [%s]", got, sharedHolds)
 	}
 }
+
+// RunCollectionsHolding covers the title page's "Also in" candidates: every
+// collection on the account that stores the title, whichever profile made it
+// and whether or not it is shared, manual or synced. A smart collection
+// stores no titles and is never reported. Which of these a profile may see
+// is the caller's check.
+func RunCollectionsHolding(t *testing.T, store userstore.UserStore) {
+	t.Helper()
+	ctx := t.Context()
+	reader, ok := store.(userstore.CollectionMembershipReader)
+	if !ok {
+		t.Fatal("store does not implement collection membership reads")
+	}
+	create := func(creator, name, kind string, shared bool, items ...string) string {
+		t.Helper()
+		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+			CreatorProfileID: creator, Name: name, CollectionType: kind, IsShared: shared,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, item := range items {
+			if err := store.AddCollectionItem(ctx, c.ID, item, i); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return c.ID
+	}
+	own := create("owner", "Own", "manual", false, "other-title", "title")
+	synced := create("owner", "Synced list", "mdblist", false, "title")
+	othersPrivate := create("viewer", "Another profile's", "manual", false, "title")
+	othersShared := create("viewer", "Another profile's, shared", "manual", true, "title")
+	create("owner", "Lacks it", "manual", false, "other-title")
+	create("owner", "Rules", "smart", false)
+
+	got, err := reader.CollectionsHolding(ctx, "title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	want := []string{own, synced, othersPrivate, othersShared}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("collections holding title = %v, want %v", got, want)
+	}
+
+	if got, err := reader.CollectionsHolding(ctx, "missing-title"); err != nil || len(got) != 0 {
+		t.Fatalf("collections holding missing-title = %v (%v), want none", got, err)
+	}
+
+	if err := store.RemoveCollectionItem(ctx, own, "title"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = reader.CollectionsHolding(ctx, "title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(got, own) {
+		t.Fatalf("after removal = %v, still holds %s", got, own)
+	}
+}

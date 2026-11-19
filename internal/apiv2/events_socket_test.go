@@ -68,7 +68,7 @@ func TestEventsSocketTicketDelegatesLoginOrMonitorKey(t *testing.T) {
 		"sa_requests": {ID: 10, UserID: 1, Scopes: []string{auth.ScopeRequests}},
 		"sa_mixed":    {ID: 11, UserID: 2, Scopes: []string{auth.ScopeAdminMonitorRead, auth.ScopeWatchRead}},
 	}}
-	deps.EventsCapability = handlers.NewEventsHandler(evt.NewHub("key-capability", nil), nil, nil, nil, nil, nil, nil)
+	deps.EventsCapability = handlers.NewEventsHandler(evt.NewHub("key-capability", nil), nil, nil, nil, nil, nil)
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{}, fakeSessions{}, keys, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
 	h = NewHandler(deps)
 	rec = do(t, h, http.MethodPost, path, "", bearer("sa_monitor"))
@@ -131,7 +131,7 @@ func eventsSocketFixtureCases() []fixtureCase {
 func TestEventsSocketUpgradeThroughV2Router(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	store := evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents)
-	socket := &handlers.EventsSocketV2{Events: handlers.NewEventsHandler(evt.NewHub("v2-router-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: store, Validate: func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
+	socket := &handlers.EventsSocketV2{Events: handlers.NewEventsHandler(evt.NewHub("v2-router-fixture", nil), nil, nil, nil, nil, nil), Tickets: store, Validate: func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		return ctx, &auth.Claims{UserID: proof.UserID, Role: "user", SessionID: proof.SessionID}, nil
 	}}
 	deps.EventsSocket = socket

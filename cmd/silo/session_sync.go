@@ -74,5 +74,6 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		IsPaused:                s.IsPaused,
 		HasWebSocket:            s.HasWebSocket,
 		IsJellyfinCompat:        s.IsJellyfinCompat,
+		Watch:                   playback.WatchTimeJSON(s.Watch),
 	}
 }

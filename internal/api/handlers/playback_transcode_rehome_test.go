@@ -928,3 +928,52 @@ func TestRelayMovePreservesMandatoryAudio(t *testing.T) {
 		})
 	}
 }
+
+// TestRelayMoveRollbackReleasesOnlyItsOwnStart pins that a move's rollback
+// names the start it sent. The release runs in the background, and by the time
+// it reaches the node another API server's move may have started the same
+// transport there; the node ends only the start the release names.
+func TestRelayMoveRollbackReleasesOnlyItsOwnStart(t *testing.T) {
+	startIDs := make(chan string, 1)
+	released := make(chan string, 1)
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			released <- r.URL.Query().Get("start_id")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		startID, _ := body["start_id"].(string)
+		startIDs <- startID
+		http.Error(w, "no capacity", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(refusing.Close)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, unreachableNodeURL(t)),
+		pooledNode(2, refusing.URL),
+	}, "ffmpeg")
+	previous := f.handler.PlaybackConfig
+	f.handler.PlaybackConfig = func() config.PlaybackConfig {
+		cfg := previous()
+		cfg.Routing = config.DefaultPlaybackRoutingPolicy()
+		cfg.Routing.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+		return cfg
+	}
+
+	if rr := f.segment("seg_00005.ts"); rr.Code == http.StatusOK {
+		t.Fatalf("status = %d; want the refusing candidate to fail the move", rr.Code)
+	}
+	startID := <-startIDs
+	if startID == "" {
+		t.Fatal("the move's start named no start id")
+	}
+	select {
+	case got := <-released:
+		if got != startID {
+			t.Fatalf("rollback release start_id = %q, want the start's %q", got, startID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the refused start was never released")
+	}
+}

@@ -25,7 +25,7 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 		return handlers.AdminPlaybackHistoryPage{}, f.err
 	}
 	duration := 5400.5
-	// A play resumed near its end: watched_seconds is the end position, the
+	// A play resumed near its end: end_position_seconds is where it ended, the
 	// measurement is the two minutes actually watched.
 	played, start, paused := 120.0, 3480.0, 15.0
 	since, until := fixedTime().Add(-3*time.Minute), fixedTime().Add(-time.Minute)
@@ -33,7 +33,7 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 	rows := []handlers.AdminPlaybackHistoryRow{{
 		SessionID: "sess-9007199254740993", UserID: 9007199254740993, Username: "laura", ProfileID: "p-owner", ProfileName: "Laura",
 		MediaItemID: "movie-1", MediaFileID: 42, MediaTitle: "Synthetic Movie", MediaType: "movie", PlayMethod: "direct_play",
-		StartedAt: fixedTime().Add(-time.Hour), EndedAt: fixedTime().Add(123456 * time.Nanosecond), WatchedSeconds: 3600, DurationSeconds: &duration, Completed: true,
+		StartedAt: fixedTime().Add(-time.Hour), EndedAt: fixedTime().Add(123456 * time.Nanosecond), EndPositionSeconds: 3600, DurationSeconds: &duration, Completed: true,
 		PlayedSeconds: &played, Measured: true, StartPositionSeconds: &start, PausedSeconds: &paused,
 		MeasuredSince: &since, MeasuredUntil: &until, ClientIP: &ip, DeviceID: &device, DevicePlatform: &platform,
 		// audio_decision stays null, as on a row recorded before decisions were.
