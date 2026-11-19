@@ -3884,7 +3884,7 @@ export interface paths {
     /** Read manageable installations with manifest surface, redacted global configuration and bindings. The reserved builtin row is excluded. Every page enumerates the full stored list; continuation is live, not a snapshot. */
     get: operations["listAdminPluginInstallations"];
     put?: never;
-    /** Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry. */
+    /** Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated; an install that finds none but loses the race to create it is 409. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry. */
     post: operations["createAdminPluginInstallation"];
     delete?: never;
     options?: never;
@@ -4077,7 +4077,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; there is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry. */
+    /** Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; an upload that finds none but loses the race to create it is 409. There is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry. */
     post: operations["uploadAdminPluginInstallation"];
     delete?: never;
     options?: never;
@@ -17331,6 +17331,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /** @description Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it */
+      created_client_ip: string | null;
       delivery_format: string;
       device_id: string;
       device_name: string;
@@ -17352,6 +17354,8 @@ export interface components {
        * @example 1
        */
       id: string;
+      /** @description Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded */
+      last_client_ip: string | null;
       /** @description Where its prepared file is: server or node:<id>; absent when it has none */
       location?: string;
       location_name?: string;
@@ -17681,6 +17685,10 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
+      /** @description download.changed on the v2 events socket's admin downloads channel reports a managed download being created, changing status or revision, moving to another title in a catalog merge, or being removed. Delivery is at most once, so re-read the admin download routes on subscribe and reconnect */
+      change_events: boolean;
+      /** @description Download rows carry created_client_ip and last_client_ip */
+      client_ip: boolean;
       /** @description Device copies can be listed */
       devices: boolean;
       /** @description Admin realtime channel carrying download_storage.changed */
@@ -19852,15 +19860,16 @@ export interface components {
       client_name?: string;
       client_user_agent?: string;
       client_version?: string;
-      content_id?: string;
       /** @description Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared. */
       device_id?: string;
       /** @description Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play. */
       device_platform?: string;
       /** @description Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown */
       effective_play_method?: string;
-      episode_name?: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Episode number; absent when not an episode
+       */
       episode_number?: number;
       /**
        * Format: int64
@@ -19880,7 +19889,11 @@ export interface components {
        * @example 1
        */
       media_file_id: string;
+      /** @description Catalog content id of what is playing: the episode for an episode, as admin playback history's media_item_id. Absent when unknown */
+      media_item_id?: string;
+      /** @description Episode or item title, as admin playback history names it; empty when the item is no longer in the catalog */
       media_title: string;
+      /** @description episode, or the catalog item type; empty when unknown */
       media_type: string;
       node_display_name?: string;
       /** @description Container the serving transport produces: fmp4, mpegts, or the source container for direct play. Absent when the node did not report it; clients must not infer it from play_method or the source. */
@@ -19919,9 +19932,13 @@ export interface components {
       /** @description Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier. */
       routing_network_provider?: string;
       routing_workload?: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Episode season; absent when not an episode
+       */
       season_number?: number;
-      series_name?: string;
+      /** @description Series title for an episode; absent otherwise */
+      series_title?: string;
       session_id: string;
       /** Format: int64 */
       source_audio_channels: number | null;
@@ -20040,15 +20057,17 @@ export interface components {
       title?: string;
     };
     AdminPlaybackSummaryItem: {
-      episode_name?: string;
       /** Format: int64 */
       episode_number?: number;
       is_paused: boolean;
+      /** @description Episode or item title, as the session row names it */
       media_title: string;
+      /** @description episode, or the catalog item type; empty when unknown */
       media_type: string;
       /** Format: int64 */
       season_number?: number;
-      series_name?: string;
+      /** @description Series title for an episode; absent otherwise */
+      series_title?: string;
       /**
        * @description Opaque identifier
        * @example 1
@@ -23023,6 +23042,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /** @description Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it */
+      created_client_ip: string | null;
       delivery_format: string;
       device_id: string;
       effective_quality: string;
@@ -23043,6 +23064,8 @@ export interface components {
        * @example 1
        */
       id: string;
+      /** @description Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded */
+      last_client_ip: string | null;
       /** @description Catalog type of content_id (movie, series, …); empty when unknown */
       media_type: string;
       /**
@@ -31938,20 +31961,10 @@ export interface components {
        */
       client_version: string;
       /**
-       * @description Catalog content id of the playing item; empty when unknown
-       * @example tt0111161
-       */
-      content_id: string;
-      /**
        * @description Bucketed method: direct, remux, direct_stream or transcode; empty when unknown
        * @example direct
        */
       effective_play_method: string;
-      /**
-       * @description Empty unless an episode
-       * @example
-       */
-      episode_name: string;
       /**
        * Format: int64
        * @description null unless an episode
@@ -31983,10 +31996,18 @@ export interface components {
        * @example 42
        */
       media_file_id: string;
-      /** @example The Shawshank Redemption */
+      /**
+       * @description Catalog content id of what is playing: the episode for an episode; empty when unknown
+       * @example tt0111161
+       */
+      media_item_id: string;
+      /**
+       * @description Episode or item title; empty when unknown
+       * @example The Shawshank Redemption
+       */
       media_title: string;
       /**
-       * @description Catalog item type; empty when unknown
+       * @description episode, or the catalog item type; empty when unknown
        * @example movie
        */
       media_type: string;
@@ -32083,10 +32104,10 @@ export interface components {
        */
       season_number: number | null;
       /**
-       * @description Empty unless an episode
+       * @description Series title for an episode; empty otherwise
        * @example
        */
-      series_name: string;
+      series_title: string;
       /**
        * Format: int64
        * @description null when unknown

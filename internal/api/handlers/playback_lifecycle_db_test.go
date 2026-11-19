@@ -541,3 +541,48 @@ func insertReportedPlay(t *testing.T, ctx context.Context, pool *pgxpool.Pool, a
 	}
 	return id
 }
+
+// TestEpisodeLiveRowNamesItAsHistoryDB pins that a live row and the history
+// entry its play leaves describe an episode the same way: monitors match the
+// two by these fields.
+func TestEpisodeLiveRowNamesItAsHistoryDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	file := lifecycleTestFile(t, ctx, pool)
+	series, episode, session := "lc-series-"+uuid.NewString(), "lc-episode-"+uuid.NewString(), uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM admin_playback_history WHERE user_id=$1`, account)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id=$1`, episode)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series)
+	})
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO media_items(content_id,type,title) VALUES($1,'series','Example Show')`, []any{series}},
+		{`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,3,'Pilot')`, []any{episode, series}},
+		{`UPDATE media_files SET content_id=$1, episode_id=$2 WHERE id=$3`, []any{series, episode, file}},
+		{`INSERT INTO playback_sessions_sync (session_id, user_id, profile_id, media_file_id, play_method, reporting_node, started_at, updated_at, last_sync_at, is_paused)
+			VALUES ($1, $2, 'p-1', $3, 'transcode', 'node-1', NOW(), NOW(), NOW(), FALSE)`, []any{session, account, file}},
+		{`INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_item_id,media_file_id,play_method,started_at,ended_at,watched_seconds)
+			VALUES($1,$2,'p-1',$3,$4,'transcode',NOW(),NOW(),60)`, []any{session, account, episode, file}},
+	} {
+		if _, err := pool.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	admin := &AdminHandler{pool: pool}
+	rows, err := admin.ReadAdminPlaybackSessions(ctx, PlaybackSessionsQuery{UserID: account}, "", 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("live rows = %+v, %v; want one", rows, err)
+	}
+	history, err := admin.ReadAdminPlaybackHistoryEntry(ctx, session)
+	if err != nil || history == nil {
+		t.Fatalf("history entry = %+v, %v", history, err)
+	}
+	live := rows[0]
+	got := [4]string{live.MediaItemID, live.MediaTitle, live.MediaType, live.SeriesTitle}
+	want := [4]string{history.MediaItemID, history.MediaTitle, history.MediaType, history.SeriesTitle}
+	if got != want || want != [4]string{episode, "Pilot", "episode", "Example Show"} {
+		t.Fatalf("live naming %q, history %q; want both %q", got, want, [4]string{episode, "Pilot", "episode", "Example Show"})
+	}
+}

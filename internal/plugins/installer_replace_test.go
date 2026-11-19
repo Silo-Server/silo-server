@@ -36,10 +36,11 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	if result.Installation.ID != 1 {
 		t.Fatalf("result installation id = %d, want 1", result.Installation.ID)
 	}
-	if len(store.saveArchiveIDs) != 1 || store.saveArchiveIDs[0] != 1 {
-		t.Fatalf("SaveArchive() ids = %#v, want [1]", store.saveArchiveIDs)
+	if len(store.createInputs) != 1 {
+		t.Fatalf("Create() calls = %d, want 1", len(store.createInputs))
 	}
-	assertStoredPluginArchive(t, store.saveArchiveBytes, store.saveArchiveManifest, binaryData)
+	created := store.createInputs[0]
+	assertStoredPluginArchive(t, created.Archive.Bytes, created.Archive.ManifestJSON, binaryData)
 }
 
 func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {

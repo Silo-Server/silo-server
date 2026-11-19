@@ -55,7 +55,9 @@ export function useProfileDefaultWriter(effective: EffectiveSettingsMap | undefi
       } catch (error) {
         // Nothing to clear is the state this asks for.
         if (isSettingValueMissing(error)) return;
-        throw error;
+        // The profile value is already stored, so callers must not read this
+        // as a change that wasn't saved; the settings re-read decides.
+        throw new Error("Couldn't clear this device's override", { cause: error });
       }
     },
     [clearValue, effective, setValue],

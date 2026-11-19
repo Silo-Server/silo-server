@@ -847,6 +847,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		libraryHandler.EventBus = deps.EventBus
 		libraryHandler.EventsHub = deps.EventsHub
+		libraryHandler.RealtimeHub = deps.RealtimeHub
 		libraryHandler.ScanRegistry = deps.ScanRegistry
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
 		libraryHandler.RealtimeMonitor = deps.LibraryMonitor

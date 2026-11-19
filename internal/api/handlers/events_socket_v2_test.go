@@ -87,17 +87,32 @@ func TestEventsSocketV2ProofOriginProtocolAndReplay(t *testing.T) {
 	}
 	_ = replay.Body.Close()
 }
-func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
-	for _, expiry := range []bool{false, true} {
-		t.Run(map[bool]string{false: "revoked", true: "expired"}[expiry], func(t *testing.T) {
+
+// Every way the server ends an open events socket sends a close frame whose
+// code and reason tell the client what to do next; an access change also
+// sends the access_changed frame first.
+func TestEventsSocketV2ClosesWithCodeForCause(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cause      error
+		lifetime   time.Duration
+		wantCode   int
+		wantReason string
+	}{
+		"access changed":     {cause: errSocketAccessChanged, wantCode: SocketCloseAccessChanged, wantReason: "access_changed"},
+		"credential invalid": {cause: errSocketCredentialInvalid, wantCode: SocketCloseCredentialInvalid, wantReason: "credential_invalid"},
+		"plain refusal":      {cause: evt.ErrSocketTicket, wantCode: SocketCloseCredentialInvalid, wantReason: "credential_invalid"},
+		"check failed":       {cause: socketAuthorityUnavailable(context.DeadlineExceeded), wantCode: SocketCloseAuthorityUnavailable, wantReason: "authority_unavailable"},
+		"lifetime ended":     {lifetime: 150 * time.Millisecond, wantCode: SocketCloseLifetimeEnded, wantReason: "lifetime_ended"},
+	} {
+		t.Run(name, func(t *testing.T) {
 			h, validity := socketTestHandler()
 			server := httptest.NewServer(h)
 			defer server.Close()
-			until := time.Now().Add(time.Minute)
-			if expiry {
-				until = time.Now().Add(150 * time.Millisecond)
+			lifetime := tc.lifetime
+			if lifetime == 0 {
+				lifetime = time.Minute
 			}
-			ticket := socketTestTicket(t, h, until)
+			ticket := socketTestTicket(t, h, time.Now().Add(lifetime))
 			dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
 			conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?channels=user_state", nil)
 			if err != nil {
@@ -108,21 +123,21 @@ func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				t.Fatal("connection did not become live", err)
 			}
-			if !expiry {
-				validity.fail(evt.ErrSocketTicket)
+			if tc.cause != nil {
+				validity.fail(tc.cause)
 			}
-			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-			for {
-				_, _, err := conn.ReadMessage()
-				if err != nil {
-					if !websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure) && websocket.IsCloseError(err, websocket.CloseAbnormalClosure) {
-						return
-					}
-					if strings.Contains(err.Error(), "timeout") {
-						t.Fatal("authority loss did not close socket")
-					}
-					return
-				}
+			frames, err := readUntilClosed(t, conn)
+
+			var closeErr *websocket.CloseError
+			if !errors.As(err, &closeErr) || closeErr.Code != tc.wantCode || closeErr.Text != tc.wantReason {
+				t.Fatalf("close = %v, want %d %q", err, tc.wantCode, tc.wantReason)
+			}
+			signaled := slices.Contains(frames, `{"type":"access_changed"}`)
+			if wantSignal := tc.wantCode == SocketCloseAccessChanged; signaled != wantSignal {
+				t.Fatalf("frames %q: access_changed frame = %v, want %v", frames, signaled, wantSignal)
+			}
+			if signaled && frames[len(frames)-1] != `{"type":"access_changed"}` {
+				t.Fatalf("frames %q: access_changed must be the last frame before the close", frames)
 			}
 		})
 	}
@@ -147,9 +162,18 @@ func (s *socketSessionFixture) ActiveSession(context.Context, string, int) (auth
 	return auth.SessionAuthority{Role: s.account.user.Role, Purpose: models.SessionPurposeAccount}, true, nil
 }
 
-type socketUserFixture struct{ user models.User }
+// socketUserFixture is one account; err, when set, is the read's failure.
+type socketUserFixture struct {
+	user models.User
+	err  error
+}
 
-func (s *socketUserFixture) GetByID(context.Context, int) (*models.User, error) { return &s.user, nil }
+func (s *socketUserFixture) GetByID(context.Context, int) (*models.User, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &s.user, nil
+}
 
 type socketViewerFixture struct {
 	scope access.Scope
@@ -229,8 +253,8 @@ func TestEventsSocketV2ValidatesCurrentSessionAccountAndProfile(t *testing.T) {
 		t.Fatalf("degraded preferences: error = %v, want the check skipped", err)
 	}
 	// Nor does a ticket carry a fingerprint of fallback preferences.
-	if _, err := h.Mint(t.Context(), evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", ProfileID: "secondary", AccessExpiresAt: time.Now().Add(time.Minute)}); !errors.Is(err, evt.ErrSocketTicket) {
-		t.Fatalf("mint with degraded preferences: error = %v, want refused", err)
+	if _, err := h.Mint(t.Context(), evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", ProfileID: "secondary", AccessExpiresAt: time.Now().Add(time.Minute)}); !errors.Is(err, evt.ErrSocketAuthorityUnavailable) {
+		t.Fatalf("mint with degraded preferences: error = %v, want refused as retryable", err)
 	}
 }
 
@@ -251,46 +275,6 @@ func readUntilClosed(t *testing.T, conn *websocket.Conn) ([]string, error) {
 			return frames, err
 		}
 		frames = append(frames, strings.TrimSpace(string(body)))
-	}
-}
-
-func TestEventsSocketV2SignalsAccessChangeBeforeClosing(t *testing.T) {
-	for name, tc := range map[string]struct {
-		err        error
-		wantSignal bool
-	}{
-		"access changed":  {err: errSocketAccessChanged, wantSignal: true},
-		"session revoked": {err: evt.ErrSocketTicket},
-	} {
-		t.Run(name, func(t *testing.T) {
-			h, validity := socketTestHandler()
-			server := httptest.NewServer(h)
-			defer server.Close()
-			ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
-			dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
-			conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?channels=user_state", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = conn.Close() }()
-			defer func() { _ = resp.Body.Close() }()
-			if _, _, err := conn.ReadMessage(); err != nil {
-				t.Fatal("connection did not become live", err)
-			}
-
-			validity.fail(tc.err)
-			frames, err := readUntilClosed(t, conn)
-
-			signaled := slices.Contains(frames, `{"type":"access_changed"}`)
-			var closeErr *websocket.CloseError
-			closedForAccess := errors.As(err, &closeErr) && closeErr.Code == EventsCloseAccessChanged && closeErr.Text == "access_changed"
-			if signaled != tc.wantSignal || closedForAccess != tc.wantSignal {
-				t.Fatalf("frames %q, close %v; want access_changed frame and close code 4001 = %v", frames, err, tc.wantSignal)
-			}
-			if tc.wantSignal && frames[len(frames)-1] != `{"type":"access_changed"}` {
-				t.Fatalf("frames %q: access_changed must be the last frame before the close", frames)
-			}
-		})
 	}
 }
 
@@ -430,8 +414,9 @@ func TestSocketValidatorProfileLessAdminFollowsHouseholdRequirement(t *testing.T
 	}
 
 	householdDown.Store(true)
-	if _, _, err := h.Validate(t.Context(), demoted); !errors.Is(err, evt.ErrSocketTicket) {
-		t.Fatalf("failed household lookup: %v, want the credential refused", err)
+	// Refused, but as a check that failed: the credential may still hold.
+	if _, _, err := h.Validate(t.Context(), demoted); !errors.Is(err, evt.ErrSocketAuthorityUnavailable) {
+		t.Fatalf("failed household lookup: %v, want the check refused as unavailable", err)
 	}
 }
 
@@ -462,11 +447,16 @@ func TestSocketValidatorPassesDeviceToActingAdmin(t *testing.T) {
 }
 
 // socketKeyFixture is one API key's current configuration; nil once deleted.
+// err, when set, is the read's failure.
 type socketKeyFixture struct {
 	key atomic.Pointer[models.APIKeyMetadata]
+	err error
 }
 
 func (s *socketKeyFixture) GetMetadataByID(_ context.Context, id int64) (*models.APIKeyMetadata, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
 	key := s.key.Load()
 	if key == nil || key.ID != id {
 		return nil, auth.ErrAPIKeyNotFound
@@ -540,7 +530,7 @@ func TestEventsSocketV2AdmitsMonitorKey(t *testing.T) {
 	if err != nil || claims.Role != "admin" || claims.TokenType != auth.TokenTypeAPIKey || claims.SessionID != "" {
 		t.Fatalf("key claims = %+v, %v", claims, err)
 	}
-	if channels := allowedChannelsForClaims(claims); !slices.Equal(channels, []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions}) {
+	if channels := allowedChannelsForClaims(claims); !slices.Equal(channels, []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions, evt.ChannelDownloads}) {
 		t.Fatalf("monitor key channels = %v", channels)
 	}
 	login := newSocketAuthorityValidator(f.sessions, users, f.viewer, apimw.NewActingAdminDecider(nil, nil))
@@ -560,13 +550,29 @@ func TestEventsSocketV2AdmitsMonitorKey(t *testing.T) {
 	}
 	credentialEnded := func(name string) {
 		t.Helper()
-		if _, _, err := h.Validate(t.Context(), proof); !errors.Is(err, evt.ErrSocketTicket) || errors.Is(err, errSocketAccessChanged) {
+		if _, _, err := h.Validate(t.Context(), proof); !errors.Is(err, errSocketCredentialInvalid) {
 			t.Fatalf("%s: error = %v, want an ended credential", name, err)
+		}
+	}
+	// A failed read says nothing about the credential: it must not be
+	// reported as revoked.
+	uncheckable := func(name string) {
+		t.Helper()
+		if _, _, err := h.Validate(t.Context(), proof); !errors.Is(err, evt.ErrSocketAuthorityUnavailable) || errors.Is(err, evt.ErrSocketTicket) {
+			t.Fatalf("%s: error = %v, want an unavailable check", name, err)
 		}
 	}
 	users.user.Enabled = false
 	credentialEnded("disabled account")
 	users.user.Enabled = true
+	users.err = auth.ErrNotFound
+	credentialEnded("deleted account")
+	users.err = context.DeadlineExceeded
+	uncheckable("account read timed out")
+	users.err = nil
+	keys.err = errors.New("connection refused")
+	uncheckable("key read failed")
+	keys.err = nil
 	users.user.Role = "user"
 	accessChanged("demoted account")
 	users.user.Role = "admin"
@@ -638,12 +644,13 @@ func TestEventsSocketV2AdmitsUserKey(t *testing.T) {
 		t.Fatal("key without an event scope minted")
 	}
 	keys.key.Store(nil)
-	if _, _, err := h.Validate(t.Context(), proof); !errors.Is(err, evt.ErrSocketTicket) || errors.Is(err, errSocketAccessChanged) {
+	if _, _, err := h.Validate(t.Context(), proof); !errors.Is(err, errSocketCredentialInvalid) {
 		t.Fatalf("revoked key: %v", err)
 	}
 }
 
-// A revoked key closes an open monitoring socket at the next recheck.
+// A revoked key closes an open monitoring socket at the next recheck with
+// credential_invalid, so the client stops reconnecting with it.
 func TestEventsSocketV2ClosesWhenKeyRevoked(t *testing.T) {
 	f := newMonitorKeySocket(t)
 	h, keys := f.h, f.keys
@@ -662,7 +669,7 @@ func TestEventsSocketV2ClosesWhenKeyRevoked(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, hello, err := conn.ReadMessage()
-	if err != nil || !strings.Contains(string(hello), `"available_channels":["catalog","sessions"]`) {
+	if err != nil || !strings.Contains(string(hello), `"available_channels":["catalog","sessions","downloads"]`) {
 		t.Fatalf("hello: %s %v", hello, err)
 	}
 	_, subscribed, err := conn.ReadMessage()
@@ -670,13 +677,10 @@ func TestEventsSocketV2ClosesWhenKeyRevoked(t *testing.T) {
 		t.Fatalf("subscribed: %s %v", subscribed, err)
 	}
 	keys.key.Store(nil)
-	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
-			if strings.Contains(err.Error(), "timeout") {
-				t.Fatal("revoked key left the socket open")
-			}
-			return
-		}
+	_, err = readUntilClosed(t, conn)
+	var closeErr *websocket.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != SocketCloseCredentialInvalid || closeErr.Text != "credential_invalid" {
+		t.Fatalf("revoked key closed with %v, want 4002 credential_invalid", err)
 	}
 }
 

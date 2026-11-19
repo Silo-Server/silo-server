@@ -25,7 +25,8 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestRecentlyReleasedOrdersByReleaseDate
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
-./internal/sections TestBookMediaScopeRowsKeepTheirTypePostgres
+./internal/sections TestMediaScopeRowsMatchSeeAllPostgres
+./internal/sections TestEpisodeScopeRowReadsPastOneCursorPagePostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
 ./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
@@ -303,6 +304,7 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
+./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -610,6 +612,8 @@
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
+./internal/downloads TestDownloadClientAddressesDB
+./internal/downloads TestDownloadChangeOutboxDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
 ./internal/downloads TestDeadAccountTransferReleasesItsConcurrentSlotDB
 ./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
@@ -709,6 +713,8 @@
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
+# A live row names an episode as the history entry its play leaves does.
+./internal/api/handlers TestEpisodeLiveRowNamesItAsHistoryDB
 
 # An Audiobookshelf play a client only reports through its local session is
 # one play across servers under a cluster-wide account cap; Activity lists it
@@ -744,6 +750,9 @@
 
 # Stored sidecar subtitles take the scanner's reading of their names.
 ./internal/database TestPostgresExternalSubtitleNameBackfill
+
+# Stored content-rating ages take what access.Normalize resolves now.
+./internal/database TestPostgresContentRatingAgeRederive
 
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
@@ -857,6 +866,14 @@
 # A plugin replacement that finishes after another install of the same plugin is
 # refused, and the newer release, its stored archive and its files stay.
 ./internal/plugins TestInstallerReplacementRefusedAfterInstallationChangedDB
+
+# A plugin has one installation: an archive link for an installed plugin
+# replaces it, and a second create for the same plugin is refused.
+./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
+
+# Cleaning up duplicate installations keeps a break-glass account's local
+# credentials and moves a deleted duplicate's marker provider settings.
+./migrations TestUniquePluginInstallationCleanupPostgres
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
@@ -1431,3 +1448,7 @@
 # Frame posters list only movies whose poster slot is empty with nothing on its
 # way, and a frame is saved only while the slot is still empty with the source read.
 ./internal/catalog TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB
+
+# Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
+./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
+./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB

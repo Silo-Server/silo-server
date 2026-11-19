@@ -25,7 +25,6 @@ import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOver
 import { IntroSkipButton } from "./IntroSkipButton";
 import { BufferingQualityPill } from "./BufferingQualityPill";
 import { MarkerEditPanel } from "./MarkerEditPanel";
-import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
@@ -50,7 +49,6 @@ import { useSubtitleDelay } from "../hooks/useSubtitleDelay";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
-import { useNextEpisode } from "../hooks/useNextEpisode";
 import { resetStillWatchingStreak } from "../stillWatching";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { useWatchTogetherPlaybackSync } from "../hooks/useWatchTogetherPlaybackSync";
@@ -76,11 +74,7 @@ import { StartupGuard } from "../utils/startupGuard";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
-import {
-  markerOccurrenceAtTime,
-  resolveAutoplayMarker,
-  resolveMarkerRegions,
-} from "../utils/watchPageMarkers";
+import { markerOccurrenceAtTime, resolveMarkerRegions } from "../utils/watchPageMarkers";
 import type {
   PlaybackExitState,
   IntroSkipMode,
@@ -107,6 +101,7 @@ import type {
 import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import {
+  bufferedAheadSeconds,
   mediaDurationSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -349,9 +344,6 @@ interface VideoPlayerProps {
   autoSkipRecap?: boolean;
   preview?: PlayerTimeRange | null;
   markerSegments?: PlayerMarkerSegment[];
-  autoPlayNextPreview?: boolean;
-  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
-  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   /**
    * Notified after a successful in-player marker edit, with only the kinds it
@@ -392,6 +384,19 @@ interface VideoPlayerProps {
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 // MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
 const MEDIA_ERR_NETWORK = 2;
+// hls.js gives up on a stream the moment a request is refused, but keeps what
+// it buffered. While the element has at least this much media at its playhead
+// it plays on, and the reconnect waits for the buffer to run out.
+const MIN_DRAIN_AHEAD_SECONDS = 1;
+// `waiting` on a draining stream is checked again after this long: a seek
+// inside the buffer or a decoder hiccup has recovered by then, an empty buffer
+// has not.
+const DRAIN_CHECK_DELAY_MS = 1_000;
+
+/** Whether a draining stream still has media to play at `position` (player time). */
+function hasMediaAhead(video: HTMLVideoElement, position = video.currentTime): boolean {
+  return bufferedAheadSeconds(video.buffered, position) >= MIN_DRAIN_AHEAD_SECONDS;
+}
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 /**
  * Firefox's copy-remux stall is media that arrived and still made no frame.
@@ -572,8 +577,6 @@ export function VideoPlayer({
   autoSkipRecap = false,
   preview = null,
   markerSegments,
-  autoPlayNextPreview = false,
-  autoPlayNext = true,
   canEditMarkers = true,
   onMarkersEdited,
   duration: propDuration,
@@ -1059,6 +1062,72 @@ export function VideoPlayer({
   // controller, which lowers when Auto lowers on its own and otherwise calls
   // back to fail the plan. Set once the controller's hook has run below.
   const startDeadlinePassedRef = useRef<(fail: () => void) => void>((fail) => fail());
+
+  // -- Draining a dead HLS transport --
+  // After hls.js gives up on the network, the element plays on from what it
+  // buffered, so a server that is away for less than the buffer interrupts
+  // nothing yet. The reconnect starts when the buffer runs out: `waiting`
+  // with nothing buffered at the playhead, a seek that needs the server, or
+  // any further fatal error. One stream at a time, reset with the transport.
+  const hlsDrainingRef = useRef(false);
+  const drainCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopDraining = useCallback(() => {
+    hlsDrainingRef.current = false;
+    if (drainCheckTimerRef.current !== null) {
+      clearTimeout(drainCheckTimerRef.current);
+      drainCheckTimerRef.current = null;
+    }
+  }, []);
+  const reconnectFromDrainedStream = useCallback(() => {
+    stopDraining();
+    reportConnectionLostRef.current();
+  }, [stopDraining]);
+
+  // `waiting` alone doesn't mean the buffer is empty: it also fires on a seek
+  // inside the buffer and on a brief decoder stall. A playhead that stays put
+  // with media buffered gets one more look; a stream stuck there needs
+  // replacing as much as an empty one. A viewer who paused meanwhile isn't
+  // waiting for anything: playing again fires `waiting` if the element still
+  // can't play. Ending the drain clears the check.
+  const scheduleDrainCheck = useCallback(() => {
+    if (!hlsDrainingRef.current || drainCheckTimerRef.current !== null) return;
+    let stalledAt: number | null = null;
+    const check = () => {
+      drainCheckTimerRef.current = null;
+      const video = videoRef.current;
+      if (!video || video.paused || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
+      if (hasMediaAhead(video) && video.currentTime !== stalledAt) {
+        stalledAt = video.currentTime;
+        drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);
+        return;
+      }
+      reconnectFromDrainedStream();
+    };
+    drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);
+  }, [reconnectFromDrainedStream]);
+
+  /**
+   * reportConnectionLost for a fatal hls.js network error: while the element
+   * still has media ahead of its playhead, the stream drains instead.
+   */
+  const reportHlsConnectionLost = useCallback((): boolean => {
+    const video = videoRef.current;
+    if (
+      onConnectionLost &&
+      video &&
+      streamFramedRef.current &&
+      connectionStatusRef.current === "connected" &&
+      hasMediaAhead(video)
+    ) {
+      hlsDrainingRef.current = true;
+      // The element may already be stalled, with its `waiting` long gone.
+      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) scheduleDrainCheck();
+      return true;
+    }
+    return reportConnectionLost();
+  }, [onConnectionLost, reportConnectionLost, scheduleDrainCheck]);
+  const reportHlsConnectionLostRef = useRef(reportHlsConnectionLost);
+  reportHlsConnectionLostRef.current = reportHlsConnectionLost;
 
   // While the session reconnects, nothing plays: the element is paused (so
   // progress reports say so), and hls.js stops hammering the server. The
@@ -1699,6 +1768,9 @@ export function VideoPlayer({
   const reanchorAtRef = useRef(reanchorAt);
   reanchorAtRef.current = reanchorAt;
 
+  // Counts performPlayerSeek calls, so a seek's late fallback can tell it was
+  // replaced.
+  const playerSeekGenerationRef = useRef(0);
   // Reports whether the seek was taken up, which callers that show an
   // affordance for it (the intro prompt) need in order to know whether the
   // affordance did anything.
@@ -1724,8 +1796,23 @@ export function VideoPlayer({
       }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
+      // A draining stream can only play what it buffered. The reconnect
+      // resumes at a target that needs the server, unless a later seek has
+      // replaced it while the reanchor was failing.
+      const draining = hlsDrainingRef.current && connectionStatusRef.current === "connected";
+      const seekGeneration = ++playerSeekGenerationRef.current;
+      const reconnectAtTarget = () => {
+        if (!hlsDrainingRef.current || playerSeekGenerationRef.current !== seekGeneration) return;
+        rememberPendingSeek(seconds);
+        setCurrentTime(seconds);
+        reconnectFromDrainedStream();
+      };
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
         takeSeek();
+        if (draining && !hasMediaAhead(video, nativeSeconds)) {
+          reconnectFromDrainedStream();
+          return true;
+        }
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;
@@ -1733,7 +1820,25 @@ export function VideoPlayer({
 
       // Outside the server-anchored window: this is a timeline operation, not
       // a failure, so it asks for a reanchor rather than reporting a failure.
-      return reanchorAt(seconds);
+      // Only the reanchor moves the window; the reconnect's replan may keep
+      // it. A draining stream reconnects once the reanchor can't reach the
+      // server either.
+      const accepted = reanchorAt(seconds);
+      if (!draining || accepted === true) return accepted;
+      if (accepted === false) {
+        reconnectAtTarget();
+        return true;
+      }
+      return accepted.then(
+        (ok) => {
+          if (!ok) reconnectAtTarget();
+          return true;
+        },
+        () => {
+          reconnectAtTarget();
+          return true;
+        },
+      );
     },
     [
       canSeekAnywhere,
@@ -1742,6 +1847,8 @@ export function VideoPlayer({
       noteViewerSeek,
       onSeek,
       reanchorAt,
+      reconnectFromDrainedStream,
+      rememberPendingSeek,
       resetRoomCatchupRate,
     ],
   );
@@ -2549,36 +2656,28 @@ export function VideoPlayer({
   const activeRecap = markerOccurrenceAtTime(savedMarkerRegions, "recap", currentTime);
   const activeCredits = markerOccurrenceAtTime(savedMarkerRegions, "credits", currentTime);
   const activePreview = markerOccurrenceAtTime(savedMarkerRegions, "preview", currentTime);
-  const autoplayMarker = useMemo(() => {
-    if (markerSegments !== undefined) {
-      return resolveAutoplayMarker(savedMarkerRegions, duration, autoPlayNextPreview);
-    }
-    return autoPlayNextPreview && preview ? preview : credits;
-  }, [markerSegments, savedMarkerRegions, duration, autoPlayNextPreview, preview, credits]);
-  const nextEpisode = useNextEpisode(
-    roomPlaybackActive ? null : autoplayMarker,
-    roomPlaybackActive ? undefined : seriesContext,
-    currentTime,
-    handleNavigate,
-    { autoPlay: autoPlayNext, playing },
-  );
-
-  // Previous-episode lookup (mirrors the helper in useNextEpisode). Auto-play
-  // is next-only, so we just need the reference + a navigation callback for
-  // the floating player cluster.
-  const prevEpisodeRef = (() => {
-    if (!seriesContext) return null;
-    const idx = seriesContext.episodes.findIndex(
-      (ep) =>
-        ep.seasonNumber === seriesContext.currentSeason &&
-        ep.episodeNumber === seriesContext.currentEpisode,
-    );
-    if (idx <= 0) return null;
-    return seriesContext.episodes[idx - 1] ?? null;
-  })();
+  // The neighbouring episodes for the floating player cluster. Next Up itself
+  // is the post-roll screen, timed from the end of the file by the host. A
+  // Watch Together room decides what plays next, so it offers no next episode.
+  const episodeIndex = seriesContext
+    ? seriesContext.episodes.findIndex(
+        (ep) =>
+          ep.seasonNumber === seriesContext.currentSeason &&
+          ep.episodeNumber === seriesContext.currentEpisode,
+      )
+    : -1;
+  const prevEpisodeRef =
+    seriesContext && episodeIndex > 0 ? (seriesContext.episodes[episodeIndex - 1] ?? null) : null;
+  const nextEpisodeRef =
+    seriesContext && !roomPlaybackActive && episodeIndex >= 0
+      ? (seriesContext.episodes[episodeIndex + 1] ?? null)
+      : null;
   const goToPrevEpisode = useCallback(() => {
     if (prevEpisodeRef) handleNavigate(prevEpisodeRef.contentId, "viewer");
   }, [prevEpisodeRef, handleNavigate]);
+  const goToNextEpisode = useCallback(() => {
+    if (nextEpisodeRef) handleNavigate(nextEpisodeRef.contentId, "viewer");
+  }, [nextEpisodeRef, handleNavigate]);
 
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
@@ -2591,25 +2690,11 @@ export function VideoPlayer({
     : year
       ? numberText(year)
       : undefined;
-  const cancelNextEpisodeAutoPlay = nextEpisode.cancelAutoPlay;
-  const cancelNextEpisodeAutoPlayRef = useRef(cancelNextEpisodeAutoPlay);
   const flushWatchProgressRef = useRef(flushWatchProgress);
-
-  useEffect(() => {
-    cancelNextEpisodeAutoPlayRef.current = cancelNextEpisodeAutoPlay;
-  }, [cancelNextEpisodeAutoPlay]);
 
   useEffect(() => {
     flushWatchProgressRef.current = flushWatchProgress;
   }, [flushWatchProgress]);
-
-  // Cancel the in-player credits countdown when entering postroll mode,
-  // since PlayingNextScreen takes over next-episode navigation.
-  useEffect(() => {
-    if (displayMode === "postroll") {
-      cancelNextEpisodeAutoPlay();
-    }
-  }, [cancelNextEpisodeAutoPlay, displayMode]);
 
   // -- Intro/recap skip --
   const activeSkipMarker = [activeRecap, activeCredits, activePreview].find(
@@ -2703,6 +2788,7 @@ export function VideoPlayer({
     // frame yet may be a route this browser cannot reach, so its network
     // failures go through startup recovery rather than the reconnect.
     streamPlayedRef.current = false;
+    stopDraining();
     streamFramedRef.current = false;
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
@@ -3021,9 +3107,20 @@ export function VideoPlayer({
                 error: data.error?.message,
               });
 
+              // A draining stream is already dead: whatever failed now, only
+              // the reconnect can replace it.
+              if (hlsDrainingRef.current) {
+                reconnectFromDrainedStream();
+                return;
+              }
+
               // hls.js has already retried the request; a fatal network error
-              // on a stream that played means the server went away.
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && reportConnectionLostRef.current()) {
+              // on a stream that played means the server went away. The
+              // element plays out what it buffered before the reconnect.
+              if (
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                reportHlsConnectionLostRef.current()
+              ) {
                 return;
               }
 
@@ -3297,6 +3394,7 @@ export function VideoPlayer({
       cleanupStartupListeners();
       video.removeEventListener("suspend", endHoldOnceLoaded);
       video.removeEventListener("canplay", endHoldOnceLoaded);
+      stopDraining();
       if (engineSession) {
         // Restores the element's own media pipeline before it is reset below.
         engineSession.destroy();
@@ -3330,9 +3428,11 @@ export function VideoPlayer({
     playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
+    reconnectFromDrainedStream,
     rememberPendingSeek,
     reportCurrentPlanFailure,
     shouldAutoPlay,
+    stopDraining,
   ]);
 
   // -- Video event listeners --
@@ -3470,6 +3570,7 @@ export function VideoPlayer({
       persistVolume(video.volume, viewerMuted);
     };
     const onWaiting = () => {
+      scheduleDrainCheck();
       // Delay showing the spinner so brief buffering between segments
       // or during initial HLS startup doesn't flash a spinner.
       if (!bufferingTimerRef.current) {
@@ -3540,8 +3641,6 @@ export function VideoPlayer({
       if (endedFiredRef.current) return;
       endedFiredRef.current = true;
       setHasEnded(true);
-      // Cancel any active credits countdown to prevent it racing with post-roll.
-      cancelNextEpisodeAutoPlayRef.current();
       // Flush progress so the server records the final position.
       flushWatchProgressRef.current().catch(() => {});
       // Use ref to get the latest callback, avoiding stale closure issues
@@ -3564,6 +3663,9 @@ export function VideoPlayer({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("error", onError);
     video.addEventListener("ended", onVideoEnded);
+    // hls.js reports an end it stalled into without a native `ended`; with At
+    // end nothing else would open Next Up then.
+    video.addEventListener(MEDIA_ENDED_EVENT, onVideoEnded);
     window.addEventListener("offline", onNetworkChange);
     window.addEventListener("online", onNetworkChange);
 
@@ -3585,6 +3687,7 @@ export function VideoPlayer({
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("error", onError);
       video.removeEventListener("ended", onVideoEnded);
+      video.removeEventListener(MEDIA_ENDED_EVENT, onVideoEnded);
     };
     // Listener behavior depends on pending seek reconciliation. Watch-together
     // deps are intentionally narrowed to the primitives the handlers read so
@@ -3597,6 +3700,7 @@ export function VideoPlayer({
     reportCurrentPlanFailure,
     resetRoomCatchupRate,
     roomReadinessPending,
+    scheduleDrainCheck,
     sessionId,
     watchTogetherRoomActive,
     watchTogetherSync,
@@ -4659,6 +4763,10 @@ export function VideoPlayer({
           video.paused &&
           transportStartupPendingRef.current &&
           video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        // The command sets the play state. A position this stream can't reach
+        // starts the reconnect inside applyRoomPosition, before the element
+        // pauses or plays below, and the reconnect resumes by this state.
+        viewerPlayingRef.current = command.action === "play";
         const playAllowed = !awaitingMedia && applyRoomPosition(video);
 
         if (command.action === "seek") {
@@ -4947,11 +5055,10 @@ export function VideoPlayer({
     }),
     [plan, activeQualityId],
   );
-  // Intro skip, the other segment skips and Next Up take priority; a
+  // Intro skip and the other segment skips take priority; a
   // buffering pill waits behind them with its timer frozen. A minimized
   // player shows no pill either, so the pill waits for it to come back.
-  const higherPriorityPillActive =
-    activeIntroPrompt !== null || nextEpisode.showCountdown || activeSkipMarker !== undefined;
+  const higherPriorityPillActive = activeIntroPrompt !== null || activeSkipMarker !== undefined;
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
@@ -5191,8 +5298,9 @@ export function VideoPlayer({
       currentTime,
       duration,
       playing,
+      fileId: activeFileId ?? selectedVersion?.file_id,
     });
-  }, [currentTime, duration, onPlaybackStateChange, playing]);
+  }, [activeFileId, currentTime, duration, onPlaybackStateChange, playing, selectedVersion]);
 
   useEffect(() => {
     if (!onPlaybackTransportReady) {
@@ -5876,7 +5984,7 @@ export function VideoPlayer({
           showSource={showMarkerSource}
         />
       )}
-      {!isDetached && !activeIntroPrompt && !nextEpisode.showCountdown && activeSkipMarker && (
+      {!isDetached && !activeIntroPrompt && activeSkipMarker && (
         <IntroSkipButton
           onSkip={skipMarker}
           label={skipMarkerLabel(t, activeSkipMarker.kind)}
@@ -5891,17 +5999,6 @@ export function VideoPlayer({
       {/* Marker editor */}
       {!isDetached && markerEditor.editing && (
         <MarkerEditPanel editor={markerEditor} currentTime={currentTime} />
-      )}
-
-      {/* Next episode overlay */}
-      {!isDetached && nextEpisode.showCountdown && nextEpisode.nextEpisode && (
-        <NextEpisodeOverlay
-          dockHeight={controlsVisible ? dockClearance : 0}
-          episode={nextEpisode.nextEpisode}
-          secondsRemaining={nextEpisode.secondsRemaining}
-          onSkip={nextEpisode.skipToNext}
-          onCancel={nextEpisode.cancelAutoPlay}
-        />
       )}
 
       {/* Live translation buffering indicator */}
@@ -6017,9 +6114,9 @@ export function VideoPlayer({
           showPlaybackInfo={showPlaybackInfo}
           onTogglePlaybackInfo={() => setShowPlaybackInfo((v) => !v)}
           hasPrevEpisode={!!prevEpisodeRef}
-          hasNextEpisode={!!nextEpisode.nextEpisode}
+          hasNextEpisode={!!nextEpisodeRef}
           onPrevEpisode={goToPrevEpisode}
-          onNextEpisode={nextEpisode.skipToNext}
+          onNextEpisode={goToNextEpisode}
           title={hudTitle}
           subtitleLabel={hudSubtitle}
         />

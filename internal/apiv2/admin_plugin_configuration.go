@@ -110,6 +110,8 @@ func adminPluginMutationProblem(err error) error {
 		return NewProblem(TypeNotFound, "Plugin installation not found.")
 	case errors.Is(err, plugins.ErrInstallationChanged):
 		return NewProblem(TypeConflict, "Another install or update replaced this plugin while its package downloaded, so Silo didn't install it. Check the installed version and try again.")
+	case errors.Is(err, plugins.ErrPluginAlreadyInstalled):
+		return NewProblem(TypeConflict, "Another install of this plugin finished first, so Silo didn't install it again. Check the installed version and try again.")
 	case errors.Is(err, handlers.ErrPluginBuiltinInstallation):
 		return NewProblem(TypeConflict, "Built-in host providers cannot be modified.")
 	case errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled):

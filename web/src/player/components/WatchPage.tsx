@@ -196,8 +196,6 @@ function WatchPagePlayer({
   showMarkerSource = false,
   bufferingMode = "always",
   autoSkipRecap,
-  autoPlayNextPreview,
-  autoPlayNext,
   canEditMarkers,
   seriesContext,
   onNavigateEpisode,
@@ -741,8 +739,6 @@ function WatchPagePlayer({
       autoSkipRecap={autoSkipRecap}
       preview={activeMarkers.preview}
       markerSegments={selectedVersion?.marker_segments}
-      autoPlayNextPreview={autoPlayNextPreview}
-      autoPlayNext={autoPlayNext}
       canEditMarkers={canEditMarkers}
       onMarkersEdited={(editedFileId, markers) =>
         applyMarkerChange((current) =>

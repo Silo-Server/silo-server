@@ -60,13 +60,15 @@ func statusEventTestRepo(t *testing.T) *Repository {
 	if err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../migrations/sql/20260906025444_download_status_events.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, _ := strings.Cut(string(migration), "-- +goose Down")
-	if _, err := pool.Exec(t.Context(), strings.ReplaceAll(up, "public.", "")); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"20260906025444_download_status_events.sql", "20261119021212_download_client_ip.sql"} {
+		migration, err := os.ReadFile("../../migrations/sql/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, _ := strings.Cut(string(migration), "-- +goose Down")
+		if _, err := pool.Exec(t.Context(), strings.ReplaceAll(up, "public.", "")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return NewRepository(pool)
 }

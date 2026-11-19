@@ -747,8 +747,11 @@ path the core approves for it, never a path the job request names.
 | `412` | The file's size or modification time differs from the grant's revision. |
 | `503` | Transient: no grant key, the catalog cannot be read, or the file could not be examined (an I/O error, a stale mount). |
 
-Each open and renewal reads the catalog once and stats the file once, so the
-catalog check is never more than one renewal interval stale.
+Each open and renewal reads the catalog once and stats the file once, then
+signs a grant valid for one lifetime from that moment. While a node's renewals
+succeed, its last check is at most one renewal interval old. When they fail
+transiently, the grant it holds stays valid until it expires, so the check can
+be up to one grant lifetime old, plus the time the core spent on that check.
 
 On the node, `nodesource.Opener` exchanges the grant through
 `nodecontrol.Client.OpenSource`. With local source access it stats the approved
@@ -819,7 +822,16 @@ the way never record it.
 
 1. The grant must verify, be unexpired, be younger than `MaxGrantAge` and name
    the calling node (`403`). There is no catalog query: the catalog is checked
-   at open and at every renewal, so it is at most one renewal interval stale.
+   when the grant is minted, from the row its caller read, and again at open
+   and at every renewal. A request needs an unexpired grant, so the last check
+   behind it is up to one grant lifetime old (see [sources/open](#sourcesopen)),
+   plus, for a grant never renewed, the time between the caller's read and the
+   mint.
+   The core does not cut a response it is already sending when the source is
+   withdrawn, and keeps serving new requests that carry an unexpired grant. A
+   node that renews ends the source at its next renewal, which the core refuses
+   with `410`, and that interrupts its reads in flight. The grant's expiry is
+   the core's own bound on a node that does not renew.
 2. The core opens the granted path through `internal/fspath` without blocking
    on a FIFO, `fstat`s the descriptor, and compares the size and the
    modification time at microseconds with the grant: `410` when gone or not a
