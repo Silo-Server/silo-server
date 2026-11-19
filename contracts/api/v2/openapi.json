@@ -19086,7 +19086,7 @@
             "type": "string"
           },
           "message": {
-            "description": "A reason or error that came with the event",
+            "description": "A reason or error that came with the event. Withheld from API keys with scopes",
             "examples": [
               "auto approved"
             ],
@@ -40418,7 +40418,7 @@
             "type": "boolean"
           },
           "last_error": {
-            "description": "Admins only: why the last submission to a download server failed. It can name servers and routing rules",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: why the last submission to a download server failed. It can name servers and routing rules",
             "type": "string"
           },
           "library_content_id": {
@@ -50594,7 +50594,7 @@
             "type": "string"
           },
           "instance_name": {
-            "description": "Admins only: the download server's name",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: the download server's name",
             "type": "string"
           },
           "integration_id": {
@@ -50612,7 +50612,7 @@
             "type": "boolean"
           },
           "last_error": {
-            "description": "Admins only: why the download server failed this target",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: why the download server failed this target",
             "type": "string"
           },
           "quality": {
@@ -50630,7 +50630,7 @@
             "type": "string"
           },
           "route_name": {
-            "description": "Admins only: the routing rule that sent this target to its server, as named when it was sent",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: the routing rule that sent this target to its server, as named when it was sent",
             "type": "string"
           },
           "status": {
