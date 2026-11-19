@@ -238,11 +238,15 @@ func (g *relayDemuxGuard) pools(source string) *relayDemuxSourceSlots {
 	defer g.mu.Unlock()
 	pools, ok := g.slots[source]
 	if !ok {
+		recoveryLimit := g.recoveryLimit
+		if recoveryLimit <= 0 {
+			recoveryLimit = relayDemuxRecoverySlotsPerSource
+		}
 		pools = &relayDemuxSourceSlots{
 			requestPath: make(chan struct{}, g.limit),
 			detached:    make(chan struct{}, g.detachedLimit),
 			font:        make(chan struct{}, g.fontLimit),
-			recovery:    make(chan struct{}, g.recoveryLimit),
+			recovery:    make(chan struct{}, recoveryLimit),
 		}
 		g.slots[source] = pools
 	}
