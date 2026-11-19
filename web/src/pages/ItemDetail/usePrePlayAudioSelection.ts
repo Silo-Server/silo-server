@@ -37,6 +37,10 @@ export function usePrePlayAudioSelection(
   // Bumped with each version or title change, so a write for the previous one
   // that lands later cannot repopulate savedRef.
   const fileGenerationRef = useRef(0);
+  // The choice whose failure put the selector back to savedRef, if it is still
+  // showing. A pick refused offline fails at once, ahead of an earlier pick
+  // still in flight; when that one lands, the selector shows it.
+  const rolledBackChoiceRef = useRef(0);
 
   const [prevContentId, setPrevContentId] = useState(contentId);
   const fileId = version?.file_id;
@@ -66,12 +70,14 @@ export function usePrePlayAudioSelection(
     const generation = fileGenerationRef.current;
     return {
       onSuccess: () => {
-        if (fileGenerationRef.current === generation) {
-          savedRef.current = { mode: nextMode, index: nextIndex };
-        }
+        if (fileGenerationRef.current !== generation) return;
+        savedRef.current = { mode: nextMode, index: nextIndex };
+        if (rolledBackChoiceRef.current === latestChoiceRef.current) show(nextMode, nextIndex);
       },
       onError: () => {
-        if (latestChoiceRef.current === choice) show(savedRef.current.mode, savedRef.current.index);
+        if (latestChoiceRef.current !== choice) return;
+        rolledBackChoiceRef.current = choice;
+        show(savedRef.current.mode, savedRef.current.index);
       },
     };
   };
