@@ -14049,3 +14049,190 @@ describe("usePlaybackSession terminal refusals", () => {
     unmount();
   });
 });
+
+// A virtual release can rotate under a plan. The server then answers the plan's
+// subtitle window with `subtitle_source_changed` (409) because the ordinal named
+// a layout that release no longer has. A plain replan returns the rotated
+// inventory but keeps the server's carried selection, which is often still the
+// dead ordinal: production re-selected ordinal 0 three times and ended on
+// "Subtitles couldn't load". The refresh must move the selection onto a track the
+// rotated inventory actually publishes.
+describe("refreshSubtitles after a source rotation", () => {
+  const pgs = (index: number, language: string, trackId: string) =>
+    fixtureSubtitleInventoryItemV3({
+      track_id: trackId,
+      combined_index: index,
+      codec: "hdmv_pgs_subtitle",
+      language,
+      label: language === "eng" ? "English" : "French",
+      url: `/stream/session-1/subtitles/${index}.sup?file_id=7`,
+    });
+
+  /** A session whose selected subtitle is `english` at ordinal 0. */
+  function mountWithSelection(english: SubtitleInventoryItemV3) {
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const plan = () =>
+      fixturePlanV3({
+        subtitle: { mode: "render", inventory: [english] },
+        selected_tracks: {
+          audio: { id: "file:7:audio:0", index: 0 },
+          subtitle: { id: english.track_id, index: english.combined_index },
+        },
+      });
+    // Successive replan answers, consumed in order.
+    const answers: Array<() => Response> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          return jsonResponse(
+            {
+              protocol_version: 3,
+              server_features: ["playback_plan_v3"],
+              outcome: "playable",
+              session_id: "session-1",
+              playback_plan: plan(),
+            },
+            { status: 201 },
+          );
+        }
+        if (url.endsWith("/playback/session-1/replan")) {
+          replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          const answer = answers.shift();
+          if (!answer) throw new Error("unexpected replan");
+          return answer();
+        }
+        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+        if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    return { replanBodies, answers, plan };
+  }
+
+  function planResponse(inventory: SubtitleInventoryItemV3[], selectedIndex: number) {
+    return jsonResponse({
+      protocol_version: 3,
+      server_features: ["playback_plan_v3"],
+      outcome: "playable",
+      session_id: "session-1",
+      playback_plan: fixturePlanV3({
+        plan_id: "plan:rotated",
+        plan_attempt_key: "v3:rotated",
+        subtitle: { mode: "render", inventory },
+        selected_tracks: {
+          audio: { id: "file:7:audio:0", index: 0 },
+          subtitle: {
+            id: inventory[selectedIndex]?.track_id ?? "",
+            index: selectedIndex,
+          },
+        },
+      }),
+    });
+  }
+
+  it("re-selects the same language and class when the rotated inventory moved it", async () => {
+    const english = pgs(0, "eng", "file:7:subtitle:0");
+    const { replanBodies, answers } = mountWithSelection(english);
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-rotated", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // The rotated release publishes French at ordinal 0 and English at 1.
+    const rotated = [pgs(0, "fra", "file:7:subtitle:9"), pgs(1, "eng", "file:7:subtitle:8")];
+    answers.push(() => planResponse(rotated, 0));
+    answers.push(() => planResponse(rotated, 1));
+
+    await act(async () => {
+      expect(await result.current.refreshSubtitles(120)).toBe(true);
+    });
+
+    expect(replanBodies).toHaveLength(2);
+    expect(replanBodies[1]).toMatchObject({
+      operation: "track_change",
+      selected_tracks: { subtitle: { id: "file:7:subtitle:8", index: 1 } },
+    });
+    expect(result.current.plan?.selected_tracks.subtitle?.index).toBe(1);
+
+    unmount();
+  });
+
+  it("falls back to any track of the same class when the language is gone", async () => {
+    const english = pgs(0, "eng", "file:7:subtitle:0");
+    const { replanBodies, answers } = mountWithSelection(english);
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-rotated", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    const frenchOnly = [pgs(0, "fra", "file:7:subtitle:9")];
+    answers.push(() => planResponse(frenchOnly, 0));
+    answers.push(() => planResponse(frenchOnly, 0));
+
+    await act(async () => {
+      expect(await result.current.refreshSubtitles(120)).toBe(true);
+    });
+
+    expect(replanBodies).toHaveLength(2);
+    expect(replanBodies[1]).toMatchObject({
+      operation: "track_change",
+      selected_tracks: { subtitle: { id: "file:7:subtitle:9", index: 0 } },
+    });
+
+    unmount();
+  });
+
+  it("reports a genuine failure when the rotated release has no track of the class", async () => {
+    const english = pgs(0, "eng", "file:7:subtitle:0");
+    const { replanBodies, answers } = mountWithSelection(english);
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-rotated", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    const textOnly = [
+      fixtureSubtitleInventoryItemV3({
+        track_id: "file:7:subtitle:4",
+        combined_index: 4,
+        codec: "subrip",
+        language: "eng",
+      }),
+    ];
+    answers.push(() => planResponse(textOnly, 0));
+
+    await act(async () => {
+      expect(await result.current.refreshSubtitles(120)).toBe(false);
+    });
+
+    // No second pick: the plan's own failure is the honest answer, and replaying
+    // the dead ordinal would only earn the same 409.
+    expect(replanBodies).toHaveLength(1);
+
+    unmount();
+  });
+
+  it("leaves an unchanged selection alone after an ordinary refresh", async () => {
+    const english = pgs(0, "eng", "file:7:subtitle:0");
+    const { replanBodies, answers } = mountWithSelection(english);
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-rotated", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    answers.push(() => planResponse([english, pgs(1, "fra", "file:7:subtitle:1")], 0));
+
+    await act(async () => {
+      expect(await result.current.refreshSubtitles(120)).toBe(true);
+    });
+
+    expect(replanBodies).toHaveLength(1);
+
+    unmount();
+  });
+});

@@ -42,7 +42,7 @@ import {
   resolvePlanAudioIdentity,
 } from "../utils/audioTrackMatch";
 import { buildPublishedSubtitleTracks, subtitleLanguageBase } from "../utils/subtitleInventory";
-import { isBitmapCodec } from "../utils/subtitleCodecs";
+import { isBitmapCodec, subtitleDeliveryClass } from "../utils/subtitleCodecs";
 import {
   isInventoryProvisional,
   isPlanSubtitleInventoryProvisional,
@@ -923,6 +923,55 @@ function mapSubtitleInventory(
       ? buildPlayerStreamUrl(config.apiBaseUrl, item.font_bundle_url, token)
       : undefined,
   }));
+}
+
+/**
+ * Whether a rotated plan's subtitle selection still names the track the viewer
+ * was watching on the inventory the 409 was earned against.
+ *
+ * `index` is that plan's selected ordinal. A plan whose selection moved is the
+ * server's own carry, which is authoritative. A plan that kept the ordinal is
+ * only usable when the inventory entry at it is still the same track: after a
+ * release rotation the same ordinal commonly names another language, and a
+ * missing entry names nothing at all.
+ */
+function planSubtitleSelectionSurvivedRotation(
+  plan: PlanV3,
+  index: number,
+  watched: SubtitleInventoryItemV3,
+): boolean {
+  const selected = plan.selected_tracks.subtitle;
+  if (selected?.index != null && selected.index !== index) return true;
+  const candidate = plan.subtitle.inventory.find((item) => item.combined_index === index);
+  if (!candidate) return false;
+  return (
+    (candidate.language ?? "").trim().toLowerCase() ===
+      (watched.language ?? "").trim().toLowerCase() &&
+    subtitleDeliveryClass(candidate.codec) === subtitleDeliveryClass(watched.codec) &&
+    Boolean(candidate.forced) === Boolean(watched.forced) &&
+    Boolean(candidate.hearing_impaired) === Boolean(watched.hearing_impaired)
+  );
+}
+
+/**
+ * The track to re-select on a rotated inventory: the same track by identity
+ * (language, flags and codec) first, then any track the release offers in the
+ * same delivery class. Null means the class itself is gone, which is the one
+ * case the player reports as a failure instead of re-selecting.
+ */
+function subtitleReplacementAfterRotation(
+  inventory: SubtitleInventoryItemV3[],
+  watched: SubtitleInventoryItemV3,
+): SubtitleInventoryItemV3 | null {
+  const deliveryClass = subtitleDeliveryClass(watched.codec);
+  // The class is the URL family the server promised to produce. The identity
+  // matcher breaks ties inside a class but does not require one, so an English
+  // SRT would otherwise stand in for an English PGS and the server would refuse
+  // the muxer change.
+  if (deliveryClass === null) return null;
+  const sameClass = inventory.filter((item) => subtitleDeliveryClass(item.codec) === deliveryClass);
+  if (sameClass.length === 0) return null;
+  return matchSubtitleTrackAcrossVersions(sameClass, watched) ?? sameClass[0] ?? null;
 }
 
 /**
@@ -4179,16 +4228,52 @@ export function usePlaybackSession(
   }, [reanchorSeek]);
 
   /**
-   * Re-reads the subtitle inventory.
+   * Re-reads the subtitle inventory, and re-selects when the rotation moved the
+   * track under the selection.
    *
    * There is no "refresh" operation in v3, and there does not need to be: a
    * `track_change` that changes nothing returns a fresh plan — inventory
-   * included — without excluding the route already playing.
+   * included — without excluding the route already playing. That fresh plan is
+   * what a `subtitle_source_changed` 409 asks for.
+   *
+   * The replan alone is not enough. A rotated release answers the plan-time
+   * ordinal with another 409 because that ordinal named a layout the release no
+   * longer has, and the player then re-selects the same ordinal against the new
+   * inventory. The ordinal is only meaningful inside one inventory, so when the
+   * track the viewer was watching is not what the new plan's ordinal now names,
+   * this re-selects the equivalent track from the new inventory: the same
+   * language and class first, then any track of the same class. Only when the
+   * class itself is gone does it stop, leaving the player's own failure on
+   * screen instead of replaying an ordinal that can never resolve.
    */
   const refreshSubtitles = useCallback(
     async (currentPosition: number): Promise<boolean> => {
-      if (!planRef.current) return false;
-      return replan({ operation: "track_change", positionSeconds: currentPosition });
+      const outgoing = planRef.current;
+      if (!outgoing) return false;
+      const watchedIndex = outgoing.selected_tracks.subtitle?.index ?? null;
+      const watched =
+        watchedIndex !== null
+          ? (outgoing.subtitle.inventory.find((item) => item.combined_index === watchedIndex) ??
+            null)
+          : null;
+
+      const refreshed = await replan({
+        operation: "track_change",
+        positionSeconds: currentPosition,
+      });
+      if (!refreshed || !watched || watchedIndex === null) return refreshed;
+
+      const next = planRef.current;
+      if (!next) return refreshed;
+      if (planSubtitleSelectionSurvivedRotation(next, watchedIndex, watched)) return refreshed;
+
+      const replacement = subtitleReplacementAfterRotation(next.subtitle.inventory, watched);
+      if (!replacement) return false;
+      return replan({
+        operation: "track_change",
+        positionSeconds: currentPosition,
+        subtitle: { id: replacement.track_id ?? "", index: replacement.combined_index },
+      });
     },
     [replan],
   );

@@ -38,6 +38,21 @@ export function isBitmapCodec(codec: string | undefined): boolean {
 }
 
 /**
+ * The delivery class of a subtitle track: the sidecar family the server mints
+ * its URL for. It mirrors the server's own class preservation, which refuses to
+ * remap a track onto a different muxer (`.sup` cannot become `.vtt` without
+ * losing the picture, and an ASS script needs its styles). A re-selection after
+ * a source rotation may only land on a track of the same class.
+ */
+export function subtitleDeliveryClass(codec: string | undefined): "sup" | "ass" | "vtt" | null {
+  if (!codec) return null;
+  if (isPGSCodec(codec)) return "sup";
+  if (isASSCodec(codec)) return "ass";
+  if (isBitmapCodec(codec)) return null;
+  return "vtt";
+}
+
+/**
  * Whether selecting the track on the web makes the server burn it into the
  * video. The web player declares `embedded_bitmap` (client-context-v3.ts), so
  * the server serves embedded PGS as a `.sup` sidecar that usePGSSubtitles
