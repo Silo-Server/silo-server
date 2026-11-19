@@ -1135,13 +1135,20 @@ export function VideoPlayer({
   // The viewer's newest seek while a replan of this session was in flight, and
   // the plan revision it was made on. The replanned stream starts there
   // instead of where the replan was asked for. A later seek replaces it; a
-  // replan that settles without a new stream drops it.
-  const replanSeekRef = useRef<{ sessionId: string; revision: number; seconds: number } | null>(
-    null,
-  );
+  // replan that settles without a new stream drops it, unless the stream
+  // playing never took it (`carried`), which then asks for a stream there.
+  const replanSeekRef = useRef<{
+    sessionId: string;
+    revision: number;
+    seconds: number;
+    carried?: boolean;
+  } | null>(null);
   useEffect(() => {
-    if (!replanning && replanSeekRef.current?.revision === planRevision) {
-      replanSeekRef.current = null;
+    const replanSeek = replanSeekRef.current;
+    if (replanning || replanSeek?.revision !== planRevision) return;
+    replanSeekRef.current = null;
+    if (replanSeek.carried && replanSeek.sessionId === sessionIdRef.current) {
+      reanchorAtRef.current(replanSeek.seconds);
     }
   }, [planRevision, replanning]);
   // The menu is the plan's. The session's preference decides whether Auto is
@@ -2869,10 +2876,12 @@ export function VideoPlayer({
           sessionId: sessionIdRef.current,
           revision: planRevision,
           seconds: replanTarget,
+          carried: true,
         };
       } else if (resolvePendingSeekTime(planStart, replanTarget).pendingSeekTime !== null) {
-        // This stream starts where the replan was asked for and cannot seek
-        // anywhere: ask for one anchored at the seek.
+        // This stream starts where the replan was asked for, too far from the
+        // seek to settle it, and cannot seek anywhere: ask for one anchored at
+        // the seek.
         reanchorAtRef.current(replanTarget);
       }
     }
@@ -3237,7 +3246,7 @@ export function VideoPlayer({
             setDirectPlayOriginSeconds(origin);
             // A seek made while the origin was unknown wins over the start position.
             const mediaTarget =
-              pendingSeekTimeRef.current ??
+              unheldPendingSeek() ??
               streamStartTarget() ??
               toMediaTime(effectiveInitialPosition, planOffset);
             const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);

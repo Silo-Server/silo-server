@@ -796,29 +796,44 @@ describe("VideoPlayer source timeline", () => {
       expect(video.currentTime).toBe(30);
     });
 
+    // A copy remux starts at the keyframe before where the change was asked for
+    // and reaches nothing outside what it has produced.
+    const remuxPlan = fixturePlanV3({
+      ...plan,
+      delivery: "server_remux_hls",
+      timeline: {
+        source_start_seconds: 120,
+        player_start_seconds: 0.5,
+        stream_origin_seconds: 119.5,
+        timeline_offset_seconds: 119.5,
+        can_seek_anywhere: false,
+        seek_restoration: "source_position",
+      },
+    });
+    const remuxStream = {
+      plan: remuxPlan,
+      planRevision: 2,
+      streamUrl: "/api/v1/stream/session-1?revision=2",
+    };
+
     it("asks for a stream at the seek when the new stream cannot seek there", async () => {
       const onReanchorSeek = vi.fn(() => true);
       const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
 
-      // A copy remux starts at the keyframe before where the change was asked
-      // for and reaches nothing outside what it has produced.
-      rerenderPlayer({
-        plan: fixturePlanV3({
-          ...plan,
-          delivery: "server_remux_hls",
-          timeline: {
-            source_start_seconds: 120,
-            player_start_seconds: 0.5,
-            stream_origin_seconds: 119.5,
-            timeline_offset_seconds: 119.5,
-            can_seek_anywhere: false,
-            seek_restoration: "source_position",
-          },
-        }),
-        replanning: false,
-        planRevision: 2,
-        streamUrl: "/api/v1/stream/session-1?revision=2",
-      });
+      rerenderPlayer({ ...remuxStream, replanning: false });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("asks for that stream once a change queued behind it settles without a stream", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      // The queued change is in flight when the remux lands, and is refused.
+      rerenderPlayer({ ...remuxStream, replanning: true });
+      await act(async () => Promise.resolve());
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replanError: "Replan refused." });
 
       await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
     });
