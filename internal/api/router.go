@@ -432,7 +432,12 @@ func (deps Dependencies) recommendationReader(repo *recommendations.Repo, rating
 	}
 	return recommendations.NewReader(repo, ratingsRepo, refresh, deps.UserStoreProvider).
 		WithUserStoreOutsidePostgres(deps.Config != nil && deps.Config.UserDB.Backend == "sqlite").
-		WithPersonalRows(deps.Config == nil || deps.Config.Recommendations.Enabled)
+		WithPersonalRows(deps.Config == nil || deps.Config.Recommendations.Enabled).
+		// Outside rows follow recommendations.external.enabled live.
+		WithExternalRecommendations(func() bool {
+			cfg := deps.CurrentConfig()
+			return cfg != nil && cfg.Recommendations.ExternalEnabled
+		})
 }
 
 // invalidateNodeCapabilities drops every cached view of one node's hardware.
@@ -1098,6 +1103,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		requestSvc.SetTitleObserver(watchlistTitles)
 		discoverLists := discoverrows.NewSnapshotRepository(deps.DB)
 		requestSvc.SetDiscoverLists(discoverLists, discoverrows.NewRefresher(requestsRepo, discoverLists, deps.TMDB))
+		// Recommended rows read each profile's stored outside titles.
+		requestSvc.SetRecommendations(deps.recommendationReader(recommendations.NewRepo(deps.DB), ratingsRepo))
 		watchlistRequestWithdrawer = requestSvc
 		requestSvc.SetWatchlistPreference(mediarequests.StoreWatchlistPreference{Stores: deps.UserStoreProvider})
 		AttachRequestRouter(requestSvc, deps.PluginService)

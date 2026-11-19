@@ -2,6 +2,9 @@ package requests
 
 import (
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 )
 
 type MediaType string
@@ -196,6 +199,9 @@ type Viewer struct {
 	UserID    int
 	ProfileID string
 	IsAdmin   bool
+	// Library is the viewer's catalog access filter, for reads that name
+	// library titles (a recommended row's reasons). Nil names none.
+	Library *catalog.AccessFilter
 }
 
 type Settings struct {
@@ -231,6 +237,10 @@ type FeatureStatus struct {
 	// viewer's profile from requests, which also takes the watchlist's
 	// titles outside the library away from it (v2 only).
 	ProfileRequestsBlocked bool `json:"-"`
+	// PersonalDiscoverRowsSupported reports that the server serves
+	// recommended Discover rows: requests, recommendations and outside-title
+	// recommendations are on (v2 only).
+	PersonalDiscoverRowsSupported bool `json:"-"`
 }
 
 type UserLimit struct {
@@ -457,6 +467,9 @@ type MediaResult struct {
 	Availability     Availability `json:"availability"`
 	LibraryContentID string       `json:"library_content_id,omitempty"`
 	Request          RequestState `json:"request"`
+	// Reasons are the library titles that led to a recommended row's title
+	// (v2 only).
+	Reasons []discoverrows.Reason `json:"-"`
 }
 
 type MediaPage struct {

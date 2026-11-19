@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
+import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useDiscoverRows } from "@/hooks/queries/admin/useDiscoverRows";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useT, type MessageKey } from "@/i18n";
@@ -28,8 +29,7 @@ import { EmptyPanel, RowsSkeleton } from "@/pages/admin-requests/queueParts";
 import { DiscoverRowDialog } from "@/pages/admin-requests/DiscoverRowDialog";
 import {
   describeDiscoverRow,
-  isBrandRow,
-  isBuiltInRow,
+  isStockRow,
   ROW_KINDS,
   toHomeRow,
 } from "@/pages/admin-requests/discoverLayoutModel";
@@ -129,6 +129,9 @@ function DiscoverLayoutEditor() {
   const [restoreBusy, setRestoreBusy] = useState(false);
   const byId = useMemo(() => new Map(discoverRows.map((row) => [row.id, row])), [discoverRows]);
   const full = layout !== undefined && discoverRows.length >= layout.max_rows;
+  // Recommended rows stay empty until the server serves them; unknown counts as on.
+  const personalRowsOff =
+    useRequestFeatureStatus().data?.personal_discover_rows_supported === false;
 
   function openDialog(row: DiscoverRow | null) {
     setRowDialog({ key: ++dialogCount.current, row });
@@ -198,7 +201,7 @@ function DiscoverLayoutEditor() {
     ];
   }
 
-  const stockRow = deleting !== null && (isBuiltInRow(deleting) || isBrandRow(deleting));
+  const stockRow = deleting !== null && isStockRow(deleting);
 
   return (
     <HomeRowsPage
@@ -209,7 +212,7 @@ function DiscoverLayoutEditor() {
       pageSwitcher={false}
       describe={(row) => {
         const stored = byId.get(row.id);
-        return stored ? describeDiscoverRow(stored) : [];
+        return stored ? describeDiscoverRow(stored, personalRowsOff) : [];
       }}
       rowIcon={(row) => ROW_KINDS[row.sectionType as DiscoverRowType].icon}
       onOpenRow={openRow}
@@ -269,6 +272,7 @@ function DiscoverLayoutEditor() {
           key={rowDialog.key}
           adapter={adapter}
           editRow={rowDialog.row}
+          personalRowsOff={personalRowsOff}
           onClose={() => setRowDialog(null)}
           onSaved={(newId) => setHighlightId(newId ?? null)}
           onDelete={(row) => {

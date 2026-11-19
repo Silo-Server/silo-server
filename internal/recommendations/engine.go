@@ -50,6 +50,14 @@ type Engine struct {
 	// refusedEmbeds are the inputs the embedding provider refused; see
 	// refusedEmbedInputs.
 	refusedEmbeds *refusedEmbedInputs
+	// externalRefusedEmbeds are the outside titles whose text the provider
+	// refused, keyed by externalEmbedID. It is kept apart from refusedEmbeds,
+	// which every full library run clears.
+	externalRefusedEmbeds *refusedEmbedInputs
+	// externalTMDB fetches outside titles; nil until WithExternalTMDB.
+	externalTMDB ExternalTMDB
+	// externalOwned finds owned outside titles; nil uses itemRepo.
+	externalOwned externalOwnedLookup
 }
 
 // WithScopeResolver installs the resolver the API resolves request scopes
@@ -115,6 +123,8 @@ func NewEngine(
 		cfg:           cfg,
 		pool:          pool,
 		refusedEmbeds: newRefusedEmbedInputs(),
+
+		externalRefusedEmbeds: newRefusedEmbedInputs(),
 	}
 }
 

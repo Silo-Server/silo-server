@@ -25,6 +25,9 @@ const (
 	TypeTMDBList Type = "tmdb_list"
 	// TypeMDBList is a public MDBList list, read from a stored copy.
 	TypeMDBList Type = "mdblist"
+	// TypeRecommended is the viewer's own ranked titles the server lacks,
+	// read from the recommendations engine's stored rows.
+	TypeRecommended Type = "recommended"
 	// TypeStudios, TypeNetworks and TypeGenres are the fixed brand
 	// carousels; their cards open a browse page instead of a title.
 	TypeStudios  Type = "studios"
@@ -39,8 +42,8 @@ func (t Type) IsBrand() bool {
 
 // Row is one row of the Discover layout, as stored and as an admin edits it.
 // Exactly the spec member that matches Type is set: Chart for tmdb_chart,
-// Discover for tmdb_discover, List for tmdb_list and mdblist, none for a
-// brand row.
+// Discover for tmdb_discover, List for tmdb_list and mdblist, Recommended for
+// recommended, none for a brand row.
 type Row struct {
 	ID      string `json:"id"`
 	Type    Type   `json:"type"`
@@ -49,11 +52,19 @@ type Row struct {
 	// Limit is how many titles the row shows on the Discover page; its see
 	// all page keeps paging. Zero on a brand row.
 	Limit int `json:"limit,omitempty"`
-	// HideAvailable leaves out titles the library already has.
-	HideAvailable bool          `json:"hide_available,omitempty"`
-	Chart         *ChartSpec    `json:"chart,omitempty"`
-	Discover      *DiscoverSpec `json:"discover,omitempty"`
-	List          *ListSpec     `json:"list,omitempty"`
+	// HideAvailable leaves out titles the library already has. Always true
+	// on a recommended row, which never shows them.
+	HideAvailable bool             `json:"hide_available,omitempty"`
+	Chart         *ChartSpec       `json:"chart,omitempty"`
+	Discover      *DiscoverSpec    `json:"discover,omitempty"`
+	List          *ListSpec        `json:"list,omitempty"`
+	Recommended   *RecommendedSpec `json:"recommended,omitempty"`
+}
+
+// RecommendedSpec names which of the viewer's ranked titles a recommended
+// row shows: movie or series.
+type RecommendedSpec struct {
+	MediaType string `json:"media_type"`
 }
 
 // ChartSpec names a TMDB chart. MediaType is movie, series, or all (trending
@@ -140,8 +151,9 @@ var reservedIDs = map[string]bool{"rows": true, "browse": true}
 // NormalizeLayout checks a whole layout and returns it in canonical form:
 // specs canonical, limits defaulted, and an ID on every new row. A built-in
 // row (one of the six original charts) keeps its ID and chart; its title,
-// limit, switch and hide_available can change. A brand row's ID is its type,
-// so each appears at most once.
+// limit, switch and hide_available can change. The two default recommended
+// rows keep their type and media type. A brand row's ID is its type, so each
+// appears at most once.
 func NormalizeLayout(rows []Row) ([]Row, FieldErrors) {
 	errs := FieldErrors{}
 	if len(rows) > MaxRows {
@@ -167,6 +179,9 @@ func NormalizeLayout(rows []Row) ([]Row, FieldErrors) {
 		}
 		if legacy, ok := LegacyRow(out[i].ID); ok && rowErrs["chart"] == "" && !sameChart(out[i].Chart, legacy.Chart) {
 			errs[prefix+"chart"] = "a built-in row keeps its chart"
+		}
+		if def, ok := recommendedRow(out[i].ID); ok && rowErrs["recommended"] == "" && out[i].Recommended != nil && *out[i].Recommended != *def.Recommended {
+			errs[prefix+"recommended.media_type"] = "a built-in row keeps its media type"
 		}
 	}
 	if len(errs) > 0 {
@@ -227,6 +242,9 @@ func checkRowID(row *Row) string {
 	}
 	if IsLegacyID(row.ID) && row.Type != TypeTMDBChart {
 		return "a built-in row stays a chart row"
+	}
+	if _, ok := recommendedRow(row.ID); ok && row.Type != TypeRecommended {
+		return "a built-in row stays a recommended row"
 	}
 	return ""
 }

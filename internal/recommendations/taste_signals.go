@@ -81,6 +81,17 @@ func (s *canonicalWeightComponents) countsTowardLevel() bool {
 	return s.Rating != nil || s.Favorited || s.ImplicitWeight > 0
 }
 
+// positiveWeight returns the title's combined weight and whether it is
+// positive and so shapes the taste vector. A title marked Not interested never
+// is, however it was watched, rated or favorited.
+func (s *canonicalWeightComponents) positiveWeight() (float64, bool) {
+	if s.NotInterested {
+		return 0, false
+	}
+	weight := combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight)
+	return weight, weight > 0
+}
+
 type rawImplicitSignal struct {
 	Ref       canonicalContentRef
 	Weight    float64

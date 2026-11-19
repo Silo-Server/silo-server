@@ -9068,6 +9068,25 @@
         ],
         "type": "object"
       },
+      "AdminDiscoverRecommended": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "examples": [
+              "movie"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_type"
+        ],
+        "type": "object"
+      },
       "AdminDiscoverRow": {
         "additionalProperties": false,
         "properties": {
@@ -9081,11 +9100,11 @@
             "type": "boolean"
           },
           "hide_available": {
-            "description": "Leave out titles the library already has",
+            "description": "Leave out titles the library already has. Always true on a recommended row, which never shows them",
             "type": "boolean"
           },
           "id": {
-            "description": "The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts; a brand row's ID is its type",
+            "description": "The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts, and recommended_movies and recommended_series keep their type and media type; a brand row's ID is its type",
             "examples": [
               "trending_movies"
             ],
@@ -9104,6 +9123,9 @@
           },
           "list": {
             "$ref": "#/components/schemas/AdminDiscoverList"
+          },
+          "recommended": {
+            "$ref": "#/components/schemas/AdminDiscoverRecommended"
           },
           "source": {
             "$ref": "#/components/schemas/AdminDiscoverSource",
@@ -9136,11 +9158,13 @@
             "type": "string"
           },
           "type": {
+            "description": "A recommended row shows each viewer's own recommendations of titles the library does not have, read from what the recommendations engine stored",
             "enum": [
               "tmdb_chart",
               "tmdb_discover",
               "tmdb_list",
               "mdblist",
+              "recommended",
               "studios",
               "networks",
               "genres"
@@ -9171,11 +9195,11 @@
             "type": "boolean"
           },
           "hide_available": {
-            "description": "Leave out titles the library already has",
+            "description": "Leave out titles the library already has. Always true on a recommended row, which never shows them",
             "type": "boolean"
           },
           "id": {
-            "description": "The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts; a brand row's ID is its type",
+            "description": "The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts, and recommended_movies and recommended_series keep their type and media type; a brand row's ID is its type",
             "examples": [
               "trending_movies"
             ],
@@ -9195,6 +9219,9 @@
           "list": {
             "$ref": "#/components/schemas/AdminDiscoverList"
           },
+          "recommended": {
+            "$ref": "#/components/schemas/AdminDiscoverRecommended"
+          },
           "title": {
             "examples": [
               "Trending Movies"
@@ -9203,11 +9230,13 @@
             "type": "string"
           },
           "type": {
+            "description": "A recommended row shows each viewer's own recommendations of titles the library does not have, read from what the recommendations engine stored",
             "enum": [
               "tmdb_chart",
               "tmdb_discover",
               "tmdb_list",
               "mdblist",
+              "recommended",
               "studios",
               "networks",
               "genres"
@@ -18766,6 +18795,16 @@
             "format": "int64",
             "type": "integer"
           },
+          "external_embeddings": {
+            "description": "Outside-title vectors deleted. The titles are kept and embedded again by the next outside-title run.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "external_rows": {
+            "description": "Profiles' outside-title rows deleted.",
+            "format": "int64",
+            "type": "integer"
+          },
           "taste_clusters": {
             "description": "Taste clusters deleted.",
             "format": "int64",
@@ -18781,7 +18820,42 @@
           "embeddings",
           "taste_profiles",
           "taste_clusters",
-          "cached_rows"
+          "cached_rows",
+          "external_embeddings",
+          "external_rows"
+        ],
+        "type": "object"
+      },
+      "AdminRecommendationExternalStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Outside titles stored.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "Whether outside-title recommendations are on: recommendations are enabled and recommendations.external.enabled is set. When off, the job only deletes expired outside titles.",
+            "type": "boolean"
+          },
+          "last_run": {
+            "$ref": "#/components/schemas/AdminRecommendationJobRun",
+            "description": "The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped when no vectors could be stored. Absent until one finishes."
+          },
+          "rows": {
+            "description": "Stored outside rows, one per profile and media type.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "running": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "running",
+          "count",
+          "rows"
         ],
         "type": "object"
       },
@@ -18906,6 +18980,10 @@
           "embeddings": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           },
+          "external": {
+            "$ref": "#/components/schemas/AdminRecommendationExternalStatus",
+            "description": "The outside-title job."
+          },
           "lock_conflict": {
             "description": "Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not.",
             "type": "string"
@@ -18937,6 +19015,7 @@
           "taste_profiles",
           "cowatch",
           "recommendations",
+          "external",
           "lock_conflict",
           "stale_sweep"
         ],
@@ -20460,6 +20539,13 @@
             },
             "type": "array"
           },
+          "live_keys": {
+            "description": "Keys that apply without a restart although one of prefixes covers them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "prefixes": {
             "items": {
               "type": "string"
@@ -20469,7 +20555,8 @@
         },
         "required": [
           "keys",
-          "prefixes"
+          "prefixes",
+          "live_keys"
         ],
         "type": "object"
       },
@@ -33074,7 +33161,7 @@
             "type": "string"
           },
           "type": {
-            "description": "What the row shows: tmdb_chart, tmdb_discover, tmdb_list or mdblist (title rows, in items), or studios, networks or genres (brand rows). More values may be added",
+            "description": "What the row shows: tmdb_chart, tmdb_discover, tmdb_list, mdblist or recommended (title rows, in items; a recommended row holds the viewer's own recommendations, see personal_discover_rows_supported), or studios, networks or genres (brand rows). More values may be added",
             "examples": [
               "tmdb_chart"
             ],
@@ -33092,7 +33179,7 @@
         "additionalProperties": false,
         "properties": {
           "key": {
-            "description": "The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; a row an admin adds has an opaque ID",
+            "description": "The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; the default recommended rows are recommended_movies and recommended_series; a row an admin adds has an opaque ID",
             "examples": [
               "trending_movies"
             ],
@@ -35735,6 +35822,10 @@
             "description": "Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available.",
             "type": "boolean"
           },
+          "personal_discover_rows_supported": {
+            "description": "Whether the server serves recommended Discover rows: rows of type recommended in listDiscoverSections whose titles are the viewer's own recommendations of movies or series the library does not have, with reasons on each. True while requests, recommendations and outside-title recommendations are on. A profile with no recommendations yet gets no such row in items; the row stays in row_order.",
+            "type": "boolean"
+          },
           "rating_restrictions_enforced": {
             "type": "boolean"
           },
@@ -35781,6 +35872,7 @@
           "watchlist_titles_supported",
           "watchlist_requests",
           "discover_rows_supported",
+          "personal_discover_rows_supported",
           "remove_failed_supported",
           "revision",
           "state",
@@ -49869,6 +49961,29 @@
         ],
         "type": "object"
       },
+      "RequestMediaReason": {
+        "additionalProperties": false,
+        "properties": {
+          "content_id": {
+            "description": "The catalog item",
+            "examples": [
+              "movie:heat-1995"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Heat"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id",
+          "title"
+        ],
+        "type": "object"
+      },
       "RequestMediaResult": {
         "additionalProperties": false,
         "properties": {
@@ -49917,6 +50032,14 @@
               "/abc.jpg"
             ],
             "type": "string"
+          },
+          "reasons": {
+            "description": "On a recommended Discover row only: the library titles that led to recommending this title, best first, at most two. Absent elsewhere, and absent or empty when none of them is one the viewer can see",
+            "items": {
+              "$ref": "#/components/schemas/RequestMediaReason"
+            },
+            "maxItems": 2,
+            "type": "array"
           },
           "release_date": {
             "description": "Calendar date, YYYY-MM-DD",
@@ -116791,7 +116914,7 @@
     },
     "/api/v2/admin/recommendations/embeddings/reset": {
       "post": {
-        "description": "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while a saved embedding model or base URL waits for a server restart. Run the embedding job afterwards to build the new embedding space.",
+        "description": "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile, recommendation or outside-title job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while a saved embedding model or base URL waits for a server restart. Run the embedding job afterwards to build the new embedding space.",
         "operationId": "resetAdminRecommendationEmbeddings",
         "parameters": [
           {
@@ -116934,7 +117057,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.",
+        "summary": "Delete the embedding lock, every item and outside-title embedding, taste clusters, per-profile cached rows and outside rows, and clear taste profile vectors, in one transaction.",
         "tags": [
           "admin-recommendations"
         ],
@@ -117243,6 +117366,160 @@
     "/api/v2/admin/recommendations/trigger/embeddings": {
       "post": {
         "operationId": "triggerAdminRecommendationEmbeddings",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRecommendationStarted"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start process-local recommendation work without a durable job receipt.",
+        "tags": [
+          "admin-recommendations"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/recommendations/trigger/external": {
+      "post": {
+        "operationId": "triggerAdminRecommendationExternal",
         "parameters": [
           {
             "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",

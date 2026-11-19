@@ -27,6 +27,8 @@ const (
 	JobTasteProfiles   JobName = "taste_profiles"
 	JobCowatch         JobName = "cowatch"
 	JobRecommendations JobName = "recommendations"
+	// JobExternal fetches, embeds and ranks outside titles.
+	JobExternal JobName = "external"
 )
 
 const (
@@ -97,6 +99,9 @@ type Worker struct {
 	readRefreshes        refreshThrottle
 	cancelFunc           context.CancelFunc
 	embeddingsJobTimeout time.Duration
+	// liveConfig reads the settings outside titles follow; nil keeps the
+	// engine's.
+	liveConfig LiveConfig
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -125,7 +130,7 @@ const postgresStoreTasteProfileSubjectsQuery = `
 	   OR  NOT EXISTS (SELECT 1 FROM user_profiles p WHERE p.user_id = s.user_id)`
 
 // NewWorker creates a new recommendation Worker.
-func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron string, embeddingsJobTimeout time.Duration) (*Worker, error) {
+func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron, externalCron string, embeddingsJobTimeout time.Duration) (*Worker, error) {
 	if embeddingsJobTimeout <= 0 {
 		embeddingsJobTimeout = 24 * time.Hour
 	}
@@ -149,6 +154,7 @@ func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, r
 		{tasteProfilesCron, JobTasteProfiles},
 		{cowatchCron, JobCowatch},
 		{recommendationsCron, JobRecommendations},
+		{externalCron, JobExternal},
 	} {
 		if _, err := w.cron.AddFunc(schedule.spec, func() { w.runScheduled(schedule.name) }); err != nil {
 			return nil, err
@@ -215,6 +221,8 @@ func (w *Worker) jobFor(name JobName) job {
 		return job{name: name, timeout: tasteProfilesJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doTasteProfiles(ctx, held) }}
 	case JobCowatch:
 		return job{name: name, timeout: cowatchJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doCowatch(ctx, held) }}
+	case JobExternal:
+		return job{name: name, timeout: externalJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doExternal(ctx, held) }}
 	default:
 		return job{name: JobRecommendations, timeout: cacheJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doRecommendations(ctx, held) }}
 	}
@@ -1423,6 +1431,13 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 	}
 	if built := w.cacheUserRows(refreshCtx, repo, userID, profileID, cacheExpiry(started)); built.failed > 0 {
 		return fmt.Errorf("rebuild recommendation cache: %d steps failed", built.failed)
+	}
+	// Outside rows come from stored titles and vectors; new seeds' lists
+	// wait for the next outside-title run.
+	if w.ExternalEnabled() {
+		if _, err := w.engine.RebuildExternalRows(refreshCtx, userID, profileID); err != nil {
+			return fmt.Errorf("rebuild outside rows: %w", err)
+		}
 	}
 	if err := w.engine.purgeIfProfileDeleted(refreshCtx, userID, profileID); err != nil {
 		return fmt.Errorf("check profile still exists: %w", err)

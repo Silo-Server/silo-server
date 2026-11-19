@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -198,35 +199,167 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		return false, fmt.Errorf("get user store for user %d: %w", userID, err)
 	}
 
-	ratings, err := e.ratingsRepo.List(ctx, userID, profileID, 1000, 0)
+	read, err := e.readTasteSignals(ctx, store, userID, profileID)
 	if err != nil {
-		return false, fmt.Errorf("list ratings: %w", err)
+		return false, err
+	}
+	signals, signalCounts := read.titles, read.counts
+
+	// A refresh queued before its profile was deleted must not bring back the
+	// taste row the deletion purged, even from signals that outlive a profile
+	// such as watch history; it only clears a row left behind. Profiles may
+	// live outside Postgres, so the user store says whether it still exists.
+	userProfile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("get profile %s: %w", profileID, err)
+	}
+	if userProfile == nil {
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, false)
 	}
 
-	favorites, err := store.ListFavorites(ctx, profileID, 1000, 0)
-	if err != nil {
-		return false, fmt.Errorf("list favorites: %w", err)
+	if len(signals) == 0 {
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, true)
 	}
 
-	watchlist, err := store.ListWatchlist(ctx, profileID, 1000, 0)
-	if err != nil {
-		return false, fmt.Errorf("list watchlist: %w", err)
+	allIDs := make([]string, 0, len(signals))
+	for id := range signals {
+		allIDs = append(allIDs, id)
 	}
 
-	watchProgress, err := e.signalReader().WatchProgressForUser(ctx, userID, profileID)
+	items, err := e.itemRepo.GetByIDs(ctx, allIDs)
 	if err != nil {
-		return false, fmt.Errorf("get watch progress: %w", err)
+		slog.ErrorContext(ctx, "taste: failed to fetch items for genre enrichment, cluster labels will be degraded", "component", "recommendations",
+			"user_id", userID, "profile_id", profileID,
+			"id_count", len(allIDs), "error", err)
+	} else {
+		itemMap := make(map[string]*models.MediaItem, len(items))
+		for _, item := range items {
+			itemMap[item.ContentID] = item
+		}
+		for id, s := range signals {
+			if item, ok := itemMap[id]; ok {
+				s.Genres = item.Genres
+			}
+		}
 	}
 
-	rewatchCounts, err := e.signalReader().RewatchCounts(ctx, userID, profileID)
+	embMap, err := e.repo.GetBatchEmbeddings(ctx, allIDs)
 	if err != nil {
-		return false, fmt.Errorf("get rewatch counts: %w", err)
+		return false, fmt.Errorf("get batch embeddings: %w", err)
 	}
 
-	marks, err := e.signalReader().NotInterestedMarks(ctx, userID, profileID)
-	if err != nil {
-		return false, fmt.Errorf("get not interested marks: %w", err)
+	maxContentRating := ""
+	if len(allIDs) > 0 && items != nil {
+		crMap := make(map[string]string, len(items))
+		for _, item := range items {
+			crMap[item.ContentID] = item.ContentRating
+		}
+		maxContentRating = maxContentRatingFromSets(read.rated, read.completed, read.favorited, crMap)
 	}
+
+	positiveItems, levelTitles := positiveTasteItems(signals, embMap)
+	profile := tasteVector(positiveItems)
+	if profile == nil {
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, true)
+	}
+	signalCounts[signalCountPositiveTitles] = levelTitles
+
+	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
+		return false, fmt.Errorf("upsert taste profile: %w", err)
+	}
+
+	clusters := buildTasteClusters(positiveItems)
+	for i := range clusters {
+		clusters[i].UserID = userID
+		clusters[i].ProfileID = profileID
+	}
+	if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
+		return false, fmt.Errorf("upsert taste clusters: %w", err)
+	}
+
+	return true, nil
+}
+
+// tasteSignals are a profile's signals combined per canonical title.
+type tasteSignals struct {
+	// titles holds each canonical title's weight components; episodes are
+	// rolled up to their series.
+	titles map[string]*canonicalWeightComponents
+	// counts are the signal_counts the taste row stores.
+	counts map[string]int
+	// rated, completed and favorited are the canonical titles the profile
+	// rated, completed and favorited.
+	rated, completed, favorited map[string]struct{}
+}
+
+// tasteSignalRows are the rows a profile's taste signals come from.
+type tasteSignalRows struct {
+	ratings       []catalog.UserRating
+	favorites     []userstore.Favorite
+	watchlist     []userstore.WatchlistEntry
+	watchProgress []WatchProgressRow
+	rewatchCounts []RewatchCount
+	marks         []NotInterestedMark
+}
+
+// readTasteSignalRows reads a profile's ratings, favorites, watchlist, watch
+// progress, rewatches and Not interested marks.
+func (e *Engine) readTasteSignalRows(ctx context.Context, store userstore.UserStore, userID int, profileID string) (tasteSignalRows, error) {
+	var rows tasteSignalRows
+	var err error
+	if rows.ratings, err = e.ratingsRepo.List(ctx, userID, profileID, 1000, 0); err != nil {
+		return rows, fmt.Errorf("list ratings: %w", err)
+	}
+	if rows.favorites, err = store.ListFavorites(ctx, profileID, 1000, 0); err != nil {
+		return rows, fmt.Errorf("list favorites: %w", err)
+	}
+	if rows.watchlist, err = store.ListWatchlist(ctx, profileID, 1000, 0); err != nil {
+		return rows, fmt.Errorf("list watchlist: %w", err)
+	}
+	if rows.watchProgress, err = e.signalReader().WatchProgressForUser(ctx, userID, profileID); err != nil {
+		return rows, fmt.Errorf("get watch progress: %w", err)
+	}
+	if rows.rewatchCounts, err = e.signalReader().RewatchCounts(ctx, userID, profileID); err != nil {
+		return rows, fmt.Errorf("get rewatch counts: %w", err)
+	}
+	if rows.marks, err = e.signalReader().NotInterestedMarks(ctx, userID, profileID); err != nil {
+		return rows, fmt.Errorf("get not interested marks: %w", err)
+	}
+	return rows, nil
+}
+
+// itemIDs returns the distinct items the rows name, marks aside: marks are
+// on canonical titles already.
+func (rows tasteSignalRows) itemIDs() []string {
+	set := make(map[string]struct{})
+	for _, r := range rows.ratings {
+		set[r.MediaItemID] = struct{}{}
+	}
+	for _, f := range rows.favorites {
+		set[f.MediaItemID] = struct{}{}
+	}
+	for _, w := range rows.watchlist {
+		set[w.MediaItemID] = struct{}{}
+	}
+	for _, wp := range rows.watchProgress {
+		set[wp.MediaItemID] = struct{}{}
+	}
+	for _, rc := range rows.rewatchCounts {
+		set[rc.MediaItemID] = struct{}{}
+	}
+	return slices.Collect(maps.Keys(set))
+}
+
+// readTasteSignals reads a profile's signal rows and combines them per
+// canonical title with time decay: the weights the taste vector is built
+// from.
+func (e *Engine) readTasteSignals(ctx context.Context, store userstore.UserStore, userID int, profileID string) (tasteSignals, error) {
+	rows, err := e.readTasteSignalRows(ctx, store, userID, profileID)
+	if err != nil {
+		return tasteSignals{}, err
+	}
+	ratings, favorites, watchlist := rows.ratings, rows.favorites, rows.watchlist
+	watchProgress, rewatchCounts, marks := rows.watchProgress, rows.rewatchCounts, rows.marks
 
 	now := time.Now()
 	halfLife := e.cfg.TasteDecayHalfLifeDays
@@ -234,31 +367,9 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		halfLife = 180
 	}
 
-	rawIDSet := make(map[string]struct{})
-	for _, r := range ratings {
-		rawIDSet[r.MediaItemID] = struct{}{}
-	}
-	for _, f := range favorites {
-		rawIDSet[f.MediaItemID] = struct{}{}
-	}
-	for _, w := range watchlist {
-		rawIDSet[w.MediaItemID] = struct{}{}
-	}
-	for _, wp := range watchProgress {
-		rawIDSet[wp.MediaItemID] = struct{}{}
-	}
-	for _, rc := range rewatchCounts {
-		rawIDSet[rc.MediaItemID] = struct{}{}
-	}
-
-	rawIDs := make([]string, 0, len(rawIDSet))
-	for id := range rawIDSet {
-		rawIDs = append(rawIDs, id)
-	}
-
-	refs, err := e.repo.ResolveCanonicalContentRefs(ctx, rawIDs)
+	refs, err := e.repo.ResolveCanonicalContentRefs(ctx, rows.itemIDs())
 	if err != nil {
-		return false, fmt.Errorf("resolve canonical content refs: %w", err)
+		return tasteSignals{}, fmt.Errorf("resolve canonical content refs: %w", err)
 	}
 
 	signalCounts := make(map[string]int)
@@ -336,79 +447,7 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		signalCounts["watchlist"] = len(watchlistSet)
 	}
 
-	// A refresh queued before its profile was deleted must not bring back the
-	// taste row the deletion purged, even from signals that outlive a profile
-	// such as watch history; it only clears a row left behind. Profiles may
-	// live outside Postgres, so the user store says whether it still exists.
-	userProfile, err := store.GetProfile(ctx, profileID)
-	if err != nil {
-		return false, fmt.Errorf("get profile %s: %w", profileID, err)
-	}
-	if userProfile == nil {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, false)
-	}
-
-	if len(signals) == 0 {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, true)
-	}
-
-	allIDs := make([]string, 0, len(signals))
-	for id := range signals {
-		allIDs = append(allIDs, id)
-	}
-
-	items, err := e.itemRepo.GetByIDs(ctx, allIDs)
-	if err != nil {
-		slog.ErrorContext(ctx, "taste: failed to fetch items for genre enrichment, cluster labels will be degraded", "component", "recommendations",
-			"user_id", userID, "profile_id", profileID,
-			"id_count", len(allIDs), "error", err)
-	} else {
-		itemMap := make(map[string]*models.MediaItem, len(items))
-		for _, item := range items {
-			itemMap[item.ContentID] = item
-		}
-		for id, s := range signals {
-			if item, ok := itemMap[id]; ok {
-				s.Genres = item.Genres
-			}
-		}
-	}
-
-	embMap, err := e.repo.GetBatchEmbeddings(ctx, allIDs)
-	if err != nil {
-		return false, fmt.Errorf("get batch embeddings: %w", err)
-	}
-
-	maxContentRating := ""
-	if len(allIDs) > 0 && items != nil {
-		crMap := make(map[string]string, len(items))
-		for _, item := range items {
-			crMap[item.ContentID] = item.ContentRating
-		}
-		maxContentRating = maxContentRatingFromSets(ratedSet, completedSet, favSet, crMap)
-	}
-
-	positiveItems, levelTitles := positiveTasteItems(signals, embMap)
-	profile := tasteVector(positiveItems)
-	if profile == nil {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, true)
-	}
-	signalCounts[signalCountPositiveTitles] = levelTitles
-
-	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
-		return false, fmt.Errorf("upsert taste profile: %w", err)
-	}
-
-	clusters := buildTasteClusters(positiveItems)
-	for i := range clusters {
-		clusters[i].UserID = userID
-		clusters[i].ProfileID = profileID
-	}
-	if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
-		return false, fmt.Errorf("upsert taste clusters: %w", err)
-	}
-
-	return true, nil
+	return tasteSignals{titles: signals, counts: signalCounts, rated: ratedSet, completed: completedSet, favorited: favSet}, nil
 }
 
 // ratingSignal returns a star rating's explicit weight and its signal_counts
@@ -445,11 +484,8 @@ func positiveTasteItems(signals map[string]*canonicalWeightComponents, embedding
 		if emb == nil {
 			continue
 		}
-		if s.NotInterested {
-			continue
-		}
-		weight := combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight)
-		if weight <= 0 {
+		weight, ok := s.positiveWeight()
+		if !ok {
 			continue
 		}
 		items = append(items, clusterItem{itemID: id, embedding: emb, weight: weight, genres: s.Genres})

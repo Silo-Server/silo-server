@@ -34,7 +34,7 @@ func (s *Service) SetDiscoverLists(snapshots DiscoverSnapshots, refresher Discov
 }
 
 func (s *Service) discoverEnv() discoverrows.Env {
-	return discoverrows.Env{TMDB: s.tmdb, Snapshots: s.discoverSnapshots}
+	return discoverrows.Env{TMDB: s.tmdb, Snapshots: s.discoverSnapshots, Recommendations: s.recommendations}
 }
 
 // DiscoverRowRef places one enabled row of the layout. Brand rows (studios,
@@ -69,7 +69,8 @@ func (s *Service) layoutRows(ctx context.Context) ([]discoverrows.Row, error) {
 
 // DiscoverRows renders the Discover page for a viewer. A title row that fails
 // is left out and logged, so one broken list or filter does not take the
-// page down; the call fails only when every title row did.
+// page down; the call fails only when every title row that reads TMDB did.
+// Personal rows count neither way.
 func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLayoutPage, error) {
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, errRequestServiceNotConfigured
@@ -111,16 +112,33 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 	for i, tr := range titleRows {
 		group.Go(func() error {
 			// A row's failure is kept, not returned, so the others finish.
-			sections[i], errs[i] = s.firstRowPage(ctx, viewer, tr.row, tr.source, ceiling)
+			if personal, ok := tr.source.(discoverrows.PersonalSource); ok {
+				sections[i], errs[i] = s.firstPersonalRowPage(ctx, viewer, tr.row, personal, ceiling)
+			} else {
+				sections[i], errs[i] = s.firstRowPage(ctx, viewer, tr.row, tr.source, ceiling)
+			}
 			return nil
 		})
 	}
 	_ = group.Wait()
 
-	failed := 0
+	// Only rows that read TMDB decide whether the page failed: personal rows
+	// read stored data and are empty, not failed, when the feature is off, so
+	// counting them would hide a TMDB outage behind an empty page.
+	tmdbRows, tmdbFailed := 0, 0
+	var firstErr error
 	for i, section := range sections {
+		_, personal := titleRows[i].source.(discoverrows.PersonalSource)
+		if !personal {
+			tmdbRows++
+		}
 		if errs[i] != nil {
-			failed++
+			if !personal {
+				tmdbFailed++
+				if firstErr == nil {
+					firstErr = errs[i]
+				}
+			}
 			slog.WarnContext(ctx, "requests: discover row failed", "component", "requests", "row", titleRows[i].row.ID, "type", titleRows[i].row.Type, "error", errs[i])
 			continue
 		}
@@ -129,8 +147,8 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 			out.Sections = append(out.Sections, *section)
 		}
 	}
-	if failed > 0 && failed == len(titleRows) {
-		return nil, errs[0]
+	if tmdbFailed > 0 && tmdbFailed == tmdbRows {
+		return nil, firstErr
 	}
 	return out, nil
 }
@@ -188,6 +206,9 @@ func (s *Service) DiscoverRow(ctx context.Context, viewer Viewer, rowID string, 
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
 	if err != nil {
 		return nil, err
+	}
+	if personal, ok := source.(discoverrows.PersonalSource); ok {
+		return s.personalSeeAllPage(ctx, viewer, row, personal, ceiling, page)
 	}
 	result, nextPage, err := s.fillRowPage(ctx, viewer, rowPageRequest{
 		source: source, page: page, want: sectionResultsPerPage, budget: sectionBackfillBudgetSingle,

@@ -32,11 +32,15 @@ func (s *layoutStore) ResetDiscoverLayoutConditional(context.Context, int64) err
 type rowsTMDB struct {
 	certTMDBClient
 	charts      map[string]*tmdb.MediaPage
+	chartErr    error
 	discoverErr error
 	discovered  []tmdb.DiscoverParams
 }
 
 func (f *rowsTMDB) ChartPage(_ context.Context, params tmdb.ChartParams, _ int) (*tmdb.MediaPage, error) {
+	if f.chartErr != nil {
+		return nil, f.chartErr
+	}
 	if page, ok := f.charts[params.Preset+"/"+params.MediaType]; ok {
 		return page, nil
 	}
@@ -148,6 +152,16 @@ func TestDiscoverRowHidesAvailableTitlesAndResumes(t *testing.T) {
 	}
 }
 
+// The default layout leads with personal rows, which never fail; a TMDB
+// outage must still fail the page so clients offer a retry.
+func TestDiscoverRowsFailWhenEveryTMDBRowFails(t *testing.T) {
+	outage := errors.New("tmdb down")
+	service := newLayoutService(t, discoverrows.DefaultRows(), &rowsTMDB{chartErr: outage}, nil, "")
+	if _, err := service.DiscoverRows(t.Context(), testViewer(1)); !errors.Is(err, outage) {
+		t.Fatalf("err = %v, want the TMDB error", err)
+	}
+}
+
 func TestDiscoverRowSendsTheStricterCertification(t *testing.T) {
 	for _, tt := range []struct {
 		rowCeiling, viewerCeiling, want string
@@ -188,7 +202,7 @@ func TestDiscoverLayoutDatabase(t *testing.T) {
 		return err
 	}, 1)
 	saved, err := repo.GetDiscoverLayout(ctx)
-	if err != nil || !saved.Customized || saved.Revision == 0 || len(saved.Rows) != 2 || saved.Rows[1].ID != "trending_series" {
+	if err != nil || !saved.Customized || saved.Revision == 0 || len(saved.Rows) != 2 || saved.Rows[1].ID != rows[1].ID {
 		t.Fatalf("saved = %+v %v", saved, err)
 	}
 	raceEditorWrites(t, func() error {

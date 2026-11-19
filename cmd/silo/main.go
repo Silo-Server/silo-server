@@ -3047,6 +3047,11 @@ func main() {
 			cfg.Recommendations,
 		).WithUnratedContentPolicy(unratedContent).
 			WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+		// Outside-title recommendations fetch through the shared, paced
+		// client. A nil *tmdb.Client must not become a non-nil interface.
+		if tmdbClient != nil {
+			recEngine.WithExternalTMDB(tmdbClient)
+		}
 		if userStoreProvider != nil {
 			// Cached rows are built under the scope the API resolves for the
 			// profile's own requests, so reads do not filter them down.
@@ -3073,6 +3078,7 @@ func main() {
 			cfg.Recommendations.TasteProfilesCron,
 			cfg.Recommendations.CowatchCron,
 			cfg.Recommendations.RecommendationsCron,
+			cfg.Recommendations.ExternalCron,
 			cfg.Recommendations.EmbeddingsJobTimeout,
 		)
 		if err != nil {
@@ -3080,6 +3086,13 @@ func main() {
 		} else {
 			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB)).
 				WithPolicyCheck(policySystem.Current).
+				// The outside-title switch and cap apply without a restart.
+				WithLiveConfig(func() config.RecommendationsConfig {
+					if live := configWatcher.Config(); live != nil {
+						return live.Recommendations
+					}
+					return cfg.Recommendations
+				}).
 				WithSavedConfig(func(ctx context.Context) (config.RecommendationsConfig, error) {
 					saved, err := settingsRepo.GetAll(ctx)
 					if err != nil {

@@ -131,6 +131,7 @@ var excludedUserTables = map[string]string{
 	"progress_bootstrap_snapshots":             "derived from watch progress",
 	"user_progress_sync_state":                 "client progress-sync state",
 	"recommendation_cache":                     excludedRecommendation,
+	"external_recommendation_rows":             excludedRecommendation,
 	"user_taste_clusters":                      excludedRecommendation,
 	"user_taste_profiles":                      excludedRecommendation,
 	"profile_series_interest":                  "derived from watch progress and history",

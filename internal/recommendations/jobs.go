@@ -25,6 +25,7 @@ const (
 	tasteProfilesJobLock int64 = 0x53494C4F52545354 // "SILORTST"
 	cowatchJobLock       int64 = 0x53494C4F52435754 // "SILORCWT"
 	cacheJobLock         int64 = 0x53494C4F52434143 // "SILORCAC"
+	externalJobLock      int64 = 0x53494C4F52455854 // "SILOREXT"
 	// staleSweepLock lets one node sweep stale profiles at a time.
 	staleSweepLock int64 = 0x53494C4F5253544C // "SILORSTL"
 )
@@ -34,6 +35,7 @@ var jobLockKeys = map[JobName]int64{
 	JobTasteProfiles:   tasteProfilesJobLock,
 	JobCowatch:         cowatchJobLock,
 	JobRecommendations: cacheJobLock,
+	JobExternal:        externalJobLock,
 }
 
 // Each job's runs are rows in the task manager's execution history under
@@ -44,6 +46,7 @@ const (
 	tasteProfilesTaskKey = "recommendations.taste_profiles"
 	cowatchTaskKey       = "recommendations.cowatch"
 	cacheTaskKey         = "recommendations.cache"
+	externalTaskKey      = "recommendations.external"
 )
 
 var jobTaskKeys = map[JobName]string{
@@ -51,6 +54,7 @@ var jobTaskKeys = map[JobName]string{
 	JobTasteProfiles:   tasteProfilesTaskKey,
 	JobCowatch:         cowatchTaskKey,
 	JobRecommendations: cacheTaskKey,
+	JobExternal:        externalTaskKey,
 }
 
 // Partial runs do part of a job under its claim between full runs: the

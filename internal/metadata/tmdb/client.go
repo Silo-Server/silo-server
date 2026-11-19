@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
@@ -1058,8 +1060,9 @@ func (c *Client) WatchProviders(ctx context.Context, mediaType, region string) (
 }
 
 // GetMediaDetail fetches a single TMDB movie or series with credits, external
-// IDs, recommendations, and the appropriate certification feed, returning a
-// normalized MediaDetail. mediaType accepts Silo-facing "movie" or "series".
+// IDs, recommendations, similar titles, keywords, and the appropriate
+// certification feed, returning a normalized MediaDetail in TMDB's default
+// language (en-US). mediaType accepts Silo-facing "movie" or "series".
 //
 // Cast is sorted by TMDB billing order and capped at 24 entries to keep the
 // payload bounded.
@@ -1067,14 +1070,31 @@ func (c *Client) WatchProviders(ctx context.Context, mediaType, region string) (
 // A detail is cached for mediaDetailCacheTTL, and concurrent callers for one
 // title share a fetch. Each caller gets its own copy.
 func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (*MediaDetail, error) {
+	return c.GetMediaDetailInLanguage(ctx, mediaType, id, "")
+}
+
+// GetMediaDetailInLanguage is GetMediaDetail with TMDB's translated fields
+// (title, overview, tagline, genre names, list entries) in language, a Silo
+// language tag as catalog.metadata_language stores it (BCP 47, such as "fr"
+// or "pt-BR"). It maps the tag the way the TMDB metadata plugin does, so the
+// text matches what library items were enriched with; see detailLanguage. An
+// empty, English, private-use (x-silo-original) or malformed tag fetches the
+// default-language detail, the same request and cache entry as
+// GetMediaDetail.
+func (c *Client) GetMediaDetailInLanguage(ctx context.Context, mediaType string, id int, language string) (*MediaDetail, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("tmdb: media id must be > 0 (got %d)", id)
+	}
+	language = detailLanguage(language)
+	languageQuery := ""
+	if language != "" {
+		languageQuery = "&language=" + url.QueryEscape(language)
 	}
 	var fetch func(context.Context) (*MediaDetail, error)
 	switch mediaType {
 	case "movie":
 		fetch = func(fetchCtx context.Context) (*MediaDetail, error) {
-			path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates,keywords", id)
+			path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,similar,release_dates,keywords", id) + languageQuery
 			var resp movieDetailResponse
 			if err := c.doGet(fetchCtx, path, &resp); err != nil {
 				return nil, err
@@ -1084,7 +1104,7 @@ func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (
 	case "series", "tv":
 		mediaType = "tv"
 		fetch = func(fetchCtx context.Context) (*MediaDetail, error) {
-			path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings,keywords", id)
+			path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,similar,content_ratings,keywords", id) + languageQuery
 			var resp tvDetailResponse
 			if err := c.doGet(fetchCtx, path, &resp); err != nil {
 				return nil, err
@@ -1096,6 +1116,9 @@ func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (
 	}
 
 	cacheKey := "media_detail:" + mediaType + ":" + strconv.Itoa(id)
+	if language != "" {
+		cacheKey += ":" + language
+	}
 	if c.mediaDetailCache != nil {
 		if cached, ok := c.mediaDetailCache.Get(cacheKey); ok {
 			return cloneMediaDetail(cached), nil
@@ -1152,6 +1175,7 @@ func cloneMediaDetail(detail *MediaDetail) *MediaDetail {
 	}
 	cloned.ProductionCompanies = slices.Clone(detail.ProductionCompanies)
 	cloned.KeywordIDs = slices.Clone(detail.KeywordIDs)
+	cloned.Keywords = slices.Clone(detail.Keywords)
 	cloned.GenreIDs = slices.Clone(detail.GenreIDs)
 	cloned.CompanyIDs = slices.Clone(detail.CompanyIDs)
 	cloned.NetworkIDs = slices.Clone(detail.NetworkIDs)
@@ -1159,8 +1183,11 @@ func cloneMediaDetail(detail *MediaDetail) *MediaDetail {
 	cloned.Networks = slices.Clone(detail.Networks)
 	cloned.Seasons = slices.Clone(detail.Seasons)
 	cloned.Cast = slices.Clone(detail.Cast)
+	cloned.Directors = slices.Clone(detail.Directors)
+	cloned.Writers = slices.Clone(detail.Writers)
 	cloned.Creators = slices.Clone(detail.Creators)
 	cloned.Recommendations = slices.Clone(detail.Recommendations)
+	cloned.Similar = slices.Clone(detail.Similar)
 	return &cloned
 }
 
@@ -1181,13 +1208,16 @@ func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
 		Genres:           namesFromGenres(resp.Genres),
 		VoteAverage:      resp.VoteAverage,
 		VoteCount:        resp.VoteCount,
+		Popularity:       resp.Popularity,
 		Status:           resp.Status,
 		Homepage:         resp.Homepage,
 		ContentRating:    pickMovieCertification(resp.ReleaseDates),
 		USCertification:  pickUSMovieCertification(resp.ReleaseDates),
+		USContentRating:  pickUSMovieContentRating(resp.ReleaseDates),
 		Certifications:   movieCertifications(resp.ReleaseDates),
 		OriginalLanguage: resp.OriginalLanguage,
 		KeywordIDs:       keywordIDs(resp.Keywords.Keywords, resp.Keywords.Results),
+		Keywords:         keywordNames(resp.Keywords.Keywords, resp.Keywords.Results),
 		GenreIDs:         idsFromGenres(resp.Genres),
 		OriginCountries:  resp.OriginCountry,
 	}
@@ -1208,14 +1238,32 @@ func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
 	if resp.Credits != nil {
 		detail.Cast = normalizeCast(resp.Credits.Cast)
 		detail.Director = pickDirector(resp.Credits.Crew)
+		detail.Directors = crewNames(resp.Credits.Crew, models.PersonKindDirector)
+		detail.Writers = crewNames(resp.Credits.Crew, models.PersonKindWriter)
 	}
 	if resp.Recommendations != nil {
-		detail.Recommendations = make([]MediaResult, 0, len(resp.Recommendations.Results))
-		for _, item := range resp.Recommendations.Results {
-			detail.Recommendations = append(detail.Recommendations, movieResult(item))
-		}
+		detail.Recommendations = movieResults(resp.Recommendations.Results)
+	}
+	if resp.Similar != nil {
+		detail.Similar = movieResults(resp.Similar.Results)
 	}
 	return detail
+}
+
+func movieResults(items []mediaMovieResponse) []MediaResult {
+	out := make([]MediaResult, 0, len(items))
+	for _, item := range items {
+		out = append(out, movieResult(item))
+	}
+	return out
+}
+
+func tvResults(items []mediaTVResponse) []MediaResult {
+	out := make([]MediaResult, 0, len(items))
+	for _, item := range items {
+		out = append(out, tvResult(item))
+	}
+	return out
 }
 
 func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
@@ -1235,15 +1283,18 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		Genres:           namesFromGenres(resp.Genres),
 		VoteAverage:      resp.VoteAverage,
 		VoteCount:        resp.VoteCount,
+		Popularity:       resp.Popularity,
 		Status:           resp.Status,
 		Homepage:         resp.Homepage,
 		NumberOfSeasons:  resp.NumberOfSeasons,
 		NumberOfEpisodes: resp.NumberOfEpisodes,
 		ContentRating:    pickTVRating(resp.ContentRatings),
 		USCertification:  pickUSTVRating(resp.ContentRatings),
+		USContentRating:  pickUSTVRating(resp.ContentRatings),
 		Certifications:   tvCertifications(resp.ContentRatings),
 		OriginalLanguage: resp.OriginalLanguage,
 		KeywordIDs:       keywordIDs(resp.Keywords.Keywords, resp.Keywords.Results),
+		Keywords:         keywordNames(resp.Keywords.Keywords, resp.Keywords.Results),
 		GenreIDs:         idsFromGenres(resp.Genres),
 		OriginCountries:  resp.OriginCountry,
 	}
@@ -1256,6 +1307,11 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		}
 		if network.ID > 0 {
 			detail.NetworkIDs = append(detail.NetworkIDs, network.ID)
+		}
+	}
+	for _, company := range resp.ProductionCompanies {
+		if name := strings.TrimSpace(company.Name); name != "" {
+			detail.ProductionCompanies = append(detail.ProductionCompanies, name)
 		}
 	}
 	for _, season := range resp.Seasons {
@@ -1276,6 +1332,8 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 	}
 	if resp.Credits != nil {
 		detail.Cast = normalizeCast(resp.Credits.Cast)
+		detail.Directors = crewNames(resp.Credits.Crew, models.PersonKindDirector)
+		detail.Writers = crewNames(resp.Credits.Crew, models.PersonKindWriter)
 	}
 	for _, person := range resp.CreatedBy {
 		if name := strings.TrimSpace(person.Name); name != "" {
@@ -1283,10 +1341,10 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		}
 	}
 	if resp.Recommendations != nil {
-		detail.Recommendations = make([]MediaResult, 0, len(resp.Recommendations.Results))
-		for _, item := range resp.Recommendations.Results {
-			detail.Recommendations = append(detail.Recommendations, tvResult(item))
-		}
+		detail.Recommendations = tvResults(resp.Recommendations.Results)
+	}
+	if resp.Similar != nil {
+		detail.Similar = tvResults(resp.Similar.Results)
 	}
 	return detail
 }
@@ -1324,6 +1382,65 @@ func keywordIDs(groups ...[]idEntry) []int {
 		}
 	}
 	return out
+}
+
+// keywordNames is keywordIDs for the names, in the same order.
+func keywordNames(groups ...[]idEntry) []string {
+	var out []string
+	for _, g := range groups {
+		for _, e := range g {
+			if name := strings.TrimSpace(e.Name); name != "" {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+// crewNames lists, once each and in crew order, the crew the TMDB metadata
+// plugin would record as kind: it keeps the Directing, Writing and Production
+// departments and maps each job with models.PersonKindFromJob. Matching the
+// plugin keeps a detail's people the same as a library item's.
+func crewNames(crew []crewEntry, kind models.PersonKind) []string {
+	var out []string
+	for _, member := range crew {
+		switch member.Department {
+		case "Directing", "Writing", "Production":
+		default:
+			continue
+		}
+		if models.PersonKindFromJob(member.Job) != kind {
+			continue
+		}
+		if name := strings.TrimSpace(member.Name); name != "" && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// detailLanguage turns a Silo language tag into the language parameter of a
+// detail request, the way the TMDB metadata plugin does: the language subtag
+// lowercased and the rest uppercased ("pt-BR", "zh-HANT"). Unlike
+// apiLanguage it returns "" for English, so an English detail is the same
+// request and cache entry as GetMediaDetail's (TMDB's default is en-US), and
+// for tags TMDB cannot use: empty, malformed, undetermined, or private-use
+// such as x-silo-original.
+func detailLanguage(tag string) string {
+	canonical := lang.CanonicalTag(tag)
+	if canonical == "" {
+		return ""
+	}
+	parts := strings.Split(canonical, "-")
+	parts[0] = strings.ToLower(parts[0])
+	switch parts[0] {
+	case "en", "und", "x":
+		return ""
+	}
+	for i := 1; i < len(parts); i++ {
+		parts[i] = strings.ToUpper(parts[i])
+	}
+	return strings.Join(parts, "-")
 }
 
 // normalizeCast sorts by billing order and caps the result so the response
@@ -1371,32 +1488,48 @@ func pickDirector(crew []crewEntry) string {
 // then falls back to any non-empty US certification, then any non-empty
 // certification at all. Type 3 is theatrical in TMDB's release-type taxonomy.
 func pickMovieCertification(rd *releaseDatesResponse) string {
+	if us := pickUSMovieContentRating(rd); us != "" {
+		return us
+	}
 	if rd == nil {
 		return ""
 	}
-	var fallbackUS, fallbackAny string
 	for _, country := range rd.Results {
-		isUS := strings.EqualFold(country.ISO3166, "US")
+		for _, entry := range country.ReleaseDates {
+			if cert := strings.TrimSpace(entry.Certification); cert != "" {
+				return cert
+			}
+		}
+	}
+	return ""
+}
+
+// pickUSMovieContentRating is the rating the TMDB metadata plugin stores for
+// a movie: the first US theatrical (type 3) certification, else the first
+// non-empty US certification, else "".
+func pickUSMovieContentRating(rd *releaseDatesResponse) string {
+	if rd == nil {
+		return ""
+	}
+	var fallback string
+	for _, country := range rd.Results {
+		if !strings.EqualFold(country.ISO3166, "US") {
+			continue
+		}
 		for _, entry := range country.ReleaseDates {
 			cert := strings.TrimSpace(entry.Certification)
 			if cert == "" {
 				continue
 			}
-			if isUS && entry.Type == 3 {
+			if entry.Type == 3 {
 				return cert
 			}
-			if isUS && fallbackUS == "" {
-				fallbackUS = cert
-			}
-			if fallbackAny == "" {
-				fallbackAny = cert
+			if fallback == "" {
+				fallback = cert
 			}
 		}
 	}
-	if fallbackUS != "" {
-		return fallbackUS
-	}
-	return fallbackAny
+	return fallback
 }
 
 func pickTVRating(cr *contentRatingsResponse) string {

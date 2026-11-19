@@ -55,6 +55,13 @@ func (f *fakeAdminRecommendations) LastRuns(context.Context) (map[recommendation
 				ResultData: json.RawMessage(`{"missing_only":true,"embedded":2}`),
 			},
 		},
+		recommendations.JobExternal: {
+			Full: &taskmanager.ExecutionResult{
+				TaskKey: "recommendations.external", Status: "completed",
+				StartedAt: fakeAdminRecommendationsTime.Add(3 * time.Hour), CompletedAt: fakeAdminRecommendationsTime.Add(3*time.Hour + 4*time.Minute),
+				ResultData: json.RawMessage(`{"enabled":true,"titles_stored":1200,"details_fetched":300,"tmdb_requests":420,"embeddings":{"embedded":298,"truncated":0,"failed":0,"skipped":2},"rows_built":6,"budget_exhausted":false}`),
+			},
+		},
 		recommendations.JobRecommendations: {
 			Full: &taskmanager.ExecutionResult{
 				TaskKey: "recommendations.cache", Status: "completed",
@@ -87,12 +94,15 @@ func (f *fakeAdminRecommendations) StaleSweep(context.Context) (recommendations.
 		ResultData: json.RawMessage(`{"stale":3,"refreshed":2,"failed":1,"deferred":0,"queued":0}`),
 	}}, nil
 }
+func (f *fakeAdminRecommendations) ExternalStatus(context.Context) (recommendations.ExternalStatus, error) {
+	return recommendations.ExternalStatus{Enabled: true, Titles: 1200, Rows: 6}, f.err
+}
 func (f *fakeAdminRecommendations) ResetEmbeddings(context.Context) (recommendations.EmbeddingsReset, error) {
 	f.resets++
 	if f.resetErr != nil {
 		return recommendations.EmbeddingsReset{}, f.resetErr
 	}
-	return recommendations.EmbeddingsReset{Embeddings: 120, TasteProfiles: 3, TasteClusters: 9, CachedRows: 41}, nil
+	return recommendations.EmbeddingsReset{Embeddings: 120, TasteProfiles: 3, TasteClusters: 9, CachedRows: 41, ExternalEmbeddings: 1200, ExternalRows: 6}, nil
 }
 func (f *fakeAdminRecommendations) start(job recommendations.JobName) error {
 	f.calls++
@@ -108,4 +118,7 @@ func (f *fakeAdminRecommendations) TriggerTasteProfiles() error {
 func (f *fakeAdminRecommendations) TriggerCowatch() error { return f.start(recommendations.JobCowatch) }
 func (f *fakeAdminRecommendations) TriggerRecommendations() error {
 	return f.start(recommendations.JobRecommendations)
+}
+func (f *fakeAdminRecommendations) TriggerExternal() error {
+	return f.start(recommendations.JobExternal)
 }

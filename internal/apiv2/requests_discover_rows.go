@@ -11,7 +11,7 @@ import (
 // DiscoverRowRef places one row of the Discover page.
 type DiscoverRowRef struct {
 	Key   string `json:"key" doc:"The row's stable ID: an items key for a title row; studios, networks or genres for a brand row" example:"trending_movies"`
-	Type  string `json:"type" doc:"What the row shows: tmdb_chart, tmdb_discover, tmdb_list or mdblist (title rows, in items), or studios, networks or genres (brand rows). More values may be added" example:"tmdb_chart"`
+	Type  string `json:"type" doc:"What the row shows: tmdb_chart, tmdb_discover, tmdb_list, mdblist or recommended (title rows, in items; a recommended row holds the viewer's own recommendations, see personal_discover_rows_supported), or studios, networks or genres (brand rows). More values may be added" example:"tmdb_chart"`
 	Title string `json:"title" example:"Trending Movies"`
 	SectionTitleKey
 }

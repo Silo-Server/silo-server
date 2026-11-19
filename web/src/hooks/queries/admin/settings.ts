@@ -194,6 +194,8 @@ export function useCancelStorageTransition() {
 export interface RestartKeysResponse {
   keys: string[];
   prefixes: string[];
+  /** Keys a prefix covers that apply without a restart; absent on older servers. */
+  live_keys?: string[];
 }
 
 /**

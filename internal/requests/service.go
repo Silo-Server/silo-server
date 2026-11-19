@@ -98,6 +98,7 @@ type Service struct {
 	titleObserver     TitleObserver
 	discoverSnapshots DiscoverSnapshots
 	discoverRefresher DiscoverListRefresher
+	recommendations   discoverrows.Recommendations
 	Now               func() time.Time
 }
 
@@ -1355,6 +1356,7 @@ func (s *Service) GetFeatureStatus(ctx context.Context, viewer Viewer) (FeatureS
 		if status.ProfileRequestsBlocked, err = s.profileRequestsBlocked(ctx, viewer); err != nil {
 			return FeatureStatus{}, err
 		}
+		status.PersonalDiscoverRowsSupported = s.recommendations != nil && s.recommendations.ExternalRecommendationsEnabled()
 	}
 	return status, nil
 }
@@ -1876,6 +1878,14 @@ func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw 
 			return nil, err
 		}
 	}
+	return s.overlayViewerState(ctx, viewer, raw, s.lookupAvailable)
+}
+
+// overlayViewerState lays the viewer's availability, request state and
+// follows over a page of titles. available looks a media type's TMDB IDs up
+// in the library.
+func (s *Service) overlayViewerState(ctx context.Context, viewer Viewer, raw *tmdb.MediaPage,
+	available func(ctx context.Context, mediaType MediaType, ids []int) (map[int]PresenceMatch, error)) (*MediaPage, error) {
 	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
 	if err != nil {
 		return nil, err
@@ -1890,15 +1900,15 @@ func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw 
 		idsByType[mediaType] = append(idsByType[mediaType], item.ID)
 	}
 
-	available := map[MediaType]map[int]PresenceMatch{}
+	presence := map[MediaType]map[int]PresenceMatch{}
 	active := map[MediaType]map[int]*Request{}
 	following := map[MediaType]map[int]bool{}
 	for mediaType, ids := range idsByType {
-		presence, err := s.lookupAvailable(ctx, mediaType, ids)
+		matches, err := available(ctx, mediaType, ids)
 		if err != nil {
 			return nil, err
 		}
-		available[mediaType] = presence
+		presence[mediaType] = matches
 		requests, err := s.store.ListActiveByTMDB(ctx, mediaType, ids)
 		if err != nil {
 			return nil, err
@@ -1920,7 +1930,7 @@ func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw 
 		if err != nil || item.ID <= 0 {
 			continue
 		}
-		match := available[mediaType][item.ID]
+		match := presence[mediaType][item.ID]
 		activeRequest := active[mediaType][item.ID]
 		state := requestStateFor(viewer, policy, match.Available, activeRequest)
 		state.Following = activeRequest != nil && following[mediaType][item.ID]

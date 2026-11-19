@@ -62,6 +62,9 @@ type Reader struct {
 	now func() time.Time
 	// personalOff serves no personal rows (see WithPersonalRows).
 	personalOff bool
+	// externalOn reports whether outside rows are served; nil serves none
+	// (see WithExternalRecommendations).
+	externalOn func() bool
 }
 
 // NewReader creates a cache-backed recommendations reader.
@@ -102,6 +105,86 @@ func (r *Reader) WithPersonalRows(enabled bool) *Reader {
 		r.personalOff = !enabled
 	}
 	return r
+}
+
+// WithExternalRecommendations sets the switch that decides whether the
+// reader serves outside-title rows, and returns it. on is called on every
+// read, so it can follow recommendations.external.enabled without a restart.
+// Without it, or with personal rows off, the reader serves none.
+func (r *Reader) WithExternalRecommendations(on func() bool) *Reader {
+	if r != nil {
+		r.externalOn = on
+	}
+	return r
+}
+
+// ExternalRecommendationsEnabled reports whether ExternalRecommendations
+// serves rows: recommendations and recommendations.external.enabled are on.
+// It reads no data.
+func (r *Reader) ExternalRecommendationsEnabled() bool {
+	return r != nil && !r.personalOff && r.externalOn != nil && r.externalOn()
+}
+
+// ExternalReason names a library title whose TMDB lists named an outside
+// title.
+type ExternalReason struct {
+	ContentID string `json:"content_id"`
+	Title     string `json:"title"`
+}
+
+// ExternalRecommendation is one ranked outside title as a read serves it:
+// its stored card data, its score and its reasons.
+type ExternalRecommendation struct {
+	ExternalTitle
+	Score float64
+	// Reasons are the library titles that named it, best first, leaving out
+	// those the viewer cannot see. It may be empty.
+	Reasons []ExternalReason
+}
+
+// ExternalRecommendations returns the profile's ranked outside titles of
+// mediaType (ExternalMediaMovie or ExternalMediaSeries), best first, with
+// their stored card data, or none when ExternalRecommendationsEnabled is
+// false or the profile has no row. A reason naming a library title filter
+// does not admit is dropped; the title stays. It reads two indexed queries
+// and calls neither TMDB nor the embedding provider. The caller applies the
+// viewer's rating ceiling to USCertification and drops titles the library
+// has since gained.
+func (r *Reader) ExternalRecommendations(ctx context.Context, userID int, profileID, mediaType string, filter catalog.AccessFilter) ([]ExternalRecommendation, error) {
+	if mediaType != ExternalMediaMovie && mediaType != ExternalMediaSeries {
+		return nil, fmt.Errorf("outside recommendations: unknown media type %q", mediaType)
+	}
+	if !r.ExternalRecommendationsEnabled() {
+		return nil, nil
+	}
+	repo, ok := r.repo.(externalReaderRepo)
+	if !ok {
+		return nil, nil
+	}
+	rows, reasonIDs, err := repo.externalRowTitles(ctx, userID, profileID, mediaType)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	titles, err := repo.recommendableItemTitles(ctx, reasonIDs, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ExternalRecommendation, len(rows))
+	for i, row := range rows {
+		out[i] = ExternalRecommendation{ExternalTitle: row.title, Score: row.item.Score, Reasons: []ExternalReason{}}
+		for _, id := range row.item.Reasons {
+			if title, ok := titles[id]; ok {
+				out[i].Reasons = append(out[i].Reasons, ExternalReason{ContentID: id, Title: title})
+			}
+		}
+	}
+	return out, nil
+}
+
+// externalReaderRepo is the part of *Repo ExternalRecommendations reads.
+type externalReaderRepo interface {
+	externalRowTitles(ctx context.Context, userID int, profileID, mediaType string) ([]externalRowTitle, []string, error)
+	recommendableItemTitles(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]string, error)
 }
 
 // today is the time a read's rotation is for; its UTC date picks the day.
