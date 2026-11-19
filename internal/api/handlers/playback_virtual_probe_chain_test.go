@@ -42,6 +42,13 @@ func probeChainRow(fileID int, filePath string, probeUpdatedAt *time.Time) *mode
 		// candidate the discovery run just listed.
 		UpdatedAt: time.Now(),
 	}
+	if probeUpdatedAt != nil {
+		// A probed stamp is only a reason to skip the chain when the evidence it
+		// stamped actually describes tracks; a stamp with empty arrays is the
+		// state an unadoptable write leaves behind and must be re-probed.
+		row.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Language: "eng"}}
+		row.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "subrip", Language: "eng"}}
+	}
 	row.ResolvedURL = probeChainProviderURL(row)
 	return row
 }
@@ -351,6 +358,31 @@ func TestScheduleDefaultFileProbeSkipsStampedRow(t *testing.T) {
 	}
 	if target.callCount() != 1 {
 		t.Fatalf("target reads = %d, want 1", target.callCount())
+	}
+}
+
+// TestScheduleDefaultFileProbeReprobesAStampedRowWithoutInventory pins the
+// repair path for a row whose probe stamp outlived the evidence it stamped. A
+// write that could not adopt its candidate (or an invalidation) can leave the
+// stamp set with empty track arrays; treating that as "already probed" froze the
+// row forever, which is what kept the played 4K file's menu empty while every
+// chain skipped it.
+func TestScheduleDefaultFileProbeReprobesAStampedRowWithoutInventory(t *testing.T) {
+	stampedAt := time.Now().Add(-time.Hour)
+	row := probeChainRow(304, "virtual://movie/probe-chain?result=c4", &stampedAt)
+	row.AudioTracks = nil
+	row.SubtitleTracks = nil
+	h, target, prober := probeChainHandler(row)
+	target.releaseRow()
+
+	h.ScheduleDefaultFileProbe(probeChainTestContent, probeChainSourceRow(), probeChainStreams(row), catalog.AccessFilter{})
+	h.probeChainWG.Wait()
+
+	if prober.count() != 1 {
+		t.Fatalf("probe calls = %d, want 1: a stamp with no inventory is not evidence", prober.count())
+	}
+	if got := prober.last(); got != probeChainProviderURL(row) {
+		t.Fatalf("probed %q, want the row's own bytes %q", got, probeChainProviderURL(row))
 	}
 }
 
@@ -1193,9 +1225,11 @@ func TestScheduleSelectedFileProbeProbesTheSelectedRow(t *testing.T) {
 		t.Fatalf("file rows read = %v, want only the selected row %d", reads, selectedRow.ID)
 	}
 
-	// Fresh inventory: the same selection must schedule nothing to probe.
+	// Fresh inventory: the same selection must schedule nothing to probe. The
+	// stamp is only evidence when it describes the tracks the chain measured.
 	probedAt := time.Now()
 	selectedRow.ProbeUpdatedAt = &probedAt
+	selectedRow.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Language: "eng"}}
 	h.ScheduleSelectedFileProbe(probeChainTestContent, selectedRow.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{77}})
 	h.probeChainWG.Wait()
 	if prober.count() != 1 {

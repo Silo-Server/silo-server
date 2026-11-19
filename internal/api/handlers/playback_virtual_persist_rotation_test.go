@@ -175,17 +175,22 @@ func TestPersistProbeEvidenceRotationPublishesVerifiedInventory(t *testing.T) {
 		ownerID   = 5
 	)
 	probedAt := time.Now().UTC()
+	// Distinct durable identity: these are two releases (the alternate-version
+	// shape this rotation exists for). Two rows the catalog groups as one release
+	// keep the evidence on the requested row instead; see
+	// TestProbeEvidenceLandsOnTheRequestedRowWhenASameReleaseDuplicateOwnsTheCandidate.
 	ownerRow := &models.MediaFile{
 		ID: 702, ContentID: content, FilePath: ownerURI,
 		MediaFolderID: 9, VirtualOwnerInstallationID: ownerID, ProbeSource: "virtual",
-		ProbeUpdatedAt: &probedAt,
+		ProbeUpdatedAt: &probedAt, ProviderVideoHash: "hash-owner",
 		AudioTracks:    probedDualAudioFile().AudioTracks,
 		SubtitleTracks: probedDualAudioFile().SubtitleTracks,
 	}
 	pinnedRow := &models.MediaFile{
 		ID: 701, ContentID: content, FilePath: pinnedURI,
 		MediaFolderID: 9, VirtualOwnerInstallationID: ownerID, ProbeSource: "virtual",
-		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Language: "eng"}},
+		ProviderVideoHash: "hash-pinned",
+		AudioTracks:       []models.AudioTrack{{Codec: "aac", Channels: 2, Language: "eng"}},
 	}
 
 	sessionMgr := playback.NewSessionManager(0, 0)
@@ -500,16 +505,18 @@ func TestPersistProbeEvidenceRotationDeliveryLoggedOnce(t *testing.T) {
 		content   = "movie-rotation-log"
 	)
 	probedAt := time.Now().UTC()
+	// A genuinely different release, so the write rotates as this test pins.
 	ownerRow := &models.MediaFile{
 		ID: 932, ContentID: content, FilePath: ownerURI,
 		MediaFolderID: 9, VirtualOwnerInstallationID: 5, ProbeSource: "virtual",
-		ProbeUpdatedAt: &probedAt,
+		ProbeUpdatedAt: &probedAt, ProviderVideoHash: "hash-owner",
 		AudioTracks:    probedDualAudioFile().AudioTracks,
 		SubtitleTracks: probedDualAudioFile().SubtitleTracks,
 	}
 	pinnedRow := &models.MediaFile{
 		ID: 931, ContentID: content, FilePath: pinnedURI,
 		MediaFolderID: 9, VirtualOwnerInstallationID: 5, ProbeSource: "virtual",
+		ProviderVideoHash: "hash-pinned",
 	}
 	sessionMgr := playback.NewSessionManager(0, 0)
 	session, err := sessionMgr.StartSession(1, "profile-1", pinnedRow.ID, playback.PlayDirect, false)

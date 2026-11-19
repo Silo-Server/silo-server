@@ -117,6 +117,21 @@ func execVirtualFileMetadataUpdateResultTx(ctx context.Context, db VirtualFileMe
 			if !args.RequireAdopt || args.AdoptPath == "" {
 				return VirtualFileMetadataUpdateResult{}, nil
 			}
+			if args.SameReleaseRematch {
+				// A resolver-certified same-release renumber the fence could not
+				// adopt: the row keeps its release and its pin simply cannot move
+				// onto a path the catalog already assigns to a sibling of it. Not
+				// counting it is what keeps a healthy row out of the terminal
+				// failed verdict a duplicate-owned id used to march it to.
+				slog.WarnContext(ctx, "virtual same-release rematch could not adopt its new candidate id; leaving the row's pin unchanged",
+					"component", "api", "file_id", args.FileID, "adopt_path", args.AdoptPath,
+					"expected_path", args.ExpectedFilePath,
+					virtualEvidenceLogKeyReason, "same_release_rematch_not_adopted")
+				// Nothing was written; the deferred rollback ends the
+				// transaction. The refusal is deliberately not counted and the
+				// terminal verdict is deliberately not installed.
+				return VirtualFileMetadataUpdateResult{}, fmt.Errorf("%w: candidate %s was not adopted", errVirtualAdoptIdentityNotPersisted, args.AdoptPath)
+			}
 			return txVirtualAdoptionRefusal(ctx, tx, store, args, &committed)
 		}
 		if args.RequireAdopt && args.AdoptPath != "" && persistedPath != args.AdoptPath {

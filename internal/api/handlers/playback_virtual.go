@@ -6020,6 +6020,17 @@ func execVirtualFileMetadataUpdateResultUntx(ctx context.Context, db VirtualFile
 	if err == nil {
 		if persistedPath == "" {
 			if args.RequireAdopt && args.AdoptPath != "" {
+				if args.SameReleaseRematch {
+					// See execVirtualFileMetadataUpdateResultTx: a certified
+					// same-release renumber that cannot adopt its new id leaves
+					// the row's pin unchanged and is never counted as a stale-pin
+					// refusal.
+					slog.WarnContext(ctx, "virtual same-release rematch could not adopt its new candidate id; leaving the row's pin unchanged",
+						"component", "api", "file_id", args.FileID, "adopt_path", args.AdoptPath,
+						"expected_path", args.ExpectedFilePath,
+						virtualEvidenceLogKeyReason, "same_release_rematch_not_adopted")
+					return VirtualFileMetadataUpdateResult{}, fmt.Errorf("%w: candidate %s was not adopted", errVirtualAdoptIdentityNotPersisted, args.AdoptPath)
+				}
 				// The atomic guard matched no row: the adoption was refused
 				// (sibling owner, collection row, live failed verdict) or the
 				// CAS snapshot was stale. Either way the validated identity
@@ -6449,7 +6460,18 @@ func (h *PlaybackHandler) virtualProbeEvidenceArgs(ctx context.Context, catalogF
 	if h == nil || (h.VirtualFileSaver == nil && h.VirtualFileMetadataSaver == nil) || catalogFile == nil || probed == nil || catalogFile.ID <= 0 {
 		return models.VirtualFilePersistArgs{}, 0, false
 	}
-	if !identityVerified && !virtualProbeEvidenceSharesRowRelease(catalogFile, resolvedPath, candidate) {
+	// The candidate's release is the row's own release when its identity proves
+	// it, or when the concrete candidate is already owned by a sibling row the
+	// catalog groups with this one (see virtualProbeEvidenceSiblingOwner).
+	// Both answers decide the same two questions below: whether unverified bytes
+	// may be written at all, and whether this write needs a fenced adoption.
+	sameRelease := virtualProbeEvidenceSharesRowRelease(catalogFile, resolvedPath, candidate)
+	var siblingOwner *models.MediaFile
+	if !sameRelease {
+		siblingOwner = h.virtualProbeEvidenceSiblingOwner(ctx, catalogFile, resolvedPath)
+		sameRelease = siblingOwner != nil
+	}
+	if !identityVerified && !sameRelease {
 		// The bytes did not establish identity and they do not belong to this
 		// row's release. Writing their inventory would present a foreign
 		// object as the requested release; leave the catalog untouched and
@@ -6464,6 +6486,25 @@ func (h *PlaybackHandler) virtualProbeEvidenceArgs(ctx context.Context, catalogF
 		h.invalidateVirtualProbeInventory(ctx, catalogFile)
 		return models.VirtualFilePersistArgs{}, 0, false
 	}
+	if siblingOwner != nil {
+		// The candidate's concrete path belongs to a sibling row of the same
+		// release: this row can never adopt a path the catalog already assigns
+		// to its duplicate, and the version list does not distinguish the two
+		// rows anyway. Write the measured inventory on the row the viewer picked
+		// and leave the pin alone. Dropping the write instead is what left a
+		// played 4K row with empty track arrays while its duplicate owned the
+		// bytes, and the Jellyfin surface with two streams for a source that has
+		// thirty.
+		args, argsOK := h.virtualProbeEvidenceArgsForRowMetadataOnly(ctx, catalogFile, probed, stampProbe)
+		if !argsOK {
+			return models.VirtualFilePersistArgs{}, 0, false
+		}
+		slog.InfoContext(ctx, "virtual probe evidence kept on the requested row: the candidate path is owned by a same-release sibling row",
+			"component", "api", "file_id", catalogFile.ID, "sibling_owner_file_id", siblingOwner.ID,
+			"candidate_uri", resolvedPath, "row_path", catalogFile.FilePath,
+			virtualEvidenceLogKeyReason, "same_release_sibling_owns_candidate")
+		return args, catalogFile.ID, true
+	}
 	identityRow, evidence, ok := h.virtualProbeEvidenceRotateTarget(ctx, catalogFile, resolvedPath, probed, candidate)
 	if !ok {
 		return models.VirtualFilePersistArgs{}, 0, false
@@ -6473,6 +6514,31 @@ func (h *PlaybackHandler) virtualProbeEvidenceArgs(ctx context.Context, catalogF
 		return models.VirtualFilePersistArgs{}, 0, false
 	}
 	return args, catalogFile.ID, true
+}
+
+// virtualProbeEvidenceSiblingOwner returns the sibling catalog row that already
+// owns candidateURI when the catalog groups it with row as one release, and nil
+// otherwise. "One release" is the version list's own rule
+// (catalog.VirtualRowsShareRelease: the same provider-neutral key, the same
+// declared size and no conflicting durable identity) or the durable-identity
+// tier comparison; a sibling whose identity, size or key disagrees is a
+// genuinely different release and keeps the existing rotation behavior.
+//
+// A lookup error is not an answer and returns nil: the caller then keeps its
+// previous rotation/refusal decision instead of landing evidence on a row the
+// catalog could not vouch for.
+func (h *PlaybackHandler) virtualProbeEvidenceSiblingOwner(ctx context.Context, row *models.MediaFile, candidateURI string) *models.MediaFile {
+	if h == nil || row == nil || row.ID <= 0 || strings.TrimSpace(candidateURI) == "" {
+		return nil
+	}
+	owner, err := h.virtualPathOwnerRow(ctx, row, candidateURI, row.VirtualOwnerInstallationID, row.MediaFolderID)
+	if err != nil || owner == nil || owner.ID <= 0 || owner.ID == row.ID {
+		return nil
+	}
+	if catalog.VirtualRowsShareRelease(row, owner) || virtualSiblingOwnerSharesRelease(row, owner) {
+		return owner
+	}
+	return nil
 }
 
 // virtualProbeEvidenceRotateTarget resolves the row the evidence belongs to and
@@ -6792,6 +6858,60 @@ func (h *PlaybackHandler) virtualProbeEvidenceArgsForRow(ctx context.Context, ca
 		// out here would race the evidence writes and clears that invalidate it.
 	}
 	return args, true
+}
+
+// virtualProbeEvidenceArgsForRowMetadataOnly builds the same catalog write as
+// virtualProbeEvidenceArgsForRow, but bound to the row's own pinned path with no
+// adoption. It is the landing site for evidence measured from the row's own
+// listing candidate when that concrete path is already owned by a sibling row of
+// the same release: the row cannot adopt a path the catalog already assigns to
+// its duplicate, and refusing the write outright is what left a played 4K row
+// with an empty menu. The pin is not moved, so nothing about the release changes;
+// only the measured inventory is stored.
+//
+// The duration-contradiction backstop still applies, so a probe that contradicts
+// the declared release cannot be stamped through this path either.
+func (h *PlaybackHandler) virtualProbeEvidenceArgsForRowMetadataOnly(ctx context.Context, row *models.MediaFile, probed *models.MediaFile, stampProbe bool) (models.VirtualFilePersistArgs, bool) {
+	if h == nil || row == nil || row.ID <= 0 || probed == nil {
+		return models.VirtualFilePersistArgs{}, false
+	}
+	if stampProbe {
+		expectedRuntime := row.VirtualExpectedRuntimeMinutes
+		if expectedRuntime <= 0 {
+			expectedRuntime = probed.VirtualExpectedRuntimeMinutes
+		}
+		if expectedRuntime <= 0 {
+			expectedRuntime = h.virtualExpectedRuntimeMinutes(ctx, row)
+		}
+		if scanner.VirtualDurationContradictsDeclaration(probed.Duration, expectedRuntime) {
+			slog.WarnContext(ctx, "virtual probe evidence refused: probe contradicts the declared release",
+				"component", "api", "file_id", row.ID,
+				"declared_size", row.FileSize, "probed_size", probed.ProbedFormatSize,
+				"probed_duration_seconds", probed.Duration, "expected_runtime_minutes", expectedRuntime,
+				virtualEvidenceLogKeyReason, "probe_contradicts_declaration")
+			return models.VirtualFilePersistArgs{}, false
+		}
+	}
+	snap := snapshotVirtualRow(row)
+	return models.VirtualFilePersistArgs{
+		FileID:           snap.FileID,
+		ExpectedFilePath: snap.FilePath,
+		VideoTracks:      marshalTracksJSON(sanitizeTrackSlice(probed.VideoTracks)),
+		AudioTracks:      marshalTracksJSON(sanitizeTrackSlice(probed.AudioTracks)),
+		SubtitleTracks:   marshalTracksJSON(sanitizeTrackSlice(probed.SubtitleTracks)),
+		Resolution:       probed.Resolution,
+		CodecVideo:       probed.CodecVideo,
+		CodecAudio:       probed.CodecAudio,
+		Container:        probed.Container,
+		HDR:              probed.HDR,
+		Bitrate:          probed.Bitrate,
+		Duration:         probed.Duration,
+		StampProbe:       stampProbe,
+		UpdatedAt:        snap.UpdatedAt,
+		ProbeUpdatedAt:   snap.ProbeUpdatedAt,
+		OwnerID:          snap.OwnerID,
+		LibraryID:        snap.LibraryID,
+	}, true
 }
 
 // virtualProbeEvidenceRefusalReason classifies a required adoption that is

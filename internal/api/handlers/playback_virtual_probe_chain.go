@@ -152,18 +152,19 @@ const (
 // before it reached the probe (budget_expired) and one whose probe failed
 // (probe_failed). The remaining values name ordinary skips.
 const (
-	virtualProbeChainReasonScheduleRefused    = "schedule_refused"
-	virtualProbeChainReasonBudgetExpired      = "budget_expired"
-	virtualProbeChainReasonDefaultUnavailable = "default_unavailable"
-	virtualProbeChainReasonProbeFailed        = "probe_failed"
-	virtualProbeChainReasonProbeIncomplete    = "probe_incomplete"
-	virtualProbeChainReasonNoDefaultVersion   = "no_default_version"
-	virtualProbeChainReasonSelectionMissing   = "selection_unavailable"
-	virtualProbeChainReasonNotVirtual         = "not_virtual"
-	virtualProbeChainReasonAlreadyProbed      = "already_probed"
-	virtualProbeChainReasonNoExactCandidate   = "no_exact_candidate"
-	virtualProbeChainReasonRecentlyFailed     = "recently_failed"
-	virtualProbeChainReasonGateBusy           = "gate_busy"
+	virtualProbeChainReasonScheduleRefused       = "schedule_refused"
+	virtualProbeChainReasonBudgetExpired         = "budget_expired"
+	virtualProbeChainReasonDefaultUnavailable    = "default_unavailable"
+	virtualProbeChainReasonProbeFailed           = "probe_failed"
+	virtualProbeChainReasonProbeIncomplete       = "probe_incomplete"
+	virtualProbeChainReasonNoDefaultVersion      = "no_default_version"
+	virtualProbeChainReasonSelectionMissing      = "selection_unavailable"
+	virtualProbeChainReasonNotVirtual            = "not_virtual"
+	virtualProbeChainReasonAlreadyProbed         = "already_probed"
+	virtualProbeChainReasonStampWithoutInventory = "stamp_without_inventory"
+	virtualProbeChainReasonNoExactCandidate      = "no_exact_candidate"
+	virtualProbeChainReasonRecentlyFailed        = "recently_failed"
+	virtualProbeChainReasonGateBusy              = "gate_busy"
 )
 
 // logVirtualProbeChainSkip records why one discovered or selected item was
@@ -769,6 +770,19 @@ func (h *PlaybackHandler) resolveFileProbeTarget(ctx context.Context, contentID 
 	return row, true
 }
 
+// virtualRowCarriesProbeInventory reports whether a row's stored probe evidence
+// actually describes tracks. A probe stamp with no video, audio or subtitle
+// inventory is not evidence a probe enumerated anything: it is the state an
+// unadoptable or invalidated evidence write leaves behind. Re-probing such a row
+// is the repair path, so the chain gate must not treat the stamp alone as
+// "already probed" (see runFileProbeChain).
+func virtualRowCarriesProbeInventory(row *models.MediaFile) bool {
+	if row == nil {
+		return false
+	}
+	return len(row.VideoTracks) > 0 || len(row.AudioTracks) > 0 || len(row.SubtitleTracks) > 0
+}
+
 // runFileProbeChain is the body of one admitted chain. It probes either the
 // item's default version (discovery trigger) or one explicitly selected
 // version (selection trigger); the authorization read, the virtual guard, the
@@ -788,11 +802,21 @@ func (h *PlaybackHandler) runFileProbeChain(ctx context.Context, contentID strin
 	}
 	// Stamp skip and damper check happen inside admitted work — the admission
 	// callback only reserves the slot, by design. A selection whose row already
-	// carries inventory stops here without touching the provider.
-	if row.ProbeUpdatedAt != nil {
+	// carries probed inventory stops here without touching the provider. The
+	// stamp alone is not inventory: a build that wrote evidence it could not
+	// adopt (or invalidated foreign evidence) could leave a row stamped with
+	// empty track arrays, and treating that as "already probed" froze it forever
+	// — production's played 4K row kept an empty menu through 40 skipped chains.
+	if row.ProbeUpdatedAt != nil && virtualRowCarriesProbeInventory(row) {
 		logVirtualProbeChainSkip(ctx, slog.LevelDebug, trigger, contentID,
 			virtualProbeChainReasonAlreadyProbed, "", virtualEvidenceLogKeyFileID, row.ID)
 		return "", false
+	}
+	if row.ProbeUpdatedAt != nil {
+		// Re-probe, but say why: this row is the repair path for an earlier
+		// evidence write that landed no inventory.
+		logVirtualProbeChainSkip(ctx, slog.LevelInfo, trigger, contentID,
+			virtualProbeChainReasonStampWithoutInventory, "reprobing", virtualEvidenceLogKeyFileID, row.ID)
 	}
 	oid := row.VirtualOwnerInstallationID
 	var probeCand *VirtualPlaybackStream
