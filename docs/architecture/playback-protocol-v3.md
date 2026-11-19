@@ -1098,6 +1098,25 @@ form. Without it a long title's playlist exceeds 4 MiB, which some players
 
 A playlist served larger than 3.5 MiB is logged with its session id.
 
+The synthetic VOD playlist of an encoded transcode lists two-second segments
+up to the file's stored duration, which the scanner takes from the video and
+audio tracks when a subtitle track alone stretches the container. A container
+can still outlast its streams in ways the scanner cannot see, such as a bad
+duration tag, so the playlist can list segments FFmpeg never writes. An FFmpeg
+that exits 0 without logging `Error during demuxing` has read its input to the
+end, and the session keeps its last segment as the media's last. A video
+segment request past that segment answers `200` with an empty body and the
+segment's media type. That request never waits and never restarts FFmpeg,
+because a restart past the end writes nothing and the player would request the
+segment again. A player steps over the empty segments to the end of the
+playlist. FFmpeg also exits 0 when a read fails mid-file, such as a relayed
+source that closes early, but it logs that demux error first. Such an FFmpeg,
+or one that exits with an error or is killed, has not reached the end, so a
+request past its output restarts it as before. A keyframe-planned copy remux
+lists only the source's own segments and keeps its own rules. The integrated
+server, transcode nodes, and the Jellyfin-compatible transcode serve this the
+same way.
+
 ---
 
 ## 5. The timeline model

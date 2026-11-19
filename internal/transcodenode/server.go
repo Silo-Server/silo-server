@@ -2969,6 +2969,11 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			// Past the media's end (FFmpeg finished there, perhaps during the
+			// wait) the segment never comes: end the stream, never restart.
+			if session.ServeIfPastEndOfStream(w, name, segNum, err) {
+				return
+			}
 			if errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				target, ok, restartErr := s.restartSegmentLocked(
 					r.Context(),
