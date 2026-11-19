@@ -73,7 +73,8 @@ func seedAdminListing(t *testing.T, pool *pgxpool.Pool) adminListingFixture {
 		($3,'movie','Unlisted',2001,'matched','',''), ($4,'series','Show',2010,'matched','','')`, movieA, movieHidden, movieUnlisted, series)
 	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'podcast','Cast'), ($2,'audiobook','Book')`, podcast, book)
 	exec(`UPDATE media_items SET genres='{Crime,Drama}', content_rating='R', rating_imdb=8.5, rating_rt_critic=0, release_date='1999-07-02' WHERE content_id=$1`, movieA)
-	exec(`UPDATE media_items SET first_air_date='2010-05-02', last_air_date='2012-01-08' WHERE content_id=$1`, series)
+	exec(`UPDATE media_items SET first_air_date='2010-05-02', last_air_date='2012-01-08', poster_path='https://image.example/show.jpg' WHERE content_id=$1`, series)
+	exec(`UPDATE media_items SET poster_path='tmdb/movies/11/poster/original.r1.webp' WHERE content_id=$1`, movieA)
 	person := time.Now().UnixNano() % 1_000_000_000_000
 	exec(`INSERT INTO people (id,name,tmdb_id) VALUES ($1,$2,'1158'), ($1+1,$3,'')`, person, p+"-actor", p+"-director")
 	exec(`INSERT INTO item_people (id,content_id,person_id,kind,character,sort_order) VALUES
@@ -232,6 +233,13 @@ func checkAdminListingItems(t *testing.T, fx adminListingFixture, ep, movie, sho
 		movie.RatingRTCritic == nil || *movie.RatingRTCritic != 0 || movie.RatingTMDB != nil || movie.Cast != nil || movie.Crew != nil ||
 		movie.ReleaseDate == nil || *movie.ReleaseDate != "1999-07-02" || movie.AirDate != nil {
 		t.Fatalf("movie metadata = %+v", movie)
+	}
+	// An episode carries its series' poster, as the session row does.
+	if movie.PosterPath != "tmdb/movies/11/poster/original.r1.webp" || movie.PosterOwnerID != fx.movieA ||
+		show.PosterPath != "https://image.example/show.jpg" || show.PosterOwnerID != fx.series ||
+		ep.PosterPath != show.PosterPath || ep.PosterOwnerID != fx.series {
+		t.Fatalf("posters = movie %q/%q, series %q/%q, episode %q/%q", movie.PosterPath, movie.PosterOwnerID,
+			show.PosterPath, show.PosterOwnerID, ep.PosterPath, ep.PosterOwnerID)
 	}
 	if show.FirstAirDate == nil || *show.FirstAirDate != "2010-05-02" || show.LastAirDate == nil || *show.LastAirDate != "2012-01-08" {
 		t.Fatalf("series dates = %+v", show)

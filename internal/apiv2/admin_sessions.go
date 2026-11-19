@@ -32,7 +32,7 @@ type AdminPlaybackSession struct {
 	EpisodeName              string   `json:"episode_name,omitempty"`
 	SeasonNumber             *int     `json:"season_number,omitempty"`
 	EpisodeNumber            *int     `json:"episode_number,omitempty"`
-	PosterURL                string   `json:"poster_url,omitempty" format:"uri-reference"`
+	PosterURL                string   `json:"poster_url,omitempty" format:"uri-reference" doc:"Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent only when there is no poster"`
 	PlayMethod               string   `json:"play_method"`
 	ReportingNode            string   `json:"reporting_node"`
 	NodeDisplayName          string   `json:"node_display_name,omitempty"`

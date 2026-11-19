@@ -444,26 +444,31 @@ type Dependencies struct {
 	AdminProfileSections AdminProfileSectionService
 	// Requests serves media requests and the discovery surface
 	// (*requests.Service, the value *handlers.RequestsHandler wraps).
-	AdminSubtitleInspection            AdminSubtitleInspectionService
-	AdminRequests                      handlers.RequestService
-	Requests                           MediaRequestService
-	RequestLifecycle                   RequestLifecycleService
-	WatchProviders                     WatchProviderService
-	HistoryImports                     HistoryImportService
-	AdminHistoryImports                AdminHistoryImportService
-	AdminSubtitleList                  AdminSubtitleListService
-	AdminSubtitleMetadata              AdminSubtitleMetadataService
-	AdminSubtitleBytes                 AdminSubtitleBytesService
-	AdminSubtitleDelete                AdminSubtitleDeleteService
-	AdminAPIKeys                       AdminAPIKeyService
-	PersonalAPIKeys                    PersonalAPIKeyService
-	PolicyCapability                   PolicyCapabilityService
-	Branding                           BrandingService
-	OverlayImages                      OverlayImageService
-	ArtworkStore                       blobstore.Store
-	ArtworkBackend                     string
-	ArtworkSigner                      *artworkurl.Signer
-	ArtworkRepair                      ArtworkRepairService
+	AdminSubtitleInspection AdminSubtitleInspectionService
+	AdminRequests           handlers.RequestService
+	Requests                MediaRequestService
+	RequestLifecycle        RequestLifecycleService
+	WatchProviders          WatchProviderService
+	HistoryImports          HistoryImportService
+	AdminHistoryImports     AdminHistoryImportService
+	AdminSubtitleList       AdminSubtitleListService
+	AdminSubtitleMetadata   AdminSubtitleMetadataService
+	AdminSubtitleBytes      AdminSubtitleBytesService
+	AdminSubtitleDelete     AdminSubtitleDeleteService
+	AdminAPIKeys            AdminAPIKeyService
+	PersonalAPIKeys         PersonalAPIKeyService
+	PolicyCapability        PolicyCapabilityService
+	Branding                BrandingService
+	OverlayImages           OverlayImageService
+	ArtworkStore            blobstore.Store
+	ArtworkBackend          string
+	ArtworkSigner           *artworkurl.Signer
+	ArtworkRepair           ArtworkRepairService
+	// ItemPosters mints and checks the admin poster URLs (admin session rows,
+	// listAdminCatalogItems) that getItemPoster serves.
+	ItemPosters                        *artworkurl.ItemPosters
+	ItemPosterSource                   ItemPosterSource
+	RemotePosters                      RemotePosterFetcher
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
 	PasswordResets                     PasswordResetService
