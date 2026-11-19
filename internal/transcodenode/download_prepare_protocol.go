@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -48,6 +49,8 @@ func ProtocolDownloadPreparation(schemas huma.Registry) workerprotocol.Operation
 	for _, status := range []string{"422", "503"} {
 		op.Responses[status].Headers = map[string]*huma.Param{ToneMapExecutionErrorHeader: {Description: "Bounded tone-map refusal code when available; not present on all failures.", Schema: &huma.Schema{Type: huma.TypeString}}}
 	}
+	op = withJobCapRefusal(op, "a request for an artifact the node is preparing or has prepared")
+	op.Description += " A node that declares a prepared-download budget refuses a new preparation once its last measurement of the directory reaches it, with 503 and " + nodepool.NodeRefusalHeader + ": " + nodepool.RefusalStorageFull + "."
 	return op
 }
 

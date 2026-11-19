@@ -107,6 +107,9 @@ func newFakeNodeCore(t *testing.T, key string) *fakeNodeCore {
 	mux.HandleFunc("GET "+nodecontrol.PathConfig, func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(core.doc)
 	})
+	mux.HandleFunc("PUT "+nodecontrol.PathRegistration, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(nodecontrol.RegistrationResult{Node: core.doc.Node, EnvManaged: []string{}})
+	})
 	mux.HandleFunc("POST "+nodecontrol.PathLogs, func(w http.ResponseWriter, r *http.Request) {
 		var batch nodecontrol.LogBatch
 		_ = json.NewDecoder(r.Body).Decode(&batch)

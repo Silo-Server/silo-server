@@ -2912,29 +2912,20 @@ func (s *Scanner) reconcileRetiredNoVideoFile(ctx context.Context, folder *model
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {
-	if _, err := fspath.Stat(filePath); err == nil {
-		return false, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return true, fmt.Errorf("stat media file %s: %w", filePath, err)
+	if gone, err := mediaFileGone(filePath); err != nil || !gone {
+		return err != nil, err
 	}
 	if s == nil || s.fileRepo == nil || folder == nil {
 		return true, fmt.Errorf("reconcile vanished file: scanner repositories not configured")
 	}
-
-	file, err := s.fileRepo.GetByPath(ctx, filePath)
-	if errors.Is(err, ErrFileNotFound) {
+	outcome, err := s.markVanishedFile(ctx, folder, filePath)
+	switch {
+	case err != nil:
+		return true, err
+	case outcome == vanishedFileRestored:
+		return false, nil
+	case outcome == vanishedFileUncataloged:
 		return true, nil
-	}
-	if err != nil {
-		return true, fmt.Errorf("loading vanished media file %s: %w", filePath, err)
-	}
-	if file.MediaFolderID != folder.ID {
-		return true, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
-	}
-	if file.MissingSince == nil {
-		if err := s.fileRepo.MarkMissing(ctx, file.ID, file.FilePath, time.Now().UTC()); err != nil && !errors.Is(err, ErrFileNotFound) {
-			return true, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
-		}
 	}
 	if _, _, _, err := s.sweepMissingAndReconcile(ctx, folder, false); err != nil {
 		return true, err
@@ -2948,6 +2939,73 @@ func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *mod
 		s.reconcileMissingEbookEnrichment(ctx, folder.ID)
 	}
 	return true, nil
+}
+
+// mediaFileGone reports whether no file exists at filePath.
+func mediaFileGone(filePath string) (bool, error) {
+	_, err := fspath.Stat(filePath)
+	switch {
+	case err == nil:
+		return false, nil
+	case errors.Is(err, os.ErrNotExist):
+		return true, nil
+	default:
+		return true, fmt.Errorf("stat media file %s: %w", filePath, err)
+	}
+}
+
+type vanishedFileOutcome int
+
+const (
+	vanishedFileNeedsSweep  vanishedFileOutcome = iota // marked missing or already missing
+	vanishedFileRestored                               // the file is back on disk
+	vanishedFileUncataloged                            // no row records the path
+)
+
+// markVanishedFile marks missing the row of a file found gone from disk.
+//
+// The file can come back once it is checked, and a single-file scan of a book
+// can then see its row unchanged and skip it before this mark. That scan
+// writes the row (confirmUnchangedFiles), so only a row written before the
+// check is marked. Any other write since the check also leaves the row
+// unmarked, so the check runs once more with a new time: a file still gone
+// is then marked. If the row is written again before that mark too, the scan
+// fails rather than report success with the file still listed.
+func (s *Scanner) markVanishedFile(ctx context.Context, folder *models.MediaFolder, filePath string) (vanishedFileOutcome, error) {
+	const attempts = 2
+	for attempt := 1; attempt <= attempts; attempt++ {
+		checkedAt, err := s.scanInventoryTime(ctx)
+		if err != nil {
+			return vanishedFileNeedsSweep, fmt.Errorf("reconcile vanished file: %w", err)
+		}
+		if gone, err := mediaFileGone(filePath); err != nil {
+			return vanishedFileNeedsSweep, err
+		} else if !gone {
+			return vanishedFileRestored, nil
+		}
+		file, err := s.fileRepo.GetByPath(ctx, filePath)
+		if errors.Is(err, ErrFileNotFound) {
+			return vanishedFileUncataloged, nil
+		}
+		if err != nil {
+			return vanishedFileNeedsSweep, fmt.Errorf("loading vanished media file %s: %w", filePath, err)
+		}
+		if file.MediaFolderID != folder.ID {
+			return vanishedFileNeedsSweep, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
+		}
+		if file.MissingSince != nil {
+			return vanishedFileNeedsSweep, nil
+		}
+		err = s.fileRepo.MarkMissingWrittenBefore(ctx, file.ID, file.FilePath, time.Now().UTC(), checkedAt)
+		if errors.Is(err, ErrFileNotFound) {
+			continue
+		}
+		if err != nil {
+			return vanishedFileNeedsSweep, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
+		}
+		return vanishedFileNeedsSweep, nil
+	}
+	return vanishedFileNeedsSweep, fmt.Errorf("marking vanished media file %s missing: its row changed during each of %d attempts", filePath, attempts)
 }
 
 func (s *Scanner) syncVanishedVideoQueues(ctx context.Context, folderID int, filePath string) error {

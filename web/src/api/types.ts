@@ -3987,6 +3987,8 @@ export interface PluginCapability {
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
   post_logout_redirect_url?: string;
+  /** A scheduled_task.v1 capability: its manifest default schedule, when the server can run it. */
+  default_schedule?: TriggerConfig;
   /** A request_router.v1 capability: the request server fields its plugin can do without. */
   request_router?: { api_key_optional: boolean; base_url_optional: boolean };
 }
@@ -4486,6 +4488,12 @@ export interface StreamNode {
    * servers.
    */
   source_access?: NodeSourceAccess;
+  /**
+   * Update-body field names the node declares from its own environment. The
+   * server refuses a change to any of them, so the editor shows them
+   * read-only. Absent on servers that predate node declarations.
+   */
+  env_managed?: string[];
 }
 
 /** How a transcode node reads source media. */

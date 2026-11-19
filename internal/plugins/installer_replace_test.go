@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,13 +82,14 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	if len(store.createInputs) != 0 {
 		t.Fatalf("Create() called %d times, want 0", len(store.createInputs))
 	}
-	if len(store.saveArchiveIDs) != 1 || store.saveArchiveIDs[0] != 15 {
-		t.Fatalf("SaveArchive() ids = %#v, want [15]", store.saveArchiveIDs)
-	}
-	assertStoredPluginArchive(t, store.saveArchiveBytes, store.saveArchiveManifest, binaryData)
 	if len(store.updateIDs) != 1 || store.updateIDs[0] != 15 {
 		t.Fatalf("Update() ids = %#v, want [15]", store.updateIDs)
 	}
+	archive := store.updateInputs[0].Archive
+	if archive == nil {
+		t.Fatal("Update() stored no archive with the replacement")
+	}
+	assertStoredPluginArchive(t, archive.Bytes, archive.ManifestJSON, binaryData)
 	if result.Installation.ID != 15 {
 		t.Fatalf("result installation id = %d, want 15", result.Installation.ID)
 	}
@@ -257,4 +259,88 @@ func (s *recordingInstallationStore) Update(_ context.Context, id int, input Upd
 func (s *recordingInstallationStore) Delete(_ context.Context, id int) error {
 	s.deleteIDs = append(s.deleteIDs, id)
 	return nil
+}
+
+// A replacement applies only to the installation it was prepared for. An
+// automatic update still downloading when an admin installs a newer release
+// is refused once it finishes, and the newer release, its stored archive and
+// its files stay.
+func TestInstallerReplacementRefusedAfterInstallationChangedDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := t.Context()
+	store := NewInstallationStore(pool)
+	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
+	pluginID := "silo.test.replace-race" + time.Now().UTC().Format("-20060102150405.000000000")
+
+	release := func(version string) ([]byte, string, *pluginv1.PluginManifest) {
+		binary := []byte("#!/bin/sh\n# " + version + "\nexit 0\n")
+		checksum := sha256Hex(binary)
+		manifest := packageErrorTestManifest(pluginID, version)
+		manifest.Checksum = checksum
+		return binary, checksum, manifest
+	}
+	binary, checksum, manifest := release("1.0.0")
+	installed, err := installer.installBinary(ctx, binary, checksum, manifest, nil, nil, unsignedSignature)
+	if err != nil {
+		t.Fatalf("install 1.0.0: %v", err)
+	}
+	id := installed.Installation.ID
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id)
+	})
+	snapshot, err := store.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binary, checksum, manifest = release("1.1.0")
+	stale, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature)
+	if err != nil {
+		t.Fatalf("prepare 1.1.0: %v", err)
+	}
+	binary, checksum, manifest = release("2.0.0")
+	newer, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature)
+	if err != nil {
+		t.Fatalf("prepare 2.0.0: %v", err)
+	}
+	applied, err := newer.Apply(ctx)
+	if err != nil {
+		t.Fatalf("apply 2.0.0: %v", err)
+	}
+
+	if _, err := stale.Apply(ctx); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("apply 1.1.0 after 2.0.0 = %v, want ErrInstallationChanged", err)
+	}
+	current, err := store.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Version != "2.0.0" || current.InstallPath != applied.BinaryPath {
+		t.Fatalf("installation = %s at %s, want 2.0.0 at %s", current.Version, current.InstallPath, applied.BinaryPath)
+	}
+	archive, err := store.GetArchive(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archive.Checksum != checksum {
+		t.Fatalf("stored archive checksum = %s, want the 2.0.0 package's %s", archive.Checksum, checksum)
+	}
+	// The guard holds for a write that changes no column, too.
+	staleArchive := &ArchiveInput{ManifestJSON: archive.ManifestJSON, Checksum: "stale", Bytes: archive.Bytes}
+	if err := store.Update(ctx, id, UpdateInstallationInput{Archive: staleArchive, IfInstallPath: &snapshot.InstallPath}); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("archive-only write guarded on the old path = %v, want ErrInstallationChanged", err)
+	}
+	if archive, err := store.GetArchive(ctx, id); err != nil || archive.Checksum != checksum {
+		t.Fatalf("stored archive after a refused archive-only write = %+v, %v; want the 2.0.0 package", archive, err)
+	}
+	if _, err := os.Stat(applied.BinaryPath); err != nil {
+		t.Fatalf("2.0.0 binary: %v", err)
+	}
+	staleRoot, err := pluginVersionRoot(installer.baseDir, pluginID, "1.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(staleRoot); len(entries) != 0 {
+		t.Fatalf("refused 1.1.0 left %d install dirs behind", len(entries))
+	}
 }

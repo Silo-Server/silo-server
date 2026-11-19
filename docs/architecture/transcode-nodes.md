@@ -198,13 +198,110 @@ cipher or event bus.
 | `SILO_NODE_KEY` | Required. A malformed key refuses startup (`transcodeNodeKey`). |
 | `PORT` | Listen port, default `8080`. |
 | `SILO_NODE_DRAIN_TIMEOUT` | See [node drain](node-drain.md). |
-| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. |
+| `SILO_NODE_NAME`, `SILO_NODE_URL`, `SILO_NODE_GROUP`, `SILO_NODE_MAX_TRANSCODES`, `SILO_NODE_SOURCE_ACCESS`, `SILO_NODE_HW_ACCEL`, `SILO_NODE_HW_DEVICE`, `SILO_NODE_DOWNLOAD_ARTIFACT_DIR`, `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | Optional. The node's declaration of its own row; see [Registration](#registration). A bad value refuses startup, naming the variable (`nodedeclare.FromEnv`). |
+| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. `NODE_URL` and `NODE_NAME` stay ignored although the node declares a URL and name: an env file shared with a proxy sets them, and honoring them would rewrite rows on upgrade. |
 
-The node reads its configuration, retrying with backoff from one second to 30
+Before its first configuration read the node sends its declaration
+([Registration](#registration)), so the configuration it loads already
+reflects it. The node then reads its configuration, retrying with backoff from one second to 30
 seconds until a read succeeds or it is signalled, and only then opens its
 listener. A configuration that names another node id than the key is refused
 (`Client.FetchConfig`). Each call to the core has a 10-second timeout
 (`nodecontrol.Client`).
+
+## Registration
+
+`PUT /api/internal/nodes/self/registration` (`nodecontrol.Server.HandleRegistration`)
+carries the configuration the node declares from its environment,
+`nodecontrol.Registration`. Every field is optional and absent means not
+declared:
+
+```json
+{
+  "name": "gpu-1",
+  "url": "http://10.0.0.5:8082",
+  "group": "rack-a",
+  "max_jobs": 0,
+  "source_access": "core",
+  "hw_accel_override": "vaapi",
+  "hw_device_override": "/dev/dri/renderD128",
+  "download_artifact_dir_override": "/srv/artifacts",
+  "download_artifact_max_bytes_override": 0
+}
+```
+
+The core applies it to the row the key names, never one named in the body,
+through the admin node service (`NodeHandler.DeclareNode`, then
+`nodepool.AdminConfigurationStore.Declare`): each field is validated as an
+administrator update is, a changed URL must be free among transcode nodes
+under the canonical-URL lock, the fields are written, and `env_managed`
+becomes exactly the declared field names in one transaction. A changed row
+then reaches every API server's registry and pools and every proxy's registry
+as an administrator's edit does; the core does not ask the node to reload,
+since it reads its configuration next. An empty body unlocks every field and
+changes nothing else, which is what a node with no declaration variables sends.
+A body with a field the core does not know is refused whole, so a misspelled
+field cannot read as an empty declaration.
+
+The table is for a node that declares something. A node that declares nothing
+sends its empty body once and starts whatever the answer: a failure is tried
+again every 30 seconds in the background, a missing route included, since a
+gateway that briefly refused the route looks the same. It logs once, at info
+level, that the fields stay read-only until the core takes it.
+
+The core also answers `404` when the node's row was deleted between
+authentication and the write. The node cannot tell that from a missing route
+and treats both alike; its next configuration read then gets `401`.
+
+| Answer | Body | Node |
+|---|---|---|
+| `200` | `{"node": {"id", "name", "url"}, "env_managed": [...], "changed": bool}` | Continues to the configuration read. |
+| `422` | `{"reason": "invalid", "field", "detail"}` | Exits, naming the variable for `field`; `field` is empty for a body the core could not read. |
+| `409` | `{"reason": "url_taken", "field": "url", "detail"}` | Exits, naming `SILO_NODE_URL`. |
+| `401`, `429`, `5xx` other than `501`, no answer | text | Retries with the configuration read's backoff, 1 to 30 seconds. |
+| `403`, `404`, `405`, `501` (a core without the route, or a gateway in front of it that blocks the request) | text | Starts, warns once, and offers the declaration every 30 seconds until it is accepted, then rereads its configuration. |
+
+The route has its own per-node budget on each API replica, far below the
+background routes': a burst of six, refilled one every ten seconds, and a 16
+KiB body. A changed declaration commits a configuration revision and makes
+every API server reload its node pools, so a node cannot repeat it quickly.
+Changing a variable takes a restart.
+
+A node that declared something sends its declaration again every minute while
+it runs (`nodeconfig.MaintainDeclaration`, `DeclarationRefreshInterval`), so a
+row or an `env_managed` list changed on the core, by SQL or otherwise, is put
+back within a minute without a restart. `changed` in the answer says whether
+it was, and the node logs it. An unchanged declaration commits no
+configuration revision, moves no pool generation, publishes no
+`node_pool_changed` and asks no server to reload: it costs one transaction
+that rewrites the node's row with its own values and leaves `env_managed`
+alone. One send a minute is a sixth of the budget's refill, so restarts keep
+the burst. A refusal on a re-send never stops the node: it logs it once (again
+only after a later send succeeds) and keeps running with its own values. A
+node that started against a core without the route keeps offering it every 30
+seconds, as before, and moves to the one-minute cadence once it is taken.
+
+## What the node enforces
+
+The row is what the core's planner and the node editor read, and whoever runs
+the core can change it. A node can be run by someone else (a rented or lent
+GPU), so the node itself holds the values it acts on to what its environment
+says, whatever its row or its configuration document says:
+
+| Variable | Enforced by |
+|---|---|
+| `SILO_NODE_MAX_TRANSCODES` | The node: it refuses new work past the cap ([worker protocol](worker-http-protocol.md)). The planner also reads the row's `max_jobs`. |
+| `SILO_NODE_HW_ACCEL` | The node: `nodeconfig.Remote` uses it over the document's `hw_accel`, and a start runs with it whatever backend the request names (`Server.jobHWAccel`). The core may still ask for `none`. Only a node that declares `auto` lets a hardware tone map name its backend, chosen from the node's own capability report; a node that declares a backend runs that one for a hardware tone map too. |
+| `SILO_NODE_HW_DEVICE` | The node: used over the document's `hw_device`. |
+| `SILO_NODE_SOURCE_ACCESS` | The node: `Remote.SourceAccess` returns it over the document's. With `local` the node never fetches source bytes over HTTP; with `core` it never opens a local path. The core still grants and serves sources either way. |
+| `SILO_NODE_DOWNLOAD_ARTIFACT_DIR` | The node: used over the document's `artifact_dir`. |
+| `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | The node, as a ceiling: it refuses a new preparation once its last measurement of the directory reaches the budget. Clean-up and the core's own budget check still read the row. |
+| `SILO_NODE_GROUP` | The row only. A group is placement on the main server's side; the node does not act on it. |
+| `SILO_NODE_NAME`, `SILO_NODE_URL` | The row only. They are the node's identity and address in the main server's pools. The node cannot stop the main server from naming or addressing it otherwise; the minute re-send puts them back. |
+
+The node never sees which planner, if any, sends it work, so the row-only
+fields are as strong as the main server's operator allows. The values the
+node enforces hold even against a main server that ignores the row.
 
 ## Configuration
 
@@ -349,7 +446,7 @@ Each API replica gives each node three in-memory token buckets and answers
 `429` with `Retry-After: 1` past any of them:
 
 - **Background** (`nodecontrol.(*Server).LimitNode`): 20 requests a second with
-  bursts of 60 across config, report, logs, health-changed and revoke-recipes.
+  bursts of 60 across config, registration, report, logs, health-changed and revoke-recipes.
   A healthy node sends about one and a half a second.
 - **Viewer path** (`LimitNodePlayback`): 200 requests a second with bursts of
   600 across resolve and sources/open, so a burst of one never refuses the
@@ -931,6 +1028,7 @@ the trickplay, media sample and chapter routes.
 | Grant reaches `MaxGrantAge` | Renewal and reads answer `403`; the job fails like any refused renewal. |
 | Relayed text burn-in cannot be staged | The node answers the start `409` and the start runs elsewhere. |
 | Node binary from before this design | Health has no `node_control_version`, so the node is unhealthy and never placed; it could not verify the core's signatures anyway. |
+| Current node, core from before node declarations | The registration route answers `404`; the node starts on its row as the administrator left it and offers its declaration every 30 seconds (see [Registration](#registration)). |
 | Current node, core from before this design | The node's first configuration read never succeeds, so it never opens its listener and the core sees it as unreachable. |
 
 ## Security properties

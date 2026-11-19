@@ -1207,8 +1207,8 @@ func main() {
 		}()
 	}
 
-	// The plugin event dispatcher observes what this process publishes, so
-	// each event reaches plugins once however many nodes receive it.
+	// Observers see what this process publishes, so work that must happen once
+	// per event runs on the node that produced it, with or without Redis.
 	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
 	// Tell the servers already running that the environment changed stored
 	// settings, as an admin save does, so they reload now rather than at the
@@ -1274,14 +1274,22 @@ func main() {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, redisClient)
 		streamTelemetryRegistry.Start(appCtx)
 
-		// Resolved before the watcher starts: NODE_URL is this process's
-		// stream_nodes identity, and the watcher needs it on its very first
-		// load to overlay the node's own acceleration overrides.
-		// config.LoadBootstrap refuses a proxy without it.
-		nodeURL := os.Getenv("NODE_URL")
-		nodeName := os.Getenv("NODE_NAME")
+		// Resolved before the watcher starts: SILO_NODE_URL (or NODE_URL) is
+		// this process's stream_nodes identity, and the watcher needs it on
+		// its very first load to overlay the node's own acceleration
+		// overrides. config.LoadBootstrap refuses a proxy without it.
+		nodeURL, givenName := proxyNodeIdentity(os.Getenv)
+		nodeName := givenName
 		if nodeName == "" {
 			nodeName = mode
+		}
+		// The proxy writes what it declares from its environment, and with
+		// SILO_NODE_REGISTER adds its own row, before the watcher first
+		// reads that row.
+		declaredRow, declareErr := declareProxyNode(appCtx, pool, eventBus, proxyDeclarationIdentity(nodeURL, givenName, nodeName, proxyRegistersItself()))
+		if declareErr != nil {
+			slog.Error("proxy cannot start: its node declaration was not applied", "error", declareErr)
+			os.Exit(1)
 		}
 
 		bootstrap := nodeconfig.BootstrapOverrides{
@@ -1295,6 +1303,9 @@ func main() {
 		}
 		watcher := nodeconfig.NewWatcher(pool, dataCipher, eventBus, bootstrap)
 		watcher.OnLoad(normalizeLoadedConfig)
+		if declaredRow != nil {
+			watcher.PinNodeRow(declaredRow.ID, declaredRow.URL)
+		}
 		if err := watcher.Start(appCtx); err != nil {
 			slog.Error("config watcher start failed", "error", err)
 			os.Exit(1)
@@ -2184,7 +2195,6 @@ func main() {
 		if err := dispatcher.Start(appCtx); err != nil {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
-		eventBus.ObservePublishes(dispatcher.ObservePublish)
 		defer dispatcher.Stop()
 		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
 		// before PublishLifecycleChanges was registered, so this call is the
@@ -2721,6 +2731,9 @@ func main() {
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
+		if pluginService != nil {
+			notificationSystem.SetPluginChannelHost(pluginChannelHost{plugins: pluginService})
+		}
 
 		if libraryIngestExecutor != nil {
 			libraryIngestExecutor.SetAvailabilityDetector(notificationSystem.Detector)
@@ -3374,6 +3387,7 @@ func main() {
 		triggerRepo := taskrepository.NewPgTriggerRepository(deps.DB)
 		historyRepo := taskrepository.NewPgExecutionRepository(deps.DB)
 		taskMgr := taskmanager.New(triggerRepo, historyRepo, triggers.New, slog.Default())
+		taskMgr.SetFiringClaims(taskrepository.NewPgFiringClaims(deps.DB))
 		if deps.EventsHub != nil {
 			taskMgr.AddObserver(evt.NewTaskObserver(deps.EventsHub))
 		}
@@ -3397,7 +3411,7 @@ func main() {
 		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
 		boxSetSyncer := boxsets.NewSyncer(catalog.NewBoxSetRepository(deps.DB), tmdbClient)
 		if metadataService != nil {
-			boxSetSyncer.WithImages(metadataService.AutoImageCacher)
+			boxSetSyncer.WithImages(metadataService.AutoImageCacher).WithFallbackLanguage(metadataService.FallbackLanguage)
 		}
 		taskMgr.Register(tasks.NewSyncMovieBoxSetsTask(deps.DB, boxSetSyncer))
 		go boxsets.Watch(appCtx, deps.EventsHub, func() {

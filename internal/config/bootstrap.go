@@ -84,8 +84,9 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 	// selects the stream_nodes row whose acceleration overrides the proxy
 	// adopts. A URL guessed from the listen port would give two proxies on the
 	// same port one identity.
-	if mode == modeProxy && os.Getenv("NODE_URL") == "" {
-		return nil, fmt.Errorf("MODE=%s needs NODE_URL, this node's own URL, which matches it to its entry on the main server", mode)
+	// SILO_NODE_URL is the preferred spelling; NODE_URL still works.
+	if mode == modeProxy && os.Getenv("SILO_NODE_URL") == "" && os.Getenv("NODE_URL") == "" {
+		return nil, fmt.Errorf("MODE=%s needs SILO_NODE_URL (or NODE_URL), this node's own URL, which matches it to its entry on the main server", mode)
 	}
 
 	redisURL := os.Getenv("REDIS_URL")

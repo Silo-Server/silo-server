@@ -41,6 +41,7 @@ type pluginClient interface {
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
 	WatchSyncProvider(capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
 	NetworkAccessProvider(capabilityID string) (*pluginhost.NetworkAccessProviderClient, error)
+	NotificationChannel(capabilityID string) (*pluginhost.NotificationChannelClient, error)
 }
 
 type Host interface {
@@ -314,15 +315,28 @@ func (s *Service) InstallRemote(ctx context.Context, req InstallArchiveRequest) 
 }
 
 func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest) (*InstallResult, error) {
+	return s.installCatalog(ctx, req, nil)
+}
+
+// installCatalog installs req. A non-nil expected is the installation the
+// caller chose req for; otherwise it is read before the catalog resolves. The
+// replacement is prepared against it, so another install that lands while the
+// catalog resolves or the package downloads refuses this one rather than
+// being replaced by it.
+func (s *Service) installCatalog(ctx context.Context, req InstallCatalogRequest, expected *Installation) (*InstallResult, error) {
+	existing := expected
+	if existing == nil {
+		var err error
+		existing, err = s.existingInstallationByPluginID(ctx, req.PluginID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	target, err := s.catalog.ResolveInstall(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	existing, err := s.existingInstallationByPluginID(ctx, req.PluginID)
-	if err != nil {
-		return nil, err
-	}
 	var result *InstallResult
 	switch {
 	case existing != nil:
@@ -364,11 +378,11 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 		return nil, fmt.Errorf("plugin %q has no repository_id, cannot update from catalog", installation.PluginID)
 	}
 
-	_, err = s.InstallCatalog(ctx, InstallCatalogRequest{
+	_, err = s.installCatalog(ctx, InstallCatalogRequest{
 		RepositoryID: *installation.RepositoryID,
 		PluginID:     installation.PluginID,
 		Version:      targetVersion,
-	})
+	}, installation)
 	if err != nil {
 		return nil, fmt.Errorf("update plugin %q to %s: %w", installation.PluginID, targetVersion, err)
 	}
@@ -471,14 +485,24 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 
 // replaceStopped stops the existing installation's process and runs replace.
 // Callers check the new package before calling it, so a refused package
-// never stops the running plugin. When replace fails the row still names the
-// old release but its process is gone: a lazily started plugin comes back on
-// its next RPC, while a resident only restarts on a lifecycle reconcile, so
-// the hooks run before the error is returned. On success the caller runs them
-// after the row has changed. The replacement leaves the row's enabled flag
-// alone, so an admin's switch made while the package downloaded stands, and
-// the result reports the flag as stored.
+// never stops the running plugin. An installation that another install or
+// update changed while the package downloaded is refused before its newer
+// process is stopped, and replace itself refuses one changed after that
+// check.
+//
+// When replace fails the row still names the old release but its process is
+// gone: a lazily started plugin comes back on its next RPC, while a resident
+// only restarts on a lifecycle reconcile, so the hooks run before the error
+// is returned. On success the caller runs them after the row has changed.
+// The replacement leaves the row's enabled flag alone, so an admin's switch
+// made while the package downloaded stands, and the result reports the flag
+// as stored.
 func (s *Service) replaceStopped(ctx context.Context, existing *Installation, replace func() (*InstallResult, error)) (*InstallResult, error) {
+	if s.installations != nil {
+		if err := checkUnchanged(ctx, s.installations.GetByID, existing); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.stopInstallationIfRunning(existing); err != nil {
 		return nil, err
 	}
@@ -798,6 +822,20 @@ func (s *Service) EventConsumerClient(
 		return nil, err
 	}
 	return client.EventConsumer(capabilityID)
+}
+
+// NotificationChannelClient returns the installation's notification_channel.v1
+// client for capabilityID, starting the plugin when needed.
+func (s *Service) NotificationChannelClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.NotificationChannelClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.NotificationChannel(capabilityID)
 }
 
 func (s *Service) AuthProviderClient(

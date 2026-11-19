@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, v2ErrorText } from "@/api/v2/request";
 import { captureSessionIdentity, isSessionIdentityCurrent } from "@/api/client";
 import { PasswordInput } from "@/components/PasswordInput";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
@@ -474,11 +474,7 @@ function DisconnectDialog({
         // Already gone; the list refreshes.
         onClose();
       } else {
-        setError(
-          failure instanceof Error
-            ? failure.message
-            : t("web.settings.accountSignIn.error.disconnectFailed"),
-        );
+        setError(v2ErrorText(failure, t("web.settings.accountSignIn.error.disconnectFailed")));
       }
     }
   }

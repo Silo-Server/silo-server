@@ -226,6 +226,12 @@ func (s *AdminConfigurationStore) Update(ctx context.Context, id int, input Upda
 	if err != nil {
 		return nil, nil, err
 	}
+	// A field the node declares from its environment is the node's: an
+	// update that would change it is refused, and rolled back with the rest.
+	// One that restates it, as a full-form save does, goes through.
+	if changed := changedEnvManagedFields(previous, node); len(changed) > 0 {
+		return nil, nil, &EnvManagedFieldsError{Fields: changed}
+	}
 	node.AdminRevision, err = readConfigurationRevision(ctx, tx, id)
 	if err != nil {
 		return nil, nil, err
