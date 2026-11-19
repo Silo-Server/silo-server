@@ -287,6 +287,12 @@
       "value": "このメールアドレスはすでに使用されています。"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "この値はすでに使用されています。"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -101733,13 +101739,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "コレクションとルール"
+      "value": "コレクションとスマート行"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "コレクション、またはルールで作成した行"
+      "value": "コレクション、またはルールで作成するスマート行"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -101853,7 +101859,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "ジャンルや年代などのルールで行を作成します。"
+      "value": "スマートコレクションに似ていますが、行のみを作成します。ジャンルや年代などのルールでタイトルを選びます。"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -102063,7 +102069,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "ルールに一致する作品"
+      "value": "スマート行"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -114113,34 +114119,6 @@
       "value": "をウォッチリストに追加"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "を視聴したあなたに"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "と"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "を視聴したあなたに"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -114199,6 +114177,34 @@
     {
       "type": 0,
       "value": "のリクエストを送信中"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "に類似"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "に類似"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -120150,6 +120156,12 @@
       "value": "」を追加しました"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "保存済みのシークレットをクリア"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -120190,6 +120202,12 @@
     {
       "type": 0,
       "value": "送信先はまだありません。"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "保存済みのシークレットを維持"
     }
   ],
   "web.settings.notifications.destinations.kind": [

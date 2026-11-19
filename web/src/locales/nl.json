@@ -287,6 +287,12 @@
       "value": "Dat e-mailadres is al in gebruik."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Dit is al in gebruik."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -111404,13 +111410,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Collecties en regels"
+      "value": "Collecties en slimme rijen"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Je collecties, of rijen opgebouwd uit regels"
+      "value": "Je collecties, of slimme rijen opgebouwd uit regels"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111524,7 +111530,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Bouw een rij op uit regels, zoals genre en decennium."
+      "value": "Net als een slimme collectie, maar alleen als rij. Kies titels met regels zoals genre en decennium."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111734,7 +111740,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titels die aan regels voldoen"
+      "value": "Slimme rij"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124631,42 +124637,6 @@
       "value": " toevoegen aan je kijklijst"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Omdat je "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " hebt gekeken"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Omdat je "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " en "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " hebt gekeken"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -124729,6 +124699,34 @@
     {
       "type": 0,
       "value": " wordt verzonden"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Vergelijkbaar met "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Vergelijkbaar met "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " en "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -131057,6 +131055,12 @@
       "value": "” toegevoegd"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Opgeslagen geheim wissen"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131097,6 +131101,12 @@
     {
       "type": 0,
       "value": "Nog geen bestemmingen."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Opgeslagen geheim behouden"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -287,6 +287,12 @@
       "value": "Ta e-poštni naslov je že v uporabi."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "To je že v uporabi."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -132732,13 +132738,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Zbirke in pravila"
+      "value": "Zbirke in pametne vrstice"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Vaše zbirke ali vrstice, sestavljene iz pravil"
+      "value": "Vaše zbirke ali pametne vrstice, sestavljene iz pravil"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -132852,7 +132858,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sestavite vrstico iz pravil, kot sta žanr in desetletje."
+      "value": "Kot pametna zbirka, vendar samo vrstica. Naslove izbere s pravili, kot sta žanr in desetletje."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -133062,7 +133068,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Naslovi, ki ustrezajo pravilom"
+      "value": "Pametna vrstica"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -147469,34 +147475,6 @@
       "value": " na svoj seznam za ogled"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Ker ste gledali: "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Ker ste gledali: "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " in "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -147563,6 +147541,34 @@
     {
       "type": 0,
       "value": " …"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Podobno naslovu "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Podobno naslovoma "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -154815,6 +154821,12 @@
       "value": "“ je dodan"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Počisti shranjeno skrivnost"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -154855,6 +154867,12 @@
     {
       "type": 0,
       "value": "Ciljev še ni."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Obdrži shranjeno skrivnost"
     }
   ],
   "web.settings.notifications.destinations.kind": [

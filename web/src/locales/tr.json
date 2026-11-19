@@ -287,6 +287,12 @@
       "value": "Bu e-posta adresi zaten kullanılıyor."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Bu zaten kullanılıyor."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -110914,13 +110920,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksiyonlar ve kurallar"
+      "value": "Koleksiyonlar ve akıllı satırlar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksiyonlarınız veya kurallarla oluşturulan satırlar"
+      "value": "Koleksiyonlarınız veya kurallarla oluşturulan akıllı satırlar"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111034,7 +111040,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Tür ve on yıl gibi kurallarla bir satır oluşturun."
+      "value": "Akıllı koleksiyon gibidir ama yalnızca bir satırdır. İçerikleri tür ve on yıl gibi kurallarla seçin."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111244,7 +111250,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Kurallara uyan içerikler"
+      "value": "Akıllı satır"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124013,34 +124019,6 @@
       "value": " içeriğini izleme listesine ekle"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " içeriğini izlediğiniz için"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " ve "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " içeriklerini izlediğiniz için"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -124099,6 +124077,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Benzer: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Benzer: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ve "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -130387,6 +130393,12 @@
       "value": "” eklendi"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Kayıtlı gizli değeri temizle"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -130427,6 +130439,12 @@
     {
       "type": 0,
       "value": "Henüz hedef yok."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Kayıtlı gizli değeri koru"
     }
   ],
   "web.settings.notifications.destinations.kind": [

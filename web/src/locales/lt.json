@@ -287,6 +287,12 @@
       "value": "Šis el. pašto adresas jau naudojamas."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Tai jau naudojama."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -134320,13 +134326,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekcijos ir taisyklės"
+      "value": "Kolekcijos ir išmaniosios eilutės"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Jūsų kolekcijos arba pagal taisykles sudarytos eilutės"
+      "value": "Jūsų kolekcijos arba pagal taisykles sudarytos išmaniosios eilutės"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -134440,7 +134446,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sudaryti eilutę pagal taisykles, pvz., žanrą ir dešimtmetį."
+      "value": "Kaip išmanioji kolekcija, bet tik eilutė. Kūrinius atrinkite pagal taisykles, pvz., žanrą ir dešimtmetį."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -134650,7 +134656,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Taisykles atitinkantys kūriniai"
+      "value": "Išmanioji eilutė"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -149313,42 +149319,6 @@
       "value": "“ į savo žiūrėjimo sąrašą"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Nes žiūrėjote „"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "“"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Nes žiūrėjote „"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "“ ir „"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "“"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -149419,6 +149389,42 @@
     {
       "type": 0,
       "value": "“…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Panašu į „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Panašu į „"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "“ ir „"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "“"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -156759,6 +156765,12 @@
       "value": "“ pridėta"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Išvalyti išsaugotą slaptąją reikšmę"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -156799,6 +156811,12 @@
     {
       "type": 0,
       "value": "Paskirties vietų dar nėra."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Palikti išsaugotą slaptąją reikšmę"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -287,6 +287,12 @@
       "value": "Địa chỉ email đó đã được sử dụng."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Giá trị này đã được sử dụng."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -112550,13 +112556,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Bộ sưu tập và quy tắc"
+      "value": "Bộ sưu tập và hàng thông minh"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Các bộ sưu tập của bạn, hoặc hàng tạo từ quy tắc"
+      "value": "Bộ sưu tập của bạn, hoặc hàng thông minh tạo từ quy tắc"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112670,7 +112676,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Tạo hàng từ quy tắc, như thể loại và thập niên."
+      "value": "Giống bộ sưu tập thông minh, nhưng chỉ là một hàng. Chọn tựa theo quy tắc như thể loại và thập niên."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112880,7 +112886,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Nội dung khớp quy tắc"
+      "value": "Hàng thông minh"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125817,34 +125823,6 @@
       "value": " vào danh sách xem của bạn"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Vì bạn đã xem "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Vì bạn đã xem "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " và "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -125911,6 +125889,34 @@
     {
       "type": 0,
       "value": "…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Tương tự "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Tương tự "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " và "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -132283,6 +132289,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Xóa khóa bí mật đã lưu"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132323,6 +132335,12 @@
     {
       "type": 0,
       "value": "Chưa có đích nào."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Giữ khóa bí mật đã lưu"
     }
   ],
   "web.settings.notifications.destinations.kind": [

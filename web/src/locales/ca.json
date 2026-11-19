@@ -287,6 +287,12 @@
       "value": "Aquesta adreça electrònica ja està en ús."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Aquest valor ja està en ús."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -121548,7 +121554,7 @@
           "value": [
             {
               "type": 0,
-              "value": "per valoració, de més alta a més baixa"
+              "value": "primer els més ben valorats"
             }
           ]
         },
@@ -121556,7 +121562,7 @@
           "value": [
             {
               "type": 0,
-              "value": "per data d’estrena, de la més recent a la més antiga"
+              "value": "primer els d’estrena més recent"
             }
           ]
         },
@@ -121564,7 +121570,7 @@
           "value": [
             {
               "type": 0,
-              "value": "per nombre de reproduccions, de més a menys"
+              "value": "primer els més reproduïts"
             }
           ]
         },
@@ -122547,13 +122553,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Col·leccions i regles"
+      "value": "Col·leccions i files intel·ligents"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Les teves col·leccions, o files creades a partir de regles"
+      "value": "Les teves col·leccions, o files intel·ligents creades a partir de regles"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122667,7 +122673,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Crea una fila a partir de regles, com ara el gènere i la dècada."
+      "value": "Com una col·lecció intel·ligent, però només és una fila. Tria títols amb regles com ara el gènere i la dècada."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122877,7 +122883,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Títols que compleixen regles"
+      "value": "Fila intel·ligent"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -136649,34 +136655,6 @@
       "value": " a la teva llista per veure"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Perquè has vist "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Perquè has vist "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " i "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136739,6 +136717,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Similar a "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Similar a "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -143550,6 +143556,12 @@
       "value": "»"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Esborra el secret desat"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143590,6 +143602,12 @@
     {
       "type": 0,
       "value": "Encara no hi ha cap destinació."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Conserva el secret desat"
     }
   ],
   "web.settings.notifications.destinations.kind": [

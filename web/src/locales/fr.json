@@ -287,6 +287,12 @@
       "value": "Cette adresse e-mail est déjà utilisée."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Cette valeur est déjà utilisée."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -120954,7 +120960,7 @@
           "value": [
             {
               "type": 0,
-              "value": "par note décroissante"
+              "value": "les mieux notés d’abord"
             }
           ]
         },
@@ -120962,7 +120968,7 @@
           "value": [
             {
               "type": 0,
-              "value": "par date de sortie décroissante"
+              "value": "les plus récemment sortis d’abord"
             }
           ]
         },
@@ -120970,7 +120976,7 @@
           "value": [
             {
               "type": 0,
-              "value": "par nombre de lectures décroissant"
+              "value": "les plus lus d’abord"
             }
           ]
         },
@@ -121941,13 +121947,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Collections et règles"
+      "value": "Collections et rangées intelligentes"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Vos collections, ou des rangées créées à partir de règles"
+      "value": "Vos collections, ou des rangées intelligentes créées à partir de règles"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122061,7 +122067,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Créez une rangée à partir de règles, comme le genre et la décennie."
+      "value": "Comme une collection intelligente, mais seulement sous forme de rangée. Choisissez les titres selon des règles comme le genre ou la décennie."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122271,7 +122277,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titres correspondant à des règles"
+      "value": "Rangée intelligente"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -135939,34 +135945,6 @@
       "value": " à votre liste à voir"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Parce que vous avez regardé "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Parce que vous avez regardé "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " et "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136029,6 +136007,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Semblable à "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Semblable à "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " et "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -142808,6 +142814,12 @@
       "value": " » ajoutée"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Effacer le secret enregistré"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -142848,6 +142860,12 @@
     {
       "type": 0,
       "value": "Aucune destination pour l’instant."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Conserver le secret enregistré"
     }
   ],
   "web.settings.notifications.destinations.kind": [

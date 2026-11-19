@@ -287,6 +287,12 @@
       "value": "Tämä sähköpostiosoite on jo käytössä."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Tämä on jo käytössä."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -112290,13 +112296,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kokoelmat ja säännöt"
+      "value": "Kokoelmat ja älykkäät rivit"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Omat kokoelmasi tai säännöistä kootut rivit"
+      "value": "Omat kokoelmasi tai säännöistä kootut älykkäät rivit"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112410,7 +112416,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Kokoa rivi säännöistä, kuten lajityypistä ja vuosikymmenestä."
+      "value": "Kuin älykäs kokoelma, mutta pelkkä rivi. Valitse nimikkeet säännöillä, kuten lajityypin ja vuosikymmenen mukaan."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112620,7 +112626,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Sääntöihin sopivat nimikkeet"
+      "value": "Älykäs rivi"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125589,34 +125595,6 @@
       "value": " katselulistallesi"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Koska katsoit kohteen "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Koska katsoit kohteet "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " ja "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -125683,6 +125661,34 @@
     {
       "type": 0,
       "value": " pyyntöä"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Samankaltainen kuin "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Samankaltainen kuin "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ja "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -132075,6 +132081,12 @@
       "value": "” lisätty"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Tyhjennä tallennettu salaisuus"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132115,6 +132127,12 @@
     {
       "type": 0,
       "value": "Ei vielä kohteita."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Säilytä tallennettu salaisuus"
     }
   ],
   "web.settings.notifications.destinations.kind": [

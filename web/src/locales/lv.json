@@ -287,6 +287,12 @@
       "value": "Šī e-pasta adrese jau tiek izmantota."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Šī vērtība jau tiek izmantota."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -124158,13 +124164,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekcijas un noteikumi"
+      "value": "Kolekcijas un viedās rindas"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Jūsu kolekcijas vai rindas, kas veidotas pēc noteikumiem"
+      "value": "Jūsu kolekcijas vai viedās rindas, kas veidotas pēc kārtulām"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -124278,7 +124284,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Veidot rindu pēc noteikumiem, piemēram, žanra un desmitgades."
+      "value": "Kā viedā kolekcija, bet tikai rinda. Atlasiet nosaukumus pēc kārtulām, piemēram, žanra un desmitgades."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -124488,7 +124494,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Nosaukumi pēc noteikumiem"
+      "value": "Viedā rinda"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -138384,42 +138390,6 @@
       "value": "” jūsu skatīšanās sarakstam"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Jo jūs skatījāties „"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "”"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Jo jūs skatījāties „"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "” un „"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "”"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -138490,6 +138460,42 @@
     {
       "type": 0,
       "value": "” pieprasījuma sūtīšana…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Līdzīgi vienumam „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Līdzīgi vienumiem „"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "” un „"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "”"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -145377,6 +145383,12 @@
       "value": "” ir pievienots"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Notīrīt saglabāto noslēpumu"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -145417,6 +145429,12 @@
     {
       "type": 0,
       "value": "Vēl nav galamērķu."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Paturēt saglabāto noslēpumu"
     }
   ],
   "web.settings.notifications.destinations.kind": [

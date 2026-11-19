@@ -287,6 +287,12 @@
       "value": "Această adresă de e-mail este deja folosită."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Această valoare este deja folosită."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -121738,7 +121744,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Manga"
+              "value": "Titluri manga"
             }
           ]
         },
@@ -121814,7 +121820,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Manga"
+              "value": "Titluri manga"
             }
           ]
         },
@@ -122657,13 +122663,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Colecții și reguli"
+      "value": "Colecții și rânduri inteligente"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Colecțiile dvs. sau rânduri create din reguli"
+      "value": "Colecțiile dvs. sau rânduri inteligente create din reguli"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122777,7 +122783,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Creați un rând din reguli, precum genul și deceniul."
+      "value": "Ca o colecție inteligentă, dar doar un rând. Alegeți titluri după reguli precum genul și deceniul."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122987,7 +122993,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titluri conform regulilor"
+      "value": "Rând inteligent"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -136719,34 +136725,6 @@
       "value": " în lista de vizionare"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Pentru că ați vizionat "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Pentru că ați vizionat "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " și "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136809,6 +136787,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Similar cu "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Similar cu "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " și "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -143608,6 +143614,12 @@
       "value": "” a fost adăugată"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Ștergeți secretul salvat"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143648,6 +143660,12 @@
     {
       "type": 0,
       "value": "Nicio destinație încă."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Păstrați secretul salvat"
     }
   ],
   "web.settings.notifications.destinations.kind": [

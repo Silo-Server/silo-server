@@ -287,6 +287,12 @@
       "value": "Den e-mailadresse er allerede i brug."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Dette er allerede i brug."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -112034,13 +112040,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Samlinger og regler"
+      "value": "Samlinger og smarte rækker"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Dine samlinger eller rækker bygget ud fra regler"
+      "value": "Dine samlinger eller smarte rækker bygget ud fra regler"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112154,7 +112160,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Byg en række ud fra regler, f.eks. genre og årti."
+      "value": "Som en smart samling, men kun en række. Vælg titler med regler som genre og årti."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112364,7 +112370,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titler, der matcher regler"
+      "value": "Smart række"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125253,34 +125259,6 @@
       "value": " til din huskeliste"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Fordi du så "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Fordi du så "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " og "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -125343,6 +125321,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Ligner "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Ligner "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " og "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -131711,6 +131717,12 @@
       "value": "” tilføjet"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Ryd gemt hemmelighed"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131751,6 +131763,12 @@
     {
       "type": 0,
       "value": "Ingen destinationer endnu."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Behold gemt hemmelighed"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -287,6 +287,12 @@
       "value": "Esse endereço de email já está a ser utilizado."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Este valor já está a ser utilizado."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -122561,13 +122567,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Coleções e regras"
+      "value": "Coleções e filas inteligentes"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "As suas coleções ou filas criadas a partir de regras"
+      "value": "As suas coleções ou filas inteligentes criadas a partir de regras"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122681,7 +122687,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Crie uma fila a partir de regras, como género e década."
+      "value": "Como uma coleção inteligente, mas apenas uma fila. Escolha títulos com regras, como o género e a década."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122891,7 +122897,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Títulos que cumprem regras"
+      "value": "Fila inteligente"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -136587,34 +136593,6 @@
       "value": " à sua lista para ver"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Porque viu "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Porque viu "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " e "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136677,6 +136655,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Semelhante a "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Semelhante a "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " e "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -143468,6 +143474,12 @@
       "value": "» foi adicionado"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Limpar segredo guardado"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143508,6 +143520,12 @@
     {
       "type": 0,
       "value": "Ainda não há destinos."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Manter segredo guardado"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -287,6 +287,12 @@
       "value": "이미 사용 중인 이메일 주소예요."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "이미 사용 중이에요."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -102545,13 +102551,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "컬렉션 및 규칙"
+      "value": "컬렉션 및 스마트 행"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "내 컬렉션 또는 규칙으로 만든 행"
+      "value": "내 컬렉션 또는 규칙으로 만든 스마트 행"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -102665,7 +102671,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "장르, 연대 같은 규칙으로 행을 만들어요."
+      "value": "스마트 컬렉션과 비슷하지만 행으로만 만들어져요. 장르, 연대 같은 규칙으로 작품을 골라요."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -102875,7 +102881,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "규칙에 맞는 작품"
+      "value": "스마트 행"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -114981,34 +114987,6 @@
       "value": " 추가"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " 시청 기반 추천"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": ", "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " 시청 기반 추천"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -115071,6 +115049,34 @@
     {
       "type": 0,
       "value": " 요청 보내는 중"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "와(과) 비슷한 콘텐츠"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "와(과) 비슷한 콘텐츠"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -121070,6 +121076,12 @@
       "value": "” 대상을 추가했어요"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "저장된 비밀 값 지우기"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -121110,6 +121122,12 @@
     {
       "type": 0,
       "value": "아직 대상이 없어요."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "저장된 비밀 값 유지"
     }
   ],
   "web.settings.notifications.destinations.kind": [

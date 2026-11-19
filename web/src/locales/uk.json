@@ -287,6 +287,12 @@
       "value": "Ця електронна адреса вже використовується."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Це вже використовується."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -132632,13 +132638,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Колекції та правила"
+      "value": "Колекції та розумні ряди"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Ваші колекції або ряди, створені за правилами"
+      "value": "Ваші колекції або розумні ряди, створені за правилами"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -132752,7 +132758,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Створіть ряд за правилами, як-от жанр і десятиліття."
+      "value": "Як розумна колекція, але лише ряд. Добирайте назви за правилами, як-от жанр і десятиліття."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -132962,7 +132968,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Назви за правилами"
+      "value": "Розумний ряд"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -147493,42 +147499,6 @@
       "value": " до вашого списку перегляду"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Бо ви дивилися «"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "»"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Бо ви дивилися «"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "» і «"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "»"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -147591,6 +147561,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Схоже на "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Схоже на "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " і "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -154755,6 +154753,12 @@
       "value": "» додано"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Очистити збережений секрет"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -154795,6 +154799,12 @@
     {
       "type": 0,
       "value": "Ще немає місць призначення."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Залишити збережений секрет"
     }
   ],
   "web.settings.notifications.destinations.kind": [

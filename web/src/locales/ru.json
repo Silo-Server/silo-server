@@ -287,6 +287,12 @@
       "value": "Этот адрес электронной почты уже используется."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Это значение уже используется."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -133970,13 +133976,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Коллекции и правила"
+      "value": "Коллекции и умные ряды"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Ваши коллекции или ряды, собранные по правилам"
+      "value": "Ваши коллекции или умные ряды, собранные по правилам"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -134090,7 +134096,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Соберите ряд по правилам, например по жанру и десятилетию."
+      "value": "Как умная коллекция, но только в виде ряда. Подберите тайтлы по правилам, например по жанру и десятилетию."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -134300,7 +134306,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Подборка по правилам"
+      "value": "Умный ряд"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -148863,42 +148869,6 @@
       "value": "» в список просмотра"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Потому что вы смотрели «"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "»"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Потому что вы смотрели «"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "» и «"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "»"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -148965,6 +148935,42 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Похоже на «"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "»"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Похоже на «"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "» и «"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "»"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -156153,6 +156159,12 @@
       "value": "» добавлен"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Очистить сохранённый секрет"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -156193,6 +156205,12 @@
     {
       "type": 0,
       "value": "Каналов пока нет."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Оставить сохранённый секрет"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -287,6 +287,12 @@
       "value": "Ez az e-mail-cím már használatban van."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Ez már használatban van."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -111726,13 +111732,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Gyűjtemények és szabályok"
+      "value": "Gyűjtemények és intelligens sorok"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Az Ön gyűjteményei vagy szabályokból összeállított sorok"
+      "value": "Saját gyűjtemények vagy szabályokból összeállított intelligens sorok"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111846,7 +111852,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sor összeállítása szabályokból, például műfaj és évtized alapján."
+      "value": "Olyan, mint egy intelligens gyűjtemény, de csak egy sor. Válasszon címeket szabályokkal, például műfaj és évtized alapján."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112056,7 +112062,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Szabályoknak megfelelő címek"
+      "value": "Intelligens sor"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124961,34 +124967,6 @@
       "value": " című elem hozzáadása a figyelőlistához"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Mert megnézte: "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Mert megnézte: "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " és "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -125055,6 +125033,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Hasonló ehhez: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Hasonló ezekhez: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " és "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -131407,6 +131413,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Mentett titkos érték törlése"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131447,6 +131459,12 @@
     {
       "type": 0,
       "value": "Még nincsenek célhelyek."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Mentett titkos érték megtartása"
     }
   ],
   "web.settings.notifications.destinations.kind": [

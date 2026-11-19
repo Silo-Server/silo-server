@@ -287,6 +287,12 @@
       "value": "यह ईमेल पता पहले से इस्तेमाल में है।"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "यह पहले से इस्तेमाल में है।"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -111504,13 +111510,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "कलेक्शन और नियम"
+      "value": "कलेक्शन और स्मार्ट पंक्तियाँ"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "आपके कलेक्शन, या नियमों से बनी पंक्तियाँ"
+      "value": "आपके कलेक्शन, या नियमों से बनी स्मार्ट पंक्तियाँ"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111624,7 +111630,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "शैली और दशक जैसे नियमों से पंक्ति बनाएँ।"
+      "value": "स्मार्ट कलेक्शन जैसी, लेकिन सिर्फ़ एक पंक्ति। शैली और दशक जैसे नियमों से टाइटल चुनें।"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111834,7 +111840,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "नियमों से मेल खाते टाइटल"
+      "value": "स्मार्ट पंक्ति"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124663,42 +124669,6 @@
       "value": " को अपनी वॉचलिस्ट में जोड़ें"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "क्योंकि आपने "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " को देखा"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "क्योंकि आपने "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " और "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " को देखा"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -124757,6 +124727,34 @@
     {
       "type": 0,
       "value": " के लिए अनुरोध भेजा जा रहा है…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " की तरह"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " और "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " की तरह"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -131113,6 +131111,12 @@
       "value": "” को जोड़ दिया गया"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "सेव किया गया सीक्रेट साफ़ करें"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131153,6 +131157,12 @@
     {
       "type": 0,
       "value": "अभी तक कोई डेस्टिनेशन नहीं है।"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "सेव किया गया सीक्रेट रखें"
     }
   ],
   "web.settings.notifications.destinations.kind": [

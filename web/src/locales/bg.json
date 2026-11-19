@@ -287,6 +287,12 @@
       "value": "Този имейл адрес вече се използва."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Това вече се използва."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -112570,13 +112576,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Колекции и правила"
+      "value": "Колекции и интелигентни редове"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Вашите колекции или редове, създадени по правила"
+      "value": "Вашите колекции или интелигентни редове, създадени по правила"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112690,7 +112696,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Създайте ред по правила, например по жанр и десетилетие."
+      "value": "Като интелигентна колекция, но само ред. Изберете заглавия по правила, например по жанр и десетилетие."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112900,7 +112906,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Заглавия по правила"
+      "value": "Интелигентен ред"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125833,34 +125839,6 @@
       "value": " във вашия списък за гледане"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Защото гледахте "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Защото гледахте "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " и "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -125927,6 +125905,34 @@
     {
       "type": 0,
       "value": "…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Подобно на "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Подобно на "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " и "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -132343,6 +132349,12 @@
       "value": "“ е добавена"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Изчистване на записаната секретна стойност"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132383,6 +132395,12 @@
     {
       "type": 0,
       "value": "Все още няма дестинации."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Запазване на записаната секретна стойност"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -287,6 +287,12 @@
       "value": "See e-posti aadress on juba kasutusel."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "See on juba kasutusel."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -111956,7 +111962,7 @@
           "value": [
             {
               "type": 0,
-              "value": "uusimad ilmumised eespool"
+              "value": "uusima ilmumiskuupäevaga eespool"
             }
           ]
         },
@@ -112912,13 +112918,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kollektsioonid ja reeglid"
+      "value": "Kollektsioonid ja nutikad read"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Teie kollektsioonid või reeglitest koostatud read"
+      "value": "Teie kollektsioonid või reeglitest koostatud nutikad read"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -113032,7 +113038,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Koostage rida reeglitest, näiteks žanri ja kümnendi järgi."
+      "value": "Nagu nutikas kollektsioon, kuid ainult rida. Valige pealkirjad reeglitega, näiteks žanri ja kümnendi järgi."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -113242,7 +113248,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Reeglitele vastavad pealkirjad"
+      "value": "Nutikas rida"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -126255,34 +126261,6 @@
       "value": " oma vaatamisloendisse"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Kuna vaatasite pealkirja "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Kuna vaatasite pealkirju "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " ja "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -126349,6 +126327,34 @@
     {
       "type": 0,
       "value": " taotluse saatmine…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Sarnane pealkirjaga "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Sarnane pealkirjadega "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ja "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -132769,6 +132775,12 @@
       "value": "“ on lisatud"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Eemalda salvestatud saladus"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132809,6 +132821,12 @@
     {
       "type": 0,
       "value": "Sihtkohti veel pole."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Säilita salvestatud saladus"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -287,6 +287,12 @@
       "value": "E-postadressen används redan."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Det här används redan."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -112056,13 +112062,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Samlingar och regler"
+      "value": "Samlingar och smarta rader"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Dina samlingar, eller rader byggda på regler"
+      "value": "Dina samlingar eller smarta rader byggda på regler"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112176,7 +112182,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Bygg en rad utifrån regler, som genre och decennium."
+      "value": "Som en smart samling, men bara en rad. Välj titlar med regler som genre och decennium."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112386,7 +112392,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titlar som matchar regler"
+      "value": "Smart rad"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125327,34 +125333,6 @@
       "value": " i din bevakningslista"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Eftersom du tittade på "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Eftersom du tittade på "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " och "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -125417,6 +125395,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Liknar "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Liknar "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " och "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -131793,6 +131799,12 @@
       "value": "” tillagd"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Rensa sparad hemlighet"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131833,6 +131845,12 @@
     {
       "type": 0,
       "value": "Inga destinationer än."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Behåll sparad hemlighet"
     }
   ],
   "web.settings.notifications.destinations.kind": [

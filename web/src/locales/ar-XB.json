@@ -287,6 +287,12 @@
       "value": "\u200F\u202EThat email address is already in use.\u202C"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis is already in use.\u202C"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -117784,13 +117790,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "\u200F\u202ECollections & rules\u202C"
+      "value": "\u200F\u202ECollections & smart rows\u202C"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "\u200F\u202EYour collections, or rows built from rules\u202C"
+      "value": "\u200F\u202EYour collections, or smart rows built from rules\u202C"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -117904,7 +117910,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "\u200F\u202EBuild a row from rules, like genre and decade.\u202C"
+      "value": "\u200F\u202ELike a smart collection, but only a row. Pick titles with rules like genre and decade.\u202C"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -118114,7 +118120,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "\u200F\u202ETitles matching rules\u202C"
+      "value": "\u200F\u202ESmart row\u202C"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -131655,34 +131661,6 @@
       "value": "\u202E to your watchlist\u202C"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBecause you watched \u202C"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBecause you watched \u202C"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "\u202E and \u202C"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 0,
@@ -131749,6 +131727,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESimilar to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESimilar to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "\u202E and \u202C"
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -138357,6 +138363,12 @@
       "value": "\u202E\" added\u202C"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear saved secret\u202C"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -138397,6 +138409,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ENo destinations yet.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKeep saved secret\u202C"
     }
   ],
   "web.settings.notifications.destinations.kind": [

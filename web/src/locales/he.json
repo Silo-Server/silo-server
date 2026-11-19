@@ -287,6 +287,12 @@
       "value": "כתובת האימייל הזו כבר בשימוש."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "הערך הזה כבר בשימוש."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -121296,13 +121302,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "אוספים וכללים"
+      "value": "אוספים ושורות חכמות"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "האוספים שלך, או שורות שנבנו מכללים"
+      "value": "האוספים שלך, או שורות חכמות שנבנות מכללים"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -121416,7 +121422,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "בניית שורה מכללים, כמו ז׳אנר ועשור."
+      "value": "כמו אוסף חכם, אבל רק שורה. אפשר לבחור פריטים לפי כללים, כמו ז׳אנר ועשור."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -121626,7 +121632,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "פריטים שתואמים כללים"
+      "value": "שורה חכמה"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -135164,34 +135170,6 @@
       "value": " לרשימת הצפייה שלך"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "בעקבות הצפייה ב-"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "בעקבות הצפייה ב-"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " וב-"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -135258,6 +135236,34 @@
     {
       "type": 0,
       "value": "…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "דומה ל-"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "דומה ל-"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ול-"
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -141942,6 +141948,12 @@
       "value": "” נוסף"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "ניקוי הסוד השמור"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -141982,6 +141994,12 @@
     {
       "type": 0,
       "value": "עדיין אין יעדים."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "שמירה על הסוד השמור"
     }
   ],
   "web.settings.notifications.destinations.kind": [

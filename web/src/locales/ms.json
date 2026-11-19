@@ -287,6 +287,12 @@
       "value": "Alamat e-mel itu sudah digunakan."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Ini sudah digunakan."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -101927,13 +101933,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksi & peraturan"
+      "value": "Koleksi & baris pintar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksi anda, atau baris yang dibina daripada peraturan"
+      "value": "Koleksi anda, atau baris pintar yang dibina daripada peraturan"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -102047,7 +102053,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Bina baris daripada peraturan, seperti genre dan dekad."
+      "value": "Seperti koleksi pintar, tetapi hanya sebagai baris. Pilih judul dengan peraturan seperti genre dan dekad."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -102257,7 +102263,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Judul yang memenuhi peraturan"
+      "value": "Baris pintar"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -114379,34 +114385,6 @@
       "value": " ke senarai tontonan anda"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Kerana anda menonton "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Kerana anda menonton "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " dan "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -114469,6 +114447,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Serupa dengan "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Serupa dengan "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " dan "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -120472,6 +120478,12 @@
       "value": "” ditambah"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Kosongkan rahsia yang disimpan"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -120512,6 +120524,12 @@
     {
       "type": 0,
       "value": "Belum ada destinasi."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Kekalkan rahsia yang disimpan"
     }
   ],
   "web.settings.notifications.destinations.kind": [

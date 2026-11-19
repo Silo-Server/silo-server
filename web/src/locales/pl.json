@@ -287,6 +287,12 @@
       "value": "Ten adres e-mail jest już używany."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Ta wartość jest już używana."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -133488,13 +133494,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekcje i reguły"
+      "value": "Kolekcje i inteligentne rzędy"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Twoje kolekcje lub rzędy tworzone z reguł"
+      "value": "Twoje kolekcje lub inteligentne rzędy tworzone z reguł"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -133608,7 +133614,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Utwórz rząd z reguł, np. gatunku i dekady."
+      "value": "Jak inteligentna kolekcja, ale tylko jako rząd. Wybieraj tytuły według reguł, np. gatunku i dekady."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -133818,7 +133824,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Tytuły pasujące do reguł"
+      "value": "Inteligentny rząd"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -148353,34 +148359,6 @@
       "value": " do listy do obejrzenia"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Po obejrzeniu: "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Po obejrzeniu: "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " i "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -148443,6 +148421,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Podobne do: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Podobne do: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -155619,6 +155625,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Wyczyść zapisany sekret"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -155659,6 +155671,12 @@
     {
       "type": 0,
       "value": "Brak miejsc docelowych."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Zachowaj zapisany sekret"
     }
   ],
   "web.settings.notifications.destinations.kind": [

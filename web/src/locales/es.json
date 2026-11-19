@@ -287,6 +287,12 @@
       "value": "Esa dirección de correo electrónico ya está en uso."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Este valor ya está en uso."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -122237,13 +122243,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Colecciones y reglas"
+      "value": "Colecciones y filas inteligentes"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Tus colecciones o filas creadas con reglas"
+      "value": "Tus colecciones o filas inteligentes creadas con reglas"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122357,7 +122363,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Crea una fila a partir de reglas, como el género y la década."
+      "value": "Como una colección inteligente, pero solo es una fila. Elige títulos con reglas como el género y la década."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122567,7 +122573,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Títulos que cumplen reglas"
+      "value": "Fila inteligente"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -136344,34 +136350,6 @@
       "value": " a tu lista para ver"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Porque viste "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Porque viste "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " y "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136434,6 +136412,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Similar a "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Similar a "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " y "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -143205,6 +143211,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Borrar secreto guardado"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143245,6 +143257,12 @@
     {
       "type": 0,
       "value": "Aún no hay destinos."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Conservar secreto guardado"
     }
   ],
   "web.settings.notifications.destinations.kind": [

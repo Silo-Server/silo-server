@@ -287,6 +287,12 @@
       "value": "Tato e-mailová adresa se už používá."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Tato hodnota se už používá."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -132986,13 +132992,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekce a pravidla"
+      "value": "Kolekce a chytré řádky"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Vaše kolekce nebo řádky sestavené z pravidel"
+      "value": "Vaše kolekce nebo chytré řádky sestavené z pravidel"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -133106,7 +133112,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sestavte řádek z pravidel, například podle žánru a desetiletí."
+      "value": "Jako chytrá kolekce, ale jen jako řádek. Vyberte tituly pomocí pravidel, například podle žánru a desetiletí."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -133316,7 +133322,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Tituly podle pravidel"
+      "value": "Chytrý řádek"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -147843,34 +147849,6 @@
       "value": " do seznamu ke zhlédnutí"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Protože sledujete "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Protože sledujete "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " a "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -147933,6 +147911,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Podobné jako "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Podobné jako "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -155213,6 +155219,12 @@
       "value": "“ byl přidán"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Vymazat uložený tajný údaj"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -155253,6 +155265,12 @@
     {
       "type": 0,
       "value": "Zatím žádné cíle."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Ponechat uložený tajný údaj"
     }
   ],
   "web.settings.notifications.destinations.kind": [

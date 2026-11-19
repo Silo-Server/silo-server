@@ -287,6 +287,12 @@
       "value": "Esse endereço de e-mail já está em uso."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Este valor já está em uso."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -122175,13 +122181,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Coleções e regras"
+      "value": "Coleções e fileiras inteligentes"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Suas coleções ou fileiras criadas a partir de regras"
+      "value": "Suas coleções ou fileiras inteligentes criadas a partir de regras"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122295,7 +122301,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Crie uma fileira a partir de regras, como gênero e década."
+      "value": "Como uma coleção inteligente, mas apenas uma fileira. Escolha títulos com regras como gênero e década."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122505,7 +122511,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Títulos que seguem regras"
+      "value": "Fileira inteligente"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -136181,34 +136187,6 @@
       "value": " à sua lista para assistir"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Porque você assistiu "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Porque você assistiu "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " e "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136271,6 +136249,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Parecido com "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Parecido com "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " e "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -143054,6 +143060,12 @@
       "value": "” adicionado"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Limpar segredo salvo"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143094,6 +143106,12 @@
     {
       "type": 0,
       "value": "Nenhum destino ainda."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Manter segredo salvo"
     }
   ],
   "web.settings.notifications.destinations.kind": [

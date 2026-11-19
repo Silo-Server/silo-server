@@ -287,6 +287,12 @@
       "value": "عنوان البريد الإلكتروني هذا مستخدم بالفعل."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "هذه القيمة مستخدمة بالفعل."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -149754,7 +149760,7 @@
             },
             {
               "type": 0,
-              "value": " قاعدة"
+              "value": " قاعدةً"
             }
           ]
         },
@@ -150673,13 +150679,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "المجموعات والقواعد"
+      "value": "المجموعات والصفوف الذكية"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "مجموعاتك، أو صفوف مبنية من قواعد"
+      "value": "مجموعاتك، أو صفوف ذكية مبنية من قواعد"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -150793,7 +150799,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "أنشئ صفًا من قواعد، مثل النوع والعقد."
+      "value": "مثل المجموعة الذكية، لكنه صف فقط. اختر العناوين بقواعد مثل النوع والعقد."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -151003,7 +151009,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "عناوين تطابق القواعد"
+      "value": "صف ذكي"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -166739,34 +166745,6 @@
       "value": " إلى قائمة المشاهدة"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "لأنك شاهدت "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "لأنك شاهدت "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " و"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -166829,6 +166807,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "مشابه لـ"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "مشابه لـ"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " و"
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -174765,6 +174771,12 @@
       "value": "»"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "مسح القيمة السرية المحفوظة"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -174805,6 +174817,12 @@
     {
       "type": 0,
       "value": "لا توجد وجهات بعد."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "الاحتفاظ بالقيمة السرية المحفوظة"
     }
   ],
   "web.settings.notifications.destinations.kind": [

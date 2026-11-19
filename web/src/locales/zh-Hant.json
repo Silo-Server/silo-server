@@ -287,6 +287,12 @@
       "value": "此電子郵件地址已有人使用。"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "此值已有人使用。"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -103191,13 +103197,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "合輯與規則"
+      "value": "合輯與智慧列"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "你的合輯，或依規則建立的列"
+      "value": "你的合輯，或依規則建立的智慧列"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -103311,7 +103317,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "依規則（例如類型和年代）建立列。"
+      "value": "類似智慧合輯，但只是一列。依類型和年代等規則挑選作品。"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -103521,7 +103527,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "符合規則的作品"
+      "value": "智慧列"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -115759,34 +115765,6 @@
       "value": " 加入你的待看清單"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "因為你看過 "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "因為你看過 "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " 和 "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -115849,6 +115827,34 @@
     {
       "type": 0,
       "value": " 的請求"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "類似 "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "類似 "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " 和 "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -121908,6 +121914,12 @@
       "value": "」"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "清除已儲存的機密"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -121948,6 +121960,12 @@
     {
       "type": 0,
       "value": "尚無目的地。"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "保留已儲存的機密"
     }
   ],
   "web.settings.notifications.destinations.kind": [

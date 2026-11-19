@@ -287,6 +287,12 @@
       "value": "อีเมลนี้มีผู้ใช้อยู่แล้ว"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "ค่านี้มีการใช้งานอยู่แล้ว"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -102468,7 +102474,7 @@
     },
     {
       "type": 0,
-      "value": " ตามลำดับที่เลือก"
+      "value": "ตามลำดับที่เลือก"
     }
   ],
   "web.home.rows.describe.rulesMatching": [
@@ -103257,13 +103263,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "คอลเลกชันและกฎ"
+      "value": "คอลเลกชันและแถวอัจฉริยะ"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "คอลเลกชันของคุณ หรือแถวที่สร้างจากกฎ"
+      "value": "คอลเลกชันของคุณ หรือแถวอัจฉริยะที่สร้างจากกฎ"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -103377,7 +103383,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "สร้างแถวจากกฎ เช่น ประเภทและทศวรรษ"
+      "value": "คล้ายคอลเลกชันอัจฉริยะ แต่เป็นแถวเท่านั้น เลือกผลงานด้วยกฎ เช่น แนวและทศวรรษ"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -103587,7 +103593,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "เรื่องที่ตรงกับกฎ"
+      "value": "แถวอัจฉริยะ"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -115817,34 +115823,6 @@
       "value": " ในรายการที่อยากดู"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "เพราะคุณดู "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "เพราะคุณดู "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " และ "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -115907,6 +115885,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "คล้ายกับ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "คล้ายกับ "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " และ "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -121962,6 +121968,12 @@
       "value": "” แล้ว"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "ล้างข้อมูลลับที่บันทึกไว้"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -122002,6 +122014,12 @@
     {
       "type": 0,
       "value": "ยังไม่มีปลายทาง"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "เก็บข้อมูลลับที่บันทึกไว้"
     }
   ],
   "web.settings.notifications.destinations.kind": [

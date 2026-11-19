@@ -287,6 +287,12 @@
       "value": "Alamat email itu sudah digunakan."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Ini sudah digunakan."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -102041,13 +102047,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksi & aturan"
+      "value": "Koleksi & baris pintar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksi Anda, atau baris yang dibuat dari aturan"
+      "value": "Koleksi Anda, atau baris pintar yang dibuat dari aturan"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -102161,7 +102167,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Buat baris dari aturan, seperti genre dan dekade."
+      "value": "Seperti koleksi pintar, tetapi hanya berupa baris. Pilih judul dengan aturan seperti genre dan dekade."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -102371,7 +102377,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Judul yang cocok dengan aturan"
+      "value": "Baris pintar"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -114493,34 +114499,6 @@
       "value": " ke daftar tonton Anda"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Karena Anda menonton "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Karena Anda menonton "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " dan "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -114583,6 +114561,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Mirip dengan "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Mirip dengan "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " dan "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -120586,6 +120592,12 @@
       "value": "” ditambahkan"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Hapus rahasia tersimpan"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -120626,6 +120638,12 @@
     {
       "type": 0,
       "value": "Belum ada tujuan."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Pertahankan rahasia tersimpan"
     }
   ],
   "web.settings.notifications.destinations.kind": [

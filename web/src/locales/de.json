@@ -287,6 +287,12 @@
       "value": "Diese E-Mail-Adresse wird bereits verwendet."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Dieser Wert wird bereits verwendet."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -111606,13 +111612,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Sammlungen & Regeln"
+      "value": "Sammlungen & intelligente Reihen"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Deine Sammlungen oder Reihen aus Regeln"
+      "value": "Deine Sammlungen oder intelligente Reihen aus Regeln"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111726,7 +111732,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Erstelle eine Reihe aus Regeln, etwa Genre und Jahrzehnt."
+      "value": "Wie eine intelligente Sammlung, aber nur als Reihe. Wähle Titel mit Regeln wie Genre und Jahrzehnt aus."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111936,7 +111942,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titel nach Regeln"
+      "value": "Intelligente Reihe"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124854,42 +124860,6 @@
       "value": " zu deiner Merkliste hinzufügen"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Weil du "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " geschaut hast"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Weil du "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " und "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " geschaut hast"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -124952,6 +124922,34 @@
     {
       "type": 0,
       "value": " wird gesendet"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Ähnlich wie "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Ähnlich wie "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " und "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -131324,6 +131322,12 @@
       "value": "“ hinzugefügt"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Gespeichertes Secret leeren"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131364,6 +131368,12 @@
     {
       "type": 0,
       "value": "Noch keine Ziele."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Gespeichertes Secret behalten"
     }
   ],
   "web.settings.notifications.destinations.kind": [

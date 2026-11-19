@@ -287,6 +287,12 @@
       "value": "Αυτή η διεύθυνση email χρησιμοποιείται ήδη."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Αυτή η τιμή χρησιμοποιείται ήδη."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -111716,7 +111722,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά βαθμολογία, από την υψηλότερη"
+              "value": "πρώτα η υψηλότερη βαθμολογία"
             }
           ]
         },
@@ -111724,7 +111730,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά ημερομηνία κυκλοφορίας, από τη νεότερη"
+              "value": "πρώτα οι νεότερες κυκλοφορίες"
             }
           ]
         },
@@ -111732,7 +111738,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά αναπαραγωγές, από τις περισσότερες"
+              "value": "πρώτα οι περισσότερες αναπαραγωγές"
             }
           ]
         },
@@ -112664,13 +112670,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Συλλογές και κανόνες"
+      "value": "Συλλογές και έξυπνες γραμμές"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Οι συλλογές σας ή γραμμές με βάση κανόνες"
+      "value": "Οι συλλογές σας ή έξυπνες γραμμές που δημιουργούνται από κανόνες"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112784,7 +112790,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Δημιουργία γραμμής από κανόνες, όπως είδος και δεκαετία."
+      "value": "Σαν μια έξυπνη συλλογή, αλλά μόνο ως γραμμή. Επιλέξτε τίτλους με κανόνες, όπως είδος και δεκαετία."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112994,7 +113000,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Τίτλοι που ταιριάζουν σε κανόνες"
+      "value": "Έξυπνη γραμμή"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125987,34 +125993,6 @@
       "value": " στη λίστα παρακολούθησής σας"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Επειδή παρακολουθήσατε: "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Επειδή παρακολουθήσατε: "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " και "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -126081,6 +126059,34 @@
     {
       "type": 0,
       "value": "…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Παρόμοιο με τον τίτλο "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Παρόμοιο με τους τίτλους "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " και "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [
@@ -132497,6 +132503,12 @@
       "value": "» προστέθηκε"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Εκκαθάριση αποθηκευμένου μυστικού"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132537,6 +132549,12 @@
     {
       "type": 0,
       "value": "Δεν υπάρχουν ακόμη προορισμοί."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Διατήρηση αποθηκευμένου μυστικού"
     }
   ],
   "web.settings.notifications.destinations.kind": [
