@@ -744,12 +744,13 @@ func buildMixedSearchCandidateBranch(
 
 // searchNamePrefixCondition matches a scored search row against the key title
 // sorting orders by: the sort title (or title) for media items, and for
-// episodes the expression episode_catalog_entries.sort_key is built from.
+// episodes the sort title (or title) that episode_catalog_entries.sort_key
+// is built from.
 // Rows are already narrowed by the text match, and each probe is a
 // primary-key lookup.
 func searchNamePrefixCondition(alias string, argIdx int) string {
 	return fmt.Sprintf(`(CASE WHEN %[3]s.type = 'episode'
-		THEN EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = %[3]s.content_id AND LOWER(COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text)) LIKE $%[1]d ESCAPE '\')
+		THEN EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = %[3]s.content_id AND LOWER(COALESCE(NULLIF(BTRIM(e.sort_title), ''), NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text)) LIKE $%[1]d ESCAPE '\')
 		ELSE EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = %[3]s.content_id AND %[2]s) END)`,
 		argIdx, sortTitlePrefixCondition(argIdx), alias)
 }

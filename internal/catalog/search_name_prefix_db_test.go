@@ -54,7 +54,8 @@ func seedNamePrefixSearchFixture(t *testing.T, pool *pgxpool.Pool) namePrefixSea
 	exec(`INSERT INTO media_items(content_id,type,title,status,genres,year) VALUES($1,'movie',$2,'matched','{Drama}',2001)`, f.movie, token+" Arrival")
 	// The series files under its sort title, so "<token> c" must not match it.
 	exec(`INSERT INTO media_items(content_id,type,title,sort_title,status,genres,year) VALUES($1,'series',$2,$3,'matched','{Drama}',2001)`, f.series, token+" Chronicles", token+" Dawn")
-	exec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,1,$3)`, f.episode, f.series, token+" Begins")
+	// The episode also files under its sort title, so "<token> b" must not match it.
+	exec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title,sort_title) VALUES($1,$2,1,1,$3,$4)`, f.episode, f.series, token+" Begins", token+" Fable")
 	exec(`INSERT INTO episode_libraries(episode_id,media_folder_id,first_seen_at) VALUES($1,$2,NOW())`, f.episode, f.folder)
 	// Matches only by overview, which title hits suppress, so no prefix may
 	// surface it either.
@@ -73,7 +74,8 @@ func seedNamePrefixSearchFixture(t *testing.T, pool *pgxpool.Pool) namePrefixSea
 	}
 	f.byPrefix = map[string][]string{
 		token + " a": {f.movie},
-		token + " b": {f.episode},
+		token + " b": nil,
+		token + " f": {f.episode},
 		token + " c": nil,
 		token + " d": {f.series},
 		"zzz":        nil,
@@ -193,7 +195,7 @@ func TestSearchNamePrefixNarrowsTextSearchDB(t *testing.T) {
 
 	// A single title hit takes the combined FTS-plus-fuzzy path.
 	postgres := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
-	for prefix, want := range map[string][]string{"": {f.episode}, f.token + " b": {f.episode}, f.token + " a": nil, "zzz": nil} {
+	for prefix, want := range map[string][]string{"": {f.episode}, f.token + " f": {f.episode}, f.token + " b": nil, f.token + " a": nil, "zzz": nil} {
 		got, _ := resolveNamePrefixSearch(t, postgres, url.Values{"q": {f.token + " begins"}, "name_prefix": {prefix}}, AccessFilter{})
 		if !slices.Equal(got, want) {
 			t.Errorf("combined prefix=%q: got %v, want %v", prefix, got, want)
