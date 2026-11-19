@@ -52243,6 +52243,12 @@
       "value": "Kapalı. Çalıştırmalar yalnızca eski içerikleri temizler."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Oluşturma durduruldu. Depolanan öneriler, sunucu yeniden başlatılana kadar Keşfet’te görünmeye devam eder."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

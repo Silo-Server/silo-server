@@ -58857,6 +58857,12 @@
       "value": "Isključeno. Pokretanja samo uklanjaju stare naslove."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generiranje je zaustavljeno. Spremljene preporuke ostaju vidljive u odjeljku Otkrij do ponovnog pokretanja poslužitelja."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

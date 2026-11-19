@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -75,10 +76,10 @@ func (r *externalRun) refreshTitles(ctx context.Context, chosen []ExternalTitleK
 	}
 
 	emb := &embedBackfill{
-		client:  e.embClient,
+		client:  r,
 		model:   lock.Model,
 		held:    r.held,
-		sink:    &externalEmbedSink{repo: e.repo, lock: *lock},
+		sink:    &externalEmbedSink{writer: r.writer, lock: *lock},
 		refused: refused,
 	}
 	attempted := 0
@@ -109,7 +110,7 @@ func (r *externalRun) refreshTitles(ctx context.Context, chosen []ExternalTitleK
 		// A title the library has under its IMDb or TVDB ID is forgotten
 		// like one TMDB lacks: it is not stored, and the links naming it go
 		// so later runs do not fetch it again until a source names it anew.
-		if err := e.repo.forgetExternalTitles(ctx, append(notFound, owned...)); err != nil {
+		if err := r.writer.forgetExternalTitles(ctx, append(notFound, owned...)); err != nil {
 			return err
 		}
 		ids, chunkTexts, err := r.storeDetails(ctx, details, texts, refused)
@@ -124,6 +125,15 @@ func (r *externalRun) refreshTitles(ctx context.Context, chosen []ExternalTitleK
 		}
 	}
 	return emb.noneStoredError()
+}
+
+// Embed checks the job session before the shared embedding loop makes a
+// provider request, including a retry of a refused batch or individual text.
+func (r *externalRun) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if err := r.checkHeld(ctx); err != nil {
+		return nil, err
+	}
+	return r.e.embClient.Embed(ctx, texts)
 }
 
 // externalEmbeddingLock returns the embedding lock outside vectors are stored
@@ -154,8 +164,8 @@ func (r *externalRun) fetchDetails(ctx context.Context, keys []ExternalTitleKey,
 	details = make([]externalDetail, len(keys))
 	tried := make([]bool, len(keys))
 	err = forEachBounded(ctx, len(keys), func(ctx context.Context, i int) (bool, error) {
-		if !r.takeRequest() {
-			return true, nil
+		if ok, err := r.takeRequest(ctx); !ok {
+			return true, err
 		}
 		tried[i] = true
 		d, err := r.tmdb.GetMediaDetailInLanguage(ctx, keys[i].MediaType, keys[i].TMDBID, language)
@@ -206,7 +216,7 @@ func (r *externalRun) dropOwnedDetails(ctx context.Context, details []externalDe
 	if len(titles) == 0 {
 		return nil, nil
 	}
-	owned, err := r.ownedTitles(ctx, titles)
+	owned, err := r.ownedTitles(ctx, slices.Values(titles))
 	if err != nil {
 		return nil, err
 	}
@@ -256,10 +266,10 @@ func (r *externalRun) storeDetails(ctx context.Context, details []externalDetail
 		ids = append(ids, id)
 		texts = append(texts, text)
 	}
-	if err := r.e.repo.deleteExternalEmbeddings(ctx, changed); err != nil {
+	if err := r.writer.deleteExternalEmbeddings(ctx, changed); err != nil {
 		return nil, nil, err
 	}
-	if err := r.e.repo.UpsertExternalTitles(ctx, titles); err != nil {
+	if err := r.writer.UpsertExternalTitles(ctx, titles); err != nil {
 		return nil, nil, err
 	}
 	// Only now: a failed write leaves the detail due, and the refusal of
@@ -366,8 +376,8 @@ func parseExternalEmbedID(id string) (ExternalTitleKey, bool) {
 // externalEmbedSink stores outside vectors under an existing embedding lock.
 // It never writes the lock.
 type externalEmbedSink struct {
-	repo *Repo
-	lock EmbeddingLock
+	writer externalPoolWriter
+	lock   EmbeddingLock
 }
 
 func (s *externalEmbedSink) checkVector(_ context.Context, vector []float32) error {
@@ -382,7 +392,7 @@ func (s *externalEmbedSink) write(ctx context.Context, id string, vector []float
 	if !ok {
 		return fmt.Errorf("outside title %q: bad id", id)
 	}
-	return s.repo.UpsertExternalEmbeddings(ctx, []ExternalEmbedding{{Key: key, Vector: vector, Model: s.lock.Model, CanonicalText: canonicalText}})
+	return s.writer.UpsertExternalEmbeddings(ctx, []ExternalEmbedding{{Key: key, Vector: vector, Model: s.lock.Model, CanonicalText: canonicalText}})
 }
 
 // externalMetadataLanguage is the language outside titles are fetched in: the

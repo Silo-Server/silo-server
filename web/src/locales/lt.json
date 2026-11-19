@@ -65530,6 +65530,12 @@
       "value": "Išjungta. Paleidimai tik išvalo senus kūrinius."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generavimas sustabdytas. Išsaugotos rekomendacijos lieka matomos skiltyje „Atrasti“, kol serveris bus paleistas iš naujo."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

@@ -52527,6 +52527,12 @@
       "value": "Uit. Runs ruimen alleen oude titels op."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Het genereren is gestopt. Opgeslagen aanbevelingen blijven zichtbaar in Ontdek totdat de server opnieuw wordt opgestart."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

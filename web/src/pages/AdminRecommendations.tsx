@@ -262,10 +262,12 @@ function RecJobLastRun({ run, kind = "run" }: { run?: RecJobRun; kind?: RecRunKi
 /** The outside-title job's card: titles stored, profile rows built, and its last run. */
 function RecExternalJobCard({
   status,
+  pendingRestart,
   onTrigger,
   triggerPending,
 }: {
   status: RecExternalStatus;
+  pendingRestart: boolean;
   onTrigger: () => void;
   triggerPending: boolean;
 }) {
@@ -285,7 +287,15 @@ function RecExternalJobCard({
           count: status.rows,
           count_text: countText(status.rows),
         }),
-        ...(status.enabled ? [] : [t("web.admin.recommendations.external.off")]),
+        ...(status.enabled
+          ? []
+          : [
+              t(
+                pendingRestart
+                  ? "web.admin.recommendations.external.pendingRestart"
+                  : "web.admin.recommendations.external.off",
+              ),
+            ]),
       ]}
       runDetails={externalRunLines(t, status.last_run)}
       onTrigger={onTrigger}
@@ -491,23 +501,30 @@ export default function AdminRecommendations() {
   async function handleResetEmbeddings() {
     try {
       const deleted = await resetEmbeddings.mutateAsync();
+      const counts = {
+        embeddings: t("web.admin.recommendations.reset.embeddingCount", {
+          count: deleted.embeddings,
+          count_text: countText(deleted.embeddings),
+        }),
+        profiles: t("web.admin.recommendations.reset.tasteProfileCount", {
+          count: deleted.taste_profiles,
+          count_text: countText(deleted.taste_profiles),
+        }),
+      };
+      if (deleted.external_embeddings == null || deleted.external_rows == null) {
+        toast.success(t("web.admin.recommendations.reset.done", counts));
+        return;
+      }
       toast.success(
         t("web.admin.recommendations.reset.doneWithExternal", {
-          embeddings: t("web.admin.recommendations.reset.embeddingCount", {
-            count: deleted.embeddings,
-            count_text: deleted.embeddings.toLocaleString(formatLocale()),
-          }),
+          ...counts,
           external_embeddings: t("web.admin.recommendations.reset.externalEmbeddingCount", {
             count: deleted.external_embeddings,
-            count_text: deleted.external_embeddings.toLocaleString(formatLocale()),
+            count_text: countText(deleted.external_embeddings),
           }),
           external_rows: t("web.admin.recommendations.reset.externalRowCount", {
             count: deleted.external_rows,
-            count_text: deleted.external_rows.toLocaleString(formatLocale()),
-          }),
-          profiles: t("web.admin.recommendations.reset.tasteProfileCount", {
-            count: deleted.taste_profiles,
-            count_text: deleted.taste_profiles.toLocaleString(formatLocale()),
+            count_text: countText(deleted.external_rows),
           }),
         }),
       );
@@ -653,11 +670,17 @@ export default function AdminRecommendations() {
               onTrigger={() => triggerRecommendations.mutate()}
               triggerPending={triggerRecommendations.isPending}
             />
-            <RecExternalJobCard
-              status={status.external}
-              onTrigger={() => triggerExternal.mutate()}
-              triggerPending={triggerExternal.isPending}
-            />
+            {status.external && (
+              <RecExternalJobCard
+                pendingRestart={
+                  serverSettings["recommendations.enabled"] === "false" &&
+                  serverSettings["recommendations.external.enabled"] === "true"
+                }
+                status={status.external}
+                onTrigger={() => triggerExternal.mutate()}
+                triggerPending={triggerExternal.isPending}
+              />
+            )}
           </div>
         </div>
       )}
@@ -673,7 +696,7 @@ export default function AdminRecommendations() {
               status.embeddings.running ||
               status.taste_profiles.running ||
               status.recommendations.running ||
-              status.external.running
+              Boolean(status.external?.running)
             }
             isPending={resetEmbeddings.isPending}
             onReset={() => void handleResetEmbeddings()}

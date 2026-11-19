@@ -64975,6 +64975,12 @@
       "value": "Vypnuté. Spustenia iba odstraňujú staré tituly."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generovanie sa zastavilo. Uložené odporúčania zostanú viditeľné v sekcii Objavovať, kým sa server nereštartuje."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

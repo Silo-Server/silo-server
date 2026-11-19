@@ -889,6 +889,7 @@
 ./internal/recommendations TestExternalRowRefusalsDB
 ./internal/recommendations TestResetEmbeddingsClearsOutsideVectorsAndRowsDB
 ./internal/recommendations TestExternalJobWithFeatureOffOnlyPrunesDB
+./internal/recommendations TestExternalJobStopsDuringFetchDB
 ./internal/recommendations TestExternalRecommendationsReadDB
 ./internal/recommendations TestExtendGlobalRecommendationCachePostgres
 ./internal/recommendations TestFailedRefreshLeavesTheProfilePendingPostgres

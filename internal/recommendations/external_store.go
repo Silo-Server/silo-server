@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -16,6 +17,16 @@ import (
 // from and the titles those name (external_title_sources/_links), the titles'
 // card fields and vectors (external_titles/_embeddings), and each profile's
 // ranked rows (external_recommendation_rows).
+
+// externalPoolWriter uses the pool for ordinary store calls and the job's
+// pinned connection when a run owns the advisory lock.
+type externalPoolWriter struct {
+	db interface {
+		Begin(context.Context) (pgx.Tx, error)
+		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+		SendBatch(context.Context, *pgx.Batch) pgx.BatchResults
+	}
+}
 
 // Outside title media types: Silo's names, not TMDB's ("tv").
 const (
@@ -208,12 +219,12 @@ func (r *Repo) ExternalSourcesToFetch(ctx context.Context, sourceKeys []string, 
 // the source's links in one transaction and marks it fetched now. A failed
 // result records the error and keeps the source's previous links and fetch
 // time, so the pool keeps using them until a fetch succeeds.
-func (r *Repo) RecordExternalSource(ctx context.Context, res ExternalSourceResult) error {
+func (w externalPoolWriter) RecordExternalSource(ctx context.Context, res ExternalSourceResult) error {
 	status := res.Status
 	if status == ExternalSourceOK && len(res.Links) == 0 {
 		status = ExternalSourceEmpty
 	}
-	tx, err := r.pool.Begin(ctx)
+	tx, err := w.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin outside source %s: %w", res.SourceKey, err)
 	}
@@ -270,10 +281,10 @@ func (r *Repo) RecordExternalSource(ctx context.Context, res ExternalSourceResul
 
 // TouchExternalReferences marks the sources and titles a run still uses as
 // referenced now, so retention keeps them.
-func (r *Repo) TouchExternalReferences(ctx context.Context, sourceKeys []string, titles []ExternalTitleKey) error {
+func (w externalPoolWriter) TouchExternalReferences(ctx context.Context, sourceKeys []string, titles []ExternalTitleKey) error {
 	if len(sourceKeys) > 0 {
 		sorted := slices.Sorted(slices.Values(sourceKeys))
-		if _, err := r.pool.Exec(ctx, `
+		if _, err := w.db.Exec(ctx, `
 			UPDATE external_title_sources SET last_referenced_at = now()
 			WHERE  source_key IN (SELECT unnest($1::text[]))`, sorted); err != nil {
 			return fmt.Errorf("touch outside sources: %w", err)
@@ -281,7 +292,7 @@ func (r *Repo) TouchExternalReferences(ctx context.Context, sourceKeys []string,
 	}
 	if len(titles) > 0 {
 		types, ids := externalKeyArrays(slices.SortedFunc(slices.Values(titles), compareExternalKeys))
-		if _, err := r.pool.Exec(ctx, `
+		if _, err := w.db.Exec(ctx, `
 			UPDATE external_titles t SET last_referenced_at = now()
 			FROM   unnest($1::text[], $2::int[]) AS k(media_type, tmdb_id)
 			WHERE  t.media_type = k.media_type AND t.tmdb_id = k.tmdb_id`, types, ids); err != nil {
@@ -294,7 +305,7 @@ func (r *Repo) TouchExternalReferences(ctx context.Context, sourceKeys []string,
 // UpsertExternalTitles stores outside titles from their detail fetch and
 // marks them referenced now. Titles are written in key order, so concurrent
 // writers on other nodes lock rows in the same order.
-func (r *Repo) UpsertExternalTitles(ctx context.Context, titles []ExternalTitle) error {
+func (w externalPoolWriter) UpsertExternalTitles(ctx context.Context, titles []ExternalTitle) error {
 	if len(titles) == 0 {
 		return nil
 	}
@@ -321,7 +332,7 @@ func (r *Repo) UpsertExternalTitles(ctx context.Context, titles []ExternalTitle)
 			t.ReleaseDate, t.OriginalLanguage, t.Popularity, t.VoteAverage, t.VoteCount,
 			t.USCertification, t.DetailFetchedAt, t.IMDbID, max(t.TVDBID, 0))
 	}
-	if err := r.pool.SendBatch(ctx, batch).Close(); err != nil {
+	if err := w.db.SendBatch(ctx, batch).Close(); err != nil {
 		return fmt.Errorf("upsert outside titles: %w", err)
 	}
 	return nil
@@ -390,7 +401,7 @@ func (r *Repo) ExternalEmbeddingTexts(ctx context.Context, keys []ExternalTitleK
 // UpsertExternalEmbeddings stores vectors for outside titles. A title deleted
 // since it was read (retention, the server cap) is skipped rather than failing
 // the batch.
-func (r *Repo) UpsertExternalEmbeddings(ctx context.Context, embeddings []ExternalEmbedding) error {
+func (w externalPoolWriter) UpsertExternalEmbeddings(ctx context.Context, embeddings []ExternalEmbedding) error {
 	if len(embeddings) == 0 {
 		return nil
 	}
@@ -413,7 +424,7 @@ func (r *Repo) UpsertExternalEmbeddings(ctx context.Context, embeddings []Extern
 				    canonical_text = EXCLUDED.canonical_text, updated_at = now()`,
 			e.Key.MediaType, e.Key.TMDBID, pgvector.NewVector(padded), e.Model, e.CanonicalText)
 	}
-	if err := r.pool.SendBatch(ctx, batch).Close(); err != nil {
+	if err := w.db.SendBatch(ctx, batch).Close(); err != nil {
 		return fmt.Errorf("upsert outside embeddings: %w", err)
 	}
 	return nil
@@ -559,12 +570,12 @@ func (r *Repo) CountExternalTitles(ctx context.Context) (int, error) {
 
 // DeleteExternalTitles deletes the given outside titles and their vectors.
 // Links naming them stay: a link may name a title without a stored row.
-func (r *Repo) DeleteExternalTitles(ctx context.Context, keys []ExternalTitleKey) (int64, error) {
+func (w externalPoolWriter) DeleteExternalTitles(ctx context.Context, keys []ExternalTitleKey) (int64, error) {
 	if len(keys) == 0 {
 		return 0, nil
 	}
 	types, ids := externalKeyArrays(slices.SortedFunc(slices.Values(keys), compareExternalKeys))
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := w.db.Exec(ctx, `
 		DELETE FROM external_titles t
 		USING  unnest($1::text[], $2::int[]) AS k(media_type, tmdb_id)
 		WHERE  t.media_type = k.media_type AND t.tmdb_id = k.tmdb_id`, types, ids)
@@ -576,12 +587,12 @@ func (r *Repo) DeleteExternalTitles(ctx context.Context, keys []ExternalTitleKey
 
 // deleteExternalEmbeddings deletes the vectors of the given titles and keeps
 // the titles.
-func (r *Repo) deleteExternalEmbeddings(ctx context.Context, keys []ExternalTitleKey) error {
+func (w externalPoolWriter) deleteExternalEmbeddings(ctx context.Context, keys []ExternalTitleKey) error {
 	if len(keys) == 0 {
 		return nil
 	}
 	types, ids := externalKeyArrays(slices.SortedFunc(slices.Values(keys), compareExternalKeys))
-	if _, err := r.pool.Exec(ctx, `
+	if _, err := w.db.Exec(ctx, `
 		DELETE FROM external_title_embeddings e
 		USING  unnest($1::text[], $2::int[]) AS k(media_type, tmdb_id)
 		WHERE  e.media_type = k.media_type AND e.tmdb_id = k.tmdb_id`, types, ids); err != nil {

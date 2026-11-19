@@ -53,6 +53,8 @@ func (l fakeClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, 
 	return other.Release, true, nil
 }
 
+func (l fakeClusterLock) poolWriter(fallback externalPoolWriter) externalPoolWriter { return fallback }
+
 func (l fakeClusterLock) Check(context.Context) error { return nil }
 
 func (l fakeClusterLock) Release() { l.release() }

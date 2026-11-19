@@ -47388,6 +47388,12 @@
       "value": "已关闭。运行时只会清除旧作品。"
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "生成已停止。在服务器重启之前，已存储的推荐仍会显示在发现中。"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

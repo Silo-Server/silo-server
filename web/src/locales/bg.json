@@ -52959,6 +52959,12 @@
       "value": "Изключено. Изпълненията само изчистват старите заглавия."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Генерирането е спряно. Запазените препоръки остават видими в „Откриване“, докато сървърът не се рестартира."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

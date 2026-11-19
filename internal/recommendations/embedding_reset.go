@@ -136,6 +136,7 @@ func (w *Worker) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 	if err != nil {
 		return EmbeddingsReset{}, err
 	}
+	w.engine.externalRefusedEmbeds.reset()
 	slog.InfoContext(ctx, "recommendation embeddings reset", "component", "recommendations",
 		"embeddings", res.Embeddings, "taste_profiles", res.TasteProfiles, "taste_clusters", res.TasteClusters, "cached_rows", res.CachedRows,
 		"external_embeddings", res.ExternalEmbeddings, "external_rows", res.ExternalRows)

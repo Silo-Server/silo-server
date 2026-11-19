@@ -52875,6 +52875,12 @@
       "value": "Av. Kjøringer fjerner bare gamle titler."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Genereringen er stoppet. Lagrede anbefalinger vises fortsatt i Utforsk til serveren startes på nytt."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

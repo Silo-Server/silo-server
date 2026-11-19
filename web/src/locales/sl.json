@@ -64706,6 +64706,12 @@
       "value": "Izklopljeno. Zagoni samo počistijo stare naslove."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Ustvarjanje se je ustavilo. Shranjena priporočila ostanejo vidna v Odkrivanju, dokler se strežnik znova ne zažene."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

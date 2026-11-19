@@ -64971,6 +64971,12 @@
       "value": "Vypnuto. Spuštění pouze odstraní staré tituly."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generování bylo zastaveno. Uložená doporučení zůstanou v sekci Objevovat viditelná až do restartu serveru."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

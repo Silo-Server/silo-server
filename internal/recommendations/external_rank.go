@@ -130,6 +130,10 @@ type ExternalRowsBuilt struct {
 // reset is refused. The caller holds the profile's refresh lock and, after
 // this returns, checks that the profile still exists (purgeIfProfileDeleted).
 func (e *Engine) RebuildExternalRows(ctx context.Context, userID int, profileID string) (ExternalRowsBuilt, error) {
+	return e.rebuildExternalRows(ctx, userID, profileID, nil)
+}
+
+func (e *Engine) rebuildExternalRows(ctx context.Context, userID int, profileID string, signals *tasteSignals) (ExternalRowsBuilt, error) {
 	var res ExternalRowsBuilt
 	deleteAll := func() (ExternalRowsBuilt, error) {
 		n, err := e.repo.DeleteExternalRows(ctx, userID, profileID)
@@ -150,7 +154,7 @@ func (e *Engine) RebuildExternalRows(ctx context.Context, userID int, profileID 
 	if len(taste) == 0 {
 		return deleteAll()
 	}
-	profile, exists, err := e.externalProfile(ctx, userID, profileID)
+	profile, exists, err := e.externalProfile(ctx, userID, profileID, signals)
 	if err != nil {
 		return res, err
 	}
@@ -287,12 +291,12 @@ func (r *Repo) externalRowSubjects(ctx context.Context) ([]StaleProfile, error) 
 // titles, after TMDB answered that it does not know them. A source names
 // them again only when it is refetched and TMDB still lists them, so a
 // missing title is not asked for on every run.
-func (r *Repo) forgetExternalTitles(ctx context.Context, keys []ExternalTitleKey) error {
+func (w externalPoolWriter) forgetExternalTitles(ctx context.Context, keys []ExternalTitleKey) error {
 	if len(keys) == 0 {
 		return nil
 	}
 	types, ids := externalKeyArrays(slices.SortedFunc(slices.Values(keys), compareExternalKeys))
-	tx, err := r.pool.Begin(ctx)
+	tx, err := w.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin forgetting outside titles: %w", err)
 	}

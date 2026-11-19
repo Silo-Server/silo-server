@@ -64658,6 +64658,12 @@
       "value": "Вимкнено. Запуски лише очищають старі назви."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Генерування зупинено. Збережені рекомендації залишаться видимими в Огляді до перезапуску сервера."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

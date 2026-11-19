@@ -58833,6 +58833,12 @@
       "value": "Desactivat. Les execucions només esborren títols antics."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "La generació s’ha aturat. Les recomanacions desades continuen visibles a Descobreix fins que es reinicia el servidor."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

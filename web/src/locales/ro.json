@@ -58813,6 +58813,12 @@
       "value": "Dezactivat. Rulările doar elimină titlurile vechi."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generarea s-a oprit. Recomandările stocate rămân vizibile în Descoperiți până la repornirea serverului."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

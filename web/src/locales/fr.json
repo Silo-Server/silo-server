@@ -58561,6 +58561,12 @@
       "value": "Désactivé. Les exécutions se limitent à retirer les anciens titres."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "La génération est arrêtée. Les recommandations enregistrées restent visibles dans Découvrir jusqu’au redémarrage du serveur."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

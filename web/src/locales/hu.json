@@ -52675,6 +52675,12 @@
       "value": "Ki. A futtatások csak a régi címeket törlik."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "A generálás leállt. A tárolt ajánlások a szerver újraindításáig láthatók maradnak a Felfedezés oldalon."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

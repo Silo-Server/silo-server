@@ -100,6 +100,8 @@ func TestExternalProfileSetSources(t *testing.T) {
 	}
 	seeds[0].OriginalLanguage, seeds[1].OriginalLanguage = "hi", "hi" // 5%
 	seeds[2].OriginalLanguage = "ta"                                  // 2.5%
+	seeds[3].OriginalLanguage, seeds[4].OriginalLanguage = "en:fr", "en:fr"
+	seeds[5].OriginalLanguage, seeds[6].OriginalLanguage = "und", "und"
 	got := externalProfileSetSources(seeds)
 	want := []string{"set:recent:movie", "set:recent:series",
 		"set:lang:hi:recent:movie", "set:lang:hi:top:movie", "set:lang:hi:recent:series", "set:lang:hi:top:series"}

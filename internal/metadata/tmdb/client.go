@@ -1124,16 +1124,13 @@ func (c *Client) GetMediaDetailInLanguage(ctx context.Context, mediaType string,
 			return cloneMediaDetail(cached), nil
 		}
 	}
-	// DoChan + select for the same reason as cachedCertification: the shared
-	// fetch survives any one caller's disconnect, and each caller stops
-	// waiting on its own cancellation.
-	resultCh := c.cacheGroup.DoChan(cacheKey, func() (any, error) {
+	value, err := c.sharedFetch(ctx, cacheKey, func(ctx context.Context) (any, error) {
 		if c.mediaDetailCache != nil {
 			if cached, ok := c.mediaDetailCache.Get(cacheKey); ok {
 				return cached, nil
 			}
 		}
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
+		fetchCtx, cancel := context.WithTimeout(ctx, sharedFetchTimeout)
 		defer cancel()
 		detail, err := fetch(fetchCtx)
 		if err != nil {
@@ -1144,19 +1141,14 @@ func (c *Client) GetMediaDetailInLanguage(ctx context.Context, mediaType string,
 		}
 		return detail, nil
 	})
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case result := <-resultCh:
-		if result.Err != nil {
-			return nil, result.Err
-		}
-		detail, ok := result.Val.(*MediaDetail)
-		if !ok {
-			return nil, fmt.Errorf("tmdb: invalid cached media detail response")
-		}
-		return cloneMediaDetail(detail), nil
+	if err != nil {
+		return nil, err
 	}
+	detail, ok := value.(*MediaDetail)
+	if !ok {
+		return nil, errors.New("tmdb: invalid cached media detail response")
+	}
+	return cloneMediaDetail(detail), nil
 }
 
 // cloneMediaDetail copies a detail deeply enough that a caller changing its

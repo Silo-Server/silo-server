@@ -65608,6 +65608,12 @@
       "value": "Выключено. Запуски только удаляют устаревшие фильмы и сериалы."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Создание рекомендаций остановлено. Сохранённые рекомендации будут отображаться в разделе «Обзор» до перезапуска сервера."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

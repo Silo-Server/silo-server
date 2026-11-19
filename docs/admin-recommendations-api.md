@@ -47,7 +47,9 @@ media type) and `last_run` in the job run shape. Its `result` holds
 `vectors_skipped`, the reason no vectors could be stored), and the row counts
 (`row_profiles`, `rows_built`, `rows_deleted`, `rows_refused`,
 `row_failures`, `rows_busy`). A run with the feature off only applies
-retention.
+retention. Saving either switch as off cancels active generation when the
+worker receives the change. If only the main recommendations switch is turned
+off, Discover can still serve stored rows until restart.
 
 `stale_sweep` reports the sweep that rebuilds profiles after their signals or
 access change: `pending` counts the profiles waiting for a rebuild, and

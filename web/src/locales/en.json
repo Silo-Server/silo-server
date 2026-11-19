@@ -52903,6 +52903,12 @@
       "value": "Off. Runs only clear out old titles."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generation has stopped. Stored recommendations stay visible in Discover until the server restarts."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

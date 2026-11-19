@@ -58187,6 +58187,12 @@
       "value": "כבוי. ההרצות רק מנקות פריטים ישנים."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "יצירת ההמלצות הופסקה. ההמלצות השמורות יישארו גלויות בדף ”גילוי” עד שהשרת יופעל מחדש."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

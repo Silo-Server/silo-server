@@ -53339,6 +53339,12 @@
       "value": "Väljas. Käivitused ainult eemaldavad vanu pealkirju."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Loomine on peatatud. Salvestatud soovitused jäävad vahelehel „Avasta“ nähtavaks, kuni server taaskäivitub."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

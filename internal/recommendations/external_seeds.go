@@ -7,10 +7,11 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Silo-Server/silo-server/internal/lang"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -87,7 +88,7 @@ func (p ExternalProfile) PoolQuery() ExternalPoolQuery {
 // from the weights its taste refresh computes, and whether the profile still
 // exists. It reads only the database. A profile that no longer exists has no
 // seeds and no sets.
-func (e *Engine) externalProfile(ctx context.Context, userID int, profileID string) (ExternalProfile, bool, error) {
+func (e *Engine) externalProfile(ctx context.Context, userID int, profileID string, signals *tasteSignals) (ExternalProfile, bool, error) {
 	p := ExternalProfile{UserID: userID, ProfileID: profileID}
 	if e.storeProvider == nil || e.ratingsRepo == nil {
 		return p, false, fmt.Errorf("outside-title seeds for user %d profile %s: no user store or ratings", userID, profileID)
@@ -106,9 +107,12 @@ func (e *Engine) externalProfile(ctx context.Context, userID int, profileID stri
 	if profile == nil {
 		return p, false, nil
 	}
-	signals, err := e.readTasteSignals(ctx, store, userID, profileID)
-	if err != nil {
-		return p, false, fmt.Errorf("read signals for user %d profile %s: %w", userID, profileID, err)
+	if signals == nil {
+		read, err := e.readTasteSignals(ctx, store, userID, profileID)
+		if err != nil {
+			return p, false, fmt.Errorf("read signals for user %d profile %s: %w", userID, profileID, err)
+		}
+		signals = &read
 	}
 	weights := make(map[string]float64, len(signals.titles))
 	engaged := make(map[string]bool, len(signals.titles))
@@ -165,8 +169,11 @@ func externalProfileLanguages(seeds []ExternalSeed) []string {
 	}
 	counts := map[string]int{}
 	for _, s := range seeds {
-		if l := lang.Canonical(s.OriginalLanguage); l != "" && l != "en" {
-			counts[l]++
+		tag, err := language.Parse(strings.TrimSpace(s.OriginalLanguage))
+		base, _, _ := tag.Raw()
+		code := base.String()
+		if err == nil && code != "und" && code != "en" {
+			counts[code]++
 		}
 	}
 	var out []string

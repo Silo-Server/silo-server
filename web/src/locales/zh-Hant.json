@@ -47518,6 +47518,12 @@
       "value": "已關閉。執行時只會清除舊作品。"
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "已停止產生推薦。在伺服器重新啟動之前，已儲存的推薦仍會顯示在探索中。"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

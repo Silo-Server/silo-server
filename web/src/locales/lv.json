@@ -59768,6 +59768,12 @@
       "value": "Izslēgts. Izpildes tikai notīra vecos nosaukumus."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Ģenerēšana ir apturēta. Saglabātie ieteikumi paliek redzami sadaļā „Atklāt”, līdz serveris tiks restartēts."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

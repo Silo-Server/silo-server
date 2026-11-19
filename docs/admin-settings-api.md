@@ -7,8 +7,9 @@ no-store responses:
   machine-managed keys.
 - `GET /api/v2/admin/settings/effective`: active settings with the runtime's
   defaults applied, using the same redaction policy as stored settings.
-- `GET /api/v2/admin/settings/restart-keys`: the compiled `keys` and `prefixes`
-  whose changes need a server restart.
+- `GET /api/v2/admin/settings/restart-keys`: the compiled restart registry. An exact match in
+  `keys` requires a restart. A match in `prefixes` also requires a restart unless
+  `live_keys` lists the key.
 - `GET /api/v2/admin/settings/sensitive-status`: configured secret key names,
   `managed_by_env` names, and `managed_by_env_vars`. Values are never returned.
   `configured` and `managed_by_env` are arrays and `managed_by_env_vars` is an
@@ -99,7 +100,7 @@ An administrator connects each AI provider once, and each AI job selects a
 provider from that list: `ai.text_provider_id` for text translation (used while
 `ai.auth_mode` is `api_key`), `ai.speech_provider_id` for speech-to-text, and
 `recommendations.embedding_provider_id` for recommendation embeddings (applied
-at restart, like every `recommendations.*` setting). The model settings
+at restart). The model settings
 (`ai.chat_model`, `ai.asr_model`, `recommendations.embedding_model`) are
 unchanged, except that `recommendations.embedding_model` no longer has a
 default. A binding must

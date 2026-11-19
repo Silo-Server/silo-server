@@ -104,9 +104,8 @@ than a recommended one from its source page by page (`fillRowPage`):
   cursor; its see all page starts again at page 1.
 - A title row that fails (TMDB refused a filter, a list is unreadable) is left
   out and logged; the page fails only when every title row that reads TMDB or a
-  stored list did. Recommended rows count neither way: they are empty, not
-  failed, while the feature is off, and a page of recommended rows alone does
-  not fail. A title row
+  stored list failed and no recommended row has titles to show. A page with only
+  recommended rows can also succeed with an empty result. A title row
   with no titles is left out of `items` and stays in `row_order`, since shipped
   clients cannot draw an empty row.
 

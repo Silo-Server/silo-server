@@ -58857,6 +58857,12 @@
       "value": "Desativado. As execuções só removem títulos antigos."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "A geração foi interrompida. As recomendações armazenadas continuam visíveis em Descobrir até que o servidor seja reiniciado."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

@@ -47000,6 +47000,12 @@
       "value": "Mati. Larian hanya mengosongkan tajuk lama."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Penjanaan telah dihentikan. Cadangan yang disimpan kekal kelihatan dalam Teroka sehingga pelayan dimulakan semula."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

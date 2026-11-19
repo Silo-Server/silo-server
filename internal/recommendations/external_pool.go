@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -96,8 +98,7 @@ type ExternalPoolOptions struct {
 	// MaxTitles caps the outside titles the server stores;
 	// DefaultExternalMaxTitles when <= 0.
 	MaxTitles int
-	// held is the job's cluster lock. Vectors are not stored once its
-	// session has closed.
+	// held owns the PostgreSQL session used for pool writes.
 	held clusterLock
 }
 
@@ -166,7 +167,7 @@ func (e *Engine) BuildExternalPool(ctx context.Context, opts ExternalPoolOptions
 		if err := ctx.Err(); err != nil {
 			return ExternalPoolCounts{}, err
 		}
-		p, ok, err := e.externalProfile(ctx, s.UserID, s.ProfileID)
+		p, ok, err := e.externalProfile(ctx, s.UserID, s.ProfileID, nil)
 		if err != nil {
 			return ExternalPoolCounts{}, err
 		}
@@ -183,9 +184,10 @@ type externalRun struct {
 	tmdb   ExternalTMDB
 	now    time.Time
 	held   clusterLock
+	writer externalPoolWriter
 	counts ExternalPoolCounts
 	// tmdbLeft is the TMDB requests the run may still make.
-	tmdbLeft atomic.Int64
+	tmdbLeft int
 	// failures counts TMDB calls in a row that failed.
 	failures atomic.Int32
 	mu       sync.Mutex
@@ -204,10 +206,14 @@ func (e *Engine) buildExternalPool(ctx context.Context, profiles []ExternalProfi
 		return ExternalPoolCounts{}, err
 	}
 	r := &externalRun{e: e, tmdb: e.externalTMDB, now: now, held: opts.held}
-	r.tmdbLeft.Store(int64(limits.tmdbRequests))
+	r.writer = e.repo.externalPoolWriter
+	if opts.held != nil {
+		r.writer = opts.held.poolWriter(r.writer)
+	}
+	r.tmdbLeft = limits.tmdbRequests
 	r.counts.Profiles = len(profiles)
 	err = r.run(ctx, profiles, maxTitles, limits.embeds)
-	r.counts.TMDBRequests = limits.tmdbRequests - int(max(r.tmdbLeft.Load(), 0))
+	r.counts.TMDBRequests = limits.tmdbRequests - r.tmdbLeft
 	return r.counts, err
 }
 
@@ -267,14 +273,31 @@ func uniqueSorted(keys []string) []string {
 
 // takeRequest spends one TMDB request of the budget, or reports that none is
 // left.
-func (r *externalRun) takeRequest() bool {
-	if r.tmdbLeft.Add(-1) >= 0 {
-		return true
-	}
+func (r *externalRun) takeRequest(ctx context.Context) (bool, error) {
+	// The lock session is also used to store source results. Serialize its
+	// probes and writes while TMDB fetches run concurrently.
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.checkHeld(ctx); err != nil {
+		return false, err
+	}
+	if r.tmdbLeft > 0 {
+		r.tmdbLeft--
+		return true, nil
+	}
 	r.counts.BudgetExhausted = true
-	r.mu.Unlock()
-	return false
+	return false, nil
+}
+
+// Parallel fetches hold mu while using the job session.
+func (r *externalRun) checkHeld(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if r.held != nil {
+		return r.held.Check(ctx)
+	}
+	return nil
 }
 
 var errExternalTMDBUnavailable = errors.New("TMDB calls keep failing")
@@ -321,16 +344,19 @@ func forEachBounded(ctx context.Context, n int, fn func(ctx context.Context, i i
 
 // recordSource stores a fetch result, counting it.
 func (r *externalRun) recordSource(ctx context.Context, res ExternalSourceResult) error {
-	if err := r.e.repo.RecordExternalSource(ctx, res); err != nil {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.checkHeld(ctx); err != nil {
 		return err
 	}
-	r.mu.Lock()
+	if err := r.writer.RecordExternalSource(ctx, res); err != nil {
+		return err
+	}
 	if res.Status == ExternalSourceFailed {
 		r.counts.SourcesFailed++
 	} else {
 		r.counts.SourcesFetched++
 	}
-	r.mu.Unlock()
 	return nil
 }
 
@@ -356,7 +382,7 @@ func (r *externalRun) fetchSeedLists(ctx context.Context, seeds []ExternalTitleK
 	// Seed lists use at most half of the TMDB requests left, so a server
 	// with more due seeds than the budget still fetches details in the same
 	// run; the rest of the seeds wait for the next one.
-	fetch := due[:min(len(due), int(max(r.tmdbLeft.Load(), 0))/2)]
+	fetch := due[:min(len(due), r.tmdbLeft/2)]
 	if len(fetch) < len(due) {
 		r.mu.Lock()
 		r.counts.BudgetExhausted = true
@@ -364,8 +390,8 @@ func (r *externalRun) fetchSeedLists(ctx context.Context, seeds []ExternalTitleK
 	}
 	var done atomic.Int64
 	err = forEachBounded(ctx, len(fetch), func(ctx context.Context, i int) (bool, error) {
-		if !r.takeRequest() {
-			return true, nil
+		if ok, err := r.takeRequest(ctx); !ok {
+			return true, err
 		}
 		key := fetch[i]
 		seed := bySource[key]
@@ -509,8 +535,8 @@ func (r *externalRun) fetchSet(ctx context.Context, set externalSet) (res Extern
 	params := set.discoverParams(r.now)
 	seen := map[int]struct{}{}
 	for page := 1; len(res.Links) < set.size; page++ {
-		if !r.takeRequest() {
-			return res, false, nil
+		if ok, err := r.takeRequest(ctx); !ok {
+			return res, false, err
 		}
 		got, fetchErr := r.tmdb.DiscoverPage(ctx, discoverType, params, page)
 		if ctx.Err() != nil {
@@ -567,12 +593,9 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 	for _, s := range stored {
 		ids[s.key] = s
 	}
-	var all []externalTitleIDs
 	addKey := func(k ExternalTitleKey) {
-		if t, ok := ids[k]; ok {
-			all = append(all, t)
-		} else {
-			all = append(all, externalTitleIDs{key: k})
+		if _, ok := ids[k]; !ok {
+			ids[k] = externalTitleIDs{key: k}
 		}
 	}
 	for _, pool := range pools {
@@ -585,8 +608,7 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 			addKey(k)
 		}
 	}
-	all = append(all, stored...)
-	owned, err := r.ownedTitles(ctx, all)
+	owned, err := r.ownedTitles(ctx, maps.Values(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -605,18 +627,18 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 			unowned = append(unowned, s.key)
 		}
 	}
-	if err := r.e.repo.forgetExternalTitles(ctx, nowOwned); err != nil {
+	if err := r.writer.forgetExternalTitles(ctx, nowOwned); err != nil {
 		return nil, err
 	}
 	r.counts.TitlesDeleted = int64(len(nowOwned))
 	if excess := externalExcessTitles(unowned, chosen, named, maxTitles); len(excess) > 0 {
-		deleted, err := r.e.repo.DeleteExternalTitles(ctx, excess)
+		deleted, err := r.writer.DeleteExternalTitles(ctx, excess)
 		if err != nil {
 			return nil, err
 		}
 		r.counts.TitlesDeleted += deleted
 	}
-	if err := r.e.repo.TouchExternalReferences(ctx, uniqueSorted(append(sources, setKeys...)), chosen); err != nil {
+	if err := r.writer.TouchExternalReferences(ctx, uniqueSorted(append(sources, setKeys...)), chosen); err != nil {
 		return nil, err
 	}
 	return chosen, nil
@@ -814,19 +836,15 @@ type externalTitleIDs struct {
 
 // ownedTitles reports which titles the catalog has, by the lookup Requests
 // uses to show a title as available: TMDB ID, then TVDB, then IMDb.
-func (r *externalRun) ownedTitles(ctx context.Context, titles []externalTitleIDs) (map[ExternalTitleKey]bool, error) {
+func (r *externalRun) ownedTitles(ctx context.Context, titles iter.Seq[externalTitleIDs]) (map[ExternalTitleKey]bool, error) {
 	lookup := r.e.externalOwnedLookup()
 	if lookup == nil {
 		return nil, errors.New("outside titles: no catalog lookup for owned titles")
 	}
 	owned := map[ExternalTitleKey]bool{}
 	byType := map[string][]externalTitleIDs{}
-	seen := map[ExternalTitleKey]bool{}
-	for _, t := range titles {
-		if !seen[t.key] {
-			seen[t.key] = true
-			byType[t.key.MediaType] = append(byType[t.key.MediaType], t)
-		}
+	for t := range titles {
+		byType[t.key.MediaType] = append(byType[t.key.MediaType], t)
 	}
 	for _, mediaType := range []string{ExternalMediaMovie, ExternalMediaSeries} {
 		group := byType[mediaType]

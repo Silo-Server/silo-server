@@ -392,6 +392,17 @@ func TestBuildExternalPoolRemembersRefusedTitlesDB(t *testing.T) {
 		t.Fatalf("refetch run: %+v, %d detail calls, %d tries", counts, s.tmdb.detailCalls(refused), tries()-firstTries)
 	}
 
+	// A reset on a peer does not touch this engine's in-memory refusal.
+	// Recreating the same model must still retry the item.
+	if _, err := s.engine.repo.ResetEmbeddings(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.lock()
+	counts = s.build(externalTMDBRequestBudget, externalEmbedBudget)
+	if tries() == firstTries || counts.Embeddings.Skipped != 1 {
+		t.Fatalf("refused title was not retried after a peer reset: %+v", counts)
+	}
+
 	// A changed text drops the refusal of the old one: when its embedding
 	// then fails for another reason, the next run tries again without
 	// waiting for the detail to be due.

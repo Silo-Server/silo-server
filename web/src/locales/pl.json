@@ -65505,6 +65505,12 @@
       "value": "Wyłączone. Uruchomienia jedynie usuwają stare tytuły."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generowanie zostało zatrzymane. Zapisane rekomendacje pozostaną widoczne na stronie Odkryj do ponownego uruchomienia serwera."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

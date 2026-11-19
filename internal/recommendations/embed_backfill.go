@@ -833,6 +833,9 @@ func runStopError(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
+	if errors.Is(err, errJobLockLost) {
+		return err
+	}
 	// A provider limit will not improve by splitting the batch.
 	if isQuotaError(err) {
 		return fmt.Errorf("embedding batch stopped: %w", err)

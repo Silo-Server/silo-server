@@ -78,14 +78,17 @@ func noneAvailable(context.Context, MediaType, []int) (map[int]PresenceMatch, er
 	return map[int]PresenceMatch{}, nil
 }
 
-// personalRowPage returns titles [from, from+want) of a personal row with the
+// personalRowPage returns up to want titles starting at pageNumber with the
 // viewer's request state, and how many titles the row has in all.
-func (s *Service) personalRowPage(ctx context.Context, viewer Viewer, source discoverrows.PersonalSource, ceiling string, from, want int) ([]MediaResult, int, error) {
+func (s *Service) personalRowPage(ctx context.Context, viewer Viewer, source discoverrows.PersonalSource, ceiling string, pageNumber, want int) ([]MediaResult, int, error) {
 	titles, err := s.personalTitles(ctx, viewer, source, ceiling)
 	if err != nil {
 		return nil, 0, err
 	}
-	from = min(max(from, 0), len(titles))
+	if pageNumber > personalPageCount(len(titles)) {
+		return []MediaResult{}, len(titles), nil
+	}
+	from := (pageNumber - 1) * discoverrows.PageSize
 	shown := titles[from:min(from+max(want, 0), len(titles))]
 	raw := &tmdb.MediaPage{Results: make([]tmdb.MediaResult, 0, len(shown))}
 	reasons := map[certKey][]discoverrows.Reason{}
@@ -115,7 +118,7 @@ func personalPageCount(total int) int {
 // its limit of titles. A trimmed row has no cursor, as on other rows; a row
 // shown whole over several pages points past its last page.
 func (s *Service) firstPersonalRowPage(ctx context.Context, viewer Viewer, row discoverrows.Row, source discoverrows.PersonalSource, ceiling string) (*DiscoverySection, error) {
-	results, total, err := s.personalRowPage(ctx, viewer, source, ceiling, 0, row.Limit)
+	results, total, err := s.personalRowPage(ctx, viewer, source, ceiling, 1, row.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +134,7 @@ func (s *Service) firstPersonalRowPage(ctx context.Context, viewer Viewer, row d
 // a page, page+1 following.
 func (s *Service) personalSeeAllPage(ctx context.Context, viewer Viewer, row discoverrows.Row, source discoverrows.PersonalSource, ceiling string, page int) (*DiscoverySection, error) {
 	page = max(page, 1)
-	results, total, err := s.personalRowPage(ctx, viewer, source, ceiling, (page-1)*discoverrows.PageSize, discoverrows.PageSize)
+	results, total, err := s.personalRowPage(ctx, viewer, source, ceiling, page, discoverrows.PageSize)
 	if err != nil {
 		return nil, err
 	}

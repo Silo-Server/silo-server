@@ -52847,6 +52847,12 @@
       "value": "Pois. Ajot vain poistavat vanhoja nimikkeitä."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Luonti on pysähtynyt. Tallennetut suositukset näkyvät Tutustu-osiossa, kunnes palvelin käynnistetään uudelleen."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

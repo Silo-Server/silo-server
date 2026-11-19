@@ -45,6 +45,18 @@ func (w *Worker) ExternalEnabled() bool {
 	return cfg.Enabled && cfg.ExternalEnabled
 }
 
+var errExternalDisabled = errors.New("outside-title generation disabled")
+
+// StopExternalGeneration cancels the current run after a config reload turns
+// either recommendation switch off. Retention runs outside this context.
+func (w *Worker) StopExternalGeneration() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.cancelExternal != nil {
+		w.cancelExternal(errExternalDisabled)
+	}
+}
+
 // TriggerExternal starts an outside-title run unless one is already running
 // on this server or another.
 func (w *Worker) TriggerExternal() error {
@@ -128,20 +140,34 @@ func (w *Worker) doExternal(ctx context.Context, held clusterLock) (externalResu
 	}
 	res.PrunedTitles, res.PrunedSources, res.PrunedLinks = pruned.Titles, pruned.Sources, pruned.Links
 
-	res.Enabled = w.ExternalEnabled()
+	generationCtx, cancel := context.WithCancelCause(ctx)
+	// Register before reading the switches: a reload either cancels this
+	// context or the read below already sees the disabled setting.
+	w.mu.Lock()
+	w.cancelExternal = cancel
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		w.cancelExternal = nil
+		w.mu.Unlock()
+		cancel(nil)
+	}()
+	cfg := w.currentConfig()
+	res.Enabled = cfg.Enabled && cfg.ExternalEnabled
 	if res.Enabled {
-		cfg := w.currentConfig()
-		var poolErr error
-		res.ExternalPoolCounts, poolErr = e.BuildExternalPool(ctx, ExternalPoolOptions{MaxTitles: cfg.ExternalMaxTitles, held: held})
-		// Rows are built from whatever the pool stored, so a pool run that
-		// stopped early (TMDB failing, a provider limit) still refreshes
-		// them; a lost lock or an expired run does not.
-		if poolErr != nil && (errors.Is(poolErr, errJobLockLost) || ctx.Err() != nil) {
-			return res, poolErr
+		res.ExternalPoolCounts, err = e.BuildExternalPool(generationCtx, ExternalPoolOptions{MaxTitles: cfg.ExternalMaxTitles, held: held})
+		// A failed write on the pinned connection may be the first sign its
+		// session closed. Only rebuild from partial results while we own it.
+		if err != nil && held != nil && generationCtx.Err() == nil && !errors.Is(err, errJobLockLost) {
+			err = errors.Join(err, held.Check(generationCtx))
 		}
-		res.externalRowsResult, err = w.rebuildAllExternalRows(ctx, held)
-		if err == nil {
-			err = poolErr
+		if generationCtx.Err() == nil && !errors.Is(err, errJobLockLost) {
+			var rowsErr error
+			res.externalRowsResult, rowsErr = w.rebuildAllExternalRows(generationCtx, held)
+			err = errors.Join(err, rowsErr)
+		}
+		if errors.Is(context.Cause(generationCtx), errExternalDisabled) && errors.Is(err, context.Canceled) {
+			err = nil
 		}
 	}
 	if n, countErr := e.repo.CountExternalTitles(ctx); countErr == nil {
@@ -179,7 +205,7 @@ func (w *Worker) rebuildAllExternalRows(ctx context.Context, held clusterLock) (
 			w.markBusyProfileStale(ctx, p.UserID, p.ProfileID)
 			continue
 		}
-		built, err := w.rebuildProfileExternalRows(ctx, p.UserID, p.ProfileID)
+		built, err := w.rebuildProfileExternalRows(ctx, p.UserID, p.ProfileID, nil)
 		unlock()
 		res.RowsBuilt += built.Written
 		res.RowsDeleted += built.Deleted
@@ -201,8 +227,8 @@ const externalPurgeTimeout = 10 * time.Second
 // checks again after the last write and purges them. The check has its own
 // deadline and runs after a failed rebuild too: one that wrote the movie
 // row and then failed or timed out on the series row left a row behind.
-func (w *Worker) rebuildProfileExternalRows(ctx context.Context, userID int, profileID string) (ExternalRowsBuilt, error) {
-	built, err := w.engine.RebuildExternalRows(ctx, userID, profileID)
+func (w *Worker) rebuildProfileExternalRows(ctx context.Context, userID int, profileID string, signals *tasteSignals) (ExternalRowsBuilt, error) {
+	built, err := w.engine.rebuildExternalRows(ctx, userID, profileID, signals)
 	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), externalPurgeTimeout)
 	defer cancel()
 	if purgeErr := w.engine.purgeIfProfileDeleted(purgeCtx, userID, profileID); purgeErr != nil {

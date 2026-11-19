@@ -75499,6 +75499,12 @@
       "value": "معطّل. تقتصر عمليات التشغيل على مسح العناوين القديمة."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "توقّف الإنشاء. تبقى التوصيات المخزّنة ظاهرة في «استكشاف» حتى إعادة تشغيل الخادم."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

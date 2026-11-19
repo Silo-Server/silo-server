@@ -3,9 +3,11 @@ package recommendations
 import (
 	"cmp"
 	"context"
+	"errors"
 	"math"
 	"slices"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -230,7 +232,7 @@ func TestExternalRowRefusalsDB(t *testing.T) {
 	s.f.exec(`DELETE FROM user_profiles WHERE id = $1`, s.profileID)
 	w := newJobTestWorker(&fakeLocker{}, nil)
 	w.engine = s.engine
-	if _, err := w.rebuildProfileExternalRows(ctx, s.userID, s.profileID); err != nil || s.row() != nil {
+	if _, err := w.rebuildProfileExternalRows(ctx, s.userID, s.profileID, nil); err != nil || s.row() != nil {
 		t.Fatalf("rebuild of a deleted profile = %v, row %+v", err, s.row())
 	}
 }
@@ -385,4 +387,84 @@ func TestExternalRecommendationsReadDB(t *testing.T) {
 	if got := read(reader.WithPersonalRows(false), catalog.AccessFilter{}); got != nil {
 		t.Fatalf("recommendations disabled served %d titles", len(got))
 	}
+}
+
+type waitingDiscoverClient struct {
+	failingExternalTMDB
+	started chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
+
+func (c *waitingDiscoverClient) DiscoverPage(ctx context.Context, _ string, _ tmdb.DiscoverParams, _ int) (*tmdb.MediaPage, error) {
+	c.once.Do(func() { close(c.started) })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.resume:
+		return &tmdb.MediaPage{}, nil
+	}
+}
+
+func TestExternalJobStopsDuringFetchDB(t *testing.T) {
+	for i, reason := range []string{"switch off", "session lost"} {
+		t.Run(reason, func(t *testing.T) {
+			s := newExternalRowsScenario(t, 938_000_000+i*100)
+			w := newJobTestWorker(&fakeLocker{}, nil)
+			w.engine = s.engine
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			held, acquired, err := (pgJobLocker{s.pool}).TryLock(ctx, externalJobLock)
+			if err != nil || !acquired {
+				t.Fatalf("acquire job lock: %v, %v", acquired, err)
+			}
+			pid := held.(pgClusterLock).lock.Conn().Conn().PgConn().PID()
+			client := &waitingDiscoverClient{failingExternalTMDB: failingExternalTMDB{t}, started: make(chan struct{}), resume: make(chan struct{})}
+			w.engine.WithExternalTMDB(client)
+			done := make(chan error, 1)
+			go func() {
+				_, err := w.doExternal(ctx, held)
+				held.Release()
+				done <- err
+			}()
+			select {
+			case <-client.started:
+			case err := <-done:
+				t.Fatalf("job stopped before TMDB: %v", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			var want error
+			if reason == "switch off" {
+				w.StopExternalGeneration()
+			} else {
+				s.terminateDuringSourceWrite(ctx, pid, client.resume)
+				want = errJobLockLost
+			}
+			if err := <-done; !errors.Is(err, want) {
+				t.Fatalf("job ended with %v, want %v", err, want)
+			}
+			var recorded int
+			if err := s.pool.QueryRow(ctx, "SELECT count(*) FROM external_title_sources WHERE source_key LIKE 'set:%'").Scan(&recorded); err != nil || recorded != 0 {
+				t.Fatalf("recorded %d interrupted sources: %v", recorded, err)
+			}
+		})
+	}
+}
+
+// Block the write after the last probe, then drop its job session. A write
+// on another connection would commit when the table lock is released.
+func (s *externalRowsScenario) terminateDuringSourceWrite(ctx context.Context, pid uint32, resume chan struct{}) {
+	s.t.Helper()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(ctx, "LOCK external_title_sources IN SHARE MODE"); err != nil {
+		s.t.Fatal(err)
+	}
+	close(resume)
+	waitForLockWait(s.t, s.pool, "INSERT INTO external_title_sources")
+	s.f.exec("SELECT pg_terminate_backend($1, 5000)", pid)
 }

@@ -69,8 +69,7 @@ func (s *Service) layoutRows(ctx context.Context) ([]discoverrows.Row, error) {
 
 // DiscoverRows renders the Discover page for a viewer. A title row that fails
 // is left out and logged, so one broken list or filter does not take the
-// page down; the call fails only when every title row that reads TMDB did.
-// Personal rows count neither way.
+// page down. Stored personal rows can still serve a page during an outage.
 func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLayoutPage, error) {
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, errRequestServiceNotConfigured
@@ -122,9 +121,7 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 	}
 	_ = group.Wait()
 
-	// Only rows that read TMDB decide whether the page failed: personal rows
-	// read stored data and are empty, not failed, when the feature is off, so
-	// counting them would hide a TMDB outage behind an empty page.
+	// Empty personal rows must not hide an outage behind an empty page.
 	tmdbRows, tmdbFailed := 0, 0
 	var firstErr error
 	for i, section := range sections {
@@ -147,7 +144,7 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 			out.Sections = append(out.Sections, *section)
 		}
 	}
-	if tmdbFailed > 0 && tmdbFailed == tmdbRows {
+	if len(out.Sections) == 0 && tmdbFailed > 0 && tmdbFailed == tmdbRows {
 		return nil, firstErr
 	}
 	return out, nil

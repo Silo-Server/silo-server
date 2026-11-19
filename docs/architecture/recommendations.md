@@ -562,7 +562,8 @@ recommendations are enabled and `recommendations.external.enabled` is set.
 The worker and reads follow `recommendations.external.enabled` without a
 restart. `recommendations.enabled` applies to outside rows as to the library's
 personal rows: reads take it at startup, and a running worker stops outside
-runs as soon as it is turned off.
+generation as soon as it observes either switch turn off, including an active
+run. Turning off the main switch leaves stored rows visible until restart.
 
 - **Stored data.** `external_title_sources` and `external_title_links` hold
   what the pool is built from: each seed title's TMDB recommendations and
@@ -598,7 +599,9 @@ runs as soon as it is turned off.
   whose text the provider refuses at every length is remembered in memory
   for this server, apart from library refusals: until its stored detail is
   due it is neither fetched nor embedded, and a refetch with the same text is
-  not sent again. A restart or a new embedding lock forgets it. A title
+  not sent again. Restarting clears refusals. Each node checks the version of
+  the lock row in PostgreSQL so it also retries refusals after a reset that
+  recreates the same model and dimensions. A title
   whose text changed loses its old vector before the new one is asked for,
   so a failed embedding leaves it for the next run, not ranked by the old
   text until its detail is due.

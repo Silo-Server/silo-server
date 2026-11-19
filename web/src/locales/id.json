@@ -47012,6 +47012,12 @@
       "value": "Nonaktif. Proses hanya membersihkan judul lama."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Pembuatan rekomendasi telah dihentikan. Rekomendasi yang tersimpan tetap terlihat di Jelajahi hingga server dimulai ulang."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

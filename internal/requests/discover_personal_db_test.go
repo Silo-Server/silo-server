@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -272,6 +273,16 @@ func TestRecommendedDiscoverRowDatabase(t *testing.T) {
 	t.Run("parent", s.checkParent)
 	t.Run("rating ceiling", s.checkCeiling)
 	t.Run("own row per profile", s.checkSibling)
+	t.Run("provider outage", func(t *testing.T) {
+		layout := s.svc.store.(*layoutStore)
+		previousRows, previousClient := layout.rows, s.svc.tmdb
+		t.Cleanup(func() { layout.rows, s.svc.tmdb = previousRows, previousClient })
+		layout.rows = discoverrows.DefaultRows()
+		s.svc.tmdb = &rowsTMDB{chartErr: errors.New("charts unavailable")}
+		if row := recMovieRow(s.page(recParent)); row == nil || len(row.Results) == 0 {
+			t.Fatal("lost stored recommendations during provider outage")
+		}
+	})
 	t.Run("blocked or off", s.checkNoRow)
 }
 
@@ -294,7 +305,7 @@ func (s *recRowScenario) checkParent(t *testing.T) {
 		t.Fatalf("series row = %+v %v, want only the series the library lacks", series, err)
 	}
 	var seen []int
-	for n := 1; n <= 3; n++ {
+	for _, n := range []int{1, 2, 3, math.MaxInt} {
 		p := s.seeAll(recParent, n)
 		if p.Page != n || p.TotalPages != 2 || p.TotalResults != len(want) || p.NextPage != 0 {
 			t.Fatalf("see all page %d = %+v", n, p)

@@ -212,6 +212,42 @@ func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
 	}
 }
 
+// A worker disabling Discover must also stop a detail fetch already waiting
+// on TMDB when no other caller needs it.
+func TestMediaDetailCancelsAbandonedRequest(t *testing.T) {
+	started, stopped := make(chan struct{}), make(chan struct{})
+	release := make(chan struct{})
+	client := newTestClient(t, func(_ http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+			close(stopped)
+		case <-release:
+		}
+	})
+	defer close(release)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	caller, stop := context.WithCancel(ctx)
+	defer stop()
+	done := make(chan error, 1)
+	go func() { _, err := client.GetMediaDetailInLanguage(caller, "movie", 1, "en"); done <- err }()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	stop()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-ctx.Done():
+		t.Fatal("abandoned detail request still running")
+	}
+}
+
 // TestGetCertificationCallerStopsWaitingOnCancel pins the DoChan behavior: a
 // caller whose context dies mid-flight returns promptly with ctx.Err() while
 // the shared detached fetch continues for the surviving waiters.

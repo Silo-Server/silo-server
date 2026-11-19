@@ -52475,6 +52475,12 @@
       "value": "बंद। रन सिर्फ़ पुराने टाइटल हटाते हैं।"
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "सुझाव बनना बंद हो गया है। सर्वर के रीस्टार्ट होने तक स्टोर किए गए सुझाव डिस्कवर में दिखते रहेंगे।"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

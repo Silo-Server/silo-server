@@ -52815,6 +52815,12 @@
       "value": "Fra. Kørsler rydder kun gamle titler op."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Genereringen er stoppet. Gemte anbefalinger forbliver synlige i Opdag, indtil serveren genstartes."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

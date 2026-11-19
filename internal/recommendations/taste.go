@@ -160,11 +160,11 @@ func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID 
 	if err != nil {
 		return false, err
 	}
-	stored, err := e.rebuildTasteProfile(ctx, userID, profileID, started)
+	signals, err := e.rebuildTasteProfile(ctx, userID, profileID, started)
 	if err != nil {
-		return stored, err
+		return false, err
 	}
-	return stored, e.purgeIfProfileDeleted(ctx, userID, profileID)
+	return signals != nil, e.purgeIfProfileDeleted(ctx, userID, profileID)
 }
 
 // purgeIfProfileDeleted deletes the recommendation state of a profile deleted
@@ -192,16 +192,17 @@ func (e *Engine) purgeIfProfileDeleted(ctx context.Context, userID int, profileI
 // rebuildTasteProfile is refreshTasteProfile for a refresh that started at
 // started, database time, before any of its signal reads. The profile is
 // stored as updated at started, so a stale mark set while it reads stays newer
-// than the profile and the stale sweep refreshes it again.
-func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID string, started time.Time) (bool, error) {
+// than the profile and the stale sweep refreshes it again. It returns the
+// signals used for a stored vector so the same refresh can build outside rows.
+func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID string, started time.Time) (*tasteSignals, error) {
 	store, err := e.storeProvider.ForUser(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("get user store for user %d: %w", userID, err)
+		return nil, fmt.Errorf("get user store for user %d: %w", userID, err)
 	}
 
 	read, err := e.readTasteSignals(ctx, store, userID, profileID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	signals, signalCounts := read.titles, read.counts
 
@@ -211,14 +212,14 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	// live outside Postgres, so the user store says whether it still exists.
 	userProfile, err := store.GetProfile(ctx, profileID)
 	if err != nil {
-		return false, fmt.Errorf("get profile %s: %w", profileID, err)
+		return nil, fmt.Errorf("get profile %s: %w", profileID, err)
 	}
 	if userProfile == nil {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, false)
+		return nil, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, false)
 	}
 
 	if len(signals) == 0 {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, true)
+		return nil, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, true)
 	}
 
 	allIDs := make([]string, 0, len(signals))
@@ -245,7 +246,7 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 
 	embMap, err := e.repo.GetBatchEmbeddings(ctx, allIDs)
 	if err != nil {
-		return false, fmt.Errorf("get batch embeddings: %w", err)
+		return nil, fmt.Errorf("get batch embeddings: %w", err)
 	}
 
 	maxContentRating := ""
@@ -260,12 +261,12 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	positiveItems, levelTitles := positiveTasteItems(signals, embMap)
 	profile := tasteVector(positiveItems)
 	if profile == nil {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, true)
+		return nil, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, true)
 	}
 	signalCounts[signalCountPositiveTitles] = levelTitles
 
 	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
-		return false, fmt.Errorf("upsert taste profile: %w", err)
+		return nil, fmt.Errorf("upsert taste profile: %w", err)
 	}
 
 	clusters := buildTasteClusters(positiveItems)
@@ -274,10 +275,10 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		clusters[i].ProfileID = profileID
 	}
 	if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
-		return false, fmt.Errorf("upsert taste clusters: %w", err)
+		return nil, fmt.Errorf("upsert taste clusters: %w", err)
 	}
 
-	return true, nil
+	return &read, nil
 }
 
 // tasteSignals are a profile's signals combined per canonical title.

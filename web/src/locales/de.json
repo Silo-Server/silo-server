@@ -52615,6 +52615,12 @@
       "value": "Aus. Durchläufe entfernen nur alte Titel."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Die Erstellung wurde beendet. Gespeicherte Empfehlungen bleiben unter „Entdecken“ sichtbar, bis der Server neu startet."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

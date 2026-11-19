@@ -47068,6 +47068,12 @@
       "value": "オフ。実行時は古いタイトルの削除のみ行います。"
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "生成は停止しました。保存済みのおすすめは、サーバーが再起動するまでディスカバーに表示されます。"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

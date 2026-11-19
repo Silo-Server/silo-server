@@ -212,6 +212,7 @@ func interleaveByGenre(ranked []tasteSeedCandidate) []string {
 
 // Repo provides database operations for the recommendation system.
 type Repo struct {
+	externalPoolWriter
 	pool        *pgxpool.Pool
 	titleCounts *titleCountCache
 	topGenre    topGenreCache
@@ -219,7 +220,7 @@ type Repo struct {
 
 // NewRepo creates a new Repo with the given connection pool.
 func NewRepo(pool *pgxpool.Pool) *Repo {
-	return &Repo{pool: pool, titleCounts: newTitleCountCache()}
+	return &Repo{externalPoolWriter: externalPoolWriter{db: pool}, pool: pool, titleCounts: newTitleCountCache()}
 }
 
 func (r *Repo) withHNSWCandidateScan(ctx context.Context, fn func(pgx.Tx) error) error {
@@ -317,15 +318,19 @@ type RowQuerier interface {
 // ReadEmbeddingLock reads the embedding lock through q, which may be a
 // transaction. It returns nil when no lock is set.
 func ReadEmbeddingLock(ctx context.Context, q RowQuerier) (*EmbeddingLock, error) {
-	var raw string
-	err := q.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw)
+	var raw, version string
+	err := q.QueryRow(ctx, `SELECT value, xmin::text || ':' || ctid::text FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw, &version)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get embedding lock: %w", err)
 	}
-	return ParseEmbeddingLock(raw)
+	lock, err := ParseEmbeddingLock(raw)
+	if lock != nil {
+		lock.rowVersion = version
+	}
+	return lock, err
 }
 
 // SetEmbeddingLock stores the embedding lock metadata in server_settings.

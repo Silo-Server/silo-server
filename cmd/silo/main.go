@@ -3104,6 +3104,11 @@ func main() {
 					}
 					return savedCfg.Recommendations, nil
 				})
+			configWatcher.OnChange(func(_, updated *config.Config) {
+				if !updated.Recommendations.Enabled || !updated.Recommendations.ExternalEnabled {
+					recWorker.StopExternalGeneration()
+				}
+			})
 			deps.RecWorker = recWorker
 			settingsRecWorker = recWorker
 			// Watch-provider syncs rebuild a profile's recommendations once

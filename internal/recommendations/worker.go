@@ -101,7 +101,8 @@ type Worker struct {
 	embeddingsJobTimeout time.Duration
 	// liveConfig reads the settings outside titles follow; nil keeps the
 	// engine's.
-	liveConfig LiveConfig
+	liveConfig     LiveConfig
+	cancelExternal context.CancelCauseFunc // guarded by mu
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -1426,7 +1427,8 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 			return errPolicyNotLoaded
 		}
 	}
-	if _, err := w.engine.rebuildTasteProfile(refreshCtx, userID, profileID, started); err != nil {
+	signals, err := w.engine.rebuildTasteProfile(refreshCtx, userID, profileID, started)
+	if err != nil {
 		return fmt.Errorf("refresh taste profile: %w", err)
 	}
 	if built := w.cacheUserRows(refreshCtx, repo, userID, profileID, cacheExpiry(started)); built.failed > 0 {
@@ -1435,11 +1437,10 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 	// Outside rows come from stored titles and vectors; new seeds' lists
 	// wait for the next outside-title run.
 	if w.ExternalEnabled() {
-		if _, err := w.rebuildProfileExternalRows(refreshCtx, userID, profileID); err != nil {
+		if _, err := w.rebuildProfileExternalRows(refreshCtx, userID, profileID, signals); err != nil {
 			return fmt.Errorf("rebuild outside rows: %w", err)
 		}
-	}
-	if err := w.engine.purgeIfProfileDeleted(refreshCtx, userID, profileID); err != nil {
+	} else if err := w.engine.purgeIfProfileDeleted(refreshCtx, userID, profileID); err != nil {
 		return fmt.Errorf("check profile still exists: %w", err)
 	}
 	if err := repo.ClearStaleAt(refreshCtx, userID, profileID, started); err != nil {

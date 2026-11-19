@@ -47852,6 +47852,12 @@
       "value": "ปิด การเรียกใช้จะล้างเรื่องเก่าออกเท่านั้น"
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "หยุดการสร้างแล้ว คำแนะนำที่จัดเก็บไว้จะยังแสดงในหน้าสำรวจจนกว่าเซิร์ฟเวอร์จะรีสตาร์ท"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

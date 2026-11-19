@@ -47344,6 +47344,12 @@
       "value": "꺼져 있어요. 실행하면 오래된 작품만 정리해요."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "생성이 중지됐어요. 저장된 추천은 서버를 다시 시작할 때까지 둘러보기에 계속 표시돼요."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

@@ -52983,6 +52983,12 @@
       "value": "Tắt. Các lần chạy chỉ xóa các tựa cũ."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Đã dừng tạo đề xuất. Các đề xuất đã lưu vẫn hiển thị trong Khám phá cho đến khi máy chủ khởi động lại."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,

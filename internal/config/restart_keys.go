@@ -179,7 +179,7 @@ func LiveKeysUnderRestartPrefixes() []string {
 
 // RestartRequiredPrefixes returns the sorted list of key prefixes whose whole
 // namespace requires a restart. Pair it with RestartRequiredKeys: a key needs a
-// restart when it is listed exactly or carries one of these prefixes.
+// restart when listed exactly, or when a prefix covers it and LiveKeysUnderRestartPrefixes omits it.
 func RestartRequiredPrefixes() []string {
 	prefixes := make([]string, len(restartRequiredPrefixes))
 	copy(prefixes, restartRequiredPrefixes)
