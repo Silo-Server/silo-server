@@ -227,6 +227,30 @@ describe("playerV2", () => {
     });
   });
 
+  it("keeps a gateway's own JSON error out of the error message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail: "Gateway could not reach its upstream" }), {
+            status: 502,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+
+    const failure = await playerV2(config, "PUT /api/v2/subtitle-prefs/{series_id}", {
+      path: { series_id: "series-1" },
+      body: { subtitle_track_index: 0 },
+    }).catch((err: unknown) => err);
+
+    expect(failure).toMatchObject({
+      status: 502,
+      code: undefined,
+      message: t("web.player.error.requestFailed"),
+    });
+  });
+
   it("fails a success status whose body is not JSON with the player's own message", async () => {
     vi.stubGlobal(
       "fetch",
