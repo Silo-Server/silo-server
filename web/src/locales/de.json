@@ -95050,6 +95050,12 @@
       "value": "deinen Mediatheken"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Anzahl nicht verfügbar"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -96968,6 +96974,24 @@
       "value": "Hinzufügen"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Es konnte nicht geprüft werden, ob Titel hinzugefügt werden können."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Erneut laden"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Es wird geprüft, ob Titel hinzugefügt werden können…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -96980,6 +97004,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Dieser Server kann keine Titel sicher hinzufügen, solange nur ein Teil der Sammlung geladen ist. Du kannst trotzdem Titel entfernen und die Sammlung bearbeiten."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Lade die Titel erneut, bevor du weitere hinzufügst."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -97000,6 +97036,12 @@
     {
       "type": 0,
       "value": " hinzufügen"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Titel werden geladen, bevor weitere hinzugefügt werden können…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -105704,6 +105746,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Auch enthalten in"
     }
   ],
   "web.detail.sections.cast": [

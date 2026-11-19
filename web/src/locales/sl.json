@@ -113534,6 +113534,12 @@
       "value": "vaše knjižnice"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Število ni na voljo"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -115588,6 +115594,24 @@
       "value": "Dodaj"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče preveriti, ali je naslove mogoče dodati."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Poskusi znova naložiti"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Preverjanje, ali je naslove mogoče dodati …"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -115604,6 +115628,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ta strežnik ne more varno dodajati naslovov, ko je naložen le del zbirke. Naslove lahko še vedno odstranite in urejate zbirko."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Preden dodate nove naslove, jih znova naložite."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -115624,6 +115660,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Nalaganje naslovov pred dodajanjem novih …"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -125954,6 +125996,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Tudi v zbirkah"
     }
   ],
   "web.detail.sections.cast": [

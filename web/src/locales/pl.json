@@ -114394,6 +114394,12 @@
       "value": "twoich bibliotekach"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Liczba niedostępna"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -116432,6 +116438,24 @@
       "value": "Dodaj"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić, czy można dodać tytuły."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Wczytaj ponownie"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Sprawdzanie, czy można dodać tytuły…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -116450,6 +116474,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ten serwer nie może bezpiecznie dodawać tytułów, gdy wczytana jest tylko część kolekcji. Nadal możesz usuwać tytuły i edytować kolekcję."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Wczytaj tytuły ponownie, zanim dodasz kolejne."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -116464,6 +116500,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Wczytywanie tytułów przed dodaniem kolejnych…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -126734,6 +126776,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Także w kolekcjach"
     }
   ],
   "web.detail.sections.cast": [

@@ -65,6 +65,12 @@ interface CatalogFilterSheetProps {
   sortRelevanceScope?: QuerySortRelevanceScope;
   editorMode: "guided" | "advanced";
   onEditorModeChange: (mode: "guided" | "advanced") => void;
+  /**
+   * False hides Advanced's Sort by. A search sorts from the toolbar, which
+   * offers Relevance; Advanced's list has no Relevance and would show the
+   * Date Added placeholder instead. Guided never shows a sort here.
+   */
+  showAdvancedSort?: boolean;
   /** False when the rules use options Guided can't show; Guided is then off. */
   guidedAvailable?: boolean;
   queryDefinition: QueryDefinition;
@@ -89,6 +95,7 @@ export default function CatalogFilterSheet({
   sortRelevanceScope,
   editorMode,
   onEditorModeChange,
+  showAdvancedSort = true,
   guidedAvailable = true,
   queryDefinition,
   onQueryDefinitionChange,
@@ -159,6 +166,7 @@ export default function CatalogFilterSheet({
                   allowPersonalizedFilters={allowPersonalizedFilters}
                   allowPersonalizedSorts={allowPersonalizedSorts}
                   sortRelevanceScope={sortRelevanceScope}
+                  showSortControls={showAdvancedSort}
                 />
               ) : (
                 <CollectionGuidedRulesEditor

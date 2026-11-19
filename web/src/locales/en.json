@@ -95476,6 +95476,12 @@
       "value": "your libraries"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Count unavailable"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97464,6 +97470,24 @@
       "value": "Add"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't check whether titles can be added."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Try loading again"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Checking whether titles can be added…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97482,6 +97506,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "This server can't safely add titles while only part of the collection is loaded. You can still remove titles and edit the collection."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Load the titles again before adding more."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97496,6 +97532,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Loading titles before adding more…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106240,6 +106282,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Also in"
     }
   ],
   "web.detail.sections.cast": [

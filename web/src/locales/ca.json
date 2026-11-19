@@ -104587,6 +104587,12 @@
       "value": "les teves biblioteques"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Recompte no disponible"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -106635,6 +106641,24 @@
       "value": "Afegeix"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut comprovar si es poden afegir títols."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Torna a provar de carregar"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "S’està comprovant si es poden afegir títols…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -106653,6 +106677,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Aquest servidor no pot afegir títols de manera segura mentre només hi ha una part de la col·lecció carregada. Encara pots treure títols i editar la col·lecció."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Torna a carregar els títols abans d’afegir-ne més."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -106667,6 +106703,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "S’estan carregant els títols abans d’afegir-ne més…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -116238,6 +116280,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "També a"
     }
   ],
   "web.detail.sections.cast": [

@@ -95436,6 +95436,12 @@
       "value": "kirjastosi"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Määrä ei saatavilla"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97456,6 +97462,24 @@
       "value": "Lisää"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nimikkeiden lisäämismahdollisuuden tarkistaminen epäonnistui."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Lataa uudelleen"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Tarkistetaan, voiko nimikkeitä lisätä…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97474,6 +97498,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Tämä palvelin ei voi lisätä nimikkeitä turvallisesti, kun kokoelmasta on ladattu vain osa. Voit silti poistaa nimikkeitä ja muokata kokoelmaa."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Lataa nimikkeet uudelleen ennen kuin lisäät uusia."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97488,6 +97524,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Ladataan nimikkeitä ennen uusien lisäämistä…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106296,6 +106338,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Myös kokoelmissa"
     }
   ],
   "web.detail.sections.cast": [

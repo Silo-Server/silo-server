@@ -86541,6 +86541,12 @@
       "value": "perpustakaan Anda"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Jumlah tidak tersedia"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -88481,6 +88487,24 @@
       "value": "Tambahkan"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa apakah judul dapat ditambahkan."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Coba muat lagi"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Memeriksa apakah judul dapat ditambahkan…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -88499,6 +88523,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Server ini tidak dapat menambahkan judul dengan aman selama hanya sebagian koleksi yang dimuat. Anda tetap dapat menghapus judul dan mengedit koleksi."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Muat judul lagi sebelum menambahkan judul lain."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -88513,6 +88549,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Memuat judul sebelum menambahkan judul lain…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -96482,6 +96524,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Juga ada di"
     }
   ],
   "web.detail.sections.cast": [

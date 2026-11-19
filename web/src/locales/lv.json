@@ -105899,6 +105899,12 @@
       "value": "jūsu bibliotēkas"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Skaits nav pieejams"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -107959,6 +107965,24 @@
       "value": "Pievienot"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, vai var pievienot vienumus."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Mēģināt ielādēt vēlreiz"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Notiek pārbaude, vai var pievienot vienumus…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -107975,6 +107999,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Šis serveris nevar droši pievienot vienumus, kamēr ir ielādēta tikai daļa kolekcijas. Jūs joprojām varat noņemt vienumus un rediģēt kolekciju."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Pirms pievienojat vēl, ielādējiet vienumus vēlreiz."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -107995,6 +108031,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Notiek vienumu ielāde pirms citu pievienošanas…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -117630,6 +117672,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Arī kolekcijās"
     }
   ],
   "web.detail.sections.cast": [

@@ -114744,6 +114744,12 @@
       "value": "ваших медиатеках"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Количество недоступно"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -116848,6 +116854,24 @@
       "value": "Добавить"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось проверить, можно ли добавить названия."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Загрузить снова"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Проверка возможности добавить названия…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -116866,6 +116890,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Этот сервер не может безопасно добавлять названия, пока коллекция загружена лишь частично. Вы по-прежнему можете удалять названия и редактировать коллекцию."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Загрузите названия снова, прежде чем добавить другие."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -116880,6 +116916,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Загрузка названий перед добавлением…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -127174,6 +127216,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Входит в коллекции"
     }
   ],
   "web.detail.sections.cast": [

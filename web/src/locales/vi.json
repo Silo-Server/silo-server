@@ -95762,6 +95762,12 @@
       "value": "thư viện của bạn"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Không có số lượng"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97770,6 +97776,24 @@
       "value": "Thêm"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra xem có thể thêm tựa hay không."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Thử tải lại"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Đang kiểm tra xem có thể thêm tựa hay không…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97788,6 +97812,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Máy chủ này không thể thêm tựa một cách an toàn khi chỉ một phần bộ sưu tập được tải. Bạn vẫn có thể xóa tựa và chỉnh sửa bộ sưu tập."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Tải lại các tựa trước khi thêm tựa khác."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97802,6 +97838,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Đang tải các tựa trước khi thêm tựa khác…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106566,6 +106608,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Cũng có trong"
     }
   ],
   "web.detail.sections.cast": [

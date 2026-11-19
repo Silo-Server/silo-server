@@ -104177,6 +104177,12 @@
       "value": "vos bibliothèques"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Nombre indisponible"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -106177,6 +106183,24 @@
       "value": "Ajouter"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de vérifier si des titres peuvent être ajoutés."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Réessayer le chargement"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Vérification de la possibilité d’ajouter des titres…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -106195,6 +106219,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ce serveur ne peut pas ajouter de titres en toute sécurité tant qu’une partie seulement de la collection est chargée. Vous pouvez toujours retirer des titres et modifier la collection."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Rechargez les titres avant d’en ajouter d’autres."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -106209,6 +106245,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Chargement des titres avant d’en ajouter d’autres…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -115648,6 +115690,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Également dans"
     }
   ],
   "web.detail.sections.cast": [

@@ -95094,6 +95094,12 @@
       "value": "a könyvtárai"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "A darabszám nem érhető el"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97024,6 +97030,24 @@
       "value": "Hozzáadás"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült ellenőrizni, hogy hozzáadhatók-e címek."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Újratöltés"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Annak ellenőrzése, hogy hozzáadhatók-e címek…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97042,6 +97066,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ez a szerver nem tud biztonságosan címeket hozzáadni, amíg a gyűjteménynek csak egy része töltődött be. A címek eltávolítása és a gyűjtemény szerkesztése továbbra is lehetséges."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Töltse be újra a címeket, mielőtt továbbiakat adna hozzá."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97056,6 +97092,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "A címek betöltése a további hozzáadás előtt…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -105776,6 +105818,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Ezekben is szerepel"
     }
   ],
   "web.detail.sections.cast": [

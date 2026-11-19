@@ -96114,6 +96114,12 @@
       "value": "teie meediakogud"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Arv pole saadaval"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -98044,6 +98050,24 @@
       "value": "Lisa"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Ei õnnestunud kontrollida, kas pealkirju saab lisada."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Proovi uuesti laadida"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Kontrollimine, kas pealkirju saab lisada…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -98060,6 +98084,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "See server ei saa pealkirju turvaliselt lisada, kui kollektsioonist on laaditud ainult osa. Pealkirju saab siiski eemaldada ja kollektsiooni muuta."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Enne uute lisamist laadige pealkirjad uuesti."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -98080,6 +98116,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Pealkirjade laadimine enne uute lisamist…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106900,6 +106942,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Ka kogumikes"
     }
   ],
   "web.detail.sections.cast": [

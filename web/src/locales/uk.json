@@ -113486,6 +113486,12 @@
       "value": "ваших бібліотеках"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Кількість недоступна"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -115566,6 +115572,24 @@
       "value": "Додати"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося перевірити, чи можна додати назви."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Завантажити ще раз"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Перевірка, чи можна додати назви…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -115584,6 +115608,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Цей сервер не може безпечно додавати назви, поки колекцію завантажено лише частково. Ви й далі можете вилучати назви та редагувати колекцію."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Завантажте назви ще раз, перш ніж додавати нові."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -115598,6 +115634,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Завантаження назв перед додаванням нових…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -125856,6 +125898,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Також у колекціях"
     }
   ],
   "web.detail.sections.cast": [

@@ -129632,6 +129632,12 @@
       "value": "مكتباتك"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "العدد غير متاح"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -131739,6 +131745,24 @@
       "value": "إضافة"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر التحقق مما إذا كان يمكن إضافة العناوين."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "إعادة محاولة التحميل"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "جارٍ التحقق مما إذا كان يمكن إضافة العناوين…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -131757,6 +131781,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "لا يمكن لهذا الخادم إضافة العناوين بأمان ما دام جزء من المجموعة فقط محمّلًا. لا يزال بإمكانك إزالة العناوين وتعديل المجموعة."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "حمّل العناوين مرة أخرى قبل إضافة المزيد."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -131771,6 +131807,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "جارٍ تحميل العناوين قبل إضافة المزيد…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -143410,6 +143452,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "موجود أيضًا في"
     }
   ],
   "web.detail.sections.cast": [

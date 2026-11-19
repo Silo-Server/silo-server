@@ -104635,6 +104635,12 @@
       "value": "bibliotecile dvs."
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Număr indisponibil"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -106691,6 +106697,24 @@
       "value": "Adăugați"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut verifica dacă se pot adăuga titluri."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Reîncercați încărcarea"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Se verifică dacă se pot adăuga titluri…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -106709,6 +106733,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Acest server nu poate adăuga titluri în siguranță cât timp este încărcată doar o parte din colecție. Puteți în continuare să eliminați titluri și să editați colecția."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Încărcați din nou titlurile înainte de a adăuga altele."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -106723,6 +106759,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Se încarcă titlurile înainte de a adăuga altele…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -116286,6 +116328,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Apare și în"
     }
   ],
   "web.detail.sections.cast": [

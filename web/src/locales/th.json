@@ -87671,6 +87671,12 @@
       "value": "คลังของคุณ"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "ไม่มีข้อมูลจำนวน"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -89569,6 +89575,24 @@
       "value": "เพิ่ม"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบไม่ได้ว่าเพิ่มรายการได้หรือไม่"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "โหลดอีกครั้ง"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "กำลังตรวจสอบว่าเพิ่มรายการได้หรือไม่…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -89587,6 +89611,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์นี้เพิ่มรายการอย่างปลอดภัยไม่ได้ขณะที่โหลดคอลเลกชันมาเพียงบางส่วน คุณยังนำรายการออกและแก้ไขคอลเลกชันได้"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "โหลดรายการอีกครั้งก่อนเพิ่มรายการอื่น"
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -89601,6 +89637,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "กำลังโหลดรายการก่อนเพิ่มรายการอื่น…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -97626,6 +97668,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "อยู่ในคอลเลกชันเหล่านี้ด้วย"
     }
   ],
   "web.detail.sections.cast": [

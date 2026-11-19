@@ -6,10 +6,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useT } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
-import {
-  buildLibraryCollectionCatalogHref,
-  buildUserCollectionCatalogHref,
-} from "@/pages/catalogSearchParams";
+import { buildCollectionCatalogHref } from "@/pages/catalogSearchParams";
 
 // Shared poster card for the per-library Collections tab and every section of
 // the Collections page. Library (admin) collections get a sidebar-pin
@@ -46,9 +43,7 @@ export function CollectionPosterCard({
   const { loaded, onLoad, onError } = useImageLoaded(collection.poster_url);
 
   const isUserCollection = kind === "user_collections";
-  const href = isUserCollection
-    ? buildUserCollectionCatalogHref(collection.id, collection.title)
-    : buildLibraryCollectionCatalogHref(collection.id, collection.title, libraryId);
+  const href = buildCollectionCatalogHref(collection, isUserCollection, libraryId);
   // A card with its own meta line draws it below the link instead.
   let subline: ReactNode = null;
   if (ownerName) {

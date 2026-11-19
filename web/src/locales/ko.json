@@ -86907,6 +86907,12 @@
       "value": "내 라이브러리"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "개수를 알 수 없음"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -88835,6 +88841,24 @@
       "value": "추가"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "작품을 추가할 수 있는지 확인하지 못했어요."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "다시 불러오기"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "작품을 추가할 수 있는지 확인하는 중…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -88847,6 +88871,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 컬렉션의 일부만 불러온 상태에서 작품을 안전하게 추가할 수 없어요. 작품을 제거하거나 컬렉션을 편집할 수는 있어요."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "작품을 더 추가하기 전에 작품을 다시 불러오세요."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -88863,6 +88899,12 @@
     {
       "type": 0,
       "value": "에서 작품 추가"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "작품을 더 추가하기 전에 작품을 불러오는 중…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -96828,6 +96870,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "포함된 컬렉션"
     }
   ],
   "web.detail.sections.cast": [

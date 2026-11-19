@@ -103580,6 +103580,12 @@
       "value": "⟦ýöûŕ ļîƀŕåŕîéš~~~~~~⟧"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Çöûñţ ûñåṽåîļåƀļé~~~~~~~⟧"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -105816,6 +105822,24 @@
       "value": "⟦Åđđ~~⟧"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ çĥéçķ ŵĥéţĥéŕ ţîţļéš çåñ ƀé åđđéđ.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕý ļöåđîñĝ åĝåîñ~~~~~~~⟧"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķîñĝ ŵĥéţĥéŕ ţîţļéš çåñ ƀé åđđéđ…~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -105838,6 +105862,18 @@
       "value": "~~~~~~⟧"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šéŕṽéŕ çåñ'ţ šåƒéļý åđđ ţîţļéš ŵĥîļé öñļý þåŕţ öƒ ţĥé çöļļéçţîöñ îš ļöåđéđ. Ýöû çåñ šţîļļ ŕéɱöṽé ţîţļéš åñđ éđîţ ţĥé çöļļéçţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđ ţĥé ţîţļéš åĝåîñ ƀéƒöŕé åđđîñĝ ɱöŕé.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -105856,6 +105892,12 @@
     {
       "type": 0,
       "value": "~~~~~~~⟧"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ţîţļéš ƀéƒöŕé åđđîñĝ ɱöŕé…~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -115444,6 +115486,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "⟦Åļšö îñ~~~⟧"
     }
   ],
   "web.detail.sections.cast": [

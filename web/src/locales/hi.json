@@ -94916,6 +94916,12 @@
       "value": "आपकी लाइब्रेरी"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "गिनती उपलब्ध नहीं है"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -96924,6 +96930,24 @@
       "value": "जोड़ें"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि टाइटल जोड़े जा सकते हैं या नहीं।"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "फिर से लोड करने की कोशिश करें"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "जाँच हो रही है कि टाइटल जोड़े जा सकते हैं या नहीं…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -96936,6 +96960,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "जब कलेक्शन का केवल कुछ हिस्सा लोड हुआ हो, तब यह सर्वर सुरक्षित रूप से टाइटल नहीं जोड़ सकता। टाइटल अब भी हटाए जा सकते हैं और कलेक्शन में बदलाव किया जा सकता है।"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "और टाइटल जोड़ने से पहले टाइटल फिर से लोड करें।"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -96952,6 +96988,12 @@
     {
       "type": 0,
       "value": " से कोई टाइटल जोड़ें"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "और टाइटल जोड़ने से पहले टाइटल लोड हो रहे हैं…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -105584,6 +105626,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "इन कलेक्शन में भी"
     }
   ],
   "web.detail.sections.cast": [

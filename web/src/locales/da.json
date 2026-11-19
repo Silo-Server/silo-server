@@ -95448,6 +95448,12 @@
       "value": "dine biblioteker"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Antal ikke tilgængeligt"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97362,6 +97368,24 @@
       "value": "Tilføj"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke kontrollere, om der kan tilføjes titler."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Prøv at indlæse igen"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Kontrollerer, om der kan tilføjes titler…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97380,6 +97404,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Denne server kan ikke tilføje titler sikkert, mens kun en del af samlingen er indlæst. Du kan stadig fjerne titler og redigere samlingen."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Indlæs titlerne igen, før du tilføjer flere."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97394,6 +97430,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Indlæser titler, før der kan tilføjes flere…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106110,6 +106152,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Også i"
     }
   ],
   "web.detail.sections.cast": [

@@ -113832,6 +113832,12 @@
       "value": "vaše knihovny"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Počet není k dispozici"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -115878,6 +115884,24 @@
       "value": "Přidat"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se ověřit, zda lze přidat tituly."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Zkusit načíst znovu"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Ověřování, zda lze přidat tituly…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -115896,6 +115920,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Tento server nemůže bezpečně přidávat tituly, dokud je načtena jen část kolekce. Tituly můžete dál odebírat a kolekci upravovat."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Před přidáním dalších titulů je načtěte znovu."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -115910,6 +115946,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Načítání titulů před přidáním dalších…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -126236,6 +126278,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Také v kolekcích"
     }
   ],
   "web.detail.sections.cast": [

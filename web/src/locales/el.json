@@ -95842,6 +95842,12 @@
       "value": "καμία από τις βιβλιοθήκες σας"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Μη διαθέσιμο πλήθος"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97854,6 +97860,24 @@
       "value": "Προσθήκη"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος για το αν μπορούν να προστεθούν τίτλοι."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Νέα προσπάθεια φόρτωσης"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Έλεγχος για το αν μπορούν να προστεθούν τίτλοι…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97872,6 +97896,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Αυτός ο διακομιστής δεν μπορεί να προσθέσει τίτλους με ασφάλεια όσο έχει φορτωθεί μόνο μέρος της συλλογής. Μπορείτε ακόμα να αφαιρέσετε τίτλους και να επεξεργαστείτε τη συλλογή."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Φορτώστε ξανά τους τίτλους πριν προσθέσετε άλλους."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97886,6 +97922,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Φόρτωση τίτλων πριν από την προσθήκη άλλων…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106682,6 +106724,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Επίσης στις συλλογές"
     }
   ],
   "web.detail.sections.cast": [

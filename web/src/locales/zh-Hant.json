@@ -87491,6 +87491,12 @@
       "value": "你的媒體庫"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "無法取得數量"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -89385,6 +89391,24 @@
       "value": "新增"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "無法檢查是否可以新增作品。"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "重新載入"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "正在檢查是否可以新增作品……"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -89401,6 +89425,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "合輯只載入了一部分時，這部伺服器無法安全地新增作品。你仍可移除作品及編輯合輯。"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "請先重新載入作品，再新增更多作品。"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -89421,6 +89457,12 @@
     {
       "type": 0,
       "value": " 新增作品"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "正在載入作品，之後才能新增更多……"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -97510,6 +97552,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "也收錄於"
     }
   ],
   "web.detail.sections.cast": [

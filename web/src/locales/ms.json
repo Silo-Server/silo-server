@@ -86439,6 +86439,12 @@
       "value": "pustaka anda"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Bilangan tidak tersedia"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -88375,6 +88381,24 @@
       "value": "Tambah"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak sama ada tajuk boleh ditambah."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Cuba muatkan lagi"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Menyemak sama ada tajuk boleh ditambah…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -88393,6 +88417,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Pelayan ini tidak dapat menambah tajuk dengan selamat semasa hanya sebahagian koleksi dimuatkan. Anda masih boleh mengalih keluar tajuk dan mengedit koleksi."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Muatkan tajuk sekali lagi sebelum menambah lebih banyak."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -88407,6 +88443,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Memuatkan tajuk sebelum menambah lebih banyak…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -96372,6 +96414,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Juga dalam"
     }
   ],
   "web.detail.sections.cast": [
