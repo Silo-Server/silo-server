@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -624,6 +625,9 @@ func mergePluginProviderIDs(capabilityID, providerID string, ids *structpb.Struc
 	if providerID != "" {
 		merged[capabilityID] = providerID
 	}
+	for key, value := range merged {
+		merged[key] = bookid.CanonicalProviderID(key, value)
+	}
 	return merged
 }
 
@@ -871,7 +875,7 @@ func structFromStringMap(value map[string]string) (*structpb.Struct, error) {
 		if entry == "" {
 			continue
 		}
-		converted[key] = entry
+		converted[key] = bookid.CanonicalProviderID(key, entry)
 	}
 	if len(converted) == 0 {
 		return nil, nil

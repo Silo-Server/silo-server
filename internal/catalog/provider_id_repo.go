@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -234,7 +235,7 @@ func normalizeDurableProviderIDs(providerIDs map[string]string) []models.MediaIt
 		}
 		entries = append(entries, models.MediaItemProviderID{
 			Provider:   provider,
-			ProviderID: providerID,
+			ProviderID: bookid.CanonicalProviderID(provider, providerID),
 		})
 	}
 
