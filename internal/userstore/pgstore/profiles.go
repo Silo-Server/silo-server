@@ -420,6 +420,7 @@ var profileCascadeTables = []string{
 	"user_taste_profiles",
 	"user_taste_clusters",
 	"recommendation_cache",
+	"external_recommendation_rows",
 	// Ebook reading data. Like the recommendation state, it lives in
 	// Postgres whichever store holds the profile; the profile handler
 	// purges it after a delete from any other store.

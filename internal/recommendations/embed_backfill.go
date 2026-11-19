@@ -194,6 +194,18 @@ func (r *refusedEmbedInputs) has(itemID, text string) bool {
 	return ok && hash == sha256.Sum256([]byte(text))
 }
 
+// hasID reports whether the provider refused itemID's text, whatever that
+// text was.
+func (r *refusedEmbedInputs) hasID(itemID string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.texts[itemID]
+	return ok
+}
+
 func (r *refusedEmbedInputs) remove(itemID string) {
 	if r == nil {
 		return
@@ -295,6 +307,10 @@ type embedBackfill struct {
 	// held is the embeddings job's cluster lock, or nil for a run outside the
 	// job.
 	held clusterLock
+	// sink stores the vectors of a run that embeds something other than
+	// library items; nil stores library items (ensureLock, writeItem). The
+	// batch loop and its stop rules are the same either way.
+	sink embedSink
 
 	counts EmbedCounts
 	// lock is the embedding lock once this run has read or written it.
@@ -314,6 +330,17 @@ type embedBackfill struct {
 	// last marked stale. With signalsOutsidePostgres it keeps only the first,
 	// since the mark covers every profile whatever was stored.
 	stored []string
+}
+
+// embedSink stores the vectors an embedding run produces for one kind of
+// title, keyed by the IDs the run was given.
+type embedSink interface {
+	// checkVector returns an error, which ends the run, when vector cannot
+	// be stored under the embedding lock.
+	checkVector(ctx context.Context, vector []float32) error
+	// write stores one vector with its canonical text. A failure is counted
+	// and the run goes on.
+	write(ctx context.Context, id string, vector []float32, canonicalText string) error
 }
 
 func (b *embedBackfill) run(ctx context.Context, includeTextStale bool) error {
@@ -344,6 +371,12 @@ func (b *embedBackfill) run(ctx context.Context, includeTextStale bool) error {
 	if err := b.lockImportedEmbeddings(ctx); err != nil {
 		return err
 	}
+	return b.noneStoredError()
+}
+
+// noneStoredError returns the error of a run that tried items and stored none
+// of them for a reason other than refused inputs, or nil.
+func (b *embedBackfill) noneStoredError() error {
 	if b.counts.Embedded == 0 && b.lastErr != nil {
 		return fmt.Errorf("embedding run stored none of the %d items it tried: %w", b.counts.Failed+b.counts.Skipped, b.lastErr)
 	}
@@ -370,14 +403,14 @@ func (b *embedBackfill) embedMissing(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("get items for embedding: %w", err)
 		}
-		toEmbed := make([]*models.MediaItem, 0, len(items))
+		toEmbed := make([]string, 0, len(items))
 		texts := make([]string, 0, len(items))
 		for _, item := range items {
 			text := embeddings.BuildEmbeddingText(item)
 			if b.refused.has(item.ContentID, text) {
 				continue
 			}
-			toEmbed = append(toEmbed, item)
+			toEmbed = append(toEmbed, item.ContentID)
 			texts = append(texts, text)
 		}
 		if err := b.embedBatch(ctx, toEmbed, texts); err != nil {
@@ -417,13 +450,13 @@ func (b *embedBackfill) embedTextStale(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("get items for embedding: %w", err)
 		}
-		staleItems := make([]*models.MediaItem, 0, len(items))
+		staleItems := make([]string, 0, len(items))
 		staleTexts := make([]string, 0, len(items))
 		for _, item := range items {
 			text := embeddings.BuildEmbeddingText(item)
 			candidate := stored[item.ContentID]
 			if embeddingTextNeedsRefresh(candidate.Model, candidate.CanonicalText, text, b.model) {
-				staleItems = append(staleItems, item)
+				staleItems = append(staleItems, item.ContentID)
 				staleTexts = append(staleTexts, text)
 			}
 		}
@@ -435,8 +468,8 @@ func (b *embedBackfill) embedTextStale(ctx context.Context) error {
 		}
 		// An item the provider refused uses none of the quota: the walk moves
 		// past it, so refused items at the front cannot starve the rest.
-		for i, item := range staleItems {
-			if !b.refused.has(item.ContentID, staleTexts[i]) {
+		for i, itemID := range staleItems {
+			if !b.refused.has(itemID, staleTexts[i]) {
 				quota--
 			}
 		}
@@ -451,7 +484,7 @@ func embeddingTextNeedsRefresh(storedModel, storedCanonicalText, generatedCanoni
 	return storedModel != currentModel || storedCanonicalText != generatedCanonicalText
 }
 
-// embedBatch embeds and stores items (parallel items/texts slices), in calls
+// embedBatch embeds and stores items (parallel itemIDs/texts slices), in calls
 // of embeddingBackfillBatchSize. A failed batch call falls back to one call
 // per item, so one item the provider rejects does not block the rest.
 //
@@ -461,8 +494,8 @@ func embeddingTextNeedsRefresh(storedModel, storedCanonicalText, generatedCanoni
 // embedding lock, or when ctx ends. Other per-item failures are counted and
 // the item is retried next run; an item whose input the provider refused is
 // recorded in b.refused instead.
-func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaItem, texts []string) error {
-	for start := 0; start < len(items); start += embeddingBackfillBatchSize {
+func (b *embedBackfill) embedBatch(ctx context.Context, itemIDs, texts []string) error {
+	for start := 0; start < len(itemIDs); start += embeddingBackfillBatchSize {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -472,8 +505,8 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		if len(b.stored) >= signalsStaleBatch && !b.signalsOutsidePostgres {
 			b.markSignalsStale(ctx)
 		}
-		end := min(start+embeddingBackfillBatchSize, len(items))
-		chunkItems, chunkTexts := items[start:end], texts[start:end]
+		end := min(start+embeddingBackfillBatchSize, len(itemIDs))
+		chunkIDs, chunkTexts := itemIDs[start:end], texts[start:end]
 
 		vectors, err := b.client.Embed(ctx, chunkTexts)
 		if err == nil && len(vectors) != len(chunkTexts) {
@@ -483,8 +516,8 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 			if stop := runStopError(ctx, err); stop != nil {
 				return stop
 			}
-			slog.WarnContext(ctx, "batch embed failed, falling back to single-item mode", "component", "recommendations", "error", err, "batch_size", len(chunkItems))
-			if err := b.embedEach(ctx, chunkItems, chunkTexts); err != nil {
+			slog.WarnContext(ctx, "batch embed failed, falling back to single-item mode", "component", "recommendations", "error", err, "batch_size", len(chunkIDs))
+			if err := b.embedEach(ctx, chunkIDs, chunkTexts); err != nil {
 				return err
 			}
 			continue
@@ -494,8 +527,8 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		if err := b.checkHeld(ctx); err != nil {
 			return err
 		}
-		for i, item := range chunkItems {
-			if _, err := b.save(ctx, item, vectors[i], chunkTexts[i]); err != nil {
+		for i, itemID := range chunkIDs {
+			if _, err := b.save(ctx, itemID, vectors[i], chunkTexts[i]); err != nil {
 				return err
 			}
 		}
@@ -544,8 +577,8 @@ func (b *embedBackfill) markSignalsStale(ctx context.Context) {
 }
 
 // embedEach embeds and stores items one call at a time.
-func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem, texts []string) error {
-	for i, item := range items {
+func (b *embedBackfill) embedEach(ctx context.Context, itemIDs, texts []string) error {
+	for i, itemID := range itemIDs {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -561,18 +594,18 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 			// shortened retries also got.
 			if embeddings.InputRefused(err) {
 				b.counts.Skipped++
-				b.refused.add(item.ContentID, texts[i])
-				b.unconfirmed = append(b.unconfirmed, item.ContentID)
+				b.refused.add(itemID, texts[i])
+				b.unconfirmed = append(b.unconfirmed, itemID)
 				if err := b.checkProviderAcceptsInput(ctx); err != nil {
 					return err
 				}
-				slog.WarnContext(ctx, "skipping item, provider refused its text", "component", "recommendations", "item_id", item.ContentID, "error", err)
+				slog.WarnContext(ctx, "skipping item, provider refused its text", "component", "recommendations", "item_id", itemID, "error", err)
 				continue
 			}
 			b.lastErr = err
 			b.counts.Failed++
 			b.consecutiveFailures++
-			slog.WarnContext(ctx, "skipping item, embed failed", "component", "recommendations", "item_id", item.ContentID, "error", err)
+			slog.WarnContext(ctx, "skipping item, embed failed", "component", "recommendations", "item_id", itemID, "error", err)
 			if b.consecutiveFailures >= maxConsecutiveEmbedFailures {
 				return providerUnavailable(err)
 			}
@@ -600,13 +633,13 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 		if err := b.checkHeld(ctx); err != nil {
 			return err
 		}
-		saved, err := b.save(ctx, item, vector, texts[i])
+		saved, err := b.save(ctx, itemID, vector, texts[i])
 		if err != nil {
 			return err
 		}
 		if saved && limit > 0 {
 			b.counts.Truncated++
-			slog.WarnContext(ctx, "embedded item from shortened text", "component", "recommendations", "item_id", item.ContentID, "runes", utf8.RuneCountInString(texts[i]), "limit", limit)
+			slog.WarnContext(ctx, "embedded item from shortened text", "component", "recommendations", "item_id", itemID, "runes", utf8.RuneCountInString(texts[i]), "limit", limit)
 		}
 	}
 	return nil
@@ -678,22 +711,35 @@ func (b *embedBackfill) checkProviderAcceptsInput(ctx context.Context) error {
 // save stores one item's vector with canonicalText. It returns an error, which
 // ends the run, when the vector does not fit the embedding lock. A failed
 // write is counted and logged, and saved is false.
-func (b *embedBackfill) save(ctx context.Context, item *models.MediaItem, vector []float32, canonicalText string) (saved bool, err error) {
-	if err := b.ensureLock(ctx, vector); err != nil {
-		return false, fmt.Errorf("embed item %s: %w", item.ContentID, err)
+func (b *embedBackfill) save(ctx context.Context, itemID string, vector []float32, canonicalText string) (saved bool, err error) {
+	check, write := b.ensureLock, b.writeItem
+	if b.sink != nil {
+		check, write = b.sink.checkVector, b.sink.write
 	}
-	if err := b.db.UpsertEmbedding(ctx, item.ContentID, vector, b.model, canonicalText); err != nil {
+	if err := check(ctx, vector); err != nil {
+		return false, fmt.Errorf("embed item %s: %w", itemID, err)
+	}
+	if err := write(ctx, itemID, vector, canonicalText); err != nil {
 		b.counts.Failed++
 		b.lastErr = err
-		slog.WarnContext(ctx, "skipping item, store failed", "component", "recommendations", "item_id", item.ContentID, "error", err)
+		slog.WarnContext(ctx, "skipping item, store failed", "component", "recommendations", "item_id", itemID, "error", err)
 		return false, nil
 	}
 	b.counts.Embedded++
-	if !b.signalsOutsidePostgres || len(b.stored) == 0 {
-		b.stored = append(b.stored, item.ContentID)
-	}
 	b.unconfirmed = nil
 	return true, nil
+}
+
+// writeItem stores a library item's vector and queues the item for the stale
+// mark.
+func (b *embedBackfill) writeItem(ctx context.Context, itemID string, vector []float32, canonicalText string) error {
+	if err := b.db.UpsertEmbedding(ctx, itemID, vector, b.model, canonicalText); err != nil {
+		return err
+	}
+	if !b.signalsOutsidePostgres || len(b.stored) == 0 {
+		b.stored = append(b.stored, itemID)
+	}
+	return nil
 }
 
 // lockImportedEmbeddings writes the embedding lock for vectors a catalog

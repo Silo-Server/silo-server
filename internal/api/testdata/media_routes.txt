@@ -394,6 +394,7 @@ POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
+POST /api/v2/admin/recommendations/trigger/external	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
 DELETE /api/v2/admin/request-discover/layout	non-media
@@ -1456,6 +1457,7 @@ POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
+POST /api/v2/admin/recommendations/trigger/external	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
 DELETE /api/v2/admin/request-discover/layout	non-media

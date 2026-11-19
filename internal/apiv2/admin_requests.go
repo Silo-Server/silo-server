@@ -184,7 +184,8 @@ type AdminRequestCapabilitiesOutputBody struct {
 }
 
 func adminRequestViewer(ctx context.Context) mediarequests.Viewer {
-	return mediarequests.Viewer{UserID: claimsFrom(ctx).UserID, ProfileID: profileFrom(ctx), IsAdmin: true}
+	library := handlers.AccessFilterFromContext(ctx, "")
+	return mediarequests.Viewer{UserID: claimsFrom(ctx).UserID, ProfileID: profileFrom(ctx), IsAdmin: true, Library: &library}
 }
 func (reg *Registry) adminRequestService() (handlers.RequestService, *Problem) {
 	if reg.deps.AdminRequests == nil {

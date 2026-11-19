@@ -515,6 +515,13 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.Recommendations.DiversityLambda = diversityLambda
 	cfg.Recommendations.CowatchCron = stringOr(m, "recommendations.cowatch_cron", "30 4 * * *")
+	if cfg.Recommendations.ExternalEnabled, err = boolOr(m, externalRecommendationsEnabledKey, false); err != nil {
+		return nil, err
+	}
+	if cfg.Recommendations.ExternalMaxTitles, err = intOr(m, externalRecommendationsMaxTitlesKey, DefaultExternalRecommendationsMaxTitles); err != nil {
+		return nil, err
+	}
+	cfg.Recommendations.ExternalCron = stringOr(m, "recommendations.external_cron", "0 6 * * *")
 
 	// Shared AI endpoints (subtitle translation, metadata translation, Whisper
 	// ASR), resolved from the provider each job selects in ai.providers. A

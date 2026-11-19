@@ -20,10 +20,12 @@ type AdminRecommendationsService interface {
 	EmbeddingLockConflict(context.Context) (text, key string, args map[string]string, err error)
 	CacheRefreshedAt(context.Context) (*time.Time, error)
 	StaleSweep(context.Context) (recommendations.StaleSweepStatus, error)
+	ExternalStatus(context.Context) (recommendations.ExternalStatus, error)
 	TriggerEmbeddings() error
 	TriggerTasteProfiles() error
 	TriggerCowatch() error
 	TriggerRecommendations() error
+	TriggerExternal() error
 	ResetEmbeddings(context.Context) (recommendations.EmbeddingsReset, error)
 }
 type AdminRecommendationJobStatus struct {
@@ -42,16 +44,27 @@ type AdminRecommendationJobRun struct {
 	Error       string         `json:"error,omitempty" doc:"Why the run failed, with credentials masked. Present only when status is failed."`
 	Result      map[string]any `json:"result,omitempty" doc:"Counts the run reported. Keys differ by job and may grow."`
 }
+
+// AdminRecommendationExternalStatus is the outside-title job: titles the
+// library does not have, fetched from TMDB, embedded and ranked per profile.
+type AdminRecommendationExternalStatus struct {
+	Enabled bool                       `json:"enabled" doc:"Whether outside-title recommendations are on: recommendations are enabled and recommendations.external.enabled is set. When off, the job only deletes expired outside titles."`
+	Running bool                       `json:"running"`
+	Count   int                        `json:"count" doc:"Outside titles stored."`
+	Rows    int                        `json:"rows" doc:"Stored outside rows, one per profile and media type."`
+	LastRun *AdminRecommendationJobRun `json:"last_run,omitempty" doc:"The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped when no vectors could be stored. Absent until one finishes."`
+}
 type AdminRecommendationsStatus struct {
-	Embeddings       AdminRecommendationJobStatus  `json:"embeddings"`
-	TasteProfiles    AdminRecommendationJobStatus  `json:"taste_profiles"`
-	Cowatch          AdminRecommendationJobStatus  `json:"cowatch"`
-	Recommendations  AdminRecommendationJobStatus  `json:"recommendations"`
-	LockConflict     string                        `json:"lock_conflict" doc:"Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not."`
-	LockConflictKey  string                        `json:"lock_conflict_key,omitempty" doc:"Translation catalog key of lock_conflict, which clients show in a non-English interface. Absent when lock_conflict is empty."`
-	LockConflictArgs map[string]string             `json:"lock_conflict_args,omitempty" doc:"Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty."`
-	StaleSweep       AdminRecommendationStaleSweep `json:"stale_sweep" doc:"The stale profile sweep, which rebuilds profiles after their signals or access change."`
-	CacheRefreshedAt *Instant                      `json:"cache_refreshed_at,omitempty" doc:"When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached."`
+	Embeddings       AdminRecommendationJobStatus      `json:"embeddings"`
+	TasteProfiles    AdminRecommendationJobStatus      `json:"taste_profiles"`
+	Cowatch          AdminRecommendationJobStatus      `json:"cowatch"`
+	Recommendations  AdminRecommendationJobStatus      `json:"recommendations"`
+	External         AdminRecommendationExternalStatus `json:"external" doc:"The outside-title job."`
+	LockConflict     string                            `json:"lock_conflict" doc:"Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not."`
+	LockConflictKey  string                            `json:"lock_conflict_key,omitempty" doc:"Translation catalog key of lock_conflict, which clients show in a non-English interface. Absent when lock_conflict is empty."`
+	LockConflictArgs map[string]string                 `json:"lock_conflict_args,omitempty" doc:"Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty."`
+	StaleSweep       AdminRecommendationStaleSweep     `json:"stale_sweep" doc:"The stale profile sweep, which rebuilds profiles after their signals or access change."`
+	CacheRefreshedAt *Instant                          `json:"cache_refreshed_at,omitempty" doc:"When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached."`
 }
 type AdminRecommendationStaleSweep struct {
 	Pending int                        `json:"pending" doc:"Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending."`
@@ -67,6 +80,9 @@ type AdminRecommendationEmbeddingsReset struct {
 	TasteProfiles int64 `json:"taste_profiles" doc:"Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again."`
 	TasteClusters int64 `json:"taste_clusters" doc:"Taste clusters deleted."`
 	CachedRows    int64 `json:"cached_rows" doc:"Per-profile cached recommendation rows deleted. Global rows are kept."`
+	// Outside titles themselves are kept: they do not depend on the model.
+	ExternalEmbeddings int64 `json:"external_embeddings" doc:"Outside-title vectors deleted. The titles are kept and embedded again by the next outside-title run."`
+	ExternalRows       int64 `json:"external_rows" doc:"Profiles' outside-title rows deleted."`
 }
 type AdminRecommendationEmbeddingsResetOutput struct {
 	Body AdminRecommendationEmbeddingsReset
@@ -89,6 +105,7 @@ func registerAdminRecommendations(reg *Registry) {
 		{"taste-profiles", "triggerAdminRecommendationTasteProfiles", AdminRecommendationsService.TriggerTasteProfiles},
 		{"cowatch", "triggerAdminRecommendationCowatch", AdminRecommendationsService.TriggerCowatch},
 		{"recommendations", "triggerAdminRecommendationRefresh", AdminRecommendationsService.TriggerRecommendations},
+		{"external", "triggerAdminRecommendationExternal", AdminRecommendationsService.TriggerExternal},
 	} {
 		trigger := op(http.MethodPost, "/trigger/"+action.path, action.id, "Start process-local recommendation work without a durable job receipt.")
 		// A job already running on this process or another server is 409.
@@ -110,9 +127,9 @@ func registerAdminRecommendations(reg *Registry) {
 			return &AdminRecommendationStartedOutput{Body: AdminRecommendationStarted{Status: "started"}}, nil
 		})
 	}
-	reset := op(http.MethodPost, "/embeddings/reset", "resetAdminRecommendationEmbeddings", "Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.")
+	reset := op(http.MethodPost, "/embeddings/reset", "resetAdminRecommendationEmbeddings", "Delete the embedding lock, every item and outside-title embedding, taste clusters, per-profile cached rows and outside rows, and clear taste profile vectors, in one transaction.")
 	reset.Description = "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. " +
-		"It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, " +
+		"It refuses with 409 while the embedding, taste profile, recommendation or outside-title job, or a stale profile sweep, runs on any server, " +
 		"while a catalog import with embeddings runs, and while a saved embedding model or base URL waits for a server restart. " +
 		"Run the embedding job afterwards to build the new embedding space."
 	reset.Errors = append(reset.Errors, http.StatusConflict)
@@ -139,6 +156,7 @@ func (reg *Registry) resetAdminRecommendationEmbeddings(ctx context.Context, _ *
 	}
 	return &AdminRecommendationEmbeddingsResetOutput{Body: AdminRecommendationEmbeddingsReset{
 		Embeddings: res.Embeddings, TasteProfiles: res.TasteProfiles, TasteClusters: res.TasteClusters, CachedRows: res.CachedRows,
+		ExternalEmbeddings: res.ExternalEmbeddings, ExternalRows: res.ExternalRows,
 	}}, nil
 }
 
@@ -167,6 +185,10 @@ func (reg *Registry) getAdminRecommendationsStatus(ctx context.Context, _ *struc
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	external, err := w.ExternalStatus(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
 	jobStatus := func(name recommendations.JobName, count int) AdminRecommendationJobStatus {
 		status := AdminRecommendationJobStatus{Running: w.IsRunning(name), Count: count}
 		runs := lastRuns[name]
@@ -186,9 +208,16 @@ func (reg *Registry) getAdminRecommendationsStatus(ctx context.Context, _ *struc
 		LockConflict:     conflict,
 		LockConflictKey:  conflictKey,
 		LockConflictArgs: conflictArgs,
+		External: AdminRecommendationExternalStatus{
+			Enabled: external.Enabled, Running: w.IsRunning(recommendations.JobExternal),
+			Count: external.Titles, Rows: external.Rows,
+		},
 		StaleSweep:       AdminRecommendationStaleSweep{Pending: sweep.Pending},
 		CacheRefreshedAt: instantPtr(refreshedAt),
 	}}
+	if runs := lastRuns[recommendations.JobExternal]; runs.Full != nil {
+		out.Body.External.LastRun = adminRecommendationJobRunOf(*runs.Full)
+	}
 	if sweep.LastRun != nil {
 		out.Body.StaleSweep.LastRun = adminRecommendationJobRunOf(*sweep.LastRun)
 	}

@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 import { Bookmark, BookmarkCheck, Loader2, Plus } from "lucide-react";
-import type { MediaRequest, RequestMediaResult, RequestMediaType } from "@/api/types";
+import type {
+  MediaRequest,
+  RequestMediaReason,
+  RequestMediaResult,
+  RequestMediaType,
+} from "@/api/types";
 import { cn } from "@/lib/utils";
 import {
   formatMediaType,
@@ -26,7 +31,7 @@ import {
   mediaItemMenuIconClassName,
   mediaItemMenuTriggerClassName,
 } from "@/components/mediaItemMenuTrigger";
-import { useT } from "@/i18n";
+import { useT, type Translate } from "@/i18n";
 
 // The badge takes the top-right corner and truncates when the card is narrow.
 const BADGE_CLASS = "ms-auto max-w-full shrink-0";
@@ -84,12 +89,22 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
   );
 }
 
+/** "Because you watched Heat": why a recommended title is on the viewer's row; null without reasons. */
+function reasonLine(t: Translate, reasons: RequestMediaReason[] | undefined): string | null {
+  const [first, second] = reasons ?? [];
+  if (!first) return null;
+  return second
+    ? t("web.requests.card.becauseYouWatchedTwo", { first: first.title, second: second.title })
+    : t("web.requests.card.becauseYouWatched", { title: first.title });
+}
+
 function DiscoverCard({
   item,
   onToggleWatchlist,
   isWatchlistPending,
   fluid,
 }: Omit<DiscoverProps, "variant">) {
+  const t = useT();
   const requestable = item.request.requestable;
   const availableInLibrary = item.availability === "available" && !item.request.status;
   const state: RequestDisplayState | undefined = item.request.status
@@ -97,6 +112,7 @@ function DiscoverCard({
     : availableInLibrary
       ? "available"
       : undefined;
+  const reason = reasonLine(t, item.reasons);
 
   return (
     <ExternalTitleCard
@@ -124,7 +140,13 @@ function DiscoverCard({
           />
         ) : null
       }
-    />
+    >
+      {reason ? (
+        <p className={DETAIL_CLASS} title={reason}>
+          {reason}
+        </p>
+      ) : null}
+    </ExternalTitleCard>
   );
 }
 

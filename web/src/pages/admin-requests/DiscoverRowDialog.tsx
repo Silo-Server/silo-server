@@ -7,8 +7,10 @@ import {
   type DiscoverRow,
   type DiscoverRowBody,
 } from "@/api/v2/adminRequests";
+import type { RequestMediaType } from "@/api/types";
 import { StepCount, StepDialog } from "@/components/calm/StepDialog";
 import { MDBListBrowser } from "@/components/CollectionTemplateGallery/MDBListBrowser";
+import { Segmented } from "@/components/collections/fields/Segmented";
 import { SourceCard } from "@/components/collections/fields/SourceCard";
 import { TMDBChartField } from "@/components/collections/fields/TMDBChartField";
 import { TMDBListURLField } from "@/components/collections/TMDBListURLField";
@@ -46,6 +48,7 @@ import {
   fromTMDBChart,
   isBrandRow,
   isBuiltInRow,
+  isStockRecommendedRow,
   MAX_ROW_LIMIT,
   MDBLIST_ORDERS,
   mdblistOrder,
@@ -71,6 +74,11 @@ function errorMessage(error: unknown, fallback: string) {
 
 /** What a stock row shows, on its Bring back card. */
 function stockSentence(t: Translate, row: DiscoverRowBody) {
+  if (row.recommended) {
+    return t("web.admin.requests.discover.describe.recommended", {
+      media: row.recommended.media_type,
+    });
+  }
   return row.chart
     ? t("web.admin.requests.rowDialog.stockChart", {
         summary: chartSummary(toTMDBChart(row.chart)),
@@ -188,6 +196,29 @@ function SourceControl({
   if (isBrandRow(row)) {
     return <SourceCard title={kindLabel} detail={rowKindSentence(row.type)} />;
   }
+  if (row.recommended) {
+    const mediaType = row.recommended.media_type;
+    // The two default recommended rows keep their media type.
+    if (isStockRecommendedRow(row)) {
+      return (
+        <SourceCard
+          title={kindLabel}
+          detail={t("web.admin.requests.discover.describe.recommended", { media: mediaType })}
+        />
+      );
+    }
+    return (
+      <Segmented<RequestMediaType>
+        label={t("web.admin.requests.filter.show")}
+        value={mediaType}
+        options={[
+          { value: "movie", label: t("web.admin.requests.filter.movies") },
+          { value: "series", label: t("web.admin.requests.filter.series") },
+        ]}
+        onChange={(next) => onChange({ ...row, recommended: { media_type: next } })}
+      />
+    );
+  }
   if (row.chart && isBuiltInRow(row)) {
     return (
       <div className="grid gap-2">
@@ -276,12 +307,14 @@ function RowFields({
   row,
   editing,
   titleTyped,
+  personalRowsOff,
   onChange,
   onPick,
 }: {
   row: DiscoverRowBody;
   editing: boolean;
   titleTyped: boolean;
+  personalRowsOff: boolean;
   onChange: (row: DiscoverRowBody, typedTitle?: boolean) => void;
   onPick: (pick: SyncedPick) => void;
 }) {
@@ -307,19 +340,37 @@ function RowFields({
       group={kind.group}
       state={preview}
       liveLabel={
-        row.list
-          ? t("web.admin.requests.rowDialog.livePreviewList")
-          : t("web.admin.requests.rowDialog.livePreviewTmdb")
+        row.recommended
+          ? t("web.admin.requests.rowDialog.livePreviewRecommended")
+          : row.list
+            ? t("web.admin.requests.rowDialog.livePreviewList")
+            : t("web.admin.requests.rowDialog.livePreviewTmdb")
       }
       offText={offText}
     />
   );
-  const control = <SourceControl row={row} editing={editing} onChange={onChange} onPick={onPick} />;
+  const sourceControl = (
+    <SourceControl row={row} editing={editing} onChange={onChange} onPick={onPick} />
+  );
+  const control =
+    row.recommended && personalRowsOff ? (
+      <div className="grid gap-2">
+        {sourceControl}
+        <p className="text-muted-foreground text-[13px]">
+          {t("web.admin.requests.discover.recommendedOff")}
+        </p>
+      </div>
+    ) : (
+      sourceControl
+    );
   const controlFirst = Boolean(row.list || row.discover);
   const moreCount = row.discover ? moreFilterCount(row.discover) : 0;
   const summary = [
     moreCount ? t("web.admin.requests.rowDialog.moreFilters", { count: moreCount }) : null,
-    row.hide_available ? t("web.admin.requests.discover.missingTitlesOnly") : null,
+    // A recommended row always leaves them out and offers no switch.
+    row.hide_available && !row.recommended
+      ? t("web.admin.requests.discover.missingTitlesOnly")
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -400,19 +451,23 @@ function RowFields({
               onChange={(discover) => onChange({ ...row, discover })}
             />
           ) : null}
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label htmlFor={hideId}>{t("web.admin.requests.rowDialog.hideAvailable")}</Label>
-              <p className="text-muted-foreground mt-1 text-[13px]">
-                {t("web.admin.requests.rowDialog.hideAvailableHelp")}
-              </p>
+          {row.recommended ? null : (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor={hideId}>{t("web.admin.requests.rowDialog.hideAvailable")}</Label>
+                <p className="text-muted-foreground mt-1 text-[13px]">
+                  {t("web.admin.requests.rowDialog.hideAvailableHelp")}
+                </p>
+              </div>
+              <Switch
+                id={hideId}
+                checked={row.hide_available ?? false}
+                onCheckedChange={(checked) =>
+                  onChange({ ...row, hide_available: checked === true })
+                }
+              />
             </div>
-            <Switch
-              id={hideId}
-              checked={row.hide_available ?? false}
-              onCheckedChange={(checked) => onChange({ ...row, hide_available: checked === true })}
-            />
-          </div>
+          )}
         </MoreOptions>
       )}
     </div>
@@ -427,6 +482,7 @@ function RowFields({
 export function DiscoverRowDialog({
   adapter,
   editRow,
+  personalRowsOff,
   onClose,
   onSaved,
   onDelete,
@@ -434,6 +490,8 @@ export function DiscoverRowDialog({
   adapter: DiscoverRowsAdapter;
   /** Edit row when set, Add row otherwise. */
   editRow: DiscoverRow | null;
+  /** The server serves no recommended rows yet, so they stay empty. */
+  personalRowsOff: boolean;
   onClose: () => void;
   /** After a row is added or saved, with the new row's id. */
   onSaved: (newId: string | undefined) => void;
@@ -640,6 +698,7 @@ export function DiscoverRowDialog({
             row={row}
             editing={editing}
             titleTyped={titleTyped}
+            personalRowsOff={personalRowsOff}
             onChange={update}
             onPick={pickList}
           />

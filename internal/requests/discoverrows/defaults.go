@@ -26,10 +26,39 @@ var brandRows = []Row{
 	{ID: string(TypeGenres), Type: TypeGenres, Title: "Genres"},
 }
 
-// DefaultRows is the layout of a server whose admin never changed it: the six
-// built-in charts, then the studio, network and genre carousels.
+// recommendedRows lead the default page: each viewer's own ranked titles the
+// server lacks. Their IDs are not legacy IDs: no shipped client merges them
+// and getDiscoverSection does not serve them.
+var recommendedRows = []Row{
+	{ID: "recommended_movies", Type: TypeRecommended, Title: "Recommended movies for you", Recommended: &RecommendedSpec{MediaType: MediaMovie}},
+	{ID: "recommended_series", Type: TypeRecommended, Title: "Recommended series for you", Recommended: &RecommendedSpec{MediaType: MediaSeries}},
+}
+
+// recommendedRow returns the default recommended row with the given ID.
+func recommendedRow(id string) (Row, bool) {
+	for _, r := range recommendedRows {
+		if r.ID == id {
+			return defaultRecommendedRow(r), true
+		}
+	}
+	return Row{}, false
+}
+
+func defaultRecommendedRow(r Row) Row {
+	spec := *r.Recommended
+	r.Recommended = &spec
+	r.Enabled, r.Limit, r.HideAvailable = true, DefaultLimit, true
+	return r
+}
+
+// DefaultRows is the layout of a server whose admin never changed it: the two
+// recommended rows, the six built-in charts, then the studio, network and
+// genre carousels.
 func DefaultRows() []Row {
-	out := make([]Row, 0, len(legacyRows)+len(brandRows))
+	out := make([]Row, 0, len(recommendedRows)+len(legacyRows)+len(brandRows))
+	for _, r := range recommendedRows {
+		out = append(out, defaultRecommendedRow(r))
+	}
 	for _, r := range legacyRows {
 		out = append(out, legacyRow(r))
 	}
@@ -68,6 +97,8 @@ func legacyRow(r Row) Row {
 // translation catalog key of its default title, which every client can show
 // in its own language while the row still holds that title.
 var defaultTitleKeys = map[string]string{
+	"recommended_movies": "home.section.discoverRecommendedMovies",
+	"recommended_series": "home.section.discoverRecommendedSeries",
 	"trending_movies":    "home.section.discoverTrendingMovies",
 	"trending_series":    "home.section.discoverTrendingSeries",
 	"popular_movies":     "home.section.discoverPopularMovies",
@@ -88,7 +119,7 @@ func TitleKey(id, title string) string {
 	if !ok {
 		return ""
 	}
-	for _, rows := range [][]Row{legacyRows, brandRows} {
+	for _, rows := range [][]Row{recommendedRows, legacyRows, brandRows} {
 		for _, r := range rows {
 			if r.ID == id && r.Title == title {
 				return key

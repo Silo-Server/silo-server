@@ -92,10 +92,30 @@ export function useTriggerRecommendations() {
   });
 }
 
+export function useTriggerExternal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: () =>
+      v2("POST /api/v2/admin/recommendations/trigger/external", { retryAuthentication: false }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminKeys.recommendationsStatus() });
+    },
+    onError: (err) => {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("web.admin.recommendations.jobs.triggerExternalFailed"),
+      );
+    },
+  });
+}
+
 /**
- * Deletes the embedding lock, every item embedding, taste profiles and
- * per-profile cached rows. Not retried: a later replay would also delete what
- * the embedding job built since. The caller reports success and failure.
+ * Deletes the embedding lock, every item and outside-title embedding, taste
+ * profiles, per-profile cached rows and outside rows. Not retried: a later
+ * replay would also delete what the embedding job built since. The caller
+ * reports success and failure.
  */
 export function useResetEmbeddings() {
   const queryClient = useQueryClient();

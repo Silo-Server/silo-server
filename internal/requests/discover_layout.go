@@ -246,6 +246,18 @@ func (s *Service) PreviewDiscoverRow(ctx context.Context, v Viewer, row discover
 		source = kind.Source(s.discoverEnv(), normalized)
 	}
 	ctx = withPolicyCache(ctx)
+	if personal, ok := source.(discoverrows.PersonalSource); ok {
+		// The admin's own row, under the admin's own rating ceiling.
+		ceiling, err := s.viewerContentCeiling(ctx, v)
+		if err != nil {
+			return nil, err
+		}
+		section, err := s.personalSeeAllPage(ctx, v, normalized, personal, ceiling, 1)
+		if err != nil {
+			return nil, err
+		}
+		return &MediaPage{Page: section.Page, TotalPages: section.TotalPages, TotalResults: section.TotalResults, Results: section.Results}, nil
+	}
 	page, _, err := s.fillRowPage(ctx, v, rowPageRequest{
 		source: source, page: 1, want: sectionResultsPerPage, budget: sectionBackfillBudgetAggregate,
 		hideAvailable: normalized.HideAvailable,

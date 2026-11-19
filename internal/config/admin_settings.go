@@ -504,6 +504,9 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.recommendations_cron":       "0 5 * * *",
 	"recommendations.taste_decay_half_life_days": "180",
 	"recommendations.diversity_lambda":           "0.7",
+	externalRecommendationsEnabledKey:            "false",
+	externalRecommendationsMaxTitlesKey:          strconv.Itoa(DefaultExternalRecommendationsMaxTitles),
+	"recommendations.external_cron":              "0 6 * * *",
 
 	"ai.auth_mode":                        "api_key",
 	"ai.reasoning_effort":                 "",
@@ -756,7 +759,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", JellyfinCompatAddressStreamGrantSettingKey, "recommendations.enabled",
-		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
+		externalRecommendationsEnabledKey, "subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
@@ -929,6 +932,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	case "s3.public_token_ttl":
 		return normalizeAdminInt(key, value, 1, math.MaxInt32)
 
+	case externalRecommendationsMaxTitlesKey:
+		return normalizeAdminInt(key, value, MinExternalRecommendationsMaxTitles, MaxExternalRecommendationsMaxTitles)
 	case "recommendations.taste_decay_half_life_days":
 		return normalizeAdminFloat(key, value, math.SmallestNonzeroFloat64, math.MaxFloat64)
 	case "recommendations.diversity_lambda", "catalog.search.meilisearch.semantic_ratio":
@@ -1008,7 +1013,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "", "presigned", "public", "cloudflare_token")
 
 	case "recommendations.embeddings_cron", "recommendations.taste_profiles_cron",
-		"recommendations.cowatch_cron", "recommendations.recommendations_cron":
+		"recommendations.cowatch_cron", "recommendations.recommendations_cron", "recommendations.external_cron":
 		if _, err := cron.ParseStandard(value); err != nil {
 			return "", fmt.Errorf("%s must be a valid five-field cron expression: %w", key, err)
 		}

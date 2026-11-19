@@ -23,6 +23,7 @@ import {
   useTriggerTasteProfiles,
   useTriggerRecommendations,
   useTriggerCowatch,
+  useTriggerExternal,
   useResetEmbeddings,
 } from "@/hooks/queries/admin/recommendations";
 import {
@@ -35,10 +36,12 @@ import { useRefreshAIProviders } from "@/hooks/queries/admin/aiProviders";
 import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
 import { ModelField } from "@/pages/admin-settings/AIModelField";
 import { formatLocale } from "@/lib/appLocale";
+import { countText, externalRunLines } from "@/pages/adminRecommendationsExternal";
 import { useT } from "@/i18n";
 import { RecEmbeddingLockCard, RecEmbeddingResetCard } from "./AdminRecommendationsEmbedding";
 
 type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
+type RecExternalStatus = components["schemas"]["AdminRecommendationExternalStatus"];
 
 interface RecLocalValues {
   [key: string]: string;
@@ -256,20 +259,60 @@ function RecJobLastRun({ run, kind = "run" }: { run?: RecJobRun; kind?: RecRunKi
   );
 }
 
+/** The outside-title job's card: titles stored, profile rows built, and its last run. */
+function RecExternalJobCard({
+  status,
+  onTrigger,
+  triggerPending,
+}: {
+  status: RecExternalStatus;
+  onTrigger: () => void;
+  triggerPending: boolean;
+}) {
+  const t = useT();
+  return (
+    <RecJobStatusCard
+      title={t("web.admin.recommendations.jobs.external")}
+      count={status.count}
+      summary={t("web.admin.recommendations.external.titlesStored", {
+        count: status.count,
+        count_text: countText(status.count),
+      })}
+      running={status.running}
+      lastRun={status.last_run}
+      details={[
+        t("web.admin.recommendations.external.rowsBuilt", {
+          count: status.rows,
+          count_text: countText(status.rows),
+        }),
+        ...(status.enabled ? [] : [t("web.admin.recommendations.external.off")]),
+      ]}
+      runDetails={externalRunLines(t, status.last_run)}
+      onTrigger={onTrigger}
+      triggerPending={triggerPending}
+    />
+  );
+}
+
 function RecJobStatusCard({
   title,
   count,
+  summary,
   total,
   running,
   lastRun,
   secondaryRun,
   secondaryRunKind,
   note,
+  details = [],
+  runDetails = [],
   onTrigger,
   triggerPending,
 }: {
   title: string;
   count: number;
+  /** Replaces the "N entries" line. */
+  summary?: string;
   total?: number;
   running: boolean;
   lastRun?: RecJobRun;
@@ -277,6 +320,10 @@ function RecJobStatusCard({
   secondaryRun?: RecJobRun;
   secondaryRunKind?: RecRunKind;
   note?: string;
+  /** More lines under the counts. */
+  details?: string[];
+  /** Lines about the last run, under it. */
+  runDetails?: string[];
   onTrigger: () => void;
   triggerPending: boolean;
 }) {
@@ -297,13 +344,24 @@ function RecJobStatusCard({
                   done_text: count.toLocaleString(formatLocale()),
                   count_text: total.toLocaleString(formatLocale()),
                 })
-              : t("web.admin.recommendations.jobs.entries", {
+              : (summary ??
+                t("web.admin.recommendations.jobs.entries", {
                   count,
                   count_text: count.toLocaleString(formatLocale()),
-                })}
+                }))}
           </p>
+          {details.map((line) => (
+            <p key={line} className="text-muted-foreground text-xs">
+              {line}
+            </p>
+          ))}
           {note && <p className="text-muted-foreground text-xs">{note}</p>}
           <RecJobLastRun run={lastRun} />
+          {runDetails.map((line) => (
+            <p key={line} className="text-muted-foreground text-xs break-words">
+              {line}
+            </p>
+          ))}
           {secondaryRun && <RecJobLastRun run={secondaryRun} kind={secondaryRunKind} />}
         </div>
         <Button
@@ -356,6 +414,7 @@ export default function AdminRecommendations() {
   const triggerTasteProfiles = useTriggerTasteProfiles();
   const triggerCowatch = useTriggerCowatch();
   const triggerRecommendations = useTriggerRecommendations();
+  const triggerExternal = useTriggerExternal();
   const resetEmbeddings = useResetEmbeddings();
   const refreshProviders = useRefreshAIProviders();
 
@@ -433,10 +492,18 @@ export default function AdminRecommendations() {
     try {
       const deleted = await resetEmbeddings.mutateAsync();
       toast.success(
-        t("web.admin.recommendations.reset.done", {
+        t("web.admin.recommendations.reset.doneWithExternal", {
           embeddings: t("web.admin.recommendations.reset.embeddingCount", {
             count: deleted.embeddings,
             count_text: deleted.embeddings.toLocaleString(formatLocale()),
+          }),
+          external_embeddings: t("web.admin.recommendations.reset.externalEmbeddingCount", {
+            count: deleted.external_embeddings,
+            count_text: deleted.external_embeddings.toLocaleString(formatLocale()),
+          }),
+          external_rows: t("web.admin.recommendations.reset.externalRowCount", {
+            count: deleted.external_rows,
+            count_text: deleted.external_rows.toLocaleString(formatLocale()),
           }),
           profiles: t("web.admin.recommendations.reset.tasteProfileCount", {
             count: deleted.taste_profiles,
@@ -586,6 +653,11 @@ export default function AdminRecommendations() {
               onTrigger={() => triggerRecommendations.mutate()}
               triggerPending={triggerRecommendations.isPending}
             />
+            <RecExternalJobCard
+              status={status.external}
+              onTrigger={() => triggerExternal.mutate()}
+              triggerPending={triggerExternal.isPending}
+            />
           </div>
         </div>
       )}
@@ -600,7 +672,8 @@ export default function AdminRecommendations() {
             disabled={
               status.embeddings.running ||
               status.taste_profiles.running ||
-              status.recommendations.running
+              status.recommendations.running ||
+              status.external.running
             }
             isPending={resetEmbeddings.isPending}
             onReset={() => void handleResetEmbeddings()}
