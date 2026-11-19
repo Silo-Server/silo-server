@@ -31,7 +31,7 @@ func TestUnsubscribeSafeMethods(t *testing.T) {
 			h := NewEmailLinkHandler(p)
 			for range 2 {
 				rec := httptest.NewRecorder()
-				h.HandleUnsubscribe(rec, httptest.NewRequest(http.MethodGet, "/api/v1/notifications/email/unsubscribe?token="+url.QueryEscape(token), nil))
+				h.HandleUnsubscribe(rec, httptest.NewRequest(http.MethodGet, "/api/v2/notifications/email/unsubscribe?token="+url.QueryEscape(token), nil))
 				wantStatus := http.StatusOK
 				if token == "" {
 					wantStatus = http.StatusBadRequest
