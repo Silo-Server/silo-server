@@ -72,7 +72,7 @@ func TestServeExtractTextWindowBudgetAnswersRetryable(t *testing.T) {
 
 	// The breach armed the existing per-identity cooldown, so the retry the 503
 	// asks for does not repeat the read.
-	if _, cooling := c.extractionCoolingDown(opts, subtitleFormatASS); !cooling {
+	if _, _, cooling := c.extractionCoolingDown(opts, subtitleFormatASS); !cooling {
 		t.Fatal("no extraction cooldown after a budget breach")
 	}
 	retryErr := c.ServeExtract(httptest.NewRecorder(), subtitleWindowRequest(), opts, extract)
@@ -192,7 +192,7 @@ func TestServeExtractDetachedPrefetchIgnoresTheBreachCooldown(t *testing.T) {
 	if err := c.ServeExtract(httptest.NewRecorder(), subtitleWindowRequest(), opts, slow); err == nil {
 		t.Fatal("the request-path window was not bounded")
 	}
-	if _, cooling := c.extractionCoolingDown(opts, subtitleFormatASS); !cooling {
+	if _, _, cooling := c.extractionCoolingDown(opts, subtitleFormatASS); !cooling {
 		t.Fatal("the breach did not arm the extraction cooldown")
 	}
 

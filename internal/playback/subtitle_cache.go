@@ -67,6 +67,11 @@ type SubtitleCache struct {
 	// cache's request-path text window extracts. Zero means the production
 	// bound; tests set a short one (see SetWindowExtractBudgetForTest).
 	windowElapsedBudget time.Duration
+	// windowWaitTimeout bounds how long a duplicate window request waits for
+	// the in-flight extract it joined before answering retryable. Zero means
+	// the production bound; tests set a short one (see
+	// SetWindowWaitTimeoutForTest).
+	windowWaitTimeout time.Duration
 
 	mu       sync.Mutex
 	inflight map[string]*SubtitleCacheFill
@@ -465,6 +470,12 @@ type subtitleWindowFlight struct {
 	start     float64
 	end       float64
 	openEnded bool
+	// refusalReason names the answer that started this extract when it is the
+	// recovery a refused request is waiting on (see
+	// StreamExtractOpts.WaitingRefusalReason). A request that joins the flight
+	// and waits past its bound answers with this reason instead of a generic
+	// source failure, so the client keeps the state the first refusal gave it.
+	refusalReason string
 }
 
 // subtitlePageFlight is a refcounted marker for the windowed extracts admitted
@@ -492,6 +503,12 @@ type subtitleExtractionGuard struct {
 	failures    int
 	retryAt     time.Time
 	lastFailure time.Time
+	// reason is the problem code the failure that armed retryAt answered with,
+	// when it is a cost refusal the client should keep honoring rather than a
+	// source verdict (a window killed at its budget). A retry that lands inside
+	// the backoff answers the same code instead of degrading to a generic
+	// source failure. Empty keeps the generic retryable shape.
+	reason string
 }
 
 // subtitleWarmGuard is the per-identity warm admission state: how many
@@ -735,8 +752,8 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 			// unservable — notably after a budget breach, which arms this same
 			// backoff on the identity the prefetch needs.
 			if !opts.DetachedRelayDemux {
-				if retryAfter, cooling := c.extractionCoolingDownFor(opts, format); cooling {
-					return result, &SubtitleExtractionRetryError{RetryAfter: retryAfter}
+				if retryAfter, reason, cooling := c.extractionCoolingDownReasonFor(opts, format); cooling {
+					return result, &SubtitleExtractionRetryError{RetryAfter: retryAfter, Reason: reason}
 				}
 			}
 			if !opts.DisableBackgroundWarm {
@@ -749,12 +766,12 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 		// failure backoff behind, both re-checked after the wait.
 		if windowKey != "" {
 			for attempt := 0; attempt < subtitleWindowWaitRetries; attempt++ {
-				leader, wait := c.beginWindowFlight(windowKey, opts)
+				leader, wait, refusalReason := c.beginWindowFlight(windowKey, opts)
 				if leader {
 					windowLeader = true
 					break
 				}
-				if err := c.waitForWindowFlight(r.Context(), wait); err != nil {
+				if err := c.waitForWindowFlight(r.Context(), wait, refusalReason); err != nil {
 					return result, err
 				}
 				served, serveErr := c.serveWindowResult(w, r, opts, format, windowKey)
@@ -765,8 +782,8 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 					return result, nil
 				}
 				if !result.ServedCommittedArtifact && !opts.DetachedRelayDemux {
-					if retryAfter, cooling := c.extractionCoolingDownFor(opts, format); cooling {
-						return result, &SubtitleExtractionRetryError{RetryAfter: retryAfter}
+					if retryAfter, reason, cooling := c.extractionCoolingDownReasonFor(opts, format); cooling {
+						return result, &SubtitleExtractionRetryError{RetryAfter: retryAfter, Reason: reason}
 					}
 				}
 			}
@@ -940,6 +957,10 @@ func (c *SubtitleCache) windowExtractContext(admittedCtx context.Context, opts S
 func (c *SubtitleCache) windowBudgetBreachError(ctx context.Context, opts StreamExtractOpts, format string, budget time.Duration, written int64, delivered bool, elapsed time.Duration) error {
 	recordSubtitleWindowBudgetKill(format)
 	c.noteExtractionFailure(opts, format)
+	// The retry that lands inside this backoff must keep answering the cost
+	// refusal: a generic source failure there told the client the provider was
+	// broken and dropped the state the budget answer carries.
+	c.noteExtractionRefusalReason(opts, format, SubtitleWindowBudgetExceededReason)
 	if delivered {
 		slog.WarnContext(ctx, "subtitle window extract killed at its budget after bytes reached the wire",
 			"component", "playback", "input", opts.InputPath, "track", opts.TrackIndex,
@@ -1388,20 +1409,25 @@ func (c *SubtitleCache) evictWindowResultsLocked(now time.Time) {
 // beginWindowFlight reserves the in-flight marker for one window, or returns
 // the marker of a request already extracting it. A request whose range is
 // covered by a wider in-flight window joins that flight: after a budget breach
-// the detached recovery warm extracts the breached range plus the client's next
-// cell, and the retry the 503 asks for is narrower than that warm. Joining it
-// keeps the retry from paying the same relay read a second time while the warm
-// is still running.
-func (c *SubtitleCache) beginWindowFlight(key string, opts StreamExtractOpts) (bool, <-chan struct{}) {
+// the detached recovery warm extracts the breached range plus a lead, and the
+// retry the 503 asks for is narrower than that warm. Joining it keeps the retry
+// from paying the same relay read a second time while the warm is still
+// running.
+//
+// The returned reason is the answer that started the joined flight, when the
+// leader published one (StreamExtractOpts.WaitingRefusalReason). A waiter that
+// times out answers with it, so the retry after a breach keeps naming the
+// window/page state instead of degrading to a generic source failure.
+func (c *SubtitleCache) beginWindowFlight(key string, opts StreamExtractOpts) (leader bool, wait <-chan struct{}, refusalReason string) {
 	if c == nil || key == "" {
-		return true, nil
+		return true, nil, ""
 	}
 	base := windowResultKeyBase(key)
 	_, start, end, openEnded := opts.WindowCoverage()
 	c.windowMu.Lock()
 	defer c.windowMu.Unlock()
 	if existing, ok := c.windowFlights[key]; ok {
-		return false, existing.done
+		return false, existing.done, existing.refusalReason
 	}
 	for _, flight := range c.windowFlights {
 		if flight.base != base {
@@ -1413,21 +1439,22 @@ func (c *SubtitleCache) beginWindowFlight(key string, opts StreamExtractOpts) (b
 			openEnded:    flight.openEnded,
 		}
 		if covering.covers(start, end, openEnded) {
-			return false, flight.done
+			return false, flight.done, flight.refusalReason
 		}
 	}
 	if c.windowFlights == nil {
 		c.windowFlights = make(map[string]*subtitleWindowFlight)
 	}
 	flight := &subtitleWindowFlight{
-		done:      make(chan struct{}),
-		base:      base,
-		start:     start,
-		end:       end,
-		openEnded: openEnded,
+		done:          make(chan struct{}),
+		base:          base,
+		start:         start,
+		end:           end,
+		openEnded:     openEnded,
+		refusalReason: opts.WaitingRefusalReason,
 	}
 	c.windowFlights[key] = flight
-	return true, nil
+	return true, nil, ""
 }
 
 func (c *SubtitleCache) endWindowFlight(key string) {
@@ -1563,18 +1590,40 @@ func (c *SubtitleCache) unregisterWarmRun(key string, run *subtitleWarmRun) {
 	}
 }
 
+// windowWaitBound returns this cache's duplicate-window wait bound, falling back
+// to the production value for a cache built without one.
+func (c *SubtitleCache) windowWaitBound() time.Duration {
+	if c != nil && c.windowWaitTimeout > 0 {
+		return c.windowWaitTimeout
+	}
+	return subtitleWindowWaitTimeout
+}
+
+// SetWindowWaitTimeoutForTest overrides the duplicate-window wait bound so a
+// test can exercise the retryable answer without waiting out the production
+// bound. A zero or negative value restores the production one.
+func (c *SubtitleCache) SetWindowWaitTimeoutForTest(bound time.Duration) {
+	if c == nil {
+		return
+	}
+	c.windowWaitTimeout = bound
+}
+
 // waitForWindowFlight waits for the leading extraction to settle, bounded by
 // subtitleWindowWaitTimeout. A waiter that times out answers retryable rather
 // than spawning a duplicate. Returning an error means the caller must stop;
-// returning nil means the caller may re-check the cache and backoff.
-func (c *SubtitleCache) waitForWindowFlight(ctx context.Context, wait <-chan struct{}) error {
-	timer := time.NewTimer(subtitleWindowWaitTimeout)
+// returning nil means the caller may re-check the cache and backoff. A flight
+// the recovery warm started carries its refusal reason, so a timeout keeps the
+// window/page code and Retry-After the first refusal published instead of
+// answering a generic source failure.
+func (c *SubtitleCache) waitForWindowFlight(ctx context.Context, wait <-chan struct{}, refusalReason string) error {
+	timer := time.NewTimer(c.windowWaitBound())
 	defer timer.Stop()
 	select {
 	case <-wait:
 		return nil
 	case <-timer.C:
-		return &SubtitleExtractionRetryError{RetryAfter: 2 * time.Second}
+		return &SubtitleExtractionRetryError{RetryAfter: subtitleFillBusyRetryAfter, Reason: refusalReason}
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -1588,6 +1637,17 @@ func (c *SubtitleCache) extractionCoolingDownFor(opts StreamExtractOpts, format 
 	if opts.FreshSourceRetry {
 		return 0, false
 	}
+	remaining, _, cooling := c.extractionCoolingDown(opts, format)
+	return remaining, cooling
+}
+
+// extractionCoolingDownReasonFor is extractionCoolingDownFor plus the reason the
+// arming failure answered with, so a window retry inside the backoff keeps the
+// cost refusal instead of a generic source failure.
+func (c *SubtitleCache) extractionCoolingDownReasonFor(opts StreamExtractOpts, format string) (time.Duration, string, bool) {
+	if opts.FreshSourceRetry {
+		return 0, "", false
+	}
 	return c.extractionCoolingDown(opts, format)
 }
 
@@ -1595,25 +1655,25 @@ func (c *SubtitleCache) extractionCoolingDownFor(opts StreamExtractOpts, format 
 // retryable upstream extraction failure. No entry means the next attempt is
 // allowed. A lapsed cooldown keeps the failure streak so the next failure
 // escalates; only a success or the history horizon clears it.
-func (c *SubtitleCache) extractionCoolingDown(opts StreamExtractOpts, format string) (time.Duration, bool) {
+func (c *SubtitleCache) extractionCoolingDown(opts StreamExtractOpts, format string) (time.Duration, string, bool) {
 	key, ok := c.formatEntryKey(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, format)
 	if !ok {
-		return 0, false
+		return 0, "", false
 	}
 	now := time.Now()
 	c.failureMu.Lock()
 	defer c.failureMu.Unlock()
 	guard, ok := c.failureGuard[key]
 	if !ok {
-		return 0, false
+		return 0, "", false
 	}
 	if now.Before(guard.retryAt) {
-		return guard.retryAt.Sub(now), true
+		return guard.retryAt.Sub(now), guard.reason, true
 	}
 	if now.Sub(guard.lastFailure) >= subtitleExtractionFailureHistoryTTL {
 		delete(c.failureGuard, key)
 	}
-	return 0, false
+	return 0, "", false
 }
 
 // noteExtractionFailure extends the per-identity backoff after a retryable
@@ -1649,6 +1709,32 @@ func (c *SubtitleCache) noteExtractionFailure(opts StreamExtractOpts, format str
 	}
 	guard.retryAt = now.Add(backoff)
 	guard.lastFailure = now
+	// A new failure re-arms the answer: the reason the previous one carried
+	// belongs to that failure and must not survive an upstream error that follows
+	// it. A cost refusal re-records its own reason right after this call.
+	guard.reason = ""
+	c.failureGuard[key] = guard
+}
+
+// noteExtractionRefusalReason records the problem code the failure that just
+// armed this identity's backoff answered with, so a retry inside the backoff
+// keeps it. It must be called after noteExtractionFailure for the same
+// key/opts/format.
+func (c *SubtitleCache) noteExtractionRefusalReason(opts StreamExtractOpts, format, reason string) {
+	if reason == "" {
+		return
+	}
+	key, ok := c.formatEntryKey(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, format)
+	if !ok {
+		return
+	}
+	c.failureMu.Lock()
+	defer c.failureMu.Unlock()
+	guard, ok := c.failureGuard[key]
+	if !ok {
+		return
+	}
+	guard.reason = reason
 	c.failureGuard[key] = guard
 }
 
@@ -2088,11 +2174,12 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	leader := false
 	for attempt := 0; windowKey != "" && attempt < subtitleWindowWaitRetries; attempt++ {
 		var wait <-chan struct{}
-		leader, wait = c.beginWindowFlight(windowKey, opts)
+		var refusalReason string
+		leader, wait, refusalReason = c.beginWindowFlight(windowKey, opts)
 		if leader {
 			break
 		}
-		if err := c.waitForWindowFlight(r.Context(), wait); err != nil {
+		if err := c.waitForWindowFlight(r.Context(), wait, refusalReason); err != nil {
 			return err
 		}
 		served, serveErr := c.serveWindowResult(w, r, opts, subtitleFormatSUP, windowKey)

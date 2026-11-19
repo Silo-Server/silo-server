@@ -129,6 +129,14 @@ type StreamExtractOpts struct {
 	// starve the read that makes the client's retry cheap. It wins over
 	// DetachedRelayDemux when both are set.
 	WaitingRelayDemux bool
+	// WaitingRefusalReason names the answer that started this recovery read, so
+	// a request that joins the read while it is still running and times out can
+	// keep the reason instead of degrading to a generic source failure. It is
+	// set by the handler on the recovery warm it starts (for a budget breach the
+	// answer is subtitle_window_budget_exceeded); the cache publishes it on the
+	// in-flight window so the waiter's 503 carries the same code and the client
+	// honors the same Retry-After. Empty keeps the generic retryable shape.
+	WaitingRefusalReason string
 	// FreshSourceRetry marks a caller's bounded retry after it replaced
 	// InputPath with a newly resolved URL for the same cache identity. The
 	// per-identity extraction backoff exists to stop repeated client retries

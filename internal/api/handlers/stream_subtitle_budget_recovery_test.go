@@ -81,21 +81,29 @@ func TestSubtitleWindowBudgetBreachRetryServedFromRecoveryWarm(t *testing.T) {
 	if killed := warmLogs.count("subtitle window extract killed at its budget"); killed != 1 {
 		t.Fatalf("budget kills = %d, want exactly 1 (the request; the warm is detached)\n%s", killed, warmLogs.String())
 	}
-	assertFFmpegArgs(t, argsLog, "-ss 580", "-to 730")
+	// The warm spans the breached window plus one full client window: the client
+	// walks on the live playhead while the warm builds, so a one-cell lead ends
+	// before the retries it exists to serve do (production: a 64.5 s build for
+	// 1680-1830 while the retries asked for 1740-1860 and 1800-1920).
+	assertFFmpegArgs(t, argsLog, "-ss 580", "-to 820")
 
-	// The client retries a few seconds forward, not on the breached range.
-	if got := countFFmpegArgs(t, argsLog, "-ss 590"); got != 0 {
-		t.Fatalf("retry window extracts before the retry = %d, want 0", got)
-	}
-	rec = serve(590)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("retry = %d %q, want 200 served from the recovery warm", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "Dialogue:") { //nolint:misspell // ASS event keyword
-		t.Fatalf("retry body = %q, want the ASS window", rec.Body.String())
-	}
-	if got := countFFmpegArgs(t, argsLog, "-ss 590"); got != 0 {
-		t.Fatalf("retry window extracts = %d, want 0: the retry must read the recovery warm, not the source", got)
+	// The client retries on the advanced playhead, up to one full window past
+	// the breached start. Every one of those windows is inside the warm and must
+	// be served from it with no new source read.
+	for _, position := range []int{590, 640, 700} {
+		if got := countFFmpegArgs(t, argsLog, "-ss "+strconv.Itoa(position)); got != 0 {
+			t.Fatalf("retry window %d extracts before the retry = %d, want 0", position, got)
+		}
+		rec = serve(position)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("retry %d = %d %q, want 200 served from the recovery warm", position, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Dialogue:") { //nolint:misspell // ASS event keyword
+			t.Fatalf("retry %d body = %q, want the ASS window", position, rec.Body.String())
+		}
+		if got := countFFmpegArgs(t, argsLog, "-ss "+strconv.Itoa(position)); got != 0 {
+			t.Fatalf("retry window %d extracts = %d, want 0: the retry must read the recovery warm, not the source", position, got)
+		}
 	}
 }
 

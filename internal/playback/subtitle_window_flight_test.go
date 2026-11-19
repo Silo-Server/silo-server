@@ -22,7 +22,7 @@ func TestWindowFlightCoveringWarmAbsorbsNarrowerRetry(t *testing.T) {
 	if !ok {
 		t.Fatal("wide window is not keyable")
 	}
-	if leader, _ := c.beginWindowFlight(wideKey, wide); !leader {
+	if leader, _, _ := c.beginWindowFlight(wideKey, wide); !leader {
 		t.Fatal("wide window did not become the flight leader")
 	}
 
@@ -33,7 +33,7 @@ func TestWindowFlightCoveringWarmAbsorbsNarrowerRetry(t *testing.T) {
 	if !ok {
 		t.Fatal("narrow window is not keyable")
 	}
-	leader, joined := c.beginWindowFlight(narrowKey, narrow)
+	leader, joined, _ := c.beginWindowFlight(narrowKey, narrow)
 	if leader {
 		t.Fatal("narrow retry started its own extract despite a covering in-flight warm")
 	}
@@ -51,7 +51,7 @@ func TestWindowFlightCoveringWarmAbsorbsNarrowerRetry(t *testing.T) {
 	if !ok {
 		t.Fatal("far window is not keyable")
 	}
-	if leader, _ := c.beginWindowFlight(farKey, far); !leader {
+	if leader, _, _ := c.beginWindowFlight(farKey, far); !leader {
 		t.Fatal("uncovered window did not become its own flight leader")
 	}
 	c.endWindowFlight(farKey)

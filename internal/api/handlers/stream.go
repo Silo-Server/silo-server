@@ -4901,13 +4901,26 @@ func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models
 		// they draw from the reserved recovery budget instead of being shed
 		// behind a fill or a window that already holds the relay pipe.
 		warmOpts.WaitingRelayDemux = breach || pageWaiting
+		// The request that joins this read while it runs answers with the reason
+		// that started it, not a generic source failure: the client keeps the
+		// page/window state and honors the same Retry-After (see
+		// StreamExtractOpts.WaitingRefusalReason).
+		if breach {
+			warmOpts.WaitingRefusalReason = playback.SubtitleWindowBudgetExceededReason
+		} else if pageWaiting {
+			warmOpts.WaitingRefusalReason = playback.SubtitlePageNotReadyReason
+		}
 		seed := inherited
 
 		// A budget breach is recovered by warming the range the retry will ask
-		// for, not by the playhead-grid prefetch below. The client re-anchors a
-		// few seconds forward on its retry, and a grid prefetch of the same
-		// page length ends before the retry's range does, so the covering
-		// lookup rejects it and the retry pays the same read again.
+		// for, not by the playhead-grid prefetch below. The client re-anchors on
+		// the live playhead, so by its retry its window starts later and ends
+		// later than the breached one; the recovery warm covers the breached
+		// range plus one full client window so the retries the 503 promises
+		// actually land inside it (see virtualSubtitleBreachRecoveryWindows). A
+		// grid prefetch of the same page length starts earlier and ends before
+		// the retry's range does, so the covering lookup rejects it and the
+		// retry pays the same read again.
 		if breach {
 			if windows, ok := virtualSubtitleBreachRecoveryWindows(opts); ok {
 				extract, _, release := h.virtualSubtitleWarmExtractor(file, track, session, planTracks, seed, warmOpts, live)
@@ -5036,14 +5049,24 @@ func virtualSubtitleWarmPrefetchWindows(opts playback.StreamExtractOpts, positio
 // warm should extract after a request-path text window is killed at its budget.
 //
 // The retry a 503 asks for is not the request that breached: both subtitle
-// clients re-anchor a few seconds forward (the web VTT fetcher snaps to the next
-// 30 s cell, the ASS fetcher pulls back a lead from the advanced playhead), so
-// its range starts later and ends later than the breached one. Extracting the
-// breached start with one extra grid cell on the end therefore covers both an
-// exact repeat and the shifted retry, while the ordinary playhead-grid prefetch
-// — same page length, earlier start — ends before the retry's end and is
-// rejected by the covering lookup. The extra cell is a duration bound, not a
-// time bound: the detached warm may spend the full window timeout on it.
+// clients re-anchor on the live playhead, which has moved on by the time the
+// client retries, so its window starts later and ends later than the breached
+// one. Extracting the breached start with a lead on the end therefore covers
+// both an exact repeat and the shifted retries, while the ordinary
+// playhead-grid prefetch — same page length, earlier start — ends before the
+// retry's end and is rejected by the covering lookup.
+//
+// The lead is one full client window, not one grid cell. The warm's own build
+// time is the reason: on the 4K source that produced the measurement a 150 s
+// window extracted from the relay took 64.5 s, so by the time it landed the
+// client had walked from 1680 s to 1740 s and asked for 1740–1860 — 30 s past
+// a one-cell lead (1680–1830). It re-extracted at full price, twice. Since the
+// client requests `[grid(playhead), +window)` and playback advances while the
+// warm builds, the warm must reach at least one full window past the breached
+// end for the retries it exists to serve to be inside it. That doubles the
+// warm's span and therefore its read; it is detached, bounded by the cache's
+// warm timeout and the two-warm budget, and it replaces repeated 26 s breaches
+// with hits on the same bytes.
 //
 // Only a bounded text/ASS window can be recovered this way. A bitmap page has
 // its own progressive artifact path, and an open-ended request has no end to
@@ -5056,7 +5079,7 @@ func virtualSubtitleBreachRecoveryWindows(opts playback.StreamExtractOpts) ([]pl
 	if !windowed || openEnded || end <= start {
 		return nil, false
 	}
-	lead := playback.SubtitleRequestGridFor(opts.SourceCodec).CellSeconds
+	lead := playback.SubtitleRequestGridFor(opts.SourceCodec).PageSeconds
 	return []playback.SubtitlePrefetchWindow{{
 		StartSeconds:    start,
 		DurationSeconds: (end - start) + lead,
