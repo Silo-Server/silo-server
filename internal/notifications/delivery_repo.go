@@ -423,6 +423,12 @@ func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int
 	return err
 }
 
+// retentionClaimGrace is how long after a retry falls due DeleteOld still
+// keeps its delivery, so the retry sweep can claim it first. It also bounds
+// how long an unclaimed retry holds the row when the sweep has stopped, such
+// as while that channel is turned off.
+const retentionClaimGrace = time.Hour
+
 // unfinishedAttemptGuards keeps DeleteOld from cascading away an attempt that
 // can still run, in each table of per-destination attempts.
 var unfinishedAttemptGuards = func() string {
@@ -436,7 +442,7 @@ var unfinishedAttemptGuards = func() string {
 		b.WriteString(`
 		  AND NOT EXISTS (SELECT 1 FROM ` + table + ` a
 		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
-		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))`)
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now() - $5::interval) OR d.created_at > now() - $4::interval))`)
 	}
 	return b.String()
 }()
@@ -451,7 +457,7 @@ var unfinishedAttemptGuards = func() string {
 // still to finish is kept, since its deletion would cascade to the attempt:
 // always while the attempt is claimed or scheduled (retrying with
 // next_retry_at ahead, which covers a live claim lease and a long
-// Retry-After), and while it waits otherwise for as long as the row is
+// Retry-After) or fell due less than retentionClaimGrace ago, and while it waits otherwise for as long as the row is
 // younger than pluginAttemptMaxAge, past which a plugin attempt is finished
 // without a send. The bound lets the row go when an attempt is stranded, such
 // as while webhooks are turned off. Every sender caps how far it schedules a
@@ -463,7 +469,7 @@ func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCu
 		       OR (d.read_at IS NULL AND d.created_at < $2))
 		  AND NOT (d.type = '`+DeliveryTypeWatchlistAvailable+`' AND d.created_at >= $3)`+
 		unfinishedAttemptGuards,
-		readCutoff, unreadCutoff, arrivalCutoff, pluginAttemptMaxAge)
+		readCutoff, unreadCutoff, arrivalCutoff, pluginAttemptMaxAge, retentionClaimGrace)
 	if err != nil {
 		return 0, err
 	}

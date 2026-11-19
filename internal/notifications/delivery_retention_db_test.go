@@ -8,7 +8,8 @@ import (
 // Inbox retention keeps a delivery while a mobile push or web push attempt
 // can still run, since deleting it cascades to the attempt. A long
 // Retry-After schedules the retry past the retention cutoff, and the row
-// must outlive it. A stranded attempt holds the row only until the age bound.
+// must outlive it. A retry that just fell due keeps the row until the sweep
+// can claim it. A stranded attempt holds the row only for a bounded time.
 func TestPushRetryOutlivesInboxRetentionDB(t *testing.T) {
 	pool := schemaDB(t, "push_retention_")
 	ctx := t.Context()
@@ -47,14 +48,16 @@ func TestPushRetryOutlivesInboxRetentionDB(t *testing.T) {
 			// A 429 with Retry-After just under a day, under one day of unread retention.
 			queue(prefix+"scheduled", 25*time.Hour, "retrying", 23*time.Hour)
 			queue(prefix+"pending", time.Hour, "pending", 0)
-			// Past the bound with no scheduled retry: stranded, so retention takes it.
-			queue(prefix+"stranded", pluginAttemptMaxAge+time.Hour, "retrying", -time.Hour)
+			// Past the age bound and just due: the sweep hasn't claimed it yet.
+			queue(prefix+"due", pluginAttemptMaxAge+time.Hour, "retrying", -time.Minute)
+			// Past the age bound and due long ago: stranded, so retention takes it.
+			queue(prefix+"stranded", pluginAttemptMaxAge+time.Hour, "retrying", -2*retentionClaimGrace)
 
 			cutoff := time.Now().Add(time.Minute)
 			if _, err := deliveries.DeleteOld(ctx, cutoff, cutoff, cutoff); err != nil {
 				t.Fatal(err)
 			}
-			for id, want := range map[string]bool{prefix + "scheduled": true, prefix + "pending": true, prefix + "stranded": false} {
+			for id, want := range map[string]bool{prefix + "scheduled": true, prefix + "pending": true, prefix + "due": true, prefix + "stranded": false} {
 				row, err := deliveries.GetRowByID(ctx, id)
 				if err != nil {
 					t.Fatal(err)
