@@ -134,9 +134,16 @@ func TestProvisionWriterMetadataPlacementRecoveryDB(t *testing.T) {
 		t.Fatalf("completed placement still queued = %v, error = %v", anchorQueued, err)
 	}
 	retryWriter.placeMetadata = place
-	retryWriter.tryPlacement(ctx)
-	assertPlacement(false, true)
+	checkPlacementBlockedByRestore(t, retryWriter)
+	assertPlacement(true, false)
 	retryWriter.Close()
+	reviewed := NewProvisionWriter(pool, repos, installations, installer, catalog, configs, nil, doc, place)
+	t.Cleanup(reviewed.Close)
+	if err := reviewed.StartOffline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertPlacement(false, true)
+	reviewed.Close()
 
 	if _, err := pool.Exec(ctx, `DELETE FROM library_provider_chains WHERE plugin_installation_id = $1 AND media_folder_id = $2`, id, folderID); err != nil {
 		t.Fatal(err)
@@ -147,4 +154,30 @@ func TestProvisionWriterMetadataPlacementRecoveryDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPlacement(false, false)
+}
+
+func checkPlacementBlockedByRestore(t *testing.T, w *ProvisionWriter) {
+	t.Helper()
+	ctx := t.Context()
+	const hold = "test-restore-before-placement"
+	if _, err := w.pool.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1,$2)`, ProvisionRestoreHoldKey, hold); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := w.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key=$1 AND value=$2`, ProvisionRestoreHoldKey, hold); err != nil {
+			t.Error(err)
+		}
+	})
+	w.tryPlacement(ctx)
+	statuses, err := ListProvisionStatus(ctx, w.pool)
+	if err != nil || len(statuses) != 1 || statuses[0].State != "held" {
+		t.Fatalf("restore during placement: statuses = %v, error = %v", statuses, err)
+	}
+	if err := AcknowledgeProvisionRestoreHold(ctx, w.pool, hold); err != nil {
+		t.Fatal(err)
+	}
+	w.applyOnline(ctx)
+	if w.retry || w.placementPending {
+		t.Fatal("acknowledgment resumed the old writer")
+	}
 }

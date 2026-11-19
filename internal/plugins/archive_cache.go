@@ -28,6 +28,12 @@ type archiveStore interface {
 	SaveArchive(ctx context.Context, installationID int, manifestJSON []byte, checksum string, archiveBytes []byte) error
 }
 
+// releaseArchiveReader pairs the archived bytes with the installation's
+// identity in one database snapshot.
+type releaseArchiveReader interface {
+	archiveForRelease(context.Context, *Installation) (*InstallationArchive, error)
+}
+
 type ArchiveCache struct {
 	// mu protects rehydration and pruning from concurrent status and
 	// reconcile calls, including cache-hit validation during extraction, and
@@ -45,14 +51,24 @@ type ArchiveCache struct {
 	// verified holds, per installation, the binary this cache last hashed
 	// and found matching its manifest. Only Manifest consults it.
 	verified map[int]verifiedBinary
-	// A read of the archive may finish after this host retired its release.
-	// Keep the path retired so that read cannot bring the files back.
-	retired            map[string]struct{}
+	// Keep a generation for each retired path, even after reuse, so a read
+	// that crossed a retirement cannot put its old archive back.
+	pathStates         map[string]archivePathState
 	pendingRetirements map[string]*Installation
 	// newHash, when set, replaces sha256.New for checking an installed
 	// binary against its manifest checksum. Tests use it to count the bytes a
 	// read hashes.
 	newHash func() hash.Hash
+}
+
+type archivePathState struct {
+	generation uint64
+	retired    bool
+}
+
+type archiveRead struct {
+	binaryPath string
+	generation uint64
 }
 
 // verifiedBinary is a binary whose hash matched checksum: its path and the
@@ -196,24 +212,35 @@ func (c *ArchiveCache) ensureFrom(
 	if installation == nil {
 		return nil, fmt.Errorf("plugin installation is required")
 	}
-	if manifest, err := c.installed(ctx, installation, trustVerified); manifest != nil || err != nil {
+	binaryPath, err := c.LocalInstallPath(installation)
+	if err != nil {
+		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
+	}
+	// The cache's own pool can attest that a retired path returned. A
+	// transaction's archive read may still see the pre-retirement snapshot.
+	_, checksRelease := archives.(releaseArchiveReader)
+	c.mu.Lock()
+	read := archiveRead{binaryPath: binaryPath, generation: c.pathStates[binaryPath].generation}
+	manifest, err := c.installed(ctx, installation, binaryPath, trustVerified, persist && checksRelease)
+	c.mu.Unlock()
+	if manifest != nil || err != nil {
 		return manifest, err
 	}
 	if !persist {
-		return c.load(ctx, installation, trustVerified, archives, false)
+		return c.load(ctx, installation, read, trustVerified, archives, false)
 	}
 	// Concurrent loads of one installation from the cache's own store share
-	// one read of its archive.
-	key := fmt.Sprintf("%d/%t/%q/%q", installation.ID, trustVerified, installation.Version, installation.InstallPath)
+	// one read of its archive if they began in the same cache generation.
+	key := fmt.Sprintf("%d/%t/%q/%q/%d", installation.ID, trustVerified, installation.Version, installation.InstallPath, read.generation)
 	result := c.loads.DoChan(key, func() (any, error) {
 		ctx := context.WithoutCancel(ctx)
 		c.mu.Lock()
-		manifest, err := c.rehydratedMeanwhile(installation, trustVerified)
+		manifest, err := c.rehydratedMeanwhile(installation, read, trustVerified)
 		c.mu.Unlock()
 		if manifest != nil || err != nil {
 			return manifest, err
 		}
-		return c.load(ctx, installation, trustVerified, archives, true)
+		return c.load(ctx, installation, read, trustVerified, archives, true)
 	})
 	select {
 	case r := <-result:
@@ -226,10 +253,10 @@ func (c *ArchiveCache) ensureFrom(
 
 // load reads the installation's stored archive, without mu, rehydrates
 // its files, and, when persist is set, stores an archive it repaired.
-func (c *ArchiveCache) load(ctx context.Context, installation *Installation, trustVerified bool, archives archiveStore, persist bool) (*pluginv1.PluginManifest, error) {
+func (c *ArchiveCache) load(ctx context.Context, installation *Installation, read archiveRead, trustVerified bool, archives archiveStore, persist bool) (*pluginv1.PluginManifest, error) {
 	var archive *InstallationArchive
 	var err error
-	if store, ok := archives.(*InstallationStore); ok {
+	if store, ok := archives.(releaseArchiveReader); ok {
 		archive, err = store.archiveForRelease(ctx, installation)
 	} else {
 		archive, err = archives.GetArchive(ctx, installation.ID)
@@ -237,7 +264,7 @@ func (c *ArchiveCache) load(ctx context.Context, installation *Installation, tru
 	if err != nil {
 		return nil, fmt.Errorf("load stored plugin archive for installation %d: %w", installation.ID, err)
 	}
-	manifest, repaired, err := c.rehydrate(ctx, installation, trustVerified, archive)
+	manifest, repaired, err := c.rehydrate(ctx, installation, read, trustVerified, archive)
 	if err != nil || repaired == nil || !persist {
 		return manifest, err
 	}
@@ -266,20 +293,19 @@ func matchingInstalledManifest(path string, installation *Installation) *pluginv
 	return manifest
 }
 
-// installed returns the installed manifest when the installed files pass
-// the check, and nil when they need rehydrating.
-func (c *ArchiveCache) installed(ctx context.Context, installation *Installation, trustVerified bool) (*pluginv1.PluginManifest, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// installed returns the installed manifest when the files pass the check,
+// and nil when they need rehydrating. The caller holds mu.
+func (c *ArchiveCache) installed(ctx context.Context, installation *Installation, binaryPath string, trustVerified, mayReuseRetired bool) (*pluginv1.PluginManifest, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	binaryPath, err := c.LocalInstallPath(installation)
-	if err != nil {
-		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
-	}
-	if _, retired := c.retired[binaryPath]; retired {
-		return nil, ErrInstallationChanged
+	if c.pathStates[binaryPath].retired {
+		if !mayReuseRetired {
+			return nil, ErrInstallationChanged
+		}
+		// Some files may remain after unsuccessful retirement. Load and
+		// verify the committed archive before trusting this path again.
+		return nil, nil
 	}
 	manifest := matchingInstalledManifest(InstalledManifestPath(binaryPath), installation)
 	if manifest == nil {
@@ -308,13 +334,14 @@ func (c *ArchiveCache) installed(ctx context.Context, installation *Installation
 // installation's verification, so one recorded now is the other caller's.
 // It hashes nothing for Manifest; Ensure still hashes the files itself.
 // Callers hold mu.
-func (c *ArchiveCache) rehydratedMeanwhile(installation *Installation, trustVerified bool) (*pluginv1.PluginManifest, error) {
-	binaryPath, err := c.LocalInstallPath(installation)
-	if err != nil {
-		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
-	}
-	if _, retired := c.retired[binaryPath]; retired {
+func (c *ArchiveCache) rehydratedMeanwhile(installation *Installation, read archiveRead, trustVerified bool) (*pluginv1.PluginManifest, error) {
+	binaryPath := read.binaryPath
+	state := c.pathStates[binaryPath]
+	if state.generation != read.generation {
 		return nil, ErrInstallationChanged
+	}
+	if state.retired {
+		return nil, nil
 	}
 	manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath))
 	if err != nil || !c.stillVerified(installation.ID, binaryPath, manifest) {
@@ -337,20 +364,17 @@ type repairedArchive struct{ manifest, archive []byte }
 // rehydrate writes the installation's files from its stored archive under
 // mu, unless a concurrent caller already put valid files in place. It
 // returns the archive it repaired from a legacy one, if any, to persist.
-func (c *ArchiveCache) rehydrate(ctx context.Context, installation *Installation, trustVerified bool,
+func (c *ArchiveCache) rehydrate(ctx context.Context, installation *Installation, read archiveRead, trustVerified bool,
 	archive *InstallationArchive) (*pluginv1.PluginManifest, *repairedArchive, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	if manifest, err := c.rehydratedMeanwhile(installation, trustVerified); manifest != nil || err != nil {
+	if manifest, err := c.rehydratedMeanwhile(installation, read, trustVerified); manifest != nil || err != nil {
 		return manifest, nil, err
 	}
-	binaryPath, err := c.LocalInstallPath(installation)
-	if err != nil {
-		return nil, nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
-	}
+	binaryPath := read.binaryPath
 	var repaired *repairedArchive
 	reader, manifestBytes, manifest, err := openPluginArchive(archive.Bytes)
 	if err != nil {
@@ -402,6 +426,11 @@ func (c *ArchiveCache) rehydrate(ctx context.Context, installation *Installation
 		}
 	}
 	c.markVerified(installation.ID, binaryPath, manifest, info)
+	if state := c.pathStates[binaryPath]; state.retired {
+		state.retired = false
+		c.pathStates[binaryPath] = state
+		delete(c.pendingRetirements, binaryPath)
+	}
 	return manifest, repaired, nil
 }
 
@@ -445,10 +474,10 @@ func (c *ArchiveCache) retire(previous, current *Installation) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.retired == nil {
-		c.retired = make(map[string]struct{})
+	if c.pathStates == nil {
+		c.pathStates = make(map[string]archivePathState)
 	}
-	c.retired[binaryPath] = struct{}{}
+	c.pathStates[binaryPath] = archivePathState{generation: c.pathStates[binaryPath].generation + 1, retired: true}
 	if c.verified[previous.ID].path == binaryPath {
 		delete(c.verified, previous.ID)
 	}
@@ -470,13 +499,27 @@ func (c *ArchiveCache) cleanRetired(binaryPath string, installation *Installatio
 	return err
 }
 
-func (c *ArchiveCache) retryRetirements(ctx context.Context) {
+func (c *ArchiveCache) retryRetirements(ctx context.Context, current map[int]*Installation) {
 	if c == nil || c.root == "" {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(c.pendingRetirements) == 0 {
+		return
+	}
+	// A restored row may use a path whose earlier removal failed. Preserve
+	// its files until a release-guarded read can rehydrate that path.
+	activePaths := make(map[string]struct{}, len(c.pendingRetirements))
+	for _, installation := range current {
+		if path, err := c.LocalInstallPath(installation); err == nil {
+			activePaths[path] = struct{}{}
+		}
+	}
 	for binaryPath, installation := range c.pendingRetirements {
+		if _, active := activePaths[binaryPath]; active {
+			continue
+		}
 		if err := c.cleanRetired(binaryPath, installation); err != nil {
 			slog.WarnContext(ctx, "remove retired plugin release from cache", "component", "plugins", "installation_id", installation.ID, "error", err)
 		}

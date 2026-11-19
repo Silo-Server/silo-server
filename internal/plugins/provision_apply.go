@@ -89,6 +89,8 @@ func (w *ProvisionWriter) apply(ctx context.Context, offline bool) (bool, error)
 func (w *ProvisionWriter) recordRestoreHold(ctx context.Context) (bool, error) {
 	w.heldForRestore = true
 	w.placementPending = false
+	ctx, cancel := context.WithTimeout(ctx, provisionDBTimeout)
+	defer cancel()
 	err := w.saveFailureStatus(ctx, "held", "Review the declaration, acknowledge the restore hold and restart the provisioning instance.", nil)
 	return err != nil, err
 }

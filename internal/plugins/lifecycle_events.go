@@ -214,7 +214,7 @@ func (s *Service) reconcileInstallations(ctx context.Context) bool {
 			slog.WarnContext(ctx, "reconcile plugin process", "component", "plugins", "installation_id", id, "error", err)
 		}
 	}
-	s.archiveCache.retryRetirements(ctx)
+	s.archiveCache.retryRetirements(ctx, current)
 	if !changed {
 		return false
 	}

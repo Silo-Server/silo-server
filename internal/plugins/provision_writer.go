@@ -276,6 +276,9 @@ func (w *ProvisionWriter) applyOnline(ctx context.Context) {
 
 func (w *ProvisionWriter) tryPlacement(ctx context.Context) {
 	changed, err := w.finishPlacement(ctx)
+	if errors.Is(err, errProvisionRestoreHeld) {
+		w.retry, err = w.recordRestoreHold(ctx)
+	}
 	if changed && w.service != nil {
 		w.service.OnLifecycleChange(ctx)
 	}
@@ -311,7 +314,7 @@ func (w *ProvisionWriter) finishPlacement(ctx context.Context) (bool, error) {
 			changed = true
 		case errors.Is(err, ErrInstallationNotFound):
 			// Deleting the installation cascades to the queue.
-		case ctx.Err() != nil || w.conn.IsClosed() || errors.Is(err, errProvisionAuthorityLost):
+		case ctx.Err() != nil, w.conn.IsClosed(), errors.Is(err, errProvisionAuthorityLost), errors.Is(err, errProvisionRestoreHeld):
 			return changed, err
 		default:
 			failures = errors.Join(failures, err)
@@ -330,6 +333,9 @@ func (w *ProvisionWriter) placeInstallation(ctx context.Context, id int) error {
 			return err
 		}
 		if err := lockPluginInstallation(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := checkPluginRestoreHold(ctx, tx); err != nil {
 			return err
 		}
 		if err := w.placeMetadata(ctx, tx, id); err != nil {
