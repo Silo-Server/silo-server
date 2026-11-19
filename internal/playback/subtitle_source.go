@@ -458,6 +458,14 @@ func (h *subtitleResponseHold) discard() {
 	h.buf = bytes.Buffer{}
 }
 
+// delivered reports whether any byte reached the response, i.e. whether the
+// slice spilled past the hold and the status is already committed. A held slice
+// that never spilled was never delivered and can still be answered with an
+// error.
+func (h *subtitleResponseHold) delivered() bool {
+	return h != nil && h.committed
+}
+
 // Flush passes a flush on only once the response streams.
 func (h *subtitleResponseHold) Flush() {
 	if !h.committed {

@@ -2473,6 +2473,11 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	// ordinal must be re-mapped onto the effective inventory rather than
 	// interpreted against a version no longer playing. Virtual sources bind to
 	// the session's planned candidate at the same time.
+	//
+	// The named row is captured first because the resolver returns a nil file on
+	// failure, and the refusal has to name the release the request was minted
+	// for, not the row it failed to resolve.
+	namedForRefusal := file
 	file, trackIndex, err = h.resolveSubtitleSourceRequest(r.Context(), file, session, trackIndex, r.URL.Query())
 	if err != nil {
 		if errors.Is(err, errSubtitleSourceChangedAfterRotation) {
@@ -2484,9 +2489,19 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errSubtitleIdentityInvalid) {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		} else {
-			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
 		}
+		// A track identity that names no track on either inventory is a 404 for
+		// a stable file, and a rotation verdict when the URL was minted for a
+		// release the session no longer serves (a substituted sibling or an
+		// edition switch). Answering 404 there strands the client on a URL it
+		// can never repair; the 409 is the retryable answer that sends it back
+		// to replan and re-select from the effective row's inventory.
+		if subtitleRequestNamesAnotherRelease(session, namedForRefusal) {
+			writeSubtitleSourceChanged(w)
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 
@@ -2647,7 +2662,38 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// An ordinal past every segment of the bound row's inventory is the same
+	// rotation verdict as an unresolvable identity pin: the URL was minted for
+	// another release's layout, so the client must replan rather than treat the
+	// track as gone.
+	if subtitleRequestNamesAnotherRelease(session, file) {
+		writeSubtitleSourceChanged(w)
+		return
+	}
 	writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
+}
+
+// subtitleRequestNamesAnotherRelease reports whether this request's subtitle
+// ordinal or identity pin was minted against a release the session no longer
+// serves: a substituted virtual candidate (the plan rotated 41255/41257 to a
+// live sibling) or an edition switch.
+//
+// Such a request cannot be repaired against the bound row — the ordinal is an
+// index into another inventory, and the pin names another container's stream —
+// so a miss is a rotation verdict, not a missing track. The answer is the
+// existing retryable 409 that makes the client replan and re-select from the
+// effective inventory, which is exactly what a 404 never does.
+func subtitleRequestNamesAnotherRelease(session *playback.Session, file *models.MediaFile) bool {
+	if session == nil || file == nil {
+		return false
+	}
+	if session.RequestedMediaFileID > 0 && session.MediaFileID > 0 &&
+		session.MediaFileID != session.RequestedMediaFileID {
+		return true
+	}
+	return session.VirtualSubtitleEvidenceSet &&
+		session.VirtualSubtitleEvidenceFileID > 0 &&
+		file.ID != session.VirtualSubtitleEvidenceFileID
 }
 
 func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.Request, subtitle subtitles.DownloadedSubtitle, requestedFormat string) {
@@ -4195,9 +4241,6 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 			// warning on every client retry. Answer with the remaining delay
 			// so the client waits instead of retrying in its default
 			// few-second cadence.
-			if response.Status() != 0 {
-				panic(http.ErrAbortHandler)
-			}
 			if extractionRetry.Reason == playback.SubtitlePageTooCostlyReason && extractionRetry.PageRecoveryDue {
 				// The page could not be cut from the source at an affordable
 				// read cost. The track's progressive artifact is what serves it,
@@ -4215,6 +4258,14 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 				// so the retry this 503 asks for is covered rather than
 				// repeating the read that just timed out.
 				h.warmVirtualSubtitleAfterBudgetBreach(file, track, session, opts, inheritedLayout, virtualActive, middleware.GetReqID(r.Context()))
+			}
+			if response.Status() != 0 {
+				// The slice spilled past its hold and part of a 200 is on the
+				// wire. Nothing can retract it, so the response is aborted
+				// rather than completed as a window that looks whole. The
+				// recovery warm above still runs, so the client's retry reads
+				// the covering slice instead of repeating the read.
+				panic(http.ErrAbortHandler)
 			}
 			writeSubtitleRetry(w, extractionRetry)
 			return
@@ -4363,6 +4414,14 @@ const (
 	virtualSubtitleWarmSeekAheadSlack = 30.0
 	virtualSubtitleWarmSeekRate       = 2.0
 )
+
+// virtualSubtitlePageWarmSlack is how much longer than a page's own wait a
+// page-driven fill may run. The fill starts a moment after the first refusal
+// that opened the wait, so without the slack its deadline could land just
+// before the page's last allowed request and the page would spend its budget
+// waiting on a fill that has already ended. With it, the fill outlives the
+// wait and its end is what the page's final answer is derived from.
+const virtualSubtitlePageWarmSlack = 5 * time.Second
 
 // virtualSubtitleWarmRekeyAttempts bounds how many times a detached warm
 // re-keys itself when its own drift probe settles on an identity other than the
@@ -4885,13 +4944,18 @@ func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models
 		for attempt := 0; attempt < virtualSubtitleWarmRekeyAttempts; attempt++ {
 			attemptOpts := warmOpts
 			extract, rekeyed, release := h.virtualSubtitleWarmExtractor(file, track, session, planTracks, seed, attemptOpts, live)
+			warmBudget := time.Duration(0)
 			if pageWaiting {
 				// A page refused for its read cost must be served by this fill, and
 				// it is the page's own ledger that allows exactly one. A previous
-				// failed warm's cooldown must not suppress it.
+				// failed warm's cooldown must not suppress it. The fill is bounded
+				// by the wait it serves: a fill that outlives the page can never
+				// answer it, and its end is what the page's next refusal acts on
+				// instead of looping on `page_not_ready`.
 				h.SubtitleCache.AllowWarmAfterPageRefusal(attemptOpts)
+				warmBudget = playback.SubtitlePageRecoveryBudget() + virtualSubtitlePageWarmSlack
 			}
-			<-h.SubtitleCache.WarmTrackInBackground(attemptOpts, extract, requestID)
+			<-h.SubtitleCache.WarmTrackInBackgroundWithin(attemptOpts, extract, requestID, warmBudget)
 			next := rekeyed()
 			release()
 			if next == nil {

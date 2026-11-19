@@ -88,6 +88,46 @@ func TestServeExtractTextWindowBudgetAnswersRetryable(t *testing.T) {
 	}
 }
 
+// A window the extract filled but never finished is held, not streamed: the
+// budget kill must drop the held slice and answer the retryable shape. This is
+// the case production hit on a 4K source — the extract wrote 1270 bytes and was
+// killed, and because "bytes written" was read as "bytes delivered" the answer
+// skipped the budget reason and the recovery warm the handler starts from it.
+func TestServeExtractTextWindowBreachAfterHeldBytesAnswersRetryable(t *testing.T) {
+	c, _ := newTestCache(t)
+	c.SetWindowExtractBudgetForTest(80 * time.Millisecond)
+	opts := relayWindowOpts("http://relay.invalid/stream/subtitles.ass")
+
+	//nolint:misspell // "Dialogue" is the ASS cue keyword, not prose.
+	const payload = "[Script Info]\nDialogue: 0,0:10:01.00,0:10:02.00,Default,,0,0,0,,hello\n"
+	calls := 0
+	extract := func(ctx context.Context, o StreamExtractOpts) error {
+		calls++
+		if _, err := io.WriteString(o.Writer, payload); err != nil {
+			return err
+		}
+		<-ctx.Done() // the window is not finished when the budget expires
+		return ctx.Err()
+	}
+
+	rec := httptest.NewRecorder()
+	err := c.ServeExtract(rec, subtitleWindowRequest(), opts, extract)
+
+	var retry *SubtitleExtractionRetryError
+	if !errors.As(err, &retry) {
+		t.Fatalf("error = %v, want the retryable budget shape", err)
+	}
+	if !retry.WindowBudgetExceeded {
+		t.Fatal("the breach after held bytes did not report the window budget: the handler starts no recovery warm")
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("body = %q, want nothing: a held, unfinished window is never served", rec.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("extract calls = %d, want 1", calls)
+	}
+}
+
 // The opening window must still attempt a real extract: a page starting at
 // source zero is not refused or cut short by the budget, and a fast one is
 // served untouched.

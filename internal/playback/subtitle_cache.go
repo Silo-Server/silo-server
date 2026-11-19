@@ -128,6 +128,14 @@ type SubtitleCache struct {
 	pageWaitBudget time.Duration
 	pageWaitNow    func() time.Time
 
+	// fillEndMu guards fillEnds, the last time each track's fill stopped
+	// without committing and why. A page whose fill ended is not being moved
+	// toward by anything, so the page answers from this record instead of
+	// looping on `page_not_ready` until its own budget expires (see the warm
+	// goroutine in subtitle_cache.go and subtitle_page_recovery.go).
+	fillEndMu sync.Mutex
+	fillEnds  map[string]subtitleFillEnd
+
 	// fontFailureMu guards fontFailureRetryAt, the per-font-bundle extraction
 	// backoff. A failed font extraction is optional to playback, so callers
 	// degrade to an empty pending bundle instead of retrying a flapping
@@ -157,6 +165,13 @@ type SubtitleCache struct {
 	demuxBusyWarnAt    time.Time
 	demuxBusyWarnEvery time.Duration
 	demuxBusyWarnNow   func() time.Time
+}
+
+// subtitleFillEnd is one track fill's non-committing end: when it happened and
+// why (a reason token, not prose).
+type subtitleFillEnd struct {
+	at     time.Time
+	reason string
 }
 
 const (
@@ -267,6 +282,10 @@ const (
 	// a page storm that never leaves a gap is better served by the next miss
 	// than by a warm that keeps demuxing from the start.
 	subtitleWarmPageYieldAttempts = 4
+	// subtitleFillEndsMaxEntries caps the non-committing fill-end record. One
+	// entry per track is tiny; the cap only keeps a long-lived node from
+	// retaining one per track it ever filled.
+	subtitleFillEndsMaxEntries = 1024
 	// subtitleWarmRequestShedQuietWindow keeps a new warm off a relay source
 	// whose request-path admission recently shed a client read. The warm is
 	// opportunistic: adding a full-track demux to a pipe that is already
@@ -844,14 +863,16 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 		// Nothing reached the client while the slice was held, so the held bytes
 		// are dropped: a truncated slice is not a window. A slice that spilled
 		// past the hold is already on the wire; the caller aborts it exactly as
-		// before.
+		// before. delivered is read before the hold is dropped: once the slice
+		// spilled, its bytes are on the wire and nothing can take them back.
+		delivered := hold.delivered()
 		hold.discard()
 		switch {
 		case windowBudget > 0 && windowExtractBounded(extractCtx):
 			// The request-path text window ran out its elapsed budget. This is
 			// checked before the generic deadline so a slow source gets the
 			// budget's own retryable shape and its cooldown.
-			err = c.windowBudgetBreachError(r.Context(), opts, format, windowBudget, counter.bytes, time.Since(start), err)
+			err = c.windowBudgetBreachError(r.Context(), opts, format, windowBudget, counter.bytes, delivered, time.Since(start))
 		case r.Context().Err() == nil && errors.Is(err, context.DeadlineExceeded):
 			// The window ran out its own extract deadline. That is a slow
 			// source, not a broken extraction: answer retryable so the client
@@ -906,25 +927,36 @@ func (c *SubtitleCache) windowExtractContext(admittedCtx context.Context, opts S
 // windowBudgetBreachError turns a text window killed at its budget into the
 // retryable shape the client already backs off from: the existing
 // per-identity cooldown is armed so a retry does not repeat the read, and the
-// caller answers 503 with Retry-After. A breach after bytes reached the client
-// keeps the extract's own error instead: the response is committed, so the
-// caller must abort it rather than complete a partial slice as a 200.
-func (c *SubtitleCache) windowBudgetBreachError(ctx context.Context, opts StreamExtractOpts, format string, budget time.Duration, written int64, elapsed time.Duration, extractErr error) error {
+// caller answers 503 with Retry-After. The handler also starts the covering
+// recovery warm for it (WindowBudgetExceeded), so the retry is served from the
+// slice that warm produces instead of paying the same source read again.
+//
+// The answer is the same whether or not the held slice had spilled onto the
+// wire. The window is held until it completes, so a real text window is never
+// delivered partially; if a pathological slice did spill, the caller sees a
+// committed response and aborts it rather than completing it as a 200, which is
+// the one thing that must never happen. Returning the raw extract error there
+// used to skip both the recovery warm and the reason.
+func (c *SubtitleCache) windowBudgetBreachError(ctx context.Context, opts StreamExtractOpts, format string, budget time.Duration, written int64, delivered bool, elapsed time.Duration) error {
 	recordSubtitleWindowBudgetKill(format)
 	c.noteExtractionFailure(opts, format)
-	if written > 0 {
+	if delivered {
+		slog.WarnContext(ctx, "subtitle window extract killed at its budget after bytes reached the wire",
+			"component", "playback", "input", opts.InputPath, "track", opts.TrackIndex,
+			"format", format, "budget", budget, "bytes", written, "elapsed", elapsed)
+	} else if written > 0 {
 		slog.WarnContext(ctx, "subtitle window extract killed at its budget after writing bytes",
 			"component", "playback", "input", opts.InputPath, "track", opts.TrackIndex,
 			"format", format, "budget", budget, "bytes", written, "elapsed", elapsed)
-		return extractErr
+	} else {
+		slog.WarnContext(ctx, "subtitle window extract killed at its budget",
+			"component", "playback", "input", opts.InputPath, "track", opts.TrackIndex,
+			"format", format, "budget", budget, "elapsed", elapsed)
 	}
 	retryAfter := subtitleExtractionFailureBaseCooldown
 	if remaining, cooling := c.extractionCoolingDownFor(opts, format); cooling {
 		retryAfter = remaining
 	}
-	slog.WarnContext(ctx, "subtitle window extract killed at its budget",
-		"component", "playback", "input", opts.InputPath, "track", opts.TrackIndex,
-		"format", format, "budget", budget, "elapsed", elapsed)
 	return &SubtitleExtractionRetryError{
 		RetryAfter:           retryAfter,
 		Reason:               SubtitleWindowBudgetExceededReason,
@@ -2519,6 +2551,18 @@ func (c *SubtitleCache) AllowWarmAfterPageRefusal(opts StreamExtractOpts) {
 // earlier bucket is not found by later lookups, so a warm that loses its
 // bucket race is simply re-kicked by the next windowed miss.
 func (c *SubtitleCache) WarmTrackInBackground(opts StreamExtractOpts, extract SUPExtractFunc, requestID string) <-chan struct{} {
+	return c.WarmTrackInBackgroundWithin(opts, extract, requestID, 0)
+}
+
+// WarmTrackInBackgroundWithin is WarmTrackInBackground with an optional bound on
+// how long the fill may run. A zero budget keeps the cache's generous warm
+// timeout. A fill something is waiting on (a bitmap page whose progressive
+// artifact is the only thing that can answer it) passes the waiter's own budget:
+// a fill that outlives the wait can never serve it, and holding a warm slot for
+// it only delays the next one. The fill then ends with an `abandoned` line whose
+// reason the page path records, instead of being canceled silently when the
+// session ends.
+func (c *SubtitleCache) WarmTrackInBackgroundWithin(opts StreamExtractOpts, extract SUPExtractFunc, requestID string, budget time.Duration) <-chan struct{} {
 	done := make(chan struct{})
 	format := subtitleCacheFormat(opts.SourceCodec, opts.TargetFormat)
 	if c == nil || extract == nil || c.dir() == "" || format == "" {
@@ -2604,126 +2648,265 @@ func (c *SubtitleCache) WarmTrackInBackground(opts StreamExtractOpts, extract SU
 	counter := &subtitleCountingWriter{w: warmWriter}
 	opts.Writer = counter
 
-	go func() {
-		defer close(done)
-		defer func() { <-c.warmSem }()
-		defer func() { c.endWarmTextProgress(warmTextKey, warmText) }()
-		warmDeadlineCtx, cancelWarmDeadline := context.WithTimeout(context.Background(), subtitleCacheWarmTimeout)
-		defer cancelWarmDeadline()
+	go c.runWarmFill(subtitleWarmFill{
+		opts:        opts,
+		extract:     extract,
+		requestID:   requestID,
+		key:         key,
+		format:      format,
+		budget:      budget,
+		fill:        fill,
+		counter:     counter,
+		warmText:    warmText,
+		warmTextKey: warmTextKey,
+		done:        done,
+	})
+	return done
+}
 
-		start := time.Now()
-		slog.Info("subtitle cache warm started",
-			"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
-		yields := 0
-		for {
-			// A request-path shed while this warm was settling means viewers
-			// are already waiting at the pipe's limit. Drop the opportunistic
-			// full-track read; the next windowed miss re-attempts it once the
-			// source stops shedding.
-			if relayDemuxRequestPathShedding(opts.InputPath, subtitleWarmRequestShedQuietWindow) {
-				fill.Discard()
-				slog.Debug("subtitle cache warm skipped: request-path admission is shedding",
-					"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
-				return
-			}
-			// An admitted page owns the pipe; wait for it (bounded) instead of
-			// demuxing the same source alongside it. This also covers the race
-			// where a page is admitted between our start and the first read.
-			if !c.awaitPageSettled(key, subtitleWarmPageYieldWait) {
-				fill.Discard()
-				slog.Debug("subtitle cache warm yielded to admitted page extracts",
-					"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
-				return
-			}
-			// Detached: skip a saturated relay source instead of queueing behind
-			// the request-path reads it exists to protect. The next windowed miss
-			// re-attempts the warm.
-			ctx, cancel := context.WithCancelCause(warmDeadlineCtx)
-			run := c.registerWarmRun(key, cancel)
-			if run == nil {
-				cancel(nil)
-				// A page was admitted between the settle wait and registration.
-				yields++
-				if yields >= subtitleWarmPageYieldAttempts {
-					fill.Discard()
-					return
-				}
-				continue
-			}
-			warmCtx, releaseRelayDemux, demuxErr := acquireRelayDemuxRead(detachedRelayDemux(ctx), opts.InputPath)
-			ctx = warmCtx
-			var err error
-			if demuxErr == nil {
-				err = extract(ctx, opts)
-			}
-			preempted := errors.Is(context.Cause(ctx), ErrSubtitleWarmCanceled)
-			releaseRelayDemux()
-			c.unregisterWarmRun(key, run)
-			cancel(nil)
-			if preempted && err != nil {
-				// An admitted page took the pipe. This is a deliberate yield,
-				// never a source failure: discard the partial fill, rebuild it
-				// under the same key, and resume once the page settles. A
-				// non-cooperative extract that ignored the cancel and returned
-				// a complete track (err == nil) falls through and commits
-				// instead of repeating the whole read.
-				newFill, newWarmText, newCounter := c.rebuildWarmFill(
-					&opts, format, fill, warmText, warmTextKey,
-				)
-				if newFill == nil {
-					// Another fill now owns the key. Leave warmText as it is:
-					// the deferred endWarmTextProgress below releases the old
-					// ASS prefix instead of orphaning its retained script.
-					return
-				}
-				fill, warmText, counter = newFill, newWarmText, newCounter
-				yields++
-				if yields >= subtitleWarmPageYieldAttempts {
-					fill.Discard()
-					return
-				}
-				slog.DebugContext(ctx, "subtitle cache warm yielded to page extract",
-					"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
-				continue
-			}
-			if demuxErr != nil {
-				fill.Discard()
-				slog.DebugContext(ctx, "subtitle cache warm skipped: relay source saturated",
-					"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
-				return
-			}
-			if err != nil {
-				fill.fail(err)
-				if errors.Is(err, ErrSubtitleWarmCanceled) {
-					// The caller intentionally abandoned this opportunistic warm,
-					// usually because playback resumed. It is not a source failure
-					// and must not arm the failure cooldown. Generic context
-					// cancellation still counts as a failure so a vanished relay
-					// cannot trigger a re-spawn storm.
-					slog.DebugContext(ctx, "subtitle cache warm canceled by playback")
-					return
-				}
-				c.noteWarmOutcome(key, false, time.Now())
-				slog.Log(ctx, slog.LevelWarn, "subtitle cache warm failed",
-					subtitleTraceAttrsForRequest(requestID, opts.SourceCodec, SubtitleTracePhaseWarm, counter.bytes, subtitleTraceOutcome(ctx, err), time.Since(start),
-						"input", opts.InputPath, "track", opts.TrackIndex, "format", format, "error", err)...)
-				return
-			}
-			if err := fill.Commit(); err != nil {
-				c.noteWarmOutcome(key, false, time.Now())
-				slog.Log(ctx, slog.LevelWarn, "subtitle cache warm commit failed",
-					subtitleTraceAttrsForRequest(requestID, opts.SourceCodec, SubtitleTracePhaseWarm, counter.bytes, SubtitleTraceOutcomeCommitFailed, time.Since(start),
-						"input", opts.InputPath, "track", opts.TrackIndex, "format", format, "error", err)...)
-				return
-			}
-			c.noteWarmOutcome(key, true, time.Now())
-			slog.Log(ctx, slog.LevelInfo, "subtitle cache warm finished",
-				subtitleTraceAttrsForRequest(requestID, opts.SourceCodec, SubtitleTracePhaseWarm, counter.bytes, SubtitleTraceOutcomeCommitted, time.Since(start),
-					"input", opts.InputPath, "track", opts.TrackIndex, "format", format)...)
+// subtitleWarmFill is the mutable state of one admitted warm fill. It is a
+// value because a page preemption rebuilds the fill under the same key and the
+// next attempt continues with the rebuilt writers.
+type subtitleWarmFill struct {
+	opts        StreamExtractOpts
+	extract     SUPExtractFunc
+	requestID   string
+	key         string
+	format      string
+	budget      time.Duration
+	fill        *SubtitleCacheFill
+	counter     *subtitleCountingWriter
+	warmText    *subtitleWarmTextProgress
+	warmTextKey string
+	startedAt   time.Time
+	done        chan struct{}
+}
+
+// Fill outcome and end reasons. They are tokens: the log line carries them for
+// an operator, and the page ledger reads the final ones.
+const (
+	subtitleFillOutcomeCommitted = "committed"
+	subtitleFillOutcomeFailed    = "failed"
+	subtitleFillOutcomeAbandoned = "abandoned"
+
+	subtitleFillEndUnknown         = "unknown"
+	subtitleFillEndRequestShed     = "request_path_shedding"
+	subtitleFillEndPageOwnsThePipe = "page_owns_the_pipe"
+	subtitleFillEndPageYields      = "page_yields_exhausted"
+	subtitleFillEndRekeyLost       = "rekey_lost_the_fill"
+	subtitleFillEndRelaySaturated  = "relay_source_saturated"
+	subtitleFillEndCanceled        = "canceled"
+	subtitleFillEndExtractError    = "extract_error"
+	subtitleFillEndCommitError     = "commit_error"
+)
+
+// runWarmFill executes one admitted fill. It always ends it in a definite state
+// — committed, failed, or abandoned with a reason — and records the
+// non-committing ones so a page waiting on the fill can act on its end.
+func (c *SubtitleCache) runWarmFill(st subtitleWarmFill) {
+	defer close(st.done)
+	defer func() { <-c.warmSem }()
+	defer func() { c.endWarmTextProgress(st.warmTextKey, st.warmText) }()
+	budget := subtitleCacheWarmTimeout
+	if st.budget > 0 && st.budget < budget {
+		budget = st.budget
+	}
+	warmDeadlineCtx, cancelWarmDeadline := context.WithTimeout(context.Background(), budget)
+	defer cancelWarmDeadline()
+
+	start := time.Now()
+	st.startedAt = start
+	outcome, reason := subtitleFillOutcomeAbandoned, subtitleFillEndUnknown
+	defer func() {
+		if outcome == subtitleFillOutcomeCommitted {
 			return
 		}
+		// Every non-committing end is recorded for the page path. Several of
+		// these paths (yields exhausted, a re-key loss, a page budget spent
+		// while the session held) used to end with no trace at all, and a page
+		// waiting on the fill looped on `page_not_ready` until its own budget
+		// ran out.
+		c.noteFillEnded(st.key, reason, time.Now())
+		if outcome == subtitleFillOutcomeFailed {
+			return // its own WARN already ran
+		}
+		slog.InfoContext(context.Background(), "subtitle cache warm abandoned",
+			"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format,
+			"reason", reason, "elapsed", time.Since(start), "bytes", st.counter.bytes)
 	}()
-	return done
+
+	slog.Info("subtitle cache warm started",
+		"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
+	outcome, reason = c.warmFillLoop(warmDeadlineCtx, &st, budget)
+}
+
+// warmFillLoop runs attempts until the fill settles. Detached warms skip a
+// saturated relay source instead of queueing behind the request-path reads they
+// exist to protect; the next windowed miss re-attempts them.
+func (c *SubtitleCache) warmFillLoop(deadlineCtx context.Context, st *subtitleWarmFill, budget time.Duration) (string, string) {
+	yields := 0
+	for {
+		// A request-path shed while this warm was settling means viewers are
+		// already waiting at the pipe's limit. Drop the opportunistic full-track
+		// read; the next windowed miss re-attempts it once the source stops
+		// shedding.
+		if relayDemuxRequestPathShedding(st.opts.InputPath, subtitleWarmRequestShedQuietWindow) {
+			st.fill.Discard()
+			slog.DebugContext(deadlineCtx, "subtitle cache warm skipped: request-path admission is shedding",
+				"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
+			return subtitleFillOutcomeAbandoned, subtitleFillEndRequestShed
+		}
+		// An admitted page owns the pipe; wait for it (bounded) instead of
+		// demuxing the same source alongside it. This also covers the race where
+		// a page is admitted between our start and the first read.
+		if !c.awaitPageSettled(st.key, subtitleWarmPageYieldWait) {
+			st.fill.Discard()
+			slog.DebugContext(deadlineCtx, "subtitle cache warm yielded to admitted page extracts",
+				"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
+			return subtitleFillOutcomeAbandoned, subtitleFillEndPageOwnsThePipe
+		}
+		ctx, cancel := context.WithCancelCause(deadlineCtx)
+		run := c.registerWarmRun(st.key, cancel)
+		if run == nil {
+			cancel(nil)
+			// A page was admitted between the settle wait and registration.
+			yields++
+			if yields >= subtitleWarmPageYieldAttempts {
+				st.fill.Discard()
+				return subtitleFillOutcomeAbandoned, subtitleFillEndPageYields
+			}
+			continue
+		}
+		warmCtx, releaseRelayDemux, demuxErr := acquireRelayDemuxRead(detachedRelayDemux(ctx), st.opts.InputPath)
+		ctx = warmCtx
+		var err error
+		if demuxErr == nil {
+			err = st.extract(ctx, st.opts)
+		}
+		preempted := errors.Is(context.Cause(ctx), ErrSubtitleWarmCanceled)
+		releaseRelayDemux()
+		c.unregisterWarmRun(st.key, run)
+		cancel(nil)
+
+		outcome, reason, again := c.settleWarmAttempt(ctx, st, err, demuxErr, preempted, budget, deadlineCtx)
+		if !again {
+			return outcome, reason
+		}
+		yields++
+		if yields >= subtitleWarmPageYieldAttempts {
+			st.fill.Discard()
+			return subtitleFillOutcomeAbandoned, subtitleFillEndPageYields
+		}
+	}
+}
+
+// settleWarmAttempt classifies one finished attempt. again reports that the fill
+// was preempted by an admitted page and must continue once that page settles.
+func (c *SubtitleCache) settleWarmAttempt(
+	ctx context.Context,
+	st *subtitleWarmFill,
+	err, demuxErr error,
+	preempted bool,
+	budget time.Duration,
+	deadlineCtx context.Context,
+) (outcome, reason string, again bool) {
+	if preempted && err != nil {
+		// An admitted page took the pipe. This is a deliberate yield, never a
+		// source failure: discard the partial fill, rebuild it under the same
+		// key, and resume once the page settles. A non-cooperative extract that
+		// ignored the cancel and returned a complete track (err == nil) falls
+		// through and commits instead of repeating the whole read.
+		newFill, newWarmText, newCounter := c.rebuildWarmFill(&st.opts, st.format, st.fill, st.warmText, st.warmTextKey)
+		if newFill == nil {
+			// Another fill now owns the key. warmText stays as it is, so the
+			// caller's deferred endWarmTextProgress releases the old prefix.
+			return subtitleFillOutcomeAbandoned, subtitleFillEndRekeyLost, false
+		}
+		st.fill, st.warmText, st.counter = newFill, newWarmText, newCounter
+		slog.DebugContext(ctx, "subtitle cache warm yielded to page extract",
+			"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
+		return "", "", true
+	}
+	if demuxErr != nil {
+		st.fill.Discard()
+		slog.DebugContext(ctx, "subtitle cache warm skipped: relay source saturated",
+			"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
+		return subtitleFillOutcomeAbandoned, subtitleFillEndRelaySaturated, false
+	}
+	if err != nil {
+		// A deliberate stop is not a source failure: the caller canceled it
+		// (playback resumed, the playhead jumped), or the budget its waiter gave
+		// it ran out. Discarding arms no cooldown, and both are recorded so a
+		// waiting page can act on the end.
+		budgetSpent := budget > 0 && errors.Is(deadlineCtx.Err(), context.DeadlineExceeded)
+		if errors.Is(err, ErrSubtitleWarmCanceled) || budgetSpent {
+			st.fill.Discard()
+			why := subtitleFillEndCanceled
+			if budgetSpent {
+				// The fill outlived the page's own wait. Repeating the same read
+				// cannot reach the page sooner, so this end is the page's final
+				// answer.
+				why = subtitleFillEndPageBudgetSpent
+			}
+			slog.DebugContext(ctx, "subtitle cache warm canceled by its caller",
+				"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format, "reason", why)
+			return subtitleFillOutcomeAbandoned, why, false
+		}
+		st.fill.fail(err)
+		c.noteWarmOutcome(st.key, false, time.Now())
+		slog.Log(ctx, slog.LevelWarn, "subtitle cache warm failed",
+			subtitleTraceAttrsForRequest(st.requestID, st.opts.SourceCodec, SubtitleTracePhaseWarm, st.counter.bytes, subtitleTraceOutcome(ctx, err), time.Since(st.startedAt),
+				"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format, "error", err)...)
+		return subtitleFillOutcomeFailed, subtitleFillEndExtractError, false
+	}
+	if err := st.fill.Commit(); err != nil {
+		c.noteWarmOutcome(st.key, false, time.Now())
+		slog.Log(ctx, slog.LevelWarn, "subtitle cache warm commit failed",
+			subtitleTraceAttrsForRequest(st.requestID, st.opts.SourceCodec, SubtitleTracePhaseWarm, st.counter.bytes, SubtitleTraceOutcomeCommitFailed, time.Since(st.startedAt),
+				"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format, "error", err)...)
+		return subtitleFillOutcomeFailed, subtitleFillEndCommitError, false
+	}
+	c.noteWarmOutcome(st.key, true, time.Now())
+	slog.Log(ctx, slog.LevelInfo, "subtitle cache warm finished",
+		subtitleTraceAttrsForRequest(st.requestID, st.opts.SourceCodec, SubtitleTracePhaseWarm, st.counter.bytes, SubtitleTraceOutcomeCommitted, time.Since(st.startedAt),
+			"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)...)
+	return subtitleFillOutcomeCommitted, "", false
+}
+
+// noteFillEnded records that this track's fill stopped without committing, and
+// why. The page path reads it to answer finally instead of retrying a page no
+// fill is moving toward.
+func (c *SubtitleCache) noteFillEnded(key, reason string, at time.Time) {
+	if c == nil || key == "" {
+		return
+	}
+	c.fillEndMu.Lock()
+	defer c.fillEndMu.Unlock()
+	if c.fillEnds == nil {
+		c.fillEnds = make(map[string]subtitleFillEnd)
+	}
+	if len(c.fillEnds) >= subtitleFillEndsMaxEntries {
+		for oldest := range c.fillEnds {
+			delete(c.fillEnds, oldest)
+			break
+		}
+	}
+	c.fillEnds[key] = subtitleFillEnd{at: at, reason: reason}
+}
+
+// fillEndedSince reports the reason this track's fill ended without committing
+// at or after since, or "" when no such end was recorded.
+func (c *SubtitleCache) fillEndedSince(key string, since time.Time) string {
+	if c == nil || key == "" {
+		return ""
+	}
+	c.fillEndMu.Lock()
+	defer c.fillEndMu.Unlock()
+	end, ok := c.fillEnds[key]
+	if !ok || end.at.Before(since) {
+		return ""
+	}
+	return end.reason
 }
 
 // rebuildWarmFill replaces a warm fill that was discarded after a page

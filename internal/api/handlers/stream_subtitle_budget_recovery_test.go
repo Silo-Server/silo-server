@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 const budgetRecoveryASS = "[Script Info]\nScriptType: v4.00+\n\n" +
@@ -92,6 +93,73 @@ func TestSubtitleWindowBudgetBreachRetryServedFromRecoveryWarm(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "Dialogue:") { //nolint:misspell // ASS event keyword
 		t.Fatalf("retry body = %q, want the ASS window", rec.Body.String())
+	}
+	if got := countFFmpegArgs(t, argsLog, "-ss 590"); got != 0 {
+		t.Fatalf("retry window extracts = %d, want 0: the retry must read the recovery warm, not the source", got)
+	}
+}
+
+// A window that has already produced cues when its budget expires is the case
+// production hit: the held slice is dropped (nothing reaches the client), but
+// the extract had written bytes, which used to make the cache return the raw
+// deadline error instead of the budget shape. The handler then answered a
+// generic subtitle_source_unavailable 503 and started no warm, so every retry
+// paid the same 20 s read and the switch ended in "Subtitles couldn't load".
+// The answer must be the retryable budget reason that starts the covering warm,
+// with no partial slice on the wire.
+func TestSubtitleWindowBudgetBreachAfterHeldBytesStartsTheRecoveryWarm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	argsLog := filepath.Join(dir, "ffmpeg.args")
+	// Every extract emits a complete-looking slice and then stalls. The
+	// request-path window is killed at its budget after those bytes were
+	// written; the detached warm has no request-path budget, so it sleeps
+	// inside its own timeout and then completes.
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\n" +
+		"cat <<'ASS'\n" + budgetRecoveryASS + "ASS\n" +
+		"sleep 0.8\n"
+
+	handler, session, file, _ := newVirtualSubtitleWindowFixture(t, dir, script)
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "ass"}}
+	session.VirtualSubtitleTracks = file.SubtitleTracks
+	writeSubtitleLayoutProbe(t, dir, file.SubtitleTracks...)
+	session.IsPaused = true
+	session.Position = 600
+	handler.SubtitleCache.SetWindowExtractBudgetForTest(150 * time.Millisecond)
+
+	serve := func(position int) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/subtitle?position="+strconv.Itoa(position)+"&duration=120", nil)
+		rec := httptest.NewRecorder()
+		handler.streamEmbeddedSubtitle(rec, req, file, 0, session, false)
+		return rec
+	}
+
+	rec := serve(580)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("breached window = %d %q, want 503", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), playback.SubtitleWindowBudgetExceededReason) {
+		t.Fatalf("breached window body = %q, want the budget reason (not a source verdict)", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "Dialogue:") { //nolint:misspell // ASS event keyword
+		t.Fatalf("breached window body = %q, want no partial slice", rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got == "" {
+		t.Fatal("breached window carries no Retry-After")
+	}
+
+	handler.waitForBackgroundSubtitleWarms()
+
+	// The retry a few seconds forward is served from the covering warm: no
+	// second source read for the range it covers.
+	if got := countFFmpegArgs(t, argsLog, "-ss 590"); got != 0 {
+		t.Fatalf("retry window extracts before the retry = %d, want 0", got)
+	}
+	rec = serve(590)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry = %d %q, want 200 served from the recovery warm", rec.Code, rec.Body.String())
 	}
 	if got := countFFmpegArgs(t, argsLog, "-ss 590"); got != 0 {
 		t.Fatalf("retry window extracts = %d, want 0: the retry must read the recovery warm, not the source", got)

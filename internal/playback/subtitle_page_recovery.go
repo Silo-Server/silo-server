@@ -134,6 +134,14 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 	}
 	wait = now.Sub(entry.first)
 	stalled = !filling && covered <= entry.lastCover && now.Sub(entry.lastSeen) >= subtitlePageRecoveryStallWindow
+	// A fill that ended without committing since this page began its wait is
+	// not going to move the coverage any further. When the reason is final for
+	// this page — the fill spent the budget the wait gave it — repeating the
+	// read cannot reach the page sooner, so the page ends now instead of after
+	// another stall window.
+	if !filling && c.fillEndedFinal(opts, entry.first) {
+		stalled = true
+	}
 	entry.lastSeen = now
 	entry.lastCover = covered
 	c.pageWaits[key] = entry
@@ -168,12 +176,41 @@ func (c *SubtitleCache) clearPageRecovery(opts StreamExtractOpts, start float64)
 }
 
 func (c *SubtitleCache) pageRecoveryKey(opts StreamExtractOpts, start float64) (string, bool) {
-	key, ok := c.formatEntryKey(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, subtitleFormatSUP)
+	key, ok := c.pageRecoveryFillKey(opts)
 	if !ok {
 		return "", false
 	}
 	return fmt.Sprintf("%s|%.3f", key, start), true
 }
+
+// pageRecoveryFillKey is the page ledger's per-track key: the same identity the
+// track's fill admits and records its end under.
+func (c *SubtitleCache) pageRecoveryFillKey(opts StreamExtractOpts) (string, bool) {
+	return c.formatEntryKey(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, subtitleFormatSUP)
+}
+
+// fillEndedFinal reports whether this track's fill ended, at or after since, for
+// a reason that is final for a page waiting on it: the fill spent the budget the
+// wait gave it, so the same read at the same rate cannot reach the page any
+// sooner. Transient ends (a provider failure, a session end, a yield) leave the
+// page retrying inside its own budget instead of turning them into a verdict.
+func (c *SubtitleCache) fillEndedFinal(opts StreamExtractOpts, since time.Time) bool {
+	key, ok := c.pageRecoveryFillKey(opts)
+	if !ok {
+		return false
+	}
+	return c.fillEndedSince(key, since) == subtitleFillEndPageBudgetSpent
+}
+
+// subtitleFillEndPageBudgetSpent is the fill-end reason recorded when a
+// page-driven fill ran out the budget its waiter gave it.
+const subtitleFillEndPageBudgetSpent = "page_wait_budget_spent"
+
+// SubtitlePageRecoveryBudget is the production wait budget for one refused
+// bitmap page. A caller that starts the fill the page is waiting on bounds that
+// fill with this (plus a little slack), so the fill ends when the wait does
+// instead of holding a warm slot for a page nobody is waiting on any more.
+func SubtitlePageRecoveryBudget() time.Duration { return subtitlePageRecoveryBudget }
 
 // prunePageRecoveryLocked drops entries that already waited past the budget this
 // cache applies. Their pages get a fresh, bounded wait the next time they ask.

@@ -10,33 +10,45 @@ import (
 // errSubtitleWindowBudget is the cancellation cause a request-path text window
 // extract is killed with when it passes its elapsed budget. It never reaches a
 // client: SubtitleCache turns the breach into the retryable shape the client
-// already backs off from (503 with Retry-After).
+// already backs off from (503 with Retry-After) and the recovery warm the
+// handler starts for it.
 var errSubtitleWindowBudget = errors.New("subtitle window extract exceeded its budget")
 
-// subtitleTextWindowElapsedBudget bounds how long one request-path text window
-// extract may run before it is killed and answered retryably.
-//
-// A 120 s page on a relay that delivers 3-7x realtime needs 17-40 s of source
-// before ffmpeg can emit the first cue, and the deployed build measured
-// 25.9-58.1 s of silence on exactly that path (24 subtitle requests in the
-// window: p50 1011 ms, p90 49327 ms, max 58147 ms). The client's own subtitle
-// fetch stall deadline is 30 s (SUBTITLE_FETCH_STALL_TIMEOUT_MS), so it aborted
-// before the server answered: the two observed requests had status 0, and the
-// two-minute window extract timeout never fired. Nothing was learned and the
-// read was repeated on the next attempt.
-//
-// This cannot be a byte cap on the extract's input. ffmpeg reads an HTTP input
-// with recv(2), not read(2), and /proc/PID/io counts only read(2)/pread(2) in
-// rchar: measured against a relay that served 24 MB, ffmpeg's rchar stayed at
-// the ~181 KB of reads it does at startup. Elapsed time is the only bound that
-// sees the relay read at all, so it is the honest one here.
-//
-// 20 s leaves the client 10 s of its stall budget for ffmpeg startup, the
-// response write, and a layout probe that ran earlier in the same request. An
-// opening page on a fast relay still finishes inside it; a page that cannot is
-// answered 503 with Retry-After and leaves a warm running, so the retry reads a
-// committed slice instead of repeating the read.
-const subtitleTextWindowElapsedBudget = 20 * time.Second
+const (
+	// subtitleTextWindowClientStall is the client's own subtitle fetch stall
+	// deadline (web: SUBTITLE_FETCH_STALL_TIMEOUT_MS). Past it the fetcher
+	// aborts the request, so a server bound beyond it can never deliver a body:
+	// the read is thrown away and the client learns nothing.
+	subtitleTextWindowClientStall = 30 * time.Second
+
+	// subtitleTextWindowAnswerReserve is what the bound leaves inside the
+	// client's stall for ffmpeg's muxer header, the first-cue gate and the
+	// response write, plus the layout probe a first request on a track may
+	// have paid earlier in the same request.
+	subtitleTextWindowAnswerReserve = 4 * time.Second
+
+	// subtitleTextWindowElapsedBudget bounds how long one request-path text
+	// window extract may run before it is killed and answered retryably.
+	//
+	// It is derived from the client contract, not from a fixed guess. The read
+	// this bound covers is the window's own span, because ffmpeg seeks the
+	// relay input: a 120 s page of a 75 GB / 81 Mbps release is ~1.2 GB of
+	// container, which the relay that produced the 4K measurements served in
+	// ~20 s (60 MB/s). The previous 20 s bound was below that, so every 4K
+	// window was killed after its bytes were already produced and answered as
+	// a source failure. 26 s (the 30 s client stall minus the answer reserve)
+	// covers the measured cost with room for startup; a source slower than
+	// that cannot be answered inside the client's stall at any bound, so its
+	// window is answered 503 with Retry-After and served from the covering
+	// warm this refusal starts.
+	//
+	// This cannot be a byte cap on the extract's input. ffmpeg reads an HTTP
+	// input with recv(2), not read(2), and /proc/PID/io counts only
+	// read(2)/pread(2) in rchar, so the relay read is invisible there. Elapsed
+	// time is the only bound that sees the relay read at all, so it is the
+	// honest one here.
+	subtitleTextWindowElapsedBudget = subtitleTextWindowClientStall - subtitleTextWindowAnswerReserve
+)
 
 // subtitleWindowBudgeted reports whether this extract is the bounded text
 // window a client is waiting on, and so whether the request-path elapsed budget
