@@ -39,8 +39,9 @@ type ThemeCatalog interface {
 // HandleSourceOpen serves POST /api/internal/nodes/self/sources/open: it
 // exchanges a source grant the calling node holds for the approved source and
 // a renewed grant with the same revision. A node calls it once when a job's
-// input opens and again at every renewal, so the catalog check is never more
-// than one renewal interval stale.
+// input opens and again at every renewal, so while renewals succeed its
+// catalog check is at most one renewal interval old, and up to one grant
+// lifetime old when they fail transiently.
 //
 // 403: the grant does not verify, has expired, or is another node's. 410: the
 // catalog no longer has the source at the granted path, or it is gone or no

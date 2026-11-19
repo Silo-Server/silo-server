@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { t } from "@/i18n";
 import type { ItemDetail } from "@/api/types";
@@ -36,9 +37,7 @@ export function useSetRating(itemId: string) {
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      for (const [queryKey, value] of context?.previous ?? []) {
-        queryClient.setQueryData(queryKey, value);
-      }
+      rollBackRating(queryClient, itemId, context?.previous ?? []);
       toast.error(t("web.common.toast.ratings.updateFailed"));
     },
     onSettled: () => {
@@ -68,13 +67,28 @@ export function useDeleteRating(itemId: string) {
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      for (const [queryKey, value] of context?.previous ?? []) {
-        queryClient.setQueryData(queryKey, value);
-      }
+      rollBackRating(queryClient, itemId, context?.previous ?? []);
       toast.error(t("web.common.toast.ratings.updateFailed"));
     },
     onSettled: () => {
       return invalidateRatingSurfaceQueries(queryClient, itemId);
     },
   });
+}
+
+// Revert only the rating, as the watched toggle does. Restoring the whole
+// snapshot would discard a detail refetched while the write was in flight,
+// such as another device's metadata save. updateCatalogItemDetail keeps a
+// detail invalidated meanwhile owing its refetch.
+function rollBackRating(
+  queryClient: QueryClient,
+  itemId: string,
+  previous: Array<[QueryKey, ItemDetail | undefined]>,
+) {
+  const snapshot = previous.find(([, detail]) => detail)?.[1];
+  if (!snapshot) return;
+  updateCatalogItemDetail(queryClient, itemId, (detail) => ({
+    ...detail,
+    user_rating: snapshot.user_rating,
+  }));
 }

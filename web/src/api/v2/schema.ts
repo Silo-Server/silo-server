@@ -3884,7 +3884,7 @@ export interface paths {
     /** Read manageable installations with manifest surface, redacted global configuration and bindings. The reserved builtin row is excluded. Every page enumerates the full stored list; continuation is live, not a snapshot. */
     get: operations["listAdminPluginInstallations"];
     put?: never;
-    /** Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry. */
+    /** Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated; an install that finds none but loses the race to create it is 409. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry. */
     post: operations["createAdminPluginInstallation"];
     delete?: never;
     options?: never;
@@ -4077,7 +4077,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; there is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry. */
+    /** Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; an upload that finds none but loses the race to create it is 409. There is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry. */
     post: operations["uploadAdminPluginInstallation"];
     delete?: never;
     options?: never;
@@ -7299,6 +7299,23 @@ export interface paths {
     };
     /** The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 when the ID is missing, hidden, or not a catalog title (an episode or season). */
     get: operations["getCatalogItemBoxSet"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/items/{id}/collections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The collections a title's page lists under "Also in": visible manual and synced collections, server and personal, that store the title. Smart collections are not listed, nor the synced copy of the box set the page shows. When only one collection holds the title, preview_items carries up to 6 of its other titles. 404 when the ID is missing, hidden, or not a catalog title. */
+    get: operations["listCatalogItemCollections"];
     put?: never;
     post?: never;
     delete?: never;
@@ -19620,7 +19637,7 @@ export interface components {
        * @description Delivery acknowledgement deadline in milliseconds; bounded to 10000, default 3000. Ignored by message
        */
       deadline_ms?: number;
-      /** @description Free-form administrator reason shown to the player when supported */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
       /**
        * Format: int64
@@ -19707,6 +19724,11 @@ export interface components {
        */
       duration_seconds: number | null;
       /**
+       * Format: double
+       * @description Position the play ended at, in seconds: how far into the media it got, not how long it was watched. A play resumed partway through ends past its resume point; played_seconds is the watch time
+       */
+      end_position_seconds: number;
+      /**
        * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
        * @enum {string|null}
        */
@@ -19730,12 +19752,12 @@ export interface components {
       measured: boolean;
       /**
        * Format: date-time
-       * @description First progress report behind the measurement
+       * @description First sample behind the measurement: the start, once its stream was prepared, or the first progress report
        */
       measured_since: string | null;
       /**
        * Format: date-time
-       * @description Last progress report behind the measurement
+       * @description Last sample behind the measurement: the latest progress report, or the final position the stop carried
        */
       measured_until: string | null;
       /**
@@ -19751,7 +19773,7 @@ export interface components {
       media_type: string;
       /**
        * Format: double
-       * @description Seconds the play spent paused between progress reports
+       * @description Seconds the play spent paused between samples
        */
       paused_seconds: number | null;
       play_method: string;
@@ -19794,11 +19816,6 @@ export interface components {
        * @enum {string|null}
        */
       video_decision: "direct" | "remux" | "transcode" | null;
-      /**
-       * Format: double
-       * @description Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time
-       */
-      watched_seconds: number;
     };
     AdminPlaybackReliability: {
       /** Format: int64 */
@@ -20019,7 +20036,7 @@ export interface components {
       deadline_ms?: number;
       /** @description Text displayed on the player */
       message: string;
-      /** @description Free-form administrator reason shown to the player when supported */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
       /**
        * Format: int64
@@ -20053,20 +20070,20 @@ export interface components {
       items: components["schemas"]["AdminPlaybackSummaryItem"][];
     };
     AdminPlaybackTerminateInputBody: {
-      /** @description Free-form administrator reason shown to the player when supported */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
     };
     AdminPlaybackTerminateReceipt: {
-      /** @description The session was already terminated before this request; the call converged without dispatching another command */
+      /** @description The session's playback attempt record already showed an administrator's end before this request: an earlier terminate, a stop the player did not confirm, or a stop the player confirmed over the control socket before its own stop reached the server. The call converged: nothing was dispatched, delivery is none and client_notified is false. A session whose record shows the player's own stop, or that expired, is not found (404), as is any ended session once its record lapses, at least 24 hours after the play started */
       already_revoked: boolean;
       /** @description The session's playback authority is durably revoked: media tokens and progress writes for it are refused from now on. Buffered media already delivered may still play out */
       authority_revoked: boolean;
-      /** @description A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open or the write failed */
+      /** @description A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open, the write failed, or nothing was sent because the session was already revoked */
       client_notified: boolean;
       /** @description The dismissal command identity when one was issued */
       command_id?: string;
       /**
-       * @description dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)
+       * @description dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing was sent because the session was already revoked
        * @enum {string}
        */
       delivery: "dispatched" | "unavailable" | "failed" | "none";
@@ -20285,6 +20302,8 @@ export interface components {
       auth_bindings: components["schemas"]["AdminPluginAuthBinding"][];
       available_version?: string;
       capabilities: components["schemas"]["AdminPluginCapability"][];
+      /** @description True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported. */
+      connection_check_supported: boolean;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -21047,7 +21066,7 @@ export interface components {
        */
       id: string;
       /**
-       * @description A reason or error that came with the event
+       * @description A reason or error that came with the event. Withheld from API keys with scopes
        * @example auto approved
        */
       message?: string;
@@ -23315,7 +23334,10 @@ export interface components {
        * @description Start of the window: now minus days
        */
       since: string;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Seconds watched across the window's plays: each play's measured watch time (playback history played_seconds), excluding pauses, seeks and buffering. A play recorded before measurement existed counts its end position, capped at how long the play lasted
+       */
       watched_seconds: number;
     };
     AdminWatchProvider: {
@@ -24426,6 +24448,12 @@ export interface components {
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
+    CatalogItemCollections: {
+      /** @description Server collections first, then personal collections, each by title; empty, never null */
+      items: components["schemas"]["SectionCollectionCard"][];
+      /** @description When items holds exactly one collection, up to 6 of its other titles as the first page of listCatalogItems lists the collection (its order, Show only filter and access rules), so a page can show them in place of its card; empty, never null, otherwise */
+      preview_items: components["schemas"]["CatalogItem"][];
+    };
     CatalogItemDetail: {
       /**
        * Format: date-time
@@ -25001,6 +25029,8 @@ export interface components {
       extended_query_rules?: boolean;
       /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
       facet_value_search?: boolean;
+      /** @description listCatalogItemCollections answers the collections a title's page lists under "Also in" */
+      item_collections?: boolean;
       /** @description queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar */
       letter_index?: boolean;
       /**
@@ -29704,7 +29734,7 @@ export interface components {
        */
       integration_kind?: string;
       is_anime: boolean;
-      /** @description Admins only: why the last submission to a download server failed. It can name servers and routing rules */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: why the last submission to a download server failed. It can name servers and routing rules */
       last_error?: string;
       /** @description The catalog item once the media is in the library */
       library_content_id?: string;
@@ -34044,7 +34074,7 @@ export interface components {
        * @example 42
        */
       id: string;
-      /** @description Admins only: the download server's name */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: the download server's name */
       instance_name?: string;
       /** @description Admins only: the download server holding this target */
       integration_id?: string;
@@ -34054,7 +34084,7 @@ export interface components {
        */
       integration_kind?: string;
       is_anime: boolean;
-      /** @description Admins only: why the download server failed this target */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: why the download server failed this target */
       last_error?: string;
       /** @example 1080p */
       quality: string;
@@ -34063,7 +34093,7 @@ export interface components {
        * @example 1834729
        */
       request_id: string;
-      /** @description Admins only: the routing rule that sent this target to its server, as named when it was sent */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: the routing rule that sent this target to its server, as named when it was sent */
       route_name?: string;
       /** @example queued */
       status: string;
@@ -101814,6 +101844,130 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CatalogItemBoxSet"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listCatalogItemCollections: {
+    parameters: {
+      query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description The library the title is being viewed in. It picks the box set whose synced copy is left out, as getCatalogItemBoxSet does. Absent uses the first of the title's libraries with box sets on */
+        library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Content id of the movie or series */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogItemCollections"];
         };
       };
       /** @description Bad Request */

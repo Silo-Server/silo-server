@@ -74,7 +74,6 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "playback.auto_skip_credits": "episodes",
   "playback.auto_skip_recap": "episodes",
   "playback.auto_play_next": "episodes",
-  "playback.auto_play_next_preview": "episodes",
   "playback.next_up_prompt_seconds": "episodes",
   "player.hdr_enabled": "picture",
   "player.dolby_vision_enabled": "picture",
@@ -97,8 +96,11 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * and Navigation & Cards screens, which already edit them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
+ * `playback.auto_play_next_preview` has no effect in any player, so a control
+ * here would save a choice that changes nothing.
  */
 const HIDDEN_KEYS = new Set<string>([
+  "playback.auto_play_next_preview",
   "ui.app_language",
   "ui.theme",
   "ui.text_scale",

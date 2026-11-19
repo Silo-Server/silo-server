@@ -28,6 +28,10 @@ var ErrInstallationDisabled = errors.New("plugin installation is disabled")
 // or update changed that state.
 var ErrInstallationChanged = errors.New("plugin installation changed since it was read")
 
+// ErrPluginAlreadyInstalled refuses a new installation of a plugin that
+// another install created first; a plugin has at most one installation.
+var ErrPluginAlreadyInstalled = errors.New("plugin is already installed")
+
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
 // the reserved builtin-host installation row (delete, update, config, ...).
 var ErrBuiltinInstallationImmutable = errors.New("builtin installation cannot be modified")
@@ -106,6 +110,8 @@ type CreateInstallationInput struct {
 	// Signature is the package's release signature check. A zero value
 	// records unknown.
 	Signature Signature
+	// Archive is the package stored in plugin_archives, written with the row.
+	Archive ArchiveInput
 }
 
 type UpdateInstallationInput struct {
@@ -266,6 +272,9 @@ func scanArchive(row pgx.Row) (*InstallationArchive, error) {
 	return &archive, nil
 }
 
+// Create writes a new installation with its capabilities and stored package
+// in one transaction. A plugin that already has an installation is
+// ErrPluginAlreadyInstalled.
 func (s *InstallationStore) Create(ctx context.Context, input CreateInstallationInput) (*Installation, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -299,10 +308,17 @@ func (s *InstallationStore) Create(ctx context.Context, input CreateInstallation
 		input.Signature.VerifiedAt,
 	))
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_plugin_installations_plugin_id" {
+			return nil, ErrPluginAlreadyInstalled
+		}
 		return nil, fmt.Errorf("creating plugin installation: %w", err)
 	}
 
 	if err := s.replaceCapabilities(ctx, tx, installation.ID, input.Capabilities); err != nil {
+		return nil, err
+	}
+	if err := saveArchive(ctx, tx, installation.ID, input.Archive.ManifestJSON, input.Archive.Checksum, input.Archive.Bytes); err != nil {
 		return nil, err
 	}
 

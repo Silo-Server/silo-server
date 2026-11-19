@@ -195,14 +195,14 @@ type RequestTarget struct {
 	RequestID       ID      `json:"request_id" example:"1834729"`
 	IntegrationID   string  `json:"integration_id,omitempty" doc:"Admins only: the download server holding this target"`
 	IntegrationKind string  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
-	InstanceName    string  `json:"instance_name,omitempty" doc:"Admins only: the download server's name"`
+	InstanceName    string  `json:"instance_name,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: the download server's name"`
 	Quality         string  `json:"quality" example:"1080p"`
 	IsAnime         bool    `json:"is_anime"`
 	ExternalID      string  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
 	ExternalStatus  string  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
 	Status          string  `json:"status" example:"queued"`
-	LastError       string  `json:"last_error,omitempty" doc:"Admins only: why the download server failed this target"`
-	RouteName       string  `json:"route_name,omitempty" doc:"Admins only: the routing rule that sent this target to its server, as named when it was sent"`
+	LastError       string  `json:"last_error,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: why the download server failed this target"`
+	RouteName       string  `json:"route_name,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: the routing rule that sent this target to its server, as named when it was sent"`
 	CreatedAt       Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt       Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	// Download is set while the target's router plugin reports progress.
@@ -237,7 +237,7 @@ type MediaRequest struct {
 	ExternalID           string                  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
 	ExternalStatus       string                  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
 	LibraryContentID     string                  `json:"library_content_id,omitempty" doc:"The catalog item once the media is in the library"`
-	LastError            string                  `json:"last_error,omitempty" doc:"Admins only: why the last submission to a download server failed. It can name servers and routing rules"`
+	LastError            string                  `json:"last_error,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: why the last submission to a download server failed. It can name servers and routing rules"`
 	CreatedAt            Instant                 `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt            Instant                 `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	ApprovedAt           *Instant                `json:"approved_at,omitempty"`
@@ -878,6 +878,19 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 		out.Targets = append(out.Targets, target)
 	}
 	return out
+}
+
+// withholdRequestDeployment drops what names the admin's download setup from
+// a request and its targets for a scoped key: the free-text failures, which
+// can name download servers, their addresses and routing rules, and each
+// target's server name and routing-rule name. The monitoring scope never
+// reads that configuration; integration_kind still says what kind of server
+// took the target.
+func withholdRequestDeployment(r *MediaRequest) {
+	r.LastError = ""
+	for i := range r.Targets {
+		r.Targets[i].LastError, r.Targets[i].InstanceName, r.Targets[i].RouteName = "", "", ""
+	}
 }
 
 // requestDownloadOf maps download progress. The byte counts and percent are
