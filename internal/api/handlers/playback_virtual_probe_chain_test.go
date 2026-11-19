@@ -1523,9 +1523,13 @@ func TestWatchDetailSelectionSchedulesProbeOnlyForUnprobedVirtualRow(t *testing.
 	}
 
 	// A selected row with fresh inventory needs no probe, but still warms: the
-	// bytes may be cold even though the inventory is known.
+	// bytes may be cold even though the inventory is known. The inventory has
+	// to be there for the stamp to mean it: a stamp over empty track arrays is
+	// the shape the selection gate re-probes (see
+	// TestScheduleSelectedVirtualProbeRepairsAStampedEmptyRow).
 	probedAt := time.Now()
 	detail.Versions[1].ProbedAt = &probedAt
+	detail.Versions[1].AudioTracks = []models.AudioTrack{{Index: 1, Codec: "ac3", Channels: 6}}
 	h.scheduleSelectedVirtualProbe(detail.ContentID, detail.Type, detail.Versions, catalog.AccessFilter{SelectedFileID: 22})
 	if got := prober.snapshot(); len(got) != 1 {
 		t.Fatalf("fresh selection scheduled %d probes, want none", len(got)-1)

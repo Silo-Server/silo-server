@@ -222,28 +222,10 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 	// speed up when the transcode competing for the relay pauses, so only an
 	// order-of-magnitude shortfall is a verdict.
 	//
-	// The wait that decides "too slow" is the client's, not the server's. A
-	// page nobody is asking for any more cannot be served by retrying whatever
-	// the fill's own budget allows, so the projection is measured against the
-	// shorter of the two windows, floored so a fill about to cross the page
-	// keeps the page retryable even after the ladder is spent.
+	// The wait that decides "too slow" is the client's, not the server's (see
+	// pageReachVerdict).
 	if !stalled && filling && covered > entry.lastCover {
-		elapsed := now.Sub(entry.lastSeen)
-		if elapsed > 0 {
-			reachRate = (covered - entry.lastCover) / elapsed.Seconds()
-			remaining := c.pageRecoveryBudget() - wait
-			clientRemaining := subtitlePageClientWaitBudget - wait
-			if clientRemaining < subtitlePageReachFloor {
-				clientRemaining = subtitlePageReachFloor
-			}
-			if remaining < clientRemaining {
-				clientRemaining = remaining
-			}
-			if reachRate > 0 && clientRemaining > 0 &&
-				(start-covered)/reachRate > subtitlePageReachMargin*clientRemaining.Seconds() {
-				stalled = true
-			}
-		}
+		reachRate, stalled = pageReachVerdict(now.Sub(entry.lastSeen), entry.lastCover, covered, start, wait, c.pageRecoveryBudget())
 	}
 	entry.lastSeen = now
 	entry.lastCover = covered
@@ -254,6 +236,36 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 	}
 	c.pageWaits[key] = entry
 	return wait, false, stalled, reachRate
+}
+
+// pageReachVerdict reports how fast the fill is parsing and whether the page it
+// is heading for is out of reach. The wait that decides "too slow" is the
+// client's: a page nobody asks for any more cannot be served by retrying,
+// whatever the fill's own budget allows. The projection is measured against the
+// shorter of the two windows, with the client's side floored at its first retry
+// step so a fill that is about to cross the page keeps the page retryable even
+// after the ladder is spent, and the verdict needs the margin because a fill
+// speeds up whenever the transcode competing for the relay pauses.
+func pageReachVerdict(elapsed time.Duration, previouslyCovered, covered, start float64, waited, budget time.Duration) (rate float64, outOfReach bool) {
+	if elapsed <= 0 {
+		return 0, false
+	}
+	rate = (covered - previouslyCovered) / elapsed.Seconds()
+	if rate <= 0 {
+		return rate, false
+	}
+	remaining := budget - waited
+	clientRemaining := subtitlePageClientWaitBudget - waited
+	if clientRemaining < subtitlePageReachFloor {
+		clientRemaining = subtitlePageReachFloor
+	}
+	if remaining < clientRemaining {
+		clientRemaining = remaining
+	}
+	if clientRemaining <= 0 {
+		return rate, false
+	}
+	return rate, (start-covered)/rate > subtitlePageReachMargin*clientRemaining.Seconds()
 }
 
 // noteWaiting records that the page at start refused now, and forgets pages
