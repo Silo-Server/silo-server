@@ -25,6 +25,8 @@ func TestCanonicalISBN(t *testing.T) {
 		{"979-10-90636-07-1", "9791090636071"},
 		// A valid EAN-13 that is not an ISBN.
 		{"4006381333931", ""},
+		// 979-0 is printed music (ISMN), with a valid check digit.
+		{"9790260000438", ""},
 		// Wrong check digits.
 		{"0306406153", ""},
 		{"9780306406158", ""},

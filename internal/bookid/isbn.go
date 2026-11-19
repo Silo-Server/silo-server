@@ -9,8 +9,8 @@ const ISBNProvider = "isbn"
 // ISBN-10 or ISBN-13 with or without hyphens and spaces, after an optional
 // "ISBN-13", "ISBN-10" or "ISBN" label (with or without a ":"), or written as
 // "urn:isbn:". An ISBN-10 is converted to its 978 form. A 13-digit value must
-// start 978 or 979; other EAN-13 barcodes are not ISBNs. ok is false when raw
-// is not an ISBN.
+// start 978, or 979 followed by 1 to 9; other EAN-13 barcodes, the 979-0 music
+// numbers included, are not ISBNs. ok is false when raw is not an ISBN.
 func CanonicalISBN(raw string) (string, bool) {
 	value := strings.ToUpper(strings.TrimSpace(raw))
 	value = strings.TrimPrefix(value, "URN:")
@@ -35,7 +35,9 @@ func CanonicalISBN(raw string) (string, bool) {
 		isbn13 := "978" + candidate[:9]
 		return isbn13 + string(isbn13CheckDigit(isbn13)), true
 	case 13:
-		if !strings.HasPrefix(candidate, "978") && !strings.HasPrefix(candidate, "979") {
+		// 979-0 is the ISMN range (printed music), not ISBNs.
+		if !strings.HasPrefix(candidate, "978") &&
+			(!strings.HasPrefix(candidate, "979") || strings.HasPrefix(candidate, "9790")) {
 			return "", false
 		}
 		if !allDigits(candidate) || isbn13CheckDigit(candidate[:12]) != candidate[12] {
