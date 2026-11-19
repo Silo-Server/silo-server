@@ -61,7 +61,10 @@ func (s *ItemCollections) ItemCollections(ctx context.Context, v ItemViewer, use
 	if s == nil || s.Cards == nil || s.Items == nil {
 		return ItemCollectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Collections are not configured")
 	}
-	if err := s.Items.EnsureAccessible(ctx, contentID, v.Access); err != nil {
+	// Collections hold titles, so an episode or season ID is a 404 too.
+	titleAccess := v.Access
+	titleAccess.ExcludedMediaTypes = append(slices.Clone(v.Access.ExcludedMediaTypes), "episode", "season")
+	if err := s.Items.EnsureAccessible(ctx, contentID, titleAccess); err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
 			return ItemCollectionsView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
 		}

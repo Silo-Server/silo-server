@@ -222,6 +222,18 @@ func TestItemCollectionsDB(t *testing.T) {
 	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusNotFound {
 		t.Errorf("a title the viewer cannot see answers %v, want 404", err)
 	}
+
+	episode := f.prefix + "-episode"
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age) VALUES($1,'episode',$1,'matched','{}','PG',8)`, episode); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, episode, f.shown); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.ItemCollections(viewerCtx, v, f.account, episode)
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusNotFound {
+		t.Errorf("an episode answers %v, want 404", err)
+	}
 }
 
 // TestItemCollectionsPreviewDB pins the row a title's page shows when one

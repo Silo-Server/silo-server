@@ -13,7 +13,8 @@ import { buildCollectionCatalogHref } from "@/pages/catalogSearchParams";
  * the title, the row shows up to six of that collection's other titles under
  * its name, with "Explore all" opening the collection. When several do, an
  * "Also in" row shows a card for each. Nothing shows while it loads, when no
- * collection holds the title, or when the read fails.
+ * collection holds the title, or when the first read fails. A failed refetch
+ * keeps the last answer, as the box set row does.
  */
 export default function ItemCollectionsRow({
   contentId,
