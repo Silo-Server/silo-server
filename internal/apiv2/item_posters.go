@@ -56,10 +56,11 @@ type itemPosterHandler struct {
 // posterEnqueueMemo remembers which items' cache jobs this server queued
 // recently. It checks and records under one lock, so concurrent requests for
 // one item queue once, and it starts no goroutine: expired entries are
-// dropped when it grows past posterEnqueueMemoSweepAt.
+// dropped, at most once a minute, once it grows past posterEnqueueMemoSweepAt.
 type posterEnqueueMemo struct {
-	mu     sync.Mutex
-	queued map[string]time.Time
+	mu        sync.Mutex
+	queued    map[string]time.Time
+	nextSweep time.Time
 }
 
 const posterEnqueueMemoSweepAt = 4096
@@ -75,12 +76,15 @@ func (m *posterEnqueueMemo) claim(contentID string, now time.Time) bool {
 	if m.queued == nil {
 		m.queued = make(map[string]time.Time)
 	}
-	if len(m.queued) >= posterEnqueueMemoSweepAt {
+	// At most one sweep a minute, so a burst of distinct items past the
+	// threshold does not rescan the map on every request.
+	if len(m.queued) >= posterEnqueueMemoSweepAt && !now.Before(m.nextSweep) {
 		for id, until := range m.queued {
 			if !now.Before(until) {
 				delete(m.queued, id)
 			}
 		}
+		m.nextSweep = now.Add(time.Minute)
 	}
 	m.queued[contentID] = now.Add(itemPosterEnqueueMemo)
 	return true

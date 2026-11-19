@@ -157,8 +157,9 @@ plugin's resolved URL, never a local source. The download is the image-cache
 job's (`imagecache.RemoteFetcher` over the same `download`): Public only unless
 `FetchContext` trusts a store URL, checked on every dial and redirect, with the
 cache's size limit and timeout, and the bytes must sniff as JPEG, PNG, WebP or
-GIF. Concurrent requests for one item share one download and each server runs
-at most four, so a link cannot multiply requests to a provider. Every refusal
+GIF. Concurrent requests for one item share one download, each server runs
+at most four, and a server remembers a finished download for five minutes and
+a failed one for 30 seconds, so a link cannot multiply requests to a provider. Every refusal
 answers the same `404`. A request also queues the item's image-cache job,
 through the ordinary upsert, so a failed job keeps its backoff, at most once per
 item per ten minutes on each server.

@@ -260,7 +260,9 @@ downloads are busy. The download follows the image cache's rules
 public addresses only, redirect hops included, the image cache's size limit, and
 only JPEG, PNG, WebP or GIF bytes, typed by their content rather than the
 provider's header. Concurrent requests for one item share one download, and a
-server runs at most four at once. Proxied bytes carry
+server runs at most four at once. A server remembers a finished download for
+five minutes and a failed one for 30 seconds, so repeating a link does not
+repeat the request to the provider. The route has no per-address rate limit. Proxied bytes carry
 `Cache-Control: private, max-age=300`; the redirect is `no-store`, since its
 target is a signed URL with its own lifetime.
 

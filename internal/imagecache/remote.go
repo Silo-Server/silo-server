@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -23,6 +24,14 @@ const (
 	// remoteFetchSlotWait is how long a download waits for a slot before the
 	// request is refused as busy.
 	remoteFetchSlotWait = 5 * time.Second
+	// A finished download is kept this long, so repeating a link does not
+	// repeat the provider download; a failed one is remembered for less, so
+	// a provider that recovers is tried again soon.
+	remoteResultTTL      = 5 * time.Minute
+	remoteFailureTTL     = 30 * time.Second
+	remoteResultMaxBytes = 4 << 20
+	remoteResultsBudget  = 64 << 20
+	remoteResultsSweep   = time.Minute
 )
 
 // ErrRemoteBusy reports that every remote fetch slot stayed taken.
@@ -45,6 +54,67 @@ type RemoteFetcher struct {
 	client *http.Client
 	slots  chan struct{}
 	group  singleflight.Group
+
+	// results holds recent outcomes by key and URL. It bounds what a link
+	// holder can make the server download: one provider request per artwork
+	// per remoteResultTTL, not one per request.
+	mu        sync.Mutex
+	results   map[string]remoteResult
+	bytes     int
+	nextSweep time.Time
+}
+
+type remoteResult struct {
+	image RemoteImage
+	err   error
+	until time.Time
+}
+
+// recent returns the remembered outcome for id, if it has not expired.
+func (f *RemoteFetcher) recent(id string, now time.Time) (remoteResult, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	result, ok := f.results[id]
+	if !ok || !now.Before(result.until) {
+		return remoteResult{}, false
+	}
+	return result, true
+}
+
+// remember keeps an outcome for later requests. An image too large to keep,
+// or one the budget has no room for, is simply not remembered. Expired
+// entries are dropped at most once per remoteResultsSweep.
+func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now time.Time) {
+	ttl := remoteResultTTL
+	if err != nil {
+		ttl = remoteFailureTTL
+	}
+	if len(image.Data) > remoteResultMaxBytes {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.results == nil {
+		f.results = make(map[string]remoteResult)
+	}
+	if !now.Before(f.nextSweep) {
+		for key, result := range f.results {
+			if !now.Before(result.until) {
+				f.bytes -= len(result.image.Data)
+				delete(f.results, key)
+			}
+		}
+		f.nextSweep = now.Add(remoteResultsSweep)
+	}
+	if old, ok := f.results[id]; ok {
+		f.bytes -= len(old.image.Data)
+		delete(f.results, id)
+	}
+	if f.bytes+len(image.Data) > remoteResultsBudget {
+		return
+	}
+	f.results[id] = remoteResult{image: image, err: err, until: now.Add(ttl)}
+	f.bytes += len(image.Data)
 }
 
 // NewRemoteFetcher returns a fetcher on the guarded download client.
@@ -64,6 +134,10 @@ func newRemoteFetcher(client *http.Client) *RemoteFetcher {
 // runs detached from the first caller, so that caller leaving does not fail
 // the rest; each caller still stops waiting when its own context ends.
 func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteImage, error) {
+	id := key + "\x00" + rawURL
+	if result, ok := f.recent(id, time.Now()); ok {
+		return result.image, result.err
+	}
 	flight := f.group.DoChan(key, func() (value any, err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -72,7 +146,13 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 				value, err = RemoteImage{}, errors.New("imagecache: remote image fetch panicked")
 			}
 		}()
-		return f.fetch(context.WithoutCancel(ctx), rawURL)
+		image, err := f.fetch(context.WithoutCancel(ctx), rawURL)
+		// A busy server is not an outcome of this artwork; the next request
+		// should try again.
+		if !errors.Is(err, ErrRemoteBusy) {
+			f.remember(id, image, err, time.Now())
+		}
+		return image, err
 	})
 	select {
 	case <-ctx.Done():
