@@ -2016,6 +2016,74 @@
       "value": "앱 언어"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "종료 시"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "종료 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "분 전"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "종료 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "초 전"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "다음 에피소드 표시"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "끔"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -47344,6 +47412,12 @@
       "value": "꺼져 있어요. 실행하면 오래된 작품만 정리해요."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "생성이 중지됐어요. 저장된 추천은 서버를 다시 시작할 때까지 둘러보기에 계속 표시돼요."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -86833,6 +86907,12 @@
       "value": "내 라이브러리"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "개수를 알 수 없음"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -88761,6 +88841,24 @@
       "value": "추가"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "작품을 추가할 수 있는지 확인하지 못했어요."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "다시 불러오기"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "작품을 추가할 수 있는지 확인하는 중…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -88773,6 +88871,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 컬렉션의 일부만 불러온 상태에서 작품을 안전하게 추가할 수 없어요. 작품을 제거하거나 컬렉션을 편집할 수는 있어요."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "작품을 더 추가하기 전에 작품을 다시 불러오세요."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -88789,6 +88899,12 @@
     {
       "type": 0,
       "value": "에서 작품 추가"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "작품을 더 추가하기 전에 작품을 불러오는 중…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -96754,6 +96870,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "포함된 컬렉션"
     }
   ],
   "web.detail.sections.cast": [
@@ -114987,34 +115109,6 @@
       "value": " 추가"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " 시청 기반 추천"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": ", "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " 시청 기반 추천"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -115077,6 +115171,34 @@
     {
       "type": 0,
       "value": " 요청 보내는 중"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "와(과) 비슷한 콘텐츠"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "와(과) 비슷한 콘텐츠"
     }
   ],
   "web.requests.discoverSection.empty": [
