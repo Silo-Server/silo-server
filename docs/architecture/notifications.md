@@ -567,9 +567,10 @@ the worker that turns the webhook off writes the notice.
 
 A claimed attempt carries a 90-second lease. Only the worker that still
 holds the claim records the send's outcome, so a send that outlived its lease
-and was reclaimed counts once. A worker starts a send only with at least 20
-seconds of lease left (artwork resolution, then the 10-second request), and
-retry sweeps claim no more attempts than fit in one lease.
+and was reclaimed counts once. A worker starts a send only with at least 25
+seconds of lease left (up to 10 seconds of artwork resolution, the 10-second
+request, and slack), and retry sweeps claim no more attempts than fit in one
+lease.
 
 Inbox retention keeps a delivery while one of its webhook or plugin
 destination attempts is still pending or retrying: deleting the delivery

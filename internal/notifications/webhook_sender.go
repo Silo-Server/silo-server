@@ -155,10 +155,10 @@ func (s *webhookSender) send(ctx context.Context, hook *Webhook, row DeliveryRow
 		row.PosterPath = flags.PosterPath
 	}
 	if hook.Type == WebhookTypeDiscord && s.posterURL != nil {
-		// Artwork gets what the POST leaves of webhookSendBudget, so a slow
-		// lookup can't push the send past its claim's lease. Without it, the
-		// embed goes out with no image.
-		posterCtx, cancel := context.WithTimeout(ctx, webhookSendBudget-webhookRequestTimeout)
+		// Artwork has its own share of webhookSendBudget, so a slow lookup
+		// can't push the send past its claim's lease. Without it, the embed
+		// goes out with no image.
+		posterCtx, cancel := context.WithTimeout(ctx, webhookArtworkTimeout)
 		row.PosterURL = s.posterURL(posterCtx, row.PosterPath, row.PosterSourcePath)
 		cancel()
 	}
@@ -170,10 +170,14 @@ func (s *webhookSender) send(ctx context.Context, hook *Webhook, row DeliveryRow
 }
 
 // webhookSendBudget is how much of its lease a claimed attempt must have left
-// to be sent: resolving artwork, then the POST under webhookRequestTimeout.
-// An attempt with less is left for the retry sweep to reclaim, because a send
-// that outlives its lease is sent again by whoever reclaims it.
-const webhookSendBudget = 2 * webhookRequestTimeout
+// to be sent: resolving artwork (webhookArtworkTimeout), then the POST under
+// webhookRequestTimeout, plus slack for the work around them. An attempt with
+// less is left for the retry sweep to reclaim, because a send that outlives
+// its lease is sent again by whoever reclaims it.
+const (
+	webhookArtworkTimeout = 10 * time.Second
+	webhookSendBudget     = webhookArtworkTimeout + webhookRequestTimeout + 5*time.Second
+)
 
 // processAttempt delivers one claimed attempt and records the outcome:
 // delivered, retrying with backoff, failed (non-retryable 4xx or exhausted
