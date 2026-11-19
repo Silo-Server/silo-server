@@ -1864,8 +1864,9 @@ Administrator download rows (`GET /api/v2/admin/downloads/entries` and
 device registered the download from, and `last_client_ip`, where it was last
 seen. Both come from the trusted-proxy resolution playback history uses for its
 `client_ip` (`internal/clientip`), never from a raw forwarding header, and are
-`null` when nothing was recorded, which includes every row registered before
-servers recorded them. `client_ip` in
+`null` when nothing was recorded. A row registered before servers recorded
+them starts with both `null`; a later status report or file request fills its
+`last_client_ip`, and its `created_client_ip` stays `null`. `client_ip` in
 `GET /api/v2/admin/downloads/storage/capabilities` says the rows carry them.
 
 What records an address:
