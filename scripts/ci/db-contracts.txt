@@ -611,6 +611,7 @@
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
 ./internal/downloads TestDownloadClientAddressesDB
+./internal/downloads TestDownloadChangeOutboxDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
 ./internal/downloads TestDeadAccountTransferReleasesItsConcurrentSlotDB
 ./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB

@@ -531,9 +531,11 @@ func allowedChannelsForClaims(claims *auth.Claims) []evt.EventChannel {
 }
 
 // monitorKeyChannels are what an admin:monitor:read key may subscribe to:
-// live sessions and catalog changes. Jobs carry artifact URLs and request
-// payloads and scans carry library paths, which monitoring never reads.
-var monitorKeyChannels = []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions}
+// live sessions, catalog changes and download changes. Jobs carry artifact
+// URLs and request payloads and scans carry library paths, which monitoring
+// never reads; download_preparations stays closed so a future preparation
+// event is not handed to scoped keys unreviewed.
+var monitorKeyChannels = []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions, evt.ChannelDownloads}
 
 func allowedChannelsForRole(role string) []evt.EventChannel {
 	channels := []evt.EventChannel{
@@ -551,6 +553,7 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 			evt.ChannelScans,
 			evt.ChannelSettings,
 			evt.ChannelDownloadPreparations,
+			evt.ChannelDownloads,
 		)
 	}
 	return channels
@@ -621,7 +624,7 @@ func (h *EventsHandler) snapshotForChannel(
 	switch channel {
 	case evt.ChannelCatalog, evt.ChannelUserState:
 		return json.RawMessage("null"), nil
-	case evt.ChannelDownloadPreparations:
+	case evt.ChannelDownloadPreparations, evt.ChannelDownloads:
 		// Events only say what changed; clients re-read the admin list, and a
 		// null snapshot tells a reconnecting client to do so.
 		return json.RawMessage("null"), nil

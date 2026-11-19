@@ -26,6 +26,10 @@ const (
 	// download encode queue: download_preparation.changed and
 	// download_preparation.progress.
 	ChannelDownloadPreparations EventChannel = "download_preparations"
+	// ChannelDownloads carries admin-only download.changed events for
+	// managed device downloads: identifiers and state, never paths, so an
+	// admin:monitor:read key may subscribe.
+	ChannelDownloads EventChannel = "downloads"
 )
 
 var AllChannels = []EventChannel{
@@ -41,6 +45,7 @@ var AllChannels = []EventChannel{
 	ChannelPlugins,
 	ChannelNotifications,
 	ChannelDownloadPreparations,
+	ChannelDownloads,
 }
 
 // ClientChannels is every channel a websocket client may subscribe to: it is
@@ -60,6 +65,7 @@ var ClientChannels = []EventChannel{
 	ChannelSettings,
 	ChannelNotifications,
 	ChannelDownloadPreparations,
+	ChannelDownloads,
 }
 
 type Envelope struct {

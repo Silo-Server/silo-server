@@ -698,6 +698,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         refreshDownloadPreparations();
         refreshDownloadStorage();
         break;
+      case "downloads":
+        // A null snapshot: events may have been missed, so re-read the
+        // device copies and entries the storage views list.
+        refreshDownloadStorage();
+        break;
       case "jobs":
         if (Array.isArray(message.data)) {
           hydrateAdminJobSnapshot(queryClient, message.data as AdminJob[]);
@@ -793,6 +798,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           break;
         }
         refreshDownloadPreparations();
+        break;
+      case "downloads":
+        // A device download was registered, changed status or was removed.
+        refreshDownloadStorage();
         break;
       case "catalog":
         {

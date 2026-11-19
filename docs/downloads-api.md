@@ -1886,6 +1886,18 @@ Administrator actions (revoke, deleting prepared files, clean-up) never change e
 field, and ephemeral web rows record only `created_client_ip`, which no
 administrator route shows.
 
+### Download change events (admin)
+
+Triggers on `downloads` queue a row in `download_change_events` whenever a
+managed download is inserted, changes `status` or `revision`, or is deleted,
+including by cascade; every API server drains the outbox and publishes
+`download.changed` on the admin-only `downloads` realtime channel, which an
+`admin:monitor:read` key may join. The event names the download, account,
+profile, device, title and status, never a prepared file, path or error text
+(see [download changes](realtime-api.md#download-changes)). It is separate from
+the per-user `download` event on `user_state` (section 9.4), which reaches only
+the owning profile.
+
 ### Pausing and canceling preparation (admin)
 
 A paused job keeps its queued status and claim position; `paused_at` hides it

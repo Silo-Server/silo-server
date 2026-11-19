@@ -10310,6 +10310,10 @@
           "available": {
             "type": "boolean"
           },
+          "change_events": {
+            "description": "download.changed on the v2 events socket's admin downloads channel reports each download created, changed or removed",
+            "type": "boolean"
+          },
           "client_ip": {
             "description": "Download rows carry created_client_ip and last_client_ip",
             "type": "boolean"
@@ -10347,6 +10351,7 @@
           "devices",
           "revocation",
           "client_ip",
+          "change_events",
           "revision",
           "state",
           "allowed"

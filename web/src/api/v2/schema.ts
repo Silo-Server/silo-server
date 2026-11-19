@@ -17668,6 +17668,8 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
+      /** @description download.changed on the v2 events socket's admin downloads channel reports each download created, changed or removed */
+      change_events: boolean;
       /** @description Download rows carry created_client_ip and last_client_ip */
       client_ip: boolean;
       /** @description Device copies can be listed */

@@ -1651,6 +1651,12 @@ func main() {
 	// database spaces the drains out across the cluster.
 	if mode == "integrated" || mode == "api" {
 		go realtimeHub.RunItemChangePublisher(appCtx, catalog.NewItemChangeOutbox(pool))
+		// The download change outbox works the same way. The hub sends each
+		// event to every API server; V2Only keeps it from plugins.
+		go downloads.RunChangePublisher(appCtx, downloads.NewChangeOutbox(pool), func(ctx context.Context, change downloads.ChangeEvent) error {
+			return eventsHub.PublishJSON(ctx, evt.ChannelDownloads, downloads.ChangeEventName, change,
+				evt.PublishOptions{AdminOnly: true, V2Only: true, EventID: change.EventID()})
+		})
 	}
 
 	// Initialize node pools for integrated/api modes.

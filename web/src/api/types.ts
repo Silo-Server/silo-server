@@ -3094,7 +3094,9 @@ export type EventChannel =
   | "settings"
   | "notifications"
   // Admin-only changes to the offline-download preparation queue.
-  | "download_preparations";
+  | "download_preparations"
+  // Admin-only download.changed for managed device downloads.
+  | "downloads";
 
 export interface NotificationReasonFlags {
   // episode.available reasons

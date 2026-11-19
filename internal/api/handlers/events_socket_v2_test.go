@@ -539,7 +539,7 @@ func TestEventsSocketV2AdmitsMonitorKey(t *testing.T) {
 	if err != nil || claims.Role != "admin" || claims.TokenType != auth.TokenTypeAPIKey || claims.SessionID != "" {
 		t.Fatalf("key claims = %+v, %v", claims, err)
 	}
-	if channels := allowedChannelsForClaims(claims); !slices.Equal(channels, []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions}) {
+	if channels := allowedChannelsForClaims(claims); !slices.Equal(channels, []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions, evt.ChannelDownloads}) {
 		t.Fatalf("monitor key channels = %v", channels)
 	}
 	login := newSocketAuthorityValidator(f.sessions, users, f.viewer, apimw.NewActingAdminDecider(nil, nil))
@@ -661,7 +661,7 @@ func TestEventsSocketV2ClosesWhenKeyRevoked(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, hello, err := conn.ReadMessage()
-	if err != nil || !strings.Contains(string(hello), `"available_channels":["catalog","sessions"]`) {
+	if err != nil || !strings.Contains(string(hello), `"available_channels":["catalog","sessions","downloads"]`) {
 		t.Fatalf("hello: %s %v", hello, err)
 	}
 	_, subscribed, err := conn.ReadMessage()
