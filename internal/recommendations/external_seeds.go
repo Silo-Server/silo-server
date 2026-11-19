@@ -19,6 +19,9 @@ const (
 	// externalLanguageShare is the share of a profile's seeds a language
 	// needs before the profile uses that language's sets.
 	externalLanguageShare = 0.05
+	// externalSeedLookupBatch bounds one catalog lookup of a profile's
+	// positively weighted titles, which grow with its history.
+	externalSeedLookupBatch = 1000
 )
 
 // ExternalSeed is a library title whose TMDB lists seed a profile's pool.
@@ -31,6 +34,10 @@ type ExternalSeed struct {
 	// OriginalLanguage is the title's original language as the catalog
 	// stores it (lang.Canonical), or "".
 	OriginalLanguage string
+	// Engaged reports that the profile watched, rated or favorited the
+	// title. A seed that is only on the watchlist shapes the pool but is
+	// never named as the reason for a pick: the profile has not seen it.
+	Engaged bool
 }
 
 // SourceKey is the source key the seed's lists are stored under.
@@ -63,7 +70,9 @@ func (p ExternalProfile) SeedSources() []string {
 func (p ExternalProfile) SeedContentIDs() map[string]string {
 	out := make(map[string]string, len(p.Seeds))
 	for _, s := range p.Seeds {
-		out[s.SourceKey()] = s.ContentID
+		if s.Engaged {
+			out[s.SourceKey()] = s.ContentID
+		}
 	}
 	return out
 }
@@ -102,16 +111,18 @@ func (e *Engine) externalProfile(ctx context.Context, userID int, profileID stri
 		return p, false, fmt.Errorf("read signals for user %d profile %s: %w", userID, profileID, err)
 	}
 	weights := make(map[string]float64, len(signals.titles))
+	engaged := make(map[string]bool, len(signals.titles))
 	for id, s := range signals.titles {
 		if w, ok := s.positiveWeight(); ok {
 			weights[id] = w
+			engaged[id] = s.countsTowardLevel()
 		}
 	}
 	titles, err := e.repo.externalSeedTitles(ctx, slices.Collect(maps.Keys(weights)))
 	if err != nil {
 		return p, false, err
 	}
-	p.Seeds = selectExternalSeeds(weights, titles)
+	p.Seeds = selectExternalSeeds(weights, engaged, titles)
 	p.SetSources = externalProfileSetSources(p.Seeds)
 	return p, true, nil
 }
@@ -119,14 +130,14 @@ func (e *Engine) externalProfile(ctx context.Context, userID int, profileID stri
 // selectExternalSeeds picks a profile's seeds: its positively weighted titles
 // that the catalog knows by TMDB ID, heaviest first (ties by content ID), one
 // per outside-title key, at most externalMaxSeeds.
-func selectExternalSeeds(weights map[string]float64, titles map[string]externalSeedTitle) []ExternalSeed {
+func selectExternalSeeds(weights map[string]float64, engaged map[string]bool, titles map[string]externalSeedTitle) []ExternalSeed {
 	seeds := make([]ExternalSeed, 0, len(titles))
 	for id, w := range weights {
 		t, ok := titles[id]
 		if !ok || w <= 0 {
 			continue
 		}
-		seeds = append(seeds, ExternalSeed{ContentID: id, Key: t.key, Weight: w, OriginalLanguage: t.originalLanguage})
+		seeds = append(seeds, ExternalSeed{ContentID: id, Key: t.key, Weight: w, OriginalLanguage: t.originalLanguage, Engaged: engaged[id]})
 	}
 	slices.SortFunc(seeds, func(a, b ExternalSeed) int {
 		return cmp.Or(cmp.Compare(b.Weight, a.Weight), cmp.Compare(a.ContentID, b.ContentID))
@@ -195,6 +206,16 @@ func (r *Repo) externalSeedTitles(ctx context.Context, contentIDs []string) (map
 	if len(contentIDs) == 0 {
 		return out, nil
 	}
+	for batch := range slices.Chunk(contentIDs, externalSeedLookupBatch) {
+		if err := r.externalSeedTitleBatch(ctx, batch, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// externalSeedTitleBatch adds one batch of externalSeedTitles to out.
+func (r *Repo) externalSeedTitleBatch(ctx context.Context, contentIDs []string, out map[string]externalSeedTitle) error {
 	rows, err := r.pool.Query(ctx, `
 		SELECT content_id, type, tmdb_id, COALESCE(original_language, '')
 		FROM   media_items
@@ -202,13 +223,13 @@ func (r *Repo) externalSeedTitles(ctx context.Context, contentIDs []string) (map
 		  AND  type IN ('movie', 'series')
 		  AND  tmdb_id ~ '^[0-9]{1,9}$'`, contentIDs)
 	if err != nil {
-		return nil, fmt.Errorf("read outside-title seed titles: %w", err)
+		return fmt.Errorf("read outside-title seed titles: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id, mediaType, tmdbID, language string
 		if err := rows.Scan(&id, &mediaType, &tmdbID, &language); err != nil {
-			return nil, fmt.Errorf("scan outside-title seed title: %w", err)
+			return fmt.Errorf("scan outside-title seed title: %w", err)
 		}
 		n, err := strconv.Atoi(tmdbID)
 		if err != nil || n <= 0 {
@@ -217,9 +238,9 @@ func (r *Repo) externalSeedTitles(ctx context.Context, contentIDs []string) (map
 		out[id] = externalSeedTitle{key: ExternalTitleKey{MediaType: mediaType, TMDBID: n}, originalLanguage: language}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read outside-title seed titles: %w", err)
+		return fmt.Errorf("read outside-title seed titles: %w", err)
 	}
-	return out, nil
+	return nil
 }
 
 // profilesWithTasteVector lists the profiles whose taste row has a vector.

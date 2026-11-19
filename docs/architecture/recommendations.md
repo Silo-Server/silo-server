@@ -580,7 +580,8 @@ runs as soon as it is turned off.
   `recommendations.external.max_titles` (default 5000), and sets fill at most
   half of it: the recent sets first, then the language sets share what is
   left of that half, each keeping its best-ranked titles, the room divided in
-  proportion to their sizes. List titles named by the most profiles fill the
+  proportion to their sizes; room that titles two sets share leave unused
+  goes to the language sets' next titles. List titles named by the most profiles fill the
   rest, including whatever the sets left. Titles the library has are left
   out: by TMDB ID and the stored IMDb and TVDB IDs when the pool is chosen,
   and by every ID a fetched detail gives, so a title the library has under
@@ -597,7 +598,10 @@ runs as soon as it is turned off.
   whose text the provider refuses at every length is remembered in memory
   for this server, apart from library refusals: until its stored detail is
   due it is neither fetched nor embedded, and a refetch with the same text is
-  not sent again. A restart or a new embedding lock forgets it.
+  not sent again. A restart or a new embedding lock forgets it. A title
+  whose text changed loses its old vector before the new one is asked for,
+  so a failed embedding leaves it for the next run, not ranked by the old
+  text until its detail is due.
   A movie's content rating in the text is the US one the plugin stores (the
   theatrical certification, else the first US one), not the strictest one
   the rating guard uses.
@@ -612,7 +616,9 @@ runs as soon as it is turned off.
   a vector for the locked model: `score = z(similarity) + z(log(1 + votes))`,
   both standardized within those candidates, similarity being the cosine to
   the taste vector. The best 60 are kept, each with up to two reasons: the
-  library titles whose lists named it, best rank first. A profile with no
+  library titles whose lists named it, best rank first. Only a title the
+  profile watched, rated or favorited is named; one that is only on its
+  watchlist seeds the pool and is never a reason. A profile with no
   taste vector, or fewer than 10 candidates of a media type, gets no row of
   it, and a stale row is deleted.
 - **Rebuilds.** The job rebuilds every profile with a taste vector or a

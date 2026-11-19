@@ -572,6 +572,22 @@ func (r *Repo) DeleteExternalTitles(ctx context.Context, keys []ExternalTitleKey
 	return tag.RowsAffected(), nil
 }
 
+// deleteExternalEmbeddings deletes the vectors of the given titles and keeps
+// the titles.
+func (r *Repo) deleteExternalEmbeddings(ctx context.Context, keys []ExternalTitleKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	types, ids := externalKeyArrays(slices.SortedFunc(slices.Values(keys), compareExternalKeys))
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM external_title_embeddings e
+		USING  unnest($1::text[], $2::int[]) AS k(media_type, tmdb_id)
+		WHERE  e.media_type = k.media_type AND e.tmdb_id = k.tmdb_id`, types, ids); err != nil {
+		return fmt.Errorf("delete outside embeddings: %w", err)
+	}
+	return nil
+}
+
 // PruneExternalTitles applies retention: it deletes titles whose detail was
 // fetched before detailBefore, and titles and sources nothing has referenced
 // since unreferencedBefore, with the deleted sources' links. Each delete is

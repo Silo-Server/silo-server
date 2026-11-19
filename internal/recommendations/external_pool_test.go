@@ -73,12 +73,18 @@ func TestSelectExternalSeeds(t *testing.T) {
 	titles["dup"] = externalSeedTitle{key: ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: 120}} // same title as m119
 	weights["dup"] = 1000
 
-	seeds := selectExternalSeeds(weights, titles)
+	engaged := map[string]bool{"dup": true}
+	seeds := selectExternalSeeds(weights, engaged, titles)
 	if len(seeds) != externalMaxSeeds {
 		t.Fatalf("%d seeds, want %d", len(seeds), externalMaxSeeds)
 	}
 	if seeds[0].ContentID != "dup" || seeds[1].ContentID != "m118" {
 		t.Fatalf("heaviest seeds = %s, %s; want dup (one per title), then m118", seeds[0].ContentID, seeds[1].ContentID)
+	}
+	// Only a seed the profile watched, rated or favorited is named as a reason.
+	reasons := ExternalProfile{Seeds: seeds}.SeedContentIDs()
+	if len(reasons) != 1 || reasons[seeds[0].SourceKey()] != "dup" {
+		t.Fatalf("reason seeds = %v, want only dup", reasons)
 	}
 	for _, s := range seeds {
 		if s.ContentID == "m000" || s.ContentID == "no-tmdb" || s.ContentID == "m119" {
@@ -188,6 +194,20 @@ func TestChooseExternalPoolHalvesSets(t *testing.T) {
 	}
 	if !slices.Equal(chosen, want) {
 		t.Fatalf("chosen = %v\nwant %v", chosen, want)
+	}
+
+	// Two language sets that share titles still fill the sets' half: each of
+	// the 8 shared titles counts toward both quotas (5 and 5 of the 10 left
+	// after the recent set) and is added once, and the room that leaves goes
+	// to the sets' next titles.
+	overlap := []externalSetTitles{
+		{key: "set:lang:hi:recent:movie", titles: keys(200, 12)},
+		{key: "set:lang:hi:top:movie", titles: append(keys(200, 8), keys(300, 6)...)},
+		{key: "set:recent:movie", titles: keys(1, 4)},
+	}
+	chosen, _ = chooseExternalPool(overlap, [][]ExternalPoolTitle{pool}, nil, 500, 28)
+	if sets := len(chosen) - 14; sets != 14 {
+		t.Fatalf("%d set titles kept, want the whole half of 14: %v", sets, chosen)
 	}
 
 	// Sets that fit leave the rest of their half to list titles.

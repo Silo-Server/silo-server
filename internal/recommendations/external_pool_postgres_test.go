@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -380,5 +381,50 @@ func TestBuildExternalPoolRemembersRefusedTitlesDB(t *testing.T) {
 	counts = s.build(externalTMDBRequestBudget, externalEmbedBudget)
 	if s.tmdb.detailCalls(refused) != 2 || tries() != firstTries || counts.RefusedSkipped != 1 {
 		t.Fatalf("refetch run: %+v, %d detail calls, %d tries", counts, s.tmdb.detailCalls(refused), tries()-firstTries)
+	}
+}
+
+// A title whose text changed and whose new embedding fails is left without a
+// vector, so the next run embeds it; it is not ranked by the old text until
+// its detail is due again.
+func TestBuildExternalPoolReembedsChangedTextAfterFailureDB(t *testing.T) {
+	s := newExternalPoolScenario(t, 925_000_000)
+	ctx := context.Background()
+	s.lock()
+	texts := 0
+	s.engine.embClient = vectorsOfTexts(4, &texts)
+	s.build(externalTMDBRequestBudget, externalEmbedBudget)
+	if s.vectors() != len(s.pool) {
+		t.Fatalf("%d vectors after the first run, want %d", s.vectors(), len(s.pool))
+	}
+
+	changed := s.pool[0]
+	s.tmdb.details[changed].Overview = "a changed overview"
+	if _, err := s.db.Exec(ctx, `UPDATE external_titles SET detail_fetched_at = now() - interval '121 days' WHERE media_type = $1 AND tmdb_id = $2`, changed.MediaType, changed.TMDBID); err != nil {
+		t.Fatal(err)
+	}
+	s.engine.embClient = quotaTestEmbedder(func(context.Context, []string) ([][]float32, error) {
+		return nil, errors.New("embedding provider is down")
+	})
+	if _, err := s.engine.buildExternalPool(ctx, s.profiles, ExternalPoolOptions{MaxTitles: 5000},
+		externalLimits{tmdbRequests: externalTMDBRequestBudget, embeds: externalEmbedBudget}); err == nil {
+		t.Fatal("the run with a failing embedder reported no error")
+	}
+	stored, err := s.engine.repo.ExternalEmbeddingTexts(ctx, s.pool, externalTestModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stored[changed]; ok || len(stored) != len(s.pool)-1 {
+		t.Fatalf("after the failed run %d vectors remain (changed title kept: %v), want only the changed title's gone", len(stored), ok)
+	}
+
+	s.engine.embClient = vectorsOfTexts(4, &texts)
+	s.build(externalTMDBRequestBudget, externalEmbedBudget)
+	stored, err = s.engine.repo.ExternalEmbeddingTexts(ctx, s.pool, externalTestModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored[changed], "a changed overview") {
+		t.Fatalf("the changed title's stored text = %q, want the new overview", stored[changed])
 	}
 }

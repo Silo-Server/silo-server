@@ -223,16 +223,21 @@ func (r *externalRun) dropOwnedDetails(ctx context.Context, details []externalDe
 
 // storeDetails upserts the fetched titles and returns the IDs and canonical
 // texts of those to embed: every fetched title whose text differs from the
-// one stored with its vector and from one the provider refused.
+// one stored with its vector and from one the provider refused. A title
+// whose text changed loses its old vector first, so a failed embedding leaves
+// it without one and the next run embeds it, instead of ranking it by the
+// old text until its detail is due again.
 func (r *externalRun) storeDetails(ctx context.Context, details []externalDetail, storedTexts map[ExternalTitleKey]string, refused *refusedEmbedInputs) (ids, texts []string, err error) {
 	titles := make([]ExternalTitle, 0, len(details))
+	var changed []ExternalTitleKey
 	for _, d := range details {
 		if d.detail == nil {
 			continue
 		}
 		titles = append(titles, externalTitleFromDetail(d.key, d.detail, r.now))
 		text := embeddings.BuildEmbeddingText(externalDetailItem(d.key.MediaType, d.detail))
-		if stored, ok := storedTexts[d.key]; ok && stored == text {
+		stored, hasVector := storedTexts[d.key]
+		if hasVector && stored == text {
 			r.counts.TextUnchanged++
 			continue
 		}
@@ -241,10 +246,16 @@ func (r *externalRun) storeDetails(ctx context.Context, details []externalDetail
 			r.counts.RefusedSkipped++
 			continue
 		}
+		if hasVector {
+			changed = append(changed, d.key)
+		}
 		ids = append(ids, id)
 		texts = append(texts, text)
 	}
 	if err := r.e.repo.UpsertExternalTitles(ctx, titles); err != nil {
+		return nil, nil, err
+	}
+	if err := r.e.repo.deleteExternalEmbeddings(ctx, changed); err != nil {
 		return nil, nil, err
 	}
 	return ids, texts, nil

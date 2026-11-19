@@ -883,6 +883,7 @@
 ./internal/recommendations TestBuildExternalPoolForgetsTitlesTMDBLacksDB
 ./internal/recommendations TestBuildExternalPoolDropsTitlesOwnedByOtherIDsDB
 ./internal/recommendations TestBuildExternalPoolRemembersRefusedTitlesDB
+./internal/recommendations TestBuildExternalPoolReembedsChangedTextAfterFailureDB
 ./internal/recommendations TestRebuildExternalRowsDB
 ./internal/recommendations TestExternalRowRefusalsDB
 ./internal/recommendations TestResetEmbeddingsClearsOutsideVectorsAndRowsDB

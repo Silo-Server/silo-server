@@ -702,6 +702,21 @@ func chooseExternalPool(sets []externalSetTitles, pools [][]ExternalPoolTitle, o
 			}
 		}
 	}
+	// A title two language sets share counts toward both quotas and is added
+	// once, so a set can fall short of its share. The room that leaves goes
+	// to the language sets' remaining titles, rank by rank across them.
+	for rank := 0; len(chosen) < setCap; rank++ {
+		more := false
+		for _, c := range candidates {
+			if rank < len(c) {
+				more = true
+				add(c[rank], setCap)
+			}
+		}
+		if !more {
+			break
+		}
+	}
 	lists := make([]ExternalTitleKey, 0, len(profiles))
 	for k := range profiles {
 		lists = append(lists, k)

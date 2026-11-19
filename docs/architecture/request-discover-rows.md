@@ -138,7 +138,7 @@ row (at most 60 titles), then:
   rows, and the API adds `in_watchlist` the same way. A title stays `missing`.
 
 Each title carries up to two `reasons`: the library titles that led to it, best
-first. A reason the viewer cannot see is left out; the title stays.
+first, and only ones the profile watched, rated or favorited. A reason the viewer cannot see is left out; the title stays.
 
 Filtering comes before paging, so totals are exact: `total_results` counts the
 titles the viewer gets and `total_pages` is that over 20. The Discover page
