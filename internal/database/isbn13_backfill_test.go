@@ -97,6 +97,65 @@ func TestPostgresISBN13Backfill(t *testing.T) {
 	}
 }
 
+// TestPostgresISBN13BackfillRetriesUniqueViolation commits another item's
+// ISBN-13 between a batch's DELETE and its UPDATE, so the UPDATE collides on
+// the unique key. The batch must run again and delete the raw spelling.
+func TestPostgresISBN13BackfillRetriesUniqueViolation(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
+		t.Fatalf("initial migration: %v", err)
+	}
+
+	prefix := fmt.Sprintf("isbn13-backfill-retry-%d-", time.Now().UnixNano())
+	isbn10, isbn13 := testISBNs()
+	contentIDs := seedISBN13BackfillItems(ctx, t, pool, prefix, []isbnSeed{
+		{"raw", "ebook", "isbn", isbn10(0)},
+		{"holder", "ebook", "isbn", prefix + "placeholder"},
+	})
+	holderID := prefix + "holder"
+
+	var attempts []int
+	isbn13BackfillAfterDelete = func(ctx context.Context, attempt int) error {
+		attempts = append(attempts, attempt)
+		if attempt != 1 {
+			return nil
+		}
+		// Committed on another connection, as a concurrent writer would.
+		_, err := pool.Exec(ctx,
+			`UPDATE media_item_provider_ids SET provider_id = $1 WHERE content_id = $2`,
+			isbn13(0), holderID)
+		return err
+	}
+	t.Cleanup(func() { isbn13BackfillAfterDelete = nil })
+
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	deleted, updated, err := rewriteISBN13ProviderIDBatch(ctx, sqlDB,
+		[]string{"isbn"}, []string{isbn10(0), isbn13(0)}, []string{isbn13(0), isbn13(0)})
+	if err != nil {
+		t.Fatalf("rewriteISBN13ProviderIDBatch: %v", err)
+	}
+	if !slices.Equal(attempts, []int{1, 2}) {
+		t.Errorf("batch attempts = %v, want [1 2]", attempts)
+	}
+	if deleted != 1 || updated != 0 {
+		t.Errorf("deleted, updated = %d, %d; want 1, 0", deleted, updated)
+	}
+	want := []string{"holder isbn " + isbn13(0)}
+	if got := readISBN13BackfillRows(ctx, t, pool, prefix, contentIDs); !slices.Equal(got, want) {
+		t.Errorf("provider ids after backfill:\n got %q\nwant %q", got, want)
+	}
+}
+
 type isbnSeed struct{ item, itemType, provider, value string }
 
 func seedISBN13BackfillItems(ctx context.Context, t *testing.T, pool *pgxpool.Pool, prefix string, seeds []isbnSeed) []string {

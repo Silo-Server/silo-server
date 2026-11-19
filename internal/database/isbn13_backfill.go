@@ -3,11 +3,13 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pressly/goose/v3"
 
 	"github.com/Silo-Server/silo-server/internal/bookid"
@@ -21,6 +23,15 @@ const isbn13BackfillVersion int64 = 20261119213533
 // each, one committed provider-ID batch rewrites, and how many media_files
 // rows one group-key batch reads.
 const isbn13BackfillBatchSize = 1000
+
+// isbn13BackfillBatchAttempts bounds how many times one provider-ID batch runs
+// when a writer stores a competing ISBN-13 between its ranking and its write.
+const isbn13BackfillBatchAttempts = 3
+
+// isbn13BackfillAfterDelete, when set, runs inside each provider-ID batch
+// between its DELETE and its UPDATE. Tests use it to commit a competing row
+// at that point; it is nil in production.
+var isbn13BackfillAfterDelete func(ctx context.Context, attempt int) error
 
 // ebookISBNGroupKeyPrefix is the content_group_key prefix the ebook scanner
 // gives a file grouped by its ISBN.
@@ -43,8 +54,13 @@ const ebookISBNGroupKeyPrefix = "ebook:isbn:"
 //
 // Go rather than SQL because the rule is bookid.CanonicalISBN; restating it in
 // SQL would be a second copy that drifts. RunDB rather than RunTx so each batch
-// commits on its own. A row an older release writes during a rolling upgrade
-// still compares equal, and its next metadata write stores the ISBN-13.
+// commits on its own.
+//
+// A row an older release writes after the backfill (upgrades before 1.0 are
+// not rolling; see "Cluster cutover policy" in docs/architecture/api-contract.md)
+// is still compared as equal at admission. The item's next metadata write
+// stores the ISBN-13, unless another item of the type already holds it: that
+// write then fails on the unique key until an admin resolves the duplicate.
 func isbn13BackfillMigration() *goose.Migration {
 	m := goose.NewGoMigration(
 		isbn13BackfillVersion,
@@ -132,7 +148,30 @@ func isbn13Spellings(stored []string) map[string][]string {
 // rewriteISBN13ProviderIDBatch deletes all but one row per (provider,
 // item_type, ISBN) among the rows holding a spelling of a batch ISBN, then
 // stores the ISBN-13 on the rows left. raws[i] is a spelling of isbns[i].
+//
+// A writer that stores an ISBN-13 between the ranking and the write makes the
+// UPDATE fail on the unique key. The batch then rolls back and runs again: the
+// new ranking sees that writer's row as the holder and deletes the spelling
+// that collided with it.
 func rewriteISBN13ProviderIDBatch(ctx context.Context, db *sql.DB, providers, raws, isbns []string) (int64, int64, error) {
+	for attempt := 1; ; attempt++ {
+		deleted, updated, err := rewriteISBN13ProviderIDBatchOnce(ctx, db, providers, raws, isbns, attempt)
+		if err == nil || attempt == isbn13BackfillBatchAttempts || !isUniqueViolation(err) {
+			return deleted, updated, err
+		}
+		slog.WarnContext(ctx, "ISBN-13 backfill: batch hit a unique violation, retrying",
+			"attempt", attempt, "error", err)
+	}
+}
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "23505"
+}
+
+func rewriteISBN13ProviderIDBatchOnce(ctx context.Context, db *sql.DB, providers, raws, isbns []string, attempt int) (int64, int64, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("ISBN-13 backfill: begin batch: %w", err)
@@ -143,7 +182,7 @@ func rewriteISBN13ProviderIDBatch(ctx context.Context, db *sql.DB, providers, ra
 WITH spelling(raw, isbn) AS (
         SELECT * FROM unnest($2::text[], $3::text[])),
      held AS (
-        SELECT p.content_id, p.provider,
+        SELECT p.content_id, p.provider, p.provider_id,
                row_number() OVER (
                    PARTITION BY p.provider, p.item_type, s.isbn
                    ORDER BY (p.provider_id = s.isbn) DESC, p.content_id) AS rank
@@ -154,7 +193,8 @@ DELETE FROM public.media_item_provider_ids p
  USING held h
  WHERE h.rank > 1
    AND p.content_id = h.content_id
-   AND p.provider = h.provider`, providers, raws, isbns)
+   AND p.provider = h.provider
+   AND p.provider_id = h.provider_id`, providers, raws, isbns)
 	if err != nil {
 		return 0, 0, fmt.Errorf("ISBN-13 backfill: deleting duplicate ISBN rows: %w", err)
 	}
@@ -163,8 +203,15 @@ DELETE FROM public.media_item_provider_ids p
 		return 0, 0, fmt.Errorf("ISBN-13 backfill: deleting duplicate ISBN rows: %w", err)
 	}
 
-	// A row another writer stored since the delete keeps the ISBN, and the
-	// spelling it competes with stays as it is.
+	if isbn13BackfillAfterDelete != nil {
+		if err := isbn13BackfillAfterDelete(ctx, attempt); err != nil {
+			return 0, 0, fmt.Errorf("ISBN-13 backfill: test hook: %w", err)
+		}
+	}
+
+	// Every spelling left is the only one of its ISBN for its provider key and
+	// item type, unless a writer stored the ISBN-13 since the ranking. Then
+	// this fails on the unique key and the caller runs the batch again.
 	res, err = tx.ExecContext(ctx, `
 UPDATE public.media_item_provider_ids p
    SET provider_id = s.isbn,
@@ -172,13 +219,7 @@ UPDATE public.media_item_provider_ids p
   FROM unnest($2::text[], $3::text[]) AS s(raw, isbn)
  WHERE p.provider = ANY($1)
    AND p.provider_id = s.raw
-   AND s.raw <> s.isbn
-   AND NOT EXISTS (
-        SELECT 1
-          FROM public.media_item_provider_ids o
-         WHERE o.provider = p.provider
-           AND o.provider_id = s.isbn
-           AND o.item_type = p.item_type)`, providers, raws, isbns)
+   AND s.raw <> s.isbn`, providers, raws, isbns)
 	if err != nil {
 		return 0, 0, fmt.Errorf("ISBN-13 backfill: storing ISBN-13 values: %w", err)
 	}
