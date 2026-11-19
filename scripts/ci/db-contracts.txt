@@ -563,6 +563,7 @@
 ./internal/notifications TestPluginDestinationTextNeverCarriesSecretsDB
 ./internal/notifications TestPluginDestinationExhaustedScheduleDB
 ./internal/notifications TestPluginDestinationRetryOutlivesInboxRetentionDB
+./internal/notifications TestPushRetryOutlivesInboxRetentionDB
 ./internal/notifications TestFanoutQueuesPluginDestinationAttemptsDB
 ./internal/notifications TestPluginDestinationCreateAndAccountDeletionDontDeadlockDB
 ./internal/notifications TestPluginDestinationCreateRechecksTheProfileDB
