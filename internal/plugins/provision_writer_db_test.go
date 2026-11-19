@@ -154,16 +154,18 @@ func TestProvisionWriterAtomicOfflineDB(t *testing.T) {
 		t.Fatalf("pin left obsolete update metadata or bumped generation: %v, %v", pinned, err)
 	}
 
-	emptyContender := NewProvisionWriter(pool, repositories, installations, installer, catalog, configs, nil,
-		&ProvisionDocument{APIVersion: 1, Plugins: map[string]ProvisionPlugin{}}, nil)
-	t.Cleanup(emptyContender.Close)
-	if err := emptyContender.StartOffline(ctx); err != nil {
-		t.Fatal(err)
-	}
-	configs.SetProvisionWriter(emptyContender)
-	localStatus, err := configs.ListProvisionStatus(ctx)
-	if err != nil || len(localStatus) != 2 || localStatus[0].State != "refused" || localStatus[1].State != "refused" {
-		t.Fatalf("empty declaration lock conflict status: %#v, %v", localStatus, err)
+	for _, declared := range []map[string]ProvisionPlugin{{}, {first.PluginID: {Version: "2.0.0"}}} {
+		conflict := NewProvisionWriter(pool, repositories, installations, installer, catalog, configs, nil,
+			&ProvisionDocument{APIVersion: 1, Plugins: declared}, nil)
+		if err := conflict.StartOffline(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(conflict.Close)
+		configs.SetProvisionWriter(conflict)
+		localStatus, err := configs.ListProvisionStatus(ctx)
+		if err != nil || len(localStatus) != 2 || localStatus[0].State != "refused" || localStatus[1].State != "refused" {
+			t.Fatalf("release blocked by competing writer: %#v, %v", localStatus, err)
+		}
 	}
 	committedStatus, err := ListProvisionStatus(ctx, pool)
 	if err != nil || len(committedStatus) != 2 || committedStatus[0].State != "applied" || committedStatus[1].State != "applied" {

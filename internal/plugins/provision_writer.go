@@ -346,13 +346,9 @@ func (w *ProvisionWriter) loseAuthority() {
 
 func (w *ProvisionWriter) saveFailureStatus(ctx context.Context, state, detail string, refusal *provisionRefusalError) error {
 	return pgx.BeginFunc(ctx, w.conn, func(tx pgx.Tx) error {
-		statuses := w.statuses(state, detail)
-		if len(statuses) == 0 {
-			var err error
-			statuses, err = statusOfUnappliedRelease(ctx, tx, nil, state, detail)
-			if err != nil {
-				return err
-			}
+		statuses, err := w.unappliedStatuses(ctx, tx, nil, state, detail)
+		if err != nil {
+			return err
 		}
 		for i := range statuses {
 			if refusal != nil && statuses[i].PluginID == refusal.pluginID {
@@ -401,47 +397,41 @@ func (s *RuntimeConfigStore) ListProvisionStatus(ctx context.Context) ([]Provisi
 	if state == "" {
 		return committed, err
 	}
-	if len(s.provisionWriter.document.Plugins) == 0 {
-		if err != nil {
-			return nil, err
-		}
-		return statusOfUnappliedRelease(ctx, s.pool, committed, state, detail)
+	if err != nil && len(s.provisionWriter.document.Plugins) == 0 {
+		return nil, err
 	}
-	local := s.provisionWriter.statuses(state, detail)
-	records := make(map[string]ProvisionStatus)
-	for _, status := range committed {
-		records[status.PluginID] = status
+	statuses, err := s.provisionWriter.unappliedStatuses(ctx, s.pool, committed, state, detail)
+	if err != nil && len(s.provisionWriter.document.Plugins) != 0 {
+		// The declaring process can still explain its own refusal during a database outage.
+		return s.provisionWriter.statuses(state, detail), nil
 	}
-	for _, status := range local {
-		records[status.PluginID] = status
-	}
-	return sortedProvisionStatus(records), nil
+	return statuses, err
 }
 
-// An empty declaration requests release of the previously managed plugins.
-// Its local failure belongs to those plugin IDs even though the document has
-// none of its own.
-func statusOfUnappliedRelease(ctx context.Context, db provisionConfigQuery, committed []ProvisionStatus, state, detail string) ([]ProvisionStatus, error) {
-	records := make(map[string]ProvisionStatus)
-	for _, status := range committed {
-		status.State, status.Detail = state, detail
-		records[status.PluginID] = status
-	}
-	rows, err := db.Query(ctx, `SELECT i.plugin_id, i.version FROM plugin_installations i
-		JOIN plugin_provision_ownership o ON o.plugin_installation_id = i.id`)
+// A declaration that fails also leaves its requested releases unapplied. Include
+// every installation still owned, then overlay the requested versions.
+func (w *ProvisionWriter) unappliedStatuses(ctx context.Context, db provisionConfigQuery, committed []ProvisionStatus, state, detail string) ([]ProvisionStatus, error) {
+	rows, err := db.Query(ctx, `SELECT i.plugin_id, i.version, $1::text, $2::text FROM plugin_installations i
+		JOIN plugin_provision_ownership o ON o.plugin_installation_id = i.id`, state, detail)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		status := ProvisionStatus{State: state, Detail: detail}
-		if err := rows.Scan(&status.PluginID, &status.Version); err != nil {
-			return nil, err
+	owned, err := pgx.CollectRows(rows, pgx.RowToStructByPos[ProvisionStatus])
+	if err != nil {
+		return nil, err
+	}
+	records := make(map[string]ProvisionStatus)
+	for _, status := range committed {
+		if len(w.document.Plugins) == 0 {
+			status.State, status.Detail = state, detail
 		}
 		records[status.PluginID] = status
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	for _, status := range owned {
+		records[status.PluginID] = status
+	}
+	for _, status := range w.statuses(state, detail) {
+		records[status.PluginID] = status
 	}
 	return sortedProvisionStatus(records), nil
 }

@@ -167,7 +167,14 @@ func swapPluginProvisionRestore(t *testing.T, src *Source, loader PGLoader, opts
 	}
 	defer func() { _ = ctl.Close(ctx) }()
 	opts.LiveURL = dstURL
+	var previous string
+	opts.Journaled = func(stamp string) { previous = "silo_before_restore_" + stamp }
 	if err := RestoreSwap(ctx, src, loader, ctl, opts); err != nil {
+		t.Fatal(err)
+	}
+	// The swap retains the old database under a name shared across tests
+	// within the same second. This fixture is finished with it.
+	if err := ctl.Drop(ctx, previous); err != nil {
 		t.Fatal(err)
 	}
 	return dstURL

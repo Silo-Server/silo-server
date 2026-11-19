@@ -39,7 +39,7 @@ func TestProvisionWriterRestartsAfterRestoreHoldDB(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		if _, err := pool.Exec(context.Background(), "DELETE FROM plugin_provision_status WHERE plugin_id=$1", tmdbID); err != nil {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM plugin_provision_status WHERE plugin_id IN ($1,$2)", tmdbID, pluginIDTVDB); err != nil {
 			t.Error(err)
 		}
 	})
@@ -72,6 +72,16 @@ func TestProvisionWriterRestartsAfterRestoreHoldDB(t *testing.T) {
 	release := newWriter(false)
 	release.document.Plugins = map[string]ProvisionPlugin{}
 	checkHeldProvisionRelease(t, release, installation, holdID)
+	release.Close()
+	partial := newWriter(false)
+	partial.document.Plugins = map[string]ProvisionPlugin{pluginIDTVDB: {}}
+	if err := partial.StartOffline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := ListProvisionStatus(ctx, pool)
+	if err != nil || len(statuses) != 2 || statuses[0].State != "held" || statuses[1].State != "held" {
+		t.Fatalf("partial release did not retain both statuses: %v, %v", statuses, err)
+	}
 }
 
 func checkHeldProvisionRelease(t *testing.T, w *ProvisionWriter, installation *Installation, holdID string) {
