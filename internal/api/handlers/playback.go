@@ -627,15 +627,17 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 				// cannot revive the old runtime on this origin.
 				return session, playback.SessionLoaded, nil, nil, nil
 			}
-			if card != nil && card.TranscodeNodeURL != "" {
-				// The card runs on a node this copy does not know about: another
-				// replica replanned the session there. The serve handler relays
-				// to the card's node; nothing is rebuilt here (#4601).
-				return session, playback.SessionLoaded, card, claims, nil
-			}
 			if card != nil {
 				if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
 					return nil, playback.SessionMissing, nil, nil, nil
+				}
+				if card.TranscodeNodeURL != "" {
+					// The card runs on a node this copy does not know about:
+					// another replica replanned the session there. The serve
+					// handler relays to the card's node; nothing is rebuilt
+					// here (#4601). The copy-safety verdict above still
+					// applies, as it does to a node card with no live copy.
+					return session, playback.SessionLoaded, card, claims, nil
 				}
 				session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 				return session, status, card, claims, reconstructErr
