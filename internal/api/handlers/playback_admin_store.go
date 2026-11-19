@@ -73,8 +73,9 @@ type AdminPlaybackHistoryEntry struct {
 	// none.
 	EndReason PlaybackEndReason
 	// Subtitle is the subtitle the session's plan delivered when the play
-	// ended; nil when it showed none. A finalization that got further than
-	// the row replaces it.
+	// ended; nil when it showed none. The finalization that ended later
+	// decides it, whatever position it ended at: a play can seek back,
+	// switch subtitles and stop before where an earlier end left it.
 	Subtitle *playback.SessionSubtitle
 }
 
@@ -147,7 +148,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END, $27)
 		ON CONFLICT (session_id) DO UPDATE SET
 			watched_seconds = GREATEST(admin_playback_history.watched_seconds, EXCLUDED.watched_seconds),
-			subtitle = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
+			subtitle = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at
 				THEN EXCLUDED.subtitle ELSE admin_playback_history.subtitle END,
 			duration_seconds = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 				THEN COALESCE(EXCLUDED.duration_seconds, admin_playback_history.duration_seconds)
@@ -173,6 +174,8 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			OR (EXCLUDED.measured AND NOT admin_playback_history.measured)
 			OR (EXCLUDED.completed AND NOT admin_playback_history.completed)
 			OR `+laterStretch+`
+			OR (EXCLUDED.ended_at > admin_playback_history.ended_at
+				AND EXCLUDED.subtitle IS DISTINCT FROM admin_playback_history.subtitle)
 	`,
 		entry.SessionID,
 		entry.UserID,

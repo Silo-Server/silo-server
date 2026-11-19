@@ -655,6 +655,11 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	}
 	session := h.attemptSessionV2(ctx, record, position, paused)
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	if record.CurrentPlanID != "" {
+		// The attempt holds the plan the last replan committed. The live row
+		// can be gone after a restart, leaving only where the play started.
+		session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+	}
 	result := h.recordStopHistory(ctx, session, reason)
 	// The copy on another replica is dropped without telling providers, so
 	// the end recorded here does, unless its caller tells them itself.
