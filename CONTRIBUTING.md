@@ -375,9 +375,12 @@ live in a separate repository,
 and nothing updates them automatically. To report a guide that is wrong,
 missing, or out of date, open a docs issue there instead of a pull request:
 select **Suggest a change** at the bottom of the page, or use the
-[Suggest a docs change](https://github.com/Silo-Server/siloserver.org/issues/new?template=docs.yml) form. Only collaborators open pull requests in
-that repository. When a code change here leaves the site wrong or incomplete,
-open a docs issue there as well.
+[Suggest a docs change](https://github.com/Silo-Server/siloserver.org/issues/new?template=docs.yml)
+form. For a guide that doesn't exist yet, give the closest page under
+**Page**, as [Improve these docs](https://siloserver.org/docs/improve-the-docs)
+describes. Only collaborators open pull requests in that repository. When a
+code change here leaves the site wrong or incomplete, open a docs issue there
+as well.
 
 A change needs a docs issue when it:
 
