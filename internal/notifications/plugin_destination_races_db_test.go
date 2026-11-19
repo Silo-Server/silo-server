@@ -16,8 +16,10 @@ import (
 // waitForLockWait waits until another backend is waiting on a row lock.
 func waitForLockWait(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.After(10 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
 		var waiting bool
 		if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
 			WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid())`).Scan(&waiting); err != nil {
@@ -26,9 +28,12 @@ func waitForLockWait(t *testing.T, pool *pgxpool.Pool) {
 		if waiting {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-deadline:
+			t.Fatal("no backend waited on a lock")
+		case <-poll.C:
+		}
 	}
-	t.Fatal("no backend waited on a lock")
 }
 
 // A create and an account deletion lock the account first, so they wait on

@@ -473,28 +473,10 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 		return result
 	}
 	if claimed != nil {
-		// Reaching the plugin can take seconds. Just before the call the
-		// claim must still hold, and the destination is read again: one
-		// turned off or deleted meanwhile gets nothing, and one edited
-		// meanwhile is sent its new settings, which the bookkeeping then
-		// applies to.
-		held, err := s.repo.ClaimHeld(ctx, *claimed, pluginSendTimeout+pluginClaimMargin)
-		if err != nil || !held {
-			return pluginSendResult{claimLost: true}
+		var stop *pluginSendResult
+		if d, stored, stop = s.recheckBeforeSend(ctx, *claimed, d, stored); stop != nil {
+			return *stop
 		}
-		current, err := s.repo.getByIDUnscoped(ctx, d.ID)
-		if err != nil {
-			return pluginSendResult{claimLost: true}
-		}
-		if current == nil || !current.Enabled {
-			return pluginSendResult{skipped: true, sent: current}
-		}
-		if current.Revision != d.Revision {
-			if stored, err = s.decryptConfig(current); err != nil {
-				return pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true, sent: current}
-			}
-		}
-		d = current
 	}
 	config, err := structpb.NewStruct(stored.Values)
 	if err != nil {
@@ -519,6 +501,32 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 		s.logSendError(ctx, d, channel, stored, err)
 	}
 	return result
+}
+
+// recheckBeforeSend runs just before a claimed attempt's send RPC, after
+// reaching the plugin, which can take seconds. The claim must still hold,
+// and the destination is read again: one turned off or deleted meanwhile
+// gets nothing, and one edited meanwhile is sent its new settings, which the
+// bookkeeping then applies to. A non-nil result ends the send with it.
+func (s *pluginDestinationSender) recheckBeforeSend(ctx context.Context, claimed DeliveryAttempt, d *PluginDestination, stored pluginSettings) (*PluginDestination, pluginSettings, *pluginSendResult) {
+	held, err := s.repo.ClaimHeld(ctx, claimed, pluginSendTimeout+pluginClaimMargin)
+	if err != nil || !held {
+		return d, stored, &pluginSendResult{claimLost: true}
+	}
+	current, err := s.repo.getByIDUnscoped(ctx, d.ID)
+	if err != nil {
+		return d, stored, &pluginSendResult{claimLost: true}
+	}
+	if current == nil || !current.Enabled {
+		return d, stored, &pluginSendResult{skipped: true, sent: current}
+	}
+	if current.Revision == d.Revision {
+		return current, stored, nil
+	}
+	if stored, err = s.decryptConfig(current); err != nil {
+		return d, stored, &pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true, sent: current}
+	}
+	return current, stored, nil
 }
 
 // logSendError logs a failed call, masked like a stored message. An

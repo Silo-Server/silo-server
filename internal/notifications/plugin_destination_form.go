@@ -116,16 +116,13 @@ func (c PluginChannel) FormFields() []PluginFormField {
 // stays a string; saving checks it against the schema either way.
 func typedOptionValue(value, valueType string) any {
 	switch valueType {
-	case "integer", "number":
-		var number json.Number
-		if json.Unmarshal([]byte(value), &number) == nil {
-			if valueType == "number" {
-				if f, err := number.Float64(); err == nil {
-					return f
-				}
-			} else if i, err := number.Int64(); err == nil {
-				return i
-			}
+	case "integer":
+		if i, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return i
+		}
+	case "number":
+		if f, err := strconv.ParseFloat(value, 64); err == nil {
+			return f
 		}
 	case "boolean":
 		if b, err := strconv.ParseBool(value); err == nil {
