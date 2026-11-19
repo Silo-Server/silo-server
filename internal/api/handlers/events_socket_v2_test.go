@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +29,7 @@ func (v *socketValidity) fail(err error) { v.err.Store(&err) }
 
 func socketTestHandler() (*EventsSocketV2, *socketValidity) {
 	validity := new(socketValidity)
-	h := &EventsSocketV2{Events: NewEventsHandler(evt.NewHub("socket-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents), checkInterval: time.Millisecond * 10}
+	h := &EventsSocketV2{Events: NewEventsHandler(evt.NewHub("socket-fixture", nil), nil, nil, nil, nil, nil), Tickets: evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents), checkInterval: time.Millisecond * 10}
 	h.Validate = func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		if err := validity.err.Load(); err != nil {
 			return ctx, nil, *err
@@ -676,5 +677,47 @@ func TestEventsSocketV2ClosesWhenKeyRevoked(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+// The sessions channel is a cue to re-read GET /api/v2/admin/sessions: its
+// subscribe snapshot and sessions.replaced frames carry null, never rows.
+func TestEventsSocketV2SessionsFramesCarryNoRows(t *testing.T) {
+	f := newMonitorKeySocket(t)
+	server := httptest.NewServer(f.h)
+	defer server.Close()
+	ticket, err := f.h.Mint(t.Context(), f.identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+	conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?channels=sessions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	defer func() { _ = resp.Body.Close() }()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	read := func(want string) map[string]json.RawMessage {
+		t.Helper()
+		for {
+			var frame map[string]json.RawMessage
+			if err := conn.ReadJSON(&frame); err != nil {
+				t.Fatalf("waiting for %s: %v", want, err)
+			}
+			if string(frame["type"]) == `"`+want+`"` {
+				return frame
+			}
+		}
+	}
+	if snapshot := read("snapshot"); string(snapshot["data"]) != "null" {
+		t.Fatalf("sessions snapshot data = %s, want null", snapshot["data"])
+	}
+	if err := f.h.Events.hub.PublishJSON(t.Context(), evt.ChannelSessions, "sessions.replaced", nil, evt.PublishOptions{AdminOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	event := read("event")
+	if string(event["event"]) != `"sessions.replaced"` || string(event["data"]) != "null" {
+		t.Fatalf("sessions.replaced frame = %s %s, want null data", event["event"], event["data"])
 	}
 }

@@ -249,8 +249,7 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
 
 1. On subscribe, and after each `sessions.replaced`, read every page of
    `GET /api/v2/admin/sessions`. The `sessions.replaced` frame and the channel's
-   snapshot keep the older row shape and at most 200 rows; use them only as a
-   cue to re-read.
+   subscribe snapshot carry `data: null`; they are only the cue to re-read.
 2. Per session id, the record with the higher `lifecycle_seq` or `seq` decides whether
    the session is live and whether it is paused. A row and an event with equal numbers
    carry the same state. Position and stream fields are observations: take them from
