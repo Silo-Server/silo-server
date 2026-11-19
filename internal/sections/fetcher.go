@@ -2746,7 +2746,8 @@ func recentlyAddedConfigFilters(config json.RawMessage) SectionConfigFilters {
 	if len(config) > 0 {
 		_ = json.Unmarshal(config, &legacyCfg)
 	}
-	if cfgFilters.FilterType == "" && len(legacyCfg.Types) > 0 {
+	// The legacy types list applies only to a config with no other scope.
+	if cfgFilters.FilterType == "" && cfgFilters.MediaScope == "" && len(legacyCfg.Types) > 0 {
 		cfgFilters.FilterType = legacyCfg.Types[0]
 	}
 	return cfgFilters

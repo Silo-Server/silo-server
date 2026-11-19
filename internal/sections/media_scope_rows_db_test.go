@@ -61,7 +61,13 @@ func TestMediaScopeRowsMatchSeeAllPostgres(t *testing.T) {
 		"ebook":   {prefix + "ebook"},
 		"manga":   {prefix + "manga"},
 	}
-	want["legacy video"] = want["video"]
+	// Configs a structured media_scope does not describe alone: a legacy
+	// filter_type, and a stray legacy types list beside a media_scope.
+	configs := map[string]json.RawMessage{
+		"legacy video":     json.RawMessage(`{"filter_type":"video"}`),
+		"video with types": json.RawMessage(`{"media_scope":"video","types":["audiobook"]}`),
+	}
+	want["legacy video"], want["video with types"] = want["video"], want["video"]
 	// The profile favorites every title, including the episode the row's
 	// library does not hold.
 	profileID := prefix + "profile"
@@ -69,12 +75,15 @@ func TestMediaScopeRowsMatchSeeAllPostgres(t *testing.T) {
 
 	fetcher := NewFetcher(pool)
 	fetcher.StoreProvider = provider
-	for _, scope := range []string{"video", "episode", "ebook", "manga", "legacy video"} {
+	for _, scope := range []string{"video", "episode", "ebook", "manga", "legacy video", "video with types"} {
 		for _, sectionType := range []SectionType{SectionRecentlyAdded, SectionRecentlyReleased, SectionRandom, SectionFavorites} {
+			if scope == "video with types" && sectionType != SectionRecentlyAdded {
+				continue // only Recently Added reads the legacy types list
+			}
 			t.Run(fmt.Sprintf("%s %s", sectionType, scope), func(t *testing.T) {
-				config := defaultMediaScopeConfig(scope)
-				if scope == "legacy video" {
-					config = json.RawMessage(`{"filter_type":"video"}`)
+				config, ok := configs[scope]
+				if !ok {
+					config = defaultMediaScopeConfig(scope)
 				}
 				section := ResolvedSection{ID: "scoped", SectionType: sectionType, Title: "Row", ItemLimit: 100, Config: config}
 				row, err := fetcher.FetchOne(ctx, section, &library, nil, userID, profileID, catalog.AccessFilter{})
