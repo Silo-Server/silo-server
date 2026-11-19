@@ -201,12 +201,6 @@ export function SubtitleMenu({
     [onSelect],
   );
 
-  const handleBlur = useCallback((e: React.FocusEvent) => {
-    if (!menuRef.current?.contains(e.relatedTarget as Node)) {
-      setOpen(false);
-    }
-  }, []);
-
   // A modal dialog hands focus back to whatever held it when it opened. A
   // pointer press leaves focus on the menu item, which closing the menu removes,
   // so focus moves to the subtitles button first.
@@ -231,7 +225,7 @@ export function SubtitleMenu({
       (aiTranscribeEnabled && (audioTracks?.length ?? 0) > 0));
 
   return (
-    <div ref={menuRef} className="relative" onBlur={handleBlur}>
+    <div ref={menuRef} className="relative">
       <button
         ref={triggerRef}
         type="button"
