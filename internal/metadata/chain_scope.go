@@ -48,11 +48,13 @@ func itemChainScopeFolders(ctx context.Context) []int {
 // content level. Libraries are taken in ID order and each provider keeps its
 // first position, so the oldest library's order leads and a provider only
 // another library names still runs, as it would on that library's own refresh.
+// The local tier stays ahead of every remote provider, as it does within one
+// chain (see local_tier.go), even when only a later library enables it.
 func (s *MetadataService) resolveLibrariesChain(ctx context.Context, folderIDs []int, contentLevel string) ([]Provider, error) {
 	if len(folderIDs) == 1 {
 		return s.resolveChainCached(ctx, folderIDs[0], contentLevel)
 	}
-	var merged []Provider
+	var local, remote []Provider
 	seen := make(map[capabilityKey]bool)
 	for _, folderID := range folderIDs {
 		chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
@@ -65,10 +67,16 @@ func (s *MetadataService) resolveLibrariesChain(ctx context.Context, folderIDs [
 				continue
 			}
 			seen[key] = true
-			merged = append(merged, provider)
+			// A resolved chain holds plugin providers and builtin (local)
+			// ones, as providersFromCapabilities builds them.
+			if _, isPlugin := provider.(*PluginProvider); isPlugin {
+				remote = append(remote, provider)
+			} else {
+				local = append(local, provider)
+			}
 		}
 	}
-	return merged, nil
+	return append(local, remote...), nil
 }
 
 // chainProviderKey identifies a provider across chains. Two plugin

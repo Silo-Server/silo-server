@@ -196,17 +196,20 @@ func TestScheduledRefreshOfAnItemInNoLibraryKeepsTheFallback(t *testing.T) {
 }
 
 // An item in several libraries merges their chains in library ID order, so a
-// provider only one library names still runs, and a provider named twice runs
-// once, at its first position.
+// provider only one library names still runs and a provider named twice runs
+// once, at its first position. The local tier stays first even when only a
+// later library enables it.
 func TestResolveLibrariesChainMergesInLibraryOrder(t *testing.T) {
-	a := &numberingProvider{slug: "a"}
-	b := &numberingProvider{slug: "b"}
-	c := &numberingProvider{slug: "c"}
+	nfo := &numberingProvider{slug: "nfo"}
+	tmdb := &PluginProvider{installationID: 5, capabilityID: "tmdb"}
+	tvdb := &PluginProvider{installationID: 6, capabilityID: "tvdb"}
+	plugin := &PluginProvider{installationID: 7, capabilityID: "plugin-meta"}
 	h := newTestHarness()
 	expiresAt := time.Now().Add(time.Hour)
 	h.service.chainCache = map[string]chainCacheEntry{
-		chainCacheKeyForTest(3, "series"): {providers: []Provider{b, a}, expiresAt: expiresAt},
-		chainCacheKeyForTest(9, "series"): {providers: []Provider{c, b}, expiresAt: expiresAt},
+		// Library 3 switched local metadata off.
+		chainCacheKeyForTest(3, "series"): {providers: []Provider{tmdb, tvdb}, expiresAt: expiresAt},
+		chainCacheKeyForTest(9, "series"): {providers: []Provider{nfo, tvdb, plugin}, expiresAt: expiresAt},
 	}
 	for _, folderID := range []int{9, 3} {
 		if err := h.libraryRepo.Upsert(context.Background(), "item", folderID, time.Now()); err != nil {
@@ -226,7 +229,7 @@ func TestResolveLibrariesChainMergesInLibraryOrder(t *testing.T) {
 	for _, provider := range chain {
 		slugs = append(slugs, provider.Slug())
 	}
-	if want := []string{"b", "a", "c"}; !slices.Equal(slugs, want) {
+	if want := []string{"nfo", "tmdb", "tvdb", "plugin-meta"}; !slices.Equal(slugs, want) {
 		t.Fatalf("merged chain = %v, want %v", slugs, want)
 	}
 }
