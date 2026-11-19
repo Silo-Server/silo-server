@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { hashKey, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
 
 import type {
   EpisodesResponse,
@@ -116,6 +116,59 @@ export function useCatalogItemDetail(id: string | undefined, libraryId?: number)
     queryFn: ({ signal }) => fetchCatalogItemDetail(id!, libraryId, { signal }),
     enabled: !!id,
   });
+}
+
+/**
+ * Reads an item's detail from the server whatever the cache holds, and returns
+ * the item only once that read has landed; from then on it follows the cache.
+ * A cached copy can predate a write: an unobserved query isn't refetched when
+ * invalidated, so a stale copy renders while the reopening refetch runs.
+ */
+export function useFreshCatalogItemDetail(id: string, libraryId?: number) {
+  const queryClient = useQueryClient();
+  const queryHash = hashKey(catalogKeys.itemDetail(id, libraryId));
+  const [read, setRead] = useState<{ queryHash: string; error: unknown }>();
+  const current = read?.queryHash === queryHash ? read : undefined;
+  const { data, fetchStatus, refetch } = useCatalogItemDetail(id, libraryId);
+
+  // Only a server response counts: a cache update is a manual success, and a
+  // cancelled fetch reverts without one. Once the item is shown it stays.
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (event.type !== "updated" || event.query.queryHash !== queryHash) return;
+        const { action } = event;
+        if (action.type === "success" && !action.manual) {
+          setRead({ queryHash, error: null });
+        } else if (action.type === "error") {
+          setRead((prev) =>
+            prev?.queryHash === queryHash && prev.error === null
+              ? prev
+              : { queryHash, error: action.error },
+          );
+        }
+      }),
+    [queryClient, queryHash],
+  );
+
+  // Read on opening, replacing a read already running: it may have started
+  // before a write that has since landed.
+  useEffect(() => {
+    void refetch();
+  }, [queryHash, refetch]);
+
+  // Read again when another caller cancels the read before it lands.
+  const waiting = current === undefined;
+  useEffect(() => {
+    const live = queryClient.getQueryCache().get(queryHash)?.state.fetchStatus;
+    if (waiting && fetchStatus === "idle" && live === "idle") void refetch();
+  }, [queryClient, queryHash, waiting, fetchStatus, refetch]);
+
+  return {
+    item: current?.error === null ? data : undefined,
+    error: current?.error ?? null,
+    retry: () => setRead(undefined),
+  };
 }
 
 export function useCatalogItemVersions(id: string | undefined) {
