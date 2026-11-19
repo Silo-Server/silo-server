@@ -557,8 +557,9 @@ without walking the schedule. Auto-disable on that path requires three
 *consecutive* deliveries to fail with a non-retryable 4xx, because
 destination-side WAF/CDN blips intermittently 4xx valid webhooks. The webhook
 row counts that streak (`consecutive_rejections`); a success, re-enabling, or
-a new URL resets it. A `Retry-After` header can lengthen the wait before the
-next attempt but never shortens the schedule. Auto-disable posts a
+a new URL resets it. On a 429, a `Retry-After` header can lengthen the wait
+before the next attempt but never shortens the schedule; other statuses ignore
+it. Auto-disable posts a
 `webhook.auto_disabled` notice to the profile's inbox — a type that is itself
 excluded from webhook dispatch so a broken webhook cannot loop. The disable
 and its notice commit with the attempt's outcome and the streaks, and only
