@@ -76,9 +76,10 @@ type trackedSession struct {
 	// request delivered media. The last release then lingers, whichever
 	// request it belongs to.
 	delivered bool
-	// plain is set when a plain Hold joined the session: it moved to another
-	// transport, so its last release ends it and no direct-play request's
-	// delivery makes it linger.
+	// plain says the latest hold on the session was a plain Hold: the session
+	// is on a transport whose requests span the stream, so its last release
+	// ends it. A lingering hold taken after it makes the session a direct play
+	// again.
 	plain bool
 }
 
@@ -173,7 +174,7 @@ func (tr *Tracker) Hold(ctx context.Context, info SessionInfo) func(context.Cont
 	}
 	var once sync.Once
 	return func(ctx context.Context) {
-		once.Do(func() { tr.release(ctx, info.SessionID, entry, false, false) })
+		once.Do(func() { tr.release(ctx, info.SessionID, entry, false) })
 	}
 }
 
@@ -185,7 +186,8 @@ func (tr *Tracker) Hold(ctx context.Context, info SessionInfo) func(context.Cont
 // session. When none did, the last release adds no linger: it ends the
 // session, unless an earlier linger is still running, which it leaves as it
 // was. A plain Hold for the session ends a running linger: the session moved
-// to another transport, whose own hold carries it. The first Touch for the
+// to another transport, whose own hold carries it. While holds of both kinds
+// overlap, the latest one decides which the session is. The first Touch for the
 // session after a lingering release writes its own record.
 func (tr *Tracker) HoldLingering(ctx context.Context, info SessionInfo) func(ctx context.Context, delivered bool) {
 	entry := tr.hold(ctx, info, true)
@@ -194,7 +196,7 @@ func (tr *Tracker) HoldLingering(ctx context.Context, info SessionInfo) func(ctx
 	}
 	var once sync.Once
 	return func(ctx context.Context, delivered bool) {
-		once.Do(func() { tr.release(ctx, info.SessionID, entry, true, delivered) })
+		once.Do(func() { tr.release(ctx, info.SessionID, entry, delivered) })
 	}
 }
 
@@ -213,8 +215,9 @@ func (tr *Tracker) hold(ctx context.Context, info SessionInfo, lingering bool) *
 	}
 	entry.holds++
 	entry.record = data
+	entry.plain = !lingering
 	if !lingering {
-		entry.plain = true
+		entry.delivered = false
 		if _, lingers := tr.lingering[info.SessionID]; lingers {
 			delete(tr.lingering, info.SessionID)
 			delete(tr.touched, info.SessionID)
@@ -228,10 +231,11 @@ func (tr *Tracker) hold(ctx context.Context, info SessionInfo, lingering bool) *
 	return entry
 }
 
-// release drops one hold and ends the session when it was the last one. The
-// last release of a session whose lingering holds delivered media moves it to
-// the touched set instead, and its record expires when its count does.
-func (tr *Tracker) release(ctx context.Context, sessionID string, entry *trackedSession, lingering, delivered bool) {
+// release drops one hold and ends the session when it was the last one. When
+// the session is a direct play (its latest hold was a lingering one) and a
+// request holding it delivered media, the last release moves it to the touched
+// set instead, and its record expires when its count does.
+func (tr *Tracker) release(ctx context.Context, sessionID string, entry *trackedSession, delivered bool) {
 	// The request that held the session may be canceled by now, and its end
 	// must still reach Redis, within a bound.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
@@ -242,7 +246,7 @@ func (tr *Tracker) release(ctx context.Context, sessionID string, entry *tracked
 		tr.mu.Unlock()
 		return
 	}
-	if lingering && delivered {
+	if delivered {
 		entry.delivered = true
 	}
 	entry.holds--
@@ -251,25 +255,10 @@ func (tr *Tracker) release(ctx context.Context, sessionID string, entry *tracked
 		return
 	}
 	delete(tr.sessions, sessionID)
-	if entry.plain {
-		lingering = false
-	}
-	if lingering && entry.delivered {
-		tr.touched[sessionID] = time.Now()
-		tr.lingering[sessionID] = entry.record
+	if record, ttl, ok := tr.lingerAfterLocked(sessionID, entry); ok {
 		tr.mu.Unlock()
-		tr.writeLinger(ctx, sessionID, entry.record, sessionTTL)
+		tr.writeLinger(ctx, sessionID, record, ttl)
 		return
-	}
-	if record, lingers := tr.lingering[sessionID]; lingering && lingers {
-		if left := sessionTTL - time.Since(tr.touched[sessionID]); left > 0 {
-			// An earlier linger still runs: these requests delivered nothing,
-			// so they neither extend it nor end it. Their hold gave the record
-			// a full TTL, which goes back to the time the linger has left.
-			tr.mu.Unlock()
-			tr.writeLinger(ctx, sessionID, record, left)
-			return
-		}
 	}
 	delete(tr.touched, sessionID)
 	delete(tr.lingering, sessionID)
@@ -278,6 +267,28 @@ func (tr *Tracker) release(ctx context.Context, sessionID string, entry *tracked
 	if err := tr.rdb.Del(ctx, tr.redisKey(sessionID)).Err(); err != nil {
 		slog.DebugContext(ctx, "session release failed", "component", "nodesessions", "error", err, "session", sessionID)
 	}
+}
+
+// lingerAfterLocked reports whether a session whose last hold was just
+// released lingers, with the record to keep and for how long. A direct play
+// that delivered media starts a new linger. One that delivered nothing leaves
+// an earlier linger as it was: its hold gave the record a full TTL, which goes
+// back to the time that linger has left. The caller holds the lock.
+func (tr *Tracker) lingerAfterLocked(sessionID string, entry *trackedSession) ([]byte, time.Duration, bool) {
+	if entry.plain {
+		return nil, 0, false
+	}
+	if entry.delivered {
+		tr.touched[sessionID] = time.Now()
+		tr.lingering[sessionID] = entry.record
+		return entry.record, sessionTTL, true
+	}
+	record, lingers := tr.lingering[sessionID]
+	left := sessionTTL - time.Since(tr.touched[sessionID])
+	if !lingers || left <= 0 {
+		return nil, 0, false
+	}
+	return record, left, true
 }
 
 // writeLinger writes a lingering session's record with the time it has left.
@@ -289,10 +300,12 @@ func (tr *Tracker) writeLinger(ctx context.Context, sessionID string, record []b
 	if err := tr.rdb.Set(ctx, key, record, ttl).Err(); err != nil {
 		slog.DebugContext(ctx, "session linger set failed", "component", "nodesessions", "error", err, "session", sessionID)
 	}
+	// The check and the delete run under the lock, so a Hold or Touch that
+	// registers the session again sends its SET after them.
 	tr.mu.Lock()
+	defer tr.mu.Unlock()
 	_, held := tr.sessions[sessionID]
 	_, touched := tr.touched[sessionID]
-	tr.mu.Unlock()
 	if held || touched {
 		return
 	}
@@ -501,7 +514,9 @@ func (tr *Tracker) reconcileAfterRefresh(ctx context.Context, written map[string
 	if len(stale) == 0 && len(current) == 0 && len(lingering) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	// Refresh's own context can be canceled once its writes are out; the
+	// repair still has to land.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()
 	pipe := tr.rdb.Pipeline()
 	if len(stale) > 0 {
