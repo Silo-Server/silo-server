@@ -1273,6 +1273,18 @@
       "value": "인기 시리즈"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "맞춤 추천 영화"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "맞춤 추천 시리즈"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -47294,6 +47306,106 @@
       "value": "모델"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "1회 실행 한도에 도달했어요. 다음 실행에서 이어서 진행해요."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "조회한 작품: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · 임베딩: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB 요청: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "꺼져 있어요. 실행하면 오래된 작품만 정리해요."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "행 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 생성됨"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "추천 대상 작품 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "임베딩 없음: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -47336,6 +47448,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "둘러보기 추천"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47564,6 +47682,12 @@
       "value": "임베딩 작업을 시작하지 못했어요"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "둘러보기 추천을 시작하지 못했어요"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47682,6 +47806,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "임베딩을 초기화했어요. 삭제: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " · 초기화: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47692,6 +47854,58 @@
             {
               "type": 0,
               "value": "임베딩 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "둘러보기 임베딩 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "둘러보기 행 "
             },
             {
               "type": 1,
@@ -48318,6 +48532,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "시청자별 추천 시리즈"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "시청자별 추천 영화"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48366,6 +48604,18 @@
     {
       "type": 0,
       "value": "방송사 카드를 선택하면 해당 방송사의 시리즈가 열려요."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "추천"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "아직 라이브러리에 없는 작품 중 시청자마다 시청 기록에 맞춰 고른 작품이에요."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48612,6 +48862,12 @@
     {
       "type": 0,
       "value": "스트리밍 서비스의 지역을 선택하세요."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "관리자 → 추천에서 둘러보기 추천을 켜기 전까지 비어 있어요."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -49936,6 +50192,12 @@
     {
       "type": 0,
       "value": "목록 실시간 미리 보기"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "내 추천 미리보기"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -59542,6 +59804,36 @@
       "value": "다른 모델로 전환하려면 임베딩을 초기화해야 하며, 이때 임베딩이 모두 삭제돼요. 같은 모델을 제공하는 다른 제공자로 바꾸면 재시작 후 적용돼요."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "둘러보기 추천 사용"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "아직 라이브러리에 없는 작품으로 요청의 둘러보기에 개인별 행을 추가해요. 임베딩 제공자와 TMDB를 사용해요."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "추천 대상 최대 작품 수"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "서버가 추천용으로 보관하는, 라이브러리에 없는 작품 수예요. 각 작품은 TMDB에서 조회한 뒤 임베딩해요. 임베딩은 보통 비용이 적지만, 숫자가 클수록 임베딩 제공자에 따라 비용이 늘거나 시간이 더 걸릴 수 있고 저장 공간도 더 사용해요."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "둘러보기 추천"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59570,6 +59862,12 @@
     {
       "type": 0,
       "value": "임베딩 Cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "둘러보기 추천 Cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -102253,13 +102551,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "컬렉션 및 규칙"
+      "value": "컬렉션 및 스마트 행"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "내 컬렉션 또는 규칙으로 만든 행"
+      "value": "내 컬렉션 또는 규칙으로 만든 스마트 행"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -102373,7 +102671,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "장르, 연대 같은 규칙으로 행을 만들어요."
+      "value": "스마트 컬렉션과 비슷하지만 행으로만 만들어져요. 장르, 연대 같은 규칙으로 작품을 골라요."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -102583,7 +102881,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "규칙에 맞는 작품"
+      "value": "스마트 행"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -114687,6 +114985,34 @@
     {
       "type": 0,
       "value": " 추가"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 시청 기반 추천"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " 시청 기반 추천"
     }
   ],
   "web.requests.card.label": [

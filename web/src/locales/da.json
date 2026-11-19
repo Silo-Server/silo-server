@@ -1273,6 +1273,18 @@
       "value": "Populære serier"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Anbefalede film til dig"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Anbefalede serier til dig"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52765,6 +52777,122 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Grænsen for én kørsel er nået; næste kørsel fortsætter."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Titler slået op: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embeddings gemt: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB-forespørgsler: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Fra. Kørsler rydder kun gamle titler op."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " række oprettet"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rækker oprettet"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titel at anbefale fra"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titler at anbefale fra"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Ingen embeddings gemt: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52819,6 +52947,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Opdag-anbefalinger"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53075,6 +53209,12 @@
       "value": "Kunne ikke starte embeddings"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke starte Opdag-anbefalinger"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53193,6 +53333,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embeddings nulstillet: slettede "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " og "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " og ryddede "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53219,6 +53397,74 @@
             {
               "type": 0,
               "value": " embeddings"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Opdag-embedding"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Opdag-embeddings"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Opdag-række"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Opdag-rækker"
             }
           ]
         }
@@ -54053,6 +54299,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anbefalede serier til hver seer"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anbefalede film til hver seer"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54101,6 +54371,18 @@
     {
       "type": 0,
       "value": "Netværkskort, der hver åbner netværkets serier."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Anbefalinger"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Titler, der endnu ikke er i biblioteket, udvalgt til hver seer ud fra det, seeren ser."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54399,6 +54681,12 @@
     {
       "type": 0,
       "value": "Vælg den region, streamingtjenesterne findes i."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Forbliver tom, indtil Opdag-anbefalinger er slået til under Admin → Anbefalinger."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55809,6 +56097,12 @@
     {
       "type": 0,
       "value": "Live-forhåndsvisning af listen"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Forhåndsvisning af dine egne anbefalinger"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65701,6 +65995,36 @@
       "value": "Skift til en anden model kræver, at embeddings nulstilles, hvilket sletter dem alle. En anden udbyder, der leverer samme model, træder i kraft efter en genstart."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Aktivér Opdag-anbefalinger"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Tilføjer personlige rækker til Opdag under Anmodninger med titler, der endnu ikke er i biblioteket. Bruger embedding-udbyderen og TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Maksimalt antal titler at anbefale fra"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Hvor mange titler, der ikke er i biblioteket, serveren gemmer at anbefale fra. Hver titel slås op på TMDB og får en embedding. Embedding er normalt billigt, men et højere antal kan koste mere eller tage længere tid afhængigt af din embedding-udbyder og bruger mere lagerplads."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Opdag-anbefalinger"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65729,6 +66053,12 @@
     {
       "type": 0,
       "value": "Cron for embeddings"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron for Opdag-anbefalinger"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -111710,13 +112040,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Samlinger og regler"
+      "value": "Samlinger og smarte rækker"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Dine samlinger eller rækker bygget ud fra regler"
+      "value": "Dine samlinger eller smarte rækker bygget ud fra regler"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111830,7 +112160,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Byg en række ud fra regler, f.eks. genre og årti."
+      "value": "Som en smart samling, men kun en række. Vælg titler med regler som genre og årti."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112040,7 +112370,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titler, der matcher regler"
+      "value": "Smart række"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124927,6 +125257,34 @@
     {
       "type": 0,
       "value": " til din huskeliste"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Fordi du så "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Fordi du så "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " og "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

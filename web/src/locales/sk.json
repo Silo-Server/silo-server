@@ -1273,6 +1273,18 @@
       "value": "Populárne seriály"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Odporúčané filmy pre vás"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Odporúčané seriály pre vás"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -64925,6 +64937,170 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Dosiahol sa limit pre jedno spustenie. Ďalšie spustenie bude pokračovať."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Vyhľadané tituly: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Vytvorené embeddingy: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Požiadavky na TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Vypnuté. Spustenia iba odstraňujú staré tituly."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vytvorený rad"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vytvorené rady"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vytvoreného radu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vytvorených radov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titul na odporúčanie"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tituly na odporúčanie"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulu na odporúčanie"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulov na odporúčanie"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nevytvorili sa žiadne embeddingy: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -65003,6 +65179,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Odporúčania v sekcii Objavovať"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -65323,6 +65505,12 @@
       "value": "Nepodarilo sa spustiť úlohu embeddingov"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa spustiť odporúčania v sekcii Objavovať"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -65441,6 +65629,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embeddingy sa obnovili. Odstránené: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ". Vymazané: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -65491,6 +65717,122 @@
             {
               "type": 0,
               "value": " embeddingov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding sekcie Objavovať"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embeddingy sekcie Objavovať"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embeddingu sekcie Objavovať"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embeddingov sekcie Objavovať"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rad sekcie Objavovať"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rady sekcie Objavovať"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " radu sekcie Objavovať"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " radov sekcie Objavovať"
             }
           ]
         }
@@ -66781,6 +67123,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Odporúčané seriály pre každého diváka"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Odporúčané filmy pre každého diváka"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -66829,6 +67195,18 @@
     {
       "type": 0,
       "value": "Karty televíznych sietí, každá otvorí seriály danej siete."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Odporúčania"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Tituly, ktoré ešte nie sú v knižnici, vybrané pre každého diváka podľa toho, čo pozerá."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -67255,6 +67633,12 @@
     {
       "type": 0,
       "value": "Vyberte región, v ktorom sú streamovacie služby dostupné."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Zostane prázdny, kým nezapnete odporúčania v sekcii Objavovať v časti Správa → Odporúčania."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -68877,6 +69261,12 @@
     {
       "type": 0,
       "value": "Živý náhľad zoznamu"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Ukážka vašich vlastných odporúčaní"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -79417,6 +79807,36 @@
       "value": "Prechod na iný model vyžaduje obnovenie embeddingov, čím sa všetky odstránia. Iný poskytovateľ s rovnakým modelom sa uplatní po reštarte."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Zapnúť odporúčania v sekcii Objavovať"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Pridá do sekcie Objavovať na stránke žiadostí osobné rady s titulmi, ktoré ešte nie sú v knižnici. Používa poskytovateľa embeddingov a službu TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Maximálny počet titulov na odporúčanie"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Koľko titulov, ktoré nie sú v knižnici, si server uchováva na odporúčanie. Každý z nich sa vyhľadá v službe TMDB a vytvorí sa preň embedding. Vytváranie embeddingov je zvyčajne lacné, no vyšší počet môže v závislosti od vášho poskytovateľa embeddingov stáť viac alebo trvať dlhšie a zaberie viac úložiska."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Odporúčania v sekcii Objavovať"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -79445,6 +79865,12 @@
     {
       "type": 0,
       "value": "Cron embeddingov"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron odporúčaní v sekcii Objavovať"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -132904,13 +133330,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekcie a pravidlá"
+      "value": "Kolekcie a inteligentné rady"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Vaše kolekcie alebo rady zostavené z pravidiel"
+      "value": "Vaše kolekcie alebo inteligentné rady zostavené z pravidiel"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -133024,7 +133450,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Zostavte rad z pravidiel, napríklad podľa žánru a desaťročia."
+      "value": "Ako inteligentná kolekcia, ale iba ako rad. Vyberte tituly pomocou pravidiel, napríklad podľa žánru a desaťročia."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -133234,7 +133660,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Tituly podľa pravidiel"
+      "value": "Inteligentný rad"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -147735,6 +148161,34 @@
     {
       "type": 0,
       "value": " do vášho zoznamu na pozretie"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Pretože ste pozerali titul "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Pretože ste pozerali tituly "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

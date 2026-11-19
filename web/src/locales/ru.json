@@ -1277,6 +1277,18 @@
       "value": "Популярные сериалы"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Рекомендуемые фильмы для вас"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Рекомендуемые сериалы для вас"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -65558,6 +65570,186 @@
       "value": "Модель"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Достигнут лимит одного запуска; следующий запуск продолжит работу."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Проверено фильмов и сериалов: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Создано эмбеддингов: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Запросов к TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Выключено. Запуски только удаляют устаревшие фильмы и сериалы."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Создан "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ряд"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Создано "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ряда"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Создано "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " рядов"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Создано "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ряда"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " название для рекомендаций"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " названия для рекомендаций"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " названий для рекомендаций"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " названия для рекомендаций"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Эмбеддинги не созданы: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -65636,6 +65828,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Рекомендации в разделе «Обзор»"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -65956,6 +66154,12 @@
       "value": "Не удалось запустить создание эмбеддингов"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось запустить рекомендации для раздела «Обзор»"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -66074,6 +66278,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Эмбеддинги сброшены. Удалено: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " и "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ". Очищено: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -66124,6 +66366,122 @@
             {
               "type": 0,
               "value": " эмбеддинга"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " эмбеддинг раздела «Обзор»"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " эмбеддинга раздела «Обзор»"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " эмбеддингов раздела «Обзор»"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " эмбеддинга раздела «Обзор»"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ряд раздела «Обзор»"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ряда раздела «Обзор»"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " рядов раздела «Обзор»"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ряда раздела «Обзор»"
             }
           ]
         }
@@ -67446,6 +67804,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Рекомендуемые сериалы для каждого зрителя"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Рекомендуемые фильмы для каждого зрителя"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -67494,6 +67876,18 @@
     {
       "type": 0,
       "value": "Карточки телеканалов; каждая открывает сериалы телеканала."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Рекомендации"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Фильмы и сериалы, которых пока нет в медиатеке, подобранные для каждого зрителя по истории просмотров."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -67936,6 +68330,12 @@
     {
       "type": 0,
       "value": "Выберите регион стриминговых сервисов."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Ряд останется пустым, пока на странице «Администрирование → Рекомендации» не включены рекомендации в разделе «Обзор»."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -69566,6 +69966,12 @@
     {
       "type": 0,
       "value": "Предпросмотр списка"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Предпросмотр ваших рекомендаций"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -80134,6 +80540,36 @@
       "value": "Для перехода на другую модель нужно сбросить эмбеддинги, при этом все они будут удалены. Другой провайдер с той же моделью применяется после перезапуска."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Включить рекомендации в разделе «Обзор»"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Добавляет в раздел «Обзор» на странице запросов персональные ряды с фильмами и сериалами, которых пока нет в медиатеке. Использует провайдера эмбеддингов и TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Максимум названий для рекомендаций"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Сколько фильмов и сериалов, которых нет в медиатеке, сервер хранит для рекомендаций. Для каждого из них выполняется запрос к TMDB и создаётся эмбеддинг. Обычно это недорого, но чем больше число, тем выше могут быть затраты или дольше обработка (в зависимости от провайдера эмбеддингов) и тем больше места занимают данные."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Рекомендации в разделе «Обзор»"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -80162,6 +80598,12 @@
     {
       "type": 0,
       "value": "Cron эмбеддингов"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron для рекомендаций в разделе «Обзор»"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -133534,13 +133976,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Коллекции и правила"
+      "value": "Коллекции и умные ряды"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Ваши коллекции или ряды, собранные по правилам"
+      "value": "Ваши коллекции или умные ряды, собранные по правилам"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -133654,7 +134096,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Соберите ряд по правилам, например по жанру и десятилетию."
+      "value": "Как умная коллекция, но только в виде ряда. Подберите тайтлы по правилам, например по жанру и десятилетию."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -133864,7 +134306,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Подборка по правилам"
+      "value": "Умный ряд"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -148425,6 +148867,42 @@
     {
       "type": 0,
       "value": "» в список просмотра"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Потому что вы смотрели «"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "»"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Потому что вы смотрели «"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "» и «"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "»"
     }
   ],
   "web.requests.card.label": [

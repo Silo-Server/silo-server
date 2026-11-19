@@ -1273,6 +1273,18 @@
       "value": "Suosituimmat sarjat"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Sinulle suositellut elokuvat"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Sinulle suositellut sarjat"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52797,6 +52809,122 @@
       "value": "Malli"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Yhden ajon raja saavutettiin; seuraava ajo jatkaa."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Haettuja nimikkeitä: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Upotuksia: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB-pyyntöjä: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Pois. Ajot vain poistavat vanhoja nimikkeitä."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rivi muodostettu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " riviä muodostettu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nimike suositeltavissa"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nimikettä suositeltavissa"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Ei upotuksia: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52851,6 +52979,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Tutustu-suositukset"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53107,6 +53241,12 @@
       "value": "Upotusten käynnistäminen epäonnistui"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Tutustu-suositusten käynnistys epäonnistui"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53225,6 +53365,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Upotukset nollattu: poistettiin "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " ja "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ", ja tyhjennettiin "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53251,6 +53429,74 @@
             {
               "type": 0,
               "value": " upotusta"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Tutustu-upotus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Tutustu-upotusta"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Tutustu-rivi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Tutustu-riviä"
             }
           ]
         }
@@ -54101,6 +54347,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Suositellut sarjat kullekin katsojalle"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Suositellut elokuvat kullekin katsojalle"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54149,6 +54419,18 @@
     {
       "type": 0,
       "value": "Kanavakortit, joista kukin avaa kanavan sarjat."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Suositukset"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Kirjastosta vielä puuttuvia nimikkeitä, jotka valitaan kullekin katsojalle tämän katselun perusteella."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54447,6 +54729,12 @@
     {
       "type": 0,
       "value": "Valitse alue, jolla suoratoistopalvelut toimivat."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Pysyy tyhjänä, kunnes Tutustu-suositukset otetaan käyttöön kohdassa Ylläpito → Suositukset."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55857,6 +56145,12 @@
     {
       "type": 0,
       "value": "Listan reaaliaikainen esikatselu"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Esikatselu omista suosituksistasi"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65761,6 +66055,36 @@
       "value": "Vaihtaminen toiseen malliin vaatii upotusten nollaamisen, mikä poistaa ne kaikki. Toinen samaa mallia tarjoava palvelu otetaan käyttöön uudelleenkäynnistyksen jälkeen."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Ota Tutustu-suositukset käyttöön"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Lisää pyyntöjen Tutustu-välilehdelle henkilökohtaisia rivejä nimikkeistä, joita ei vielä ole kirjastossa. Käyttää upotuspalvelua ja TMDB:tä."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Suositeltavien nimikkeiden enimmäismäärä"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Kuinka monta kirjastosta puuttuvaa nimikettä palvelin säilyttää suositusten pohjaksi. Jokainen niistä haetaan TMDB:stä ja upotetaan. Upottaminen on yleensä edullista, mutta suurempi määrä voi upotuspalvelustasi riippuen maksaa enemmän tai kestää pidempään, ja se vie enemmän tallennustilaa."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Tutustu-suositukset"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65789,6 +66113,12 @@
     {
       "type": 0,
       "value": "Upotusten cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Tutustu-suositusten cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -111966,13 +112296,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kokoelmat ja säännöt"
+      "value": "Kokoelmat ja älykkäät rivit"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Omat kokoelmasi tai säännöistä kootut rivit"
+      "value": "Omat kokoelmasi tai säännöistä kootut älykkäät rivit"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112086,7 +112416,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Kokoa rivi säännöistä, kuten lajityypistä ja vuosikymmenestä."
+      "value": "Kuin älykäs kokoelma, mutta pelkkä rivi. Valitse nimikkeet säännöillä, kuten lajityypin ja vuosikymmenen mukaan."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112296,7 +112626,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Sääntöihin sopivat nimikkeet"
+      "value": "Älykäs rivi"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125263,6 +125593,34 @@
     {
       "type": 0,
       "value": " katselulistallesi"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Koska katsoit kohteen "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Koska katsoit kohteet "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ja "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

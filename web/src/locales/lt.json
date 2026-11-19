@@ -1277,6 +1277,18 @@
       "value": "Populiariausi serialai"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Rekomenduojami filmai jums"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Rekomenduojami serialai jums"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -65480,6 +65492,186 @@
       "value": "Modelis"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Pasiekta vieno paleidimo riba; kitas paleidimas tęs darbą."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Gauta kūrinių informacijos: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Sukurta įterpčių: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · „TMDB“ užklausų: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Išjungta. Paleidimai tik išvalo senus kūrinius."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sukurta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " eilutė"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sukurtos "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " eilutės"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sukurta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " eilutės"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sukurta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " eilučių"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kūrinys rekomendacijoms"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kūriniai rekomendacijoms"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kūrinio rekomendacijoms"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kūrinių rekomendacijoms"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nesukurta jokių įterpčių: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -65558,6 +65750,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Skilties „Atrasti“ rekomendacijos"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -65878,6 +66076,12 @@
       "value": "Nepavyko paleisti įterpinių kūrimo"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko paleisti skilties „Atrasti“ rekomendacijų"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -65996,6 +66200,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Įterptys nustatytos iš naujo: ištrinta "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " ir "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ", išvalyta "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -66046,6 +66288,122 @@
             {
               "type": 0,
               "value": " įterpinių"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ įterptis"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ įterptys"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ įterpties"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ įterpčių"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ eilutė"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ eilutės"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ eilutės"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " skilties „Atrasti“ eilučių"
             }
           ]
         }
@@ -67336,6 +67694,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rekomenduojami serialai kiekvienam žiūrovui"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rekomenduojami filmai kiekvienam žiūrovui"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -67384,6 +67766,18 @@
     {
       "type": 0,
       "value": "Televizijos tinklų kortelės, kurių kiekviena atidaro to tinklo serialus."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Rekomendacijos"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Kūriniai, kurių dar nėra bibliotekoje, parinkti kiekvienam žiūrovui pagal tai, ką jis žiūri."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -67842,6 +68236,12 @@
     {
       "type": 0,
       "value": "Pasirinkite regioną, kuriame veikia srautinio perdavimo paslaugos."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Liks tuščia, kol skiltyje „Administravimas → Rekomendacijos“ nebus įjungtos skilties „Atrasti“ rekomendacijos."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -69472,6 +69872,12 @@
     {
       "type": 0,
       "value": "Tiesioginė sąrašo peržiūra"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Jūsų rekomendacijų peržiūra"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -80016,6 +80422,36 @@
       "value": "Norint pereiti prie kito modelio, reikia iš naujo nustatyti įterpinius, o tai juos visus ištrina. Kitas teikėjas, teikiantis tą patį modelį, pradedamas naudoti po paleidimo iš naujo."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Įjungti skilties „Atrasti“ rekomendacijas"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Prideda asmenines eilutes užklausų skiltyje „Atrasti“ su kūriniais, kurių dar nėra bibliotekoje. Naudojamas įterpčių teikėjas ir „TMDB“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Didžiausias kūrinių rekomendacijoms skaičius"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Kiek bibliotekoje nesančių kūrinių serveris laiko rekomendacijoms. Kiekvieno kūrinio informacija gaunama iš „TMDB“ ir jam sukuriama įterptis. Įterpčių kūrimas paprastai nebrangus, bet, priklausomai nuo jūsų įterpčių teikėjo, didesnis skaičius gali kainuoti daugiau ar užtrukti ilgiau, be to, užima daugiau vietos saugykloje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Skilties „Atrasti“ rekomendacijos"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -80044,6 +80480,12 @@
     {
       "type": 0,
       "value": "Įterpinių cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Skilties „Atrasti“ rekomendacijų cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -133884,13 +134326,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekcijos ir taisyklės"
+      "value": "Kolekcijos ir išmaniosios eilutės"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Jūsų kolekcijos arba pagal taisykles sudarytos eilutės"
+      "value": "Jūsų kolekcijos arba pagal taisykles sudarytos išmaniosios eilutės"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -134004,7 +134446,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sudaryti eilutę pagal taisykles, pvz., žanrą ir dešimtmetį."
+      "value": "Kaip išmanioji kolekcija, bet tik eilutė. Kūrinius atrinkite pagal taisykles, pvz., žanrą ir dešimtmetį."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -134214,7 +134656,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Taisykles atitinkantys kūriniai"
+      "value": "Išmanioji eilutė"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -148875,6 +149317,42 @@
     {
       "type": 0,
       "value": "“ į savo žiūrėjimo sąrašą"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Nes žiūrėjote „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Nes žiūrėjote „"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "“ ir „"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "“"
     }
   ],
   "web.requests.card.label": [

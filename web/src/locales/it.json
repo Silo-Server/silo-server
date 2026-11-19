@@ -1273,6 +1273,18 @@
       "value": "Serie popolari"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Film consigliati per te"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Serie consigliate per te"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -58575,6 +58587,146 @@
       "value": "Modello"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Raggiunto il limite per una singola esecuzione; la prossima esecuzione riprenderà da qui."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Titoli cercati: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embedding creati: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Richieste TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Disattivato. Le esecuzioni rimuovono solo i titoli vecchi."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " riga creata"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di righe create"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " righe create"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titolo da cui scegliere i consigli"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di titoli da cui scegliere i consigli"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titoli da cui scegliere i consigli"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nessun embedding creato: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -58641,6 +58793,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Consigli in Scopri"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -58929,6 +59087,12 @@
       "value": "Impossibile avviare gli embedding"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Impossibile avviare i consigli in Scopri"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -59047,6 +59211,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embedding reimpostati: eliminazione di "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " e "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "; svuotamento di "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -59085,6 +59287,98 @@
             {
               "type": 0,
               "value": " embedding"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding di Scopri"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di embedding di Scopri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding di Scopri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " riga di Scopri"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di righe di Scopri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " righe di Scopri"
             }
           ]
         }
@@ -60131,6 +60425,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Serie consigliate per ogni persona"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Film consigliati per ogni persona"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -60179,6 +60497,18 @@
     {
       "type": 0,
       "value": "Schede delle reti, ognuna apre le serie della rete."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Consigli"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Titoli non ancora presenti nella libreria, scelti per ogni persona in base a ciò che guarda."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -60541,6 +60871,12 @@
     {
       "type": 0,
       "value": "Scegli la regione dei servizi di streaming."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Resta vuota finché i consigli in Scopri non vengono attivati in Admin → Consigli."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -62057,6 +62393,12 @@
     {
       "type": 0,
       "value": "Anteprima dal vivo della lista"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Anteprima dei tuoi consigli"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -72271,6 +72613,36 @@
       "value": "Per passare a un altro modello occorre reimpostare gli embedding, operazione che li elimina tutti. Un altro provider che fornisce lo stesso modello si applica dopo un riavvio."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Attiva i consigli in Scopri"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Aggiunge a Scopri nelle richieste righe personali con titoli non ancora presenti nella libreria. Usa il provider di embedding e TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Numero massimo di titoli per i consigli"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Quanti titoli non presenti nella libreria il server conserva per scegliere i consigli. Ognuno viene cercato su TMDB e trasformato in embedding. Creare gli embedding di solito costa poco, ma un numero più alto può costare di più o richiedere più tempo a seconda del provider di embedding, e occupa più spazio di archiviazione."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Consigli in Scopri"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -72299,6 +72671,12 @@
     {
       "type": 0,
       "value": "Cron degli embedding"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron dei consigli in Scopri"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -121771,13 +122149,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Raccolte e regole"
+      "value": "Raccolte e righe intelligenti"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Le tue raccolte o righe create da regole"
+      "value": "Le tue raccolte o righe intelligenti create da regole"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -121891,7 +122269,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Crea una riga da regole, come genere e decennio."
+      "value": "Come una raccolta intelligente, ma solo come riga. Scegli i titoli con regole come genere e decennio."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122101,7 +122479,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titoli secondo regole"
+      "value": "Riga intelligente"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -135783,6 +136161,34 @@
     {
       "type": 0,
       "value": " all’elenco Da guardare"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Perché hai guardato "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Perché hai guardato "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " e "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

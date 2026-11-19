@@ -1273,6 +1273,18 @@
       "value": "Priljubljene serije"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Priporočeni filmi za vas"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Priporočene serije za vas"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -64656,6 +64668,170 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Dosežena je bila omejitev za en zagon; naslednji zagon bo nadaljeval."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Poiskani naslovi: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Vdelano: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Zahteve TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Izklopljeno. Zagoni samo počistijo stare naslove."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjena vrstica"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjeni vrstici"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjene vrstice"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjenih vrstic"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslov za priporočanje"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslova za priporočanje"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslovi za priporočanje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslovov za priporočanje"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nič ni bilo vdelano: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -64734,6 +64910,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Priporočila za Odkrivanje"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -65054,6 +65236,12 @@
       "value": "Ni bilo mogoče zagnati vložitev"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Zagon priporočil za Odkrivanje ni uspel"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -65172,6 +65360,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Vdelave so ponastavljene. Izbrisano: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ". Počiščeno: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -65222,6 +65448,122 @@
             {
               "type": 0,
               "value": " vložitev"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelava za Odkrivanje"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelavi za Odkrivanje"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelave za Odkrivanje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelav za Odkrivanje"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstica za Odkrivanje"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstici za Odkrivanje"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstice za Odkrivanje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstic za Odkrivanje"
             }
           ]
         }
@@ -66512,6 +66854,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Priporočene serije za vsakega gledalca"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Priporočeni filmi za vsakega gledalca"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -66560,6 +66926,18 @@
     {
       "type": 0,
       "value": "Kartice TV-mrež, vsaka odpre serije svoje mreže."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Priporočila"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Naslovi, ki jih še ni v knjižnici, izbrani za vsakega gledalca glede na to, kar gleda."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -66986,6 +67364,12 @@
     {
       "type": 0,
       "value": "Izberite regijo, v kateri so pretočne storitve."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Ostane prazno, dokler priporočila za Odkrivanje niso vklopljena v Skrbništvo → Priporočila."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -68620,6 +69004,12 @@
     {
       "type": 0,
       "value": "Predogled seznama v živo"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Predogled vaših priporočil"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -79124,6 +79514,36 @@
       "value": "Preklop na drug model zahteva ponastavitev vdelav, kar izbriše vse vdelave. Drug ponudnik, ki ponuja isti model, začne veljati po ponovnem zagonu."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Omogoči priporočila za Odkrivanje"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "V Odkrivanje med zahtevami doda osebne vrstice z naslovi, ki jih še ni v knjižnici. Uporablja ponudnika vdelav in TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Največje število naslovov za priporočanje"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Koliko naslovov, ki jih ni v knjižnici, strežnik hrani za priporočanje. Vsak se poišče v storitvi TMDB in vdela. Vdelava je običajno poceni, vendar je višje število glede na ponudnika vdelav lahko dražje ali počasnejše in porabi več prostora za shranjevanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Priporočila za Odkrivanje"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -79152,6 +79572,12 @@
     {
       "type": 0,
       "value": "Cron za vdelave"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron priporočil za Odkrivanje"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -132312,13 +132738,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Zbirke in pravila"
+      "value": "Zbirke in pametne vrstice"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Vaše zbirke ali vrstice, sestavljene iz pravil"
+      "value": "Vaše zbirke ali pametne vrstice, sestavljene iz pravil"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -132432,7 +132858,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sestavite vrstico iz pravil, kot sta žanr in desetletje."
+      "value": "Kot pametna zbirka, vendar samo vrstica. Naslove izbere s pravili, kot sta žanr in desetletje."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -132642,7 +133068,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Naslovi, ki ustrezajo pravilom"
+      "value": "Pametna vrstica"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -147047,6 +147473,34 @@
     {
       "type": 0,
       "value": " na svoj seznam za ogled"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Ker ste gledali: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Ker ste gledali: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

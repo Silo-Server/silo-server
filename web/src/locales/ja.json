@@ -1273,6 +1273,18 @@
       "value": "人気のシリーズ"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "おすすめの映画"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "おすすめのシリーズ"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -47018,6 +47030,102 @@
       "value": "モデル"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "1回の実行の上限に達しました。次回の実行で続行します。"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "検索したタイトル："
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · エンベディング："
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDBリクエスト："
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "オフ。実行時は古いタイトルの削除のみ行います。"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "行を作成済み"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "おすすめ候補のタイトル"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "エンベディングなし："
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -47060,6 +47168,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめ"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47316,6 +47430,12 @@
       "value": "エンベディングを開始できませんでした"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを開始できませんでした"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47434,6 +47554,44 @@
       "value": "をクリアしました。"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "エンベディングをリセットしました："
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "を削除し、"
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "をクリアしました。"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47448,6 +47606,58 @@
             {
               "type": 0,
               "value": "件のエンベディング"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ディスカバーのエンベディング"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ディスカバーの"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "行"
             }
           ]
         }
@@ -48062,6 +48272,30 @@
       "value": "："
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "視聴者ごとのおすすめシリーズ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "視聴者ごとのおすすめ映画"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48110,6 +48344,18 @@
     {
       "type": 0,
       "value": "ネットワークのカード。各カードからそのネットワークのシリーズを開きます。"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "おすすめ"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "ライブラリにまだないタイトルを、視聴内容に基づいて視聴者ごとに選びます。"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48356,6 +48602,12 @@
     {
       "type": 0,
       "value": "ストリーミングサービスの地域を選択してください。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "「管理 → おすすめ」でディスカバーのおすすめをオンにするまで空のままです。"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -49676,6 +49928,12 @@
     {
       "type": 0,
       "value": "リストのライブプレビュー"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "自分のおすすめのプレビュー"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -59290,6 +59548,36 @@
       "value": "別のモデルに切り替えるには埋め込みをリセットする必要があり、すべての埋め込みが削除されます。同じモデルを提供する別のプロバイダーへの変更は、再起動後に適用されます。"
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを有効にする"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "ライブラリにまだないタイトルを含む個人用の行を、リクエストのディスカバーに追加します。エンベディングプロバイダーとTMDBを使用します。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "おすすめ候補の最大タイトル数"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "ライブラリにないタイトルのうち、サーバーがおすすめ候補として保持する数です。各タイトルはTMDBで検索され、エンベディングされます。エンベディングは通常低コストですが、数を増やすとエンベディングプロバイダーによってはコストや時間が増え、ストレージも多く使用します。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめ"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59318,6 +59606,12 @@
     {
       "type": 0,
       "value": "埋め込みのCron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめのCron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -101445,13 +101739,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "コレクションとルール"
+      "value": "コレクションとスマート行"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "コレクション、またはルールで作成した行"
+      "value": "コレクション、またはルールで作成するスマート行"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -101565,7 +101859,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "ジャンルや年代などのルールで行を作成します。"
+      "value": "スマートコレクションに似ていますが、行のみを作成します。ジャンルや年代などのルールでタイトルを選びます。"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -101775,7 +102069,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "ルールに一致する作品"
+      "value": "スマート行"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -113823,6 +114117,34 @@
     {
       "type": 0,
       "value": "をウォッチリストに追加"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "を視聴したあなたに"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "と"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "を視聴したあなたに"
     }
   ],
   "web.requests.card.label": [

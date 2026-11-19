@@ -1273,6 +1273,18 @@
       "value": "Népszerű sorozatok"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Ajánlott filmek Önnek"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Ajánlott sorozatok Önnek"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52625,6 +52637,122 @@
       "value": "Modell"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Elérte az egy futtatásra vonatkozó korlátot; a következő futtatás folytatja."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Lekért címek: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Beágyazva: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB-kérések: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Ki. A futtatások csak a régi címeket törlik."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sor elkészítve"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sor elkészítve"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cím, amelyből ajánlani lehet"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cím, amelyből ajánlani lehet"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nem készült beágyazás: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52679,6 +52807,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Felfedezési ajánlások"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -52935,6 +53069,12 @@
       "value": "Nem sikerült elindítani a beágyazások létrehozását"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült elindítani a felfedezési ajánlásokat"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53053,6 +53193,44 @@
       "value": " kiürítve."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Beágyazások alaphelyzetbe állítva. Törölve: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " és "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "; kiürítve: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53079,6 +53257,74 @@
             {
               "type": 0,
               "value": " beágyazás"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " felfedezési beágyazás"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " felfedezési beágyazás"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " felfedezési sor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " felfedezési sor"
             }
           ]
         }
@@ -53897,6 +54143,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ajánlott sorozatok minden nézőnek"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ajánlott filmek minden nézőnek"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -53945,6 +54215,18 @@
     {
       "type": 0,
       "value": "Csatornakártyák, mindegyik a csatorna sorozatait nyitja meg."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Ajánlások"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "A könyvtárban még nem szereplő címek, minden nézőnek a megtekintései alapján válogatva."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54243,6 +54525,12 @@
     {
       "type": 0,
       "value": "Válassza ki a streamingszolgáltatások régióját."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Üres marad, amíg be nem kapcsolja a felfedezési ajánlásokat itt: Adminisztráció → Ajánlások."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55645,6 +55933,12 @@
     {
       "type": 0,
       "value": "A lista élő előnézete"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Előnézet a saját ajánlásaiból"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65557,6 +65851,36 @@
       "value": "Másik modellre váltáshoz alaphelyzetbe kell állítani a beágyazásokat, ami mindet törli. Ha egy másik szolgáltató ugyanazt a modellt szolgálja ki, az újraindítás után lép érvénybe."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Felfedezési ajánlások engedélyezése"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Személyes sorokat ad hozzá a Kérések Felfedezés lapjához a könyvtárban még nem szereplő címekkel. A beágyazási szolgáltatót és a TMDB-t használja."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Ajánláshoz tárolt címek maximális száma"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Hány, a könyvtárban nem szereplő címet tárol a szerver, amelyekből ajánlani lehet. Mindegyiket lekéri a TMDB-ből, és beágyazást készít hozzá. A beágyazás általában olcsó, de nagyobb szám a beágyazási szolgáltatótól függően többe kerülhet vagy tovább tarthat, és több tárhelyet használ."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Felfedezési ajánlások"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65585,6 +65909,12 @@
     {
       "type": 0,
       "value": "Beágyazási cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Felfedezési ajánlások – cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -111402,13 +111732,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Gyűjtemények és szabályok"
+      "value": "Gyűjtemények és intelligens sorok"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Az Ön gyűjteményei vagy szabályokból összeállított sorok"
+      "value": "Saját gyűjtemények vagy szabályokból összeállított intelligens sorok"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111522,7 +111852,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sor összeállítása szabályokból, például műfaj és évtized alapján."
+      "value": "Olyan, mint egy intelligens gyűjtemény, de csak egy sor. Válasszon címeket szabályokkal, például műfaj és évtized alapján."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111732,7 +112062,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Szabályoknak megfelelő címek"
+      "value": "Intelligens sor"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124635,6 +124965,34 @@
     {
       "type": 0,
       "value": " című elem hozzáadása a figyelőlistához"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Mert megnézte: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Mert megnézte: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " és "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

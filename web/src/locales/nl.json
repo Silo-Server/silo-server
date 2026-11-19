@@ -1281,6 +1281,18 @@
       "value": "Populaire series"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Aanbevolen films voor jou"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Aanbevolen series voor jou"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52477,6 +52489,122 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Limiet voor één run bereikt; de volgende run gaat verder."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Titels opgezocht: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embeddings opgeslagen: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB-aanvragen: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Uit. Runs ruimen alleen oude titels op."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rij opgebouwd"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rijen opgebouwd"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titel om uit aan te bevelen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titels om uit aan te bevelen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Geen embeddings opgeslagen: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52531,6 +52659,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Ontdekken-aanbevelingen"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -52787,6 +52921,12 @@
       "value": "Kan embeddings niet starten"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Kan Ontdekken-aanbevelingen niet starten"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -52905,6 +53045,44 @@
       "value": " gewist."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embeddings gereset: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " en "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " verwijderd en "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " gewist."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -52931,6 +53109,74 @@
             {
               "type": 0,
               "value": " embeddings"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Ontdekken-embedding"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Ontdekken-embeddings"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Ontdekken-rij"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Ontdekken-rijen"
             }
           ]
         }
@@ -53761,6 +54007,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aanbevolen series voor elke kijker"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aanbevolen films voor elke kijker"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -53809,6 +54079,18 @@
     {
       "type": 0,
       "value": "Zenderkaarten die elk de series van die zender openen."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Aanbevelingen"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Titels die nog niet in de bibliotheek staan, voor elke kijker gekozen op basis van wat die kijkt."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54107,6 +54389,12 @@
     {
       "type": 0,
       "value": "Kies de regio van de streamingdiensten."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Blijft leeg totdat Ontdekken-aanbevelingen zijn ingeschakeld in Beheer → Aanbevelingen."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55509,6 +55797,12 @@
     {
       "type": 0,
       "value": "Live voorbeeld van de lijst"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Voorbeeld van je eigen aanbevelingen"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65421,6 +65715,36 @@
       "value": "Overschakelen naar een ander model vereist het resetten van de embeddings, waarbij ze allemaal worden verwijderd. Een andere provider die hetzelfde model levert, wordt na een herstart toegepast."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Ontdekken-aanbevelingen inschakelen"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Voegt persoonlijke rijen toe aan Ontdekken bij Aanvragen, met titels die nog niet in de bibliotheek staan. Gebruikt de embedding-provider en TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Maximaal aantal titels om uit aan te bevelen"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Hoeveel titels die niet in de bibliotheek staan de server bewaart om uit aan te bevelen. Elke titel wordt opgezocht op TMDB en krijgt een embedding. Een embedding maken is meestal goedkoop, maar een hoger aantal kan meer kosten of langer duren, afhankelijk van je embedding-provider, en gebruikt meer opslag."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Ontdekken-aanbevelingen"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65449,6 +65773,12 @@
     {
       "type": 0,
       "value": "Cron voor embeddings"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron voor Ontdekken-aanbevelingen"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -111080,13 +111410,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Collecties en regels"
+      "value": "Collecties en slimme rijen"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Je collecties, of rijen opgebouwd uit regels"
+      "value": "Je collecties, of slimme rijen opgebouwd uit regels"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111200,7 +111530,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Bouw een rij op uit regels, zoals genre en decennium."
+      "value": "Net als een slimme collectie, maar alleen als rij. Kies titels met regels zoals genre en decennium."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111410,7 +111740,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titels die aan regels voldoen"
+      "value": "Slimme rij"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124305,6 +124635,42 @@
     {
       "type": 0,
       "value": " toevoegen aan je kijklijst"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Omdat je "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " hebt gekeken"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Omdat je "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " en "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " hebt gekeken"
     }
   ],
   "web.requests.card.label": [

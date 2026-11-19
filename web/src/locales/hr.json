@@ -1273,6 +1273,18 @@
       "value": "Popularne serije"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Preporučeni filmovi za vas"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Preporučene serije za vas"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -58807,6 +58819,146 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Dosegnuto je ograničenje za jedno pokretanje; sljedeće pokretanje nastavlja."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Pretraženi naslovi: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Izrađeni embeddingi: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Zahtjevi prema TMDB-u: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Isključeno. Pokretanja samo uklanjaju stare naslove."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " redak izrađen"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " retka izrađena"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " redaka izrađeno"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslov za preporuke"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslova za preporuke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslova za preporuke"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nema izrađenih embeddinga: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -58873,6 +59025,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Preporuke za Otkrij"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -59161,6 +59319,12 @@
       "value": "Pokretanje embeddinga nije uspjelo"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Pokretanje preporuka za Otkrij nije uspjelo"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -59279,6 +59443,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embeddingi su poništeni. Izbrisano: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ". Očišćeno: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -59317,6 +59519,98 @@
             {
               "type": 0,
               "value": " embeddinga"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding za Otkrij"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embeddinga za Otkrij"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embeddinga za Otkrij"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " redak za Otkrij"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " retka za Otkrij"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " redaka za Otkrij"
             }
           ]
         }
@@ -60363,6 +60657,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Preporučene serije za svakog gledatelja"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Preporučeni filmovi za svakog gledatelja"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -60411,6 +60729,18 @@
     {
       "type": 0,
       "value": "Kartice mreža; svaka otvara serije te mreže."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Preporuke"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Naslovi koji još nisu u medijateci, odabrani za svakog gledatelja prema onome što gleda."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -60773,6 +61103,12 @@
     {
       "type": 0,
       "value": "Odaberite regiju u kojoj su streaming usluge."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Ostaje prazno dok se ne uključe preporuke za Otkrij pod Administracija → Preporuke."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -62289,6 +62625,12 @@
     {
       "type": 0,
       "value": "Pregled popisa uživo"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Pregled vaših vlastitih preporuka"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -72519,6 +72861,36 @@
       "value": "Prelazak na drugi model zahtijeva ponovno postavljanje embeddinga, čime se svi brišu. Drugi pružatelj koji poslužuje isti model primjenjuje se nakon ponovnog pokretanja."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Omogući preporuke za Otkrij"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Dodaje osobne retke u Otkrij u Zahtjevima s naslovima koji još nisu u medijateci. Koristi pružatelja embeddinga i TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Najveći broj naslova za preporuke"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Koliko naslova koji nisu u medijateci poslužitelj čuva za preporuke. Svaki se traži na TMDB-u i pretvara u embedding. Izrada embeddinga obično je jeftina, ali veći broj može koštati više ili trajati dulje, ovisno o vašem pružatelju embeddinga, i zauzima više prostora za pohranu."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Preporuke za Otkrij"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -72547,6 +72919,12 @@
     {
       "type": 0,
       "value": "Cron embeddinga"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron preporuka za Otkrij"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -122220,13 +122598,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekcije i pravila"
+      "value": "Kolekcije i pametni retci"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Vaše kolekcije ili retci izrađeni prema pravilima"
+      "value": "Vaše kolekcije ili pametni retci izrađeni prema pravilima"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122340,7 +122718,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Izradite redak prema pravilima, poput žanra i desetljeća."
+      "value": "Poput pametne kolekcije, ali samo redak. Odaberite naslove prema pravilima poput žanra i desetljeća."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122550,7 +122928,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Naslovi prema pravilima"
+      "value": "Pametni redak"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -136204,6 +136582,34 @@
     {
       "type": 0,
       "value": " na svoj popis za gledanje"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Jer ste gledali "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Jer ste gledali "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

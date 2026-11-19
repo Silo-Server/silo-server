@@ -1273,6 +1273,18 @@
       "value": "Sèries populars"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Pel·lícules recomanades per a tu"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Sèries recomanades per a tu"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -58783,6 +58795,146 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "S’ha arribat al límit d’una execució; la següent execució continuarà."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Títols consultats: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embeddings desats: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Sol·licituds a TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Desactivat. Les execucions només esborren títols antics."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fila creada"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de files creades"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " files creades"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " títol per recomanar"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de títols per recomanar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " títols per recomanar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "No s’ha desat cap embedding: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -58849,6 +59001,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Recomanacions de Descobreix"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -59137,6 +59295,12 @@
       "value": "No s’han pogut iniciar les incrustacions"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut iniciar les recomanacions de Descobreix"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -59255,6 +59419,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "S’han restablert els embeddings: s’han eliminat "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ", i s’han esborrat "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -59293,6 +59495,98 @@
             {
               "type": 0,
               "value": " incrustacions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding de Descobreix"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " d’embeddings de Descobreix"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embeddings de Descobreix"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fila de Descobreix"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de files de Descobreix"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " files de Descobreix"
             }
           ]
         }
@@ -60363,6 +60657,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sèries recomanades per a cada perfil"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pel·lícules recomanades per a cada perfil"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -60411,6 +60729,18 @@
     {
       "type": 0,
       "value": "Targetes de cadenes; cadascuna obre les sèries de la cadena."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Recomanacions"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Títols que encara no són a la biblioteca, triats per a cada perfil segons el que mira."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -60773,6 +61103,12 @@
     {
       "type": 0,
       "value": "Tria la regió dels serveis de streaming."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Es mantindrà buida fins que s’activin les recomanacions de Descobreix a Administració → Recomanacions."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -62289,6 +62625,12 @@
     {
       "type": 0,
       "value": "Previsualització en directe de la llista"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Previsualització de les teves recomanacions"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -72499,6 +72841,36 @@
       "value": "Per canviar a un altre model cal restablir els embeddings, cosa que els elimina tots. Si un altre proveïdor serveix el mateix model, el canvi s’aplica després de reiniciar."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Activa les recomanacions de Descobreix"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Afegeix files personals a Descobreix de Sol·licituds amb títols que encara no són a la biblioteca. Utilitza el proveïdor d’embeddings i TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Nombre màxim de títols per recomanar"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Quants títols que no són a la biblioteca conserva el servidor per fer recomanacions. Cadascun es consulta a TMDB i se’n genera un embedding. Generar embeddings sol ser barat, però un nombre més alt pot costar més o trigar més segons el teu proveïdor d’embeddings, i ocupa més emmagatzematge."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Recomanacions de Descobreix"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -72527,6 +72899,12 @@
     {
       "type": 0,
       "value": "Cron d’embeddings"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron de les recomanacions de Descobreix"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -121176,7 +121554,7 @@
           "value": [
             {
               "type": 0,
-              "value": "per valoració, de més alta a més baixa"
+              "value": "primer els més ben valorats"
             }
           ]
         },
@@ -121184,7 +121562,7 @@
           "value": [
             {
               "type": 0,
-              "value": "per data d’estrena, de la més recent a la més antiga"
+              "value": "primer els d’estrena més recent"
             }
           ]
         },
@@ -121192,7 +121570,7 @@
           "value": [
             {
               "type": 0,
-              "value": "per nombre de reproduccions, de més a menys"
+              "value": "primer els més reproduïts"
             }
           ]
         },
@@ -122175,13 +122553,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Col·leccions i regles"
+      "value": "Col·leccions i files intel·ligents"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Les teves col·leccions, o files creades a partir de regles"
+      "value": "Les teves col·leccions, o files intel·ligents creades a partir de regles"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -122295,7 +122673,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Crea una fila a partir de regles, com ara el gènere i la dècada."
+      "value": "Com una col·lecció intel·ligent, però només és una fila. Tria títols amb regles com ara el gènere i la dècada."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122505,7 +122883,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Títols que compleixen regles"
+      "value": "Fila intel·ligent"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -136275,6 +136653,34 @@
     {
       "type": 0,
       "value": " a la teva llista per veure"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Perquè has vist "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Perquè has vist "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

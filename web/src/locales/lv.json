@@ -1277,6 +1277,18 @@
       "value": "Iecienītākie seriāli"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Ieteiktās filmas jums"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Ieteiktie seriāli jums"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -59718,6 +59730,158 @@
       "value": "Modelis"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Sasniegts vienas izpildes ierobežojums; nākamā izpilde turpinās."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Uzmeklēti nosaukumi: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Iegulumi: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB pieprasījumi: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Izslēgts. Izpildes tikai notīra vecos nosaukumus."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Izveidotas "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rindas"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Izveidota "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rinda"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Izveidotas "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rindas"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nosaukumi, no kuriem ieteikt"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nosaukums, no kura ieteikt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nosaukumi, no kuriem ieteikt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nekas netika iegults: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -59784,6 +59948,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Ieteikumi sadaļai „Atklāt”"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -60072,6 +60242,12 @@
       "value": "Neizdevās palaist iegulumu izveidi"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās palaist ieteikumus sadaļai „Atklāt”"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -60190,6 +60366,44 @@
       "value": ")."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Iegulumi atiestatīti. Dzēsts: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " un "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ". Notīrīts: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -60228,6 +60442,98 @@
             {
               "type": 0,
               "value": " iegulumi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sadaļas „Atklāt” iegulumi"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sadaļas „Atklāt” iegulums"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sadaļas „Atklāt” iegulumi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sadaļas „Atklāt” rindas"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sadaļas „Atklāt” rinda"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sadaļas „Atklāt” rindas"
             }
           ]
         }
@@ -61274,6 +61580,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ieteiktie seriāli katram skatītājam"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ieteiktās filmas katram skatītājam"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -61322,6 +61652,18 @@
     {
       "type": 0,
       "value": "Kanālu kartītes; katra atver attiecīgā kanāla seriālus."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Ieteikumi"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Nosaukumi, kuru vēl nav bibliotēkā, atlasīti katram skatītājam, pamatojoties uz skatīto."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -61696,6 +62038,12 @@
     {
       "type": 0,
       "value": "Atlasiet reģionu, kurā darbojas straumēšanas pakalpojumi."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Paliek tukša, līdz ieteikumi sadaļai „Atklāt” tiek ieslēgti sadaļā „Administrēšana → Ieteikumi”."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -63220,6 +63568,12 @@
     {
       "type": 0,
       "value": "Saraksta tiešais priekšskatījums"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Jūsu ieteikumu priekšskatījums"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -73502,6 +73856,36 @@
       "value": "Lai pārslēgtos uz citu modeli, ir jāatiestata iegulumi, un tādējādi tie visi tiek izdzēsti. Cits nodrošinātājs, kas nodrošina to pašu modeli, tiek lietots pēc restartēšanas."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Iespējot ieteikumus sadaļai „Atklāt”"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Pievieno pieprasījumu sadaļai „Atklāt” personiskas rindas ar nosaukumiem, kuru vēl nav bibliotēkā. Izmanto iegulumu nodrošinātāju un TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Maksimālais nosaukumu skaits ieteikumiem"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Cik nosaukumu, kuru nav bibliotēkā, serveris glabā, lai no tiem ieteiktu. Katrs tiek uzmeklēts TMDB un iegults. Iegulšana parasti ir lēta, taču lielāks skaits atkarībā no jūsu iegulumu nodrošinātāja var izmaksāt vairāk vai aizņemt ilgāku laiku, kā arī izmanto vairāk krātuves."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Ieteikumi sadaļai „Atklāt”"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -73530,6 +73914,12 @@
     {
       "type": 0,
       "value": "Iegulumu cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron grafiks: ieteikumi sadaļai „Atklāt”"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -123774,13 +124164,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kolekcijas un noteikumi"
+      "value": "Kolekcijas un viedās rindas"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Jūsu kolekcijas vai rindas, kas veidotas pēc noteikumiem"
+      "value": "Jūsu kolekcijas vai viedās rindas, kas veidotas pēc kārtulām"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -123894,7 +124284,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Veidot rindu pēc noteikumiem, piemēram, žanra un desmitgades."
+      "value": "Kā viedā kolekcija, bet tikai rinda. Atlasiet nosaukumus pēc kārtulām, piemēram, žanra un desmitgades."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -124104,7 +124494,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Nosaukumi pēc noteikumiem"
+      "value": "Viedā rinda"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -137998,6 +138388,42 @@
     {
       "type": 0,
       "value": "” jūsu skatīšanās sarakstam"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Jo jūs skatījāties „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Jo jūs skatījāties „"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "” un „"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "”"
     }
   ],
   "web.requests.card.label": [

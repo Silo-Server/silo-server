@@ -1281,6 +1281,18 @@
       "value": "Beliebte Serien"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Empfohlene Filme für dich"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Empfohlene Serien für dich"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52565,6 +52577,122 @@
       "value": "Modell"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Limit für einen Durchlauf erreicht; der nächste Durchlauf macht weiter."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Nachgeschlagene Titel: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embeddings erstellt: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB-Anfragen: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Aus. Durchläufe entfernen nur alte Titel."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Reihe erstellt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Reihen erstellt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Titel als Grundlage für Empfehlungen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Titel als Grundlage für Empfehlungen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Kein Embedding erstellt: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52623,6 +52751,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Entdecken-Empfehlungen"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -52911,6 +53045,12 @@
       "value": "Embeddings konnten nicht gestartet werden"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Entdecken-Empfehlungen konnten nicht gestartet werden"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53029,6 +53169,44 @@
       "value": " geleert."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embeddings zurückgesetzt: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " und "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " gelöscht und "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " geleert."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53055,6 +53233,74 @@
             {
               "type": 0,
               "value": " Embeddings"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Entdecken-Embedding"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Entdecken-Embeddings"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Entdecken-Reihe"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Entdecken-Reihen"
             }
           ]
         }
@@ -53885,6 +54131,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Empfohlene Serien für jede Person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Empfohlene Filme für jede Person"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -53933,6 +54203,18 @@
     {
       "type": 0,
       "value": "Senderkarten, die jeweils die Serien des Senders öffnen."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Empfehlungen"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Titel, die noch nicht in der Mediathek sind, für jede Person passend zu dem ausgewählt, was sie schaut."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54231,6 +54513,12 @@
     {
       "type": 0,
       "value": "Wähle die Region, in der die Streamingdienste verfügbar sind."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Bleibt leer, bis Entdecken-Empfehlungen unter Admin → Empfehlungen aktiviert sind."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55633,6 +55921,12 @@
     {
       "type": 0,
       "value": "Live-Vorschau der Liste"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Vorschau deiner eigenen Empfehlungen"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65541,6 +65835,36 @@
       "value": "Für einen Wechsel zu einem anderen Modell müssen die Embeddings zurückgesetzt werden, wodurch alle gelöscht werden. Ein anderer Anbieter, der dasselbe Modell bereitstellt, gilt nach einem Neustart."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Entdecken-Empfehlungen aktivieren"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Fügt unter Anfragen → Entdecken persönliche Reihen mit Titeln hinzu, die noch nicht in der Mediathek sind. Nutzt den Embedding-Anbieter und TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Maximale Anzahl Titel für Empfehlungen"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Wie viele Titel, die nicht in der Mediathek sind, der Server als Grundlage für Empfehlungen vorhält. Jeder wird auf TMDB nachgeschlagen und erhält ein Embedding. Embeddings sind meist günstig, aber eine höhere Zahl kann je nach Embedding-Anbieter mehr kosten oder länger dauern und belegt mehr Speicherplatz."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Entdecken-Empfehlungen"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65569,6 +65893,12 @@
     {
       "type": 0,
       "value": "Cron für Embeddings"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron für Entdecken-Empfehlungen"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -111282,13 +111612,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Sammlungen & Regeln"
+      "value": "Sammlungen & intelligente Reihen"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Deine Sammlungen oder Reihen aus Regeln"
+      "value": "Deine Sammlungen oder intelligente Reihen aus Regeln"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111402,7 +111732,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Erstelle eine Reihe aus Regeln, etwa Genre und Jahrzehnt."
+      "value": "Wie eine intelligente Sammlung, aber nur als Reihe. Wähle Titel mit Regeln wie Genre und Jahrzehnt aus."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111612,7 +111942,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titel nach Regeln"
+      "value": "Intelligente Reihe"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124528,6 +124858,42 @@
     {
       "type": 0,
       "value": " zu deiner Merkliste hinzufügen"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Weil du "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " geschaut hast"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Weil du "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " und "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " geschaut hast"
     }
   ],
   "web.requests.card.label": [

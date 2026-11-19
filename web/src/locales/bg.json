@@ -1273,6 +1273,18 @@
       "value": "Популярни сериали"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Препоръчани филми за вас"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Препоръчани сериали за вас"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52909,6 +52921,122 @@
       "value": "Модел"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Лимитът за едно изпълнение е достигнат; следващото изпълнение ще продължи."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Проверени заглавия: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · С ембединг: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Заявки към TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Изключено. Изпълненията само изчистват старите заглавия."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " създаден ред"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " създадени реда"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " заглавие за препоръчване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " заглавия за препоръчване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Няма създадени ембединги: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52963,6 +53091,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Препоръки в „Откриване“"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53219,6 +53353,12 @@
       "value": "Неуспешно стартиране на ембедингите"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Неуспешно стартиране на препоръките в „Откриване“"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53337,6 +53477,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Ембедингите са нулирани: изтрити – "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " и "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "; изчистени – "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53363,6 +53541,74 @@
             {
               "type": 0,
               "value": " ембединга"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ембединг за „Откриване“"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ембединга за „Откриване“"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ред в „Откриване“"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " реда в „Откриване“"
             }
           ]
         }
@@ -54221,6 +54467,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Препоръчани сериали за всеки зрител"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Препоръчани филми за всеки зрител"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54269,6 +54539,18 @@
     {
       "type": 0,
       "value": "Карти на телевизионни мрежи, всяка отваря сериалите на мрежата."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Препоръки"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Заглавия, които още не са в библиотеката, подбрани за всеки зрител според това, което гледа."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54567,6 +54849,12 @@
     {
       "type": 0,
       "value": "Изберете региона, в който са стрийминг услугите."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Остава празен, докато препоръките в „Откриване“ не бъдат включени в Администриране → Препоръки."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55977,6 +56265,12 @@
     {
       "type": 0,
       "value": "Преглед на списъка на живо"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Преглед на собствените ви препоръки"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65961,6 +66255,36 @@
       "value": "Преминаването към друг модел изисква нулиране на ембедингите, което изтрива всички тях. Друг доставчик, обслужващ същия модел, влиза в сила след рестартиране."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Включване на препоръките в „Откриване“"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Добавя персонални редове в „Откриване“ на заявките със заглавия, които още не са в библиотеката. Използва доставчика на ембединги и TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Максимален брой заглавия за препоръчване"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Колко заглавия, които не са в библиотеката, сървърът пази, за да препоръчва от тях. Всяко се проверява в TMDB и за него се създава ембединг. Създаването на ембединги обикновено е евтино, но по-голям брой може да струва повече или да отнеме повече време в зависимост от доставчика на ембединги и използва повече място за съхранение."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Препоръки в „Откриване“"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65989,6 +66313,12 @@
     {
       "type": 0,
       "value": "Cron за ембедингите"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron за препоръките в „Откриване“"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -112246,13 +112576,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Колекции и правила"
+      "value": "Колекции и интелигентни редове"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Вашите колекции или редове, създадени по правила"
+      "value": "Вашите колекции или интелигентни редове, създадени по правила"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112366,7 +112696,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Създайте ред по правила, например по жанр и десетилетие."
+      "value": "Като интелигентна колекция, но само ред. Изберете заглавия по правила, например по жанр и десетилетие."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112576,7 +112906,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Заглавия по правила"
+      "value": "Интелигентен ред"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125507,6 +125837,34 @@
     {
       "type": 0,
       "value": " във вашия списък за гледане"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Защото гледахте "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Защото гледахте "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " и "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

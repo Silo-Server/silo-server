@@ -1273,6 +1273,18 @@
       "value": "Popüler diziler"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Size önerilen filmler"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Size önerilen diziler"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52193,6 +52205,130 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Tek çalıştırmanın sınırına ulaşıldı; sonraki çalıştırma devam edecek."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Bilgisi alınan içerikler: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Oluşturulan gömme: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB istekleri: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Kapalı. Çalıştırmalar yalnızca eski içerikleri temizler."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " satır oluşturuldu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " satır oluşturuldu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Önerilebilecek "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Önerilebilecek "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Gömme oluşturulmadı: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52251,6 +52387,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -52539,6 +52681,12 @@
       "value": "Gömmeler başlatılamadı"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri başlatılamadı"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -52657,6 +52805,44 @@
       "value": " temizlendi."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Gömmeler sıfırlandı: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " ve "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " silindi, "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " temizlendi."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -52683,6 +52869,74 @@
             {
               "type": 0,
               "value": " gömme"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet gömmesi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet gömmesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet satırı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet satırı"
             }
           ]
         }
@@ -53517,6 +53771,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Her izleyici için önerilen diziler"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Her izleyici için önerilen filmler"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -53565,6 +53843,18 @@
     {
       "type": 0,
       "value": "Her biri o kanalın dizilerini açan kanal kartları."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Öneriler"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Kitaplıkta henüz olmayan, her izleyici için izlediklerine göre seçilen içerikler."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -53887,6 +54177,12 @@
     {
       "type": 0,
       "value": "Akış hizmetlerinin bulunduğu bölgeyi seçin."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri Yönetim → Öneriler kısmında açılana kadar boş kalır."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55289,6 +55585,12 @@
     {
       "type": 0,
       "value": "Listenin canlı önizlemesi"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Kendi önerilerinizin önizlemesi"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65125,6 +65427,36 @@
       "value": "Başka bir modele geçmek gömmelerin sıfırlanmasını gerektirir; bu işlem tüm gömmeleri siler. Aynı modeli sunan başka bir sağlayıcı ise yeniden başlatmadan sonra uygulanır."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini etkinleştir"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "İsteklerdeki Keşfet sayfasına kitaplıkta henüz olmayan içeriklerle kişisel satırlar ekler. Gömme sağlayıcısını ve TMDB’yi kullanır."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Önerilerin seçileceği en fazla içerik"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Sunucunun öneri yapmak için tuttuğu, kitaplıkta olmayan içerik sayısı. Her biri TMDB’de aranır ve gömmesi oluşturulur. Gömme genellikle ucuzdur, ancak daha yüksek bir sayı gömme sağlayıcınıza bağlı olarak daha pahalıya mal olabilir veya daha uzun sürebilir; ayrıca daha fazla depolama alanı kullanır."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65153,6 +65485,12 @@
     {
       "type": 0,
       "value": "Gömme zamanlaması (cron)"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri cron zamanlaması"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -110582,13 +110920,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksiyonlar ve kurallar"
+      "value": "Koleksiyonlar ve akıllı satırlar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksiyonlarınız veya kurallarla oluşturulan satırlar"
+      "value": "Koleksiyonlarınız veya kurallarla oluşturulan akıllı satırlar"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -110702,7 +111040,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Tür ve on yıl gibi kurallarla bir satır oluşturun."
+      "value": "Akıllı koleksiyon gibidir ama yalnızca bir satırdır. İçerikleri tür ve on yıl gibi kurallarla seçin."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -110912,7 +111250,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Kurallara uyan içerikler"
+      "value": "Akıllı satır"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -123679,6 +124017,34 @@
     {
       "type": 0,
       "value": " içeriğini izleme listesine ekle"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " içeriğini izlediğiniz için"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ve "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " içeriklerini izlediğiniz için"
     }
   ],
   "web.requests.card.label": [

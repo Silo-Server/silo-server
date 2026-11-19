@@ -1273,6 +1273,18 @@
       "value": "Δημοφιλείς σειρές"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Προτεινόμενες ταινίες για εσάς"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Προτεινόμενες σειρές για εσάς"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -53041,6 +53053,122 @@
       "value": "Μοντέλο"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Συμπληρώθηκε το όριο μίας εκτέλεσης. Η επόμενη εκτέλεση συνεχίζει από εκεί."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Τίτλοι που αναζητήθηκαν: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Ενσωματώσεις: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Αιτήματα στο TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Ανενεργό. Οι εκτελέσεις μόνο εκκαθαρίζουν παλιούς τίτλους."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δημιουργημένη γραμμή"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δημιουργημένες γραμμές"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλος για προτάσεις"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλοι για προτάσεις"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Δεν δημιουργήθηκαν ενσωματώσεις: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -53095,6 +53223,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Προτάσεις Ανακάλυψης"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53351,6 +53485,12 @@
       "value": "Αποτυχία εκκίνησης των ενσωματώσεων"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Αποτυχία εκκίνησης των προτάσεων Ανακάλυψης"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53469,6 +53609,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Επαναφορά ενσωματώσεων: διαγράφηκαν "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " και "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " και εκκαθαρίστηκαν "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53495,6 +53673,74 @@
             {
               "type": 0,
               "value": " ενσωματώσεις"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ενσωμάτωση Ανακάλυψης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ενσωματώσεις Ανακάλυψης"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " γραμμή Ανακάλυψης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " γραμμές Ανακάλυψης"
             }
           ]
         }
@@ -54345,6 +54591,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Προτεινόμενες σειρές για κάθε θεατή"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Προτεινόμενες ταινίες για κάθε θεατή"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54393,6 +54663,18 @@
     {
       "type": 0,
       "value": "Κάρτες δικτύων που ανοίγουν τις σειρές κάθε δικτύου."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Προτάσεις"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Τίτλοι που δεν υπάρχουν ακόμα στη βιβλιοθήκη, επιλεγμένοι για κάθε θεατή με βάση ό,τι παρακολουθεί."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54691,6 +54973,12 @@
     {
       "type": 0,
       "value": "Επιλέξτε την περιοχή των υπηρεσιών ροής."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Παραμένει κενή μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -56101,6 +56389,12 @@
     {
       "type": 0,
       "value": "Ζωντανή προεπισκόπηση της λίστας"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Προεπισκόπηση των δικών σας προτάσεων"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -66013,6 +66307,36 @@
       "value": "Η αλλαγή σε άλλο μοντέλο απαιτεί επαναφορά των ενσωματώσεων, η οποία τις διαγράφει όλες. Ένας άλλος πάροχος που εξυπηρετεί το ίδιο μοντέλο εφαρμόζεται μετά από επανεκκίνηση."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Ενεργοποίηση προτάσεων Ανακάλυψης"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Προσθέτει προσωπικές γραμμές στην καρτέλα «Ανακάλυψη» των Αιτημάτων με τίτλους που δεν υπάρχουν ακόμα στη βιβλιοθήκη. Χρησιμοποιεί τον πάροχο ενσωματώσεων και το TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Μέγιστος αριθμός τίτλων για προτάσεις"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Πόσους τίτλους που δεν υπάρχουν στη βιβλιοθήκη διατηρεί ο διακομιστής για να κάνει προτάσεις. Για τον καθένα γίνεται αναζήτηση στο TMDB και δημιουργείται ενσωμάτωση. Η ενσωμάτωση είναι συνήθως φθηνή, αλλά ένας μεγαλύτερος αριθμός μπορεί να κοστίσει περισσότερο ή να διαρκέσει περισσότερο, ανάλογα με τον πάροχο ενσωματώσεων, και χρησιμοποιεί περισσότερο χώρο αποθήκευσης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Προτάσεις Ανακάλυψης"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -66041,6 +66365,12 @@
     {
       "type": 0,
       "value": "Cron ενσωματώσεων"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron προτάσεων Ανακάλυψης"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -111392,7 +111722,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά βαθμολογία, από την υψηλότερη"
+              "value": "πρώτα η υψηλότερη βαθμολογία"
             }
           ]
         },
@@ -111400,7 +111730,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά ημερομηνία κυκλοφορίας, από τη νεότερη"
+              "value": "πρώτα οι νεότερες κυκλοφορίες"
             }
           ]
         },
@@ -111408,7 +111738,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά αναπαραγωγές, από τις περισσότερες"
+              "value": "πρώτα οι περισσότερες αναπαραγωγές"
             }
           ]
         },
@@ -112340,13 +112670,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Συλλογές και κανόνες"
+      "value": "Συλλογές και έξυπνες γραμμές"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Οι συλλογές σας ή γραμμές με βάση κανόνες"
+      "value": "Οι συλλογές σας ή έξυπνες γραμμές που δημιουργούνται από κανόνες"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112460,7 +112790,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Δημιουργία γραμμής από κανόνες, όπως είδος και δεκαετία."
+      "value": "Σαν μια έξυπνη συλλογή, αλλά μόνο ως γραμμή. Επιλέξτε τίτλους με κανόνες, όπως είδος και δεκαετία."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112670,7 +113000,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Τίτλοι που ταιριάζουν σε κανόνες"
+      "value": "Έξυπνη γραμμή"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125661,6 +125991,34 @@
     {
       "type": 0,
       "value": " στη λίστα παρακολούθησής σας"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Επειδή παρακολουθήσατε: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Επειδή παρακολουθήσατε: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " και "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

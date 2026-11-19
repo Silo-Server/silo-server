@@ -1273,6 +1273,18 @@
       "value": "ซีรีส์ยอดนิยม"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "ภาพยนตร์แนะนำสำหรับคุณ"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "ซีรีส์แนะนำสำหรับคุณ"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -47802,6 +47814,106 @@
       "value": "โมเดล"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "ถึงขีดจำกัดของการเรียกใช้หนึ่งครั้งแล้ว การเรียกใช้ครั้งถัดไปจะทำต่อ"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "เรื่องที่ค้นข้อมูล: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · เอ็มเบดแล้ว: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · คำขอ TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "ปิด การเรียกใช้จะล้างเรื่องเก่าออกเท่านั้น"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "สร้างแถวแล้ว "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " แถว"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "เรื่องที่ใช้แนะนำ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " เรื่อง"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "ไม่ได้เอ็มเบดรายการใด: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -47844,6 +47956,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "คำแนะนำในหน้าสำรวจ"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -48068,6 +48186,12 @@
       "value": "เริ่มสร้างเอ็มเบดดิงไม่ได้"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "เริ่มคำแนะนำในหน้าสำรวจไม่ได้"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -48182,6 +48306,44 @@
       "value": "profiles"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "รีเซ็ตเอ็มเบดดิงแล้ว: ลบ "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " และ "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " แล้ว และล้าง "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " แล้ว"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -48200,6 +48362,58 @@
             {
               "type": 0,
               "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "เอ็มเบดดิงของหน้าสำรวจ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แถวของหน้าสำรวจ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " แถว"
             }
           ]
         }
@@ -48842,6 +49056,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซีรีส์แนะนำสำหรับผู้ชมแต่ละคน"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ภาพยนตร์แนะนำสำหรับผู้ชมแต่ละคน"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48890,6 +49128,18 @@
     {
       "type": 0,
       "value": "การ์ดเครือข่าย แต่ละใบเปิดซีรีส์ของเครือข่ายนั้น"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "คำแนะนำ"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "เรื่องที่ยังไม่มีในคลัง ซึ่งเลือกให้ผู้ชมแต่ละคนจากสิ่งที่ดู"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -49124,6 +49374,12 @@
     {
       "type": 0,
       "value": "เลือกภูมิภาคของบริการสตรีมมิง"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "จะว่างอยู่จนกว่าจะเปิดคำแนะนำในหน้าสำรวจใน ผู้ดูแลระบบ → คำแนะนำ"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -50436,6 +50692,12 @@
     {
       "type": 0,
       "value": "ตัวอย่างสดของรายการ"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "ตัวอย่างคำแนะนำของคุณเอง"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -60126,6 +60388,36 @@
       "value": "การเปลี่ยนไปใช้โมเดลอื่นต้องรีเซ็ตเอ็มเบดดิง ซึ่งจะลบเอ็มเบดดิงทั้งหมด ผู้ให้บริการอื่นที่ให้บริการโมเดลเดียวกันจะมีผลหลังจากรีสตาร์ต"
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "เปิดใช้คำแนะนำในหน้าสำรวจ"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "เพิ่มแถวส่วนตัวในหน้าสำรวจของคำขอพร้อมเรื่องที่ยังไม่มีในคลัง ใช้ผู้ให้บริการเอ็มเบดดิงและ TMDB"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "จำนวนเรื่องสูงสุดที่ใช้แนะนำ"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "จำนวนเรื่องที่ยังไม่มีในคลังซึ่งเซิร์ฟเวอร์เก็บไว้ใช้แนะนำ แต่ละเรื่องจะค้นข้อมูลใน TMDB และสร้างเอ็มเบดดิง โดยทั่วไปการสร้างเอ็มเบดดิงมีค่าใช้จ่ายต่ำ แต่จำนวนที่สูงขึ้นอาจมีค่าใช้จ่ายมากขึ้นหรือใช้เวลานานขึ้นโดยขึ้นอยู่กับผู้ให้บริการเอ็มเบดดิง และใช้พื้นที่จัดเก็บมากขึ้น"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "คำแนะนำในหน้าสำรวจ"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -60154,6 +60446,12 @@
     {
       "type": 0,
       "value": "Cron เอ็มเบดดิง"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron ของคำแนะนำในหน้าสำรวจ"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -102176,7 +102474,7 @@
     },
     {
       "type": 0,
-      "value": " ตามลำดับที่เลือก"
+      "value": "ตามลำดับที่เลือก"
     }
   ],
   "web.home.rows.describe.rulesMatching": [
@@ -102965,13 +103263,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "คอลเลกชันและกฎ"
+      "value": "คอลเลกชันและแถวอัจฉริยะ"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "คอลเลกชันของคุณ หรือแถวที่สร้างจากกฎ"
+      "value": "คอลเลกชันของคุณ หรือแถวอัจฉริยะที่สร้างจากกฎ"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -103085,7 +103383,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "สร้างแถวจากกฎ เช่น ประเภทและทศวรรษ"
+      "value": "คล้ายคอลเลกชันอัจฉริยะ แต่เป็นแถวเท่านั้น เลือกผลงานด้วยกฎ เช่น แนวและทศวรรษ"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -103295,7 +103593,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "เรื่องที่ตรงกับกฎ"
+      "value": "แถวอัจฉริยะ"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -115523,6 +115821,34 @@
     {
       "type": 0,
       "value": " ในรายการที่อยากดู"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "เพราะคุณดู "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "เพราะคุณดู "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " และ "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

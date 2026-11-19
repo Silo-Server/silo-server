@@ -1273,6 +1273,18 @@
       "value": "Siri popular"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Filem disyorkan untuk anda"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Siri disyorkan untuk anda"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -46950,6 +46962,98 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Had untuk satu larian telah dicapai; larian seterusnya akan menyambungnya."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Tajuk dicari: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embedding disimpan: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Permintaan TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Mati. Larian hanya mengosongkan tajuk lama."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " baris dibina"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tajuk untuk dicadangkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Tiada embedding disimpan: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -46992,6 +47096,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Cadangan Teroka"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47216,6 +47326,12 @@
       "value": "Tidak dapat memulakan pembenaman"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Gagal mencetuskan cadangan Teroka"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47334,6 +47450,44 @@
       "value": " dikosongkan."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embedding ditetapkan semula: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " dan "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " dipadam, dan "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " dikosongkan."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47348,6 +47502,50 @@
             {
               "type": 0,
               "value": " pembenaman"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding Teroka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " baris Teroka"
             }
           ]
         }
@@ -47970,6 +48168,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Siri disyorkan untuk setiap penonton"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Filem disyorkan untuk setiap penonton"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48018,6 +48240,18 @@
     {
       "type": 0,
       "value": "Kad rangkaian, setiap satu membuka siri rangkaian itu."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Cadangan"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Tajuk yang belum ada dalam pustaka, dipilih untuk setiap penonton berdasarkan apa yang mereka tonton."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48252,6 +48486,12 @@
     {
       "type": 0,
       "value": "Pilih rantau perkhidmatan penstriman itu."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Kekal kosong sehingga cadangan Teroka dihidupkan dalam Pentadbir → Cadangan."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -49556,6 +49796,12 @@
     {
       "type": 0,
       "value": "Pratonton masa nyata senarai"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Pratonton cadangan anda sendiri"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -59170,6 +59416,36 @@
       "value": "Beralih kepada model lain memerlukan penetapan semula pembenaman, yang memadam kesemuanya. Pembekal lain yang menyediakan model yang sama berkuat kuasa selepas dimulakan semula."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Dayakan Cadangan Teroka"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Menambah baris peribadi pada Teroka Permintaan dengan tajuk yang belum ada dalam pustaka. Menggunakan pembekal embedding dan TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Bilangan maksimum tajuk untuk dicadangkan"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Bilangan tajuk yang belum ada dalam pustaka yang disimpan oleh pelayan untuk dicadangkan. Setiap tajuk dicari di TMDB dan dijadikan embedding. Embedding biasanya murah, tetapi bilangan yang lebih tinggi boleh menelan kos lebih tinggi atau mengambil masa lebih lama bergantung pada pembekal embedding anda, dan menggunakan lebih banyak storan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Cadangan Teroka"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59198,6 +59474,12 @@
     {
       "type": 0,
       "value": "Cron pembenaman"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron Cadangan Teroka"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -101651,13 +101933,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksi & peraturan"
+      "value": "Koleksi & baris pintar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksi anda, atau baris yang dibina daripada peraturan"
+      "value": "Koleksi anda, atau baris pintar yang dibina daripada peraturan"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -101771,7 +102053,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Bina baris daripada peraturan, seperti genre dan dekad."
+      "value": "Seperti koleksi pintar, tetapi hanya sebagai baris. Pilih judul dengan peraturan seperti genre dan dekad."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -101981,7 +102263,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Judul yang memenuhi peraturan"
+      "value": "Baris pintar"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -114101,6 +114383,34 @@
     {
       "type": 0,
       "value": " ke senarai tontonan anda"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Kerana anda menonton "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Kerana anda menonton "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " dan "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

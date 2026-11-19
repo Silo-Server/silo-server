@@ -1273,6 +1273,18 @@
       "value": "Serial populer"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Rekomendasi film untuk Anda"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Rekomendasi serial untuk Anda"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -46962,6 +46974,98 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Batas untuk satu kali proses tercapai; proses berikutnya akan melanjutkan."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Judul dicari: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embedding disimpan: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Permintaan TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Nonaktif. Proses hanya membersihkan judul lama."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " baris dibuat"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " judul untuk direkomendasikan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Tidak ada embedding yang disimpan: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -47004,6 +47108,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Rekomendasi Jelajahi"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47228,6 +47338,12 @@
       "value": "Gagal memicu embedding"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Gagal memicu rekomendasi Jelajahi"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47346,6 +47462,44 @@
       "value": " dikosongkan."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embedding direset: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", dan "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " dihapus, serta "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " dikosongkan."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47360,6 +47514,50 @@
             {
               "type": 0,
               "value": " embedding"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding Jelajahi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " baris Jelajahi"
             }
           ]
         }
@@ -47982,6 +48180,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rekomendasi serial untuk setiap penonton"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rekomendasi film untuk setiap penonton"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48030,6 +48252,18 @@
     {
       "type": 0,
       "value": "Kartu jaringan, masing-masing membuka serial dari jaringan itu."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Rekomendasi"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Judul yang belum ada di perpustakaan, dipilih untuk setiap penonton berdasarkan yang mereka tonton."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48264,6 +48498,12 @@
     {
       "type": 0,
       "value": "Pilih wilayah layanan streaming tersebut."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Tetap kosong sampai rekomendasi Jelajahi diaktifkan di Admin → Rekomendasi."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -49568,6 +49808,12 @@
     {
       "type": 0,
       "value": "Pratinjau real-time daftar"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Pratinjau rekomendasi Anda sendiri"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -59182,6 +59428,36 @@
       "value": "Beralih ke model lain memerlukan reset embedding, yang menghapus semuanya. Penyedia lain yang melayani model yang sama berlaku setelah mulai ulang."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Aktifkan Rekomendasi Jelajahi"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Menambahkan baris personal ke Jelajahi di Permintaan dengan judul yang belum ada di perpustakaan. Menggunakan penyedia embedding dan TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Jumlah Maksimum Judul untuk Direkomendasikan"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Jumlah judul yang belum ada di perpustakaan yang disimpan server untuk direkomendasikan. Setiap judul dicari di TMDB dan dibuatkan embedding. Pembuatan embedding biasanya murah, tetapi angka yang lebih tinggi dapat menambah biaya atau waktu proses, tergantung penyedia embedding Anda, dan menggunakan lebih banyak penyimpanan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Rekomendasi Jelajahi"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59210,6 +59486,12 @@
     {
       "type": 0,
       "value": "Cron embedding"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron Rekomendasi Jelajahi"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -101765,13 +102047,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksi & aturan"
+      "value": "Koleksi & baris pintar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksi Anda, atau baris yang dibuat dari aturan"
+      "value": "Koleksi Anda, atau baris pintar yang dibuat dari aturan"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -101885,7 +102167,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Buat baris dari aturan, seperti genre dan dekade."
+      "value": "Seperti koleksi pintar, tetapi hanya berupa baris. Pilih judul dengan aturan seperti genre dan dekade."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -102095,7 +102377,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Judul yang cocok dengan aturan"
+      "value": "Baris pintar"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -114215,6 +114497,34 @@
     {
       "type": 0,
       "value": " ke daftar tonton Anda"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Karena Anda menonton "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Karena Anda menonton "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " dan "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

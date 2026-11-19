@@ -1273,6 +1273,18 @@
       "value": "סדרות פופולריות"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "סרטים מומלצים בשבילך"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "סדרות מומלצות בשבילך"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -58137,6 +58149,146 @@
       "value": "מודל"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "הושגה המגבלה להרצה אחת; ההרצה הבאה תמשיך."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "פריטים שנבדקו: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · הטמעות שנשמרו: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · בקשות ל-TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "כבוי. ההרצות רק מנקות פריטים ישנים."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נבנתה שורה אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נבנו "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " שורות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נבנו "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " שורות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פריט אחד זמין להמלצה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים זמינים להמלצה"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים זמינים להמלצה"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "לא נשמרו הטמעות: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -58203,6 +58355,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "המלצות גילוי"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -58491,6 +58649,12 @@
       "value": "לא ניתן היה להפעיל את ההטמעות"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "הפעלת המלצות הגילוי נכשלה"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -58609,6 +58773,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "ההטמעות אופסו: נמחקו "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " ו-"
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ", ונוקו "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -58647,6 +58849,90 @@
             {
               "type": 0,
               "value": " הטמעות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הטמעת גילוי אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הטמעות גילוי"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הטמעות גילוי"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "שורת גילוי אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " שורות גילוי"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " שורות גילוי"
             }
           ]
         }
@@ -59717,6 +60003,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "סדרות מומלצות לכל צופה"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "סרטים מומלצים לכל צופה"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -59765,6 +60075,18 @@
     {
       "type": 0,
       "value": "כרטיסי רשתות, שכל אחד מהם פותח את הסדרות של הרשת."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "המלצות"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "פריטים שעדיין אינם בספרייה, שנבחרים לכל צופה לפי היסטוריית הצפייה."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -60107,6 +60429,12 @@
     {
       "type": 0,
       "value": "יש לבחור את האזור של שירותי ההזרמה."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "השורה תישאר ריקה עד להפעלת המלצות הגילוי בניהול ← המלצות."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -61613,6 +61941,12 @@
     {
       "type": 0,
       "value": "תצוגה מקדימה חיה של הרשימה"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "תצוגה מקדימה של ההמלצות שלך"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -71880,6 +72214,36 @@
       "value": "מעבר למודל אחר מחייב איפוס של ההטמעות, שמוחק את כולן. ספק אחר שמספק את אותו המודל נכנס לתוקף אחרי הפעלה מחדש."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "הפעלת המלצות הגילוי"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "נוספות שורות אישיות לגילוי בדף הבקשות עם פריטים שעדיין אינם בספרייה. נעשה שימוש בספק ההטמעות וב-TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "מספר מרבי של פריטים להמלצה"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "כמה פריטים שאינם בספרייה השרת שומר כמקור להמלצות. כל פריט נבדק ב-TMDB ועובר הטמעה. ההטמעה בדרך כלל זולה, אבל מספר גבוה יותר עלול לעלות יותר או להימשך זמן רב יותר, בהתאם לספק ההטמעות שלך, ולתפוס יותר נפח אחסון."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "המלצות גילוי"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -71908,6 +72272,12 @@
     {
       "type": 0,
       "value": "Cron להטמעות"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "תזמון Cron של המלצות הגילוי"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -120932,13 +121302,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "אוספים וכללים"
+      "value": "אוספים ושורות חכמות"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "האוספים שלך, או שורות שנבנו מכללים"
+      "value": "האוספים שלך, או שורות חכמות שנבנות מכללים"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -121052,7 +121422,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "בניית שורה מכללים, כמו ז׳אנר ועשור."
+      "value": "כמו אוסף חכם, אבל רק שורה. אפשר לבחור פריטים לפי כללים, כמו ז׳אנר ועשור."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -121262,7 +121632,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "פריטים שתואמים כללים"
+      "value": "שורה חכמה"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -134798,6 +135168,34 @@
     {
       "type": 0,
       "value": " לרשימת הצפייה שלך"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "בעקבות הצפייה ב-"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "בעקבות הצפייה ב-"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " וב-"
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

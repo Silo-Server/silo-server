@@ -1273,6 +1273,18 @@
       "value": "المسلسلات الشائعة"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "أفلام موصى بها لك"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "مسلسلات موصى بها لك"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -75449,6 +75461,194 @@
       "value": "النموذج"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "بلغ الحد الأقصى لتشغيل واحد؛ يتابع التشغيل التالي."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "عناوين تم البحث عنها: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · تم تضمينها: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · طلبات TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "معطّل. تقتصر عمليات التشغيل على مسح العناوين القديمة."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا صفوف منشأة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صف واحد منشأ"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صفان منشآن"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صفوف منشأة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صفًا منشأً"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صف منشأ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا عناوين للتوصية منها"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنوان واحد للتوصية منه"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنوانان للتوصية منهما"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عناوين للتوصية منها"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنوانًا للتوصية منها"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنوان للتوصية منها"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "لم يتم أي تضمين: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -75547,6 +75747,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "توصيات الاستكشاف"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -75927,6 +76133,12 @@
       "value": "تعذّر بدء التضمينات"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "فشل تشغيل توصيات الاستكشاف"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -76045,6 +76257,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "تمت إعادة تعيين التضمينات: حُذفت "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": " و"
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " و"
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "، ومُسحت "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -76115,6 +76365,146 @@
             {
               "type": 0,
               "value": " تضمين"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا تضمينات للاستكشاف"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تضمين واحد للاستكشاف"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تضمينان للاستكشاف"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " تضمينات للاستكشاف"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " تضمينًا للاستكشاف"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " تضمين للاستكشاف"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا صفوف للاستكشاف"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صف واحد للاستكشاف"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صفان للاستكشاف"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صفوف للاستكشاف"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صفًا للاستكشاف"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صف للاستكشاف"
             }
           ]
         }
@@ -77797,6 +78187,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مسلسلات موصى بها لكل مشاهد"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "أفلام موصى بها لكل مشاهد"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -77845,6 +78259,18 @@
     {
       "type": 0,
       "value": "بطاقات شبكات، تفتح كل منها مسلسلات الشبكة."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "التوصيات"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "عناوين غير موجودة في المكتبة بعد، تُختار لكل مشاهد بناءً على ما يشاهده."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -78339,6 +78765,12 @@
     {
       "type": 0,
       "value": "اختر المنطقة التي تتوفر فيها خدمات البث."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "يبقى فارغًا حتى تفعيل توصيات الاستكشاف من الإدارة ← التوصيات."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -80115,6 +80547,12 @@
     {
       "type": 0,
       "value": "معاينة مباشرة للقائمة"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "معاينة توصياتك الخاصة"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -91114,6 +91552,36 @@
       "value": "يتطلب التبديل إلى نموذج آخر إعادة تعيين التضمينات، مما يحذفها جميعًا. أما استخدام مزود آخر يقدّم النموذج نفسه فيُطبَّق بعد إعادة التشغيل."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "تفعيل توصيات الاستكشاف"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "يضيف صفوفًا شخصية إلى صفحة استكشاف في الطلبات تضم عناوين غير موجودة في المكتبة بعد. يستخدم مزود التضمين وTMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "الحد الأقصى للعناوين المتاحة للتوصية"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "عدد العناوين غير الموجودة في المكتبة التي يحتفظ بها الخادم للتوصية منها. يُبحث عن كل عنوان على TMDB ويُنشأ له تضمين. عادةً ما يكون التضمين منخفض التكلفة، لكن الرقم الأعلى قد يكلّف أكثر أو يستغرق وقتًا أطول حسب مزود التضمين لديك، ويستهلك مساحة تخزين أكبر."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "توصيات الاستكشاف"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -91142,6 +91610,12 @@
     {
       "type": 0,
       "value": "Cron التضمينات"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "جدولة Cron لتوصيات الاستكشاف"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -149286,7 +149760,7 @@
             },
             {
               "type": 0,
-              "value": " قاعدة"
+              "value": " قاعدةً"
             }
           ]
         },
@@ -150205,13 +150679,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "المجموعات والقواعد"
+      "value": "المجموعات والصفوف الذكية"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "مجموعاتك، أو صفوف مبنية من قواعد"
+      "value": "مجموعاتك، أو صفوف ذكية مبنية من قواعد"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -150325,7 +150799,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "أنشئ صفًا من قواعد، مثل النوع والعقد."
+      "value": "مثل المجموعة الذكية، لكنه صف فقط. اختر العناوين بقواعد مثل النوع والعقد."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -150535,7 +151009,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "عناوين تطابق القواعد"
+      "value": "صف ذكي"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -166269,6 +166743,34 @@
     {
       "type": 0,
       "value": " إلى قائمة المشاهدة"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "لأنك شاهدت "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "لأنك شاهدت "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " و"
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

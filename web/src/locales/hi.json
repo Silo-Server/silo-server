@@ -1277,6 +1277,18 @@
       "value": "लोकप्रिय सीरीज़"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "आपके लिए सुझाई गई फ़िल्में"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "आपके लिए सुझाई गई सीरीज़"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52425,6 +52437,130 @@
       "value": "मॉडल"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "एक रन की सीमा पूरी हो गई। अगले रन में काम जारी रहेगा।"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "जाँचे गए टाइटल: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · एम्बेड किए गए: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB अनुरोध: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "बंद। रन सिर्फ़ पुराने टाइटल हटाते हैं।"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " पंक्ति बनाई गई"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " पंक्तियाँ बनाई गईं"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "सुझाव देने के लिए "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " टाइटल"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "सुझाव देने के लिए "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " टाइटल"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "कुछ भी एम्बेड नहीं किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52483,6 +52619,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -52771,6 +52913,12 @@
       "value": "एम्बेडिंग जॉब शुरू नहीं की जा सकी"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव शुरू नहीं किए जा सके"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -52889,6 +53037,44 @@
       "value": " को साफ़ किया गया।"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "एम्बेडिंग रीसेट की गईं: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " और "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " को मिटाया गया, और "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " को साफ़ किया गया।"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -52915,6 +53101,74 @@
             {
               "type": 0,
               "value": " एम्बेडिंग"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर एम्बेडिंग"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर एम्बेडिंग"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर पंक्ति"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर पंक्तियाँ"
             }
           ]
         }
@@ -53733,6 +53987,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "हर दर्शक के लिए सुझाई गई सीरीज़"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "हर दर्शक के लिए सुझाई गई फ़िल्में"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -53781,6 +54059,18 @@
     {
       "type": 0,
       "value": "नेटवर्क कार्ड, हर कार्ड उस नेटवर्क की सीरीज़ खोलता है।"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "सुझाव"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "ऐसे टाइटल जो अभी लाइब्रेरी में नहीं हैं, हर दर्शक के लिए उनके देखे गए टाइटल के आधार पर चुने गए।"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54095,6 +54385,12 @@
     {
       "type": 0,
       "value": "वह क्षेत्र चुनें जिसमें स्ट्रीमिंग सेवाएँ उपलब्ध हैं।"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "जब तक एडमिन → सुझाव में डिस्कवर सुझाव चालू नहीं किए जाते, यह खाली रहेगी।"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55497,6 +55793,12 @@
     {
       "type": 0,
       "value": "सूची का लाइव प्रीव्यू"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "आपके अपने सुझावों का प्रीव्यू"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65417,6 +65719,36 @@
       "value": "किसी दूसरे मॉडल पर जाने के लिए एम्बेडिंग रीसेट करनी होंगी, जिससे वे सभी मिट जाती हैं। उसी मॉडल वाला कोई दूसरा प्रोवाइडर रीस्टार्ट के बाद लागू होता है।"
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव चालू करें"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "अनुरोध → डिस्कवर में निजी पंक्तियाँ जोड़ता है, जिनमें ऐसे टाइटल होते हैं जो अभी लाइब्रेरी में नहीं हैं। इसके लिए एम्बेडिंग प्रोवाइडर और TMDB का इस्तेमाल होता है।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "सुझाव के लिए अधिकतम टाइटल"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "सर्वर सुझाव देने के लिए ऐसे कितने टाइटल रखे जो लाइब्रेरी में नहीं हैं। हर टाइटल की जानकारी TMDB से ली जाती है और उसे एम्बेड किया जाता है। एम्बेडिंग आम तौर पर सस्ती होती है, लेकिन ज़्यादा संख्या रखने पर आपके एम्बेडिंग प्रोवाइडर के हिसाब से खर्च बढ़ सकता है या ज़्यादा समय लग सकता है, और स्टोरेज भी ज़्यादा लगता है।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65445,6 +65777,12 @@
     {
       "type": 0,
       "value": "एम्बेडिंग Cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव का Cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -111172,13 +111510,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "कलेक्शन और नियम"
+      "value": "कलेक्शन और स्मार्ट पंक्तियाँ"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "आपके कलेक्शन, या नियमों से बनी पंक्तियाँ"
+      "value": "आपके कलेक्शन, या नियमों से बनी स्मार्ट पंक्तियाँ"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111292,7 +111630,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "शैली और दशक जैसे नियमों से पंक्ति बनाएँ।"
+      "value": "स्मार्ट कलेक्शन जैसी, लेकिन सिर्फ़ एक पंक्ति। शैली और दशक जैसे नियमों से टाइटल चुनें।"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111502,7 +111840,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "नियमों से मेल खाते टाइटल"
+      "value": "स्मार्ट पंक्ति"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -124329,6 +124667,42 @@
     {
       "type": 0,
       "value": " को अपनी वॉचलिस्ट में जोड़ें"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "क्योंकि आपने "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " को देखा"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "क्योंकि आपने "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " और "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " को देखा"
     }
   ],
   "web.requests.card.label": [

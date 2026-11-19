@@ -1273,6 +1273,18 @@
       "value": "人氣影集"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "為你推薦的電影"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "為你推薦的影集"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -47468,6 +47480,102 @@
       "value": "模型"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "已達單次執行的上限，下次執行時會繼續。"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "已查詢的作品："
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · 已嵌入："
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB 請求："
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "已關閉。執行時只會清除舊作品。"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已建立 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 列"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 部可供推薦的作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "未嵌入任何內容："
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -47510,6 +47618,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "探索推薦"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47734,6 +47848,12 @@
       "value": "無法啟動嵌入向量作業"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "無法觸發探索推薦"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47852,6 +47972,44 @@
       "value": "。"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "嵌入已重設：已刪除 "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " 和 "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "，並清除 "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47866,6 +48024,50 @@
             {
               "type": 0,
               "value": " 個嵌入向量"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個探索嵌入"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個探索列"
             }
           ]
         }
@@ -48504,6 +48706,30 @@
       "value": "："
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "為每位觀眾推薦的影集"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "為每位觀眾推薦的電影"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48552,6 +48778,18 @@
     {
       "type": 0,
       "value": "電視網卡片，點選即可開啟該電視網的影集。"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "推薦"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "尚未加入媒體庫的作品，依每位觀眾的觀看內容挑選。"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48794,6 +49032,12 @@
     {
       "type": 0,
       "value": "請選擇串流服務所在的地區。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "在「管理 → 推薦」中開啟探索推薦之前，此列會保持空白。"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -50110,6 +50354,12 @@
     {
       "type": 0,
       "value": "清單即時預覽"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "預覽你自己的推薦內容"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -59816,6 +60066,36 @@
       "value": "改用其他模型需要重設嵌入，這會刪除所有嵌入。若改由其他提供者提供相同模型，則會在重新啟動後套用。"
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "啟用探索推薦"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "在請求的探索頁面新增個人化列，顯示尚未加入媒體庫的作品。會使用嵌入提供者和 TMDB。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "可供推薦的作品數量上限"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "伺服器保留多少部不在媒體庫中的作品以供推薦。每部作品都會在 TMDB 上查詢並建立嵌入。建立嵌入通常成本不高，但數量越多，視你的嵌入提供者而定，可能花費更多或耗時更久，也會占用更多儲存空間。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "探索推薦"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59844,6 +60124,12 @@
     {
       "type": 0,
       "value": "嵌入 Cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "探索推薦 Cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -102911,13 +103197,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "合輯與規則"
+      "value": "合輯與智慧列"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "你的合輯，或依規則建立的列"
+      "value": "你的合輯，或依規則建立的智慧列"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -103031,7 +103317,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "依規則（例如類型和年代）建立列。"
+      "value": "類似智慧合輯，但只是一列。依類型和年代等規則挑選作品。"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -103241,7 +103527,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "符合規則的作品"
+      "value": "智慧列"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -115477,6 +115763,34 @@
     {
       "type": 0,
       "value": " 加入你的待看清單"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "因為你看過 "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "因為你看過 "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " 和 "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [

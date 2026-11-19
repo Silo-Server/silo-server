@@ -1273,6 +1273,18 @@
       "value": "Phim bộ phổ biến"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Phim đề xuất cho bạn"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Phim bộ đề xuất cho bạn"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -52933,6 +52945,130 @@
       "value": "Mô hình"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Đã đạt giới hạn cho một lần chạy; lần chạy tiếp theo sẽ tiếp tục."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Tựa đã tra cứu: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Đã tạo embedding: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Yêu cầu TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Tắt. Các lần chạy chỉ xóa các tựa cũ."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã tạo "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hàng"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã tạo "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hàng"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa để đề xuất"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa để đề xuất"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Không tạo embedding nào: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52987,6 +53123,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Đề xuất Khám phá"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53243,6 +53385,12 @@
       "value": "Không thể bắt đầu tạo embedding"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Không thể kích hoạt đề xuất Khám phá"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53361,6 +53509,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Đã đặt lại embedding: đã xóa "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " và "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ", đồng thời xóa hết "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53387,6 +53573,74 @@
             {
               "type": 0,
               "value": " embedding"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding Khám phá"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding Khám phá"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hàng Khám phá"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hàng Khám phá"
             }
           ]
         }
@@ -54237,6 +54491,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Phim bộ đề xuất cho từng người xem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Phim đề xuất cho từng người xem"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54285,6 +54563,18 @@
     {
       "type": 0,
       "value": "Thẻ kênh truyền hình, mỗi thẻ mở các phim bộ của kênh đó."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Đề xuất"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Các tựa chưa có trong thư viện, được chọn cho từng người xem dựa trên nội dung họ xem."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54583,6 +54873,12 @@
     {
       "type": 0,
       "value": "Chọn khu vực của các dịch vụ phát trực tuyến."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Sẽ trống cho đến khi bật đề xuất Khám phá trong Quản trị → Đề xuất."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55993,6 +56289,12 @@
     {
       "type": 0,
       "value": "Xem trước danh sách theo thời gian thực"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Xem trước đề xuất của riêng bạn"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -65969,6 +66271,36 @@
       "value": "Chuyển sang mô hình khác cần đặt lại embedding, thao tác này sẽ xóa toàn bộ embedding. Nhà cung cấp khác phục vụ cùng mô hình sẽ được áp dụng sau khi khởi động lại."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Bật đề xuất Khám phá"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Thêm các hàng cá nhân vào Khám phá trong Yêu cầu với các tựa chưa có trong thư viện. Sử dụng nhà cung cấp embedding và TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Số tựa tối đa để đề xuất"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Số tựa chưa có trong thư viện mà máy chủ lưu giữ để đề xuất. Mỗi tựa được tra cứu trên TMDB và tạo embedding. Việc tạo embedding thường rẻ, nhưng con số cao hơn có thể tốn kém hơn hoặc mất nhiều thời gian hơn tùy theo nhà cung cấp embedding của bạn, và dùng nhiều dung lượng lưu trữ hơn."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Đề xuất Khám phá"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65997,6 +66329,12 @@
     {
       "type": 0,
       "value": "Cron embedding"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron đề xuất Khám phá"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -112218,13 +112556,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Bộ sưu tập và quy tắc"
+      "value": "Bộ sưu tập và hàng thông minh"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Các bộ sưu tập của bạn, hoặc hàng tạo từ quy tắc"
+      "value": "Bộ sưu tập của bạn, hoặc hàng thông minh tạo từ quy tắc"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112338,7 +112676,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Tạo hàng từ quy tắc, như thể loại và thập niên."
+      "value": "Giống bộ sưu tập thông minh, nhưng chỉ là một hàng. Chọn tựa theo quy tắc như thể loại và thập niên."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112548,7 +112886,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Nội dung khớp quy tắc"
+      "value": "Hàng thông minh"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -125483,6 +125821,34 @@
     {
       "type": 0,
       "value": " vào danh sách xem của bạn"
+    }
+  ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Vì bạn đã xem "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Vì bạn đã xem "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " và "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.card.label": [
