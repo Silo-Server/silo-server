@@ -31,7 +31,10 @@ const (
 	remoteFailureTTL     = 30 * time.Second
 	remoteResultMaxBytes = 4 << 20
 	remoteResultsBudget  = 64 << 20
-	remoteResultsSweep   = time.Minute
+	// remoteResultsMax bounds how many outcomes are kept, so remembered
+	// failures, which hold no bytes, cannot grow the map without limit.
+	remoteResultsMax   = 4096
+	remoteResultsSweep = time.Minute
 )
 
 // ErrRemoteBusy reports that every remote fetch slot stayed taken.
@@ -110,7 +113,7 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 		f.bytes -= len(old.image.Data)
 		delete(f.results, id)
 	}
-	if f.bytes+len(image.Data) > remoteResultsBudget {
+	if f.bytes+len(image.Data) > remoteResultsBudget || len(f.results) >= remoteResultsMax {
 		return
 	}
 	f.results[id] = remoteResult{image: image, err: err, until: now.Add(ttl)}
@@ -146,6 +149,11 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 				value, err = RemoteImage{}, errors.New("imagecache: remote image fetch panicked")
 			}
 		}()
+		// A caller that missed the memory just before the previous download
+		// finished lands here after it; it takes that outcome.
+		if result, ok := f.recent(id, time.Now()); ok {
+			return result.image, result.err
+		}
 		image, err := f.fetch(context.WithoutCancel(ctx), rawURL)
 		// A busy server is not an outcome of this artwork; the next request
 		// should try again.
