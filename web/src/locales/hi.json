@@ -72617,6 +72617,12 @@
       "value": "टीवी साइन इन: शुरुआत"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "पोस्टर के अनुरोध"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

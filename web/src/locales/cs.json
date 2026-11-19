@@ -86779,6 +86779,12 @@
       "value": "Přihlášení na TV: zahájení"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Požadavky na plakáty"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

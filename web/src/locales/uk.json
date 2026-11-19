@@ -86538,6 +86538,12 @@
       "value": "Вхід на ТБ: початок"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Запити постерів"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

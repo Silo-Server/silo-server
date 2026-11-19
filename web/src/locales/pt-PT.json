@@ -80016,6 +80016,12 @@
       "value": "Início de sessão na TV: início"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Pedidos de pósteres"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

@@ -46,6 +46,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
@@ -1245,8 +1246,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 			personalCollages.SetCollageGenerator(gen)
 		}
 	}
+	// Admin reads (session rows, the catalog listing) name posters by a URL
+	// this server issued, so a monitoring tool never needs a provider's host.
+	var itemPosters *artworkurl.ItemPosters
+	if cfg := deps.CurrentConfig(); detailSvc != nil && cfg != nil {
+		itemPosters = artworkurl.NewItemPosters(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry, detailSvc)
+	}
 	if deps.DB != nil {
 		playbackSessionsLoader = handlers.NewPlaybackSessionsLoader(deps.DB, deps.UserStoreProvider, detailSvc)
+		playbackSessionsLoader.Posters = itemPosters
 	}
 
 	if deps.UserStoreProvider != nil {
@@ -3216,6 +3224,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if itemRepo != nil {
 		v2deps.AdminCatalogItems = itemRepo
+	}
+	if itemPosters != nil && deps.DB != nil {
+		v2deps.ItemPosters = itemPosters
+		v2deps.ItemPosterSource = metadata.NewImageCacheJobRepository(deps.DB)
+		v2deps.RemotePosters = imagecache.NewRemoteFetcher()
 	}
 	if adminImageHandler != nil {
 		v2deps.AdminCatalogImages = adminImageHandler

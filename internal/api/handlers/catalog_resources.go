@@ -153,6 +153,7 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 			detail.SeasonUserData = h.items.getLeafUserData(ctx, v, detail.ContentID, detail.Type)
 		}
 		applyEffectiveEditionPreference(detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
+		projectEditionPreference(detail.EditionAliases, detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
 	}
 
 	detail.ViewerCurates = curates

@@ -72717,6 +72717,12 @@
       "value": "TV-Anmeldung: Start"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poster-Anfragen"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

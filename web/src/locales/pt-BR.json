@@ -79728,6 +79728,12 @@
       "value": "Login na TV: início"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Solicitações de pôster"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

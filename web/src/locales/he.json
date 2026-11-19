@@ -79191,6 +79191,12 @@
       "value": "התחברות בטלוויזיה: התחלה"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "בקשות פוסטר"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

@@ -72913,6 +72913,12 @@
       "value": "Tv-kirjautuminen: aloitus"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Julistepyynnöt"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

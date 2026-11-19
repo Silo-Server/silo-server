@@ -66613,6 +66613,12 @@
       "value": "TV 로그인: 시작"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "포스터 요청"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

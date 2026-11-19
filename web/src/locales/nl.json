@@ -72541,6 +72541,12 @@
       "value": "Tv-aanmelding: starten"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Posterverzoeken"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

@@ -72709,6 +72709,12 @@
       "value": "TV-bejelentkezés: indítás"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poszterkérések"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

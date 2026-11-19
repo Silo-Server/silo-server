@@ -884,6 +884,7 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		IsJellyfinCompat: card.IsJellyfinCompat,
 		// So do the reasons the admin views give for the adaptation.
 		AdaptationReasons: NormalizeAdaptationReasons(card.AdaptationReasons),
+		Subtitle:          card.Subtitle,
 		// The card carries no address; the media request rebuilding the
 		// session comes from the viewer's player.
 		ClientIP: clientip.FromContext(ctx),

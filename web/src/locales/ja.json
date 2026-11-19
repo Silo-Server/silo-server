@@ -66325,6 +66325,12 @@
       "value": "テレビのサインイン：開始"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "ポスターのリクエスト"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

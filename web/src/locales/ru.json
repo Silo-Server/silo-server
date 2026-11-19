@@ -87660,6 +87660,12 @@
       "value": "Вход на телевизоре: начало"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Запросы постеров"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

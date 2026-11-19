@@ -66737,6 +66737,12 @@
       "value": "电视登录：开始"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "海报请求"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

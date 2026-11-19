@@ -72889,6 +72889,12 @@
       "value": "TV-pålogging: start"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatforespørsler"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

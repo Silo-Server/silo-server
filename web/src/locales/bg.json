@@ -73121,6 +73121,12 @@
       "value": "Вход на ТВ: начало"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Заявки за постери"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

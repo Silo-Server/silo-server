@@ -811,7 +811,7 @@ func reprobeMayScanPackets(file *models.MediaFile) bool {
 		return false
 	}
 	return file.Duration <= 0 ||
-		videoDurationImplausible(float64(file.Duration), file.FileSize, true)
+		models.VideoDurationImplausible(float64(file.Duration), file.FileSize, true)
 }
 
 // legacyProbeDurationFixTime marks the revision of the duration-validity rule
@@ -835,7 +835,7 @@ func needsLegacyDurationRepair(file *models.MediaFile) bool {
 }
 
 func legacyDurationRepairNeeded(duration int, sizeBytes int64, hasVideo bool, probeUpdatedAt *time.Time) bool {
-	if !videoDurationImplausible(float64(duration), sizeBytes, hasVideo) {
+	if !models.VideoDurationImplausible(float64(duration), sizeBytes, hasVideo) {
 		return false
 	}
 	return probeUpdatedAt == nil || probeUpdatedAt.Before(legacyProbeDurationFixTime)

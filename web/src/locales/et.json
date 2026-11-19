@@ -73509,6 +73509,12 @@
       "value": "Teleri sisselogimine: alustamine"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatite päringud"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

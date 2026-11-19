@@ -79812,6 +79812,12 @@
       "value": "Prijava na TV-u: početak"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Zahtjevi za postere"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

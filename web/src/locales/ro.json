@@ -79808,6 +79808,12 @@
       "value": "Conectare pe TV: pornire"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Cereri pentru postere"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

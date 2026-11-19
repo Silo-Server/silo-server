@@ -67133,6 +67133,12 @@
       "value": "การลงชื่อเข้าใช้บนทีวี: เริ่มต้น"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "คำขอโปสเตอร์"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

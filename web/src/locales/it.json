@@ -79544,6 +79544,12 @@
       "value": "Accesso TV: avvio"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Richieste di locandine"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

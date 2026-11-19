@@ -76649,6 +76649,12 @@
       "value": "\u200F\u202ETV sign-in: start\u202C"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPoster requests\u202C"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

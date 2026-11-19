@@ -66883,6 +66883,12 @@
       "value": "電視登入：開始"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "海報請求"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

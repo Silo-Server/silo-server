@@ -54,20 +54,21 @@ type AdminPlaybackHistoryEntry struct {
 	SeasonNumber       *int     `json:"season_number" nullable:"true" doc:"Episode season; null when not an episode"`
 	EpisodeNumber      *int     `json:"episode_number" nullable:"true" doc:"Episode number; null when not an episode"`
 
-	Measured             bool     `json:"measured" doc:"Whether the play has a watch-time measurement; played_seconds, start_position_seconds, paused_seconds, measured_since and measured_until are null without one"`
-	StartPositionSeconds *float64 `json:"start_position_seconds" nullable:"true" doc:"First position, in seconds, the measurement saw: where the play began or resumed"`
-	PausedSeconds        *float64 `json:"paused_seconds" nullable:"true" doc:"Seconds the play spent paused between samples"`
-	MeasuredSince        *Instant `json:"measured_since" nullable:"true" doc:"First sample behind the measurement: the start, once its stream was prepared, or the first progress report"`
-	MeasuredUntil        *Instant `json:"measured_until" nullable:"true" doc:"Last sample behind the measurement: the latest progress report, or the final position the stop carried"`
-	ClientIP             *string  `json:"client_ip" nullable:"true" doc:"Viewer's last address on the playback session; null when none was recorded. Rows recorded by older servers may hold the address of the request that ended the attempt"`
-	DeviceID             *string  `json:"device_id" nullable:"true" doc:"Device the client declared in X-Silo-Device-Id when playback started (the profile device registry's identity); a Jellyfin play records the DeviceId of its MediaBrowser authorization. Null when unknown"`
-	DevicePlatform       *string  `json:"device_platform" nullable:"true" doc:"Platform the client declared in X-Silo-Device-Platform when playback started, never derived from the user agent. Null when unknown, and for a Jellyfin play"`
-	ClientName           *string  `json:"client_name" nullable:"true" doc:"App name the client reported; null when unknown"`
-	ClientVersion        *string  `json:"client_version" nullable:"true" doc:"App version the client reported; null when unknown"`
-	VideoDecision        *string  `json:"video_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the video stream was delivered when the play ended: direct, remux (copied into a new container), or transcode. Null when unknown"`
-	AudioDecision        *string  `json:"audio_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown"`
-	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
-	LifecycleSeq         *int64   `json:"lifecycle_seq" nullable:"true" doc:"Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed"`
+	Measured             bool                                    `json:"measured" doc:"Whether the play has a watch-time measurement; played_seconds, start_position_seconds, paused_seconds, measured_since and measured_until are null without one"`
+	StartPositionSeconds *float64                                `json:"start_position_seconds" nullable:"true" doc:"First position, in seconds, the measurement saw: where the play began or resumed"`
+	PausedSeconds        *float64                                `json:"paused_seconds" nullable:"true" doc:"Seconds the play spent paused between samples"`
+	MeasuredSince        *Instant                                `json:"measured_since" nullable:"true" doc:"First sample behind the measurement: the start, once its stream was prepared, or the first progress report"`
+	MeasuredUntil        *Instant                                `json:"measured_until" nullable:"true" doc:"Last sample behind the measurement: the latest progress report, or the final position the stop carried"`
+	ClientIP             *string                                 `json:"client_ip" nullable:"true" doc:"Viewer's last address on the playback session; null when none was recorded. Rows recorded by older servers may hold the address of the request that ended the attempt"`
+	DeviceID             *string                                 `json:"device_id" nullable:"true" doc:"Device the client declared in X-Silo-Device-Id when playback started (the profile device registry's identity); a Jellyfin play records the DeviceId of its MediaBrowser authorization. Null when unknown"`
+	DevicePlatform       *string                                 `json:"device_platform" nullable:"true" doc:"Platform the client declared in X-Silo-Device-Platform when playback started, never derived from the user agent. Null when unknown, and for a Jellyfin play"`
+	ClientName           *string                                 `json:"client_name" nullable:"true" doc:"App name the client reported; null when unknown"`
+	ClientVersion        *string                                 `json:"client_version" nullable:"true" doc:"App version the client reported; null when unknown"`
+	VideoDecision        *string                                 `json:"video_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the video stream was delivered when the play ended: direct, remux (copied into a new container), or transcode. Null when unknown"`
+	AudioDecision        *string                                 `json:"audio_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown"`
+	EndReason            *string                                 `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
+	Subtitle             NullableObject[PlaybackSessionSubtitle] `json:"subtitle" doc:"The subtitle the play's plan delivered when it ended, in the live session row's shape; null when it showed none, for a Jellyfin-protocol or Audiobookshelf play, and on rows recorded before the server kept it"`
+	LifecycleSeq         *int64                                  `json:"lifecycle_seq" nullable:"true" doc:"Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed"`
 }
 
 // AdminPlaybackHistoryCollection is the named envelope the contract carries.
@@ -221,6 +222,6 @@ func adminPlaybackHistoryEntryOf(row handlers.AdminPlaybackHistoryRow) AdminPlay
 		ClientIP: row.ClientIP, DeviceID: row.DeviceID, DevicePlatform: row.DevicePlatform,
 		ClientName: row.ClientName, ClientVersion: row.ClientVersion,
 		VideoDecision: row.VideoDecision, AudioDecision: row.AudioDecision, EndReason: row.EndReason,
-		LifecycleSeq: row.LifecycleSeq,
+		LifecycleSeq: row.LifecycleSeq, Subtitle: playbackSessionSubtitleOf(row.Subtitle),
 	}
 }

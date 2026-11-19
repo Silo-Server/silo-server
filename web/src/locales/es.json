@@ -79672,6 +79672,12 @@
       "value": "Inicio de sesión en TV: inicio"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Solicitudes de póster"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

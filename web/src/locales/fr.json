@@ -79428,6 +79428,12 @@
       "value": "Connexion TV : démarrage"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Demandes d’affiche"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

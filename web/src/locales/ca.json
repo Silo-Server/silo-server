@@ -79800,6 +79800,12 @@
       "value": "Inici de sessió a la TV: començament"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Sol·licituds de pòsters"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

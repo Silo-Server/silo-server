@@ -66141,6 +66141,12 @@
       "value": "Log masuk TV: mula"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Permintaan poster"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

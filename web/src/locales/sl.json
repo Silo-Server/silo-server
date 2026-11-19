@@ -86574,6 +86574,12 @@
       "value": "Prijava na TV: začetek"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Zahteve za plakate"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

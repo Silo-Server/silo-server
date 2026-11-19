@@ -73145,6 +73145,12 @@
       "value": "Đăng nhập TV: bắt đầu"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Yêu cầu ảnh poster"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,

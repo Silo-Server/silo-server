@@ -542,11 +542,19 @@ func normalizeImageLanguage(language string) string {
 // and network limits: public addresses only, or the local network too when
 // ctx carries netguard.WithPrivateAccess.
 func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
+	return download(ctx, c.httpClient, rawURL, c.enforcePublicURLs, maxDownloadBytes)
+}
+
+// download is the one guarded artwork download: the image-cache job and the
+// remote poster fetcher both use it, so they share the timeout and the address
+// checks. It reads at most maxBytes, so a caller with a lower cap never
+// buffers more than it keeps.
+func download(ctx context.Context, client *http.Client, rawURL string, enforcePublicURLs bool, maxBytes int64) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse URL: %w", err)
 	}
-	if c.enforcePublicURLs {
+	if enforcePublicURLs {
 		if err := validateImageURLFor(ctx, parsed); err != nil {
 			return nil, err
 		}
@@ -559,7 +567,6 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	client := c.httpClient
 	if client == nil {
 		client = newGuardedHTTPClient()
 	}
@@ -572,14 +579,17 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
+	if resp.ContentLength > maxBytes {
+		return nil, fmt.Errorf("image exceeds %d byte limit: %w", maxBytes, ErrRemoteTooLarge)
+	}
 
-	limited := io.LimitReader(resp.Body, maxDownloadBytes+1)
+	limited := io.LimitReader(resp.Body, maxBytes+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	if int64(len(data)) > maxDownloadBytes {
-		return nil, fmt.Errorf("image exceeds %d byte limit", maxDownloadBytes)
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("image exceeds %d byte limit: %w", maxBytes, ErrRemoteTooLarge)
 	}
 
 	return data, nil

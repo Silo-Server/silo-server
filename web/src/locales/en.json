@@ -72901,6 +72901,12 @@
       "value": "TV sign-in: start"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poster requests"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,
