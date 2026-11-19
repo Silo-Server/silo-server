@@ -36,6 +36,7 @@ import {
 } from "@/hooks/queries/settingWriteOffline";
 import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
+import { storage } from "@/utils/storage";
 import { useT } from "@/i18n";
 
 /**
@@ -247,7 +248,8 @@ type SyncProfileField = (field: string) => (updated: Profile) => void;
  * Applies a tour step's saved profile field to the active profile. A step can
  * unmount while its save is in flight, so this lives with the tour, not the
  * step. Each field takes the response of its newest pick that saved, and only
- * that field is copied, so one step's response can't undo another's.
+ * that field is copied, so one step's response can't undo another's. A
+ * response for a profile that is no longer selected is dropped.
  */
 function useProfileFieldSync(): SyncProfileField {
   const { profile, selectProfile } = useAuth();
@@ -262,7 +264,10 @@ function useProfileFieldSync(): SyncProfileField {
     const pick = ++entry.picked;
     return (updated) => {
       const { profile: current, selectProfile: select } = latest.current;
-      if (pick < entry.applied || current?.id !== updated.id) return;
+      // The tour may have closed and another profile been picked since, so
+      // check the live selection, not the last one the tour saw.
+      const liveId = storage.get(storage.KEYS.PROFILE_ID);
+      if (pick < entry.applied || liveId !== updated.id || current?.id !== updated.id) return;
       entry.applied = pick;
       const value = (updated as unknown as Record<string, unknown>)[field];
       select({ ...current, [field]: value }, getProfileToken() ?? undefined);
