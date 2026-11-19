@@ -155,7 +155,12 @@ func (s *webhookSender) send(ctx context.Context, hook *Webhook, row DeliveryRow
 		row.PosterPath = flags.PosterPath
 	}
 	if hook.Type == WebhookTypeDiscord && s.posterURL != nil {
-		row.PosterURL = s.posterURL(ctx, row.PosterPath, row.PosterSourcePath)
+		// Artwork gets what the POST leaves of webhookSendBudget, so a slow
+		// lookup can't push the send past its claim's lease. Without it, the
+		// embed goes out with no image.
+		posterCtx, cancel := context.WithTimeout(ctx, webhookSendBudget-webhookRequestTimeout)
+		row.PosterURL = s.posterURL(posterCtx, row.PosterPath, row.PosterSourcePath)
+		cancel()
 	}
 	body, headers, err := s.buildPayload(hook, row, test)
 	if err != nil {
