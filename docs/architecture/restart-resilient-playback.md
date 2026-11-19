@@ -889,8 +889,9 @@ working (`internal/jellycompat/transcode_failover.go`):
   The record naming the new node is written at commit, before this release
   starts. A release deletes no record, and a node never touches the recipe
   store, so that record stays. The release names no start, so the node ends
-  only the job it holds when the release arrives; a job a start or rebuild
-  publishes while the release waits for the transport's lifecycle lock stays.
+  the job it holds when the release arrives, or a rebuild that publishes while
+  the release waits for the transport's lifecycle lock (that rebuild resolved
+  before the move committed); a job a start publishes while it waits stays.
   A release that arrives after a later move put the transport back on the
   released node and its job was already running there (rebuilt, or the old
   job reused) still ends that job; the record still names that node, so the

@@ -75,8 +75,8 @@ attestations as a fresh start, and a node that fails them is released with
 `fence=0&start_id=<that id>` and skipped, so the release cannot end a later
 start of the same transport there. The API then sends a
 best-effort release (`DELETE /transcode/{session_id}?fence=0`, no `start_id`)
-to the node it left, which ends only the job running there when the release
-arrives. See
+to the node it left, which ends the job running there when the release arrives, or a rebuild
+that publishes while it waits, but not a newer start's job. See
 [Transcode node lost under the API relay](architecture/restart-resilient-playback.md#transcode-node-lost-under-the-api-relay).
 
 The start response also reports `hw_accel`, the backend retained for video

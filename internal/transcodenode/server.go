@@ -2699,18 +2699,22 @@ func (s *Server) progressiveRemuxStopped(transportID string) bool {
 // releaseSupersededLocked reports whether the HLS job under transportID is
 // not the one a release (a stop with fence=0) was sent for, so the release
 // must leave it running. A release that names a start ends only that start's
-// job. One that names none, a retire of the node a transport left, ends only
-// the job it found on arrival. A stop that ends the session for good is
-// fenced and ends any job. The caller holds mu.
+// job. One that names none, a retire of the node a transport left, ends the
+// job it found on arrival or a rebuild published while it waited: that
+// rebuild resolved before the move off this node committed, since the core
+// refuses one whose route names another node. It leaves a job a start
+// published while it waited. A stop that ends the session for good is fenced
+// and ends any job. The caller holds mu.
 func (s *Server) releaseSupersededLocked(transportID, startID string, arrived *playback.TranscodeSession) bool {
 	session, ok := s.sessions[transportID]
 	if !ok {
 		return false
 	}
+	identity := s.identities[transportID]
 	if startID != "" {
-		return s.identities[transportID].startID != startID
+		return identity.startID != startID
 	}
-	return session != arrived
+	return session != arrived && !identity.rebuilt
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
@@ -2718,8 +2722,8 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	fenced := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0"
 	startID := r.URL.Query().Get(playback.TranscodeStopStartIDQueryParam)
 	// A release is sent in the background and can arrive after a newer start
-	// or rebuild of the same transport id. Note the job it found on arrival:
-	// one published while it waits for the lifecycle lock is newer than it.
+	// of the same transport id. Note the job it found on arrival: a start
+	// published while it waits for the lifecycle lock is newer than it.
 	var arrived *playback.TranscodeSession
 	if !fenced && startID == "" {
 		s.mu.RLock()
@@ -2734,7 +2738,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// reaper finds it. Blocking here until the start registers turns that
 	// miss into a normal teardown. A release does the same only for the start
 	// it names: one without a start id leaves the job such a start publishes,
-	// as it leaves any job newer than its arrival.
+	// though not a rebuild (releaseSupersededLocked).
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
 

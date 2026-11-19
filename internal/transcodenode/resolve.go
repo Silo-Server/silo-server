@@ -26,6 +26,9 @@ type sessionIdentity struct {
 	mediaFileID       int
 	// startID is the start request's StartID; a rebuilt session has none.
 	startID string
+	// rebuilt marks a session a rebuild published from the core's resolution
+	// rather than a start the core sent.
+	rebuilt bool
 }
 
 func identityOfStart(req TranscodeStartRequest) sessionIdentity {
@@ -38,6 +41,7 @@ func identityOfResolution(resolution *nodecontrol.Resolution) sessionIdentity {
 		userID:            resolution.UserID,
 		profileID:         resolution.ProfileID,
 		mediaFileID:       resolution.MediaFileID,
+		rebuilt:           true,
 	}
 }
 

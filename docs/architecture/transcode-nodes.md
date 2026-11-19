@@ -600,8 +600,9 @@ resolve and never deletes from it.
   lands. A move's start carries a fresh `start_id`, and its rollback names it,
   so the node ends only that start's job. A retire of the node the transport
   left names none, since that job may be a rebuild or another server's start;
-  the node then ends only the job it held when the release arrived, not one a
-  start or rebuild published while the release waited for the lifecycle lock.
+  the node then ends the job it held when the release arrived, or a rebuild
+  published while the release waited for the lifecycle lock, but not a job a
+  start published then.
   A retire that arrives after a newer job on that node is already running
   still ends it, and the next request rebuilds it from the card. A move to the
   API process deletes the card. Jellyfin-compatible moves write their record at

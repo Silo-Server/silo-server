@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -131,5 +132,41 @@ func waitForLifecycleWaiters(t *testing.T, s *Server, transportID string, n int)
 			t.Fatalf("lifecycle lock refs = %d, want %d", refs, n)
 		}
 		runtime.Gosched()
+	}
+}
+
+// A rebuild on the node a transport is leaving resolves with the core before
+// the move commits and publishes after it. A retire that waits behind that
+// rebuild for the lifecycle lock must still end it, or the old node keeps a
+// duplicate FFmpeg until the idle reaper.
+func TestHandleStop_ReleaseEndsRebuildPublishedWhileItWaited(t *testing.T) {
+	const transportID = "sess-rebuilt-on-old-node"
+	s := newTestServer(t)
+	s.tracker = nodesessions.NewLocalTracker()
+
+	unlock := s.lockSessionLifecycle(transportID)
+	stopped := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		s.handleStop(rec, releaseRequest(transportID, ""))
+		stopped <- rec
+	}()
+	waitForLifecycleWaiters(t, s, transportID, 2)
+
+	s.mu.Lock()
+	s.registerSessionLocked(transportID, &playback.TranscodeSession{}, identityOfResolution(&nodecontrol.Resolution{}), nil)
+	s.activeJobs.Store(1)
+	s.mu.Unlock()
+	unlock()
+
+	rec := <-stopped
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("release status = %d, want 204", rec.Code)
+	}
+	s.mu.RLock()
+	_, running := s.sessions[transportID]
+	s.mu.RUnlock()
+	if running {
+		t.Fatal("a release left a rebuild of the old route that published while it waited")
 	}
 }
