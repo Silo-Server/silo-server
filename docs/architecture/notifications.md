@@ -128,10 +128,11 @@ What follows from the rule:
 - The rule reads the catalog when fanout runs. One ingest records all its
   events in one transaction, so episodes linked by one scan are all listed by
   the time any of them is evaluated, whatever order the scan linked them in.
-  Fanout also waits a fixed 30-second settle delay before it claims an event,
-  so files imported one at a time within that window (E07 a few seconds
-  before E06, with metadata not yet listing E06) are all listed too, and E06
-  is the episode that notifies.
+  For separate imports, fanout waits 30 seconds before it can claim each
+  event. If E07 arrives first and the catalog lists E06 by the time fanout
+  evaluates E07, E07 stays silent and E06 can notify when its file is
+  available. If E06's file arrives during the delay but the catalog still
+  has no entry for E06 when fanout evaluates E07, E07 can notify.
 
 Fanout never moves the cursor. It changes only when the interest recompute
 runs, which profile activity queues (see "Next Up cursor" below).
