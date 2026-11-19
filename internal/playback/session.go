@@ -1971,7 +1971,7 @@ func (m *SessionManager) FinishDetached(ctx context.Context, s Session) {
 const PositionUnknown = -1
 
 // EndReasonReplaced is the end reason of a session another one replaced
-// mid-play: a Jellyfin client switched play method.
+// mid-play: a Jellyfin client switched play method or media source.
 const EndReasonReplaced = "replaced"
 
 type endReasonKey struct{}

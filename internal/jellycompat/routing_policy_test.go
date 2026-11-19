@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -222,6 +223,94 @@ func TestEnsureUpstreamPlaybackClearsStaleHLSRouteOnMethodSwitch(t *testing.T) {
 						t.Fatalf("upstream starts = %d, want only the method-switch start", manager.startCalls)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestSourceSwitchReplacesTheUpstream covers a play that moves to another
+// version of its item with the same play method: the upstream session bound
+// to the first version's file must not serve the second.
+func TestSourceSwitchReplacesTheUpstream(t *testing.T) {
+	for _, method := range []string{"direct", "remux", "transcode"} {
+		t.Run(method, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			first := testCompatSource(codec, testCompatVersion())
+			secondVersion := testCompatVersion()
+			secondVersion.FileID = 43
+			second := testCompatSource(codec, secondVersion)
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{
+				ID: "play-1", CompatToken: "compat-token", RouteItemID: "item-1",
+				UpstreamSessionID: "old-upstream", UpstreamPlayMethod: method, UpstreamMediaFileID: first.FileID,
+				MediaSources: []PlaybackMediaSource{first, second},
+			})
+			manager := &testCompatSessionManager{sessions: map[string]*playback.Session{
+				"old-upstream": {ID: "old-upstream", UserID: 7, ProfileID: "profile-1", MediaFileID: first.FileID, PlayMethod: compatPlayMethod(method), Position: 300},
+			}}
+			handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
+
+			updated, err := handler.ensureUpstreamPlayback(t.Context(),
+				&Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}, "play-1", second, method)
+			if err != nil {
+				t.Fatalf("switch source: %v", err)
+			}
+			if updated.UpstreamSessionID == "old-upstream" || updated.UpstreamMediaFileID != second.FileID {
+				t.Fatalf("upstream = %q for file %d, want a fresh session for file %d",
+					updated.UpstreamSessionID, updated.UpstreamMediaFileID, second.FileID)
+			}
+			if started := manager.sessions[updated.UpstreamSessionID]; started == nil || started.MediaFileID != second.FileID {
+				t.Fatalf("started session = %+v, want one for file %d", started, second.FileID)
+			}
+			if !slices.Contains(manager.stopCalls, "old-upstream") {
+				t.Fatalf("stopped sessions = %v, want the first version's session stopped", manager.stopCalls)
+			}
+			if len(manager.detached) != 1 || manager.detached[0].session.ID != "old-upstream" ||
+				manager.detached[0].reason != playback.EndReasonReplaced {
+				t.Fatalf("detached ends = %+v, want the first version's session recorded as replaced", manager.detached)
+			}
+		})
+	}
+}
+
+// TestConcurrentVersionStartsAdoptOnlyTheSameFile covers two requests that
+// start one play with different versions at once: the one that loses the
+// attach may take over the winner's session only when it streams the version
+// the loser was asked for.
+func TestConcurrentVersionStartsAdoptOnlyTheSameFile(t *testing.T) {
+	codec := NewResourceIDCodec()
+	first := testCompatSource(codec, testCompatVersion())
+	secondVersion := testCompatVersion()
+	secondVersion.FileID = 43
+	second := testCompatSource(codec, secondVersion)
+	for _, tc := range []struct {
+		name      string
+		requested PlaybackMediaSource
+		wantAdopt bool
+	}{
+		{name: "same version adopts the winner", requested: first, wantAdopt: true},
+		{name: "other version refuses the winner", requested: second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{
+				ID: "play-1", CompatToken: "compat-token", RouteItemID: "item-1",
+				MediaSources: []PlaybackMediaSource{first, second},
+			})
+			manager := &racingStartSessionManager{store: store, winnerMethod: "direct", winnerFileID: first.FileID, winnerLocal: true}
+			handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
+
+			updated, err := handler.ensureUpstreamPlayback(t.Context(),
+				&Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}, "play-1", tc.requested, "direct")
+			if tc.wantAdopt {
+				if err != nil || updated.UpstreamSessionID != "upstream-winner" {
+					t.Fatalf("result = %+v, %v; want the winner adopted", updated, err)
+				}
+			} else if !errors.Is(err, errUpstreamReplaced) {
+				t.Fatalf("result = %v, want errUpstreamReplaced instead of adopting %+v", err, updated)
+			}
+			if !slices.Contains(manager.stopCalls, "upstream-started") {
+				t.Fatalf("stopped sessions = %v, want the losing start stopped", manager.stopCalls)
 			}
 		})
 	}

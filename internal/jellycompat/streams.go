@@ -2925,7 +2925,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	if h.sessionMgr == nil {
 		return nil, fmt.Errorf("session manager not available")
 	}
-	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod == method {
+	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod == method && upstreamServesSource(playSession, source) {
 		// After a restart the durable play session survives but the in-memory
 		// native session is gone; rebuild it from the recipe card so ownership and
 		// accounting are restored before the transcode is (re)started.
@@ -2975,8 +2975,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 	}
 
-	// replaced is this replica's copy of the upstream session a method switch
-	// retires. Its play ends once the switch has moved the play off it.
+	// replaced is this replica's copy of the upstream session a switch of play
+	// method or media source retires. Its play ends once the switch has moved
+	// the play off it.
 	var replaced *playback.Session
 	var playMethod playback.PlayMethod
 	transcodeAudio := source.TranscodeAudio
@@ -2994,7 +2995,8 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		transcodeAudio = false
 	}
 
-	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod != "" && playSession.UpstreamPlayMethod != method {
+	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod != "" &&
+		(playSession.UpstreamPlayMethod != method || !upstreamServesSource(playSession, source)) {
 		oldUpstreamSessionID := playSession.UpstreamSessionID
 		transcodeNodeURL := ""
 		if current, err := h.sessionMgr.GetSession(oldUpstreamSessionID); err == nil {
@@ -3013,7 +3015,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
 		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
-		// Method switch discards the old upstream session: drop its node recipe so
+		// The switch discards the old upstream session: drop its node recipe so
 		// the abandoned id cannot reconstruct ffmpeg after a node restart. Best
 		// effort and bounded — never block the new method's start on a store hiccup.
 		if h.RecipeNodeStore != nil {
@@ -3085,14 +3087,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			// Another request moved the play off the session this one
 			// replaced, so that session's play is over all the same.
 			finishReplaced()
-			// Adopt the winner only when it serves the same play method;
-			// otherwise a concurrent method switch made this caller's
+			// Adopt the winner only when it serves the same play method and
+			// file; otherwise a concurrent switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
-			// continuing on a session with mismatched transcode bookkeeping.
+			// continuing on a session bound to another method or version.
 			// A winner attached on another replica has no native session here,
 			// and rebuilding one before its recipe is committed would start a
 			// second transcode under its id, so the client retries instead.
-			if winner, ok := h.playbackStore.Get(playSessionID); ok && winner.UpstreamPlayMethod == method {
+			if winner, ok := h.playbackStore.Get(playSessionID); ok && winner.UpstreamPlayMethod == method && winner.UpstreamMediaFileID == source.FileID {
 				if _, err := h.sessionMgr.GetSession(winner.UpstreamSessionID); err == nil {
 					return winner, nil
 				}
@@ -3112,6 +3114,13 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 	h.sendCompatResumeStart(ctx, updated, session, &source)
 	return updated, nil
+}
+
+// upstreamServesSource reports whether the play's upstream session streams
+// source's file. A play stored before its upstream file was recorded counts
+// as a match.
+func upstreamServesSource(playSession *PlaybackSession, source PlaybackMediaSource) bool {
+	return playSession.UpstreamMediaFileID == 0 || playSession.UpstreamMediaFileID == source.FileID
 }
 
 // compatDetachedSnapshot is the session a Jellyfin stop records when no copy

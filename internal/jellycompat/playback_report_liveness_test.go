@@ -198,13 +198,14 @@ func TestHandlePlaybackReport_StopViaUniqueRouteDoesNotTearDown(t *testing.T) {
 
 // racingStartSessionManager simulates a concurrent request winning the
 // upstream-attach race: while this caller is inside StartSession, the store's
-// play session is re-pointed at a different upstream id/method. winnerLocal
+// play session is re-pointed at a different upstream id/method/file. winnerLocal
 // says whether the winner attached in this process (so its native session is
 // here) or on another replica.
 type racingStartSessionManager struct {
 	testCompatSessionManager
 	store        CompatPlaybackStore
 	winnerMethod string
+	winnerFileID int
 	winnerLocal  bool
 }
 
@@ -212,13 +213,14 @@ func (m *racingStartSessionManager) StartSession(userID int, profileID string, f
 	_ = m.store.Update("play-1", func(current *PlaybackSession) error {
 		current.UpstreamSessionID = "upstream-winner"
 		current.UpstreamPlayMethod = m.winnerMethod
+		current.UpstreamMediaFileID = m.winnerFileID
 		return nil
 	})
 	if m.winnerLocal {
 		if m.sessions == nil {
 			m.sessions = make(map[string]*playback.Session)
 		}
-		m.sessions["upstream-winner"] = &playback.Session{ID: "upstream-winner", PlayMethod: method}
+		m.sessions["upstream-winner"] = &playback.Session{ID: "upstream-winner", MediaFileID: m.winnerFileID, PlayMethod: method}
 	}
 	return m.testCompatSessionManager.StartSession(userID, profileID, fileID, method, transcodeAudio)
 }
