@@ -367,7 +367,9 @@ func pluginPlaybackSession(raw json.RawMessage, fileItem *events.PlaybackFileIte
 	if row.SeriesTitle != "" {
 		row.SeriesName = row.SeriesTitle
 	}
-	if fileItem != nil {
+	// Only a row still in the socket's shape is rewritten, so projecting an
+	// already projected row again leaves it as it is.
+	if fileItem != nil && row.MediaItemID != "" {
 		row.EpisodeName = row.MediaTitle
 		row.MediaTitle = fileItem.Title
 		row.MediaType = fileItem.Type
