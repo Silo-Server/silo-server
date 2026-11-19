@@ -530,7 +530,7 @@ func TestPlaybackEditionAliasProjection(t *testing.T) {
 		{"outside authorized libraries", func(f *models.MediaFile) { f.MediaFolderID, f.Duration = 3, 7500 }, true},
 		{"definitively unreadable", func(f *models.MediaFile) {
 			f.ProbeUpdatedAt, f.ProbeFailedAt, f.CodecVideo, f.Duration = nil, &probedAt, "", 0
-		}, true},
+		}, false},
 		{"unprobed third file", func(f *models.MediaFile) { f.ProbeUpdatedAt = nil }, false},
 		{"implausible duration", func(f *models.MediaFile) { f.Duration, f.FileSize = 61, 100<<30 }, false},
 		{"different parts", func(f *models.MediaFile) { f.PresentationKind, f.PresentationPartIndex = "multipart_movie", 2 }, false},

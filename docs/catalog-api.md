@@ -530,9 +530,9 @@ keeps its own order: a variant comes before another when its lowest file ID is l
 Audiobook and ebook versions keep their part and file order.
 
 For standalone movies and individual episodes, the server can group recognized
-spellings of a named edition. All playable files in the family must have
-credible catalog durations within five seconds of each other. The server
-resolves the group from the files the profile may play before applying the
+spellings of a named edition. Every present file the profile may access in the
+family must have a credible catalog duration within five seconds of the others.
+The server resolves the group across authorized files before applying the
 optional catalog-only library scope. When a group qualifies, its files and
 playback variants share the resolved `edition_key`. The `variant_id` uses that
 key, and each file still reports its original `edition_raw`. Resume hints are

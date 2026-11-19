@@ -72,7 +72,7 @@ func preferredRoomVersion(versions []catalog.FileVersion) catalog.FileVersion {
 		}
 	}
 	for _, candidate := range versions {
-		if !roomVersionsShareEdition(candidate, best) || candidate.PresentationKind != best.PresentationKind ||
+		if candidate.EditionKey != best.EditionKey || candidate.PresentationKind != best.PresentationKind ||
 			candidate.PresentationGroupKey != best.PresentationGroupKey || candidate.PresentationPartIndex != best.PresentationPartIndex {
 			continue
 		}
@@ -81,15 +81,6 @@ func preferredRoomVersion(versions []catalog.FileVersion) catalog.FileVersion {
 		}
 	}
 	return best
-}
-
-func roomVersionsShareEdition(a, b catalog.FileVersion) bool {
-	// Rejected files did not participate in alias resolution. An existing
-	// exact-key copy can still replace one even if the other aliases merged.
-	if a.Unreadable || b.Unreadable {
-		return a.StoredEditionKey == b.StoredEditionKey
-	}
-	return a.EditionKey == b.EditionKey
 }
 
 func (r *CatalogSelectionResolver) watchDetail(ctx context.Context, userID int, profileID string, input SelectItemInput) (*catalog.WatchDetail, error) {
@@ -154,7 +145,7 @@ func (r *CatalogSelectionResolver) ResolveSourceFallback(ctx context.Context, us
 		candidate := &detail.Versions[i]
 		// Strictly descend the catalog order so different viewers cannot
 		// bounce the room between previously refused versions.
-		if candidate.Unreadable || !roomVersionBetter(*current, *candidate) || !roomVersionsShareEdition(*current, *candidate) ||
+		if candidate.Unreadable || !roomVersionBetter(*current, *candidate) || candidate.EditionKey != current.EditionKey ||
 			candidate.PresentationKind != current.PresentationKind || candidate.PresentationGroupKey != current.PresentationGroupKey ||
 			candidate.PresentationPartIndex != current.PresentationPartIndex {
 			continue

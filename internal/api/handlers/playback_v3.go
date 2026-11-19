@@ -6020,10 +6020,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// A quality change, and an output change that went back to the requested
 	// edition, choose a version again. Under a buffering budget that must not
 	// be the source that stalled. A track change stays on the mounted version.
-	// If we kept a mounted alias for its tracks, look for new sources from the
-	// requested edition via planReplanAlternateV3, which checks today's group.
-	choosesVersion := (qualityChange || (intentChange && !pinnedTrackChange)) &&
-		effectiveFile.EditionKey == requestedFile.EditionKey
+	choosesVersion := qualityChange || (intentChange && !pinnedTrackChange)
+	edition := effectiveFile
+	if effectiveFile.EditionKey != requestedFile.EditionKey {
+		edition = requestedFile
+	}
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
@@ -6032,7 +6033,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
 		if choosesVersion {
-			effectiveFile, start, audioIndex = h.lowerBufferedVersionForIntent(r, start, effectiveFile, audioIndex, plannerSettings, desired)
+			effectiveFile, start, audioIndex = h.lowerBufferedVersionForIntent(r, start, effectiveFile, edition, audioIndex, plannerSettings, desired)
 		}
 		if requestedEditionResolved {
 			lowerVersion = h.lowerVersionV3(r.Context(), start, requestedFile, plannerSettings, requestAccessFilter(r))
@@ -6106,7 +6107,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			readingErr = h.applyConnectionReading(r, &unlimitedStart)
 		}
 		if choosesVersion {
-			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersionForIntent(r, unlimitedStart, unlimitedFile, unlimitedAudioIndex, plannerSettings, desired)
+			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersionForIntent(r, unlimitedStart, unlimitedFile, edition, unlimitedAudioIndex, plannerSettings, desired)
 		}
 		unlimited, unlimitedErr := h.planReplanV3(r, planning, unlimitedStart, unlimitedFile, unlimitedAudioIndex, false)
 		if readingErr != nil || unlimitedErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {

@@ -16,13 +16,13 @@ func (a EditionAliases) Key(key string) string {
 }
 
 // ResolveEditionAliases compares the live files of one movie or episode that
-// the viewer may play. A catalog-only library scope narrows the projection
-// after grouping. An incompatible file keeps the entire family on its old
-// keys, since clients group the flat version list by key too.
+// the viewer may access. A catalog-only library scope narrows the projection
+// after grouping. An unreadable or incompatible file keeps the family on its
+// stored keys, since it still appears in the client version list.
 func ResolveEditionAliases(files []*models.MediaFile, filter AccessFilter) EditionAliases {
 	var families map[string][]*models.MediaFile
 	for _, file := range files {
-		if !FileAllowedByAccess(file, filter) || file.MissingSince != nil || file.ProbeRejected() || file.EditionKey == "" {
+		if !FileAllowedByAccess(file, filter) || file.MissingSince != nil || file.EditionKey == "" {
 			continue
 		}
 		if family := naming.EditionAliasFamily(file.EditionKey); family != "" {

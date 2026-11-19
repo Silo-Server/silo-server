@@ -571,7 +571,6 @@ type FileVersion struct {
 	AddedAt                  time.Time              `json:"added_at"`
 	EditionRaw               string                 `json:"edition_raw,omitempty"`
 	EditionKey               string                 `json:"edition_key,omitempty"`
-	StoredEditionKey         string                 `json:"-"`
 	PresentationKind         string                 `json:"presentation_kind,omitempty"`
 	PresentationGroupKey     string                 `json:"presentation_group_key,omitempty"`
 	PresentationPartIndex    int                    `json:"presentation_part_index,omitempty"`
@@ -4788,7 +4787,6 @@ func (s *DetailService) buildPlaybackInfoWith(
 			AddedAt:                  f.CreatedAt,
 			EditionRaw:               f.EditionRaw,
 			EditionKey:               aliases.Key(f.EditionKey),
-			StoredEditionKey:         f.EditionKey,
 			PresentationKind:         f.PresentationKind,
 			PresentationGroupKey:     f.PresentationGroupKey,
 			PresentationPartIndex:    f.PresentationPartIndex,

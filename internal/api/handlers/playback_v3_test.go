@@ -4848,6 +4848,54 @@ func TestStartPlaybackV2MultipartSuppressesProgressPersistence(t *testing.T) {
 	}
 }
 
+func TestQualityReplanFindsLowerCopyWhileKeepingAliasSubtitle(t *testing.T) {
+	f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+		f.source.EditionKey, f.alternate.EditionKey = "extended_cut", "extended"
+		f.source.ProbeUpdatedAt, f.alternate.ProbeUpdatedAt = new(time.Now()), new(time.Now())
+		f.alternate.ExternalSubtitles = append([]models.ExternalSubtitle(nil), f.source.ExternalSubtitles...)
+		f.startRequest.BandwidthEstimateKbps = new(12000)
+		f.startRequest.ClientFeatures = append(f.startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+		f.handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+		presetLocalRegistryV3(f.handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+			{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+			{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		}))
+	})
+	t.Cleanup(func() { f.handler.tm.CloseTranscodeSession(f.started.SessionID, "") })
+	plan := f.started.PlaybackPlan
+	if plan.EffectiveMediaFileID != f.alternate.ID || plan.SelectedTracks.Subtitle == nil {
+		t.Fatalf("initial plan did not play the mounted alias with its subtitle: %+v", plan)
+	}
+	// Add a lighter copy with the playing subtitle. The requested file no
+	// longer carries that track, so the replan keeps the mounted alias first.
+	f.source.ExternalSubtitles = nil
+	light := *f.alternate
+	light.ID, light.EditionKey, light.Bitrate = 126, "extended_version", 1000
+	light.VideoTracks = slices.Clone(light.VideoTracks)
+	light.VideoTracks[0].Bitrate = 1000
+	fetcher := f.handler.FileVersionFetcher.(testPlaybackFileVersionFetcher)
+	fetcher.byContent[f.source.ContentID] = append(fetcher.byContent[f.source.ContentID], &light)
+	response, err := f.handler.ReplanPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{
+		UserID: 1, ProfileID: "profile-1", InstallationID: f.handler.InstallationID,
+	}, f.started.SessionID, PlaybackReplanCommand{Digest: "alias-with-subtitle", Request: playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, ClientFeatures: f.startRequest.ClientFeatures,
+		Operation: playback.ReplanOperationQualityChangeV3, PlaybackAttemptID: f.startRequest.PlaybackAttemptID,
+		ReplanRequestID: "alias-with-subtitle", FailedPlanID: plan.PlanID,
+		PlanAttemptID: "alias-with-subtitle-attempt", PlanAttemptKey: plan.PlanAttemptKey,
+		AttemptedPlanKeys: []string{plan.PlanAttemptKey}, AttemptCount: 1,
+		QualityPreference: "auto", BandwidthEstimateKbps: new(2600), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3,
+		SelectedTracks: plan.SelectedTracks, Capabilities: f.startRequest.Capabilities,
+		ClientPlaybackContext: f.startRequest.ClientPlaybackContext,
+	}})
+	if err != nil || response.PlaybackPlan == nil {
+		t.Fatalf("replan: %v, terminal = %#v", err, response.Terminal)
+	}
+	got := response.PlaybackPlan
+	if got.EffectiveMediaFileID != light.ID || got.Delivery != playback.DeliveryOriginalHTTPV3 || got.SelectedTracks.Subtitle == nil {
+		t.Fatalf("replan should direct-play the fitting copy and keep subtitles: file=%d delivery=%s subtitle=%v", got.EffectiveMediaFileID, got.Delivery, got.SelectedTracks.Subtitle)
+	}
+}
+
 // Exercise the route used when neither original fits the stream budget and the
 // 1080p alias is useful only as input to an encode.
 func TestPlaybackV2EditionAliasFallback(t *testing.T) {
