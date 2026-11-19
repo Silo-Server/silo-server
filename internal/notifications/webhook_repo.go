@@ -321,10 +321,17 @@ func (r *WebhookRepository) ClaimDue(ctx context.Context, limit int) ([]Delivery
 }
 
 func (r *WebhookRepository) claim(ctx context.Context, query string, args ...any) ([]DeliveryAttempt, error) {
-	// Taken before the query: the lease starts when the claiming statement
-	// does, so time spent waiting for it counts against the lease too.
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("claim webhook attempts: %w", err)
+	}
+	defer conn.Release()
+	// Taken once a connection is in hand and before the query: the lease
+	// starts when the claiming statement does, so time it spends waiting on
+	// row locks counts against the lease, but waiting for a connection
+	// doesn't.
 	claimedAt := time.Now()
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("claim webhook attempts: %w", err)
 	}
