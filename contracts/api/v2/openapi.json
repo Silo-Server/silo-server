@@ -9454,6 +9454,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "created_client_ip": {
+            "description": "Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "delivery_format": {
             "type": "string"
           },
@@ -9507,6 +9514,13 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "last_client_ip": {
+            "description": "Address of the device's latest status report or file request for the download; null when none was recorded. A file request from a new address replaces it at most once a minute",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "location": {
             "description": "Where its prepared file is: server or node:\u003cid\u003e; absent when it has none",
@@ -9601,7 +9615,9 @@
           "created_at",
           "updated_at",
           "completed_at",
-          "status_event_at"
+          "status_event_at",
+          "created_client_ip",
+          "last_client_ip"
         ],
         "type": "object"
       },
@@ -10294,6 +10310,10 @@
           "available": {
             "type": "boolean"
           },
+          "client_ip": {
+            "description": "Download rows carry created_client_ip and last_client_ip",
+            "type": "boolean"
+          },
           "devices": {
             "description": "Device copies can be listed",
             "type": "boolean"
@@ -10326,6 +10346,7 @@
           "realtime_channel",
           "devices",
           "revocation",
+          "client_ip",
           "revision",
           "state",
           "allowed"
@@ -24543,6 +24564,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "created_client_ip": {
+            "description": "Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "delivery_format": {
             "type": "string"
           },
@@ -24593,6 +24621,13 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "last_client_ip": {
+            "description": "Address of the device's latest status report or file request for the download; null when none was recorded. A file request from a new address replaces it at most once a minute",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "media_type": {
             "description": "Catalog type of content_id (movie, series, …); empty when unknown",
@@ -24656,7 +24691,9 @@
           "created_at",
           "updated_at",
           "completed_at",
-          "status_event_at"
+          "status_event_at",
+          "created_client_ip",
+          "last_client_ip"
         ],
         "type": "object"
       },

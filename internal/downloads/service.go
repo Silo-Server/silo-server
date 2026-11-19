@@ -1510,8 +1510,25 @@ func (s *Service) ResolveManagedFile(ctx context.Context, userID int, profileID,
 	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
 		return nil, err
 	}
+	s.recordFileRequestAddress(ctx, dl)
 	proxyEligible := proxyDeliveryAllowed(cfg)
 	return s.resolveDownloadBytesTarget(ctx, dl, filter, proxyEligible, proxyEligible)
+}
+
+// recordFileRequestAddress records where an authorized file request came
+// from as the entry's last_client_ip. Every delivery path authorizes here on
+// the API server, including the one that redirects the bytes to a node, so the
+// address is the device's as the trusted proxies resolve it, never a node's.
+// It writes only when staleLastClientIP says so: range requests from the
+// same address cost no write. A failed write never fails the transfer.
+func (s *Service) recordFileRequestAddress(ctx context.Context, dl *Download) {
+	ip := clientAddress(ctx)
+	if !staleLastClientIP(dl, ip, time.Now()) {
+		return
+	}
+	if err := s.repo.RecordLastClientIP(ctx, dl.ID, ip); err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "failed to record a download's client address", "component", "downloads", "download_id", dl.ID, "error", err)
+	}
 }
 
 // PatchStatus lets a client confirm a managed entry's local state
