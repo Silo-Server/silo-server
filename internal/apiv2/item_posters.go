@@ -239,7 +239,6 @@ func (h *itemPosterHandler) redirect(w http.ResponseWriter, r *http.Request, tar
 		writeProblem(w, r, unavailable("artwork storage"))
 		return
 	}
-	//nolint:gosec // G710: target is the signed URL this server resolved for the item's stored poster, not request input
 	http.Redirect(w, r, target, http.StatusFound)
 }
 

@@ -114,3 +114,31 @@ func TestRemoteFetcherKeepsAMarkerForEvictedImages(t *testing.T) {
 		t.Fatalf("the newest poster = %v, found %v; want its image", kept.err, ok)
 	}
 }
+
+// A full memory must refuse new artwork instead of forgetting an outcome:
+// cycling more links than it holds would otherwise repeat every download.
+func TestRemoteFetcherRefusesNewArtworkWhenFull(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nrest"))
+	}))
+	defer srv.Close()
+	f := newRemoteFetcher(srv.Client())
+	ctx := netguard.WithPrivateAccess(context.Background())
+
+	until := time.Now().Add(time.Hour)
+	f.results = make(map[string]remoteResult, remoteResultsMax)
+	for i := range remoteResultsMax {
+		f.results["movie-"+strconv.Itoa(i)+"\x00"+srv.URL+"/poster.png"] = remoteResult{err: ErrNotImage, until: until}
+	}
+	if _, err := f.Fetch(ctx, "movie-new", srv.URL+"/poster.png"); !errors.Is(err, ErrRemoteBusy) {
+		t.Fatalf("Fetch of new artwork with a full memory = %v, want ErrRemoteBusy", err)
+	}
+	if _, err := f.Fetch(ctx, "movie-0", srv.URL+"/poster.png"); !errors.Is(err, ErrNotImage) {
+		t.Fatalf("Fetch of remembered artwork = %v, want its remembered outcome", err)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("provider saw %d requests with a full memory, want 0", got)
+	}
+}

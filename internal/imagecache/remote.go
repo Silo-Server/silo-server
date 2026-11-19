@@ -32,7 +32,9 @@ const (
 	remoteResultMaxBytes = 4 << 20
 	remoteResultsBudget  = 64 << 20
 	// remoteResultsMax bounds how many outcomes are kept, so remembered
-	// failures, which hold no bytes, cannot grow the map without limit.
+	// failures, which hold no bytes, cannot grow the map without limit. A
+	// full memory refuses new artwork as busy instead of forgetting an
+	// outcome, because a forgotten outcome is a download its link can repeat.
 	remoteResultsMax   = 4096
 	remoteResultsSweep = time.Minute
 )
@@ -90,6 +92,31 @@ func (f *RemoteFetcher) recent(id string, now time.Time) (remoteResult, bool) {
 	return result, true
 }
 
+// admits reports whether id's outcome can be remembered: it already has an
+// entry, or the memory has room once expired entries are dropped. Fetch asks
+// while holding a download slot, so the memory exceeds remoteResultsMax by
+// less than remoteFetchSlots.
+func (f *RemoteFetcher) admits(id string, now time.Time) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.results[id]; ok || len(f.results) < remoteResultsMax {
+		return true
+	}
+	f.dropExpired(now)
+	return len(f.results) < remoteResultsMax
+}
+
+// dropExpired removes expired outcomes. The caller holds f.mu.
+func (f *RemoteFetcher) dropExpired(now time.Time) {
+	for key, result := range f.results {
+		if !now.Before(result.until) {
+			f.bytes -= len(result.image.Data)
+			delete(f.results, key)
+		}
+	}
+	f.nextSweep = now.Add(remoteResultsSweep)
+}
+
 // remember keeps an outcome for later requests. Expired entries are dropped
 // at most once per remoteResultsSweep.
 func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now time.Time) {
@@ -104,13 +131,7 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 		f.results = make(map[string]remoteResult)
 	}
 	if !now.Before(f.nextSweep) {
-		for key, result := range f.results {
-			if !now.Before(result.until) {
-				f.bytes -= len(result.image.Data)
-				delete(f.results, key)
-			}
-		}
-		f.nextSweep = now.Add(remoteResultsSweep)
+		f.dropExpired(now)
 	}
 	if old, ok := f.results[id]; ok {
 		f.bytes -= len(old.image.Data)
@@ -133,17 +154,6 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 		}
 		f.bytes -= len(f.results[victim].image.Data)
 		f.results[victim] = remoteResult{err: ErrRemoteBusy, until: soonest}
-	}
-	// The count limit drops whole entries, nearest expiry first.
-	for len(f.results) >= remoteResultsMax {
-		victim, soonest := "", time.Time{}
-		for key, result := range f.results {
-			if victim == "" || result.until.Before(soonest) {
-				victim, soonest = key, result.until
-			}
-		}
-		f.bytes -= len(f.results[victim].image.Data)
-		delete(f.results, victim)
 	}
 	f.results[id] = remoteResult{image: image, err: err, until: now.Add(ttl)}
 	f.bytes += len(image.Data)
@@ -185,7 +195,7 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 		if result, ok := f.recent(id, time.Now()); ok {
 			return result.image, result.err
 		}
-		image, err := f.fetch(context.WithoutCancel(ctx), rawURL)
+		image, err := f.fetch(context.WithoutCancel(ctx), id, rawURL)
 		// A busy server is not an outcome of this artwork; the next request
 		// should try again.
 		if !errors.Is(err, ErrRemoteBusy) {
@@ -205,7 +215,7 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 	}
 }
 
-func (f *RemoteFetcher) fetch(ctx context.Context, rawURL string) (RemoteImage, error) {
+func (f *RemoteFetcher) fetch(ctx context.Context, id, rawURL string) (RemoteImage, error) {
 	wait := time.NewTimer(remoteFetchSlotWait)
 	defer wait.Stop()
 	select {
@@ -215,6 +225,9 @@ func (f *RemoteFetcher) fetch(ctx context.Context, rawURL string) (RemoteImage, 
 	}
 	defer func() { <-f.slots }()
 
+	if !f.admits(id, time.Now()) {
+		return RemoteImage{}, ErrRemoteBusy
+	}
 	data, err := download(ctx, f.client, rawURL, true)
 	if err != nil {
 		return RemoteImage{}, err
