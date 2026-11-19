@@ -51,7 +51,6 @@ export default function GeneralSettings() {
 
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
-  const trustedProxiesManaged = form.sensitiveManagedByEnv.includes(TRUSTED_PROXIES_KEY);
   const [saveInProgress, setSaveInProgress] = useState(false);
   const saveInProgressRef = useRef(false);
 
@@ -131,6 +130,7 @@ export default function GeneralSettings() {
             value={form.getValue("branding.server_name")}
             onChange={(v) => form.setValue("branding.server_name", v)}
             restartRequired={restartKeys.has("branding.server_name")}
+            managedByEnv={form.envVar("branding.server_name")}
           />
           <SettingField
             label={t("web.admin.settings.general.identity.loginSubtitle.label")}
@@ -157,6 +157,7 @@ export default function GeneralSettings() {
             value={form.getValue("server.public_url")}
             onChange={(v) => form.setValue("server.public_url", v)}
             restartRequired={restartKeys.has("server.public_url")}
+            managedByEnv={form.envVar("server.public_url")}
           />
           <SettingField
             label={t("web.admin.settings.general.network.lanDiscovery.label")}
@@ -166,6 +167,7 @@ export default function GeneralSettings() {
             value={form.getValue("server.lan_discovery")}
             onChange={(v) => form.setValue("server.lan_discovery", v)}
             restartRequired={restartKeys.has("server.lan_discovery")}
+            managedByEnv={form.envVar("server.lan_discovery")}
           />
           <SettingField
             label={t("web.admin.settings.general.network.localUrl.label")}
@@ -176,21 +178,18 @@ export default function GeneralSettings() {
             value={form.getValue(LOCAL_URL_KEY)}
             onChange={(v) => form.setValue(LOCAL_URL_KEY, v)}
             restartRequired={restartKeys.has(LOCAL_URL_KEY)}
+            managedByEnv={form.envVar(LOCAL_URL_KEY)}
           />
           <SettingField
             label={t("web.admin.settings.general.network.trustedProxies.label")}
             dirty={form.isDirty(TRUSTED_PROXIES_KEY)}
-            description={
-              trustedProxiesManaged
-                ? t("web.admin.settings.general.network.trustedProxies.managed")
-                : t("web.admin.settings.general.network.trustedProxies.description")
-            }
+            description={t("web.admin.settings.general.network.trustedProxies.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
             value={form.getValue(TRUSTED_PROXIES_KEY)}
             onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
-            disabled={trustedProxiesManaged}
             restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}
+            managedByEnv={form.envVar(TRUSTED_PROXIES_KEY)}
           />
         </FieldGroup>
 
@@ -207,6 +206,7 @@ export default function GeneralSettings() {
             value={form.getValue("database.max_connections")}
             onChange={(v) => form.setValue("database.max_connections", v)}
             restartRequired={restartKeys.has("database.max_connections")}
+            managedByEnv={form.envVar("database.max_connections")}
           />
         </FieldGroup>
 

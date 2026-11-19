@@ -23,6 +23,11 @@ var ErrArchiveUnreadable = errors.New("stored plugin archive is unreadable")
 
 var ErrInstallationDisabled = errors.New("plugin installation is disabled")
 
+// ErrInstallationChanged refuses a write guarded on the installation's state
+// (UpdateInstallationInput.IfVersion or IfInstallPath) after another install
+// or update changed that state.
+var ErrInstallationChanged = errors.New("plugin installation changed since it was read")
+
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
 // the reserved builtin-host installation row (delete, update, config, ...).
 var ErrBuiltinInstallationImmutable = errors.New("builtin installation cannot be modified")
@@ -124,11 +129,24 @@ type UpdateInstallationInput struct {
 	// Signature, when set, replaces the recorded release signature check, as
 	// when a new package replaces the installed one.
 	Signature *Signature
-	// IfVersion, when set, applies the row's column writes only while the
-	// installed version still equals it; otherwise they are a no-op. It does
-	// not guard Capabilities. An update check uses it so a refusal can't land
-	// on a newer version that a concurrent manual update installed.
-	IfVersion *string
+	// Archive, when set, replaces the stored package in the same transaction
+	// as the row, so the two never name different releases.
+	Archive *ArchiveInput
+	// IfVersion and IfInstallPath, when set, apply the update only while the
+	// row still holds that version and install path; otherwise nothing is
+	// written and Update returns ErrInstallationChanged. A replacement guards
+	// on the install path it was prepared against, so one that finishes after
+	// another install can't overwrite it, and an update check guards its
+	// refusal record so it can't land on a newer version.
+	IfVersion     *string
+	IfInstallPath *string
+}
+
+// ArchiveInput is a package for the installation's plugin_archives row.
+type ArchiveInput struct {
+	ManifestJSON []byte
+	Checksum     string
+	Bytes        []byte
 }
 
 type InstallationStore struct {
@@ -439,28 +457,17 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		setClauses = append(setClauses, "update_failed_version = NULL, update_failure_reason = NULL, update_failed_at = NULL")
 	}
 
-	if len(setClauses) > 0 {
-		setClauses = append(setClauses, "updated_at = NOW()")
-		args = append(args, id)
-		where := fmt.Sprintf("id = $%d", argIndex)
-		if input.IfVersion != nil {
-			args = append(args, *input.IfVersion)
-			where += fmt.Sprintf(" AND version = $%d", argIndex+1)
+	// A guarded write always runs the row update, so the guard also holds
+	// for an Archive or Capabilities write that changes no column.
+	if len(setClauses) > 0 || input.IfVersion != nil || input.IfInstallPath != nil {
+		if err := updateInstallationRow(ctx, tx, id, input, setClauses, args); err != nil {
+			return err
 		}
-		query := fmt.Sprintf(
-			"UPDATE plugin_installations SET %s WHERE %s",
-			strings.Join(setClauses, ", "),
-			where,
-		)
-		tag, err := tx.Exec(ctx, query, args...)
-		if err != nil {
-			return fmt.Errorf("updating plugin installation: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
-			if input.IfVersion != nil {
-				return nil
-			}
-			return ErrInstallationNotFound
+	}
+
+	if a := input.Archive; a != nil {
+		if err := saveArchive(ctx, tx, id, a.ManifestJSON, a.Checksum, a.Bytes); err != nil {
+			return err
 		}
 	}
 
@@ -472,6 +479,38 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit update installation transaction: %w", err)
+	}
+	return nil
+}
+
+// updateInstallationRow runs one installation row update with setClauses,
+// whose placeholders take args, under input's IfVersion and IfInstallPath
+// guards.
+func updateInstallationRow(ctx context.Context, tx pgx.Tx, id int, input UpdateInstallationInput, setClauses []string, args []any) error {
+	setClauses = append(setClauses, "updated_at = NOW()")
+	args = append(args, id)
+	where := fmt.Sprintf("id = $%d", len(args))
+	guarded := false
+	if input.IfVersion != nil {
+		args = append(args, *input.IfVersion)
+		where += fmt.Sprintf(" AND version = $%d", len(args))
+		guarded = true
+	}
+	if input.IfInstallPath != nil {
+		args = append(args, *input.IfInstallPath)
+		where += fmt.Sprintf(" AND install_path = $%d", len(args))
+		guarded = true
+	}
+	query := fmt.Sprintf("UPDATE plugin_installations SET %s WHERE %s", strings.Join(setClauses, ", "), where)
+	tag, err := tx.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("updating plugin installation: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		if guarded {
+			return ErrInstallationChanged
+		}
+		return ErrInstallationNotFound
 	}
 	return nil
 }
@@ -550,6 +589,10 @@ func (s *InstallationStore) SaveArchive(
 	checksum string,
 	archiveBytes []byte,
 ) error {
+	return saveArchive(ctx, s.pool, installationID, manifestJSON, checksum, archiveBytes)
+}
+
+func saveArchive(ctx context.Context, db installationDB, installationID int, manifestJSON []byte, checksum string, archiveBytes []byte) error {
 	if len(manifestJSON) == 0 {
 		return fmt.Errorf("saving plugin archive: manifest JSON is required")
 	}
@@ -566,7 +609,7 @@ func (s *InstallationStore) SaveArchive(
 			checksum = EXCLUDED.checksum,
 			archive_bytes = EXCLUDED.archive_bytes,
 			updated_at = NOW()`
-	tag, err := s.pool.Exec(ctx, query, installationID, manifestJSON, checksum, archiveBytes)
+	tag, err := db.Exec(ctx, query, installationID, manifestJSON, checksum, archiveBytes)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {

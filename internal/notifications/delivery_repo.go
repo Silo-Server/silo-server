@@ -170,6 +170,10 @@ func (r *DeliveryRepository) HasRequestFulfilled(ctx context.Context, userID int
 // complete recipient union first. The insert trigger then assigns timestamps
 // strictly above the preceding committed delivery for each profile.
 func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) error {
+	return lockInboxProfiles(ctx, tx, profileIDs)
+}
+
+func lockInboxProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) error {
 	profiles := slices.Clone(profileIDs)
 	slices.Sort(profiles)
 	for _, profile := range slices.Compact(profiles) {
@@ -425,13 +429,26 @@ func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int
 // A watchlist.available row created at or after arrivalCutoff, the fanout
 // staleness horizon, is kept whatever the retention settings: it is what
 // stops a later episode inside the horizon from telling the profile again.
+// A row with a webhook or plugin destination attempt still to finish is
+// kept, since its deletion would cascade to the attempt: always while the
+// attempt is claimed or scheduled (retrying with next_retry_at ahead, which
+// covers a live claim lease), and while it waits otherwise for as long as
+// the row is younger than pluginAttemptMaxAge, past which a plugin attempt
+// is finished without a send. The bound lets the row go when an attempt is
+// stranded, such as while webhooks are turned off.
 func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff, arrivalCutoff time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM notification_deliveries
-		WHERE ((read_at IS NOT NULL AND read_at < $1)
-		       OR (read_at IS NULL AND created_at < $2))
-		  AND NOT (type = '`+DeliveryTypeWatchlistAvailable+`' AND created_at >= $3)`,
-		readCutoff, unreadCutoff, arrivalCutoff)
+		DELETE FROM notification_deliveries d
+		WHERE ((d.read_at IS NOT NULL AND d.read_at < $1)
+		       OR (d.read_at IS NULL AND d.created_at < $2))
+		  AND NOT (d.type = '`+DeliveryTypeWatchlistAvailable+`' AND d.created_at >= $3)
+		  AND NOT EXISTS (SELECT 1 FROM webhook_delivery_attempts a
+		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))
+		  AND NOT EXISTS (SELECT 1 FROM plugin_destination_delivery_attempts a
+		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))`,
+		readCutoff, unreadCutoff, arrivalCutoff, pluginAttemptMaxAge)
 	if err != nil {
 		return 0, err
 	}

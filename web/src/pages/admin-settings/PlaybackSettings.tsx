@@ -76,6 +76,7 @@ export default function PlaybackSettings() {
   const hwAccel = form.getValue("playback.hw_accel");
   const hwDetection = useHWAccelDetection(hwAccel !== "none");
   const hwDevice = form.getValue("playback.hw_device");
+  const hwDeviceEnv = form.envVar("playback.hw_device");
   const selectedDevices = parseHWDeviceList(hwDevice);
   const deviceRows = buildHWDeviceRows(hwDetection.data, hwDevice);
   const detectedPaths = deviceRows.filter((row) => row.detected).map((row) => row.path);
@@ -257,6 +258,7 @@ export default function PlaybackSettings() {
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_enabled")}
+            managedByEnv={form.envVar("playback.transcode_enabled")}
           />
           <SettingField
             label={t("web.admin.settings.playback.hwAccel.label")}
@@ -267,6 +269,7 @@ export default function PlaybackSettings() {
             value={hwAccel}
             onChange={(v) => form.setValue("playback.hw_accel", v)}
             restartRequired={restartKeys.has("playback.hw_accel")}
+            managedByEnv={form.envVar("playback.hw_accel")}
           />
           <SettingField
             label={t("web.admin.settings.playback.transcoding.allow4k")}
@@ -335,6 +338,7 @@ export default function PlaybackSettings() {
             value={form.getValue("playback.transcode_dir")}
             onChange={(v) => form.setValue("playback.transcode_dir", v)}
             restartRequired={restartKeys.has("playback.transcode_dir")}
+            managedByEnv={form.envVar("playback.transcode_dir")}
           />
 
           <AdvancedSection
@@ -351,6 +355,7 @@ export default function PlaybackSettings() {
               value={form.getValue("playback.ffmpeg_path")}
               onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
               restartRequired={restartKeys.has("playback.ffmpeg_path")}
+              managedByEnv={form.envVar("playback.ffmpeg_path")}
             />
             {showDevicePicker && (
               <div>
@@ -382,9 +387,11 @@ export default function PlaybackSettings() {
                 {/* One shared row shell per device, so these switches land on the
                     same edge as every other control in the group instead of
                     hugging the panel. */}
-                {deviceRows.map((row) => (
+                {deviceRows.map((row, index) => (
                   <SettingFieldRow
                     key={row.path}
+                    // One note for the whole device list, on its first row.
+                    managedByEnv={index === 0 ? hwDeviceEnv : undefined}
                     label={
                       <span className={row.detected ? undefined : "text-muted-foreground"}>
                         {row.description}
@@ -406,6 +413,7 @@ export default function PlaybackSettings() {
                     <Switch
                       checked={selectedDevices.includes(row.path)}
                       aria-label={row.description}
+                      disabled={hwDeviceEnv != null}
                       onCheckedChange={() =>
                         form.setValue(
                           "playback.hw_device",

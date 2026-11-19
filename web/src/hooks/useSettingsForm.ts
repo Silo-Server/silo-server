@@ -283,15 +283,26 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
   const sensitiveManagedByEnv = sensitiveData?.managed_by_env ?? [];
+  const envVars = sensitiveData?.managed_by_env_vars;
+  /**
+   * The environment variable that sets `key` on the server, or undefined when
+   * an admin can save it. Pass it to a field's `managedByEnv`.
+   */
+  const envVar = useCallback((key: string) => envVars?.[key], [envVars]);
+
+  // Until the status is known a field cannot tell whether the environment
+  // sets it, so the form stays in its loading state rather than offer an edit
+  // the server would refuse. A failed status request ends the wait.
+  const sensitiveStatusPending = sensitiveData == null && !sensitiveStatusError;
 
   return {
-    isLoading,
+    isLoading: isLoading || sensitiveStatusPending,
     /**
      * True until the snapshot has either arrived or failed. Unlike `isLoading`
      * this also covers a query that has not been allowed to start yet (no
      * profile selected), so a form can hold its skeleton through that gap.
      */
-    isPending: settings == null && !loadError,
+    isPending: (settings == null && !loadError) || sensitiveStatusPending,
     /** True when the settings snapshot could not be read; values are unset. */
     loadError,
     retryLoad: refetch,
@@ -311,6 +322,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     restartRequired,
     sensitiveConfigured,
     sensitiveManagedByEnv,
+    envVar,
     sensitiveStatusReady: sensitiveData != null,
     sensitiveStatusError,
     buildConnectionCheckRequest,

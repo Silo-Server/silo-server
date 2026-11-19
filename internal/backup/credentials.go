@@ -94,6 +94,12 @@ type carrySpec struct {
 	// limit, when set, turns a switch off on a carried row instead of
 	// dropping it.
 	limit *carryLimit
+	// staged, when set, is a text column under a unique constraint besides
+	// the key, such as a destination's per-profile name. Before the upsert
+	// the restored rows it will update move to a value no live row can
+	// hold, so values swapped since the backup don't collide part way
+	// through the upsert on any schema the backup has (stageCarried).
+	staged string
 	// binding, when set, is a nullable column that narrows what a row's
 	// credential may do. A live row holding a value there is carried only
 	// when the restored schema has the column and what the value names is in
@@ -298,6 +304,13 @@ var secretTables = []secretTable{
 		key: "id", same: []string{"id", columnUserID}, credential: everyRow,
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
 		describe: `format('notification webhook %s %L (account %s)', r.id, r.name, r.user_id)`,
+		staged:   "name",
+	}},
+	{name: "notification_plugin_destinations", handling: secretCarried, why: "plugin notification destinations", carry: &carrySpec{
+		key: "id", same: []string{"id", columnUserID}, credential: everyRow,
+		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
+		describe: `format('plugin notification destination %s %L (account %s)', r.id, r.name, r.user_id)`,
+		staged:   "name",
 	}},
 	{name: "notification_email_prefs", handling: secretCarried, why: "notification email addresses", carry: &carrySpec{
 		key: columnUserID + ", " + columnProfileID, same: []string{columnUserID, columnProfileID}, credential: everyRow,
@@ -384,6 +397,7 @@ var secretTables = []secretTable{
 	{name: "idgen_machine_leases", handling: secretRestored, why: workerLease},
 	{name: "web_push_delivery_attempts", handling: secretRestored, why: deliveryHistory},
 	{name: "webhook_delivery_attempts", handling: secretRestored, why: deliveryHistory},
+	{name: "plugin_destination_delivery_attempts", handling: secretRestored, why: deliveryHistory},
 	{name: "download_subscription_exclusions", handling: secretRestored, why: "a download subscription's rules, not a destination"},
 }
 
@@ -411,7 +425,7 @@ func leftOutTables() []string {
 const carriedKinds = "API keys, pending invitations, invite codes, autoscan webhook tokens, audiobook RSS feed links, " +
 	"Plex and Jellyfin webhook sync secrets, external sign-in links and providers, watch-provider connections, " +
 	"plugin configuration and state, and notification destinations " +
-	"(push registrations, webhooks, email addresses, Discord links, server channels)"
+	"(push registrations, webhooks, plugin destinations, email addresses, Discord links, server channels)"
 
 // CarriedCredentials is what DatabaseLoader.CarryCredentials did.
 type CarriedCredentials struct {
@@ -799,6 +813,9 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 			}
 		}
 	}
+	if err := c.stageCarried(ctx, tx, t.name, columns, keyColumns, rows, owned, live); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (%s) OVERRIDING SYSTEM VALUE
 		SELECT %s FROM %s WHERE %s
 		ON CONFLICT (%s) DO UPDATE SET %s`,
@@ -825,6 +842,23 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		}
 	}
 	return nil
+}
+
+// stageCarried moves the staged column of every restored row the upsert
+// will update to a space followed by its key, which no live row holds:
+// names are trimmed before they are stored. Each upserted row then writes
+// its live value over a staged one, so live rows that swapped values since
+// the backup land without a unique violation, whichever schema the backup
+// has.
+func (c *carrySpec) stageCarried(ctx context.Context, tx pgx.Tx, table string, columns, keyColumns []string, rows, owned, live string) error {
+	if c.staged == "" || !slices.Contains(columns, c.staged) || len(keyColumns) != 1 {
+		return nil
+	}
+	key := keyColumns[0]
+	_, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s t SET %s = ' ' || t.%s::text
+		WHERE EXISTS (SELECT 1 FROM %s WHERE (%s) AND r.%s = t.%s)`,
+		table, c.staged, key, rows, owned, key, key), live)
+	return err
 }
 
 // primaryKeyColumns lists the columns of table's primary key, in key order;

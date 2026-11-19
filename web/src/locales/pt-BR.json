@@ -287,6 +287,12 @@
       "value": "Esse endereço de e-mail já está em uso."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Este valor já está em uso."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -327,6 +333,12 @@
     {
       "type": 0,
       "value": "Não foi possível ler a solicitação."
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Definido pelo ambiente do nó. Altere lá e reinicie o nó."
     }
   ],
   "error.field.out_of_range": [
@@ -1259,6 +1271,18 @@
     {
       "type": 0,
       "value": "Séries populares"
+    }
+  ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Filmes recomendados para você"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Séries recomendadas para você"
     }
   ],
   "home.section.discoverStudios": [
@@ -54377,6 +54401,12 @@
       "value": ", então o seletor de dispositivos não se aplica a ele. Deixar em branco herda a configuração de dispositivo de todo o cluster, que também precisa ser uma identidade CUDA para o NVENC usá-la — defina uma aqui quando o cluster estiver configurado com caminhos de renderização."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Definido pelo ambiente deste nó. Altere lá e reinicie o nó."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -58789,6 +58819,146 @@
       "value": "Modelo"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "O limite de uma execução foi atingido; a próxima execução continua."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Títulos consultados: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Com embedding: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Solicitações ao TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Desativado. As execuções só removem títulos antigos."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fileira criada"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de fileiras criadas"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fileiras criadas"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " título para recomendar"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de títulos para recomendar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " títulos para recomendar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nenhum embedding gerado: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -58855,6 +59025,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Recomendações do Descobrir"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -59143,6 +59319,12 @@
       "value": "Não foi possível iniciar os embeddings"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível iniciar as recomendações do Descobrir"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -59261,6 +59443,44 @@
       "value": " limpos."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embeddings redefinidos: exclusão de "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " e "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "; limpeza de "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -59299,6 +59519,98 @@
             {
               "type": 0,
               "value": " embeddings"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding do Descobrir"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de embeddings do Descobrir"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embeddings do Descobrir"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fileira do Descobrir"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de fileiras do Descobrir"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fileiras do Descobrir"
             }
           ]
         }
@@ -60345,6 +60657,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Séries recomendadas para cada espectador"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Filmes recomendados para cada espectador"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -60393,6 +60729,18 @@
     {
       "type": 0,
       "value": "Cards de emissoras, cada um abre as séries da emissora."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Recomendações"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Títulos que ainda não estão na biblioteca, escolhidos para cada espectador com base no que assiste."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -60755,6 +61103,12 @@
     {
       "type": 0,
       "value": "Escolha a região dos serviços de streaming."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Fica vazia até que as recomendações do Descobrir sejam ativadas em Administração → Recomendações."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -62271,6 +62625,12 @@
     {
       "type": 0,
       "value": "Prévia ao vivo da lista"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Prévia das suas próprias recomendações"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -66191,6 +66551,20 @@
       "value": "Carregando configurações"
     }
   ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Definido por "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " no ambiente do servidor."
+    }
+  ],
   "web.admin.settings.fields.passwordConfigured": [
     {
       "type": 0,
@@ -66325,12 +66699,6 @@
     {
       "type": 0,
       "value": "Proxies confiáveis"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Gerenciado por SILO_TRUSTED_PROXIES."
     }
   ],
   "web.admin.settings.general.title": [
@@ -72437,6 +72805,36 @@
       "value": "Trocar para outro modelo exige redefinir os embeddings, o que exclui todos eles. Outro provedor que sirva o mesmo modelo passa a valer após uma reinicialização."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Ativar recomendações do Descobrir"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Adiciona fileiras pessoais em Descobrir, nas solicitações, com títulos que ainda não estão na biblioteca. Usa o provedor de embedding e o TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Máximo de títulos para recomendar"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Quantos títulos que não estão na biblioteca o servidor mantém para recomendar. Cada um é consultado no TMDB e recebe um embedding. Gerar embeddings costuma ser barato, mas um número maior pode custar mais ou demorar mais, dependendo do seu provedor de embedding, e usa mais armazenamento."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Recomendações do Descobrir"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -72465,6 +72863,12 @@
     {
       "type": 0,
       "value": "Cron de embeddings"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron das recomendações do Descobrir"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -72509,12 +72913,6 @@
       "value": "Usar Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Definido por REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -72531,12 +72929,6 @@
     {
       "type": 0,
       "value": "URL de conexão"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Valor fornecido por REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -77442,20 +77834,6 @@
     {
       "type": 0,
       "value": "Log do servidor"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Gerenciado por "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -121803,13 +122181,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Coleções e regras"
+      "value": "Coleções e fileiras inteligentes"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Suas coleções ou fileiras criadas a partir de regras"
+      "value": "Suas coleções ou fileiras inteligentes criadas a partir de regras"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -121923,7 +122301,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Crie uma fileira a partir de regras, como gênero e década."
+      "value": "Como uma coleção inteligente, mas apenas uma fileira. Escolha títulos com regras como gênero e década."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -122133,7 +122511,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Títulos que seguem regras"
+      "value": "Fileira inteligente"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -128086,6 +128464,12 @@
       "value": " d"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "Um destino de notificações parou de funcionar"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -128240,6 +128624,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "Abra as configurações de notificações para corrigir."
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -128562,6 +128952,12 @@
     {
       "type": 0,
       "value": "Um título da sua lista para assistir já está disponível"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "Um webhook parou de funcionar"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -135791,6 +136187,34 @@
       "value": " à sua lista para assistir"
     }
   ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Porque você assistiu "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Porque você assistiu "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " e "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -142604,6 +143028,314 @@
       "value": "Sem interesse"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "Adicionar destino"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "Adicionar"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "Adicionar um destino de notificações"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” adicionado"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Limpar segredo salvo"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "Um destino já está sendo adicionado."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "As notificações deixarão de ser enviadas para este destino. Não é possível desfazer esta ação."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível excluir o destino"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "Destino excluído"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "Envie as notificações deste perfil para serviços compatíveis com os plugins do seu servidor."
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "Escolha para onde vão as notificações deste perfil."
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "Nenhum destino ainda."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Manter segredo salvo"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "Tipo"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "Última falha: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "Última falha "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "Última falha "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": o plugin não conseguiu enviar"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "Última falha: o plugin não conseguiu enviar"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Limite de "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " destino atingido"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Limite de "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de destinos atingido"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Limite de "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " destinos atingido"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "Recarregue a lista de destinos antes de excluir este destino."
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "Recarregue a lista de destinos antes de editar este destino."
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível salvar o destino"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "Os campos secretos deixados em branco mantêm os valores salvos."
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "Uma mensagem de teste já está sendo enviada."
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Teste enviado"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Falha no teste"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Teste enviado: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Falha no teste: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "Outros destinos"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "Indisponível"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "O plugin que fornece este destino está desativado ou foi removido, então nada é enviado."
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível atualizar"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -143568,6 +144300,12 @@
     {
       "type": 0,
       "value": "É necessário informar uma URL de webhook"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Você está off-line, então esta alteração não foi salva"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -150841,12 +151579,6 @@
       "value": "Proxies confiáveis"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Definido por SILO_TRUSTED_PROXIES no ambiente."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -151097,12 +151829,6 @@
     {
       "type": 0,
       "value": "Número do banco de dados"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Definido por REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

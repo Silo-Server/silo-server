@@ -188,11 +188,14 @@ type AdminHandler struct {
 	AccessGroups                 AccessGroupValidator
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
-	RedisBootstrapAvailable      bool
-	OnUserSessionsRevoked        func(ctx context.Context, userID int)
-	OnServerSettingUpdated       func(ctx context.Context, key, value string)
-	RestartStatus                *ServerRestartStatusTracker
-	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// BootstrapEnvVars names the environment variable that sets each key in
+	// BootstrapSensitiveConfigured, for the admin UI to show.
+	BootstrapEnvVars        map[string]string
+	RedisBootstrapAvailable bool
+	OnUserSessionsRevoked   func(ctx context.Context, userID int)
+	OnServerSettingUpdated  func(ctx context.Context, key, value string)
+	RestartStatus           *ServerRestartStatusTracker
+	CatalogSearchStatus     catalog.CatalogSearchStatusProvider
 	// BeforeServerSettingCommit runs inside the settings transaction for each
 	// setting whose effective value changes. An error rolls the save back. tx
 	// is nil when the settings store has no transactional update.

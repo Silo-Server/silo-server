@@ -69,8 +69,18 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 		map[string]*huma.Response{"200": {Description: "The source's length and ETag, without a body."}},
 		http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusRequestedRangeNotSatisfiable, http.StatusTooManyRequests, http.StatusServiceUnavailable)
 	sourceHead.Parameters = sourceParams
+	registrationRefusal := func(status int) *huma.Response {
+		return &huma.Response{Description: http.StatusText(status), Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(reflect.TypeFor[RegistrationRefusal](), true, "")}}}
+	}
+	registration := op(http.MethodPut, PathRegistration, "HandleRegistration", "natural_idempotent",
+		"The configuration the calling node declares from its environment, sent at startup before its first configuration read and again every minute while the node runs, so a row or lock changed on the core is put back. The core validates the declared fields as an administrator update is validated, writes them to the node's row, and sets env_managed to exactly the declared field names, so a field the node no longer declares is unlocked; an empty body unlocks every field. changed in the answer reports whether the registration changed the row or its locks; an unchanged one commits no configuration revision and makes no API server reload its node pools. Administrator updates that would change a locked field are refused. A changed URL must be free among transcode nodes (409 url_taken). A refused value is 422 invalid naming its field. 404: the node row is gone. 429: the node exceeded its request budget on this server. 503 is transient.",
+		jsonBody(reflect.TypeFor[Registration]()), map[string]*huma.Response{
+			"200": {Description: "Applied.", Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(reflect.TypeFor[RegistrationResult](), true, "")}}},
+			"409": registrationRefusal(http.StatusConflict), "422": registrationRefusal(http.StatusUnprocessableEntity),
+		}, http.StatusBadRequest, http.StatusNotFound, http.StatusTooManyRequests, http.StatusServiceUnavailable)
 	return []workerprotocol.Operation{
 		config,
+		registration,
 		sourceBytes,
 		sourceHead,
 		op(http.MethodPost, PathReport, "HandleReport", "non_retryable",

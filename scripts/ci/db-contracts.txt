@@ -23,7 +23,9 @@
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
+./internal/sections TestRecentlyReleasedOrdersByReleaseDate
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestBookMediaScopeRowsKeepTheirTypePostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
 ./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
@@ -91,6 +93,7 @@
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
+./internal/catalog TestBoxSetCollectionLanguageDB
 
 # Audiobook Series, Authors, and Narrators browse: group counts and durations,
 # cover order, the viewer's own progress, count-sorted cursor pages, the search
@@ -217,8 +220,14 @@
 ./internal/scanner TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB
 
 # An ebook or manga library scan does not mark missing a book that a scan of
-# that file indexed after the library scan's walk or while it marked the book.
+# that file indexed after the library scan's walk or while it marked the book,
+# or saw unchanged after it was restored with its old modification time. The
+# same holds for an audiobook library scan, and for a single-file scan of a
+# book that vanished and came back before that scan marked it; a book still
+# gone is marked even when its row was written meanwhile.
 ./internal/scanner TestScanBookFolderKeepsBookIndexedByConcurrentScanDB
+./internal/scanner TestScanAudiobookFolderKeepsBookRestoredUnchangedDB
+./internal/scanner TestScanFileReconcilesVanishedBookDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
@@ -353,6 +362,12 @@
 ./internal/taskmanager/tasks TestReconcileWaitsForADownloadRefreshPostgres
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
+
+# A plugin scheduled task's firing runs on one API server: of claims taken at
+# once one wins, a server whose timer fires seconds later (across an interval
+# slot boundary too) loses, and a startup firing runs once per cluster start.
+./internal/taskmanager/repository TestPgFiringClaimsRunEachFiringOnceDB
+./internal/taskmanager/repository TestPgFiringClaimsMeasureAStalledServerFromItsDueTimeDB
 
 # Autoscan event retention deletes old finished events in bounded batches and keeps recent and running ones.
 ./internal/autoscan TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB
@@ -535,6 +550,28 @@
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestSendPushTestStaysOnTheCallersAccount
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
+./internal/notifications TestPluginDestinationsStayOnTheirAccountDB
+./internal/notifications TestPluginDestinationDeliveryOutcomesDB
+./internal/notifications TestPluginDestinationStaleSendsDontWinDB
+./internal/notifications TestPluginDestinationValidationHoldsNoRowLockDB
+./internal/notifications TestPluginDestinationsOfAMissingPluginGetNothingQueuedDB
+./internal/notifications TestPluginDestinationEnqueueSurvivesADeleteDB
+./internal/notifications TestPluginDestinationFinishIsAtomicDB
+./internal/notifications TestPluginDestinationUnreadableSettingsDB
+./internal/notifications TestPluginDestinationTextNeverCarriesSecretsDB
+./internal/notifications TestPluginDestinationExhaustedScheduleDB
+./internal/notifications TestPluginDestinationRetryOutlivesInboxRetentionDB
+./internal/notifications TestFanoutQueuesPluginDestinationAttemptsDB
+./internal/notifications TestPluginDestinationCreateAndAccountDeletionDontDeadlockDB
+./internal/notifications TestPluginDestinationCreateRechecksTheProfileDB
+./internal/notifications TestPluginDestinationAutoDisableOnAOneConnectionPoolDB
+./internal/notifications TestPluginDestinationSendRereadsTheDestinationDB
+./internal/notifications TestPluginDestinationNULMessageIsStoredDB
+./internal/notifications TestPluginDestinationAttemptAgeCapDB
+./internal/notifications TestPluginDestinationPurgeWaitsForADeliveryDB
+./internal/notifications TestPluginDestinationTakenNameAtTheLimitDB
+./internal/notifications TestPluginDestinationAutoDisableAndAccountDeletionDontDeadlockDB
+./internal/notifications TestPluginDestinationAutoDisableAndProfilePurgeDontDeadlockDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
@@ -789,6 +826,15 @@
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
 
+# Plugin instance state versions: a write at a stale version, or a create-only
+# write on an existing key, changes nothing; of several writers at one version
+# exactly one lands; the key budget still refuses a new key; an update that
+# leaves the version column alone (an older release's write during a rolling
+# deploy) still advances it, and one that sets it (a restore's carry) never
+# moves it back.
+./internal/plugins TestInstanceStateConditionalWritesPostgres
+./internal/plugins TestInstanceStateVersionAdvancesOnAnyUpdatePostgres
+
 # A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.
@@ -807,6 +853,10 @@
 # Updating an installed plugin from its catalog stops the running plugin only
 # after the new package passed its download and checksum checks.
 ./internal/plugins TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB
+
+# A plugin replacement that finishes after another install of the same plugin is
+# refused, and the newer release, its stored archive and its files stay.
+./internal/plugins TestInstallerReplacementRefusedAfterInstallationChangedDB
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
@@ -1213,6 +1263,7 @@
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
 ./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
+./internal/backup TestCarrySwapsDestinationNamesDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
 ./internal/backup TestLostLockSessionCancelsWorkDB
@@ -1346,6 +1397,14 @@
 # moves the admin revision and pool generation; a proxy can only hold local,
 # refused by the store and by the check constraint.
 ./internal/nodepool TestSourceAccessIsTranscodeConfigurationDB
+
+# Node declarations: a declaration writes its fields and sets env_managed to
+# exactly their names without moving the admin revision or pool generation on
+# its own; administrator updates that change a declared field are refused and
+# ones that restate it pass; a taken URL is refused. A proxy registers itself
+# only when asked to, and a node cannot declare a proxy's address.
+./internal/nodepool TestNodeDeclarationsLockFieldsDB
+./internal/nodepool TestProxyDeclarationsDB
 
 # Admin node writes reach every credential registry: the writing API server's
 # before it answers (a deleted node's key is refused at once, a moved node is

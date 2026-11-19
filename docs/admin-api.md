@@ -430,13 +430,13 @@ and the API serves it that row's overrides already applied in its
 configuration document (`GET /api/internal/nodes/self/config`), at its
 30-second poll and at once after an admin change to the row.
 
-A proxy finds its own row by URL first: `NODE_URL` on the proxy is matched
-against `stream_nodes.url`, ignoring a trailing slash on either side. A proxy
-refuses to start without `NODE_URL`: a URL guessed from its listen port could
+A proxy finds its own row by URL first: `SILO_NODE_URL` (or the older
+`NODE_URL`) on the proxy is matched against `stream_nodes.url`, ignoring a
+trailing slash on either side. A proxy refuses to start without either: a URL guessed from its listen port could
 match a different machine's row and adopt its policy.
 
-If the URL does not match, the node falls back to `NODE_NAME` against the
-registered name. This covers split-horizon topologies where `stream_nodes.url`
+If the URL does not match, the node falls back to `SILO_NODE_NAME` (or
+`NODE_NAME`) against the registered name. This covers split-horizon topologies where `stream_nodes.url`
 was registered as a public address the node's own `NODE_URL` never equals —
 with `public_url` carrying the client-facing address, `url` can simply be the
 node's internal address and match `NODE_URL` directly, which is the
@@ -485,6 +485,78 @@ things do wait for a restart: the hardware encoder warmup that ran at boot,
 which stays primed for the old backend, and sessions already transcoding, which
 keep the backend they started with. Restart the node when you want all four in
 agreement immediately.
+
+### Node-declared configuration
+
+A node can declare part of its own row from its environment instead of an
+administrator entering it. `stream_nodes.env_managed` (`env_managed` on the
+node rows of `listAdminNodes` and the update response) names the fields the
+node declared at its last start, using the update body's field names.
+`updateAdminNode` refuses a change to any of them with `422 validation_failed`
+and one `errors[]` entry per field at `body.<field>`, code
+`managed_by_environment`. Restating a declared field's stored value passes, so
+the editor's full-form save keeps working. Enabling, disabling, draining,
+deleting and issuing a key are unaffected. `GET /admin/nodes/capabilities`
+reports `env_declarations`. Writing `env_managed` alone is not a configuration
+change: it moves neither the node's ETag nor the pool generation.
+
+A proxy declares once per start; a transcode node declares at startup and
+again every minute while it runs, so a row or lock changed behind its back is
+put back (`nodedeclare`, `nodepool.Declare`). An unset or blank variable
+declares nothing and leaves that field to the administrator, so removing a
+variable unlocks its field at the next start.
+Values follow the update body: `0` for a cap is unlimited, `0` for the
+download budget is no budget. A node checks each value before sending it and
+refuses to start on a bad one, naming the variable.
+
+| Field | Proxy | Transcode node |
+|---|---|---|
+| `name` | — (identity, set at self-registration) | `SILO_NODE_NAME` |
+| `url` | — (identity, set at self-registration) | `SILO_NODE_URL` |
+| `public_url` | `SILO_NODE_PUBLIC_URL` | — |
+| `group` | `SILO_NODE_GROUP` | `SILO_NODE_GROUP` |
+| `max_jobs` | `SILO_NODE_MAX_STREAMS` | `SILO_NODE_MAX_TRANSCODES` |
+| `max_bandwidth_kbps` | `SILO_NODE_MAX_BANDWIDTH_KBPS` | — |
+| `source_access` | — | `SILO_NODE_SOURCE_ACCESS` |
+| `hw_accel_override` | — | `SILO_NODE_HW_ACCEL` |
+| `hw_device_override` | — | `SILO_NODE_HW_DEVICE` |
+| `download_artifact_dir_override` | — | `SILO_NODE_DOWNLOAD_ARTIFACT_DIR` |
+| `download_artifact_max_bytes_override` | — | `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` |
+
+A proxy writes its declaration to the database before its configuration
+watcher first reads its row (`declareProxyNode` in `cmd/silo`), then publishes
+`node_pool_changed`. It finds its row as the watcher does, by
+`SILO_NODE_URL` (or `NODE_URL`) and then by `SILO_NODE_NAME` (or `NODE_NAME`)
+when exactly one row has that name. With neither name variable set it uses the
+watcher's fallback name `proxy`, unless it registers itself: an unnamed proxy
+with `SILO_NODE_REGISTER=true` is found by URL only, so several of them each
+get their own row. A proxy that matches no row starts as it
+always has when it declares nothing, and refuses to start when it declares
+something. With `SILO_NODE_REGISTER=true` it registers itself instead: a new
+enabled proxy row at its URL, named by its name variable or, with none set, by
+the URL's host. Registration is opt-in because a proxy can match no row and
+still have one, registered at an address clients reach it by; a second row at
+`SILO_NODE_URL` would hand clients an address they cannot reach. A match on a
+row that is not a proxy refuses
+startup when the proxy declares anything and is only logged when it does not.
+A transcode node declares through the core; see
+[transcode nodes](architecture/transcode-nodes.md#registration). A transcode
+node also enforces the values it acts on itself, its job cap, acceleration,
+device, source access and prepared-download directory and budget, whatever
+its row says; its group, name and URL are placement and identity on the main
+server's side and hold only through the row. See
+[what the node enforces](architecture/transcode-nodes.md#what-the-node-enforces).
+A proxy reads its row from the database the main server owns, so it is run
+by the same operator and enforces nothing beyond its row.
+
+Upgrade order: the main server first, since its migration adds the column.
+Proxies read node rows with it, so they follow the main server. A proxy that
+starts while the column is still missing (its main server is migrating beside
+it) starts without its declaration and applies it every 30 seconds until the
+column exists. Transcode
+nodes can go before or after: against an older main server a node that
+declares something logs a warning, starts on its row as it is, and offers the
+declaration again every 30 seconds until the main server takes it.
 
 ### `last_stats`
 
@@ -3522,6 +3594,14 @@ replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacem
 that names a different plugin ID than the installation. Both are refused as package errors
 (422) and nothing is installed.
 
+A replacement applies only to the installation it was read against. When another install,
+update or upload of the same plugin replaced the installation while this one looked up its
+catalog entry or downloaded its package, the later one is refused with 409 `conflict` and
+writes nothing: the newer release, its stored package and its files stay. It is refused
+before it stops the plugin, unless both finish at the same moment, when the newer release's
+process may be stopped and started again once. This covers catalog installs, `/update` and
+uploads; an automatic update in the same situation is skipped without recording a refusal.
+
 `PUT /api/v2/admin/plugins/installations/{id}` assigns `enabled` and/or `update_policy`
 (`auto`, `notify`, `off`, `manual`); an empty body is 422. Disabling stops the running plugin
 before the write; any enabled change rebuilds the event subscriber index. Repeating the
@@ -3662,7 +3742,10 @@ restart. An omitted `auto_provision` is true, and enabling an auth binding while
 is enabled is 409 `provider_already_enabled`
 ([external-sign-in.md](architecture/external-sign-in.md)). The task binding marks a server
 restart required and answers 200 with `restart_required` true.
-An omitted task trigger stores an empty object. Both are naturally idempotent upserts.
+An omitted task trigger stores an empty object. A runnable binding trigger outranks the
+manifest's `scheduled_task.default_trigger`; a schedule saved on the task page outranks both
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Both are naturally
+idempotent upserts.
 
 All four require an acting administrator, restrict demo access, answer 404 for an unknown
 installation, 409 for the reserved built-in host row, 422 for a blank key or capability, and

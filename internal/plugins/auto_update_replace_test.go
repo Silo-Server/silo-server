@@ -32,6 +32,50 @@ func TestAutoUpdateServiceRefusedPackageLeavesPluginRunning(t *testing.T) {
 	}
 }
 
+// An automatic update whose installation an admin's install replaced while
+// it downloaded leaves the newer release running and its refusal record
+// alone: it is skipped, not a refusal to show in web admin.
+func TestAutoUpdateServiceSkipsInstallationReplacedDuringDownload(t *testing.T) {
+	events := []string{}
+	installations := &fakeAutoUpdateInstallations{
+		list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", InstallPath: "/plugins/1.0.0/plugin", UpdatePolicy: "auto", Enabled: true,
+			UpdateFailure: &UpdateFailure{Version: "1.1.0", Reason: "earlier refusal"}}},
+		current: &Installation{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "2.0.0", InstallPath: "/plugins/2.0.0/plugin", UpdatePolicy: "auto", Enabled: true},
+	}
+	service := NewAutoUpdateService(
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+		installations,
+		&fakeAutoUpdateCatalog{
+			entries:  []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"}}},
+			resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
+		},
+		&fakeAutoUpdateInstaller{events: &events},
+		&fakeAutoUpdateHost{events: &events},
+		nil,
+		nil,
+	)
+	summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+	if err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if want := []string{"prepare"}; !slices.Equal(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+	if summary.UpdatesApplied != 0 || len(summary.Failures) != 0 {
+		t.Fatalf("summary = %+v, want nothing applied and no failure", summary)
+	}
+	for _, update := range installations.updates {
+		if update.UpdateFailure != nil {
+			t.Fatalf("recorded failure %+v for a skipped update", update.UpdateFailure)
+		}
+		// A record on the newer release is about updating that release, so
+		// clearing the old snapshot's record must not reach it.
+		if update.ClearUpdateFailure && (update.IfInstallPath == nil || *update.IfInstallPath != "/plugins/1.0.0/plugin") {
+			t.Fatalf("clear guarded on %v, want the install path the pass read", update.IfInstallPath)
+		}
+	}
+}
+
 // A refused automatic update is recorded on the installation so web admin
 // can show it, and a later pass that no longer fails clears it.
 func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
@@ -210,7 +254,9 @@ func (f *fakeAutoUpdateRepositories) Create(_ context.Context, input CreateRepos
 }
 
 type fakeAutoUpdateInstallations struct {
-	list       []*Installation
+	list []*Installation
+	// current, when set, is what GetByID reads, as after another install.
+	current    *Installation
 	updates    []UpdateInstallationInput
 	updateErr  error
 	deletedIDs []int
@@ -218,6 +264,18 @@ type fakeAutoUpdateInstallations struct {
 
 func (f *fakeAutoUpdateInstallations) List(context.Context) ([]*Installation, error) {
 	return f.list, nil
+}
+
+func (f *fakeAutoUpdateInstallations) GetByID(_ context.Context, id int) (*Installation, error) {
+	if f.current != nil {
+		return f.current, nil
+	}
+	for _, installation := range f.list {
+		if installation.ID == id {
+			return installation, nil
+		}
+	}
+	return nil, ErrInstallationNotFound
 }
 
 func (f *fakeAutoUpdateInstallations) Update(_ context.Context, _ int, input UpdateInstallationInput) error {

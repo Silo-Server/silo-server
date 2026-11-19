@@ -661,6 +661,7 @@ describe("usePlaybackSession output capability changes", () => {
   function hdrFetch(
     replan: (init?: RequestInit) => Response | Promise<Response>,
     stoppedSessions: string[] = [],
+    stop: () => Response | Promise<Response> = () => jsonResponse({ outcome: "stopped" }),
   ) {
     return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -671,7 +672,7 @@ describe("usePlaybackSession output capability changes", () => {
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
       if (init?.method === "DELETE") {
         stoppedSessions.push(url);
-        return jsonResponse({ outcome: "stopped" });
+        return stop();
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -902,17 +903,30 @@ describe("usePlaybackSession output capability changes", () => {
   it("retires an active plan when the refreshed output has no playable route", async () => {
     const setHDR = outputProbe(true);
     const stoppedSessions: string[] = [];
-    const fetchMock = hdrFetch(() => {
-      return jsonResponse({
-        protocol_version: 3,
-        server_features: ["playback_plan_v3", "output_change_v1"],
-        outcome: "terminal",
-        terminal: { reason: "hdr_transcode_unsupported", message: "HDR unsupported" },
-      });
-    }, stoppedSessions);
+    let answerStop: (response: Response) => void = () => {};
+    const fetchMock = hdrFetch(
+      () => {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "terminal",
+          terminal: { reason: "hdr_transcode_unsupported", message: "HDR unsupported" },
+        });
+      },
+      stoppedSessions,
+      () => new Promise<Response>((resolve) => (answerStop = resolve)),
+    );
     vi.stubGlobal("fetch", fetchMock);
+    const onSessionStopped = vi.fn();
+    const config: PlayerConfig = { ...playerConfig, onSessionStopped };
 
-    const { result, unmount } = renderSession();
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(PlayerConfigProvider, { config, children }),
+      },
+    );
     await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
 
     act(() => setHDR(false));
@@ -920,8 +934,17 @@ describe("usePlaybackSession output capability changes", () => {
     await waitFor(() => expect(result.current.plan).toBeNull());
     expect(result.current.sessionId).toBeNull();
     expect(result.current.error).not.toBeNull();
-    await waitFor(() => expect(stoppedSessions).toContain("/api/v2/playback/session-hdr"));
+    await waitFor(() => expect(stoppedSessions).toEqual(["/api/v2/playback/session-hdr"]));
+
+    // The viewer goes back from the error before the retired session's stop
+    // lands, so the page it returns to reads ahead of that stop and is told
+    // to read again once the stop lands.
     unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onSessionStopped).not.toHaveBeenCalled();
+
+    answerStop(jsonResponse({ outcome: "stopped" }));
+    await waitFor(() => expect(onSessionStopped).toHaveBeenCalledTimes(1));
   });
 
   it("keeps a queued output change when a subtitle refresh follows it", async () => {

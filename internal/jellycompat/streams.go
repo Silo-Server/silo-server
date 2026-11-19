@@ -1873,19 +1873,6 @@ func subtitleCanServeSRT(format string) bool {
 	}
 }
 
-func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "ass", "ssa":
-		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	case "srt", "subrip":
-		w.Header().Set("Content-Type", "application/x-subrip; charset=utf-8")
-	default:
-		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
-}
-
 // extractEmbeddedTextSubtitle serves one embedded text track: from the cache,
 // a kept copy, or the file's index. When only a demux can produce it, the
 // demux extracts every text track of the file at once, so switching to
@@ -2012,6 +1999,7 @@ func writeJellyfinJSONSubtitleResponse(w http.ResponseWriter, data []byte) error
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write(payload)
 	return err

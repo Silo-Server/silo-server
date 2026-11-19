@@ -150,6 +150,9 @@ type DeliveryRow struct {
 	// from or written to the database; empty renders the embed without an
 	// image.
 	PosterURL string
+	// pluginAttempts carries InsertedDelivery.pluginAttempts to the
+	// dispatchers. Transient, like PosterURL.
+	pluginAttempts bool
 	// Catalog enrichment rendered by outbound channels (Discord embeds).
 	// Series-level fields describe the joined media_items row, which for
 	// request.fulfilled deliveries is the matched movie or series itself.
@@ -174,6 +177,10 @@ type InsertedDelivery struct {
 	UserID    int
 	ProfileID string
 	CreatedAt time.Time
+	// pluginAttempts is set when the delivery's transaction queued plugin
+	// destination attempts, so only those deliveries reach the plugin
+	// destination dispatcher.
+	pluginAttempts bool
 }
 
 func (d InsertedDelivery) key() profileKey { return profileKey{d.UserID, d.ProfileID} }

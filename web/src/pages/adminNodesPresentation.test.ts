@@ -20,6 +20,7 @@ import {
   nodeHasHWDeviceInventory,
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
+  restoreEnvManagedFields,
 } from "./adminNodesPresentation";
 
 const NOW = Date.parse("2026-08-26T12:00:00Z");
@@ -937,5 +938,22 @@ describe("describeNodeDrain", () => {
       ),
     ).toMatchObject({ phase: "draining", label: "Draining · not answering" });
     expect(describeNodeDrain(makeNode({ healthy: false, drain_state: "none" }))).toBeNull();
+  });
+});
+
+describe("restoreEnvManagedFields", () => {
+  // A save must restate what the node declares, or the server refuses it.
+  it("sends the stored value for each declared field the form carries", () => {
+    const node = makeNode({
+      group: null,
+      max_jobs: 3,
+      hw_accel_override: "qsv",
+      env_managed: ["group", "max_jobs", "hw_accel_override", "public_url"],
+    });
+    const body = restoreEnvManagedFields(
+      { name: "edited", group: "typed", max_jobs: 9, hw_accel_override: null },
+      node,
+    );
+    expect(body).toEqual({ name: "edited", group: "", max_jobs: 3, hw_accel_override: "qsv" });
   });
 });

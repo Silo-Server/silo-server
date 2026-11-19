@@ -96,6 +96,7 @@ import {
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
   parseHWDeviceOverride,
+  restoreEnvManagedFields,
 } from "./adminNodesPresentation";
 import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
@@ -918,10 +919,12 @@ function NodeDevicePicker({
   rows,
   onToggle,
   onInherit,
+  disabled = false,
 }: {
   rows: NodeHWDeviceRow[];
   onToggle: (path: string) => void;
   onInherit: () => void;
+  disabled?: boolean;
 }) {
   const t = useT();
   const selectedCount = rows.filter((row) => row.selected).length;
@@ -939,6 +942,7 @@ function NodeDevicePicker({
             </div>
             <Switch
               checked={row.selected}
+              disabled={disabled}
               aria-label={t("web.admin.nodes.devicePicker.toggle", { path: row.path })}
               onCheckedChange={() => onToggle(row.path)}
             />
@@ -958,7 +962,7 @@ function NodeDevicePicker({
               ? t("web.admin.nodes.devicePicker.singleDevice")
               : t("web.admin.nodes.devicePicker.balanced")}
         </p>
-        {selectedCount > 0 && (
+        {selectedCount > 0 && !disabled && (
           <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onInherit}>
             {t("web.admin.nodes.devicePicker.useClusterDefault")}
           </Button>
@@ -992,6 +996,14 @@ function NodeForm({
   onCreated?: (created: { id: string; name: string }) => void;
 }) {
   const t = useT();
+  // Fields the node declares from its own environment: shown read-only, and
+  // sent back with their stored values (restoreEnvManagedFields).
+  const envManaged = new Set(node?.env_managed ?? []);
+  const isLocked = (field: string) => envManaged.has(field);
+  const lockedNote = (field: string) =>
+    isLocked(field) ? (
+      <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.envManaged")}</p>
+    ) : null;
   const [name, setName] = useState(node?.name ?? "");
   const [url, setUrl] = useState(node?.url ?? "");
   const [publicUrl, setPublicUrl] = useState(node?.public_url ?? "");
@@ -1030,7 +1042,11 @@ function NodeForm({
   // the first render, and an effect would read that as a change and erase a
   // valid override on a dialog nobody had touched yet.
   function selectHWAccelOverride(next: string) {
-    if (hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)) {
+    // A device the node declares is saved as stored, so it stays on screen.
+    if (
+      !isLocked("hw_device_override") &&
+      hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)
+    ) {
       setHwDeviceOverride("");
     }
     setHwAccelOverride(next);
@@ -1082,7 +1098,10 @@ function NodeForm({
       if (showSourceAccess) {
         body.source_access = sourceAccess;
       }
-      updateMutation.mutate({ node, body }, { onSuccess: onClose });
+      updateMutation.mutate(
+        { node, body: restoreEnvManagedFields(body, node) },
+        { onSuccess: onClose },
+      );
     } else {
       const body: CreateNodeRequest = { type: nodeType, ...fields };
       if (nodeType === "proxy" && publicUrl.trim() !== "") {
@@ -1107,6 +1126,7 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.name")}</Label>
           <Input
             value={name}
+            disabled={isLocked("name")}
             onChange={(e) => setName(e.target.value)}
             placeholder={
               nodeType === "proxy"
@@ -1115,6 +1135,7 @@ function NodeForm({
             }
             required
           />
+          {lockedNote("name")}
         </div>
 
         <div className="space-y-2">
@@ -1130,10 +1151,12 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.url")}</Label>
           <Input
             value={url}
+            disabled={isLocked("url")}
             onChange={(e) => setUrl(e.target.value)}
             placeholder={urlPlaceholder}
             required
           />
+          {lockedNote("url")}
           {nodeType === "transcode" ? (
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.urlHelpTranscode")}
@@ -1150,9 +1173,11 @@ function NodeForm({
             <Label>{t("web.admin.nodes.form.publicUrl")}</Label>
             <Input
               value={publicUrl}
+              disabled={isLocked("public_url")}
               onChange={(e) => setPublicUrl(e.target.value)}
               placeholder={t("web.admin.nodes.form.publicUrlPlaceholder")}
             />
+            {lockedNote("public_url")}
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.publicUrlHelp")}
             </p>
@@ -1163,9 +1188,11 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.group")}</Label>
           <Input
             value={group}
+            disabled={isLocked("group")}
             onChange={(e) => setGroup(e.target.value)}
             placeholder={t("web.admin.nodes.form.groupPlaceholder")}
           />
+          {lockedNote("group")}
           <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.groupHelp")}</p>
         </div>
 
@@ -1179,9 +1206,11 @@ function NodeForm({
             type="number"
             min={0}
             value={maxJobs}
+            disabled={isLocked("max_jobs")}
             onChange={(e) => setMaxJobs(e.target.value)}
             placeholder={t("web.admin.nodes.form.unlimited")}
           />
+          {lockedNote("max_jobs")}
           <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.maxJobsHelp")}</p>
         </div>
 
@@ -1193,9 +1222,11 @@ function NodeForm({
               min={0}
               step="any"
               value={maxBandwidthMbps}
+              disabled={isLocked("max_bandwidth_kbps")}
               onChange={(e) => setMaxBandwidthMbps(e.target.value)}
               placeholder={t("web.admin.nodes.form.unlimited")}
             />
+            {lockedNote("max_bandwidth_kbps")}
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.maxEgressHelp")}
             </p>
@@ -1207,6 +1238,7 @@ function NodeForm({
             <Label htmlFor="node-source-access">{t("web.admin.nodes.form.sourceAccess")}</Label>
             <Select
               value={sourceAccess}
+              disabled={isLocked("source_access")}
               onValueChange={(value) => setSourceAccess(value as NodeSourceAccess)}
             >
               <SelectTrigger id="node-source-access" className="w-full">
@@ -1220,6 +1252,7 @@ function NodeForm({
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.sourceAccessHelp")}
             </p>
+            {lockedNote("source_access")}
           </div>
         )}
 
@@ -1235,7 +1268,11 @@ function NodeForm({
               <Label htmlFor="node-hw-accel-override">
                 {t("web.admin.nodes.form.hardwareAcceleration")}
               </Label>
-              <Select value={hwAccelOverride} onValueChange={selectHWAccelOverride}>
+              <Select
+                value={hwAccelOverride}
+                disabled={isLocked("hw_accel_override")}
+                onValueChange={selectHWAccelOverride}
+              >
                 <SelectTrigger id="node-hw-accel-override" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -1253,6 +1290,7 @@ function NodeForm({
               {effectiveAcceleration && (
                 <p className="text-muted-foreground text-sm">{effectiveAcceleration}</p>
               )}
+              {lockedNote("hw_accel_override")}
             </div>
 
             <div className="space-y-2">
@@ -1266,12 +1304,14 @@ function NodeForm({
                     setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
                   }
                   onInherit={() => setHwDeviceOverride("")}
+                  disabled={isLocked("hw_device_override")}
                 />
               ) : (
                 <>
                   <Input
                     id="node-hw-device-override"
                     value={hwDeviceOverride}
+                    disabled={isLocked("hw_device_override")}
                     onChange={(e) => setHwDeviceOverride(e.target.value)}
                     placeholder={t("web.admin.nodes.form.gpuDevicesPlaceholder")}
                   />
@@ -1304,6 +1344,7 @@ function NodeForm({
                   </p>
                 </>
               )}
+              {lockedNote("hw_device_override")}
             </div>
           </>
         )}

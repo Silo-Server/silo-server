@@ -605,6 +605,136 @@ This is a non-retryable operation: resubmitting a URL replacement advances the w
 
 No provider delivery is sent by the update, and already-dispatched work cannot be recalled. No attempt table, secret lease, fleet rollout or enrollment guarantee is introduced.
 
+## Plugin destinations
+
+A plugin with a `notification_channel.v1` capability provides a channel,
+such as ntfy or Pushover. A profile adds destinations on that channel next to
+its webhooks, and they receive the same deliveries webhooks do:
+new episodes when `notify_next_up` is on, and request updates and watchlist
+arrivals when `notify_requests` is on. Plugin destinations exist only when the server
+has an at-rest cipher, because their settings hold credentials.
+`GET /api/v2/notifications/capabilities` reports `plugin_destinations.available`
+(an enabled plugin provides at least one channel) and `max_per_profile` (10).
+
+All operations below are profile-scoped, demo-guarded when mutating, and
+identify the recipient by account and profile together. A destination that
+belongs to another account, including another account's profile with the
+same ID, answers `404`.
+
+### List the channels
+
+`GET /api/v2/notifications/plugin-channels` (`listNotificationPluginChannels`)
+returns the channels enabled plugins provide now, unpaginated. Each names its
+`plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
+`display_name` and `description`, and `settings_form`
+(`NotificationPluginSettingsForm`): one flat list of `fields`, rendered in
+order. Each field has its `key` in `settings`, its `label`, `control`
+(`text`, `password`, `number`, `switch` or `select`), `type`, the JSON type the
+value is sent as (`string`, `integer`, `number` or `boolean`), `required` and
+`secret`. These members are optional and absent when the plugin declares
+none, never null or empty: `description` and `placeholder` (the plugin's
+text), `default_value` (of the field's `type`), `options` (a select field's
+`value` and `label` pairs, each `value` of the field's `type`, so a number
+for an `integer` or `number` field), and the checks the server applies on
+save: `minimum`/`maximum` (inclusive), `min_length`/`max_length` and
+`pattern`. `pattern` is Go RE2 syntax and matches anywhere in the string
+unless anchored; a client may check a value against it before saving, but
+the server's check is the one that counts. `required` is what the server
+enforces: it refuses a save without that setting, and a stored secret left
+blank on an edit counts as present. A client that meets a `control` it
+doesn't know renders the field by its `type`: a switch for `boolean`, a
+number input for `integer` and `number`, a text input otherwise. The
+SDK's `manifest.ValidateDestinationSchema` keeps a destination form to this
+shape, and the server refuses to install or upgrade a plugin whose form
+breaks it. A setting is write-only (`secret: true`) when the plugin marks
+its form field `secret`, gives it a password control, or gives its schema
+property `format: password`; the SDK refuses `writeOnly` in a destination
+schema.
+
+### List destinations
+
+`GET /api/v2/notifications/plugin-destinations` (`listNotificationPluginDestinations`)
+is cursor-paginated in creation order. Each item carries its `etag`,
+`notify_next_up` and `notify_requests`, the delivery bookkeeping webhooks carry (`consecutive_failures`,
+`disabled_reason`, `last_success_at`, `last_failure_at`,
+`last_failure_message`), `settings`, and `secret_settings_set`, the secret
+fields that have a stored value. `settings` holds only the fields the channel's
+current schema declares and doesn't mark secret: a stored field the schema no
+longer declares, such as a secret a plugin upgrade renamed, is never returned.
+A setting saved as secret stays write-only after a plugin upgrade drops its
+secret marking: it is listed in `secret_settings_set`, not returned in
+`settings`, until the owner replaces or clears it. Clients treat a field
+named in `secret_settings_set` as secret whatever its form field says.
+`available`
+is false, `channel_name` empty and `settings` empty while no enabled plugin
+provides the destination's channel; nothing is sent or queued then. Whether
+a channel is available is read in the same transaction that queues the
+notification, so enabling, disabling or removing a plugin takes effect for the
+next notification on every server.
+
+### Create a destination
+
+`POST /api/v2/notifications/plugin-destinations` (`createNotificationPluginDestination`)
+takes `plugin_id`, `capability_id`, `name` (1 to 64 characters, unique per
+account profile), `settings`, and optional `notify_next_up` and
+`notify_requests` (default on); `name` is required and `clear_secrets` isn't
+accepted. The
+server accepts only settings the schema or its form declares. It refuses
+keys a schema allows only through `additionalProperties`, which it could
+neither return nor keep secret. It checks each value against the form's
+JSON Schema: its declared scalar type (an object or array is refused),
+required fields, `enum`, string length and `pattern`, and numeric bounds.
+An `integer` setting is also limited to 2^53-1 (9007199254740991) in
+magnitude, the largest integer a JSON number carries exactly on its way to
+the plugin, and a larger one answers `out_of_range`. Each failing setting answers `422` with a field error at
+`body.settings.<field>` (`unknown_field`, `required`, `invalid_type`,
+`invalid_enum`, `out_of_range` or `invalid`). It then calls the plugin's
+`ValidateDestination`. A refusal answers `422` with the plugin's
+message, with the destination's secret values masked, in the problem's
+error detail at `body.settings`. A profile deleted meanwhile answers `404`.
+A channel no enabled plugin provides answers `422` with a field error at
+`body.capability_id`; so does a channel whose stored form the server can't
+use (its schema doesn't compile), which it treats as not provided. A plugin that provides it but fails to answer (it
+returns an error, times out or can't start) answers `503
+dependency_unavailable` with `Retry-After`; ten destinations answer `422`.
+Success is `201` with the destination and its `ETag`. The operation is
+non-retryable: a replay with the same name answers `422` with the field code
+`duplicate` at `body.name`, since names are unique per profile. A rename to a
+taken name answers the same.
+
+### Update a destination
+
+`PUT /api/v2/notifications/plugin-destinations/{id}` (`updateNotificationPluginDestination`)
+requires the original `If-Match` validator, like a webhook update. Omitted
+fields stay unchanged. `settings` merges over the stored settings: a
+non-secret field sent as `null` is removed, a secret field sent blank or left
+out keeps its stored value, and `clear_secrets` removes named secrets. A
+stored setting the channel's current form no longer declares, after a plugin
+update, is dropped on the next update. Merged settings are checked as on
+create; a stored secret left blank counts as present for `required`. When
+the server can't decrypt the stored settings, or no enabled plugin provides
+the destination's channel any more, a settings change answers `409
+conflict` and nothing is written; a plugin that fails to answer its check
+answers `503` with `Retry-After`.
+Changed settings are checked by the plugin again and, like a changed webhook
+URL, clear the failure streak and the disable reason; so does re-enabling.
+Missing preconditions answer `428`, stale validators `412`. The validator
+changes on the owner's edits and when the server disables the destination,
+not when a send updates its delivery bookkeeping. The plugin checks
+changed settings before the destination is locked for the write; if the
+destination changes meanwhile, the update answers `412` with the current
+`ETag` and writes nothing, even under `If-Match: *`.
+
+### Delete and test
+
+`DELETE /api/v2/notifications/plugin-destinations/{id}` (`deleteNotificationPluginDestination`)
+requires `If-Match` and removes the destination and its queued attempts.
+`POST /api/v2/notifications/plugin-destinations/{id}/test` (`testNotificationPluginDestination`)
+sends one test message now and answers `200` with `ok` and `duration_ms`,
+plus `message` when the send failed or the plugin gave one; a failed send is
+`ok: false`, not retried and not counted. It
+is non-retryable.
+
 ## Ordered Apple registration storage
 
 Apple registration ordering uses a separate retained installation record. Its

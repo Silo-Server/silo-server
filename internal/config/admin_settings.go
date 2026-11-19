@@ -234,6 +234,9 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
+// serverLogFormatSettingKey selects text or JSON console logs.
+const serverLogFormatSettingKey = "server.log_format"
+
 // Backup settings (docs/architecture/backups.md). internal/backup reads them
 // live at each run, so none needs a restart.
 const (
@@ -947,6 +950,12 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	case "server.log_level":
 		return normalizeAdminEnum(key, value, "debug", "info", "warn", "error")
+	case serverLogFormatSettingKey:
+		// Empty keeps the text default, as an unset row does.
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminEnum(key, value, "text", "json")
 	case "opslog.capture_level":
 		// "warning" is accepted because the startup reader in cmd/silo treats
 		// it as an alias for "warn".
