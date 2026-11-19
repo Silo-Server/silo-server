@@ -6,6 +6,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/bookid"
 )
 
@@ -50,4 +52,25 @@ func splitPluginWorkClaims(capabilityID, itemType string, ids map[string]string,
 		}
 	}
 	return edition, []bookid.WorkClaims{claims}
+}
+
+// pluginRequestProviderIDs returns the provider ids a plugin request about an
+// item of itemType may carry: a book's work-level keys are never sent to a
+// plugin (bookid.SplitWorkIDs). Every request that carries an item's provider
+// ids takes them from here, before it reads its own key, so a work id cannot
+// open a lookup either. GetPersonDetail and GetEpisodes do not call it: a
+// person's ids are not an item's, and an episodes request has no item type
+// (episodes belong to a series, never a book), so neither has a work key to
+// strip.
+func pluginRequestProviderIDs(itemType string, ids map[string]string) map[string]string {
+	edition, _ := bookid.SplitWorkIDs(itemType, ids)
+	return edition
+}
+
+// searchResultProviderIDs returns a search result's provider ids without the
+// work-level keys: a search result carries no work claims; only GetMetadata
+// does.
+func (p *PluginProvider) searchResultProviderIDs(itemType string, result *pluginv1.ProviderSearchResult) map[string]string {
+	ids, _ := bookid.SplitWorkIDs(itemType, mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()))
+	return ids
 }
