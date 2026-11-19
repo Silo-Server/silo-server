@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -45,13 +44,13 @@ func pluginChannelOf(channel plugins.NotificationChannel) notifications.PluginCh
 }
 
 func (h pluginChannelHost) AvailableChannels(ctx context.Context, tx pgx.Tx) ([]notifications.PluginChannelRef, error) {
-	refs, err := plugins.ListEnabledCapabilityRefsOfType(ctx, tx, capability.NotificationChannel)
+	channels, err := plugins.ListNotificationChannels(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]notifications.PluginChannelRef, 0, len(refs))
-	for _, ref := range refs {
-		out = append(out, notifications.PluginChannelRef{PluginID: ref.PluginID, CapabilityID: ref.CapabilityID})
+	out := make([]notifications.PluginChannelRef, 0, len(channels))
+	for _, channel := range channels {
+		out = append(out, notifications.PluginChannelRef{PluginID: channel.PluginID, CapabilityID: channel.CapabilityID})
 	}
 	return out, nil
 }
