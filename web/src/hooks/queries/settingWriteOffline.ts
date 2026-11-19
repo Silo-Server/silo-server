@@ -2,8 +2,11 @@ import { useCallback, useLayoutEffect, useRef } from "react";
 import { onlineManager } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { V2ProblemError } from "@/api/v2/request";
 import { t } from "@/i18n";
 import { appearanceCache, type StorageKey } from "@/utils/storage";
+
+import { isDefinitiveSettingMutationRejection } from "./settingValues";
 
 /**
  * A setting write refused unsent because the browser was offline. Its message
@@ -51,32 +54,62 @@ export function reportOfflineSettingFailure(error: unknown): boolean {
   return true;
 }
 
+/**
+ * Tells the user a preference change wasn't saved when that is certain: it was
+ * refused offline, or the server rejected it (a 4xx other than 408). A
+ * rejection triggers no settings re-read, so nothing else corrects what the
+ * caller showed. Other failures may have saved, and that re-read decides.
+ * Returns whether the change certainly wasn't saved.
+ */
+export function reportUnsavedSettingChange(error: unknown): boolean {
+  if (reportOfflineSettingFailure(error)) return true;
+  if (!(error instanceof V2ProblemError) || !isDefinitiveSettingMutationRejection(error)) {
+    return false;
+  }
+  // The problem's own message is already in the interface language.
+  toast.error(error.message, { id: "setting-write-rejected" });
+  return true;
+}
+
 interface ShownChange<T> {
   /** Identifies the preference; a newer change to it supersedes an older one. */
   key: string;
-  /** The browser cache entry that warms the next load with this preference. */
-  cacheKey: StorageKey;
+  /** The browser cache entry that warms the next load with this preference, if any. */
+  cacheKey?: StorageKey;
   value: T;
-  /** What is shown now, put back if the change is refused offline. */
+  /** What is shown now, put back if the change certainly wasn't saved. */
   previous: T;
   show: (value: T) => void;
   save: (value: T) => Promise<unknown>;
+  /**
+   * Reports a failed save and returns whether it certainly stored nothing.
+   * Defaults to reportUnsavedSettingChange.
+   */
+  unsaved?: (error: unknown) => boolean;
 }
 
 interface UnsettledPreference {
   /** The newest change; only its failure may restore. */
   latest: object;
-  /** The last value known stored, and its cache entry, to restore. */
-  stored: { value: unknown; cached: string | null };
+  /** Changes to this preference whose saves haven't settled. */
+  saving: number;
+  /** Numbers the changes in the order they were made. */
+  made: number;
+  /** The last value known stored, the change that stored it, and its cache entry. */
+  stored: { value: unknown; change: number; cached: string | null };
+  /** Whether the newest change failed and `stored` is shown in its place. */
+  restored: boolean;
 }
 
 /**
- * For appearance preferences applied before they are saved: shows the change
- * and caches it, then saves it. When the newest change to a preference is
- * refused offline, it puts back the last value known stored, with its cache
- * entry: the one from before the first unsettled change, or a later change
- * that has since landed. Their sync effects re-run only when the stored value
- * changes, which a refused save never does.
+ * For preferences applied before they are saved: shows the change (and caches
+ * it, given a cache key), then saves it. When the newest change to a
+ * preference certainly wasn't saved (refused offline, or rejected by the
+ * server), it puts back the last value known stored, with its cache entry:
+ * the newest change known to have landed, or else the value from before the
+ * first unsettled change. An earlier change that lands after that, with
+ * nothing picked since, is then shown. Callers' sync effects re-run only when
+ * the stored value changes, which a failed save never does.
  */
 export function useShowThenSave(cacheOwner: string | null) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
@@ -87,33 +120,65 @@ export function useShowThenSave(cacheOwner: string | null) {
     currentOwner.current = cacheOwner;
   }, [cacheOwner]);
   return useCallback(
-    <T>({ key, cacheKey, value, previous, show, save }: ShownChange<T>) => {
+    <T>({
+      key,
+      cacheKey,
+      value,
+      previous,
+      show,
+      save,
+      unsaved = reportUnsavedSettingChange,
+    }: ShownChange<T>) => {
       const token = {};
       // Per owner: another profile's unsettled change says nothing about this one's.
       const entryKey = `${cacheOwner ?? ""}\u0000${key}`;
-      const pending = unsettled.current.get(entryKey) ?? {
+      // Kept until every save in it settles, so one that lands late still
+      // counts after a newer change has failed or saved.
+      const pending: UnsettledPreference = unsettled.current.get(entryKey) ?? {
         latest: token,
-        stored: { value: previous, cached: appearanceCache.get(cacheKey, cacheOwner) },
+        saving: 0,
+        made: 0,
+        stored: {
+          value: previous,
+          change: 0,
+          cached: cacheKey ? appearanceCache.get(cacheKey, cacheOwner) : null,
+        },
+        restored: false,
       };
+      const change = ++pending.made;
       pending.latest = token;
+      pending.saving++;
+      pending.restored = false;
       unsettled.current.set(entryKey, pending);
+      const settle = () => {
+        if (--pending.saving === 0) unsettled.current.delete(entryKey);
+      };
+      const showStored = () => {
+        if (currentOwner.current === cacheOwner) show(pending.stored.value as T);
+        // The cache is the original owner's either way, read on its next load.
+        if (!cacheKey) return;
+        if (pending.stored.cached === null) appearanceCache.remove(cacheKey, cacheOwner);
+        else appearanceCache.set(cacheKey, pending.stored.cached, cacheOwner);
+      };
+
       show(value);
-      appearanceCache.set(cacheKey, String(value), cacheOwner);
+      if (cacheKey) appearanceCache.set(cacheKey, String(value), cacheOwner);
       save(value).then(
         () => {
-          // Even an older change that lands moves the value a failure restores.
-          pending.stored = { value, cached: String(value) };
-          if (pending.latest === token) unsettled.current.delete(entryKey);
+          settle();
+          // A change that saved after a newer one doesn't replace it.
+          if (change < pending.stored.change) return;
+          pending.stored = { value, change, cached: String(value) };
+          // It landed after the newest change failed and put back an older
+          // value, with nothing picked since: show what is stored now.
+          if (pending.restored) showStored();
         },
         (error: unknown) => {
+          settle();
           // A newer change to this preference settles it instead.
-          if (pending.latest !== token) return;
-          unsettled.current.delete(entryKey);
-          if (!reportOfflineSettingFailure(error)) return;
-          if (currentOwner.current === cacheOwner) show(pending.stored.value as T);
-          // The cache is the original owner's either way, read on its next load.
-          if (pending.stored.cached === null) appearanceCache.remove(cacheKey, cacheOwner);
-          else appearanceCache.set(cacheKey, pending.stored.cached, cacheOwner);
+          if (pending.latest !== token || !unsaved(error)) return;
+          pending.restored = true;
+          showStored();
         },
       );
     },
