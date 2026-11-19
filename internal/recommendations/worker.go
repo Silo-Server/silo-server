@@ -1435,7 +1435,7 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 	// Outside rows come from stored titles and vectors; new seeds' lists
 	// wait for the next outside-title run.
 	if w.ExternalEnabled() {
-		if _, err := w.engine.RebuildExternalRows(refreshCtx, userID, profileID); err != nil {
+		if _, err := w.rebuildProfileExternalRows(refreshCtx, userID, profileID); err != nil {
 			return fmt.Errorf("rebuild outside rows: %w", err)
 		}
 	}

@@ -608,7 +608,9 @@ runs as soon as it is turned off.
 - **Job.** The job takes the in-process flag and its cluster lock like the
   others and runs: retention always; then, with the feature on, the pool
   (lists, sets, details and vectors, within per-run budgets of 10000 TMDB
-  requests and 10000 embeddings) and every profile's rows. A run cut short by
+  client calls, each of which the client may retry or answer from its cache,
+  and 10000 embeddings; seed lists take at most half of the calls left, so
+  details are fetched in the same run) and every profile's rows. A run cut short by
   a budget, a node dying or TMDB failing leaves stored state for the next run
   to continue from. With the feature off it calls neither TMDB nor the
   embedding provider.

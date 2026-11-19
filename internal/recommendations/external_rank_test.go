@@ -55,6 +55,22 @@ func TestRankExternalCandidatesScores(t *testing.T) {
 }
 
 // A measure with no spread adds nothing, rather than dividing by zero.
+// A candidate whose vector has no cosine (an all-zero vector) is left out
+// and the others keep finite scores, so the row can still be stored.
+func TestRankExternalCandidatesSkipsNaNSimilarity(t *testing.T) {
+	sims := externalSims(externalMinCandidates+1, func(i int) float64 { return float64(i) / 20 }, func(i int) int { return 10 * i })
+	sims[3].Similarity = math.NaN()
+	items := rankExternalCandidates(sims, nil, nil)
+	if len(items) != externalMinCandidates {
+		t.Fatalf("%d items, want %d", len(items), externalMinCandidates)
+	}
+	for _, it := range items {
+		if it.TMDBID == 4 || math.IsNaN(it.Score) {
+			t.Fatalf("item %+v: the NaN candidate must go and scores stay finite", it)
+		}
+	}
+}
+
 func TestRankExternalCandidatesFlatMeasure(t *testing.T) {
 	sims := externalSims(12, func(i int) float64 { return float64(i) / 12 }, func(int) int { return 50 })
 	items := rankExternalCandidates(sims, nil, nil)

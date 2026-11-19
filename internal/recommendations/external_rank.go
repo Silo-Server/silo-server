@@ -35,8 +35,14 @@ var externalMediaTypes = []string{ExternalMediaMovie, ExternalMediaSeries}
 // ExternalRowSize. A measure with no spread adds 0 to every score. Each item
 // names up to externalMaxReasons of the seeds that named it, best rank
 // first, as library content IDs from seedContentIDs; seeds missing from it
-// are skipped. Fewer than externalMinCandidates candidates give no row.
+// are skipped. A candidate whose similarity is not finite is left out. Fewer
+// than externalMinCandidates candidates give no row.
 func rankExternalCandidates(sims []ExternalSimilarity, pool map[ExternalTitleKey]ExternalPoolTitle, seedContentIDs map[string]string) []ExternalRowItem {
+	// A zero vector has no cosine: its similarity is NaN, which would turn
+	// every standardized score NaN and make the row unstorable.
+	sims = slices.DeleteFunc(slices.Clone(sims), func(s ExternalSimilarity) bool {
+		return math.IsNaN(s.Similarity) || math.IsInf(s.Similarity, 0)
+	})
 	if len(sims) < externalMinCandidates {
 		return nil
 	}

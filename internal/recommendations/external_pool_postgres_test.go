@@ -256,15 +256,16 @@ func TestBuildExternalPoolBudgetDB(t *testing.T) {
 	s := newExternalPoolScenario(t, 921_000_000)
 	s.lock()
 
-	// Two set pages and two of the three seeds.
+	// Two set pages, then one of the three seeds: seed lists take at most
+	// half of what is left, so the last request fetches a title's detail.
 	counts := s.build(4, externalEmbedBudget)
-	if !counts.BudgetExhausted || counts.TMDBRequests != 4 || counts.SourcesLeft != 1 || counts.DetailsFetched != 0 || counts.DetailsLeft == 0 {
+	if !counts.BudgetExhausted || counts.TMDBRequests != 4 || counts.SourcesLeft != 2 || counts.DetailsFetched != 1 || counts.DetailsLeft == 0 {
 		t.Fatalf("TMDB budget run: %+v", counts)
 	}
 
-	// The last seed, then two titles' details: the embedding budget.
+	// The other two seeds, then two more titles' details: the embedding budget.
 	counts = s.build(externalTMDBRequestBudget, 2)
-	if !counts.BudgetExhausted || counts.SourcesLeft != 0 || counts.Embeddings.Embedded != 2 || counts.DetailsLeft != len(s.pool)-2 {
+	if !counts.BudgetExhausted || counts.SourcesLeft != 0 || counts.Embeddings.Embedded != 2 || counts.DetailsLeft != len(s.pool)-3 {
 		t.Fatalf("embedding budget run: %+v", counts)
 	}
 
@@ -330,6 +331,14 @@ func TestBuildExternalPoolDropsTitlesOwnedByOtherIDsDB(t *testing.T) {
 	if stored, err := s.engine.repo.externalTitlesByKeys(ctx, []ExternalTitleKey{byTVDB}); err != nil || len(stored) != 0 {
 		t.Fatalf("series owned by TVDB ID still stored: %+v (%v)", stored, err)
 	}
+
+	// Its links went with it, so the next run does not choose it and fetch
+	// its detail again to learn that the library has it.
+	calls := s.tmdb.detailCalls(byTVDB)
+	s.build(externalTMDBRequestBudget, externalEmbedBudget)
+	if got := s.tmdb.detailCalls(byTVDB); got != calls {
+		t.Fatalf("the TVDB-owned series was fetched %d more times", got-calls)
+	}
 }
 
 // A title whose text the provider refuses is remembered: later runs neither
@@ -381,6 +390,27 @@ func TestBuildExternalPoolRemembersRefusedTitlesDB(t *testing.T) {
 	counts = s.build(externalTMDBRequestBudget, externalEmbedBudget)
 	if s.tmdb.detailCalls(refused) != 2 || tries() != firstTries || counts.RefusedSkipped != 1 {
 		t.Fatalf("refetch run: %+v, %d detail calls, %d tries", counts, s.tmdb.detailCalls(refused), tries()-firstTries)
+	}
+
+	// A changed text drops the refusal of the old one: when its embedding
+	// then fails for another reason, the next run tries again without
+	// waiting for the detail to be due.
+	s.tmdb.details[refused].Overview = "an acceptable overview"
+	if _, err := s.db.Exec(ctx, `UPDATE external_titles SET detail_fetched_at = now() - interval '121 days' WHERE media_type = $1 AND tmdb_id = $2`, refused.MediaType, refused.TMDBID); err != nil {
+		t.Fatal(err)
+	}
+	working := s.engine.embClient
+	s.engine.embClient = quotaTestEmbedder(func(context.Context, []string) ([][]float32, error) {
+		return nil, errors.New("embedding provider is down")
+	})
+	if _, err := s.engine.buildExternalPool(ctx, s.profiles, ExternalPoolOptions{MaxTitles: 5000},
+		externalLimits{tmdbRequests: externalTMDBRequestBudget, embeds: externalEmbedBudget}); err == nil {
+		t.Fatal("the run with a failing embedder reported no error")
+	}
+	s.engine.embClient = working
+	s.build(externalTMDBRequestBudget, externalEmbedBudget)
+	if s.vectors() != len(s.pool) {
+		t.Fatalf("%d vectors, want %d: the once-refused title was not embedded after its text changed", s.vectors(), len(s.pool))
 	}
 }
 

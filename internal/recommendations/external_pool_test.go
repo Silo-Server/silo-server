@@ -196,18 +196,25 @@ func TestChooseExternalPoolHalvesSets(t *testing.T) {
 		t.Fatalf("chosen = %v\nwant %v", chosen, want)
 	}
 
-	// Two language sets that share titles still fill the sets' half: each of
-	// the 8 shared titles counts toward both quotas (5 and 5 of the 10 left
-	// after the recent set) and is added once, and the room that leaves goes
-	// to the sets' next titles.
+	// Two language sets that share titles still fill the sets' half. Of the
+	// 10 slots left after the recent set, the first set gets 6 and the second
+	// 4; the second adds only 3, since the first already added six of its
+	// nine titles, and the slot that leaves goes to the first set's next
+	// title.
 	overlap := []externalSetTitles{
 		{key: "set:lang:hi:recent:movie", titles: keys(200, 12)},
-		{key: "set:lang:hi:top:movie", titles: append(keys(200, 8), keys(300, 6)...)},
+		{key: "set:lang:hi:top:movie", titles: append(keys(200, 8), k(300))},
 		{key: "set:recent:movie", titles: keys(1, 4)},
 	}
 	chosen, _ = chooseExternalPool(overlap, [][]ExternalPoolTitle{pool}, nil, 500, 28)
-	if sets := len(chosen) - 14; sets != 14 {
-		t.Fatalf("%d set titles kept, want the whole half of 14: %v", sets, chosen)
+	setTitles := 0
+	for _, key := range chosen {
+		if key.TMDBID < 900 {
+			setTitles++
+		}
+	}
+	if setTitles != 14 || len(chosen) != 28 || !slices.Contains(chosen, k(208)) {
+		t.Fatalf("%d set titles of %d chosen, want the sets' whole half of 14 with title 208: %v", setTitles, len(chosen), chosen)
 	}
 
 	// Sets that fit leave the rest of their half to list titles.

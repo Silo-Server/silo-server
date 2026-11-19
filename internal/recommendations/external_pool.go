@@ -353,12 +353,21 @@ func (r *externalRun) fetchSeedLists(ctx context.Context, seeds []ExternalTitleK
 	if err != nil {
 		return err
 	}
+	// Seed lists use at most half of the TMDB requests left, so a server
+	// with more due seeds than the budget still fetches details in the same
+	// run; the rest of the seeds wait for the next one.
+	fetch := due[:min(len(due), int(max(r.tmdbLeft.Load(), 0))/2)]
+	if len(fetch) < len(due) {
+		r.mu.Lock()
+		r.counts.BudgetExhausted = true
+		r.mu.Unlock()
+	}
 	var done atomic.Int64
-	err = forEachBounded(ctx, len(due), func(ctx context.Context, i int) (bool, error) {
+	err = forEachBounded(ctx, len(fetch), func(ctx context.Context, i int) (bool, error) {
 		if !r.takeRequest() {
 			return true, nil
 		}
-		key := due[i]
+		key := fetch[i]
 		seed := bySource[key]
 		// Lists hold IDs only, so the default-language detail serves, and
 		// shares its cache entry with the Requests title page.
@@ -584,23 +593,28 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 	chosen, named := chooseExternalPool(sets, pools, owned, externalProfileListCap, maxTitles)
 	r.counts.PoolTitles = len(chosen)
 
-	// Stored titles the library now has go; so do the least-named unused
-	// ones past the cap.
-	var unowned, remove []ExternalTitleKey
+	// Stored titles the library now has go with the links that name them,
+	// so a title owned under its IMDb or TVDB ID is not chosen and fetched
+	// again; the least-named unused titles past the cap go and keep their
+	// links.
+	var unowned, nowOwned []ExternalTitleKey
 	for _, s := range stored {
 		if owned[s.key] {
-			remove = append(remove, s.key)
+			nowOwned = append(nowOwned, s.key)
 		} else {
 			unowned = append(unowned, s.key)
 		}
 	}
-	remove = append(remove, externalExcessTitles(unowned, chosen, named, maxTitles)...)
-	if len(remove) > 0 {
-		deleted, err := r.e.repo.DeleteExternalTitles(ctx, remove)
+	if err := r.e.repo.forgetExternalTitles(ctx, nowOwned); err != nil {
+		return nil, err
+	}
+	r.counts.TitlesDeleted = int64(len(nowOwned))
+	if excess := externalExcessTitles(unowned, chosen, named, maxTitles); len(excess) > 0 {
+		deleted, err := r.e.repo.DeleteExternalTitles(ctx, excess)
 		if err != nil {
 			return nil, err
 		}
-		r.counts.TitlesDeleted = deleted
+		r.counts.TitlesDeleted += deleted
 	}
 	if err := r.e.repo.TouchExternalReferences(ctx, uniqueSorted(append(sources, setKeys...)), chosen); err != nil {
 		return nil, err
@@ -703,9 +717,11 @@ func chooseExternalPool(sets []externalSetTitles, pools [][]ExternalPoolTitle, o
 			}
 		}
 	}
-	// A title two language sets share counts toward both quotas and is added
-	// once, so a set can fall short of its share. The room that leaves goes
-	// to the language sets' remaining titles, rank by rank across them.
+	// A quota counts a set's titles, including ones an earlier language set
+	// has already added, and a set is charged only for titles it adds. So a
+	// set whose titles were mostly added by another runs out before its
+	// quota does. The room that leaves goes to the language sets' remaining
+	// titles, rank by rank across them.
 	for rank := 0; len(chosen) < setCap; rank++ {
 		more := false
 		for _, c := range candidates {
