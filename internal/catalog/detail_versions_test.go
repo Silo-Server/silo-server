@@ -503,3 +503,49 @@ func TestGetEpisodeDetailsForSeriesChecksLibraryMembershipOnce(t *testing.T) {
 		}
 	}
 }
+
+// The picker and flat file list must agree even when the request displays
+// only one of the libraries containing the movie.
+func TestPlaybackEditionAliasProjection(t *testing.T) {
+	probedAt := time.Now()
+	original := &models.MediaFile{ID: 1, ContentID: "movie", MediaFolderID: 1, CodecVideo: "hevc", Resolution: "2160p", ProbeUpdatedAt: &probedAt, Duration: 7200, EditionKey: "extended_cut", EditionRaw: "Extended Cut"}
+	hd := &models.MediaFile{ID: 2, ContentID: "movie", MediaFolderID: 2, CodecVideo: "h264", Resolution: "1080p", ProbeUpdatedAt: &probedAt, Duration: 7204, EditionKey: "extended_version", EditionRaw: "Extended Version"}
+	files := []*models.MediaFile{original, hd}
+	filter := AccessFilter{ScopeFilesToLibrary: true, PresentationLibraryID: new(hd.MediaFolderID)}
+	aliases := ResolveEditionAliases(files, filter)
+	service := &DetailService{}
+	versions, variants, _, _, _, _, _ := service.buildPlaybackInfo(t.Context(), FilterMediaFilesByAccess(files, filter), filter, "movie", aliases)
+	if !aliases.AllowsSubstitution(original, hd) || len(versions) != 1 || len(variants) != 1 ||
+		versions[0].EditionKey != "extended" || versions[0].EditionRaw != "Extended Version" ||
+		variants[0].EditionKey != "extended" || variants[0].EditionRaw != "Extended" || variants[0].VariantID != "extended||" ||
+		hd.EditionKey != "extended_version" {
+		t.Fatalf("alias projection = %v, %v; stored key = %q", versions, variants, hd.EditionKey)
+	}
+
+	for _, tt := range []struct {
+		name   string
+		change func(*models.MediaFile)
+		merges bool
+	}{
+		{"outside authorized libraries", func(f *models.MediaFile) { f.MediaFolderID, f.Duration = 3, 7500 }, true},
+		{"definitively unreadable", func(f *models.MediaFile) {
+			f.ProbeUpdatedAt, f.ProbeFailedAt, f.CodecVideo, f.Duration = nil, &probedAt, "", 0
+		}, false},
+		{"unprobed third file", func(f *models.MediaFile) { f.ProbeUpdatedAt = nil }, false},
+		{"implausible duration", func(f *models.MediaFile) { f.Duration, f.FileSize = 61, 100<<30 }, false},
+		{"different parts", func(f *models.MediaFile) { f.PresentationKind, f.PresentationPartIndex = "multipart_movie", 2 }, false},
+		{"different episode range", func(f *models.MediaFile) { f.MultiEpisodeStart, f.MultiEpisodeEnd = 1, 2 }, false},
+		{"adjacent pairs fit but whole group does not", func(f *models.MediaFile) { f.Duration = 7208 }, false},
+		{"qualified edition", func(f *models.MediaFile) { f.EditionKey, f.Duration = "extended_open_matte", 7500 }, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := *hd
+			f.ID, f.EditionKey = 3, "extended"
+			tt.change(&f)
+			a := ResolveEditionAliases([]*models.MediaFile{&f, hd, original}, AccessFilter{AllowedLibraryIDs: []int{1, 2}})
+			if a.AllowsSubstitution(original, hd) != tt.merges {
+				t.Fatalf("aliases = %v, want merge = %t", a, tt.merges)
+			}
+		})
+	}
+}

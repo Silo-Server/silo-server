@@ -15,6 +15,7 @@ var (
 	variantReleaseGroupRe = regexp.MustCompile(`(?i)(?:^|[.\s_-])(?:remux|web[ ._-]?dl|webrip|bluray|bdrip|brrip|hdr|dv|2160p|1080p|720p|x264|x265|h\.?264|h\.?265|hevc|av1|aac|ac3|eac3|dts|truehd|atmos).*-([a-z0-9][a-z0-9-]{1,31})$`)
 	variantCleanupSepRe   = regexp.MustCompile(`[.\-_]+`)
 	variantWhitespaceRe   = regexp.MustCompile(`\s+`)
+	editionApostrophes    = strings.NewReplacer("’", "'", "‘", "'", "ʼ", "'")
 	variantQualityTokenRe = regexp.MustCompile(`(?i)\b(?:hdr|dv|sdr|3d|remux|web[ ._-]?dl|webrip|bluray|bdrip|brrip|2160p|1080p|720p|480p|x264|x265|h\.?264|h\.?265|hevc|av1|aac|ac3|eac3|dts|truehd|atmos|proper|repack|multi|dual|vff|german|internal|criterion|custom|hybrid)\b`)
 )
 
@@ -344,6 +345,31 @@ func normalizeEditionKey(raw string) string {
 	cleaned = variantWhitespaceRe.ReplaceAllString(cleaned, " ")
 	cleaned = strings.TrimSpace(cleaned)
 	return strings.ReplaceAll(cleaned, " ", "_")
+}
+
+// EditionAliasFamily classifies a stored edition key without changing the
+// scanner's interpretation of a file name. Matching is on the whole label.
+func EditionAliasFamily(key string) string {
+	switch normalizeEditionKey(editionApostrophes.Replace(key)) {
+	case "theatrical", "theatrical_cut", "theatrical_edition", "theatrical_version", "theatrical_release":
+		return "theatrical"
+	case "extended", "extended_cut", "extended_edition", "extended_version":
+		return "extended"
+	case "unrated", "unrated_cut", "unrated_edition", "unrated_version":
+		return "unrated"
+	case "uncut", "uncut_edition", "uncut_version":
+		return "uncut"
+	case "uncensored", "uncensored_edition", "uncensored_version":
+		return "uncensored"
+	case "director_cut", "directors_cut":
+		return "director_cut"
+	case "editor_cut", "editors_cut":
+		return "editor_cut"
+	case "extended_director_cut", "extended_directors_cut":
+		return "extended_director_cut"
+	default:
+		return ""
+	}
 }
 
 func stripVariantReleaseGroup(surface string) string {
