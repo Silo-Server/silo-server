@@ -2421,8 +2421,9 @@ retention rule, budgets, measurement, and revocation they act on. Every operatio
 requires an acting administrator; the mutations are refused in demo mode.
 
 `GET /api/v2/admin/downloads/storage/capabilities` reports `available`, the realtime
-channel (`download_preparations`), and `devices` and `revocation` when device copies
-can be listed and revoked.
+channel (`download_preparations`), `devices` and `revocation` when device copies
+can be listed and revoked, and `client_ip` when download rows carry
+`created_client_ip` and `last_client_ip`.
 
 `GET /api/v2/admin/downloads/storage` returns one entry per location, the server
 first and then transcode nodes by name, plus the settings that govern them
@@ -2484,7 +2485,9 @@ not yet confirmed deleting), and active series `monitors`.
 Filters: `q`, `stale`, `platform`; `sort` is `last_seen` (longest unseen first,
 default) or `size`. `GET /api/v2/admin/downloads/entries` lists the managed
 downloads themselves, filtered by `user_id`, `profile_id`, `device_id`, or `status`,
-with where each one's prepared file is and any revocation.
+with where each one's prepared file is, any revocation, and the device's
+`created_client_ip` and `last_client_ip` (see
+[client addresses](downloads-api.md#client-addresses-admin)).
 
 `POST /api/v2/admin/downloads/revoke` takes either `ids` (up to 500 download ids)
 or `user_id`, `profile_id`, and `device_id` for every download on one device, plus
