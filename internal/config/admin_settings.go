@@ -303,10 +303,12 @@ func ParseBackupTime(value string) (hour, minute int, ok bool) {
 const ServerLocalURLSettingKey = "server.local_url"
 
 // WebMediaURLSettingKey is an optional https origin that serves the same API
-// over HTTP/1.1 only. The web player stripes direct-play range reads across it
-// (parallel_range_url in the playback plan); the URL's st, when present, authorizes
-// each range.
-// Empty is off. Read per request, so a change applies without restart.
+// over HTTP/1.1 only, for a deployment whose main address speaks HTTP/2. The
+// web player stripes direct-play range reads across it (parallel_range_url in
+// the playback plan) when the API serves the file; the URL's st authorizes each
+// range. Empty names no media origin: the player then stripes on the page's own
+// origin when the page loaded over HTTP/1.1, and on a proxy node's own URL.
+// Read per request, so a change applies without restart.
 const WebMediaURLSettingKey = "server.web_media_url"
 
 // External sign-in settings (docs/architecture/external-sign-in.md).
@@ -1548,7 +1550,7 @@ func normalizeLocalURL(value string) (string, error) {
 }
 
 // normalizeWebMediaURL accepts an https origin: an HTTPS page cannot fetch
-// plain HTTP, and the login token travels to this origin.
+// plain HTTP, and the stream reference travels to this origin.
 func normalizeWebMediaURL(value string) (string, error) {
 	normalized, err := normalizeOriginURL(WebMediaURLSettingKey, value)
 	if err != nil || normalized == "" {

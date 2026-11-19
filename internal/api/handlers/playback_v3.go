@@ -258,33 +258,64 @@ func withNativeDeliveryFeaturesV3(mode mediaAuthModeV3, req playback.StartReques
 }
 
 // setPlanStreamURLsV3 publishes the prepared transport's URL as the plan's
-// stream URL, and, when every condition holds, the same stream on the admin's
-// media origin as stream.parallel_range_url. When the URL carries st, st alone
-// authorizes each range request and the client sends no account token; when
-// signing yields no st, the client sends its account access token. The stream
-// reference authorizes only an attempt that a login session started
-// (loginBound), so the field appears only for such an attempt that negotiated
-// parallel_range_origin_v1, on an API-served original_http plan, while
-// server.web_media_url is set. A client that also negotiated
-// header_authenticated_media_v1 gets a stream URL with no st, and the media
-// origin's preflight allows only Range, so it reads stream.url. Any other
-// attempt reads stream.url.
+// stream URL and, when the client may read the file over parallel ranges, the
+// URL to read them from as stream.parallel_range_url.
 func (h *PlaybackHandler) setPlanStreamURLsV3(ctx context.Context, plan *playback.PlanV3, transport preparedTransportV3, clientFeatures []string, loginBound bool) {
 	plan.Stream.URL = transport.url
-	plan.Stream.ParallelRangeURL = ""
-	if !loginBound || h.SettingsRepo == nil ||
+	plan.Stream.ParallelRangeURL = h.parallelRangeURLV3(ctx, plan.Delivery, transport, clientFeatures, loginBound)
+}
+
+// parallelRangeURLV3 is the URL a client that negotiated
+// parallel_range_origin_v1 reads an original_http file's ranges from, or empty
+// when it reads stream.url as before. The URL always authorizes itself: the
+// client uses it exactly as given and adds no account token to it.
+//
+//   - A proxy node serves the file: the node's own direct-play URL. Its token
+//     is in the path, signed for that node, on the address chosen for the
+//     client's access path. A node's header-authorized route is not published.
+//   - The API serves the file: the same stream on the admin's media origin
+//     (server.web_media_url) when one is set and the client came by the default
+//     access path, else the stream URL itself, which the client stripes on only
+//     when its page loaded over HTTP/1.1. Either carries st, which authorizes
+//     each range of an attempt a login session started (loginBound) and no
+//     other, so any other attempt gets no URL. A client that reached the
+//     server through a network access provider cannot be assumed to reach the
+//     media origin.
+//
+// A client that also negotiated header_authenticated_media_v1 gets none: its
+// URLs carry no credential.
+func (h *PlaybackHandler) parallelRangeURLV3(ctx context.Context, delivery playback.DeliveryV3, transport preparedTransportV3, clientFeatures []string, loginBound bool) string {
+	if delivery != playback.DeliveryOriginalHTTPV3 ||
 		!playback.HasFeatureV3(clientFeatures, playback.FeatureParallelRangeOriginV1) ||
-		playback.HasFeatureV3(clientFeatures, playback.FeatureHeaderAuthenticatedMediaV3) ||
-		plan.Delivery != playback.DeliveryOriginalHTTPV3 ||
-		transport.routingEgress != noderouting.EgressAPI ||
-		!strings.HasPrefix(transport.url, "/stream/") {
-		return
+		playback.HasFeatureV3(clientFeatures, playback.FeatureHeaderAuthenticatedMediaV3) {
+		return ""
 	}
-	origin, _ := h.SettingsRepo.Get(ctx, config.WebMediaURLSettingKey)
-	if origin == "" {
-		return
+	switch transport.routingEgress {
+	case noderouting.EgressProxy:
+		if node, path, ok := strings.Cut(transport.url, "/stream/direct/"); ok && path != "" &&
+			(strings.HasPrefix(node, "https://") || strings.HasPrefix(node, "http://")) {
+			return transport.url
+		}
+	case noderouting.EgressAPI:
+		if !loginBound || !strings.HasPrefix(transport.url, "/stream/") {
+			return ""
+		}
+		if _, query, _ := strings.Cut(transport.url, "?"); !hasQueryParamV3(query, "st") {
+			return ""
+		}
+		if h.SettingsRepo != nil && netaccess.PathFromContext(ctx).IsDefault() {
+			if origin, _ := h.SettingsRepo.Get(ctx, config.WebMediaURLSettingKey); origin != "" {
+				return origin + "/api/v2" + transport.url
+			}
+		}
+		return transport.url
 	}
-	plan.Stream.ParallelRangeURL = origin + "/api/v2" + transport.url
+	return ""
+}
+
+// hasQueryParamV3 reports whether a raw query names the parameter.
+func hasQueryParamV3(rawQuery, name string) bool {
+	return strings.HasPrefix(rawQuery, name+"=") || strings.Contains(rawQuery, "&"+name+"=")
 }
 
 // headerAuthenticatedMediaV3 resolves the negotiated media transport mode from

@@ -432,8 +432,9 @@ export interface StreamV3 {
   header_refresh: HeaderRefreshModeV3;
   header_refresh_url?: string;
   /**
-   * The same stream on the admin's media origin; with `st` it needs no login token, without it the
-   * client adds one. Absent when the attempt negotiated `header_authenticated_media_v1`.
+   * Where the engine may read the file's ranges over several connections: the plan's own stream
+   * (relative, as `url`), the same stream on the admin's media origin, or the proxy node's own
+   * URL. It authorizes itself and is used as given, with no login token added.
    */
   parallel_range_url?: string;
 }

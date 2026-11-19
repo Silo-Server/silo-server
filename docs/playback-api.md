@@ -407,18 +407,28 @@ byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
-A plan may carry `stream.parallel_range_url`, the same stream on the media origin
-the administrator set in `server.web_media_url`. It appears only for an attempt
-that a login session started and that sent client feature
-`parallel_range_origin_v1` without `header_authenticated_media_v1`, on an
-API-served `original_http` plan, and is omitted otherwise. A client that
-negotiated `parallel_range_origin_v1` reads the file from `parallel_range_url`
-when the plan has one, as parallel closed ranges.
-When that URL carries `st`, the reference alone authorizes each range request
-and the client sends no account token; when it carries no `st`, the client sends
-its account access token. A plan without `parallel_range_url` is read from
-`stream.url`. `stream.url` stays valid; a client may also read the warm head,
-overflow ranges, or a natively played file from it.
+A plan may carry `stream.parallel_range_url`: a URL the client may read the
+file's byte ranges from over several connections. The server sets it only for an
+`original_http` plan whose attempt sent client feature
+`parallel_range_origin_v1` without `header_authenticated_media_v1`, and names
+one of three:
+
+- the plan's own stream, as a reference relative to the API root like
+  `stream.url`, when the API serves the file. The server names it only for an
+  attempt a login session started;
+- the same stream on the media origin the administrator set in
+  `server.web_media_url`, in place of the first, when one is set and the client
+  did not arrive through a network access provider;
+- the proxy node's own URL, the one `stream.url` already carries, when a node
+  serves the file.
+
+The URL authorizes itself (`st`, or the token in a node URL's path). A client
+uses it exactly as given and adds no account token, header or cookie to it. A
+client reads parallel ranges only over connections that are separate: on the
+page's own origin, the web player does so only when the page loaded over
+HTTP/1.1. A plan without `parallel_range_url` is read from `stream.url`.
+`stream.url` stays valid; a client may also read the warm head, overflow ranges,
+or a natively played file from it.
 
 Three kinds of response are readable from another origin. Each carries
 `Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials`:

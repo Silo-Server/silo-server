@@ -53381,7 +53381,7 @@
             "type": "string"
           },
           "parallel_range_url": {
-            "format": "uri",
+            "format": "uri-reference",
             "type": "string"
           },
           "protocol": {

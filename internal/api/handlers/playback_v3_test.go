@@ -4871,12 +4871,13 @@ func TestParallelRangeURLV3(t *testing.T) {
 		features []string
 		setting  string
 		noLogin  bool
-		want     bool
+		// The prefix the published URL adds to stream.url; "none" publishes nothing.
+		want string
 	}{
-		{name: "feature negotiated and origin configured", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, want: true},
-		{name: "feature not negotiated", setting: origin},
+		{name: "feature negotiated and origin configured", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, want: origin + "/api/v2"},
+		{name: "feature not negotiated", setting: origin, want: "none"},
 		{name: "no origin configured", features: []string{playback.FeatureParallelRangeOriginV1}},
-		{name: "no login session", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, noLogin: true},
+		{name: "no login session", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, noLogin: true, want: "none"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4903,8 +4904,8 @@ func TestParallelRangeURLV3(t *testing.T) {
 				t.Fatalf("start plan = %s %q, want original_http with st", plan.Delivery, plan.Stream.URL)
 			}
 			wantURL := ""
-			if tc.want {
-				wantURL = origin + "/api/v2" + plan.Stream.URL
+			if tc.want != "none" {
+				wantURL = tc.want + plan.Stream.URL
 				if !strings.Contains(wantURL, "?st=") {
 					t.Fatalf("parallel range URL %q has no st", wantURL)
 				}
@@ -4933,8 +4934,8 @@ func TestParallelRangeURLV3(t *testing.T) {
 				t.Fatalf("replan delivery = %s, want original_http", replannedPlan.Delivery)
 			}
 			wantURL = ""
-			if tc.want {
-				wantURL = origin + "/api/v2" + replannedPlan.Stream.URL
+			if tc.want != "none" {
+				wantURL = tc.want + replannedPlan.Stream.URL
 			}
 			if replannedPlan.Stream.ParallelRangeURL != wantURL {
 				t.Fatalf("replan ParallelRangeURL = %q, want %q", replannedPlan.Stream.ParallelRangeURL, wantURL)
@@ -4943,10 +4944,13 @@ func TestParallelRangeURLV3(t *testing.T) {
 	}
 }
 
-// The other publication checks, unit-level: delivery kind, API egress, URL
-// shape and the configured origin.
+// The other publication checks, unit-level: delivery kind, egress, URL shape,
+// the configured origin, the login session and the access path.
 func TestParallelRangeURLV3Conditions(t *testing.T) {
 	const origin = "https://media.example.test"
+	const node = "https://node.example.test/stream/direct/opaque"
+	feature := []string{playback.FeatureParallelRangeOriginV1}
+	overlay := netaccess.WithPath(context.Background(), netaccess.Path{Provider: "overlay"})
 	tests := []struct {
 		name     string
 		features []string
@@ -4954,21 +4958,35 @@ func TestParallelRangeURLV3Conditions(t *testing.T) {
 		delivery playback.DeliveryV3
 		egress   noderouting.Egress
 		url      string
+		noLogin  bool
+		ctx      context.Context
 		want     string
 	}{
-		{name: "original over the API", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", want: origin + "/api/v2/stream/s1?st=abc"},
-		{name: "keeps st and seek", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc&seek=12.5", want: origin + "/api/v2/stream/s1?st=abc&seek=12.5"},
+		{name: "original over the API with a media origin", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", want: origin + "/api/v2/stream/s1?st=abc"},
+		{name: "keeps st and seek", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?seek=12.5&st=abc", want: origin + "/api/v2/stream/s1?seek=12.5&st=abc"},
+		{name: "original over the API with no media origin", features: feature, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", want: "/stream/s1?st=abc"},
+		{name: "media origin, client on a network access provider", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", ctx: overlay, want: "/stream/s1?st=abc"},
+		{name: "API stream with no login session", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", noLogin: true},
+		{name: "API stream without st", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?seek=3"},
 		{name: "without feature", setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
-		{name: "setting off", features: []string{playback.FeatureParallelRangeOriginV1}, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
-		{name: "proxy egress", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: "https://node.example.test/stream/direct/opaque"},
-		{name: "remux", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, delivery: playback.DeliveryRemuxProgressiveV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
+		{name: "proxy node token route", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node, want: node},
+		{name: "proxy node token route with no login session", features: feature, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node, noLogin: true, want: node},
+		{name: "proxy node header-authorized route", features: feature, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: "https://node.example.test/stream/v3/s1"},
+		{name: "proxy node without feature", delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node},
+		{name: "remux over the API", features: feature, setting: origin, delivery: playback.DeliveryRemuxProgressiveV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
+		{name: "remux through a proxy node", features: feature, delivery: playback.DeliveryRemuxProgressiveV3, egress: noderouting.EgressProxy, url: "https://node.example.test/stream/remux/opaque"},
 		{name: "header authenticated media", features: []string{playback.FeatureParallelRangeOriginV1, playback.FeatureHeaderAuthenticatedMediaV3}, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1"},
+		{name: "header authenticated media through a proxy node", features: []string{playback.FeatureParallelRangeOriginV1, playback.FeatureHeaderAuthenticatedMediaV3}, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &PlaybackHandler{SettingsRepo: &mutablePlaybackSettingsV3{values: map[string]string{config.WebMediaURLSettingKey: tc.setting}}}
 			plan := &playback.PlanV3{Delivery: tc.delivery}
-			h.setPlanStreamURLsV3(context.Background(), plan, preparedTransportV3{url: tc.url, routingEgress: tc.egress}, tc.features, true)
+			ctx := tc.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			h.setPlanStreamURLsV3(ctx, plan, preparedTransportV3{url: tc.url, routingEgress: tc.egress}, tc.features, !tc.noLogin)
 			if plan.Stream.URL != tc.url {
 				t.Fatalf("Stream.URL = %q, want the transport URL %q", plan.Stream.URL, tc.url)
 			}

@@ -65,16 +65,16 @@ const (
 	// origin, so every byte egresses from the API server; with it the plan may
 	// hand out credential-free proxy origins and distributed egress is restored.
 	FeatureAuthorizedMediaOriginsV3 = "authorized_media_origins_v1"
-	// FeatureParallelRangeOriginV1 is the client's promise to read the file from
-	// the plan's stream.parallel_range_url when the plan has one. The server
-	// sends it only for an attempt started by a login session. When that URL
-	// carries st, the reference alone authorizes each range request and the
-	// client sends no account token; when it carries no st, the client sends its
-	// account access token. A plan without parallel_range_url is read from
-	// stream.url. stream.url stays valid; a client may also read the warm head,
-	// overflow ranges, or a natively played file from it. The server also leaves
-	// the field out when the attempt negotiated header_authenticated_media_v1.
-	// Without the feature the plan carries no such field.
+	// FeatureParallelRangeOriginV1 is the client's promise about the plan's
+	// stream.parallel_range_url: when the plan has one, the client may read the
+	// file's byte ranges from it, uses it exactly as given, and adds no account
+	// token to it. The URL authorizes itself. The server names the admin's
+	// media origin, the stream URL itself, or a proxy node's own URL there. A
+	// plan without the field is read from stream.url, and stream.url stays
+	// valid either way: a client may read the warm head, overflow ranges, or a
+	// natively played file from it. The server leaves the field out when the
+	// attempt negotiated header_authenticated_media_v1. Without the feature the
+	// plan carries no such field.
 	FeatureParallelRangeOriginV1 = "parallel_range_origin_v1"
 	// FeaturePlanInvalidatedV3 is the client's promise to handle the realtime
 	// plan_invalidated command: ack it, replan off the named plan with operation
@@ -1010,12 +1010,13 @@ type StreamV3 struct {
 	Headers          map[string]string   `json:"headers"`
 	HeaderRefresh    HeaderRefreshModeV3 `json:"header_refresh"`
 	HeaderRefreshURL string              `json:"header_refresh_url,omitempty" format:"uri-reference"`
-	// ParallelRangeURL is the same API stream on the admin's media origin, for a
-	// client that negotiated parallel_range_origin_v1 without
-	// header_authenticated_media_v1, on an attempt started by a login session. It
-	// carries the same query as URL. When that query has st, st alone authorizes
-	// each range request.
-	ParallelRangeURL string `json:"parallel_range_url,omitempty" format:"uri"`
+	// ParallelRangeURL is where a client that negotiated
+	// parallel_range_origin_v1 may read the file's byte ranges over several
+	// connections: the same stream on the admin's media origin, the stream URL
+	// itself (relative to the API root, as URL is), or the proxy node's own
+	// URL. It authorizes itself; the client uses it as given and adds no
+	// account token. Absent, the client reads URL as before.
+	ParallelRangeURL string `json:"parallel_range_url,omitempty" format:"uri-reference"`
 }
 
 type TimelineV3 struct {
