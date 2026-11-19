@@ -1046,7 +1046,11 @@ follows each start or replan request.
 Parallel ranges help only over separate connections, which a browser opens to an
 HTTP/1.1 origin and not to an HTTP/2 or HTTP/3 one. The web player stripes on
 the page's own origin only when the page loaded over HTTP/1.1; it stripes on a
-node's URL and on a media origin as named. A plan without `parallel_range_url`
+node's URL and on a media origin as named. The stream answers of the API and of
+a node carry `Timing-Allow-Origin: *`, so the player can read which protocol a
+completed range came over: on HTTP/2 or HTTP/3 it goes back to reading
+`stream.url` over one connection. A browser that does not say leaves it
+striping. A plan without `parallel_range_url`
 is read from `stream.url`. `stream.url` stays valid; a client may also read the
 warm head, overflow ranges, or a natively played file from it.
 

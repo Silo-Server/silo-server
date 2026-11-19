@@ -15,7 +15,9 @@
  * ignores `Range`: the source then becomes the stock `UrlSource`, which reads the file
  * sequentially. When the server names the plan's own URL as the stripe URL, as it does for a
  * proxy node and for the page's own origin, there is one URL: every range uses it, up to 4 at
- * once, with the retries of any read from the plan's URL.
+ * once, with the retries of any read from the plan's URL. HTTP/2 and HTTP/3 put every request to
+ * an origin on one connection, so when the browser reports that the striped URL answered over
+ * either, the source also becomes the stock `UrlSource`.
  *
  * At a page seek (`endWarmHead()`) the source records the reads Mediabunny waits for, and cuts
  * each queued read to the bytes those reads wait for. When a new read then finds every read worker
@@ -58,6 +60,12 @@ const MAX_STRIPE_URL_RANGES = MAX_RANGES_IN_FLIGHT - 1;
  * (`STALL_TIMEOUT_MS` in `EnginePlayer.ts`) to take the read over.
  */
 const STRIPE_INACTIVITY_MS = 8_000;
+
+/**
+ * How many completed responses the source asks the browser about before it stops asking which
+ * protocol the striped URL speaks. A browser that never says leaves the source striping.
+ */
+const PROTOCOL_CHECKS = 8;
 
 /** A `Content-Range` that names the range and the file's size. */
 const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/;
@@ -158,6 +166,13 @@ export class ParallelRangeSource extends InternalUrlSource {
    * the stock `UrlSource` from then on, and every worker runs the parent's `_runWorker`.
    */
   private ignoresRange = false;
+  /**
+   * Set when the browser reports that the striped URL answers over HTTP/2 or HTTP/3. Those put
+   * every request on one connection, so the ranges gain none: the source is the stock
+   * `UrlSource` from then on, as for a plan URL that ignores `Range`.
+   */
+  private multiplexed = false;
+  private protocolChecks = 0;
 
   /**
    * `headUrl` is the plan's own stream URL, which carries the warm head and the
@@ -365,7 +380,7 @@ export class ParallelRangeSource extends InternalUrlSource {
    * place of `UrlSource._runWorker`.
    */
   override async _runWorker(worker: ReadWorker): Promise<void> {
-    if (this.ignoresRange) return super._runWorker(worker);
+    if (this.ignoresRange || this.multiplexed) return super._runWorker(worker);
     const orchestrator = this._orchestrator;
     if (worker.aborted) {
       orchestrator.signalWorkerStoppedRunning(worker);
@@ -438,7 +453,7 @@ export class ParallelRangeSource extends InternalUrlSource {
       (orchestrator.fileSize !== null || (ranges.length === 0 && this.slots.active === 0));
     try {
       while (true) {
-        if (this.ignoresRange) break;
+        if (this.ignoresRange || this.multiplexed) break;
         if (worker.aborted) {
           orchestrator.signalWorkerStoppedRunning(worker);
           return;
@@ -515,7 +530,8 @@ export class ParallelRangeSource extends InternalUrlSource {
       this.slots.wakers.delete(notify);
       this.wakeWorkers();
     }
-    // The plan's URL ignores `Range`: the stock source reads the file from here on.
+    // The plan's URL ignores `Range`, or the striped URL shares one connection: the stock source
+    // reads the file from here on.
     return super._runWorker(worker);
   }
 
@@ -655,6 +671,7 @@ export class ParallelRangeSource extends InternalUrlSource {
           }
           // A range that reached past the end of the file ends at its last byte.
           range.end = Math.min(range.end, responseEnd);
+          if (onStripe || !this.twoOrigins) this.checkProtocol(url);
         } finally {
           stripe?.dispose();
         }
@@ -668,6 +685,29 @@ export class ParallelRangeSource extends InternalUrlSource {
     if (range.stripe) this.stripesInFlight--;
     this.releaseSlot();
     notify();
+  }
+
+  /**
+   * Asks the browser which protocol a completed response from the striped URL came over, and
+   * hands the source to the stock reader when it was HTTP/2 or HTTP/3. A cross-origin response
+   * says only when its server sent `Timing-Allow-Origin`; without an answer the source keeps
+   * striping and asks again after the next response, up to `PROTOCOL_CHECKS` times.
+   */
+  private checkProtocol(url: string | URL | Request): void {
+    if (this.multiplexed || this.protocolChecks >= PROTOCOL_CHECKS) return;
+    this.protocolChecks++;
+    const href = url instanceof Request ? url.url : String(url);
+    const name = typeof location === "undefined" ? href : new URL(href, location.href).href;
+    const entries = performance.getEntriesByName?.(name, "resource") as
+      | PerformanceResourceTiming[]
+      | undefined;
+    const protocol = entries?.[entries.length - 1]?.nextHopProtocol ?? "";
+    if (protocol === "") return;
+    this.protocolChecks = PROTOCOL_CHECKS;
+    if (protocol === "h2" || protocol === "h3") {
+      this.multiplexed = true;
+      this.wakeWorkers();
+    }
   }
 
   /**

@@ -382,6 +382,37 @@ describe("ParallelRangeSource failures", () => {
     }
   });
 
+  // HTTP/2 and HTTP/3 put every request to an origin on one connection, so parallel ranges there
+  // add requests and no connections. The browser says which protocol a completed response used.
+  it.each([
+    ["h2", false],
+    ["h3", false],
+    ["http/1.1", true],
+    ["", true],
+  ])("after the browser reports protocol %j, keeps striping: %s", async (protocol, stripes) => {
+    vi.stubGlobal("ReadableStream", ReadableStream);
+    // The VM test context's `performance` has no resource timing.
+    const timing = performance as { getEntriesByName?: unknown };
+    timing.getEntriesByName = () => (protocol === "" ? [] : [{ nextHopProtocol: protocol }]);
+    try {
+      const server = new FakeServer(pattern(SIZE));
+      const { source } = makeSource(server);
+      expect(same(await read(source, 0, 20 * MIB), server.bytes.subarray(0, 20 * MIB))).toBe(true);
+      await vi.waitFor(() => expect(server.inFlight).toBe(0));
+      const stripeBefore = server.requests.filter((r) => r.url === STRIPE_URL).length;
+      expect(stripeBefore).toBeGreaterThan(0);
+      source.endWarmHead();
+      expect(
+        same(await read(source, 60 * MIB, 61 * MIB), server.bytes.subarray(60 * MIB, 61 * MIB)),
+      ).toBe(true);
+      const stripeAfter = server.requests.filter((r) => r.url === STRIPE_URL).length;
+      expect(stripeAfter > stripeBefore).toBe(stripes);
+    } finally {
+      delete timing.getEntriesByName;
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("fails a range at its fourth failure in a row that delivered nothing", async () => {
     const server = new FakeServer(pattern(SIZE));
     const failures: Fault[] = [

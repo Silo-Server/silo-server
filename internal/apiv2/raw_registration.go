@@ -46,6 +46,9 @@ func mediaCrossOrigin(ctx huma.Context, next func(huma.Context)) {
 	ctx.SetHeader("Access-Control-Allow-Origin", "*")
 	ctx.SetHeader("Access-Control-Allow-Headers", mediaCORSAllowHeaders)
 	ctx.SetHeader("Access-Control-Expose-Headers", mediaCORSExposeHeaders)
+	// Lets a player on another origin read which protocol the connection
+	// speaks, so it does not send parallel ranges over HTTP/2 or HTTP/3.
+	ctx.SetHeader("Timing-Allow-Origin", "*")
 	next(ctx)
 }
 

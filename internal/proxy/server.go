@@ -782,6 +782,10 @@ func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, c
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "direct_play")
+	// Lets the web player, on another origin, read which protocol this
+	// connection speaks, so it does not send parallel ranges over HTTP/2 or
+	// HTTP/3, which put them on one connection.
+	w.Header().Set("Timing-Allow-Origin", "*")
 	// A striping player plays one file through many short range requests, so
 	// the session stays counted between them: the last request to end lingers
 	// when it delivered media. A HEAD, a refusal or an unsatisfiable range

@@ -426,7 +426,9 @@ The URL authorizes itself (`st`, or the token in a node URL's path). A client
 uses it exactly as given and adds no account token, header or cookie to it. A
 client reads parallel ranges only over connections that are separate: on the
 page's own origin, the web player does so only when the page loaded over
-HTTP/1.1. A plan without `parallel_range_url` is read from `stream.url`.
+HTTP/1.1, and it stops when the browser reports that a range came over HTTP/2
+or HTTP/3 (the stream answers carry `Timing-Allow-Origin: *` for that). A plan
+without `parallel_range_url` is read from `stream.url`.
 `stream.url` stays valid; a client may also read the warm head, overflow ranges,
 or a natively played file from it.
 
