@@ -53,6 +53,7 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"monitor user detail", monitor, http.MethodGet, "/api/v2/admin/users/42", true},
 		{"monitor user downloads summary", monitor, http.MethodGet, "/api/v2/admin/users/42/downloads/summary", true},
 		{"monitor download entries", monitor, http.MethodGet, "/api/v2/admin/downloads/entries", true},
+		{"monitor download capabilities", monitor, http.MethodGet, "/api/v2/admin/downloads/storage/capabilities", true},
 		{"monitor node summary", monitor, http.MethodGet, "/api/v2/admin/nodes/summary", true},
 		{"monitor events capabilities", monitor, http.MethodGet, "/api/v2/events/capabilities", true},
 		{"monitor catalog listing", monitor, http.MethodGet, "/api/v2/admin/catalog/items", true},

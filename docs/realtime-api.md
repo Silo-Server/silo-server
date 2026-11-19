@@ -100,10 +100,10 @@ account, its configuration revision and the events socket, and the response
 carries `max_connection_seconds` (14400). The handshake is the same as for a
 login session.
 
-A key connection may subscribe to `sessions` and `catalog` only; the hello
-frame's `available_channels` lists exactly those, and other declared channels
-come back rejected. Jobs and scans carry artifact URLs, request payloads and
-library paths, which the monitoring scope never reads. The admin log stream,
+A key connection may subscribe to `sessions`, `catalog` and `downloads` only; the
+hello frame's `available_channels` lists exactly those, and other declared
+channels come back rejected. Jobs and scans carry artifact URLs, request payloads
+and library paths, which the monitoring scope never reads. The admin log stream,
 playback-control, Watch Together and Apple push sockets stay login-only.
 
 The connection ends after four hours. Every 15 seconds it rechecks that the key
@@ -277,6 +277,45 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
 Rows and entries without `lifecycle_seq` (sessions that started before the server
 recorded lifecycle transitions) count as number 0. During a rolling deploy, servers
 without this change send no lifecycle events.
+
+### Download changes
+
+The admin-only `downloads` channel carries `download.changed` for managed
+(device) downloads: when one is registered, changes status or is registered
+again at a new revision (preparation finishing or failing, the device's own
+status reports, a revocation), when a catalog merge moves it to another
+title or episode, and when it is removed (the device
+deletes it, a revoked row is purged, or its account, profile or title is
+deleted). `GET /api/v2/admin/downloads/storage/capabilities` reports
+`change_events: true` when the server sends them. Ephemeral web downloads, which
+no administrator route lists, send none. The per-user `download` event on
+`user_state` is unchanged.
+
+```json
+{"type":"event","channel":"downloads","event":"download.changed","event_id":"download-change:812","timestamp":"2026-11-19T02:30:00.120Z","data":{"download_id":"3f6c…","user_id":"12","profile_id":"8d1e…","device_id":"ios-5B2…","content_id":"series-tvdb-81189","episode_id":"episode-tvdb-349232","status":"downloading","change":"changed","at":"2026-11-19T02:30:00.064Z"}}
+```
+
+`data` holds identifiers and state only, every id a string: `download_id`,
+`user_id`, `profile_id`, `device_id`, `content_id` (the movie, or the series of
+an episode), `episode_id` (absent for a movie), `status` (as the admin download
+rows report it; for `removed`, the status the row had), `change` (`created`,
+`changed` or `removed`) and `at`, when the change was written, UTC milliseconds.
+A failure is `changed` with `status: "failed"` and a revocation `changed` with
+`status: "revoked"`. Events never carry prepared-file ids, URLs, storage keys,
+paths, error text or revocation reasons; read those, where the caller may, from
+the admin download routes.
+
+The channel's subscribe snapshot is `null`. On subscribe and after a reconnect,
+re-read `GET /api/v2/admin/downloads/entries` (or
+`GET /api/v2/admin/users/{id}/downloads`). Database triggers record the changes
+from every code path that writes a managed download, so an event is published
+only after its write commits; every API server drains them, at most 32 every
+100 ms across the cluster, and each reaches sockets on every server. Delivery is
+at most once; changes still unpublished after a day are dropped. Two changes to
+one download written close together can arrive out of order and can share an
+`at`, which has millisecond precision. The envelope's `event_id` is an opaque
+identifier and carries no order. Treat an event as a sign that the download
+changed, and read its current state from the admin routes.
 
 ### Access changes
 

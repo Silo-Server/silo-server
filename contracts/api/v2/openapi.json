@@ -9464,6 +9464,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "created_client_ip": {
+            "description": "Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "delivery_format": {
             "type": "string"
           },
@@ -9517,6 +9524,13 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "last_client_ip": {
+            "description": "Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "location": {
             "description": "Where its prepared file is: server or node:\u003cid\u003e; absent when it has none",
@@ -9611,7 +9625,9 @@
           "created_at",
           "updated_at",
           "completed_at",
-          "status_event_at"
+          "status_event_at",
+          "created_client_ip",
+          "last_client_ip"
         ],
         "type": "object"
       },
@@ -10304,6 +10320,14 @@
           "available": {
             "type": "boolean"
           },
+          "change_events": {
+            "description": "download.changed on the v2 events socket's admin downloads channel reports a managed download being created, changing status or revision, moving to another title in a catalog merge, or being removed. Delivery is at most once, so re-read the admin download routes on subscribe and reconnect",
+            "type": "boolean"
+          },
+          "client_ip": {
+            "description": "Download rows carry created_client_ip and last_client_ip",
+            "type": "boolean"
+          },
           "devices": {
             "description": "Device copies can be listed",
             "type": "boolean"
@@ -10336,6 +10360,8 @@
           "realtime_channel",
           "devices",
           "revocation",
+          "client_ip",
+          "change_events",
           "revision",
           "state",
           "allowed"
@@ -15962,9 +15988,6 @@
           "client_version": {
             "type": "string"
           },
-          "content_id": {
-            "type": "string"
-          },
           "device_id": {
             "description": "Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared.",
             "type": "string"
@@ -15977,10 +16000,8 @@
             "description": "Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown",
             "type": "string"
           },
-          "episode_name": {
-            "type": "string"
-          },
           "episode_number": {
+            "description": "Episode number; absent when not an episode",
             "format": "int64",
             "type": "integer"
           },
@@ -16014,10 +16035,16 @@
             "minLength": 1,
             "type": "string"
           },
+          "media_item_id": {
+            "description": "Catalog content id of what is playing: the episode for an episode, as admin playback history's media_item_id. Absent when unknown",
+            "type": "string"
+          },
           "media_title": {
+            "description": "Episode or item title, as admin playback history names it; empty when the item is no longer in the catalog",
             "type": "string"
           },
           "media_type": {
+            "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
           },
           "node_display_name": {
@@ -16102,10 +16129,12 @@
             "type": "string"
           },
           "season_number": {
+            "description": "Episode season; absent when not an episode",
             "format": "int64",
             "type": "integer"
           },
-          "series_name": {
+          "series_title": {
+            "description": "Series title for an episode; absent otherwise",
             "type": "string"
           },
           "session_id": {
@@ -16441,9 +16470,6 @@
       "AdminPlaybackSummaryItem": {
         "additionalProperties": false,
         "properties": {
-          "episode_name": {
-            "type": "string"
-          },
           "episode_number": {
             "format": "int64",
             "type": "integer"
@@ -16452,16 +16478,19 @@
             "type": "boolean"
           },
           "media_title": {
+            "description": "Episode or item title, as the session row names it",
             "type": "string"
           },
           "media_type": {
+            "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
           },
           "season_number": {
             "format": "int64",
             "type": "integer"
           },
-          "series_name": {
+          "series_title": {
+            "description": "Series title for an episode; absent otherwise",
             "type": "string"
           },
           "user_id": {
@@ -24559,6 +24588,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "created_client_ip": {
+            "description": "Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "delivery_format": {
             "type": "string"
           },
@@ -24609,6 +24645,13 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "last_client_ip": {
+            "description": "Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "media_type": {
             "description": "Catalog type of content_id (movie, series, …); empty when unknown",
@@ -24672,7 +24715,9 @@
           "created_at",
           "updated_at",
           "completed_at",
-          "status_event_at"
+          "status_event_at",
+          "created_client_ip",
+          "last_client_ip"
         ],
         "type": "object"
       },
@@ -46071,24 +46116,10 @@
             ],
             "type": "string"
           },
-          "content_id": {
-            "description": "Catalog content id of the playing item; empty when unknown",
-            "examples": [
-              "tt0111161"
-            ],
-            "type": "string"
-          },
           "effective_play_method": {
             "description": "Bucketed method: direct, remux, direct_stream or transcode; empty when unknown",
             "examples": [
               "direct"
-            ],
-            "type": "string"
-          },
-          "episode_name": {
-            "description": "Empty unless an episode",
-            "examples": [
-              ""
             ],
             "type": "string"
           },
@@ -46149,14 +46180,22 @@
             "minLength": 1,
             "type": "string"
           },
+          "media_item_id": {
+            "description": "Catalog content id of what is playing: the episode for an episode; empty when unknown",
+            "examples": [
+              "tt0111161"
+            ],
+            "type": "string"
+          },
           "media_title": {
+            "description": "Episode or item title; empty when unknown",
             "examples": [
               "The Shawshank Redemption"
             ],
             "type": "string"
           },
           "media_type": {
-            "description": "Catalog item type; empty when unknown",
+            "description": "episode, or the catalog item type; empty when unknown",
             "examples": [
               "movie"
             ],
@@ -46306,8 +46345,8 @@
               "null"
             ]
           },
-          "series_name": {
-            "description": "Empty unless an episode",
+          "series_title": {
+            "description": "Series title for an episode; empty otherwise",
             "examples": [
               ""
             ],
@@ -46508,11 +46547,10 @@
           "profile_name",
           "media_file_id",
           "requested_media_file_id",
-          "content_id",
+          "media_item_id",
           "media_title",
           "media_type",
-          "series_name",
-          "episode_name",
+          "series_title",
           "season_number",
           "episode_number",
           "poster_url",
