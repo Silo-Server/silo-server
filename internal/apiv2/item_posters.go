@@ -45,6 +45,8 @@ const (
 	// itemPosterEnqueueTimeout bounds the queue write a poster request makes
 	// before it fetches.
 	itemPosterEnqueueTimeout = 3 * time.Second
+	// itemPosterEnqueueRetry is how soon a failed queue write is tried again.
+	itemPosterEnqueueRetry = 30 * time.Second
 )
 
 // itemPosterHandler serves GET /api/v2/item-posters/{content_id}.
@@ -91,6 +93,16 @@ func (m *posterEnqueueMemo) claim(contentID string, now time.Time) bool {
 	}
 	m.queued[contentID] = now.Add(itemPosterEnqueueMemo)
 	return true
+}
+
+// retryAt shortens a claim whose queue write failed, so the item is tried
+// again at when.
+func (m *posterEnqueueMemo) retryAt(contentID string, when time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.queued[contentID]; ok {
+		m.queued[contentID] = when
+	}
 }
 
 // posterFetchLogError is a fetch failure as it is logged: without the URL a
@@ -243,6 +255,9 @@ func (h *itemPosterHandler) queueCache(ctx context.Context, contentID string) {
 	defer cancel()
 	if err := h.source.EnqueueItemPosterCache(queueCtx, contentID); err != nil {
 		slog.WarnContext(ctx, "queueing an item poster cache job failed", "component", "apiv2", "content_id", contentID, "error", err)
+		// Nothing was queued, so do not hold the item for the whole memo:
+		// try again soon, but not on every request while the database is slow.
+		h.enqueued.retryAt(contentID, time.Now().Add(itemPosterEnqueueRetry))
 	}
 }
 
