@@ -84,9 +84,10 @@ var (
 // the source a grant approves, to the node it names, with the grant in the
 // X-Silo-Source-Grant header (which the node-to-core signature covers). It
 // reads no catalog: the catalog is checked when the source opens and at every
-// renewal. A request needs an unexpired grant, so the check behind it is at
-// most one grant lifetime old; a response already being sent keeps reading the
-// descriptor it opened until it ends.
+// renewal. A request needs an unexpired grant, so the check behind it is up to
+// one grant lifetime old. A withdrawn source does not cut a response already
+// being sent: the node ends it when its next renewal is refused, and the
+// grant's expiry bounds a node that stops renewing.
 //
 // The core opens the granted path through fspath, without blocking on a FIFO,
 // fstats the descriptor and serves from it, so a file replaced after the
