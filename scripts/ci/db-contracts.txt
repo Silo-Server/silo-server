@@ -1444,3 +1444,7 @@
 # Frame posters list only movies whose poster slot is empty with nothing on its
 # way, and a frame is saved only while the slot is still empty with the source read.
 ./internal/catalog TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB
+
+# Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
+./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
+./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB
