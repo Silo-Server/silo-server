@@ -132,13 +132,7 @@ func compatChildHLSRouteMatches(source PlaybackMediaSource, recipe *playback.Rec
 // compatChildHLSSource is the source a child HLS request names, or else the
 // version the play streams. Only the master manifest switches versions.
 func compatChildHLSSource(playSession *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {
-	if mediaSourceID != "" {
-		return findMediaSource(playSession, mediaSourceID)
-	}
-	if source := boundMediaSource(playSession); source != nil {
-		return source
-	}
-	return firstMediaSource(playSession)
+	return playbackRouteSource(playSession, mediaSourceID, false, false)
 }
 
 func (h *PlaybackHandler) requireCompatChildHLSRoute(w http.ResponseWriter, playSession *PlaybackSession, source PlaybackMediaSource) bool {
@@ -4363,6 +4357,12 @@ func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowIt
 		return source
 	}
 	if mediaSourceID == "" || (allowItemAlias && mediaSourceIDsEqual(mediaSourceID, session.RouteItemID)) {
+		// A request that names no version follows the one the play streams,
+		// as child HLS requests do; only a named version switches the play.
+		if bound := boundMediaSource(session); bound != nil &&
+			(!staticRequest || bound.ServerBitrateCapKbps == 0 || bound.SupportsDirectPlay) {
+			return bound
+		}
 		if staticRequest {
 			for _, source := range session.MediaSources {
 				if source.ServerBitrateCapKbps > 0 && source.SupportsDirectPlay {

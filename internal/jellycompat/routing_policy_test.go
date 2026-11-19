@@ -494,6 +494,11 @@ func TestChildHLSSourceFollowsTheStreamedVersion(t *testing.T) {
 			if got := compatChildHLSSource(play, ""); got == nil || got.FileID != tc.wantFileID {
 				t.Fatalf("source = %+v, want file %d", got, tc.wantFileID)
 			}
+			// A progressive request that names no version must not switch
+			// the play back to the first one listed.
+			if got := playbackRouteSource(play, "", true, false); got == nil || got.FileID != tc.wantFileID {
+				t.Fatalf("progressive source = %+v, want file %d", got, tc.wantFileID)
+			}
 		})
 	}
 }
