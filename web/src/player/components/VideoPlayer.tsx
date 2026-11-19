@@ -5158,13 +5158,16 @@ export function VideoPlayer({
   }, [onPlaybackTransportReady, skipActions]);
 
   // A server message renders inside the player only in the foreground, so a
-  // minimized or detached player shows it as a page toast instead.
+  // minimized or detached player shows it as a page toast instead. The toast
+  // goes at the top: the minimized player sits along the bottom edge, where
+  // page toasts normally appear, and one there would cover its controls.
   const showServerNotice = useCallback((next: PlaybackNoticeState) => {
     if (isDetachedRef.current) {
       const show = next.tone === "warning" ? toast.warning : toast.info;
       show(next.title ?? next.message, {
         description: next.title ? next.message : undefined,
         duration: PLAYBACK_NOTICE_VISIBLE_MS,
+        position: "top-center",
       });
       return;
     }
