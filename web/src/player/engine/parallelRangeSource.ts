@@ -15,10 +15,19 @@
  * ignores `Range`: the source then becomes the stock `UrlSource`, which reads the file
  * sequentially.
  *
+ * At a page seek (`endWarmHead()`) the source records the reads Mediabunny waits for, and cuts
+ * each queued read to the bytes those reads wait for. When a new read then finds every read worker
+ * running, each older run (one that serves only reads from before the latest seek) is cut to the
+ * bytes its reads wait for, and its ranges that hold none of them are cancelled. The older run that
+ * owes the fewest bytes is retired, its unmet bytes go back on the queue, and the new read takes
+ * its place. Runs for the latest seek take free slots first. Trimming alone is not enough: two owed
+ * 5 MiB cluster reads still held a seek's first request 7.0 s. A read the replaced playback makes
+ * after the seek still counts as new.
+ *
  * It subclasses `UrlSource` and overrides its private `_runWorker`, so
  * Mediabunny keeps its read orchestrator, its cache, its read workers and its
- * prefetch profile, and only the way the bytes arrive changes. The Mediabunny
- * internals it relies on:
+ * prefetch profile. Besides the way the bytes arrive, at a seek the source changes worker
+ * admission, worker targets and the queued reads. The Mediabunny internals it relies on:
  *
  * - `UrlSource`: `_orchestrator`, `_abortControllers`, `_requestInit`, `_url`,
  *   `_getRetryDelay`, `_fileSizeDetermined`, `_dispatchRead`, and `_runWorker`,
@@ -26,9 +35,17 @@
  *   constructor binds `this._runWorker`, so the override runs.
  * - `ReadOrchestrator`: `fileSize`, `supplyFileSize`, `supplyWorkerData`,
  *   `signalWorkerStoppedRunning`, and `options.prefetchProfile`, which the
- *   read-ahead floor wraps.
- * - `ReadWorker`: `currentPos`, `targetPos` (which grows while the worker
- *   runs) and `aborted`.
+ *   read-ahead floor wraps. `signalWorkerStoppedRunning` clears a stopped worker's reads unless
+ *   the worker is aborted, so a trim must cover the bytes those reads wait for.
+ *   - `createWorker`, which the source wraps: its name, its `null` while every worker runs, and
+ *     that `read()` and the queue restart call it through `this`. The restart starts the oldest
+ *     queued read with that read's exact hole.
+ *   - `workers`, which a retired worker leaves.
+ *   - `queuedReads`, sorted by `hole.start` with no overlaps, and each entry's `hole`,
+ *     `strictTarget`, `pendingSlices` and `age`.
+ *   - `nextAge`, the age of the next queued read.
+ * - `ReadWorker`: `currentPos`, `targetPos`, `aborted`, and `pendingSlices`, whose entries are
+ *   each read's identity, `start` and `bytes.length`.
  *
  * `mediabunny` is pinned to an exact version for that reason. Upgrading it
  * must re-run `parallelRangeSource.test.ts`, which drives the real orchestrator.
@@ -62,10 +79,25 @@ const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/;
 
 type MeteredFetch = Pick<ReturnType<typeof createMeteredFetch>, "fetch" | "newRun">;
 
+/** One read Mediabunny waits on: the bytes `[start, start + bytes.length)`. */
+interface PendingSlice {
+  start: number;
+  bytes: Uint8Array;
+}
+
 interface ReadWorker {
   currentPos: number;
   targetPos: number;
   aborted: boolean;
+  pendingSlices: PendingSlice[];
+}
+
+/** A read that found every worker running, waiting for one to stop. */
+interface QueuedRead {
+  hole: { start: number; end: number };
+  strictTarget: boolean;
+  pendingSlices: PendingSlice[];
+  age: number;
 }
 
 type PrefetchProfile = (
@@ -80,6 +112,11 @@ interface ReadOrchestrator {
   supplyFileSize(size: number): void;
   supplyWorkerData(worker: ReadWorker, bytes: Uint8Array): void;
   signalWorkerStoppedRunning(worker: ReadWorker): void;
+  createWorker(startPos: number, targetPos: number, strictTarget: boolean): ReadWorker | null;
+  workers: ReadWorker[];
+  /** Sorted by `hole.start`, holes never overlapping. */
+  queuedReads: QueuedRead[];
+  nextAge: number;
 }
 
 /** The private surface of `UrlSource` this file reads and writes. */
@@ -108,8 +145,20 @@ interface StripeRange {
   /** True when the range uses the stripe URL; false for a head range and for the plan-URL lane. */
   stripe: boolean;
   chunks: Uint8Array[];
+  /**
+   * Aborts this range alone, as a trim does for a range no read waits on; the worker's abort
+   * aborts it too. `readRange` reads this signal, so a cancel is an abort and never counts as a
+   * stripe failure.
+   */
+  controller: AbortController;
   done: boolean;
   failure: { error: unknown } | null;
+}
+
+/** A worker run's place in the slot queue: a run that serves a later seek goes first. */
+interface SlotToken {
+  /** The seek count the run serves now. */
+  status: () => number;
 }
 
 /** Resolves after `ms`, or at once when `signal` aborts. */
@@ -129,7 +178,7 @@ export class ParallelRangeSource extends InternalUrlSource {
   private readonly stripeUrl: string;
   private readonly metered: MeteredFetch;
   /** The ranges in flight across the workers, the workers queued for a slot, and each worker's wake function. */
-  private readonly slots = { active: 0, waiting: [] as object[], wakers: new Set<() => void>() };
+  private readonly slots = { active: 0, waiting: [] as SlotToken[], wakers: new Set<() => void>() };
   private headOpen = true;
   /** The non-head ranges in flight on the stripe URL, across the workers. */
   private stripesInFlight = 0;
@@ -148,6 +197,21 @@ export class ParallelRangeSource extends InternalUrlSource {
    * plan's URL.
    */
   private stripeFailed = false;
+  /**
+   * Counts `endWarmHead()` calls: one for each engine start after the first, which is a page seek
+   * or a decoder restart. A decoder restart replaces the old generation's reads too, so the seek
+   * rules below fit it.
+   */
+  private seeks = 0;
+  /**
+   * The reads Mediabunny waited for at some `endWarmHead()`, by object identity. A run's status
+   * is `seeks` while a read outside this set waits on its worker, else the count when the run
+   * started. Queued reads are recorded too: one that Mediabunny later gives to a worker that
+   * started before the seek does not raise that run.
+   */
+  private readonly readsAtSeeks = new WeakSet<PendingSlice>();
+  /** Each running worker's run: its status, as a slot token reads it, and how to trim it. */
+  private readonly runs = new Map<ReadWorker, { status: () => number; trim: () => void }>();
   /**
    * Set when the plan's URL answered its first request with a whole-file `200`: the source is
    * the stock `UrlSource` from then on, and every worker runs the parent's `_runWorker`.
@@ -175,34 +239,62 @@ export class ParallelRangeSource extends InternalUrlSource {
       const range = profile(start, end, workers);
       return { start: range.start, end: Math.max(range.end, start + READ_AHEAD_BYTES) };
     };
+    const createWorker = orchestrator.createWorker.bind(orchestrator);
+    orchestrator.createWorker = (startPos, targetPos, strictTarget) => {
+      const created = createWorker(startPos, targetPos, strictTarget);
+      if (created !== null) return created;
+      // Mediabunny starts a queued read with that read's hole: such a call is no new read.
+      const queued = orchestrator.queuedReads.some(
+        (read) => read.hole.start === startPos && read.hole.end === targetPos,
+      );
+      const older = [...this.runs].filter(([, run]) => run.status() < this.seeks);
+      if (older.length === 0) return null;
+      for (const [, run] of older) run.trim();
+      if (queued) return null;
+      // A new read: retire the older worker that owes the fewest bytes and take its place.
+      let victim = older[0]![0];
+      for (const [worker] of older) {
+        if (worker.targetPos - worker.currentPos < victim.targetPos - victim.currentPos) {
+          victim = worker;
+        }
+      }
+      this.retire(victim);
+      return createWorker(startPos, targetPos, strictTarget);
+    };
   }
 
-  /** From now on no range, of any worker, is a head range. */
+  /** From now on no range, of any worker, is a head range, and the seek is recorded. */
   endWarmHead(): void {
+    const orchestrator = this._orchestrator;
+    for (const { pendingSlices } of [...orchestrator.workers, ...orchestrator.queuedReads]) {
+      for (const slice of pendingSlices) this.readsAtSeeks.add(slice);
+    }
+    this.seeks++;
+    this.trimQueuedReads();
     this.headOpen = false;
     this.reserveOpen = false;
     this.wakeWorkers();
   }
 
   /** Takes a slot for the worker named by `token`, or queues the worker and returns false. */
-  private takeSlot(token: object): boolean {
+  private takeSlot(token: SlotToken): boolean {
     const slots = this.slots;
     if (slots.active >= this.slotCap() && slots.active < MAX_RANGES_IN_FLIGHT) {
       // Held back by the warm-head reserve, not by a full pool: the worker takes no place in
       // the queue, so the worker that arrives next takes the reserved slot at once.
       return false;
     }
-    const first = slots.waiting[0];
-    if (slots.active < MAX_RANGES_IN_FLIGHT && (first === undefined || first === token)) {
-      if (first === token) slots.waiting.shift();
+    this.joinQueue(token);
+    // A run that serves a later seek goes first. A run's status can rise while it waits, so the
+    // order is taken again on each call; the sort is stable, so arrival order holds within a seek.
+    slots.waiting.sort((a, b) => b.status() - a.status());
+    if (slots.active < MAX_RANGES_IN_FLIGHT && slots.waiting[0] === token) {
+      slots.waiting.shift();
       slots.active++;
       // The worker now at the head may be asleep while a slot is still free: wake it.
-      if (first === token && slots.waiting.length > 0 && slots.active < MAX_RANGES_IN_FLIGHT) {
-        this.wakeWorkers();
-      }
+      if (slots.waiting.length > 0 && slots.active < MAX_RANGES_IN_FLIGHT) this.wakeWorkers();
       return true;
     }
-    this.joinQueue(token);
     return false;
   }
 
@@ -216,11 +308,11 @@ export class ParallelRangeSource extends InternalUrlSource {
     return this.reserveOpen ? MAX_RANGES_IN_FLIGHT - 1 : MAX_RANGES_IN_FLIGHT;
   }
 
-  private joinQueue(token: object): void {
+  private joinQueue(token: SlotToken): void {
     if (!this.slots.waiting.includes(token)) this.slots.waiting.push(token);
   }
 
-  private leaveQueue(token: object): void {
+  private leaveQueue(token: SlotToken): void {
     const index = this.slots.waiting.indexOf(token);
     if (index >= 0) this.slots.waiting.splice(index, 1);
   }
@@ -233,6 +325,85 @@ export class ParallelRangeSource extends InternalUrlSource {
 
   private wakeWorkers(): void {
     for (const wake of this.slots.wakers) wake();
+  }
+
+  /**
+   * The seek a run serves: the current count once a read made after the latest seek waits on the
+   * run's worker, else the count when the run started.
+   */
+  private runStatus(worker: ReadWorker, started: number): number {
+    for (const slice of worker.pendingSlices) {
+      if (!this.readsAtSeeks.has(slice)) return this.seeks;
+    }
+    return started;
+  }
+
+  /** The end of the bytes that reads still wait for in `[start, end)`; `start` when none. */
+  private static owedEnd(start: number, end: number, slices: PendingSlice[]): number {
+    let bound = start;
+    for (const slice of slices) {
+      bound = Math.max(bound, Math.min(slice.start + slice.bytes.length, end));
+    }
+    return bound;
+  }
+
+  /**
+   * At a page seek, cuts each queued read to the bytes its reads wait for and drops a queued read
+   * that nobody waits for, so no read-ahead from before the seek starts after it.
+   */
+  private trimQueuedReads(): void {
+    const queue = this._orchestrator.queuedReads;
+    for (let i = queue.length - 1; i >= 0; i--) {
+      const read = queue[i]!;
+      const end = ParallelRangeSource.owedEnd(read.hole.start, read.hole.end, read.pendingSlices);
+      if (end > read.hole.start) {
+        read.hole.end = end;
+        read.strictTarget = true;
+      } else {
+        queue.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * Retires `worker` from the orchestrator: its ranges are aborted, and the bytes its reads still
+   * wait for go back on the queue, which keeps Mediabunny's invariants: sorted by `hole.start`,
+   * with overlapping entries merged. The worker's reads come off it first, because
+   * `signalWorkerStoppedRunning` keeps an aborted worker's reads.
+   */
+  private retire(worker: ReadWorker): void {
+    const orchestrator = this._orchestrator;
+    const slices = worker.pendingSlices.splice(0);
+    const end = ParallelRangeSource.owedEnd(worker.currentPos, worker.targetPos, slices);
+    worker.aborted = true;
+    this.runs.delete(worker);
+    orchestrator.workers.splice(orchestrator.workers.indexOf(worker), 1);
+    this._abortControllers.get(worker)?.abort();
+    this._abortControllers.delete(worker);
+    // A run that owes nothing has nothing to queue: an empty hole would trip Mediabunny's check
+    // that a worker's current position is below its target.
+    if (end <= worker.currentPos) return;
+    const queue = orchestrator.queuedReads;
+    queue.push({
+      hole: { start: worker.currentPos, end },
+      strictTarget: true,
+      pendingSlices: slices,
+      age: orchestrator.nextAge++,
+    });
+    queue.sort((a, b) => a.hole.start - b.hole.start);
+    for (let i = 0; i + 1 < queue.length; ) {
+      const read = queue[i]!;
+      const next = queue[i + 1]!;
+      if (next.hole.start > read.hole.end) {
+        i++;
+        continue;
+      }
+      read.hole.end = Math.max(read.hole.end, next.hole.end);
+      read.pendingSlices.push(...next.pendingSlices);
+      read.strictTarget &&= next.strictTarget;
+      read.age = Math.min(read.age, next.age);
+      queue.splice(i + 1, 1);
+    }
   }
 
   /**
@@ -261,11 +432,45 @@ export class ParallelRangeSource extends InternalUrlSource {
       wake = null;
       resolve?.();
     };
-    const token = {};
+    const started = this.seeks;
+    const status = () => this.runStatus(worker, started);
+    const token: SlotToken = { status };
     this.slots.wakers.add(notify);
     // A second worker ends the reserve and takes the slot the first worker held back.
     if (++this.workersStarted > 1) this.reserveOpen = false;
-    abortController.signal.addEventListener("abort", notify, { once: true });
+    // A worker abort aborts every range it still holds, so each range reads its own signal.
+    abortController.signal.addEventListener(
+      "abort",
+      () => {
+        for (const range of ranges) range.controller.abort();
+        notify();
+      },
+      { once: true },
+    );
+    let trimmed = false;
+    this.runs.set(worker, {
+      status,
+      trim: () => {
+        worker.targetPos = ParallelRangeSource.owedEnd(
+          worker.currentPos,
+          worker.targetPos,
+          worker.pendingSlices,
+        );
+        trimmed = true;
+        // Ranges that hold no byte a read waits for are aborted now, which frees their slots.
+        for (let i = ranges.length - 1; i >= 0; i--) {
+          const range = ranges[i]!;
+          if (Math.max(range.start, worker.currentPos) < Math.min(range.end, worker.targetPos)) {
+            continue;
+          }
+          range.controller.abort();
+          ranges.splice(i, 1);
+        }
+        // The cut ranges leave no gap: the next range starts where the last kept one ends.
+        nextStart = ranges[ranges.length - 1]?.end ?? worker.currentPos;
+        notify();
+      },
+    });
     const hasRoom = () => ranges.length < MAX_RANGES_PER_WORKER && nextStart < worker.targetPos;
     // A range is wanted while this worker has room and the file size is known.
     // Until then one range per source, in flight, finds the size.
@@ -292,12 +497,13 @@ export class ParallelRangeSource extends InternalUrlSource {
             head,
             stripe,
             chunks: [],
+            controller: new AbortController(),
             done: false,
             failure: null,
           };
           nextStart = range.end;
           ranges.push(range);
-          void this.readRange(range, run, abortController.signal, notify);
+          void this.readRange(range, run, range.controller.signal, notify);
         }
         // A worker with nothing in flight that waits for the file size keeps its place in
         // the queue, so it takes the first free slot once the size is known, ahead of the
@@ -326,6 +532,12 @@ export class ParallelRangeSource extends InternalUrlSource {
           delivered = true;
         }
         if (worker.aborted) continue;
+        // A trimmed run stops once it has delivered what the reads waited for; its `finally`
+        // aborts the rest of any kept range.
+        if (trimmed && worker.currentPos >= worker.targetPos) {
+          orchestrator.signalWorkerStoppedRunning(worker);
+          return;
+        }
         if (first.failure) throw first.failure.error;
         if (first.done) {
           ranges.shift();
@@ -339,6 +551,7 @@ export class ParallelRangeSource extends InternalUrlSource {
       }
     } finally {
       if (ranges.length > 0) abortController.abort();
+      this.runs.delete(worker);
       this.leaveQueue(token);
       this.slots.wakers.delete(notify);
       this.wakeWorkers();
