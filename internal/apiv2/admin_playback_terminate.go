@@ -20,7 +20,7 @@ type AdminPlaybackTerminateService interface {
 type AdminPlaybackTerminateInput struct {
 	SessionID string `path:"session_id" minLength:"1" maxLength:"128"`
 	Body      struct {
-		Reason string `json:"reason,omitempty" maxLength:"1024" doc:"Free-form administrator reason shown to the player when supported"`
+		Reason string `json:"reason,omitempty" maxLength:"1024" doc:"Free-form administrator reason. The player receives it as the realtime command's top-level reason and shows it with the notice for a stop or terminate"`
 	}
 }
 

@@ -607,6 +607,8 @@ export function VideoPlayer({
   tRef.current = t;
   const playerConfig = usePlayerConfig();
   const isDetached = displayMode !== "foreground";
+  const isDetachedRef = useRef(isDetached);
+  isDetachedRef.current = isDetached;
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -5155,6 +5157,20 @@ export function VideoPlayer({
     return () => onPlaybackTransportReady(null);
   }, [onPlaybackTransportReady, skipActions]);
 
+  // A server message renders inside the player only in the foreground, so a
+  // minimized or detached player shows it as a page toast instead.
+  const showServerNotice = useCallback((next: PlaybackNoticeState) => {
+    if (isDetachedRef.current) {
+      const show = next.tone === "warning" ? toast.warning : toast.info;
+      show(next.title ?? next.message, {
+        description: next.title ? next.message : undefined,
+        duration: PLAYBACK_NOTICE_VISIBLE_MS,
+      });
+      return;
+    }
+    setNotice(next);
+  }, []);
+
   const executeRealtimeCommand = useCallback(
     async (command: PlaybackRealtimeCommandEnvelope) => {
       const video = videoRef.current;
@@ -5197,7 +5213,7 @@ export function VideoPlayer({
           return;
         }
         case "display_message":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.title"),
@@ -5208,7 +5224,7 @@ export function VideoPlayer({
           });
           return;
         case "server_restarting":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.restartingTitle"),
@@ -5219,7 +5235,7 @@ export function VideoPlayer({
           });
           return;
         case "server_shutting_down":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.shuttingDownTitle"),
@@ -5252,28 +5268,45 @@ export function VideoPlayer({
           return;
         }
         case "stop":
-        case "terminate":
-          if (command.payload) {
-            const message = readStringPayload(command.payload, "message");
-            if (message) {
-              setNotice({
-                title:
-                  readStringPayload(command.payload, "title") ??
-                  (command.name === "terminate"
-                    ? tRef.current("web.player.serverMessage.endedTitle")
-                    : tRef.current("web.player.serverMessage.stoppingTitle")),
-                message,
-                tone: "warning",
-              });
+        case "terminate": {
+          // The player closes at once, so the notice is a page toast that
+          // stays on the screen the viewer lands on. An administrator's
+          // reason travels in the envelope's top-level reason.
+          const byAdmin = command.issued_by?.kind === "admin";
+          const message =
+            readStringPayload(command.payload, "message") ?? (command.reason?.trim() || undefined);
+          if (byAdmin) {
+            // A later 410 from the same end must not toast a second time.
+            sessionEndedHandledRef.current = true;
+          }
+          if (byAdmin || message) {
+            let fallbackTitle = tRef.current("web.player.session.endedByAdmin");
+            if (!byAdmin) {
+              fallbackTitle =
+                command.name === "terminate"
+                  ? tRef.current("web.player.serverMessage.endedTitle")
+                  : tRef.current("web.player.serverMessage.stoppingTitle");
             }
+            toast.warning(readStringPayload(command.payload, "title") ?? fallbackTitle, {
+              description: message,
+              duration: PLAYBACK_NOTICE_VISIBLE_MS,
+            });
           }
           await handleExit();
           return;
+        }
         default:
           throw new Error("unsupported");
       }
     },
-    [handleExit, handleVolumeChange, onPlanInvalidated, performPlayerSeek, replanPosition],
+    [
+      handleExit,
+      handleVolumeChange,
+      onPlanInvalidated,
+      performPlayerSeek,
+      replanPosition,
+      showServerNotice,
+    ],
   );
 
   const realtime = usePlaybackRealtime({
