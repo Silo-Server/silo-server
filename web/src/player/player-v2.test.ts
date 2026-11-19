@@ -8,7 +8,7 @@ const config: PlayerConfig = {
   apiBaseUrl: "/api/v2",
   getAccessToken: () => "token-1",
   getProfileId: () => "profile-1",
-  getDeviceId: () => "web-player-device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "web-player-device" }),
 };
 
 afterEach(() => {

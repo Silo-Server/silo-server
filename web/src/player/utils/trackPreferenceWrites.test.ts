@@ -16,7 +16,7 @@ function playerConfig(profile: { id: string }): PlayerConfig {
     apiBaseUrl: "/api/v2",
     getAccessToken: () => "token",
     getProfileId: () => profile.id,
-    getDeviceId: () => "device",
+    getDeviceHeaders: () => ({ "X-Silo-Device-Id": "device" }),
   };
 }
 
