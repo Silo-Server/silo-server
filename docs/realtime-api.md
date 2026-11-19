@@ -204,7 +204,9 @@ the old ID and `added` for the new one. The events carry ids only. A consumer
 fetches the named items with the listing's `content_ids` filter (up to 200 per
 request) and treats an id the listing no longer returns as gone. Turning a
 library off or on sends no per-item changes; it changes `library_ids` and which
-items the listing returns, so re-list after a `catalog.library.changed`. Metadata
+items the listing returns, so re-list after the `catalog.library.changed` it
+sends administrators, whose `reason` is `library_disabled` or `library_enabled`
+and whose counts are zero. Metadata
 edits arrive as `metadata_updated`, which names the item but not what changed. A
 few repairs send nothing, such as merging duplicate series, which moves their
 episodes to the surviving series; a mirror that must not drift re-lists
