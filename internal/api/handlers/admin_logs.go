@@ -227,8 +227,11 @@ func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return
 	}
-	defer conn.Close()
-	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	// The v2 handshake's recheck and lifetime end the request context with a
+	// cause the closer turns into a close frame; the bridge's has none.
+	closer := newSocketCloser(conn)
+	defer func() { closer.close(context.Cause(r.Context())) }()
+	stopClose := closer.closeWhenDone(r.Context())
 	defer stopClose()
 
 	events, unsubscribe := h.streamHub.Subscribe(func(msg logstream.Message) bool {
