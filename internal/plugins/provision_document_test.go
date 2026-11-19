@@ -124,6 +124,12 @@ func TestProvisionDocumentHostIntegersAndPluginNumbers(t *testing.T) {
 			}
 		}
 	}
+	const exactYAML = "apiVersion: 1\nplugins:\n  silo.auth.oidc:\n    config:\n      connection:\n        seconds: 1000000000000000128.0"
+	exact, err := parseProvisionDocument([]byte(exactYAML), true)
+	if err != nil || exact.Plugins["silo.auth.oidc"].Config[key]["seconds"] != json.Number("1000000000000000128") {
+		t.Fatalf("exact YAML integer was lost during conversion: %v", err)
+	}
+
 	if _, err := parseProvisionDocument([]byte("apiVersion: 1\nplugins:\n  silo.auth.oidc:\n    config:\n      connection:\n        seconds: 9007199254740993.0"), true); err == nil {
 		t.Fatal("YAML rounded the number before validation")
 	}

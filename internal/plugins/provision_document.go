@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"math/big"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -193,7 +196,7 @@ func provisionYAMLToJSON(data []byte) ([]byte, error) {
 	if !provisionJSONValue(document) {
 		return nil, errors.New("plugin provisioning requires JSON-compatible YAML with string mapping keys")
 	}
-	encoded, err := json.Marshal(document)
+	encoded, err := jsonv2.Marshal(document, jsonv2.WithMarshalers(provisionYAMLFloat))
 	if err != nil {
 		return nil, errors.New("plugin provisioning requires finite JSON numbers and UTF-8 strings")
 	}
@@ -202,6 +205,15 @@ func provisionYAMLToJSON(data []byte) ([]byte, error) {
 	}
 	return encoded, nil
 }
+
+// The shortest decimal for an integral float can name a different integer
+// that rounds to the same float. Preserve its exact integer through JSON.
+var provisionYAMLFloat = jsonv2.MarshalFunc(func(value float64) ([]byte, error) {
+	if value == math.Trunc(value) && !math.IsInf(value, 0) {
+		return strconv.AppendFloat(nil, value, 'f', 0, 64), nil
+	}
+	return json.Marshal(value)
+})
 
 func checkProvisionYAMLNumbers(node *yaml.Node) error {
 	if node.Kind == yaml.ScalarNode && node.ShortTag() == "!!float" &&
