@@ -257,3 +257,23 @@ func TestItemPosterDoesNotRedirectToSchemeRelativeAnswer(t *testing.T) {
 	h := NewHandler(Dependencies{ItemPosters: posters, ItemPosterSource: source, RemotePosters: &posterFetcherFake{}})
 	requireProblem(t, do(t, h, http.MethodGet, posters.Link("movie-plugin", time.Now()), "", nil), TypeNotFound)
 }
+
+// A plugin call in flight holds a place in the memo, so concurrent first
+// requests for distinct posters cannot start more calls than it has room for.
+func TestPosterResolveMemoCountsCallsInFlight(t *testing.T) {
+	var memo posterResolveMemo
+	now := time.Now()
+	if _, ok, busy := memo.reserve("tmdb://poster/first", now); ok || busy {
+		t.Fatalf("first reservation: ok=%v busy=%v, want a place", ok, busy)
+	}
+	for i := range itemPosterResolveMax - 1 {
+		memo.put("tmdb://poster/"+strconv.Itoa(i), "https://images.example/"+strconv.Itoa(i), now)
+	}
+	if _, ok, busy := memo.reserve("tmdb://poster/second", now); ok || !busy {
+		t.Fatalf("reservation with the memo full of answers and calls: ok=%v busy=%v, want busy", ok, busy)
+	}
+	memo.release()
+	if _, ok, busy := memo.reserve("tmdb://poster/second", now); ok || busy {
+		t.Fatalf("reservation after the call finished: ok=%v busy=%v, want a place", ok, busy)
+	}
+}

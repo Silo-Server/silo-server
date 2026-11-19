@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -75,14 +76,19 @@ type itemPosterHandler struct {
 	fetcher  RemotePosterFetcher
 	enqueued posterEnqueueMemo
 	resolved posterResolveMemo
+	// resolving shares one plugin call among requests for one poster path.
+	resolving singleflight.Group
 }
 
 // posterResolveMemo keeps what plugins answered for poster paths, by path.
 // Like posterEnqueueMemo it starts no goroutine and never forgets a live
 // entry to make room: a full memo refuses new paths until entries expire.
 type posterResolveMemo struct {
-	mu          sync.Mutex
-	urls        map[string]posterResolution
+	mu   sync.Mutex
+	urls map[string]posterResolution
+	// pending counts plugin calls whose answers are not stored yet; each
+	// holds a place so the calls in flight cannot overfill the memo.
+	pending     int
 	firstExpiry time.Time
 }
 
@@ -100,13 +106,36 @@ type posterResolution struct {
 func (m *posterResolveMemo) get(path string, now time.Time) (url string, ok, busy bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.lookup(path, now)
+}
+
+// reserve is get for a caller about to ask the plugin: on a miss with room it
+// also holds a place for the answer, which the caller gives back with release.
+func (m *posterResolveMemo) reserve(path string, now time.Time) (url string, ok, busy bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	url, ok, busy = m.lookup(path, now)
+	if !ok && !busy {
+		m.pending++
+	}
+	return url, ok, busy
+}
+
+func (m *posterResolveMemo) release() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending--
+}
+
+// lookup is get's body. The caller holds m.mu.
+func (m *posterResolveMemo) lookup(path string, now time.Time) (url string, ok, busy bool) {
 	if entry, found := m.urls[path]; found && now.Before(entry.until) {
 		if entry.busy {
 			return "", false, true
 		}
 		return entry.url, true, false
 	}
-	if len(m.urls) < itemPosterResolveMax {
+	if len(m.urls)+m.pending < itemPosterResolveMax {
 		return "", false, false
 	}
 	if now.Before(m.firstExpiry) {
@@ -122,7 +151,7 @@ func (m *posterResolveMemo) get(path string, now time.Time) (url string, ok, bus
 			m.firstExpiry = entry.until
 		}
 	}
-	return "", false, len(m.urls) >= itemPosterResolveMax
+	return "", false, len(m.urls)+m.pending >= itemPosterResolveMax
 }
 
 func (m *posterResolveMemo) put(path, url string, now time.Time) {
@@ -327,22 +356,11 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 	// The answer is reused for itemPosterResolveMemo, failures included, so a
 	// link cannot make the plugin work on every request.
 	resolved, known, busy := h.resolved.get(posterPath, time.Now())
-	switch {
-	case busy:
+	if !known && !busy {
+		resolved, busy = h.askPlugin(ctx, posterPath)
+	}
+	if busy {
 		return "", false, false, errPosterResolveBusy
-	case !known:
-		// Keep the plugin's answer for the next request even if this client leaves.
-		resolveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), itemPosterResolveTimeout)
-		defer cancel()
-		resolved = h.posters.Presign(resolveCtx, posterPath)
-		// A plugin that ran out of time gave no answer. Keeping the empty
-		// result for the whole memo would hide a poster the plugin can still
-		// resolve, so the path answers busy for a short while instead.
-		if resolveCtx.Err() != nil {
-			h.resolved.putBusy(posterPath, time.Now())
-			return "", false, false, errPosterResolveBusy
-		}
-		h.resolved.put(posterPath, resolved, time.Now())
 	}
 	switch {
 	// One leading slash is a path on this server; "//host/..." is another
@@ -354,6 +372,41 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 	default:
 		return "", false, false, nil
 	}
+}
+
+// askPlugin resolves a plugin poster path that has no remembered answer.
+// Requests for one path share one call, and a call starts only while the memo
+// has room for its answer, so neither the plugin calls in flight nor the
+// answers kept can pass itemPosterResolveMax. The call runs apart from the
+// request, so its answer is kept for the next request even when this client
+// leaves.
+func (h *itemPosterHandler) askPlugin(ctx context.Context, posterPath string) (resolved string, busy bool) {
+	type answer struct {
+		url  string
+		busy bool
+	}
+	value, _, _ := h.resolving.Do(posterPath, func() (any, error) {
+		// A request that missed the memo just before the previous call
+		// stored its answer lands here after it.
+		if url, known, busy := h.resolved.reserve(posterPath, time.Now()); known || busy {
+			return answer{url: url, busy: busy}, nil
+		}
+		defer h.resolved.release()
+		resolveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), itemPosterResolveTimeout)
+		defer cancel()
+		url := h.posters.Presign(resolveCtx, posterPath)
+		// A plugin that ran out of time gave no answer. Keeping the empty
+		// result for the whole memo would hide a poster the plugin can still
+		// resolve, so the path answers busy for a short while instead.
+		if resolveCtx.Err() != nil {
+			h.resolved.putBusy(posterPath, time.Now())
+			return answer{busy: true}, nil
+		}
+		h.resolved.put(posterPath, url, time.Now())
+		return answer{url: url}, nil
+	})
+	got, _ := value.(answer)
+	return got.url, got.busy
 }
 
 // redirect answers with the stored object's URL. The redirect itself is not
