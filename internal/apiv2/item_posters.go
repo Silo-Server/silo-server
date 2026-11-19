@@ -308,7 +308,12 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 		return "", false, false, errPosterResolveBusy
 	case !known:
 		resolved = h.posters.Presign(ctx, posterPath)
-		h.resolved.put(posterPath, resolved, time.Now())
+		// A request that left mid-call gets an empty answer that says
+		// nothing about the plugin; keeping it would hide the poster from
+		// the requests that follow.
+		if ctx.Err() == nil {
+			h.resolved.put(posterPath, resolved, time.Now())
+		}
 	}
 	switch {
 	case strings.HasPrefix(resolved, "/"):
