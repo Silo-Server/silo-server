@@ -138,6 +138,17 @@ func TestHoldLingeringCountsOnlyDeliveredRequests(t *testing.T) {
 		t.Fatalf("after a probe outlived a range that delivered media: ActiveCount = %d, record exists = %t, want 1 and a record", got, redisStub.exists(key))
 	}
 
+	// Remove ends a session outright. The lingering release writes its record
+	// outside the lock, so a Remove that lands first must not be undone by it.
+	tracker.Remove(ctx, info.SessionID)
+	last := tracker.HoldLingering(ctx, info)
+	redisStub.beforeNextSet(func() { tracker.Remove(ctx, info.SessionID) })
+	last(ctx, true)
+	if got := tracker.ActiveCount(); got != 0 || redisStub.exists(key) {
+		t.Fatalf("after Remove raced a lingering release: ActiveCount = %d, record exists = %t, want 0 and none", got, redisStub.exists(key))
+	}
+	tracker.HoldLingering(ctx, info)(ctx, true)
+
 	// A replan to remux on the same node keeps the session ID. When the remux
 	// ends, the direct play's linger must not come back.
 	tracker.Hold(ctx, SessionInfo{SessionID: info.SessionID, Type: "remux"})(ctx)
