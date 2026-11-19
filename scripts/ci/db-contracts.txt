@@ -568,6 +568,7 @@
 ./internal/notifications TestPluginDestinationSendRereadsTheDestinationDB
 ./internal/notifications TestPluginDestinationNULMessageIsStoredDB
 ./internal/notifications TestPluginDestinationAttemptAgeCapDB
+./internal/notifications TestPluginDestinationPurgeWaitsForADeliveryDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess

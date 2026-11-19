@@ -295,23 +295,30 @@ func (r *PluginDestinationRepository) DeleteGuarded(ctx context.Context, userID 
 	return tx.Commit(ctx)
 }
 
-// DeleteAllForProfile removes a deleted account profile's destinations. It
-// locks them in id order first, the order a delivery's enqueue locks them,
-// so a purge and a concurrent enqueue for the profile can't deadlock.
+// DeleteAllForProfile removes a deleted account profile's destinations (see
+// deleteProfileTargetsInOrder for the locking).
 func (r *PluginDestinationRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	return deleteProfileTargetsInOrder(ctx, r.pool, "notification_plugin_destinations", userID, profileID)
 }
 
 // deleteProfileTargetsInOrder deletes an account profile's rows of a
-// delivery target table after locking them in id order (see
-// enqueueAttemptsForLiveTargets). The table name is a constant of the
-// callers.
+// delivery target table. The table name is a constant of the callers.
+//
+// It first takes the profile's inbox lock. Every transaction that enqueues
+// attempts for a profile's targets holds that lock already (BulkInsert takes
+// it before the enqueues, and a fanout takes the locks of all its recipients
+// at once), so a purge waits for a whole delivery transaction instead of
+// interleaving its row locks with the several enqueue calls one transaction
+// makes, which can deadlock whatever order each call locks in.
 func deleteProfileTargetsInOrder(ctx context.Context, pool *pgxpool.Pool, table string, userID int, profileID string) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := lockInboxProfiles(ctx, tx, []string{profileID}); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM `+table+` WHERE user_id = $1 AND profile_id = $2 ORDER BY id FOR UPDATE`, userID, profileID); err != nil {
 		return err
 	}
@@ -401,9 +408,10 @@ func (r *PluginDestinationRepository) EnqueueAttempts(ctx context.Context, tx pg
 // enqueueAttemptsForLiveTargets inserts pending attempts into an outbox
 // table for the targets that still exist, key-share locking them until the
 // transaction ends (see PluginDestinationRepository.EnqueueAttempts), and
-// returns the delivery IDs it inserted an attempt for. The targets are
-// locked in id order, the order a profile purge locks them, so the two
-// can't deadlock. The table and column names are constants of the callers.
+// returns the delivery IDs it inserted an attempt for. The caller holds the
+// recipients' inbox locks, which a profile purge takes before it locks the
+// profile's targets (see deleteProfileTargetsInOrder). The table and column
+// names are constants of the callers.
 func enqueueAttemptsForLiveTargets(ctx context.Context, tx pgx.Tx, table, targetColumn, targetTable string, attempts []DeliveryAttempt) (map[string]bool, error) {
 	if len(attempts) == 0 {
 		return nil, nil

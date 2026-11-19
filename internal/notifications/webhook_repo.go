@@ -194,10 +194,8 @@ func (r *WebhookRepository) Delete(ctx context.Context, userID int, profileID, i
 	return err
 }
 
-// DeleteAllForProfile removes a deleted account profile's webhooks.
-//
-// The webhooks are locked in id order first, as a delivery's enqueue locks
-// them, so a purge and a concurrent enqueue can't deadlock.
+// DeleteAllForProfile removes a deleted account profile's webhooks (see
+// deleteProfileTargetsInOrder for the locking).
 func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	return deleteProfileTargetsInOrder(ctx, r.pool, "notification_webhooks", userID, profileID)
 }

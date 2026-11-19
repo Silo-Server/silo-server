@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -256,5 +257,67 @@ func TestPluginDestinationAttemptAgeCapDB(t *testing.T) {
 	got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID)
 	if outcome != WebhookOutcomeFailed || len(host.sent) != 0 || !got.Enabled || got.ConsecutiveFailures != 0 {
 		t.Fatalf("aged attempt: outcome %s, %d sends, destination %+v; want failed, unsent, the destination untouched", outcome, len(host.sent), got)
+	}
+}
+
+// One delivery transaction enqueues for a profile's destinations in several
+// calls, so it can lock them in any order. A profile purge takes the
+// profile's inbox lock first and waits for the whole transaction instead of
+// deadlocking with it, and then leaves nothing of the profile behind.
+func TestPluginDestinationPurgeWaitsForADeliveryDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	service, sender := newTestPluginDestinationService(t, pool, &scriptedChannelHost{})
+	var ids []string
+	for _, name := range []string{"Phone", "Tablet"} {
+		d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
+			Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
+			Settings: map[string]any{"topic": "alerts"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, d.ID)
+	}
+	slices.Sort(ids)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	inserted, err := NewDeliveryRepository(pool).BulkInsert(ctx, tx, []Delivery{{
+		ID: "delivery-purge", UserID: accountA, ProfileID: sharedID,
+		Type: DeliveryTypeRequestApproved, ReasonFlags: []byte(`{"title":"Heat"}`),
+	}})
+	if err != nil || len(inserted) != 1 {
+		t.Fatalf("insert delivery: %v, %d rows", err, len(inserted))
+	}
+	enqueue := func(target string) {
+		t.Helper()
+		if _, err := sender.repo.EnqueueAttempts(ctx, tx, []DeliveryAttempt{{ID: "attempt-" + target, NotificationDeliveryID: "delivery-purge", TargetID: target}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The later destination first, then the purge, then the earlier one: the
+	// order that deadlocked when the purge locked only the destinations.
+	enqueue(ids[1])
+	purged := make(chan error, 1)
+	go func() { purged <- sender.repo.DeleteAllForProfile(ctx, accountA, sharedID) }()
+	waitForLockWait(t, pool)
+	enqueue(ids[0])
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-purged; err != nil {
+		t.Fatalf("purge alongside a delivery: %v", err)
+	}
+	var destinations, attempts int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM notification_plugin_destinations),
+		(SELECT count(*) FROM plugin_destination_delivery_attempts)`).Scan(&destinations, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if destinations != 0 || attempts != 0 {
+		t.Fatalf("after the purge: %d destinations, %d attempts; want none", destinations, attempts)
 	}
 }

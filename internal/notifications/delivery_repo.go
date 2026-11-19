@@ -170,6 +170,10 @@ func (r *DeliveryRepository) HasRequestFulfilled(ctx context.Context, userID int
 // complete recipient union first. The insert trigger then assigns timestamps
 // strictly above the preceding committed delivery for each profile.
 func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) error {
+	return lockInboxProfiles(ctx, tx, profileIDs)
+}
+
+func lockInboxProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) error {
 	profiles := slices.Clone(profileIDs)
 	slices.Sort(profiles)
 	for _, profile := range slices.Compact(profiles) {
