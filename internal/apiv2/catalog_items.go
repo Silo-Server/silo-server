@@ -627,6 +627,7 @@ func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
 	registerCatalogLetters(reg)
 	registerCatalogBoxSets(reg)
+	registerCatalogItemCollections(reg)
 	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	// Browsing, audiobook groups and the query form answer 501

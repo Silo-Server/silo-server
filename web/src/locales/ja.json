@@ -96362,6 +96362,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "収録コレクション"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

@@ -105106,6 +105106,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Şu koleksiyonlarda da var"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

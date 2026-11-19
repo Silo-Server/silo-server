@@ -1770,7 +1770,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminCatalogItemsFixtureCases()...)
 	cases = append(cases, adminCatalogMatchHintsFixtureCases()...)
 	cases = append(cases, deviceLoginBindingFixtureCases()...)
-	return append(cases, adminDashboardLayoutFixtureCases()...)
+	cases = append(cases, adminDashboardLayoutFixtureCases()...)
+	return append(cases, catalogItemCollectionsFixtureCases()...)
 }
 
 // deviceLoginBindingFixtureCases pin the session binding a device-login
@@ -2134,6 +2135,7 @@ func fixtureDeps() Dependencies {
 	sharedCollection.ID, sharedCollection.ProfileID, sharedCollection.CreatorProfileID, sharedCollection.Name, sharedCollection.IsShared = "c2", "p-primary", "p-primary", "Family night", true
 	deps.PersonalCollections = &fixturePersonalCollections{fakePersonalCollections: fakePersonalCollections{list: handlers.PersonalCollectionListView{Collections: []handlers.PersonalCollectionView{fixtureCollectionView(), sharedCollection}, Groups: []handlers.CollectionGroupView{}}, holding: map[string]bool{"c1": true}, features: userstore.CollectionFeatures{Description: true}}, previewCollections: previewCollections{view: fixturePreviewView()}}
 	deps.CollectionImports = &fakeCollectionImports{configured: true}
+	deps.ItemCollections = fixtureItemCollections{}
 	deps, _ = withLibraryAdmin(deps)
 	deps.LibraryMonitoring = &fakeLibraryMonitoring{snap: librarymonitor.StatusSnapshot{
 		ServerEnabled: true,

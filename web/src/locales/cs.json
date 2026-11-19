@@ -126280,6 +126280,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Také v kolekcích"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

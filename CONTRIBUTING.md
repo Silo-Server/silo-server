@@ -116,8 +116,9 @@ code: architecture, invariants, API contracts, and development setup. Guides
 for installing, configuring, operating, or troubleshooting Silo belong in the
 [user manual](https://siloserver.org/docs), which lives in
 [Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org).
-This repository does not accept operator or user guides; open those pull
-requests against the website repository instead.
+This repository does not accept operator or user guides. To ask for a new
+guide or a fix to an existing one, open a docs issue in the website repository
+(see [Update the user manual](#update-the-user-manual)).
 
 Choose the repository that owns the behavior before implementation begins.
 This repository owns the backend, web app, native API, Jellyfin compatibility,
@@ -371,9 +372,15 @@ private infrastructure. Never claim a check passed or ran on a target it did not
 The user manual and feature pages on [siloserver.org](https://siloserver.org)
 live in a separate repository,
 [Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org),
-and nothing updates them automatically. To write or fix a guide, open a pull
-request there. When a code change here leaves the site wrong or incomplete,
-open an issue there.
+and nothing updates them automatically. To report a guide that is wrong,
+missing, or out of date, open a docs issue there instead of a pull request:
+select **Suggest a change** at the bottom of the page, or use the
+[Suggest a docs change](https://github.com/Silo-Server/siloserver.org/issues/new?template=docs.yml)
+form. For a guide that doesn't exist yet, give the closest page under
+**Page**, as [Improve these docs](https://siloserver.org/docs/improve-the-docs)
+describes. Contributors don't open pull requests in that repository;
+maintainers make the change from the issue. When a code change here leaves the
+site wrong or incomplete, open a docs issue there as well.
 
 A change needs a docs issue when it:
 

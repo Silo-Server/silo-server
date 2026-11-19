@@ -275,6 +275,50 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("read archive %q: %w", req.ArchivePath, err)
 	}
+	return s.installArchive(ctx, data, req, func(pluginID string) (*Installation, error) {
+		return s.existingInstallationByPluginID(ctx, pluginID)
+	})
+}
+
+// InstallRemote installs the archive at req.ArchiveURL, replacing the
+// plugin's installation when it already has one.
+func (s *Service) InstallRemote(ctx context.Context, req InstallArchiveRequest) (*InstallResult, error) {
+	if req.ArchiveURL == "" {
+		return nil, errors.New("archive url is required")
+	}
+	// The plugin is known only once its archive is downloaded, so read every
+	// installation first, as installCatalog reads its plugin's: another
+	// install of the plugin that lands during the download then refuses this
+	// one rather than being replaced by it.
+	var before []*Installation
+	if s.installations != nil {
+		var err error
+		if before, err = s.installations.List(ctx); err != nil {
+			return nil, err
+		}
+	}
+	data, err := s.installer.downloadArchive(ctx, req.ArchiveURL)
+	if err != nil {
+		return nil, err
+	}
+	return s.installArchive(ctx, data, req, func(pluginID string) (*Installation, error) {
+		var existing *Installation
+		for _, installation := range before {
+			if installation.PluginID != pluginID {
+				continue
+			}
+			if existing != nil {
+				return nil, fmt.Errorf("multiple existing installations found for plugin %q", pluginID)
+			}
+			existing = installation
+		}
+		return existing, nil
+	})
+}
+
+// installArchive installs an archive package as a new installation of its
+// plugin, or as a replacement for the installation existingFor returns.
+func (s *Service) installArchive(ctx context.Context, data []byte, req InstallArchiveRequest, existingFor func(pluginID string) (*Installation, error)) (*InstallResult, error) {
 	// Refuse a package the installer would refuse before an installed copy
 	// is stopped to replace it.
 	_, _, manifest, err := openInstallArchive(data, req)
@@ -282,7 +326,7 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 		return nil, err
 	}
 
-	existing, err := s.existingInstallationByPluginID(ctx, manifest.GetPluginId())
+	existing, err := existingFor(manifest.GetPluginId())
 	if err != nil {
 		return nil, err
 	}
@@ -295,18 +339,15 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 				return prepared.Apply(ctx)
 			})
 		}
+		if errors.Is(err, ErrInstallationNotFound) {
+			// The installation this install replaces was uninstalled since it
+			// was read: the request conflicts with that change, as when another
+			// install replaced it.
+			err = ErrInstallationChanged
+		}
 	} else {
-		result, err = s.installer.InstallLocal(ctx, req)
+		result, err = s.installer.installArchive(ctx, data, req)
 	}
-	if err != nil {
-		return nil, err
-	}
-	s.OnLifecycleChange(ctx)
-	return result, nil
-}
-
-func (s *Service) InstallRemote(ctx context.Context, req InstallArchiveRequest) (*InstallResult, error) {
-	result, err := s.installer.InstallRemote(ctx, req)
 	if err != nil {
 		return nil, err
 	}

@@ -116330,6 +116330,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Apare și în"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

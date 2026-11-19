@@ -97554,6 +97554,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "也收錄於"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

@@ -902,6 +902,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var catalogResourceHandler *handlers.CatalogResourceHandler
 	var catalogHandler *handlers.CatalogHandler
 	var catalogResolver *catalog.CatalogResolver
+	var itemCollections *handlers.ItemCollections
 	var shuffleService *shuffle.Service
 	var literaryWorkHandler *handlers.LiteraryWorkHandler
 	var peopleHandler *handlers.PeopleHandler
@@ -2350,7 +2351,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.PersonalCollages = personalCollages
 		libraryCollectionHandler.PersonalMemberCounts = personalMemberCounts
 		libraryCollectionHandler.EventsHub = deps.EventsHub
-		sectionFetcher.CollectionCards = &handlers.CollectionRowCards{Library: libraryCollectionHandler, Personal: collectionHandler}
+		collectionRowCards := &handlers.CollectionRowCards{Library: libraryCollectionHandler, Personal: collectionHandler}
+		sectionFetcher.CollectionCards = collectionRowCards
+		itemCollections = &handlers.ItemCollections{Cards: collectionRowCards, Items: itemRepo}
+		if catalogResolver != nil {
+			itemCollections.BoxSets = catalogResolver
+		}
+		if catalogHandler != nil {
+			itemCollections.Browser = catalogHandler
+		}
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		libraryCollectionHandler.CollectionRowRenamer = collectionRowRenamer
 		if deps.FolderRepo != nil {
@@ -3014,7 +3023,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 	}
 	if deps.EventsHub != nil {
-		events := handlers.NewEventsHandler(deps.EventsHub, adminJobsHandler, adminHandler, deps.TaskManager, deps.ScanRegistry, deps.LibraryScanQueue, historyImportSvc)
+		events := handlers.NewEventsHandler(deps.EventsHub, adminJobsHandler, deps.TaskManager, deps.ScanRegistry, deps.LibraryScanQueue, historyImportSvc)
 		events.SetNotificationsSystem(deps.Notifications)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
@@ -3286,6 +3295,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if catalogHandler != nil {
 		v2deps.CatalogBrowse = catalogHandler
 		v2deps.BoxSets = catalogHandler
+	}
+	if itemCollections != nil {
+		v2deps.ItemCollections = itemCollections
 	}
 	if catalogResourceHandler != nil {
 		v2deps.CatalogItems = catalogResourceHandler

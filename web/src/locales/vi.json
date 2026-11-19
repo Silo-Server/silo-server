@@ -106610,6 +106610,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Cũng có trong"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

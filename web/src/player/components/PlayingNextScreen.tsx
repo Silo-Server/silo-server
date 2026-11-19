@@ -6,6 +6,7 @@ import { isStillWatchingGated } from "../stillWatching";
 import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
@@ -71,13 +72,19 @@ function PlayingNextContent({
   // -- Auto-play setting --
   // Shared with Settings → Playback: both surfaces edit the same profile row,
   // so a choice made here is the one that screen shows and vice versa.
-  const { enabled: autoplaySetting, setEnabled: setAutoplay } = useAutoPlayNextSetting();
-  // Past the still-watching limit the card stays up without a countdown.
-  const autoplay = autoplaySetting && !isStillWatchingGated();
+  const {
+    enabled: autoplaySetting,
+    isLoading: autoplayLoading,
+    setEnabled: setAutoplay,
+  } = useAutoPlayNextSetting();
+  // Past the still-watching limit the card stays up without a countdown. With
+  // At end the card can open before the setting has loaded, and the default
+  // (on) must not start a countdown for a viewer who turned auto-play off.
+  const autoplay = autoplaySetting && !autoplayLoading && !isStillWatchingGated();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
 
   const toggleAutoplay = useCallback(() => {
-    void setAutoplay(!autoplaySetting);
+    setAutoplay(!autoplaySetting).catch(reportOfflineSettingFailure);
   }, [autoplaySetting, setAutoplay]);
 
   // -- Countdown (only starts after video has ended) --

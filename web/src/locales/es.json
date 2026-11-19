@@ -116000,6 +116000,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "También en"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,

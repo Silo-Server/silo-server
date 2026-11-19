@@ -105628,6 +105628,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "इन कलेक्शन में भी"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,
