@@ -393,8 +393,15 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, attemptI
 // login sessions that have ended. Their pushes already stopped at
 // pushDeviceLoginLive. An installation's ordering record stays: a later sign-in
 // registers at a newer generation.
+//
+// The retention sweeps skip a registration another transaction holds, such
+// as a delivery that key-share locked it in EnqueuePushAttempts, and take it
+// on the next sweep: waiting on rows in scan order while that delivery waits
+// on them in id order would deadlock.
 func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE NOT `+pushDeviceLoginLive)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE id IN (
+		SELECT id FROM push_devices WHERE NOT `+pushDeviceLoginLive+`
+		FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
 		return 0, fmt.Errorf("delete registrations of ended logins: %w", err)
 	}
@@ -412,7 +419,8 @@ func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context
 // docs/notifications-push-api.md lists what it misses.
 func (r *PushDeviceRepository) DeleteRegistrationsWithNoLogin(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM push_devices d
+		DELETE FROM push_devices WHERE id IN (
+		SELECT d.id FROM push_devices d
 		WHERE d.login_session_id IS NULL
 		  -- An API key registers with no session, and it has no revoked state.
 		  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = d.user_id)
@@ -434,7 +442,8 @@ func (r *PushDeviceRepository) DeleteRegistrationsWithNoLogin(ctx context.Contex
 		                   AND COALESCE(s.revoked_at, s.expires_at) >= d.last_seen_at)
 		     AND NOT EXISTS (SELECT 1 FROM auth_sessions s
 		                     WHERE s.user_id = d.user_id AND s.device_id IS NULL AND `+authSessionLive+`))
-		  )`, PushPlatformApple)
+		  )
+		FOR UPDATE OF d SKIP LOCKED)`, PushPlatformApple)
 	if err != nil {
 		return 0, fmt.Errorf("delete registrations with no login: %w", err)
 	}

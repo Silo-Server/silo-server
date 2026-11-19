@@ -230,8 +230,15 @@ func (r *WebPushRepository) DeleteAllForProfile(ctx context.Context, userID int,
 // DeleteEndedLoginSubscriptions removes the subscriptions, keys included, of
 // login sessions that have ended. Their pushes already stopped at
 // webPushLoginLive. The attempts cascade.
+//
+// The retention sweeps skip a subscription another transaction holds, such
+// as a delivery that key-share locked it in EnqueueAttempts, and take it on
+// the next sweep: waiting on rows in scan order while that delivery waits on
+// them in id order would deadlock.
 func (r *WebPushRepository) DeleteEndedLoginSubscriptions(ctx context.Context) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM web_push_subscriptions WHERE NOT `+webPushLoginLive)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM web_push_subscriptions WHERE id IN (
+		SELECT id FROM web_push_subscriptions WHERE NOT `+webPushLoginLive+`
+		FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
 		return 0, fmt.Errorf("delete web push subscriptions of ended logins: %w", err)
 	}
@@ -247,12 +254,14 @@ func (r *WebPushRepository) DeleteEndedLoginSubscriptions(ctx context.Context) (
 // registered on a login; turning push on again in Settings does.
 func (r *WebPushRepository) DeleteSubscriptionsWithNoLogin(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM web_push_subscriptions w
+		DELETE FROM web_push_subscriptions WHERE id IN (
+		SELECT w.id FROM web_push_subscriptions w
 		WHERE w.login_session_id IS NULL
 		  -- An API key registers with no session, and it has no revoked state.
 		  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = w.user_id)
 		  -- A full restore leaves auth_sessions empty, so this covers its rows too.
-		  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = w.user_id AND `+authSessionLive+`)`)
+		  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = w.user_id AND `+authSessionLive+`)
+		FOR UPDATE OF w SKIP LOCKED)`)
 	if err != nil {
 		return 0, fmt.Errorf("delete web push subscriptions with no login: %w", err)
 	}
