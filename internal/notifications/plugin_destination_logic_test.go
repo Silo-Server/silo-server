@@ -282,10 +282,12 @@ func TestRedactPluginText(t *testing.T) {
 		t.Fatalf("redactPluginText() = %q, want public values kept", got)
 	}
 
-	// A provider can quote a credential encoded. A value too short for its
-	// encodings to be telling ("4321") is masked only as written.
-	secret := "tk_live_123/+?"
+	// A provider can quote a credential encoded, stray space included, or
+	// trimmed. A value too short for its encodings to be telling ("4321") is
+	// masked only as written.
+	secret := " tk_live_123/+? "
 	for _, encoded := range []string{
+		strings.TrimSpace(secret),
 		base64.StdEncoding.EncodeToString([]byte(secret)), base64.RawStdEncoding.EncodeToString([]byte(secret)),
 		base64.URLEncoding.EncodeToString([]byte(secret)), base64.RawURLEncoding.EncodeToString([]byte(secret)),
 		url.QueryEscape(secret), url.PathEscape(secret), hex.EncodeToString([]byte(secret)), strings.ToUpper(hex.EncodeToString([]byte(secret))),

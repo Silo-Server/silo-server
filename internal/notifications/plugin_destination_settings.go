@@ -209,15 +209,21 @@ func truncateRunes(text string, limit int) string {
 	return string([]rune(text)[:limit])
 }
 
-// pluginSecretForms is how a secret can appear in text: as written and, when
-// at least minEncodedSecretLen bytes, in the encodings a provider or plugin
-// is likely to quote it in.
+// pluginSecretForms is how a secret can appear in text: as stored, without
+// its surrounding whitespace and, when at least minEncodedSecretLen bytes,
+// the stored bytes in the encodings a provider or plugin is likely to quote
+// them in. A credential pasted with a stray space is sent with it, so its
+// encoded forms carry the space too.
 func pluginSecretForms(secret string) []string {
-	if secret == "" {
+	trimmed := strings.TrimSpace(secret)
+	if trimmed == "" {
 		return nil
 	}
 	forms := []string{secret}
-	if len(secret) < minEncodedSecretLen {
+	if trimmed != secret {
+		forms = append(forms, trimmed)
+	}
+	if len(trimmed) < minEncodedSecretLen {
 		return forms
 	}
 	raw := []byte(secret)
@@ -243,7 +249,7 @@ func pluginSecretForms(secret string) []string {
 func pluginSecretText(value any) string {
 	switch v := value.(type) {
 	case string:
-		return strings.TrimSpace(v)
+		return v
 	case float64:
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	case int64:
