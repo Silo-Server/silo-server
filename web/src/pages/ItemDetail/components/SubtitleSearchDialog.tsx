@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Ear, Loader2, Search } from "lucide-react";
 
 import type { FileVersion, SubtitleResult } from "@/api/types";
+import { readableErrorText } from "@/api/v2/request";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -165,7 +166,7 @@ export default function SubtitleSearchDialog({
     } catch (err) {
       if (controller.signal.aborted) return;
       setResults([]);
-      setSearchError(err instanceof Error ? err.message : t("web.detail.subtitleSearch.failed"));
+      setSearchError(readableErrorText(err, t("web.detail.subtitleSearch.failed")));
     } finally {
       if (!controller.signal.aborted) {
         setSearching(false);

@@ -127,7 +127,7 @@ export function SubtitleUploadForm({
           return;
         }
         setDetectionSource(null);
-        reportError(err instanceof Error ? err.message : t("web.subtitles.upload.detectFailed"));
+        reportError(readableErrorText(err, t("web.subtitles.upload.detectFailed")));
       } finally {
         if (requestId === detectRequestRef.current) {
           setDetectingLanguage(false);
