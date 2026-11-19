@@ -4888,10 +4888,13 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 			CopyVideoMPEGTS:  playback.PlanCopiesVideoAsMPEGTSV3(*result.Plan),
 		})
 	}
+	if result.PlayMethod == playback.PlayTranscode {
+		state.TargetBitrateKbps = result.TargetBitrateKbps
+	}
 	if strings.EqualFold(state.TargetVideoCodec, "copy") {
-		// A copy applies no target resolution. Report none, as a session rebuilt
-		// from its recipe card does, so the field does not change on a restart.
-		state.TargetResolution = ""
+		// A copy applies neither target. Report none, as a session rebuilt from
+		// its recipe card does, so the fields do not change on a restart.
+		state.TargetResolution, state.TargetBitrateKbps = "", 0
 	}
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
 		state.OutputContainer, state.OutputProtocol = playback.OutputContainerFMP4, playback.OutputProtocolHTTP
