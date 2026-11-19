@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
@@ -23,7 +24,12 @@ func TestNotifyPluginUpdateDropsAnOfferForAReplacedReleaseDB(t *testing.T) {
 		t.Fatalf("seed installation: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(t.Context(), `DELETE FROM plugin_installations WHERE id = $1`, id)
+		// t.Context() is canceled by the time cleanup runs.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := pool.Exec(cleanupCtx, `DELETE FROM plugin_installations WHERE id = $1`, id); err != nil {
+			t.Errorf("delete seeded installation: %v", err)
+		}
 	})
 	read, err := store.GetByID(ctx, id)
 	if err != nil {
