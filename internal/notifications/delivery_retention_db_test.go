@@ -46,7 +46,7 @@ func TestPushRetryOutlivesInboxRetentionDB(t *testing.T) {
 			}
 			prefix := channel + "-"
 			// A 429 with Retry-After just under a day, under one day of unread retention.
-			queue(prefix+"scheduled", 25*time.Hour, "retrying", 23*time.Hour)
+			queue(prefix+"scheduled", pluginAttemptMaxAge+time.Hour, "retrying", 23*time.Hour)
 			queue(prefix+"pending", time.Hour, "pending", 0)
 			// Past the age bound and just due: the sweep hasn't claimed it yet.
 			queue(prefix+"due", pluginAttemptMaxAge+time.Hour, "retrying", -time.Minute)
