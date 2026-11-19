@@ -60,6 +60,10 @@ vi.mock("@/hooks/queries/notificationPluginDestinations", async () => ({
             field({ key: "tag", label: "Tag", min_length: 2 }),
             field({ key: "priority", label: "Priority", control: "number", type: "integer" }),
             field({ key: "token", label: "Token", control: "password", secret: true }),
+            // Valid Go RE2 that JavaScript's RegExp reads differently.
+            field({ key: "slug", label: "Slug", pattern: "\\A[a-z]+\\z" }),
+            // A key that names an Object.prototype member.
+            field({ key: "constructor", label: "Server" }),
           ],
         },
       },
@@ -98,7 +102,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("sends settings typed as the form declares, keeps a blank stored secret, and clears with null", () => {
+it("sends only the settings the user changed, typed as the form declares, and clears with null", () => {
   render(<PluginDestinationsSection />);
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Tag"), { target: { value: "" } });
@@ -106,12 +110,42 @@ it("sends settings typed as the form declares, keeps a blank stored secret, and 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(state.update).toHaveBeenCalledOnce();
-  // The stored token isn't sent, so it stays as saved.
-  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({
-    topic: "alerts",
-    tag: null,
-    priority: 4,
-  });
+  // Untouched settings, the stored token among them, aren't sent.
+  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({ tag: null, priority: 4 });
+});
+
+it("sends no settings for a rename", () => {
+  render(<PluginDestinationsSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Tablet" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(state.update).toHaveBeenCalledOnce();
+  expect(state.update.mock.calls[0]?.[0]).toMatchObject({ name: "Tablet" });
+  expect(state.update.mock.calls[0]?.[0]).not.toHaveProperty("settings");
+});
+
+it("leaves pattern checks to the server", () => {
+  render(<PluginDestinationsSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "abc" } });
+
+  const save = screen.getByRole("button", { name: "Save" });
+  expect(save.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(save);
+  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({ slug: "abc" });
+});
+
+it("handles a field keyed like an Object.prototype member", () => {
+  render(<PluginDestinationsSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const server = screen.getByLabelText("Server") as HTMLInputElement;
+  expect(server.value).toBe("");
+  expect(server.disabled).toBe(false);
+  fireEvent.change(server, { target: { value: "ntfy.example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({ constructor: "ntfy.example.test" });
 });
 
 it("deletes with the validator seen when the confirmation opened", () => {
@@ -193,7 +227,14 @@ it("clears a saved optional secret on save, and typing a new value replaces it i
 
   expect(state.update).toHaveBeenCalledOnce();
   expect(state.update.mock.calls[0]?.[0]?.clear_secrets).toEqual(["token"]);
-  expect(state.update.mock.calls[0]?.[0]?.settings).not.toHaveProperty("token");
+  expect(state.update.mock.calls[0]?.[0]).not.toHaveProperty("settings");
+
+  // Typing in another field keeps the clear.
+  state.update.mockReset();
+  fireEvent.change(screen.getByLabelText("Tag"), { target: { value: "movies" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(state.update.mock.calls[0]?.[0]?.clear_secrets).toEqual(["token"]);
+  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({ tag: "movies" });
 
   state.update.mockReset();
   fireEvent.click(screen.getByRole("button", { name: "Keep saved secret" }));

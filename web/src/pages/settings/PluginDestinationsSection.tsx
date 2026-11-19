@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
 import {
   buildSchemaValues,
+  ownValue,
   type BuildSchemaValuesOptions,
   type FieldType,
 } from "@/components/admin/plugins/schemaFormUtils";
@@ -75,7 +76,11 @@ function formControl(field: NotificationPluginSettingsField): PluginAdminFormFie
  * The destination's flat settings form as the shared SchemaForm renders it.
  * A setting the server lists in secretsSet is write-only even when the
  * current form no longer marks it secret: it renders as a password left
- * blank, and blank keeps the stored value, so it isn't required either.
+ * blank, and blank keeps the stored value, so it isn't required either. A
+ * secret select stays a select, so its options aren't lost. Patterns aren't
+ * checked here: the server compiles them as Go RE2, which JavaScript's
+ * RegExp reads differently for some valid patterns, and its field error
+ * shows under the field.
  */
 function destinationForm(
   fields: NotificationPluginSettingsField[],
@@ -85,12 +90,13 @@ function destinationForm(
     fields: fields.map((field) => {
       const stored = secretsSet.includes(field.key);
       const secret = field.secret || stored;
+      const control = formControl(field);
       return {
         key: field.key,
         label: field.label,
         description: field.description,
         placeholder: field.placeholder,
-        control: secret ? "PASSWORD" : formControl(field),
+        control: secret && control !== "SELECT" ? "PASSWORD" : control,
         required: field.required && !stored,
         secret,
         multiline: false,
@@ -106,7 +112,6 @@ function destinationForm(
           min: field.minimum,
           has_max: field.maximum !== undefined,
           max: field.maximum,
-          pattern: field.pattern,
           min_length: field.min_length,
           max_length: field.max_length,
         },
@@ -193,6 +198,9 @@ function DestinationFormDialog({
   const [nameError, setNameError] = useState<string | null>(null);
   // Saved optional secrets the user chose to remove on save.
   const [clearing, setClearing] = useState<Set<string>>(new Set());
+  // The settings the user changed in this dialog, the only ones an update
+  // sends: settings the server couldn't return must not be overwritten.
+  const [edited, setEdited] = useState<Set<string>>(new Set());
   const [settingsValid, setSettingsValid] = useState(true);
   const [reasons, setReasons] = useState<Record<DestinationNotifyKey, boolean>>({
     notify_next_up: destination?.notify_next_up ?? true,
@@ -212,20 +220,22 @@ function DestinationFormDialog({
   const settingsToSend = (options?: BuildSchemaValuesOptions) =>
     form ? buildSchemaValues(form, settings, destinationFieldTypes(fields), options) : settings;
 
-  // An update merges over the stored settings. A stored secret the user
-  // didn't type is left out, so neither a blank nor the field's form default
-  // replaces it. Any other emptied field goes out as null, which removes it
-  // so the plugin falls back to its default; a "" would be checked against
-  // the field's constraints instead.
-  const updatedSettings = () =>
-    Object.fromEntries(
-      Object.entries(settingsToSend({ explicitClears: true }))
-        .filter(
-          ([key]) =>
-            !clearing.has(key) && (!secretsSet.includes(key) || (settings[key] ?? "") !== ""),
-        )
-        .map(([key, value]) => [key, value === "" ? null : value]),
-    );
+  // An update merges over the stored settings and sends only the settings
+  // the user changed, or none at all. A stored secret left blank is left
+  // out, so it stays as saved. Any other emptied field goes out as null,
+  // which removes it so the plugin falls back to its default; a "" would be
+  // checked against the field's constraints instead.
+  const updatedSettings = () => {
+    const changed = Object.entries(settingsToSend({ explicitClears: true }))
+      .filter(
+        ([key]) =>
+          edited.has(key) &&
+          !clearing.has(key) &&
+          (!secretsSet.includes(key) || (ownValue(settings, key) ?? "") !== ""),
+      )
+      .map(([key, value]) => [key, value === "" ? null : value]);
+    return changed.length > 0 ? Object.fromEntries(changed) : undefined;
+  };
 
   const toggleClearing = (key: string) => {
     const next = new Set(clearing);
@@ -260,12 +270,13 @@ function DestinationFormDialog({
         );
     };
     if (editing) {
+      const changedSettings = updatedSettings();
       update.mutate(
         {
           id: destination.id,
           etag: destination.etag,
           name: name.trim(),
-          settings: updatedSettings(),
+          ...(changedSettings ? { settings: changedSettings } : {}),
           ...(clearing.size > 0 ? { clear_secrets: [...clearing] } : {}),
           ...reasons,
         },
@@ -366,8 +377,15 @@ function DestinationFormDialog({
                 values={settings}
                 errors={fieldErrors}
                 onChange={(next) => {
-                  // Typing a new value for a secret replaces it instead.
-                  const typed = [...clearing].filter((key) => (next[key] ?? "") !== "");
+                  const changed = Object.keys(next).filter(
+                    (key) => ownValue(next, key) !== ownValue(settings, key),
+                  );
+                  setEdited(new Set([...edited, ...changed]));
+                  // Typing a new value for a secret being cleared replaces it
+                  // instead; a change to any other field leaves the clear.
+                  const typed = changed.filter(
+                    (key) => clearing.has(key) && (ownValue(next, key) ?? "") !== "",
+                  );
                   if (typed.length > 0)
                     setClearing(new Set([...clearing].filter((key) => !typed.includes(key))));
                   setSettings(next);
