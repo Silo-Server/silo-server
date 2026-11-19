@@ -515,15 +515,18 @@ line, which also counts items past the 10-embed cap.
 ### Generic payload and HMAC signing
 
 Generic webhooks receive canonical Silo JSON: event name, delivery and
-webhook IDs, timestamp, `version`, `test` flag, profile ID, delivery type,
-`reason_flags`, and the series/episode (or request) content blocks.
+webhook IDs, timestamp, `version`, `test` flag, profile ID, library ID (when
+the delivery has one), delivery type, `reason_flags`, and the series/episode
+(or request) content blocks.
 `reason_flags` is `{"next_up": <bool>}`; Next Up is the only reason an
 episode notifies for. A `watchlist.available` payload names the arrived item
 in the series block and the watchlisted title in a `watchlist` block,
 `{"tmdb_id", "media_type"}` (`movie` or `series`; `tmdb_id` is left out when
 the title has none), and its `reason_flags` read `{"next_up": false}`.
 
-Each request is signed with the webhook's per-destination 32-byte secret:
+Each request is signed with the webhook's per-destination signing secret: 32
+random bytes, base64-encoded into the 44-character string the API returns.
+The HMAC key is that string's bytes as returned, not the decoded 32 bytes.
 
 - Headers: `X-Silo-Event`, `X-Silo-Webhook-Id`, `X-Silo-Delivery-Id`,
   `X-Silo-Timestamp` (Unix epoch seconds), and
@@ -552,10 +555,22 @@ Non-retryable 4xx responses (everything except 408, 425, and 429) are
 deterministic destination-side rejections: the attempt fails immediately
 without walking the schedule. Auto-disable on that path requires three
 *consecutive* deliveries to fail with a non-retryable 4xx, because
-destination-side WAF/CDN blips intermittently 4xx valid webhooks. 429 honors
-`Retry-After` when present. Auto-disable posts a `webhook.auto_disabled`
-notice to the profile's inbox — a type that is itself excluded from webhook
-dispatch so a broken webhook cannot loop.
+destination-side WAF/CDN blips intermittently 4xx valid webhooks. The webhook
+row counts that streak (`consecutive_rejections`); a success, re-enabling, or
+a new URL resets it. On a 429, a `Retry-After` header can lengthen the wait
+before the next attempt but never shortens the schedule; other statuses ignore
+it. Auto-disable posts a
+`webhook.auto_disabled` notice to the profile's inbox — a type that is itself
+excluded from webhook dispatch so a broken webhook cannot loop. The disable
+and its notice commit with the attempt's outcome and the streaks, and only
+the worker that turns the webhook off writes the notice.
+
+A claimed attempt carries a 90-second lease. Only the worker that still
+holds the claim records the send's outcome, so a send that outlived its lease
+and was reclaimed counts once. A worker starts a send only with at least 25
+seconds of lease left (up to 10 seconds of artwork resolution, the 10-second
+request, and slack), and retry sweeps claim no more attempts than fit in one
+lease.
 
 Inbox retention keeps a delivery while one of its webhook or plugin
 destination attempts is still pending or retrying: deleting the delivery

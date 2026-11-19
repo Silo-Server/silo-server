@@ -307,7 +307,15 @@ func NewSystem(
 		emailChannelInst.profileName = system.lookupProfileName
 	}
 	if sender != nil {
-		sender.operational = system.DispatchOperational
+		// The notice reaches no webhook (loop guard). Its channel settings
+		// are read before the sender's transaction begins.
+		sender.noticeWriter = func(ctx context.Context) func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+			channels := system.operationalChannels(ctx)
+			return func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+				return system.insertOperational(ctx, tx, notice, OperationalDispatch{}, nil, channels)
+			}
+		}
+		sender.dispatchNotice = system.dispatchOperationalRow
 		sender.posterURL = system.discordPosterURL
 	}
 	system.wirePluginDestinationSender()
