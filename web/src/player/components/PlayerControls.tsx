@@ -422,6 +422,37 @@ export function PlayerControls({
               audioTracks={audioTracks}
               locked={trackMenusLocked}
             />
+            {onAudioSelect &&
+              (audioTracks.length > 0 ||
+                audioInventoryProvisional ||
+                inventoryPending ||
+                inventoryFailed) && (
+                // The narrow layout used to open the audio menu only from the
+                // overflow sheet, so a viewer on a laptop-width window reported
+                // "the player has no audio selector". The same control the wide
+                // rail shows now sits beside captions, with the menu it controls
+                // rendered below (hideTrigger).
+                <button
+                  type="button"
+                  className="player-utility-btn"
+                  aria-label="Audio"
+                  aria-expanded={audioOpen}
+                  aria-haspopup="menu"
+                  aria-disabled={trackMenusLocked || undefined}
+                  disabled={trackMenusLocked}
+                  onClick={(event) => {
+                    // The row sits over the seek/progress surface: a click that
+                    // reached it would seek the playhead instead of opening the
+                    // menu.
+                    event.stopPropagation();
+                    setOverflowOpen(false);
+                    setAudioOpen(true);
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <AudioLines className="h-5 w-5" />
+                </button>
+              )}
             <QualityMenu
               options={qualityOptions}
               activeId={activeQualityId}
@@ -736,21 +767,6 @@ export function PlayerControls({
                 />
               </div>
             )}
-            {onAudioSelect &&
-              (audioTracks.length > 0 ||
-                audioInventoryProvisional ||
-                inventoryPending ||
-                inventoryFailed) && (
-                <OverflowAction
-                  icon={<AudioLines className="h-5 w-5" />}
-                  label="Audio tracks"
-                  disabled={trackMenusLocked}
-                  onClick={() => {
-                    setOverflowOpen(false);
-                    setAudioOpen(true);
-                  }}
-                />
-              )}
             {(chapters?.length ?? 0) > 0 && (
               <OverflowAction
                 icon={<ListVideo className="h-5 w-5" />}

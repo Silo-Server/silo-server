@@ -380,6 +380,29 @@ export interface PlayerPlaybackTransport {
   skipForward: () => void;
   seekTo: (seconds: number) => void;
   togglePictureInPicture: () => void | Promise<void>;
+  /**
+   * The plan's audio inventory and the live selection, for a host surface that
+   * is not the player itself: the minimised (background) bar offers the same
+   * audio selector the player does, so a viewer can change language without
+   * leaving the page. Absent while the player has no selectable inventory (a
+   * plan still probing, or a source with one track and no menu).
+   */
+  audio?: PlayerAudioTransport;
+}
+
+/**
+ * The audio picker the minimised bar renders. `select` applies the pick to the
+ * playing session at the position the bar shows, exactly as the in-player menu
+ * does; it never starts a new playback.
+ */
+export interface PlayerAudioTransport {
+  tracks: PlayerAudioTrack[];
+  activeIndex: number | null;
+  provisional: boolean;
+  pending: boolean;
+  failed: boolean;
+  select: (index: number, currentPosition: number) => void;
+  retry: () => void;
 }
 
 /**

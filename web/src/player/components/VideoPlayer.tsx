@@ -6425,11 +6425,46 @@ export function VideoPlayer({
     });
   }, [currentTime, duration, onPlaybackStateChange, playing]);
 
+  // A stable signature of the audio inventory the host's transport publishes.
+  // The list itself is often a fresh array of equal rows (a default `[]` on a
+  // caller that passes none), so keying the transport effect on its identity
+  // would rebuild the transport on every render and dispatch it back into the
+  // provider.
+  const audioTransportSignature = useMemo(
+    () =>
+      [
+        audioTracks
+          .map(
+            (track) =>
+              `${track.track_id ?? ""}:${track.index ?? ""}:${track.language ?? ""}:${track.codec ?? ""}:${track.channels ?? ""}:${track.title ?? ""}`,
+          )
+          .join("|"),
+        activeAudioIndex,
+        audioInventoryProvisional,
+        inventoryPending,
+        inventoryFailed,
+        onAudioSelect ? 1 : 0,
+        onRetryInventory ? 1 : 0,
+      ].join("#"),
+    [
+      audioTracks,
+      activeAudioIndex,
+      audioInventoryProvisional,
+      inventoryPending,
+      inventoryFailed,
+      onAudioSelect,
+      onRetryInventory,
+    ],
+  );
+
   useEffect(() => {
     if (!onPlaybackTransportReady) {
       return;
     }
 
+    const audioSelectable =
+      onAudioSelect != null &&
+      (audioTracks.length > 0 || audioInventoryProvisional || inventoryPending || inventoryFailed);
     const transport: PlayerPlaybackTransport = {
       playPause: () => {
         handlePlayPauseRef.current();
@@ -6446,11 +6481,31 @@ export function VideoPlayer({
         handlePlayerSeekRef.current(seconds);
       },
       togglePictureInPicture: () => handleTogglePiPRef.current(),
+      // The minimised bar's audio selector reads this: the same inventory,
+      // selection and pick handler the in-player menu uses, so a language change
+      // made there applies to the live session instead of starting a new one at
+      // the stored resume position.
+      audio: audioSelectable
+        ? {
+            tracks: audioTracks,
+            activeIndex: activeAudioIndex >= 0 ? activeAudioIndex : null,
+            provisional: audioInventoryProvisional,
+            pending: inventoryPending,
+            failed: inventoryFailed,
+            select: (index: number, currentPosition: number) => {
+              onAudioSelect?.(index, currentPosition);
+            },
+            retry: () => onRetryInventory?.(),
+          }
+        : undefined,
     };
 
     onPlaybackTransportReady(transport);
     return () => onPlaybackTransportReady(null);
-  }, [onPlaybackTransportReady, skipActions]);
+    // The signature stands in for the inventory and selection fields above;
+    // see its definition.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the signature encodes every inventory field the effect reads
+  }, [onPlaybackTransportReady, skipActions, audioTransportSignature]);
 
   const executeRealtimeCommand = useCallback(
     async (command: PlaybackRealtimeCommandEnvelope) => {

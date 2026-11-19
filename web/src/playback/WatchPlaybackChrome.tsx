@@ -50,6 +50,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { AudioTrackMenu } from "@/player/components/AudioTrackMenu";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import type { BufferingMode } from "@/player/buffering-quality";
 import type {
@@ -1496,6 +1497,7 @@ export function WatchPlaybackBar() {
   const request = state.request;
   const snapshot = useWatchPlaybackSnapshot(isBackgroundBarVisible ? request : null);
   const transport = state.transport;
+  const audio = transport?.audio;
   const { user } = useAuth();
   const seekPreferences = useSeekPreferences("video", { enabled: user !== null });
   const { data: item } = useWatchDetail(request?.contentId, request?.fileId, request?.libraryId);
@@ -1611,6 +1613,23 @@ export function WatchPlaybackBar() {
             >
               <SkipForward className="h-4 w-4" />
             </Button>
+            {audio && (
+              // The audio selector the player's own bar shows, offered while
+              // the player is minimised. It picks on the live session at the
+              // position this bar shows and never starts a new playback, so a
+              // language change here cannot jump the playhead to the stored
+              // resume position.
+              <AudioTrackMenu
+                tracks={audio.tracks}
+                activeIndex={audio.activeIndex}
+                onSelect={(index) => audio.select(index, displayedTime)}
+                currentPosition={displayedTime}
+                provisional={audio.provisional}
+                pending={audio.pending}
+                failed={audio.failed}
+                onRetryDiscovery={audio.retry}
+              />
+            )}
             <Button
               variant="glass"
               className="h-10 rounded-full px-4"
