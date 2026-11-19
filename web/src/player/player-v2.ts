@@ -175,25 +175,25 @@ export async function playerV2<K extends PlayerV2Key>(
   if (!res.ok) {
     let message = requestFailed;
     let code: string | undefined;
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      const parsed: unknown = JSON.parse(text);
+      // Only a problem document's text is shown. Other JSON (a gateway's own
+      // error object) is not the server's answer.
+      if (isProblem(parsed)) {
+        // A validation problem's own detail only points at its field errors,
+        // which say what to fix.
+        const fieldDetails = (parsed.errors ?? [])
+          .map((error) => error.detail?.trim())
+          .filter(Boolean)
+          .join(" ");
+        const detail = fieldDetails || parsed.detail?.trim() || parsed.title.trim();
+        message = problemDisplayText(parsed, detail || message);
+        const segment = parsed.type.split("?")[0]?.split("/").pop() ?? "";
+        code = segment.replace(/#.*$/, "") || undefined;
+      }
     } catch {
-      // Not JSON; keep the player's own message.
-    }
-    // Only a problem document's text is shown. Other JSON (a gateway's own
-    // error object) is not the server's answer.
-    if (isProblem(parsed)) {
-      // A validation problem's own detail only points at its field errors,
-      // which say what to fix.
-      const fieldDetails = (parsed.errors ?? [])
-        .map((error) => error.detail?.trim())
-        .filter(Boolean)
-        .join(" ");
-      const detail = fieldDetails || parsed.detail?.trim() || parsed.title.trim();
-      message = problemDisplayText(parsed, detail || message);
-      const segment = parsed.type.split("?")[0]?.split("/").pop() ?? "";
-      code = segment.replace(/#.*$/, "") || undefined;
+      // Not JSON, or a problem with malformed fields: keep the player's own
+      // message so the caller still gets a PlayerFetchError.
     }
     throw new PlayerFetchError(res.status, message, code, text);
   }
