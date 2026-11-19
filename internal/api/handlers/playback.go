@@ -1689,25 +1689,37 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	}
 }
 
-// reconstructedClientTimeout bounds the live-row read a rebuild makes, so a
-// stalled database delays a recovering stream by at most this much.
+// reconstructedClientTimeout bounds the attempt and live-row reads a rebuild
+// makes, so a stalled database delays a recovering stream by at most this much.
 const reconstructedClientTimeout = 2 * time.Second
 
 // restoreReconstructedClient fills the client of a session rebuilt from a
 // stream token, whose recipe card leaves client metadata out to keep stream
 // URLs short. The client comes from the session's shared live row, or from
 // its start row once no live row is left, and only from a row of the card's
-// own account and profile. A failed read costs the session its client label,
-// never its playback.
+// own account and profile. The subtitle comes from the session's attempt
+// instead: a restart can leave only the start row, and the attempt holds the
+// plan the last replan committed. A failed read costs the session its client
+// label, never its playback.
 func (h *PlaybackHandler) restoreReconstructedClient(ctx context.Context, card *playback.RecipeCard) {
-	reader, ok := h.AdminStore.(liveSessionReader)
-	if !ok || card == nil {
+	if card == nil {
 		return
 	}
 	// The rebuild registers the session even when the player abandons the
-	// request that started it, so the read must not end with that request.
+	// request that started it, so the reads must not end with that request.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconstructedClientTimeout)
 	defer cancel()
+	subtitleFromAttempt := false
+	if h.PlanStoreV3 != nil {
+		record, err := h.PlanStoreV3.GetAttempt(ctx, card.SessionID)
+		if err == nil && record != nil && record.UserID == card.UserID && record.ProfileID == card.ProfileID {
+			card.Subtitle, subtitleFromAttempt = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan), true
+		}
+	}
+	reader, ok := h.AdminStore.(liveSessionReader)
+	if !ok {
+		return
+	}
 	live, err := reader.LiveSession(ctx, card.SessionID)
 	if err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
@@ -1734,7 +1746,7 @@ func (h *PlaybackHandler) restoreReconstructedClient(ctx context.Context, card *
 	if len(card.AdaptationReasons) == 0 {
 		card.AdaptationReasons = live.AdaptationReasons
 	}
-	if card.Subtitle == nil {
+	if !subtitleFromAttempt {
 		card.Subtitle = live.Subtitle
 	}
 }

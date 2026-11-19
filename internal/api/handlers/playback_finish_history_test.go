@@ -833,3 +833,27 @@ func TestStaleJellyfinCopyKeepsAnotherReplicasEnd(t *testing.T) {
 		t.Fatalf("admin history = %+v, want the newer copy's 3500 recorded after the older expiry", admin.history)
 	}
 }
+
+// TestRebuiltSessionTakesItsSubtitleFromTheAttempt pins that a session
+// rebuilt from a stream token reports the subtitle its last replan committed,
+// not the one its start row recorded: a restart can leave only that row.
+func TestRebuiltSessionTakesItsSubtitleFromTheAttempt(t *testing.T) {
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	started := &playback.SessionSubtitle{TrackID: "file:7:subtitle:0", Source: "embedded", Delivery: "sidecar"}
+	h.AdminStore = &liveRowAdminStore{live: &playback.Session{ID: "s-1", UserID: 7, ProfileID: "p-1", ClientName: "Silo Web", Subtitle: started}}
+	plan := playback.PlanV3{Subtitle: playback.SubtitleDecisionV3{
+		Mode: playback.SubtitleConvertV3, TrackID: "file:7:subtitle:2", Artifact: &playback.SubtitleArtifactV3{Format: "vtt"},
+		Inventory: []playback.SubtitleInventoryItemV3{{TrackID: "file:7:subtitle:2", Source: "embedded", Language: "en"}},
+	}}
+	store := playback.NewMemoryPlanStoreV3()
+	if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: "s-1", UserID: 7, ProfileID: "p-1",
+		CurrentPlan: plan, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	h.PlanStoreV3 = store
+	card := playback.RecipeCard{SessionID: "s-1", UserID: 7, ProfileID: "p-1"}
+	h.restoreReconstructedClient(t.Context(), &card)
+	if card.ClientName != "Silo Web" || card.Subtitle == nil || card.Subtitle.TrackID != "file:7:subtitle:2" {
+		t.Fatalf("rebuilt card client %q subtitle %+v; want the live row's client and the attempt's subtitle", card.ClientName, card.Subtitle)
+	}
+}
