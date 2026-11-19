@@ -422,13 +422,15 @@ export default function HeroBanner({
           narrow viewports. On lg+ with a mouse they fade in on hover; a touch
           screen has no hover, so there they stay visible. The gate is the
           observed pointer (lib/pointerCapability.ts), wrapped in :where() so
-          group-hover still outranks it. */}
+          group-hover still outranks it. Keyboard focus raises them as well,
+          so a mouse user who tabs to an arrow is never left with an invisible
+          button whose focus ring is hidden with it. */}
       {slides.length > 1 && (
         <>
           <button
             type="button"
             onClick={prev}
-            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
+            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 focus-visible:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
             aria-label={t("web.home.hero.previousSlide")}
           >
             <ChevronLeft className="size-4 sm:size-5" />
@@ -436,7 +438,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={next}
-            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
+            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 focus-visible:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:group-hover:opacity-90 lg:[:where(:root[data-fine-pointer=true])_&]:opacity-0"
             aria-label={t("web.home.hero.nextSlide")}
           >
             <ChevronRight className="size-4 sm:size-5" />
