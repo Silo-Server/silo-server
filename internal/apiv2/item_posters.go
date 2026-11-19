@@ -5,16 +5,18 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
@@ -48,13 +50,57 @@ type itemPosterHandler struct {
 	source   ItemPosterSource
 	fetcher  RemotePosterFetcher
 	store    blobstore.Store
-	enqueued *cache.TTLCache[bool]
+	enqueued posterEnqueueMemo
+}
+
+// posterEnqueueMemo remembers which items' cache jobs this server queued
+// recently. It checks and records under one lock, so concurrent requests for
+// one item queue once, and it starts no goroutine: expired entries are
+// dropped when it grows past posterEnqueueMemoSweepAt.
+type posterEnqueueMemo struct {
+	mu     sync.Mutex
+	queued map[string]time.Time
+}
+
+const posterEnqueueMemoSweepAt = 4096
+
+// claim reports whether the caller should queue contentID's job now, and
+// records that it did.
+func (m *posterEnqueueMemo) claim(contentID string, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if until, ok := m.queued[contentID]; ok && now.Before(until) {
+		return false
+	}
+	if m.queued == nil {
+		m.queued = make(map[string]time.Time)
+	}
+	if len(m.queued) >= posterEnqueueMemoSweepAt {
+		for id, until := range m.queued {
+			if !now.Before(until) {
+				delete(m.queued, id)
+			}
+		}
+	}
+	m.queued[contentID] = now.Add(itemPosterEnqueueMemo)
+	return true
+}
+
+// posterFetchLogError is a fetch failure as it is logged: without the URL a
+// transport error quotes, which for a plugin's or a store's link can carry a
+// signature or a key in its query.
+func posterFetchLogError(err error) string {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.Err != nil {
+		err = urlErr.Err
+	}
+	return logredact.SanitizeText(err.Error())
 }
 
 func registerItemPosters(reg *Registry) {
 	h := &itemPosterHandler{
 		posters: reg.deps.ItemPosters, source: reg.deps.ItemPosterSource, fetcher: reg.deps.RemotePosters,
-		store: reg.deps.ArtworkStore, enqueued: cache.NewTTLCache[bool](),
+		store: reg.deps.ArtworkStore,
 	}
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/item-posters/{content_id}", "getItemPoster", "artwork",
 		"Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art redirects to its stored object; art not cached yet is fetched from its provider through the server and queued for caching."),
@@ -125,7 +171,7 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A refused address, an upstream failure and a body that is not an
 		// image all read the same, so the answer cannot map the network.
 		if r.Context().Err() == nil {
-			slog.InfoContext(r.Context(), "item poster fetch failed", "component", "apiv2", "content_id", contentID, "error", err)
+			slog.InfoContext(r.Context(), "item poster fetch failed", "component", "apiv2", "content_id", contentID, "error", posterFetchLogError(err))
 		}
 		notFound()
 		return
@@ -181,10 +227,9 @@ func (h *itemPosterHandler) redirect(w http.ResponseWriter, r *http.Request, tar
 // queueCache makes sure the item's poster has a cache job, at most once per
 // item per itemPosterEnqueueMemo on this server.
 func (h *itemPosterHandler) queueCache(ctx context.Context, contentID string) {
-	if _, ok := h.enqueued.Get(contentID); ok {
+	if !h.enqueued.claim(contentID, time.Now()) {
 		return
 	}
-	h.enqueued.Set(contentID, true, itemPosterEnqueueMemo)
 	if err := h.source.EnqueueItemPosterCache(context.WithoutCancel(ctx), contentID); err != nil {
 		slog.WarnContext(ctx, "queueing an item poster cache job failed", "component", "apiv2", "content_id", contentID, "error", err)
 	}
