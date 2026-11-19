@@ -1108,6 +1108,23 @@ and plugin pages use the server's own origin, while Apple, Android, and other na
 not governed by browser CORS. The narrow plugin launch cookie remains same-origin and path-scoped;
 it does not authorize cross-origin API access.
 
+Three kinds of native media response are readable cross-origin, each with
+`Access-Control-Allow-Origin: *` and no credentials:
+
+- The original-file stream route, `/api/v2/stream/{session_id}`. `GET` and `HEAD` set
+  `RawOperation.CrossOrigin`, so every answer, authorization refusals included, carries the
+  wildcard, allows the `Range` request header and exposes `Content-Range`; the web player reads ranges from the administrator's
+  media origin. The `OPTIONS` preflight is answered by the router's `playbackMediaCORS`
+  middleware with `204`, before authentication. Authorization stays in the URL's `token` and
+  `st`.
+- The HLS manifest and segment routes (`/api/v2/playback/transcode/{session_id}/...`), through
+  `RawOperation.CrossOrigin`, with the same wildcard and the `Range` request header allowed on
+  every answer. They answer no preflight.
+- Subtitle sidecar responses (`/api/v2/stream/{session_id}/subtitles/{track}`), which send the
+  wildcard from their handler; a refusal before the handler runs carries no CORS header.
+
+Every other native `/api/v2` route answers without CORS headers.
+
 Media proxy routes retain their explicit cross-origin behavior because a browser player can fetch
 streams from a separate proxy or transcode-node origin. Those routes still perform their normal
 token or bearer authorization and do not enable credentialed wildcard CORS; CORS is never an
