@@ -38,7 +38,7 @@ func TestPlaybackLifecycleTransitionsDB(t *testing.T) {
 		got, won, err := store.RecordEnd(ctx, AdminPlaybackHistoryEntry{
 			SessionID: id, UserID: account, ProfileID: "p-1", MediaFileID: 7, PlayMethod: "direct_play",
 			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(time.Hour).Format(time.RFC3339Nano),
-			WatchedSeconds: position, EndReason: reason,
+			EndPositionSeconds: position, EndReason: reason,
 		}, LifecycleFrontendJellyfin)
 		if err != nil {
 			t.Fatal(err)

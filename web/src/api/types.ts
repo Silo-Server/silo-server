@@ -3399,7 +3399,7 @@ export interface AdminPlaybackHistoryItem {
   started_at: string;
   ended_at: string;
   /** Where the play ended, not how long it was watched. */
-  watched_seconds: number;
+  end_position_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
   /** Measured watch time; null for a play recorded before it was measured. */
