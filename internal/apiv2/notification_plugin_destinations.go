@@ -53,28 +53,29 @@ type NotificationPluginSettingsForm struct {
 }
 
 // NotificationPluginSettingsField is one setting of a destination form.
+// Optional members are absent when the plugin declares none.
 type NotificationPluginSettingsField struct {
 	Key          string                             `json:"key" doc:"The setting's key in settings"`
 	Label        string                             `json:"label"`
-	Description  string                             `json:"description" doc:"Help text; empty when the plugin gives none"`
-	Placeholder  string                             `json:"placeholder" doc:"Empty when the plugin gives none"`
-	Control      string                             `json:"control" enum:"text,password,number,switch,select" doc:"How to render the input. password hides what is typed; select picks one of options"`
+	Description  string                             `json:"description,omitempty" doc:"Help text; absent when the plugin gives none"`
+	Placeholder  string                             `json:"placeholder,omitempty" doc:"Absent when the plugin gives none"`
+	Control      string                             `json:"control" enum:"text,password,number,switch,select" doc:"How to render the input. password hides what is typed; select picks one of options. A client that doesn't know a control renders the field by its type"`
 	Type         string                             `json:"type" enum:"string,integer,number,boolean" doc:"The JSON type the value is sent as"`
-	Required     bool                               `json:"required" doc:"A value must be present. A stored secret left blank on an edit counts"`
+	Required     bool                               `json:"required" doc:"The server refuses a save without a value. A stored secret left blank on an edit counts"`
 	Secret       bool                               `json:"secret" doc:"Write-only: never returned in settings; listed in secret_settings_set when stored. Leave it blank on an edit to keep the stored value. A destination's secret_settings_set can also name a setting saved as secret before a plugin upgrade unmarked it; treat that one as secret too"`
-	DefaultValue NotificationPluginSettingValue     `json:"default_value,omitempty" doc:"The value a new destination starts with; absent when there is none"`
-	Options      []NotificationPluginSettingsOption `json:"options" doc:"The choices of a select field, in order; empty for other controls"`
-	Minimum      *float64                           `json:"minimum" doc:"Smallest allowed number, inclusive; null when unbounded"`
-	Maximum      *float64                           `json:"maximum" doc:"Largest allowed number, inclusive; null when unbounded"`
-	MinLength    *int                               `json:"min_length" doc:"Fewest characters in a string; null when unbounded"`
-	MaxLength    *int                               `json:"max_length" doc:"Most characters in a string; null when unbounded"`
-	Pattern      string                             `json:"pattern" doc:"JSON Schema pattern (a regular expression) a string must match somewhere in it; empty when there is none"`
+	DefaultValue NotificationPluginSettingValue     `json:"default_value,omitempty" doc:"The value a new destination starts with, of the field's type; absent when there is none"`
+	Options      []NotificationPluginSettingsOption `json:"options,omitempty" doc:"The choices of a select field, in order; absent for other controls"`
+	Minimum      *float64                           `json:"minimum,omitempty" doc:"Smallest allowed number, inclusive; absent when unbounded"`
+	Maximum      *float64                           `json:"maximum,omitempty" doc:"Largest allowed number, inclusive; absent when unbounded"`
+	MinLength    *int                               `json:"min_length,omitempty" doc:"Fewest characters in a string; absent when unbounded"`
+	MaxLength    *int                               `json:"max_length,omitempty" doc:"Most characters in a string; absent when unbounded"`
+	Pattern      string                             `json:"pattern,omitempty" doc:"A Go RE2 regular expression a string must match somewhere in it; absent when there is none. A client may check it before saving; the server's check is the one that counts"`
 }
 
 // NotificationPluginSettingsOption is one choice of a select field.
 type NotificationPluginSettingsOption struct {
-	Value string `json:"value" doc:"The choice as a string; send it as the field's type"`
-	Label string `json:"label"`
+	Value NotificationPluginSettingValue `json:"value" doc:"The choice, of the field's type"`
+	Label string                         `json:"label"`
 }
 
 // NotificationPluginSettingValue is a setting's scalar JSON value.
@@ -163,7 +164,6 @@ func notificationPluginChannelOf(channel notifications.PluginChannel) (Notificat
 		item := NotificationPluginSettingsField{
 			Key: field.Key, Label: field.Label, Description: field.Description, Placeholder: field.Placeholder,
 			Control: field.Control, Type: field.Type, Required: field.Required, Secret: field.Secret,
-			Options: make([]NotificationPluginSettingsOption, 0, len(field.Options)),
 			Minimum: field.Minimum, Maximum: field.Maximum, MinLength: field.MinLength, MaxLength: field.MaxLength,
 			Pattern: field.Pattern,
 		}
@@ -175,7 +175,11 @@ func notificationPluginChannelOf(channel notifications.PluginChannel) (Notificat
 			item.DefaultValue = raw
 		}
 		for _, option := range field.Options {
-			item.Options = append(item.Options, NotificationPluginSettingsOption{Value: option.Value, Label: option.Label})
+			raw, err := json.Marshal(option.Value)
+			if err != nil {
+				return NotificationPluginChannel{}, err
+			}
+			item.Options = append(item.Options, NotificationPluginSettingsOption{Value: raw, Label: option.Label})
 		}
 		form.Fields = append(form.Fields, item)
 	}

@@ -3,6 +3,7 @@ package notifications
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
@@ -35,10 +36,10 @@ type PluginFormField struct {
 	Pattern   string
 }
 
-// PluginFormOption is one static choice of a select field. Value is the
-// value as a string; a client sends it as the field's Type.
+// PluginFormOption is one static choice of a select field. Value is typed
+// as the field's Type, like Default.
 type PluginFormOption struct {
-	Value string
+	Value any
 	Label string
 }
 
@@ -93,7 +94,6 @@ func (c PluginChannel) FormFields() []PluginFormField {
 			Required:    field.GetRequired() || slices.Contains(schema.Required, field.GetKey()),
 			Secret:      slices.Contains(c.SecretFields, field.GetKey()),
 			Default:     property.Default,
-			Options:     make([]PluginFormOption, 0, len(field.GetOptions())),
 			Minimum:     property.Minimum,
 			Maximum:     property.Maximum,
 			MinLength:   property.MinLength,
@@ -104,9 +104,33 @@ func (c PluginChannel) FormFields() []PluginFormField {
 			item.Default = field.GetDefaultValue().AsInterface()
 		}
 		for _, option := range field.GetOptions() {
-			item.Options = append(item.Options, PluginFormOption{Value: option.GetValue(), Label: option.GetLabel()})
+			item.Options = append(item.Options, PluginFormOption{Value: typedOptionValue(option.GetValue(), valueType), Label: option.GetLabel()})
 		}
 		out = append(out, item)
 	}
 	return out
+}
+
+// typedOptionValue reads a select option, which a manifest carries as a
+// string, as the field's JSON type. A value that doesn't read as that type
+// stays a string; saving checks it against the schema either way.
+func typedOptionValue(value, valueType string) any {
+	switch valueType {
+	case "integer", "number":
+		var number json.Number
+		if json.Unmarshal([]byte(value), &number) == nil {
+			if valueType == "number" {
+				if f, err := number.Float64(); err == nil {
+					return f
+				}
+			} else if i, err := number.Int64(); err == nil {
+				return i
+			}
+		}
+	case "boolean":
+		if b, err := strconv.ParseBool(value); err == nil {
+			return b
+		}
+	}
+	return value
 }

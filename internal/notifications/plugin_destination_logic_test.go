@@ -312,3 +312,12 @@ func TestRedactPluginTextIsStorable(t *testing.T) {
 			got, utf8.RuneCountInString(got), maxPluginTextRunes)
 	}
 }
+
+// A stored schema that doesn't compile is a permanent condition: the
+// channel counts as not provided, which the API answers without Retry-After.
+func TestCheckPluginSettingsUncompilableSchema(t *testing.T) {
+	channel := PluginChannel{Schema: &pluginv1.ConfigSchema{JsonSchema: `{"type":"object","properties":{"topic":{"type":"string","pattern":"("}}}`}}
+	if err := checkPluginSettings(channel, map[string]any{"topic": "x"}); !errors.Is(err, ErrPluginChannelNotProvided) {
+		t.Fatalf("checkPluginSettings() = %v, want ErrPluginChannelNotProvided", err)
+	}
+}

@@ -41,9 +41,10 @@ func checkPluginSettings(channel PluginChannel, merged map[string]any) error {
 	}
 	var invalid *jsonschema.ValidationError
 	if !errors.As(err, &invalid) {
-		// The schema itself doesn't compile: install refuses such a form,
-		// so the channel is broken rather than the settings.
-		return fmt.Errorf("%w: %w", ErrPluginChannelUnavailable, err)
+		// The schema itself doesn't compile. Install refuses such a form and
+		// the channel listing skips a stored one, so waiting won't fix it:
+		// the channel counts as not provided.
+		return fmt.Errorf("%w: %w: %w", ErrPluginChannelUnavailable, ErrPluginChannelNotProvided, err)
 	}
 	var fields []PluginSettingError
 	collectPluginSettingErrors(invalid, &fields)

@@ -30420,44 +30420,44 @@ export interface components {
     };
     NotificationPluginSettingsField: {
       /**
-       * @description How to render the input. password hides what is typed; select picks one of options
+       * @description How to render the input. password hides what is typed; select picks one of options. A client that doesn't know a control renders the field by its type
        * @enum {string}
        */
       control: "text" | "password" | "number" | "switch" | "select";
-      /** @description The value a new destination starts with; absent when there is none */
+      /** @description The value a new destination starts with, of the field's type; absent when there is none */
       default_value?: string | number | boolean;
-      /** @description Help text; empty when the plugin gives none */
-      description: string;
+      /** @description Help text; absent when the plugin gives none */
+      description?: string;
       /** @description The setting's key in settings */
       key: string;
       label: string;
       /**
        * Format: int64
-       * @description Most characters in a string; null when unbounded
+       * @description Most characters in a string; absent when unbounded
        */
-      max_length: number | null;
+      max_length?: number;
       /**
        * Format: double
-       * @description Largest allowed number, inclusive; null when unbounded
+       * @description Largest allowed number, inclusive; absent when unbounded
        */
-      maximum: number | null;
+      maximum?: number;
       /**
        * Format: int64
-       * @description Fewest characters in a string; null when unbounded
+       * @description Fewest characters in a string; absent when unbounded
        */
-      min_length: number | null;
+      min_length?: number;
       /**
        * Format: double
-       * @description Smallest allowed number, inclusive; null when unbounded
+       * @description Smallest allowed number, inclusive; absent when unbounded
        */
-      minimum: number | null;
-      /** @description The choices of a select field, in order; empty for other controls */
-      options: components["schemas"]["NotificationPluginSettingsOption"][];
-      /** @description JSON Schema pattern (a regular expression) a string must match somewhere in it; empty when there is none */
-      pattern: string;
-      /** @description Empty when the plugin gives none */
-      placeholder: string;
-      /** @description A value must be present. A stored secret left blank on an edit counts */
+      minimum?: number;
+      /** @description The choices of a select field, in order; absent for other controls */
+      options?: components["schemas"]["NotificationPluginSettingsOption"][];
+      /** @description A Go RE2 regular expression a string must match somewhere in it; absent when there is none. A client may check it before saving; the server's check is the one that counts */
+      pattern?: string;
+      /** @description Absent when the plugin gives none */
+      placeholder?: string;
+      /** @description The server refuses a save without a value. A stored secret left blank on an edit counts */
       required: boolean;
       /** @description Write-only: never returned in settings; listed in secret_settings_set when stored. Leave it blank on an edit to keep the stored value. A destination's secret_settings_set can also name a setting saved as secret before a plugin upgrade unmarked it; treat that one as secret too */
       secret: boolean;
@@ -30472,8 +30472,8 @@ export interface components {
     };
     NotificationPluginSettingsOption: {
       label: string;
-      /** @description The choice as a string; send it as the field's type */
-      value: string;
+      /** @description The choice, of the field's type */
+      value: string | number | boolean;
     };
     NotificationPreferences: {
       enabled: boolean;

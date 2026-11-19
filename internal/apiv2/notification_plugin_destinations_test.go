@@ -175,6 +175,27 @@ func TestNotificationPluginChannelsListFlatForm(t *testing.T) {
 		fields[2].Type != "integer" || fields[2].Control != "select" || string(fields[2].DefaultValue) != "3" || *fields[2].Maximum != 5 || len(fields[2].Options) != 2 {
 		t.Fatalf("form fields = %+v", fields)
 	}
+	// An optional member a field doesn't have is absent, never null or
+	// empty, and an option's value has the field's type.
+	var raw struct {
+		Items []struct {
+			SettingsForm struct {
+				Fields []map[string]json.RawMessage `json:"fields"`
+			} `json:"settings_form"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	token := raw.Items[0].SettingsForm.Fields[1]
+	for _, member := range []string{"description", "placeholder", "pattern", "default_value", "minimum", "maximum", "min_length", "max_length", "options"} {
+		if _, present := token[member]; present {
+			t.Errorf("token field carries %s = %s, want it absent", member, token[member])
+		}
+	}
+	if options := string(raw.Items[0].SettingsForm.Fields[2]["options"]); options != `[{"value":1,"label":"Low"},{"value":5,"label":"High"}]` {
+		t.Errorf("priority options = %s, want integer values", options)
+	}
 
 }
 

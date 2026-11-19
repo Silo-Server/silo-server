@@ -42275,7 +42275,7 @@
         "additionalProperties": false,
         "properties": {
           "control": {
-            "description": "How to render the input. password hides what is typed; select picks one of options",
+            "description": "How to render the input. password hides what is typed; select picks one of options. A client that doesn't know a control renders the field by its type",
             "enum": [
               "text",
               "password",
@@ -42286,7 +42286,7 @@
             "type": "string"
           },
           "default_value": {
-            "description": "The value a new destination starts with; absent when there is none",
+            "description": "The value a new destination starts with, of the field's type; absent when there is none",
             "oneOf": [
               {
                 "type": "string"
@@ -42300,7 +42300,7 @@
             ]
           },
           "description": {
-            "description": "Help text; empty when the plugin gives none",
+            "description": "Help text; absent when the plugin gives none",
             "type": "string"
           },
           "key": {
@@ -42311,54 +42311,42 @@
             "type": "string"
           },
           "max_length": {
-            "description": "Most characters in a string; null when unbounded",
+            "description": "Most characters in a string; absent when unbounded",
             "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "maximum": {
-            "description": "Largest allowed number, inclusive; null when unbounded",
+            "description": "Largest allowed number, inclusive; absent when unbounded",
             "format": "double",
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": "number"
           },
           "min_length": {
-            "description": "Fewest characters in a string; null when unbounded",
+            "description": "Fewest characters in a string; absent when unbounded",
             "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "minimum": {
-            "description": "Smallest allowed number, inclusive; null when unbounded",
+            "description": "Smallest allowed number, inclusive; absent when unbounded",
             "format": "double",
-            "type": [
-              "number",
-              "null"
-            ]
+            "type": "number"
           },
           "options": {
-            "description": "The choices of a select field, in order; empty for other controls",
+            "description": "The choices of a select field, in order; absent for other controls",
             "items": {
               "$ref": "#/components/schemas/NotificationPluginSettingsOption"
             },
             "type": "array"
           },
           "pattern": {
-            "description": "JSON Schema pattern (a regular expression) a string must match somewhere in it; empty when there is none",
+            "description": "A Go RE2 regular expression a string must match somewhere in it; absent when there is none. A client may check it before saving; the server's check is the one that counts",
             "type": "string"
           },
           "placeholder": {
-            "description": "Empty when the plugin gives none",
+            "description": "Absent when the plugin gives none",
             "type": "string"
           },
           "required": {
-            "description": "A value must be present. A stored secret left blank on an edit counts",
+            "description": "The server refuses a save without a value. A stored secret left blank on an edit counts",
             "type": "boolean"
           },
           "secret": {
@@ -42379,18 +42367,10 @@
         "required": [
           "key",
           "label",
-          "description",
-          "placeholder",
           "control",
           "type",
           "required",
-          "secret",
-          "options",
-          "minimum",
-          "maximum",
-          "min_length",
-          "max_length",
-          "pattern"
+          "secret"
         ],
         "type": "object"
       },
@@ -42416,8 +42396,18 @@
             "type": "string"
           },
           "value": {
-            "description": "The choice as a string; send it as the field's type",
-            "type": "string"
+            "description": "The choice, of the field's type",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
           }
         },
         "required": [

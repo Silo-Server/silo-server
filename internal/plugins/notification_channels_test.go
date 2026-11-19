@@ -52,3 +52,17 @@ func TestNotificationChannelsResolveTheProvidingInstallation(t *testing.T) {
 		t.Fatalf("channels = %+v, want ntfy once, from installation 2", channels)
 	}
 }
+
+// A stored destination form whose JSON Schema doesn't compile could never
+// check a value, so its channel isn't offered.
+func TestUsableDestinationSchemaRefusesAnUncompilableSchema(t *testing.T) {
+	form := &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "topic", Label: "Topic", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_TEXT}}}
+	good := &pluginv1.ConfigSchema{Key: "destination", JsonSchema: `{"type":"object","required":["topic"],"properties":{"topic":{"type":"string","pattern":"^[a-z]+$"}}}`, AdminForm: form}
+	bad := &pluginv1.ConfigSchema{Key: "destination", JsonSchema: `{"type":"object","properties":{"topic":{"type":"string","pattern":"("}}}`, AdminForm: form}
+	if err := usableDestinationSchema(good, "ntfy"); err != nil {
+		t.Fatalf("usableDestinationSchema(good) = %v", err)
+	}
+	if err := usableDestinationSchema(bad, "ntfy"); err == nil {
+		t.Fatal("usableDestinationSchema accepted a pattern that doesn't compile")
+	}
+}
