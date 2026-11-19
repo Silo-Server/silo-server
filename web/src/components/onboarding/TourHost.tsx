@@ -252,27 +252,38 @@ type SyncProfileField = (field: string) => (updated: Profile) => void;
  * response for a profile that is no longer selected is dropped.
  */
 function useProfileFieldSync(): SyncProfileField {
-  const { profile, selectProfile } = useAuth();
-  const latest = useRef({ profile, selectProfile });
+  const { selectProfile } = useAuth();
+  const latest = useRef(selectProfile);
   useLayoutEffect(() => {
-    latest.current = { profile, selectProfile };
-  }, [profile, selectProfile]);
+    latest.current = selectProfile;
+  }, [selectProfile]);
   const picks = useRef(new Map<string, { picked: number; applied: number }>());
   return useCallback((field) => {
     const entry = picks.current.get(field) ?? { picked: 0, applied: 0 };
     picks.current.set(field, entry);
     const pick = ++entry.picked;
     return (updated) => {
-      const { profile: current, selectProfile: select } = latest.current;
-      // The tour may have closed and another profile been picked since, so
-      // check the live selection, not the last one the tour saw.
+      // The tour may have closed and the profile been edited or another one
+      // picked since, so build on the live stored profile, not the last one
+      // the tour saw.
+      const live = readStoredProfile();
       const liveId = storage.get(storage.KEYS.PROFILE_ID);
-      if (pick < entry.applied || liveId !== updated.id || current?.id !== updated.id) return;
+      if (pick < entry.applied || liveId !== updated.id || live?.id !== updated.id) return;
       entry.applied = pick;
       const value = (updated as unknown as Record<string, unknown>)[field];
-      select({ ...current, [field]: value }, getProfileToken() ?? undefined);
+      latest.current({ ...live, [field]: value }, getProfileToken() ?? undefined);
     };
   }, []);
+}
+
+function readStoredProfile(): Profile | null {
+  const raw = storage.get(storage.KEYS.CURRENT_PROFILE);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Profile;
+  } catch {
+    return null;
+  }
 }
 
 function StepBody({

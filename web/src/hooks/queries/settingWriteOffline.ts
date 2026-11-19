@@ -154,8 +154,11 @@ export function useShowThenSave(cacheOwner: string | null) {
         if (--pending.saving === 0) unsettled.current.delete(entryKey);
       };
       const showStored = () => {
-        if (currentOwner.current === cacheOwner) show(pending.stored.value as T);
-        // The cache is the original owner's either way, read on its next load.
+        // Once another owner holds the appearance, leave it alone: writing the
+        // cache would also make this owner the signed-out fallback. This
+        // owner's namespace is refreshed from the server on its next load.
+        if (currentOwner.current !== cacheOwner) return;
+        show(pending.stored.value as T);
         if (!cacheKey) return;
         if (pending.stored.cached === null) appearanceCache.remove(cacheKey, cacheOwner);
         else appearanceCache.set(cacheKey, pending.stored.cached, cacheOwner);
