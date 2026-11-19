@@ -3014,7 +3014,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 	}
 	if deps.EventsHub != nil {
-		events := handlers.NewEventsHandler(deps.EventsHub, adminJobsHandler, adminHandler, deps.TaskManager, deps.ScanRegistry, deps.LibraryScanQueue, historyImportSvc)
+		events := handlers.NewEventsHandler(deps.EventsHub, adminJobsHandler, deps.TaskManager, deps.ScanRegistry, deps.LibraryScanQueue, historyImportSvc)
 		events.SetNotificationsSystem(deps.Notifications)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
