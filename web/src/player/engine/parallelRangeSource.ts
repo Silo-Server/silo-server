@@ -13,7 +13,9 @@
  * stripe URL ends its use: the rest of that range and every later range go to the plan's own URL,
  * with no retry spent on the stripe URL. A plan URL whose first answer is a whole-file `200`
  * ignores `Range`: the source then becomes the stock `UrlSource`, which reads the file
- * sequentially.
+ * sequentially. When the server names the plan's own URL as the stripe URL, as it does for a
+ * proxy node and for the page's own origin, there is one URL: every range uses it, up to 4 at
+ * once, with the retries of any read from the plan's URL.
  *
  * At a page seek (`endWarmHead()`) the source records the reads Mediabunny waits for, and cuts
  * each queued read to the bytes those reads wait for. When a new read then finds every read worker
@@ -101,6 +103,12 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 
 export class ParallelRangeSource extends InternalUrlSource {
   private readonly stripeUrl: string;
+  /**
+   * False when the stripe URL is the plan's own URL, as it is for a proxy node and for the
+   * page's own origin: the ranges then have one URL, so no range is a stripe range. A transport
+   * failure is retried there and a refusal fails the read, as for any read from the plan's URL.
+   */
+  private readonly twoOrigins: boolean;
   private readonly metered: MeteredFetch;
   /**
    * Every range, retry and head request of this source counts into one run, so the page's
@@ -154,7 +162,7 @@ export class ParallelRangeSource extends InternalUrlSource {
   /**
    * `headUrl` is the plan's own stream URL, which carries the warm head and the
    * range that finds the stripe URL full; `stripeUrl` carries up to 3 other
-   * ranges at once. `metered.fetch` counts each response into the run it is given.
+   * ranges at once. When the two are the same URL, every range uses it. `metered.fetch` counts each response into the run it is given.
    */
   constructor(
     headUrl: string,
@@ -165,6 +173,7 @@ export class ParallelRangeSource extends InternalUrlSource {
     // The stock reads, which the source falls back to, are metered too.
     super(headUrl, { ...options, fetchFn: metered.fetch });
     this.stripeUrl = stripeUrl;
+    this.twoOrigins = stripeUrl !== headUrl;
     this.metered = metered;
     this.run = metered.newRun();
     const orchestrator = this._orchestrator;
@@ -439,7 +448,7 @@ export class ParallelRangeSource extends InternalUrlSource {
           if (head) this.headed.add(worker);
           // At most three ranges use the stripe URL; the next one rides the plan's own URL, whose
           // connection is already open.
-          const stripe = !head && this.stripesInFlight < MAX_STRIPE_URL_RANGES;
+          const stripe = this.twoOrigins && !head && this.stripesInFlight < MAX_STRIPE_URL_RANGES;
           if (stripe) this.stripesInFlight++;
           const range: StripeRange = {
             start: nextStart,

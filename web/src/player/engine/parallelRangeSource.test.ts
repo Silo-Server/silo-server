@@ -480,6 +480,28 @@ describe("ParallelRangeSource failures", () => {
     },
   );
 
+  // A proxy node and the page's own origin have one URL: the server names the plan's own URL as
+  // the stripe URL. There is then no second origin to give up on, so a transport failure is
+  // retried on that URL like any read's, and the ranges stay parallel.
+  it("reads every range from the one URL and retries a transport failure there", async () => {
+    const server = new FakeServer(pattern(SIZE));
+    server.fault = (request, index) =>
+      index === 3 && request.start >= FIRST_STRIPE ? { kind: "fetchError" } : undefined;
+    const getRetryDelay = vi.fn(() => 0);
+    const { source } = makeSource(server, { getRetryDelay }, HEAD_URL);
+    expect(same(await read(source, 0, 30 * MIB), server.bytes.subarray(0, 30 * MIB))).toBe(true);
+    await vi.waitFor(() => expect(server.inFlight).toBe(0));
+    expect(server.requests.every((r) => r.url === HEAD_URL)).toBe(true);
+    expect(getRetryDelay).toHaveBeenCalledTimes(1);
+    expect(server.maxInFlight).toBe(4);
+    // Still 2 MiB ranges after the failure: the failed one is asked again, and later ones follow.
+    const failed = server.requests[3]!;
+    expect(server.requests.filter((r) => r.start === failed.start).length).toBe(2);
+    expect(server.requests.some((r) => r.start > failed.start && r.last - r.start < 2 * MIB)).toBe(
+      true,
+    );
+  });
+
   // A stripe whose body stops without closing would hold the in-order delivery until the page's
   // 20 s stall timeout. Fake timers stand in for the wait.
   it("sends the range to the head URL when a stripe body goes silent", async () => {

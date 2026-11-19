@@ -251,7 +251,11 @@ export function disposeSources() {
   }
 }
 
-export function makeSource(server: FakeServer, options: UrlSourceOptions = {}) {
+export function makeSource(
+  server: FakeServer,
+  options: UrlSourceOptions = {},
+  stripeUrl = STRIPE_URL,
+) {
   let runs = 0;
   const metered = {
     fetch: server.fetch as unknown as MeteredFetch["fetch"],
@@ -266,7 +270,7 @@ export function makeSource(server: FakeServer, options: UrlSourceOptions = {}) {
   };
   const source = new ParallelRangeSource(
     HEAD_URL,
-    STRIPE_URL,
+    stripeUrl,
     { getRetryDelay: () => 0, ...options },
     metered,
   );

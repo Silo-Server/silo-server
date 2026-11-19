@@ -48,53 +48,94 @@ function originalPlan(overrides: {
 }
 
 describe("resolveOriginalPlaybackRoute", () => {
-  // The stripe URL decides where the login token goes: a parallel_range_url
-  // with st is authorized by that reference alone and gets no token; one
-  // without st gets the token. A plan that names no media origin is not striped.
+  const NODE = "https://node.example.test/stream/direct/opaque";
+  // The server names the stripe URL, and the engine uses it as given: no token
+  // is ever added to it. A plan that names none is not striped.
   it.each([
     {
-      name: "a parallel_range_url with st carries no login token",
-      parallelRangeUrl: "https://media.example.test/api/v2/stream/s?st=x",
-      streamUrl: "/api/v2/stream/s?st=x&token=access",
-      want: "https://media.example.test/api/v2/stream/s?st=x",
-    },
-    {
-      name: "a parallel_range_url with st keeps its other parameters and no token",
+      name: "a media origin is used as given, with no login token",
       parallelRangeUrl: "https://media.example.test/api/v2/stream/s?st=x&seek=12.5",
+      planUrl: "/stream/s?st=x&seek=12.5",
       streamUrl: "/api/v2/stream/s?st=x&seek=12.5&token=access",
+      navigationProtocol: "h2",
       want: "https://media.example.test/api/v2/stream/s?st=x&seek=12.5",
     },
     {
-      name: "a parallel_range_url without st carries the login token",
+      name: "a media origin without st still gets no login token",
       parallelRangeUrl: "https://media.example.test/api/v2/stream/s",
+      planUrl: "/stream/s",
       streamUrl: "/api/v2/stream/s?token=access",
-      want: "https://media.example.test/api/v2/stream/s?token=access",
+      navigationProtocol: "h2",
+      want: "https://media.example.test/api/v2/stream/s",
     },
     {
-      name: "a parallel_range_url whose origin new URL() rejects gives no stripe URL",
+      name: "a media origin whose URL new URL() rejects gives no stripe URL",
       parallelRangeUrl: "https://a<b.example/api/v2/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
       streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "http/1.1",
+      want: undefined,
+    },
+    {
+      name: "the plan's own stream is striped when the page came over HTTP/1.1",
+      parallelRangeUrl: "/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "http/1.1",
+      want: "/api/v2/stream/s?st=x&token=access",
+    },
+    {
+      name: "the plan's own stream is not striped when the page came over HTTP/2",
+      parallelRangeUrl: "/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "h2",
+      want: undefined,
+    },
+    {
+      name: "the plan's own stream is not striped when the browser names no protocol",
+      parallelRangeUrl: "/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "",
+      want: undefined,
+    },
+    {
+      name: "a proxy node's URL the server names is striped as issued, whatever the page's protocol",
+      parallelRangeUrl: NODE,
+      planUrl: NODE,
+      streamUrl: NODE,
+      navigationProtocol: "h2",
+      want: NODE,
+    },
+    {
+      name: "a proxy node's URL the server did not name is not striped",
+      planUrl: NODE,
+      streamUrl: NODE,
+      navigationProtocol: "http/1.1",
       want: undefined,
     },
     {
       name: "a plan without parallel_range_url is not striped",
+      planUrl: "/stream/s?st=x",
       streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "http/1.1",
       want: undefined,
     },
-    {
-      name: "a proxy node URL is not striped",
-      streamUrl: "https://node.example.test/stream/direct/opaque",
-      want: undefined,
-    },
-  ])("$name", ({ parallelRangeUrl, streamUrl, want }) => {
+  ])("$name", ({ parallelRangeUrl, planUrl, streamUrl, navigationProtocol, want }) => {
     const base = originalPlan({ recipe: { audio_codec: "truehd" } });
-    const plan = parallelRangeUrl
-      ? { ...base, stream: { ...base.stream, parallel_range_url: parallelRangeUrl } }
-      : base;
+    const plan = {
+      ...base,
+      stream: {
+        ...base.stream,
+        url: planUrl,
+        ...(parallelRangeUrl ? { parallel_range_url: parallelRangeUrl } : {}),
+      },
+    };
     const route = resolveOriginalPlaybackRoute({
       plan,
       streamUrl,
-      accessToken: "access",
+      navigationProtocol,
       native,
       engine,
       audioTracks: [],

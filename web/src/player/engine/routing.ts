@@ -1,6 +1,5 @@
 import type { FailureV3, PlanV3 } from "../protocol-v3";
 import type { PlayerAudioTrack } from "../types";
-import { buildParallelRangeUrl } from "../stream-url";
 import type { EngineCapabilities } from "./capabilities";
 import type { EngineSourceSpec, EngineTransfer } from "./source";
 
@@ -64,17 +63,42 @@ export function engineTransferForPlan(plan: PlanV3): EngineTransfer | null {
   }
 }
 
+function isAbsoluteUrl(url: string): boolean {
+  return url.startsWith("http://") || url.startsWith("https://");
+}
+
 /**
  * The URL the engine stripes range reads on, or undefined for the stock
- * source. The server named a media origin (`parallel_range_url`): stripe on
- * it. The URL's `st` authorizes each range, so the login token is added only
- * when the URL has no `st`. A URL that does not parse gives no stripe URL, so
- * the engine reads the plan's URL through the stock source. A plan that names
- * no media origin is never striped.
+ * source. The server names it in `parallel_range_url`; a plan without one is
+ * never striped. The URL authorizes itself, so it is used exactly as given and
+ * no token is added to it. The server names one of three:
+ *
+ * 1. The plan's own stream on the page's origin, as a reference relative to
+ *    the API root. The engine stripes on `streamUrl`, and only when the page
+ *    itself came over HTTP/1.1, where the browser opens several connections.
+ *    Over HTTP/2 or HTTP/3 the ranges would share one.
+ * 2. The proxy node's URL the plan already uses. The engine stripes on it.
+ * 3. The same stream on the administrator's media origin. A URL that does not
+ *    parse gives no stripe URL.
  */
-function parallelRangeUrlFor(plan: PlanV3, accessToken: string | null): string | undefined {
-  if (!plan.stream.parallel_range_url) return undefined;
-  return buildParallelRangeUrl(plan.stream.parallel_range_url, accessToken) ?? undefined;
+function parallelRangeUrlFor(
+  plan: PlanV3,
+  streamUrl: string,
+  navigationProtocol: string,
+): string | undefined {
+  const named = plan.stream.parallel_range_url;
+  if (!named) return undefined;
+  if (!isAbsoluteUrl(named)) {
+    return !isAbsoluteUrl(streamUrl) && navigationProtocol === "http/1.1" ? streamUrl : undefined;
+  }
+  if (named === plan.stream.url) return streamUrl;
+  try {
+    new URL(named);
+  } catch {
+    // Go's URL parser accepts origins, such as `https://a<b.example`, that `new URL()` rejects.
+    return undefined;
+  }
+  return named;
 }
 
 function unsupported(message: string): OriginalPlaybackRoute {
@@ -97,11 +121,11 @@ export function resolveOriginalPlaybackRoute(input: {
   native: NativeOriginalSupport;
   engine: EngineCapabilities | null;
   audioTracks: readonly PlayerAudioTrack[];
-  /** The login token, for a server-named media origin whose URL has no `st`. */
-  accessToken?: string | null;
+  /** The page navigation's `nextHopProtocol`; empty when the browser gives none. */
+  navigationProtocol?: string;
 }): OriginalPlaybackRoute {
   const { plan, streamUrl, native, engine, audioTracks } = input;
-  const parallelRangeUrl = parallelRangeUrlFor(plan, input.accessToken ?? null);
+  const parallelRangeUrl = parallelRangeUrlFor(plan, streamUrl, input.navigationProtocol ?? "");
   const container = lower(plan.source.container || plan.stream.container);
   const videoCodec = lower(plan.effective_recipe.video_codec || plan.source.video_codec);
   const audioCodec = lower(plan.effective_recipe.audio_codec || plan.source.audio_codec);
