@@ -114,7 +114,9 @@ func NewEventsHandler(
 
 // serveWebSocket runs one events connection. When accessChanged closes, the
 // loop tells the client its access changed and closes the connection with
-// EventsCloseAccessChanged; a nil channel never fires.
+// SocketCloseAccessChanged; a nil channel never fires. When the request
+// context ends with a cause socketCloseFrame names (a v2 recheck or the
+// lifetime deadline), the connection ends with that close frame.
 func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -135,8 +137,9 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 		)
 		return
 	}
-	defer conn.Close()
-	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	closer := newSocketCloser(conn)
+	defer func() { closer.close(context.Cause(r.Context())) }()
+	stopClose := closer.closeWhenDone(r.Context())
 	defer stopClose()
 	configureWebSocket(conn)
 	conn.SetReadLimit(maxEventsFrameBytes)
@@ -256,7 +259,10 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 		case <-readDone:
 			return
 		case <-accessChanged:
-			closeEventsAccessChanged(conn, readDone)
+			// The frame goes first, so a client that reads frames but not
+			// close codes still learns why.
+			_ = writeWebSocketJSON(conn, evt.EventsAccessChangedMessage{Type: eventsAccessChanged})
+			closer.close(errSocketAccessChanged)
 			return
 		case <-deadlineC:
 			writeWebSocketError(conn, "bad_request", "subscribe is required within "+subscribeGracePeriod.String())
@@ -293,28 +299,6 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 				return
 			}
 		}
-	}
-}
-
-// closeEventsAccessChanged sends the access_changed frame and close code, then
-// waits briefly for the client's close reply so both frames arrive before the
-// connection is torn down.
-func closeEventsAccessChanged(conn *websocket.Conn, readDone <-chan struct{}) {
-	if err := writeWebSocketJSON(conn, evt.EventsAccessChangedMessage{Type: eventsAccessChanged}); err != nil {
-		return
-	}
-	if err := writeWebSocketControl(
-		conn,
-		websocket.CloseMessage,
-		websocket.FormatCloseMessage(EventsCloseAccessChanged, eventsAccessChanged),
-	); err != nil {
-		return
-	}
-	reply := time.NewTimer(time.Second)
-	defer reply.Stop()
-	select {
-	case <-readDone:
-	case <-reply.C:
 	}
 }
 
@@ -528,9 +512,11 @@ func allowedChannelsForClaims(claims *auth.Claims) []evt.EventChannel {
 }
 
 // monitorKeyChannels are what an admin:monitor:read key may subscribe to:
-// live sessions and catalog changes. Jobs carry artifact URLs and request
-// payloads and scans carry library paths, which monitoring never reads.
-var monitorKeyChannels = []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions}
+// live sessions, catalog changes and download changes. Jobs carry artifact
+// URLs and request payloads and scans carry library paths, which monitoring
+// never reads; download_preparations stays closed so a future preparation
+// event is not handed to scoped keys unreviewed.
+var monitorKeyChannels = []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions, evt.ChannelDownloads}
 
 func allowedChannelsForRole(role string) []evt.EventChannel {
 	channels := []evt.EventChannel{
@@ -548,6 +534,7 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 			evt.ChannelScans,
 			evt.ChannelSettings,
 			evt.ChannelDownloadPreparations,
+			evt.ChannelDownloads,
 		)
 	}
 	return channels
@@ -619,7 +606,7 @@ func (h *EventsHandler) snapshotForChannel(
 	case evt.ChannelCatalog, evt.ChannelUserState, evt.ChannelSessions:
 		// Session frames are cues: clients re-read GET /api/v2/admin/sessions.
 		return json.RawMessage("null"), nil
-	case evt.ChannelDownloadPreparations:
+	case evt.ChannelDownloadPreparations, evt.ChannelDownloads:
 		// Events only say what changed; clients re-read the admin list, and a
 		// null snapshot tells a reconnecting client to do so.
 		return json.RawMessage("null"), nil

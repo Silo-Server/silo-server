@@ -392,10 +392,14 @@ func (h *PlaybackHandler) publishLifecycle(ctx context.Context, t LifecycleTrans
 func (h *PlaybackHandler) publishLifecycleView(ctx context.Context, view PlaybackLifecycleEventView) {
 	t := view.Transition
 	event := t.eventName()
-	if err := h.EventsHub.PublishJSON(ctx, evt.ChannelSessions, event, h.LifecycleEncoder.EncodePlaybackLifecycleEvent(view), evt.PublishOptions{
+	opts := evt.PublishOptions{
 		AdminOnly: true,
 		EventID:   "playback-lifecycle:" + strconv.FormatInt(t.Seq, 10),
-	}); err != nil {
+	}
+	if view.Session != nil {
+		opts.EpisodeFileItem = view.Session.EpisodeFileItem
+	}
+	if err := h.EventsHub.PublishJSON(ctx, evt.ChannelSessions, event, h.LifecycleEncoder.EncodePlaybackLifecycleEvent(view), opts); err != nil {
 		slog.WarnContext(ctx, "failed to publish a playback lifecycle event", "component", "api", "session", t.SessionID, "event", event, "error", err)
 	}
 }

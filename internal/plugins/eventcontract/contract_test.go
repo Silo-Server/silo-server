@@ -11,6 +11,7 @@ import (
 
 	publicevents "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/events"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -105,6 +106,65 @@ func TestEventCatalogMatchesProducers(t *testing.T) {
 		payload := definition.NewPayload()
 		if err := json.Unmarshal(projected, payload); err != nil || !tc.check(payload) {
 			t.Errorf("%s: projected payload %s lost the producer's fields (%v)", definition.Name, projected, err)
+		}
+	}
+}
+
+// episodePause supplies the stored transition and live row to the real publisher.
+type episodePause struct {
+	*handlers.PGPlaybackAdminStore
+	handlers.PlaybackLifecycleViews
+	row handlers.AdminPlaybackSessionView
+}
+
+func (p episodePause) SetLifecyclePaused(context.Context, string, bool) (handlers.LifecycleTransition, bool, error) {
+	return handlers.LifecycleTransition{SessionID: p.row.SessionID, Seq: 2, State: handlers.LifecyclePaused, At: p.row.UpdatedAt}, true, nil
+}
+
+func (p episodePause) ReadAdminPlaybackSessions(context.Context, handlers.PlaybackSessionsQuery, string, int) ([]handlers.AdminPlaybackSessionView, error) {
+	return []handlers.AdminPlaybackSessionView{p.row}, nil
+}
+
+func TestPluginEpisodeSessionPayload(t *testing.T) {
+	at := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	pause := episodePause{row: handlers.AdminPlaybackSessionView{
+		SessionID: "88451ef8-0f5c-4235-8ee4-26cbd0b51326", StartedAt: at, UpdatedAt: at,
+		EpisodeFileItem: &evt.PlaybackFileItem{Title: "Example Show", Type: "series"},
+		MediaItemID:     "episode-3", MediaType: "episode", MediaTitle: "Pilot", SeriesTitle: "Example Show",
+	}}
+	hub := evt.NewHub("api", nil)
+	events, unsubscribe := hub.Subscribe()
+	defer unsubscribe()
+	h := handlers.PlaybackHandler{EventsHub: hub, AdminStore: pause, LifecycleViews: pause, LifecycleEncoder: apiv2.PlaybackLifecycleEncoder{}}
+	h.SessionPauseReported(t.Context(), pause.row.SessionID, true)
+	var env evt.Envelope
+	select {
+	case env = <-events:
+	default:
+		t.Fatal("pause did not publish an event")
+	}
+
+	payload, err := plugins.PublicPayloadJSON(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event struct {
+		Session map[string]json.RawMessage `json:"session"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"content_id": "episode-3", "media_title": "Example Show", "media_type": "series",
+		"series_name": "Example Show", "episode_name": "Pilot",
+	} {
+		if got := string(event.Session[key]); got != string(mustJSON(t, want)) {
+			t.Errorf("session.%s = %s, want %q", key, got, want)
+		}
+	}
+	for _, key := range []string{"media_item_id", "series_title"} {
+		if _, ok := event.Session[key]; ok {
+			t.Errorf("plugin session includes native API field %s", key)
 		}
 	}
 }

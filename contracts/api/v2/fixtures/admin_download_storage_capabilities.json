@@ -1,9 +1,11 @@
 {
-  "revision": "165ec9e877759eb1312ddf0e64d5fb05f3183e04d967deb116de5a532355d9fa",
+  "revision": "db6deb85da9cb4c222b4bc0dd86f60a2b1650fe1d38847182f277abf3fe017a3",
   "state": "available",
   "allowed": true,
   "available": true,
   "realtime_channel": "download_preparations",
   "devices": true,
-  "revocation": true
+  "revocation": true,
+  "client_ip": true,
+  "change_events": true
 }

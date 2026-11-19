@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 const downloadColumns = `id, user_id, profile_id, device_id, media_file_id, content_id, episode_id, batch_id,
 	kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
-	created_at, updated_at, completed_at, status_event_at`
+	created_at, updated_at, completed_at, status_event_at, created_client_ip, last_client_ip, last_client_ip_at`
 
 // Repository provides CRUD operations for the downloads table.
 type Repository struct {
@@ -93,14 +94,17 @@ func (r *Repository) WithUserQuotaLock(ctx context.Context, userID int, fn func(
 // into d, mapping nullable text columns to empty strings.
 func scanInto(row pgx.Row, d *Download) error {
 	var profileID, deviceID, episodeID, batchID, artifactID *string
+	var createdIP, lastIP *netip.Addr
 	err := row.Scan(
 		&d.ID, &d.UserID, &profileID, &deviceID, &d.MediaFileID, &d.ContentID, &episodeID, &batchID,
 		&d.Kind, &d.Status, &d.Format, &d.Quality, &d.EffectiveQuality, &d.TargetBitrateKbps, &d.Revision, &artifactID, &d.FileSize, &d.BytesSent, &d.ErrorMessage,
-		&d.CreatedAt, &d.UpdatedAt, &d.CompletedAt, &d.StatusEventAt,
+		&d.CreatedAt, &d.UpdatedAt, &d.CompletedAt, &d.StatusEventAt, &createdIP, &lastIP, &d.LastClientIPAt,
 	)
 	if err != nil {
 		return err
 	}
+	d.CreatedClientIP = addrString(createdIP)
+	d.LastClientIP = addrString(lastIP)
 	d.ProfileID = deref(profileID)
 	d.DeviceID = deref(deviceID)
 	d.EpisodeID = deref(episodeID)
@@ -264,6 +268,22 @@ func (r *Repository) TransitionStatus(ctx context.Context, id, expectedStatus, n
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrStatusConflict
+	}
+	return nil
+}
+
+// RecordLastClientIP sets a row's last_client_ip unless it already holds ip
+// or was written less than lastClientIPInterval ago, the bound that holds
+// across API servers whatever each one last read.
+func (r *Repository) RecordLastClientIP(ctx context.Context, id, ip string) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE downloads SET last_client_ip = $2::inet, last_client_ip_at = now()
+		 WHERE id = $1 AND last_client_ip IS DISTINCT FROM $2::inet
+		   AND (last_client_ip_at IS NULL OR last_client_ip_at <= now() - make_interval(secs => $3))`,
+		id, ip, lastClientIPInterval.Seconds(),
+	)
+	if err != nil {
+		return fmt.Errorf("recording download client address: %w", err)
 	}
 	return nil
 }

@@ -2274,6 +2274,14 @@ The detailed session list also accepts `user_id` to filter by login account
 before pagination. Cursors bind that filter, the page size and caller authority;
 changing a filter requires a fresh first page.
 
+A row names what is playing as [playback history](#playback-history)
+names it, so a live row and the history entry its play leaves agree: for an
+episode, `media_type` is `episode`, `media_title` is the episode's title,
+`series_title` is the show's, and `media_item_id` is the episode's content ID,
+the value history's `media_item_id` and its filter take. The summary items, the
+household sessions listing and the row in each `session.*` WebSocket event share this
+naming.
+
 `GET /api/v2/admin/sessions/summary` returns `{count, items}`. Optional `user_id`
 filters by account; omitted means all accounts. `limit` chooses a sample of 1–100
 observations (default 20), ordered by start time descending and session identity
@@ -2281,8 +2289,8 @@ as the tie-breaker. The count includes every matching observation and shares the
 sample's database snapshot. Missing accounts or no activity return zero and an
 empty array. The summary has no pagination.
 
-Summary items expose only account ID, media title/type, optional series/episode
-labels and numbers, and paused state. They omit session/profile identifiers,
+Summary items expose only account ID, media title/type, the optional series
+title and episode numbers, and paused state. They omit session/profile identifiers,
 client network/device details, file IDs and playback controls. The summary reuses
 the live session loader and inherits its synchronization and cleanup delay.
 `admin:sessions:summary:read` grants only this summary and session capabilities;
@@ -2421,8 +2429,11 @@ retention rule, budgets, measurement, and revocation they act on. Every operatio
 requires an acting administrator; the mutations are refused in demo mode.
 
 `GET /api/v2/admin/downloads/storage/capabilities` reports `available`, the realtime
-channel (`download_preparations`), and `devices` and `revocation` when device copies
-can be listed and revoked.
+channel (`download_preparations`), `devices` and `revocation` when device copies
+can be listed and revoked, `client_ip` when download rows carry
+`created_client_ip` and `last_client_ip`, and `change_events` when the admin-only
+`downloads` realtime channel carries `download.changed` (see
+[download changes](realtime-api.md#download-changes)).
 
 `GET /api/v2/admin/downloads/storage` returns one entry per location, the server
 first and then transcode nodes by name, plus the settings that govern them
@@ -2484,7 +2495,9 @@ not yet confirmed deleting), and active series `monitors`.
 Filters: `q`, `stale`, `platform`; `sort` is `last_seen` (longest unseen first,
 default) or `size`. `GET /api/v2/admin/downloads/entries` lists the managed
 downloads themselves, filtered by `user_id`, `profile_id`, `device_id`, or `status`,
-with where each one's prepared file is and any revocation.
+with where each one's prepared file is, any revocation, and the device's
+`created_client_ip` and `last_client_ip` (see
+[client addresses](downloads-api.md#client-addresses-admin)).
 
 `POST /api/v2/admin/downloads/revoke` takes either `ids` (up to 500 download ids)
 or `user_id`, `profile_id`, and `device_id` for every download on one device, plus
