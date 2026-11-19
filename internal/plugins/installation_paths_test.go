@@ -141,6 +141,7 @@ func TestInstallationStoreDeleteRemovesOnlyTrustedFiles(t *testing.T) {
 		installation, err := store.Create(t.Context(), CreateInstallationInput{
 			PluginID: tc.pluginID, Version: tc.version,
 			InstallPath: filepath.Join(base, sanitizeFilesystemSegment(tc.pluginID), sanitizeFilesystemSegment(tc.version), "plugin"),
+			Archive:     ArchiveInput{ManifestJSON: []byte("{}"), Checksum: "test", Bytes: []byte("archive")},
 		})
 		if err != nil {
 			t.Fatal(err)
