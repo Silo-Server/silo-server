@@ -44,7 +44,12 @@ export function SpeedControl({ value, onChange }: SpeedControlProps) {
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Claimed, so the page-level Back key doesn't also leave the page.
+      e.preventDefault();
+      setOpen(false);
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);

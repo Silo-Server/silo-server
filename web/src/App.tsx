@@ -219,10 +219,13 @@ function ScrollRestorationManager() {
   return null;
 }
 
-/** A remote's Back key steps back a page; see `useRemoteBackKey`. */
+/**
+ * A remote's Back key steps back a page; see `useRemoteBackKey`. Not on admin
+ * or settings pages, whose forms hold unsaved edits that Back would discard.
+ */
 function RemoteBackKeyManager() {
   const { pathname } = useLocation();
-  useRemoteBackKey(!/^\/admin(\/|$)/.test(pathname));
+  useRemoteBackKey(!/^\/(admin|settings)(\/|$)/.test(pathname));
   return null;
 }
 

@@ -7,8 +7,25 @@ import { hasEarlierEntry } from "@/lib/navigationHistory";
 // and the browser. BrowserBack is left out: the browser already goes back on it.
 export const REMOTE_BACK_KEYS = new Set(["Escape", "Backspace", "GoBack"]);
 
+/**
+ * Whether a keydown is a remote's Back for a surface that dismisses on it.
+ * Escape always is; Backspace and GoBack typed into a field edit the field.
+ */
+export function isRemoteBack(event: KeyboardEvent): boolean {
+  if (!REMOTE_BACK_KEYS.has(event.key)) return false;
+  if (event.key === "Escape") return true;
+  const target = event.target;
+  return !(
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
+// A native <dialog> closes on Escape by itself and claims the other Back keys
+// (see PlayerModalDialog).
 const CLAIMS_BACK =
-  'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
+  'input, textarea, select, dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
 
 /**
  * Steps back one page when a remote's Back key reaches the page unclaimed.
@@ -18,8 +35,8 @@ const CLAIMS_BACK =
  * key prevents its default and this leaves it alone. A key typed into a field
  * belongs to the field, and with no in-app page behind there is nothing to do.
  *
- * Off when `enabled` is false: admin pages hold unsaved forms that a stray
- * Backspace on a toggle would throw away, and no one administers from a couch.
+ * Off when `enabled` is false: admin and settings pages hold unsaved forms
+ * that a stray Backspace or Escape on a toggle would throw away.
  */
 export function useRemoteBackKey(enabled: boolean) {
   const navigate = useViewTransitionNavigate();
@@ -27,11 +44,13 @@ export function useRemoteBackKey(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!REMOTE_BACK_KEYS.has(event.key) || event.defaultPrevented) return;
+      // A held Back key repeats; one press is one page.
+      if (!REMOTE_BACK_KEYS.has(event.key) || event.defaultPrevented || event.repeat) return;
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       // Escape in fullscreen is the browser leaving fullscreen.
       if (event.key === "Escape" && document.fullscreenElement) return;
       const target = event.target instanceof Element ? event.target : null;
+      if (target instanceof HTMLElement && target.isContentEditable) return;
       if (target?.closest(CLAIMS_BACK) || document.querySelector('[aria-modal="true"]')) return;
       if (!hasEarlierEntry()) return;
       event.preventDefault();

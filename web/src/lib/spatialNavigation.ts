@@ -21,6 +21,9 @@
 // `data-nav-scope` confines movement to a surface drawn over the page (the
 // video player), the same way an open modal dialog does.
 
+import { isRightToLeft } from "./direction";
+import { isNativeImeComposing } from "./imeComposition";
+
 export type NavDirection = "up" | "down" | "left" | "right";
 
 export interface NavBox {
@@ -39,8 +42,11 @@ const DIRECTIONS: Record<string, NavDirection> = {
 
 const FOCUSABLE =
   'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]';
-const DIALOG = '[role="dialog"][aria-modal="true"], [role="alertdialog"]';
+// An open <dialog> counts: the player's dialogs are native modal ones.
+const DIALOG = 'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"]';
 const SCOPE = `${DIALOG}, [data-nav-scope]`;
+// Focus inside a menu stays there: the arrows the menu doesn't use go nowhere.
+const OWN_SCOPE = `${SCOPE}, [role="menu"]`;
 const GROUP = "[data-nav-group]";
 const LIST_ITEM = 'li, [role="listitem"]';
 
@@ -159,17 +165,21 @@ const INPUTS_OWNING_ALL_ARROWS = new Set([
   "week",
 ]);
 
+// Inputs with a caret, which keep Left and Right to move it.
+const INPUTS_WITH_CARET = new Set(["text", "search", "email", "url", "tel", "password"]);
+
 /**
  * Whether the focused element uses this arrow itself. A text field keeps Left
  * and Right for its caret but hands Up and Down on, so a remote can leave the
- * search box for the results below it.
+ * search box for the results below it. A checkbox or a button input has no
+ * caret and keeps no arrows.
  */
 function ownsArrow(el: Element, direction: NavDirection): boolean {
   if (isTextEntry(el)) return true;
   if (el instanceof HTMLMediaElement) return true;
   if (el instanceof HTMLInputElement) {
     if (INPUTS_OWNING_ALL_ARROWS.has(el.type)) return true;
-    return direction === "left" || direction === "right";
+    if (INPUTS_WITH_CARET.has(el.type)) return direction === "left" || direction === "right";
   }
   return false;
 }
@@ -177,7 +187,14 @@ function ownsArrow(el: Element, direction: NavDirection): boolean {
 function isVisible(el: HTMLElement): boolean {
   if (
     typeof el.checkVisibility === "function" &&
-    !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+    // The older option names are the only ones Chromium before 121 reads,
+    // which some TV browsers still ship.
+    !el.checkVisibility({
+      opacityProperty: true,
+      visibilityProperty: true,
+      checkOpacity: true,
+      checkVisibilityCSS: true,
+    })
   ) {
     return false;
   }
@@ -243,7 +260,7 @@ function reachableFrom(focusedGroup: Element | null, el: HTMLElement): boolean {
 }
 
 function activeScope(active: Element | null): Element {
-  const own = active?.closest(SCOPE);
+  const own = active?.closest(OWN_SCOPE);
   if (own) return own;
   const open = document.querySelectorAll(SCOPE);
   return open[open.length - 1] ?? document.body;
@@ -256,13 +273,15 @@ function activeScope(active: Element | null): Element {
  * preferring the page over its chrome.
  */
 function entryCandidate(candidates: HTMLElement[]): HTMLElement | null {
+  // On screen, and not a card its row has scrolled out of sight.
   const onScreen = candidates.filter((el) => {
     const rect = el.getBoundingClientRect();
     return (
       rect.bottom > 0 &&
       rect.top < window.innerHeight &&
       rect.right > 0 &&
-      rect.left < window.innerWidth
+      rect.left < window.innerWidth &&
+      reachableFrom(null, el)
     );
   });
   const preferred = onScreen.find((el) => el.closest("[data-nav-default]"));
@@ -272,6 +291,9 @@ function entryCandidate(candidates: HTMLElement[]): HTMLElement | null {
   let pool = inMain.filter((el) => el.closest(GROUP));
   if (pool.length === 0) pool = inMain;
   if (pool.length === 0) pool = onScreen;
+  // Reading order: the top row, then its inline start, which is the right
+  // edge in a right-to-left layout.
+  const rtl = isRightToLeft(document.documentElement);
   let best: HTMLElement | null = null;
   let bestRect: DOMRect | null = null;
   for (const el of pool) {
@@ -279,7 +301,7 @@ function entryCandidate(candidates: HTMLElement[]): HTMLElement | null {
     if (
       !bestRect ||
       rect.top < bestRect.top ||
-      (rect.top === bestRect.top && rect.left < bestRect.left)
+      (rect.top === bestRect.top && (rtl ? rect.right > bestRect.right : rect.left < bestRect.left))
     ) {
       best = el;
       bestRect = rect;
@@ -332,6 +354,8 @@ export function installSpatialNavigation(): () => void {
   const onKeyDown = (event: KeyboardEvent) => {
     const direction = DIRECTIONS[event.key];
     if (!direction || event.defaultPrevented || isModified(event)) return;
+    // Up and Down pick an input method's candidate while it composes.
+    if (isNativeImeComposing(event)) return;
 
     const active = document.activeElement;
     const focused = active instanceof HTMLElement && active !== document.body ? active : null;

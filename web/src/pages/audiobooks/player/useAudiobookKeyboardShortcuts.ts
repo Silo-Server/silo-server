@@ -129,7 +129,10 @@ export function useAudiobookKeyboardShortcuts({
           e.preventDefault();
           onToggleExpanded();
           break;
+        // Backspace and GoBack are how some remotes send Back.
         case "Escape":
+        case "Backspace":
+        case "GoBack":
           // Open popovers close themselves on Escape; only collapse the
           // full-screen view when nothing else is consuming the key.
           if (expanded && !document.querySelector("[role='menu'], [role='dialog']")) {

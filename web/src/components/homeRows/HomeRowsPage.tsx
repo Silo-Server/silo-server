@@ -180,6 +180,8 @@ export function HomeRowsPage({
       !event.currentTarget.contains(event.target as Node)
     )
       return;
+    // Claimed, so the page-level Back key doesn't also leave the page.
+    event.preventDefault();
     selection.onExit();
   }
 

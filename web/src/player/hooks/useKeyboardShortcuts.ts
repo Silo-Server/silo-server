@@ -87,7 +87,11 @@ export function useKeyboardShortcuts(
             return;
           }
         } else if (e.key === "Enter") {
-          if (onControl) return;
+          // A control outside the player, such as a toast's action, keeps
+          // its own Enter.
+          const outside =
+            container !== null && target !== document.body && !container.contains(target);
+          if (onControl || outside) return;
           e.preventDefault();
           handlePlayPause();
           return;

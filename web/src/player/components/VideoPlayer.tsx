@@ -4823,6 +4823,7 @@ export function VideoPlayer({
   }, [handleMutedChange, muted]);
 
   // -- Keyboard shortcuts --
+  const markerEditing = markerEditor.editing;
   const remoteControls = useMemo<RemoteControls>(
     () => ({
       container: containerRef,
@@ -4831,11 +4832,19 @@ export function VideoPlayer({
       focusTransport,
       back: () => {
         // An open menu closes on Escape by itself; Back must not also leave.
-        if (hasOpenPlayerMenu()) return;
+        // Nor while markers are edited, which would throw the draft away.
+        if (hasOpenPlayerMenu() || markerEditing) return;
         void handleExit();
       },
     }),
-    [controlsVisible, focusTransport, handleExit, hasOpenPlayerMenu, resetControlsTimer],
+    [
+      controlsVisible,
+      focusTransport,
+      handleExit,
+      hasOpenPlayerMenu,
+      markerEditing,
+      resetControlsTimer,
+    ],
   );
   useKeyboardShortcuts(
     videoRef,

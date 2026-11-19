@@ -343,11 +343,14 @@ export default function MediaCarousel({
           onKeyDown={(e) => {
             // Only the row itself pages; with a card focused, the arrows move
             // between cards (see spatialNavigation) and Embla follows focus.
+            // The arrow the row pages with is claimed, so focus stays put.
             if (e.target !== e.currentTarget) return;
             const key = readingArrowKey(e);
             if (key === "ArrowLeft") {
+              e.preventDefault();
               scrollPrev();
             } else if (key === "ArrowRight") {
+              e.preventDefault();
               scrollNext();
             }
           }}

@@ -77,9 +77,12 @@ export default function BrandCarousel({
             onKeyDown={(e) => {
               if (e.target !== e.currentTarget) return;
               const key = readingArrowKey(e);
+              // Claimed, so spatial navigation doesn't also move focus.
               if (key === "ArrowLeft") {
+                e.preventDefault();
                 scrollPrev();
               } else if (key === "ArrowRight") {
+                e.preventDefault();
                 scrollNext();
               }
             }}
