@@ -2897,6 +2897,15 @@ func (c *SubtitleCache) settleWarmAttempt(
 	budget time.Duration,
 	deadlineCtx context.Context,
 ) (outcome, reason string, again bool) {
+	if errors.Is(context.Cause(ctx), errSubtitleFillPageAnswered) || errors.Is(err, errSubtitleFillPageAnswered) {
+		// The page this fill was serving already has its final answer and no
+		// other page of the track is waiting. Nothing can consume the rest of
+		// this read, so it ends here instead of running to its own budget.
+		st.fill.Discard()
+		slog.DebugContext(ctx, "subtitle cache warm ended: its page was answered finally",
+			"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
+		return subtitleFillOutcomeAbandoned, subtitleFillEndPageAnswered, false
+	}
 	if preempted && err != nil {
 		// An admitted page took the pipe. This is a deliberate yield, never a
 		// source failure: discard the partial fill, rebuild it under the same

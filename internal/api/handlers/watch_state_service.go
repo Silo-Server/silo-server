@@ -90,7 +90,13 @@ func (h *ItemsHandler) scheduleSelectedVirtualProbe(contentID, itemType string, 
 		// chain for an unprobed row cover the warm-up (it opens the same URL and
 		// starts the same fetch), while a refused probe leaves the warm-up to
 		// start the fetch on its own.
-		if version.ProbedAt == nil {
+		//
+		// A stamp is not an inventory: an evidence write that landed no tracks
+		// (or whose tracks were invalidated afterwards) leaves a row stamped and
+		// empty, and that row is exactly the one whose menu stays blank forever.
+		// The probe chain already calls this "stamp_without_inventory" and
+		// re-probes it, but this gate kept a selection from ever reaching it.
+		if version.ProbedAt == nil || !versionCarriesProbeInventory(*version) {
 			h.virtualSelectionProber.ScheduleSelectedFileProbe(contentID, version.FileID, filter)
 		}
 		h.virtualSelectionProber.ScheduleSelectedFileWarm(contentID, version.FileID, filter)
@@ -292,4 +298,11 @@ func (h *ItemsHandler) markLeafTargetsUnwatched(ctx context.Context, userID int,
 		targetIDs = append(targetIDs, target.ContentID)
 	}
 	return h.watchState.RecordManualMarkUnwatched(ctx, userID, profileID, targetIDs)
+}
+
+// versionCarriesProbeInventory reports whether a version row has any track
+// evidence to show. A row can be stamped without it (see the selection probe
+// gate): the stamp says a probe ran, not that its evidence was adopted.
+func versionCarriesProbeInventory(version catalog.FileVersion) bool {
+	return len(version.VideoTracks) > 0 || len(version.AudioTracks) > 0 || len(version.SubtitleTracks) > 0
 }

@@ -51,6 +51,26 @@ const (
 	// is a verdict.
 	subtitlePageReachMargin = 2.0
 
+	// subtitlePageClientWaitBudget is how long the bitmap clients keep asking
+	// for the same page. Their retry ladder backs off 5, 10, 20 and 40 s
+	// (web/src/player/utils/subtitleWindows.ts), so a page asked for from the
+	// first refusal is only being waited on for ~75 s in total — the viewer
+	// sees the stalled card once the overlay stops promising a load, and the
+	// remaining retries run behind it. The server's own 90 s budget is longer
+	// than that, so on its own it answers after the client has already given
+	// up: production's 1080p page (1074011 at 1080 s) spent the whole client
+	// ladder on `page_not_ready` while the reach check compared the fill
+	// against the server window and kept saying "retry".
+	subtitlePageClientWaitBudget = 75 * time.Second
+
+	// subtitlePageReachFloor is the shortest wait the reach check will judge a
+	// page against. Once the client's ladder is spent, its remaining wait is
+	// zero, but a fill that is about to cross the page (a few seconds of
+	// artifact away) must still stay retryable: a viewer who presses Retry, or
+	// whose client keeps polling, is then served rather than told the page is
+	// unavailable a moment before it lands.
+	subtitlePageReachFloor = 5 * time.Second
+
 	// subtitlePageRecoveryStallWindow is how long the watermark may stay put
 	// before the page stops waiting for it, once nothing is filling the track
 	// any more. A real artifact advances between refusals; one that has not
@@ -79,6 +99,11 @@ type subtitlePageRecovery struct {
 	// the budget belongs to the track, because a client that re-anchors on every
 	// retry asks for a new start on the same artifact.
 	start float64
+	// waiting holds the page positions still waiting on this track, keyed by
+	// start, with the time each last refused. A final answer reads it to decide
+	// whether the fill it cancels still has another page to serve: two clients,
+	// or a seek target and the playhead page, can wait on one track.
+	waiting map[float64]time.Time
 }
 
 // pageRecoveryRefusal records this page's wait and answers it: the retryable
@@ -100,6 +125,11 @@ func (c *SubtitleCache) pageRecoveryRefusal(opts StreamExtractOpts, start, cover
 			logKeyComponent, logValuePlayback,
 			"start", start, "covered", covered, "waited", wait,
 			"budget", c.pageRecoveryBudget(), "artifact_seconds_per_second", reachRate)
+		// Nobody is going to ask for this page again, so the fill is now a
+		// read for no one. Cancel it unless another page of the track is still
+		// waiting on it; production's answered page ran on to 95 s and 3.1 MB
+		// past its final answer.
+		c.cancelFillAfterFinalPage(opts, start)
 		return &SubtitleExtractionUnavailableError{
 			Reason:       SubtitlePageUnavailableReason,
 			Start:        start,
@@ -163,9 +193,15 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		if len(c.pageWaits) >= subtitlePageRecoveryMaxEntries {
 			c.prunePageRecoveryLocked(now)
 		}
-		c.pageWaits[key] = subtitlePageRecovery{first: now, lastSeen: now, lastCover: covered, start: start}
+		c.pageWaits[key] = subtitlePageRecovery{
+			first: now, lastSeen: now, lastCover: covered, start: start,
+			waiting: map[float64]time.Time{start: now},
+		}
 		return 0, true, false, 0
 	}
+	// Record this page as waiting before the verdicts, so a final answer in this
+	// same call can tell whether any other page still needs the fill.
+	entry.noteWaiting(now, start)
 	wait = now.Sub(entry.first)
 	stalled = !filling && covered <= entry.lastCover && now.Sub(entry.lastSeen) >= subtitlePageRecoveryStallWindow
 	// A fill that ended without committing since this track began its wait is
@@ -185,12 +221,26 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 	// minutes ahead. The margin keeps a merely tight estimate retryable: fills
 	// speed up when the transcode competing for the relay pauses, so only an
 	// order-of-magnitude shortfall is a verdict.
+	//
+	// The wait that decides "too slow" is the client's, not the server's. A
+	// page nobody is asking for any more cannot be served by retrying whatever
+	// the fill's own budget allows, so the projection is measured against the
+	// shorter of the two windows, floored so a fill about to cross the page
+	// keeps the page retryable even after the ladder is spent.
 	if !stalled && filling && covered > entry.lastCover {
 		elapsed := now.Sub(entry.lastSeen)
 		if elapsed > 0 {
 			reachRate = (covered - entry.lastCover) / elapsed.Seconds()
 			remaining := c.pageRecoveryBudget() - wait
-			if reachRate > 0 && remaining > 0 && (start-covered)/reachRate > subtitlePageReachMargin*remaining.Seconds() {
+			clientRemaining := subtitlePageClientWaitBudget - wait
+			if clientRemaining < subtitlePageReachFloor {
+				clientRemaining = subtitlePageReachFloor
+			}
+			if remaining < clientRemaining {
+				clientRemaining = remaining
+			}
+			if reachRate > 0 && clientRemaining > 0 &&
+				(start-covered)/reachRate > subtitlePageReachMargin*clientRemaining.Seconds() {
 				stalled = true
 			}
 		}
@@ -204,6 +254,67 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 	}
 	c.pageWaits[key] = entry
 	return wait, false, stalled, reachRate
+}
+
+// noteWaiting records that the page at start refused now, and forgets pages
+// that have stopped asking. A page that has not refused for the client's own
+// wait budget is not waiting any more: its client gave up or seeked away, and
+// its fill must not be kept alive on its behalf.
+func (r *subtitlePageRecovery) noteWaiting(now time.Time, start float64) {
+	if r.waiting == nil {
+		r.waiting = make(map[float64]time.Time, 1)
+	}
+	r.waiting[start] = now
+	for position, seen := range r.waiting {
+		if now.Sub(seen) > subtitlePageClientWaitBudget {
+			delete(r.waiting, position)
+		}
+	}
+}
+
+// cancelFillAfterFinalPage stops the fill this page was waiting on once the page
+// has its final answer, unless another page of the same track is still waiting
+// for it. The fill's remaining work cannot serve the answered page, and
+// production's answered page left it reading to 95 s and 3.1 MB for nobody.
+func (c *SubtitleCache) cancelFillAfterFinalPage(opts StreamExtractOpts, start float64) {
+	key, ok := c.pageRecoveryFillKey(opts)
+	if !ok {
+		return
+	}
+	now := c.pageRecoveryNow()
+	c.pageWaitMu.Lock()
+	if entry, seen := c.pageWaits[key]; seen {
+		delete(entry.waiting, start)
+		for position, seenAt := range entry.waiting {
+			if now.Sub(seenAt) > subtitlePageClientWaitBudget {
+				delete(entry.waiting, position)
+			}
+		}
+		c.pageWaits[key] = entry
+		if len(entry.waiting) > 0 {
+			// Another page of this track is still waiting: the fill is its read,
+			// not this page's.
+			c.pageWaitMu.Unlock()
+			return
+		}
+	}
+	c.pageWaitMu.Unlock()
+	c.cancelTrackFill(key)
+}
+
+// cancelTrackFill stops the full-track fill registered for key, if any. The
+// cause is the page-answered one rather than the page-preemption one: this fill
+// is finished, not yielding to a page that will hand it back.
+func (c *SubtitleCache) cancelTrackFill(key string) {
+	if c == nil || key == "" {
+		return
+	}
+	c.windowMu.Lock()
+	run := c.warmRuns[key]
+	c.windowMu.Unlock()
+	if run != nil {
+		run.cancel(errSubtitleFillPageAnswered)
+	}
 }
 
 // progressiveFillInFlight reports whether a progressive .sup fill currently holds
@@ -261,6 +372,17 @@ func (c *SubtitleCache) fillEndedFinal(opts StreamExtractOpts, since time.Time) 
 // subtitleFillEndPageBudgetSpent is the fill-end reason recorded when a
 // page-driven fill ran out the budget its waiter gave it.
 const subtitleFillEndPageBudgetSpent = "page_wait_budget_spent"
+
+// subtitleFillEndPageAnswered is the fill-end reason recorded when the page a
+// fill was serving got its final answer and nothing else was waiting on the
+// track: the fill is stopped instead of reading the artifact out for no one.
+const subtitleFillEndPageAnswered = "page_answered_finally"
+
+// errSubtitleFillPageAnswered cancels a full-track fill whose page has already
+// been answered. It is deliberately not ErrSubtitleWarmCanceled: that cause
+// means an admitted page took the pipe and the fill must resume afterwards,
+// while this one ends the fill for good.
+var errSubtitleFillPageAnswered = errors.New("subtitle fill ended: its page was answered finally")
 
 // SubtitlePageRecoveryBudget is the production wait budget for one refused
 // bitmap page. A caller that starts the fill the page is waiting on bounds that

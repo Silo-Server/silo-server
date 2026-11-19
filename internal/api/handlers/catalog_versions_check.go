@@ -345,10 +345,16 @@ func (h *CatalogResourceHandler) CheckVersionsWithInventory(ctx context.Context,
 		return results
 	}
 	status := VirtualPreprobeDeclined
-	// Only an unstamped, not-yet-failed virtual row has provider bytes left to
-	// enumerate: a stamped row already carries its answer, and a dead pin is not
-	// worth a synchronous provider read.
-	if isVirtualPlaybackFile(file) && file.ProbeUpdatedAt == nil && file.FailedAt == nil && h.items != nil {
+	// A row with no track inventory has something left to enumerate even when
+	// it carries a probe stamp: an evidence write that landed no tracks (or
+	// whose tracks were invalidated later) leaves exactly that shape, and
+	// treating the stamp alone as the answer froze those rows — production's
+	// four stamped-empty rows were never re-probed by the surface the pre-play
+	// bar asks through. A dead pin is still not worth a synchronous provider
+	// read.
+	if isVirtualPlaybackFile(file) &&
+		(file.ProbeUpdatedAt == nil || !virtualRowCarriesProbeInventory(file)) &&
+		file.FailedAt == nil && h.items != nil {
 		probeCtx, cancel := context.WithTimeout(ctx, versionCheckPreprobeBudget)
 		status = h.items.preprobeSelectedVirtualFile(probeCtx, file.ContentID, file.ID, h.versionCheckAccessFilter(ctx))
 		cancel()

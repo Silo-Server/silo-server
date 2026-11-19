@@ -191,3 +191,40 @@ func TestCheckVersionsWithInventorySkipsAProbedRow(t *testing.T) {
 		t.Fatalf("stamped row ran %d preprobes, want none", len(prober.calls))
 	}
 }
+
+// TestCheckVersionsWithInventoryRepairsAStampedEmptyRow: a probe stamp with no
+// tracks is not an answer. An evidence write that landed no inventory (or whose
+// inventory was invalidated later) leaves exactly that shape, and the pre-play
+// bar's version row is the surface a viewer asks through — the repair must fire
+// there, not only on a play.
+func TestCheckVersionsWithInventoryRepairsAStampedEmptyRow(t *testing.T) {
+	row := &models.MediaFile{
+		ID:                         46,
+		ContentID:                  "movie:inventory",
+		FilePath:                   "virtual://movie/inventory?result=cand-1",
+		VirtualOwnerInstallationID: 7,
+	}
+	probedAt := time.Now().Add(-time.Hour)
+	row.ProbeUpdatedAt = &probedAt
+	prober := &recordingPreprober{status: VirtualPreprobeVerified}
+	h, stub := inventoryCheckHandler(prober, row)
+	repairedAt := time.Now()
+	prober.after = func() {
+		repaired := *row
+		repaired.ProbeUpdatedAt = &repairedAt
+		repaired.VideoTracks = []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160}}
+		repaired.AudioTracks = []models.AudioTrack{{Index: 1, Codec: "truehd", Language: "kor", Channels: 8}}
+		stub.set(&repaired)
+	}
+
+	results := h.CheckVersionsWithInventory(t.Context(), []int{row.ID})
+	if len(prober.calls) != 1 || prober.calls[0] != row.ID {
+		t.Fatalf("preprobe calls = %v, want the stamped-empty row re-probed", prober.calls)
+	}
+	if len(results) != 1 || results[0].Inventory == nil {
+		t.Fatalf("results = %#v, want one with inventory", results)
+	}
+	if got := results[0].Inventory.AudioTracks; len(got) != 1 || got[0].Codec != "truehd" {
+		t.Fatalf("inventory tracks = %+v, want the repaired audio track", got)
+	}
+}
