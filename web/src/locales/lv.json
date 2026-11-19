@@ -2054,6 +2054,110 @@
       "value": "Lietotnes valoda"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Beigās"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minūtes pirms beigām"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minūte pirms beigām"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minūtes pirms beigām"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundes pirms beigām"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekunde pirms beigām"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundes pirms beigām"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Rādīt nākamās epizodes"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Izslēgts"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -59313,7 +59417,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Uzdevumi tiek reģistrēti, kad serveris startē, tāpēc uzdevuma ieslēgšana vai izslēgšana stājas spēkā pēc restartēšanas. Kad uzdevums ir izveidots, mainiet tā grafiku uzdevuma lapā."
+      "value": "Uzdevuma ieslēgšana vai izslēgšana stājas spēkā bez restartēšanas, taču citiem serveriem var būt vajadzīgs brīdis, lai to pārņemtu. Kad uzdevums ir ieslēgts, mainiet tā grafiku uzdevuma lapā."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -80721,6 +80825,12 @@
     {
       "type": 0,
       "value": "Pierakstīšanās televizorā: sākšana"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakātu pieprasījumi"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -105795,6 +105905,12 @@
       "value": "jūsu bibliotēkas"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Skaits nav pieejams"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -107855,6 +107971,24 @@
       "value": "Pievienot"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, vai var pievienot vienumus."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Mēģināt ielādēt vēlreiz"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Notiek pārbaude, vai var pievienot vienumus…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -107871,6 +108005,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Šis serveris nevar droši pievienot vienumus, kamēr ir ielādēta tikai daļa kolekcijas. Jūs joprojām varat noņemt vienumus un rediģēt kolekciju."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Pirms pievienojat vēl, ielādējiet vienumus vēlreiz."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -107891,6 +108037,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Notiek vienumu ielāde pirms citu pievienošanas…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -117526,6 +117678,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Arī kolekcijās"
     }
   ],
   "web.detail.sections.cast": [

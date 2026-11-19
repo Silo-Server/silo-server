@@ -2035,6 +2035,104 @@
       "value": "\u200F\u202EApp language\u202C"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAt end\u202C"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E minute before end\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E minutes before end\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E second before end\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E seconds before end\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow Next Up\u202C"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOff\u202C"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -55408,7 +55506,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "\u200F\u202ETasks are registered when the server starts, so turning one on or off takes effect after a restart. Once a task exists, change its schedule on its task page.\u202C"
+      "value": "\u200F\u202ETurning a task on or off applies without a restart, though other servers can take a moment to pick it up. Once a task is on, change its schedule on its task page.\u202C"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -76549,6 +76647,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ETV sign-in: start\u202C"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPoster requests\u202C"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -100062,6 +100166,12 @@
       "value": "\u200F\u202Eyour libraries\u202C"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECount unavailable\u202C"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -102174,6 +102284,24 @@
       "value": "\u200F\u202EAdd\u202C"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't check whether titles can be added.\u202C"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETry loading again\u202C"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChecking whether titles can be added…\u202C"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -102192,6 +102320,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server can't safely add titles while only part of the collection is loaded. You can still remove titles and edit the collection.\u202C"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoad the titles again before adding more.\u202C"
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -102206,6 +102346,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading titles before adding more…\u202C"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -111490,6 +111636,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAlso in\u202C"
     }
   ],
   "web.detail.sections.cast": [

@@ -2049,6 +2049,132 @@
       "value": "Język aplikacji"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Na końcu"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutę przed końcem"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuty przed końcem"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minut przed końcem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuty przed końcem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundę przed końcem"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundy przed końcem"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekund przed końcem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundy przed końcem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Podpowiedź o następnym odcinku"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Wył."
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -65054,7 +65180,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Zadania są rejestrowane podczas uruchamiania serwera, więc włączenie lub wyłączenie zadania zadziała dopiero po restarcie. Gdy zadanie już istnieje, zmień jego harmonogram na stronie zadania."
+      "value": "Włączenie lub wyłączenie zadania działa bez ponownego uruchamiania serwera, choć inne serwery mogą potrzebować chwili, aby uwzględnić zmianę. Gdy zadanie jest włączone, zmień jego harmonogram na stronie zadania."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -87293,6 +87419,12 @@
     {
       "type": 0,
       "value": "Logowanie na TV: rozpoczęcie"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Żądania plakatów"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -114268,6 +114400,12 @@
       "value": "twoich bibliotekach"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Liczba niedostępna"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -116306,6 +116444,24 @@
       "value": "Dodaj"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić, czy można dodać tytuły."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Wczytaj ponownie"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Sprawdzanie, czy można dodać tytuły…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -116324,6 +116480,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ten serwer nie może bezpiecznie dodawać tytułów, gdy wczytana jest tylko część kolekcji. Nadal możesz usuwać tytuły i edytować kolekcję."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Wczytaj tytuły ponownie, zanim dodasz kolejne."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -116338,6 +116506,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Wczytywanie tytułów przed dodaniem kolejnych…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -126608,6 +126782,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Także w kolekcjach"
     }
   ],
   "web.detail.sections.cast": [

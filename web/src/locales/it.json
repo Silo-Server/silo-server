@@ -2038,6 +2038,110 @@
       "value": "Lingua dell’app"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Alla fine"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuto prima della fine"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " di minuti prima della fine"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuti prima della fine"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " secondo prima della fine"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " di secondi prima della fine"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " secondi prima della fine"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Mostra Prossimi episodi"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Disattivato"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -58170,7 +58274,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Le attività vengono registrate all’avvio del server, quindi attivarne o disattivarne una ha effetto dopo un riavvio. Una volta creata un’attività, modificane la pianificazione nella sua pagina."
+      "value": "Attivare o disattivare un’attività ha effetto senza riavvio, anche se gli altri server possono impiegare qualche istante per recepire la modifica. Una volta attivata un’attività, modificane la pianificazione nella pagina dell’attività."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79438,6 +79542,12 @@
     {
       "type": 0,
       "value": "Accesso TV: avvio"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Richieste di locandine"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -104197,6 +104307,12 @@
       "value": "nessuna delle tue librerie"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Conteggio non disponibile"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -106179,6 +106295,24 @@
       "value": "Aggiungi"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Impossibile verificare se è possibile aggiungere titoli."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Riprova a caricare"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Verifica della possibilità di aggiungere titoli…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -106197,6 +106331,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Questo server non può aggiungere titoli in sicurezza finché la raccolta è caricata solo in parte. Puoi comunque rimuovere titoli e modificare la raccolta."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Carica di nuovo i titoli prima di aggiungerne altri."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -106211,6 +106357,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Caricamento dei titoli prima di aggiungerne altri…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -115718,6 +115870,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Anche in"
     }
   ],
   "web.detail.sections.cast": [

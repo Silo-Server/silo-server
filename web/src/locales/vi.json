@@ -2027,6 +2027,88 @@
       "value": "Ngôn ngữ ứng dụng"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Khi kết thúc"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " phút trước khi kết thúc"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " phút trước khi kết thúc"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " giây trước khi kết thúc"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " giây trước khi kết thúc"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Hiển thị Tập tiếp theo"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Tắt"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -52532,7 +52614,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tác vụ được đăng ký khi máy chủ khởi động, nên việc bật hoặc tắt một tác vụ chỉ có hiệu lực sau khi khởi động lại. Khi tác vụ đã tồn tại, hãy thay đổi lịch của tác vụ trên trang tác vụ đó."
+      "value": "Việc bật hoặc tắt một tác vụ có hiệu lực mà không cần khởi động lại, tuy các máy chủ khác có thể cần một lúc để nhận thay đổi. Khi tác vụ đã bật, hãy thay đổi lịch của tác vụ trên trang tác vụ đó."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -73061,6 +73143,12 @@
     {
       "type": 0,
       "value": "Đăng nhập TV: bắt đầu"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Yêu cầu ảnh poster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -95680,6 +95768,12 @@
       "value": "thư viện của bạn"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Không có số lượng"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97688,6 +97782,24 @@
       "value": "Thêm"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra xem có thể thêm tựa hay không."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Thử tải lại"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Đang kiểm tra xem có thể thêm tựa hay không…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97706,6 +97818,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Máy chủ này không thể thêm tựa một cách an toàn khi chỉ một phần bộ sưu tập được tải. Bạn vẫn có thể xóa tựa và chỉnh sửa bộ sưu tập."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Tải lại các tựa trước khi thêm tựa khác."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97720,6 +97844,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Đang tải các tựa trước khi thêm tựa khác…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106484,6 +106614,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Cũng có trong"
     }
   ],
   "web.detail.sections.cast": [

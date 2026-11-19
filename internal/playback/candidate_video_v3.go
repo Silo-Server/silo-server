@@ -283,6 +283,7 @@ func (p *candidatePlannerV3) videoCandidates() []candidateV3 {
 		original(candidateDV8BaseLayerV3, !dv7 && f.dv8BaseOK)
 		original(candidateClientManagedV3, f.clientManagedRange && (dv7 || !f.rangeOK && !f.dv8BaseOK))
 	}
+	add(candidateV3{route: candidateSurroundBitstreamV3, video: candidateCopyV3, audio: candidateAudioConvertV3, delivery: candidateHLSV3}, len(p.surroundBitstreamCodecs()) > 0, sidecar...)
 	if f.remuxActive {
 		strip := f.stripProgressive || f.stripHLS
 		a := &f.remuxAudio
@@ -330,6 +331,8 @@ func (p *candidatePlannerV3) progressiveAACOK() bool {
 
 func (p *candidatePlannerV3) evaluateVideo(c candidateV3) (*PlannerResultV3, *PlannerResultV3) {
 	switch {
+	case c.route == candidateSurroundBitstreamV3:
+		return p.surroundBitstreamCandidate(), nil
 	case c.route == candidateTranscodeV3:
 		return p.transcodeCandidate(c)
 	case c.route == candidateOriginalV3:

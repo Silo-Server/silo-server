@@ -202,9 +202,19 @@ func TestAdminCommandRelaysToTheLaneOwner(t *testing.T) {
 }
 
 // TestAdminTerminateRelaysToTheLaneOwner: the owner ends its live session and
-// tells the player, instead of the receiving replica revoking blind.
+// tells the player, instead of the receiving replica revoking blind. A repeat
+// relayed while the player's lane is still open converges without telling
+// the player again.
 func TestAdminTerminateRelaysToTheLaneOwner(t *testing.T) {
 	c := newRelayTestCluster(t)
+	store := playback.NewMemoryPlanStoreV3()
+	c.owner.playback.PlanStoreV3 = store
+	c.other.playback.PlanStoreV3 = store
+	if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+		PlaybackAttemptID: "attempt-" + c.session.ID, SessionID: c.session.ID, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	view, err := c.other.Terminate(t.Context(), AdminTerminateInput{SessionID: c.session.ID, ActorID: 2, Reason: "policy"})
 	if err != nil {
@@ -219,6 +229,15 @@ func TestAdminTerminateRelaysToTheLaneOwner(t *testing.T) {
 	}
 	if _, err := c.ownerMgr.GetSession(c.session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("the owner kept the terminated session: %v", err)
+	}
+
+	repeat, err := c.other.Terminate(t.Context(), AdminTerminateInput{SessionID: c.session.ID, ActorID: 2})
+	want := AdminTerminateView{SessionID: c.session.ID, AuthorityRevoked: true, AlreadyRevoked: true, DurableState: AdminTerminateDurableStopped, Delivery: AdminTerminateDeliveryNone}
+	if err != nil || repeat != want {
+		t.Fatalf("relayed repeat = %+v, %v; want %+v", repeat, err, want)
+	}
+	if got := len(c.conn.sent()); got != 1 {
+		t.Fatalf("lane received %d commands after the repeat, want 1", got)
 	}
 }
 

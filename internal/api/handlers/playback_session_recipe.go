@@ -79,9 +79,10 @@ func stampLiveRouteV3(card *playback.RecipeCard, current *playback.Session) {
 
 // sessionRecipeCardV3 is a builder's base card for the recovery copy, with the
 // client metadata stored cards carry so a rebuilt session keeps its label in
-// the admin views. The adaptation reasons come from the plan being committed:
-// the session still holds the previous plan's while its transport is built.
-func sessionRecipeCardV3(card playback.RecipeCard, session *playback.Session, adaptationReasons []string) *playback.RecipeCard {
+// the admin views. The adaptation reasons and subtitle come from the plan being
+// committed: the session still holds the previous plan's while its transport
+// is built.
+func sessionRecipeCardV3(card playback.RecipeCard, session *playback.Session, result playback.PlannerResultV3) *playback.RecipeCard {
 	card.ClientName = session.ClientName
 	card.ClientVersion = session.ClientVersion
 	card.ClientBuild = session.ClientBuild
@@ -89,7 +90,8 @@ func sessionRecipeCardV3(card playback.RecipeCard, session *playback.Session, ad
 	card.ClientUserAgent = session.ClientUserAgent
 	card.DeviceID = session.DeviceID
 	card.DevicePlatform = session.DevicePlatform
-	card.AdaptationReasons = adaptationReasons
+	card.AdaptationReasons = result.AdaptationReasons
+	card.Subtitle = playback.SessionSubtitleFromPlanV3(result.Plan)
 	return &card
 }
 
@@ -223,6 +225,10 @@ func storedSessionRecipeV3(ctx context.Context, recipes sessionRecipeStoreV3, at
 	if profileID := apimw.GetProfileID(ctx); profileID != "" && profileID != record.ProfileID {
 		return nil, nil
 	}
+	// The card was frozen before the transport attached its sidecar, and an
+	// executor move rewrites it from the moved transport; the plan it is bound
+	// to says what the session shows.
+	card.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
 	return card, nil
 }
 

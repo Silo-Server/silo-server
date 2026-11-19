@@ -146,67 +146,68 @@ type Dependencies struct {
 	AdminDownloadStorage             AdminDownloadStorageService
 	AdminDownloadDevices             AdminDownloadDeviceService
 	// DownloadPrepareAgain prepares a finished download's expired file again.
-	DownloadPrepareAgain          DownloadPrepareAgainService
-	AdminNodeSessions             AdminNodeSessionService
-	AdminPlaybackCommands         AdminPlaybackCommandService
-	AdminPlaybackTerminate        AdminPlaybackTerminateService
-	AdminAutoscanConnections      AdminAutoscanConnectionsService
-	AdminAutoscanInspection       AdminAutoscanInspectionService
-	AdminAutoscanSources          AdminAutoscanSourcesService
-	AutoscanDelivery              AutoscanDeliveryService
-	Onboarding                    OnboardingService
-	DownloadCreation              DownloadCreationService
-	AdminJellyfinCompatStatus     AdminJellyfinCompatStatusService
-	AdminSettingRead              AdminSettingReadService
-	AdminJellyfinCompatWeb        AdminJellyfinCompatWebService
-	AdminRateLimitsWrite          AdminRateLimitWriteService
-	AdminRateLimits               AdminRateLimitReadService
-	DownloadSubscriptionMutations DownloadSubscriptionMutationService
-	DownloadSubscriptionSync      DownloadSubscriptionSyncService
-	DiagnosticsChunks             DiagnosticsChunksService
-	DiagnosticsIngress            DiagnosticsIngressService
-	EventsSocket                  EventsSocketService
-	AdminLogsSocket               AdminLogsSocketService
-	PlaybackControlSocket         PlaybackControlSocketService
-	EventsCapability              EventsCapabilityService
-	NetworkAccess                 NetworkAccessService
-	ServerIdentity                ServerIdentityService
-	ServerConnections             ServerConnections
-	NotificationDestinationCreate NotificationDestinationCreateService
-	AdminUnmatchedFiles           AdminUnmatchedFilesService
-	AdminCatalogItems             AdminCatalogItemsService
-	AdminCatalogImages            AdminCatalogImagesService
-	AdminCatalogMatch             AdminCatalogMatchService
-	AdminCatalogSplit             AdminCatalogSplitService
-	AdminMarkerContributions      AdminMarkerContributionsService
-	AdminMarkerProviders          AdminMarkerProvidersService
-	AdminMarkerHistory            AdminMarkerHistoryService
-	AdminEpisodeMarkers           AdminEpisodeMarkersService
-	DownloadSubscriptions         DownloadSubscriptionService
-	DownloadManifests             DownloadManifestService
-	DownloadDelivery              DownloadDeliveryService
-	Downloads                     DownloadRegistryService
-	DownloadProxyDelivery         func() bool
-	WebhookReceiver               WebhookReceiverService
-	SubtitleAIReads               SubtitleAIReadService
-	NotificationDiscordLinks      NotificationDiscordLinkService
-	NotificationEmailLinks        NotificationEmailLinkService
-	NotificationDestinationTests  NotificationDestinationTestService
-	AdminDevices                  AdminDeviceService
-	UserLibraries                 UserLibraryService
-	EbookAnnotations              EbookAnnotationService
-	AdminNotificationDiscord      AdminNotificationDiscordService
-	NotificationDestinations      NotificationDestinationService
-	EbookFiles                    EbookFileService
-	EbookConfig                   EbookConfigService
-	EbookProgress                 EbookProgressService
-	AdminItemMetadata             AdminItemMetadataService
-	AdminMetadataTranslation      AdminMetadataTranslationService
-	AdminPeople                   AdminPeopleService
-	AdminDiagnosticDownloads      AdminDiagnosticDownloadService
-	AdminJobArtifacts             AdminJobArtifactService
-	AdminJobArtifactSigner        *artworkurl.Signer
-	AdminBackups                  AdminBackupService
+	DownloadPrepareAgain           DownloadPrepareAgainService
+	AdminNodeSessions              AdminNodeSessionService
+	AdminPlaybackCommands          AdminPlaybackCommandService
+	AdminPlaybackTerminate         AdminPlaybackTerminateService
+	AdminAutoscanConnections       AdminAutoscanConnectionsService
+	AdminAutoscanInspection        AdminAutoscanInspectionService
+	AdminAutoscanSources           AdminAutoscanSourcesService
+	AutoscanDelivery               AutoscanDeliveryService
+	Onboarding                     OnboardingService
+	DownloadCreation               DownloadCreationService
+	AdminJellyfinCompatStatus      AdminJellyfinCompatStatusService
+	AdminSettingRead               AdminSettingReadService
+	AdminJellyfinCompatWeb         AdminJellyfinCompatWebService
+	AdminRateLimitsWrite           AdminRateLimitWriteService
+	AdminRateLimits                AdminRateLimitReadService
+	DownloadSubscriptionMutations  DownloadSubscriptionMutationService
+	DownloadSubscriptionSync       DownloadSubscriptionSyncService
+	DiagnosticsChunks              DiagnosticsChunksService
+	DiagnosticsIngress             DiagnosticsIngressService
+	EventsSocket                   EventsSocketService
+	AdminLogsSocket                AdminLogsSocketService
+	PlaybackControlSocket          PlaybackControlSocketService
+	EventsCapability               EventsCapabilityService
+	NetworkAccess                  NetworkAccessService
+	ServerIdentity                 ServerIdentityService
+	ServerConnections              ServerConnections
+	NotificationDestinationCreate  NotificationDestinationCreateService
+	AdminUnmatchedFiles            AdminUnmatchedFilesService
+	AdminCatalogItems              AdminCatalogItemsService
+	AdminCatalogImages             AdminCatalogImagesService
+	AdminCatalogMatch              AdminCatalogMatchService
+	AdminCatalogSplit              AdminCatalogSplitService
+	AdminMarkerContributions       AdminMarkerContributionsService
+	AdminMarkerProviders           AdminMarkerProvidersService
+	AdminMarkerHistory             AdminMarkerHistoryService
+	AdminEpisodeMarkers            AdminEpisodeMarkersService
+	DownloadSubscriptions          DownloadSubscriptionService
+	DownloadManifests              DownloadManifestService
+	DownloadDelivery               DownloadDeliveryService
+	Downloads                      DownloadRegistryService
+	DownloadProxyDelivery          func() bool
+	WebhookReceiver                WebhookReceiverService
+	SubtitleAIReads                SubtitleAIReadService
+	NotificationDiscordLinks       NotificationDiscordLinkService
+	NotificationEmailLinks         NotificationEmailLinkService
+	NotificationDestinationTests   NotificationDestinationTestService
+	AdminDevices                   AdminDeviceService
+	UserLibraries                  UserLibraryService
+	EbookAnnotations               EbookAnnotationService
+	AdminNotificationDiscord       AdminNotificationDiscordService
+	NotificationDestinations       NotificationDestinationService
+	NotificationPluginDestinations NotificationPluginDestinationService
+	EbookFiles                     EbookFileService
+	EbookConfig                    EbookConfigService
+	EbookProgress                  EbookProgressService
+	AdminItemMetadata              AdminItemMetadataService
+	AdminMetadataTranslation       AdminMetadataTranslationService
+	AdminPeople                    AdminPeopleService
+	AdminDiagnosticDownloads       AdminDiagnosticDownloadService
+	AdminJobArtifacts              AdminJobArtifactService
+	AdminJobArtifactSigner         *artworkurl.Signer
+	AdminBackups                   AdminBackupService
 	// AdminBackupSigner signs backup object links for destinations that
 	// cannot presign.
 	AdminBackupSigner *artworkurl.Signer
@@ -443,26 +444,31 @@ type Dependencies struct {
 	AdminProfileSections AdminProfileSectionService
 	// Requests serves media requests and the discovery surface
 	// (*requests.Service, the value *handlers.RequestsHandler wraps).
-	AdminSubtitleInspection            AdminSubtitleInspectionService
-	AdminRequests                      handlers.RequestService
-	Requests                           MediaRequestService
-	RequestLifecycle                   RequestLifecycleService
-	WatchProviders                     WatchProviderService
-	HistoryImports                     HistoryImportService
-	AdminHistoryImports                AdminHistoryImportService
-	AdminSubtitleList                  AdminSubtitleListService
-	AdminSubtitleMetadata              AdminSubtitleMetadataService
-	AdminSubtitleBytes                 AdminSubtitleBytesService
-	AdminSubtitleDelete                AdminSubtitleDeleteService
-	AdminAPIKeys                       AdminAPIKeyService
-	PersonalAPIKeys                    PersonalAPIKeyService
-	PolicyCapability                   PolicyCapabilityService
-	Branding                           BrandingService
-	OverlayImages                      OverlayImageService
-	ArtworkStore                       blobstore.Store
-	ArtworkBackend                     string
-	ArtworkSigner                      *artworkurl.Signer
-	ArtworkRepair                      ArtworkRepairService
+	AdminSubtitleInspection AdminSubtitleInspectionService
+	AdminRequests           handlers.RequestService
+	Requests                MediaRequestService
+	RequestLifecycle        RequestLifecycleService
+	WatchProviders          WatchProviderService
+	HistoryImports          HistoryImportService
+	AdminHistoryImports     AdminHistoryImportService
+	AdminSubtitleList       AdminSubtitleListService
+	AdminSubtitleMetadata   AdminSubtitleMetadataService
+	AdminSubtitleBytes      AdminSubtitleBytesService
+	AdminSubtitleDelete     AdminSubtitleDeleteService
+	AdminAPIKeys            AdminAPIKeyService
+	PersonalAPIKeys         PersonalAPIKeyService
+	PolicyCapability        PolicyCapabilityService
+	Branding                BrandingService
+	OverlayImages           OverlayImageService
+	ArtworkStore            blobstore.Store
+	ArtworkBackend          string
+	ArtworkSigner           *artworkurl.Signer
+	ArtworkRepair           ArtworkRepairService
+	// ItemPosters mints and checks the admin poster URLs (admin session rows,
+	// listAdminCatalogItems) that getItemPoster serves.
+	ItemPosters                        *artworkurl.ItemPosters
+	ItemPosterSource                   ItemPosterSource
+	RemotePosters                      RemotePosterFetcher
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
 	PasswordResets                     PasswordResetService
@@ -499,6 +505,9 @@ type Dependencies struct {
 	LiteraryWorks LiteraryWorkService
 	// BoxSets answers box set search and detail (*handlers.CatalogHandler).
 	BoxSets BoxSetService
+	// ItemCollections answers a title page's "Also in" row
+	// (*handlers.ItemCollections).
+	ItemCollections ItemCollectionService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.

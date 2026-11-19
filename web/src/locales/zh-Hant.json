@@ -2016,6 +2016,74 @@
       "value": "App 語言"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "結束時"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "結束前 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 分鐘"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "結束前 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 秒"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "顯示接下來"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "關閉"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -47063,7 +47131,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "任務會在伺服器啟動時註冊，因此開啟或關閉任務要在重新啟動後才會生效。任務建立後，請在該任務的頁面變更排程。"
+      "value": "開啟或關閉任務不需重新啟動即可生效，但其他伺服器可能需要一點時間才會套用。任務開啟後，請在該任務的頁面變更排程。"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -66813,6 +66881,12 @@
     {
       "type": 0,
       "value": "電視登入：開始"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "海報請求"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -87423,6 +87497,12 @@
       "value": "你的媒體庫"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "無法取得數量"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -89317,6 +89397,24 @@
       "value": "新增"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "無法檢查是否可以新增作品。"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "重新載入"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "正在檢查是否可以新增作品……"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -89333,6 +89431,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "合輯只載入了一部分時，這部伺服器無法安全地新增作品。你仍可移除作品及編輯合輯。"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "請先重新載入作品，再新增更多作品。"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -89353,6 +89463,12 @@
     {
       "type": 0,
       "value": " 新增作品"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "正在載入作品，之後才能新增更多……"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -97442,6 +97558,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "也收錄於"
     }
   ],
   "web.detail.sections.cast": [

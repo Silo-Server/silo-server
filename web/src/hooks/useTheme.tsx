@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import type { ReactNode } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
+import { useShowThenSave } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { appearanceCache, storage } from "@/utils/storage";
 import type { StorageKey } from "@/utils/storage";
@@ -227,34 +228,54 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, [cacheOwner]);
 
+  const showThenSave = useShowThenSave(cacheOwner);
+
   const setTextScale = useCallback(
-    (value: TextScale) => {
-      setTextScalePreference(value);
-      applyTextScaleToDOM(value);
-      appearanceCache.set(storage.KEYS.UI_TEXT_SCALE, value, cacheOwner);
-      void saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, value);
-    },
-    [saveProfileDefault, cacheOwner],
+    (value: TextScale) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_TEXT_SCALE,
+        cacheKey: storage.KEYS.UI_TEXT_SCALE,
+        value,
+        previous: textScale,
+        show: (v) => {
+          setTextScalePreference(v);
+          applyTextScaleToDOM(v);
+        },
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, v),
+      }),
+    [saveProfileDefault, showThenSave, textScale],
   );
 
   const setTextWeight = useCallback(
-    (value: TextWeight) => {
-      setTextWeightPreference(value);
-      applyTextWeightToDOM(value);
-      appearanceCache.set(storage.KEYS.UI_TEXT_WEIGHT, value, cacheOwner);
-      void saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, value);
-    },
-    [saveProfileDefault, cacheOwner],
+    (value: TextWeight) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_TEXT_WEIGHT,
+        cacheKey: storage.KEYS.UI_TEXT_WEIGHT,
+        value,
+        previous: textWeight,
+        show: (v) => {
+          setTextWeightPreference(v);
+          applyTextWeightToDOM(v);
+        },
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, v),
+      }),
+    [saveProfileDefault, showThenSave, textWeight],
   );
 
   const setHighContrast = useCallback(
-    (value: boolean) => {
-      setHighContrastPreference(value);
-      applyHighContrastToDOM(value);
-      appearanceCache.set(storage.KEYS.UI_HIGH_CONTRAST, String(value), cacheOwner);
-      void saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, value);
-    },
-    [saveProfileDefault, cacheOwner],
+    (value: boolean) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_HIGH_CONTRAST,
+        cacheKey: storage.KEYS.UI_HIGH_CONTRAST,
+        value,
+        previous: highContrast,
+        show: (v) => {
+          setHighContrastPreference(v);
+          applyHighContrastToDOM(v);
+        },
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, v),
+      }),
+    [saveProfileDefault, showThenSave, highContrast],
   );
 
   return (

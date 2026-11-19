@@ -2049,6 +2049,132 @@
       "value": "Jezik aplikacije"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Na koncu"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuto pred koncem"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuti pred koncem"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute pred koncem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minut pred koncem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundo pred koncem"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundi pred koncem"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekunde pred koncem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekund pred koncem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Prikaz naslednje epizode"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Izklopljeno"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -64251,7 +64377,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Opravila se registrirajo ob zagonu strežnika, zato vklop ali izklop opravila začne veljati po ponovnem zagonu. Ko opravilo obstaja, njegov urnik spremenite na strani opravila."
+      "value": "Vklop ali izklop opravila začne veljati brez ponovnega zagona, vendar lahko drugi strežniki za uveljavitev potrebujejo trenutek. Ko je opravilo vklopljeno, njegov urnik spremenite na strani opravila."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -86446,6 +86572,12 @@
     {
       "type": 0,
       "value": "Prijava na TV: začetek"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Zahteve za plakate"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -113408,6 +113540,12 @@
       "value": "vaše knjižnice"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Število ni na voljo"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -115462,6 +115600,24 @@
       "value": "Dodaj"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče preveriti, ali je naslove mogoče dodati."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Poskusi znova naložiti"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Preverjanje, ali je naslove mogoče dodati …"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -115478,6 +115634,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ta strežnik ne more varno dodajati naslovov, ko je naložen le del zbirke. Naslove lahko še vedno odstranite in urejate zbirko."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Preden dodate nove naslove, jih znova naložite."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -115498,6 +115666,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Nalaganje naslovov pred dodajanjem novih …"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -125828,6 +126002,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Tudi v zbirkah"
     }
   ],
   "web.detail.sections.cast": [

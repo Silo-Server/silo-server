@@ -308,6 +308,8 @@ type AdminDownloadStorageCapabilitiesOutputBody struct {
 	RealtimeChannel string `json:"realtime_channel" doc:"Admin realtime channel carrying download_storage.changed"`
 	Devices         bool   `json:"devices" doc:"Device copies can be listed"`
 	Revocation      bool   `json:"revocation" doc:"Device copies can be revoked"`
+	ClientIP        bool   `json:"client_ip" doc:"Download rows carry created_client_ip and last_client_ip"`
+	ChangeEvents    bool   `json:"change_events" doc:"download.changed on the v2 events socket's admin downloads channel reports a managed download being created, changing status or revision, moving to another title in a catalog merge, or being removed. Delivery is at most once, so re-read the admin download routes on subscribe and reconnect"`
 }
 
 func (c AdminDownloadStorageCapabilitiesOutputBody) capabilityState() string {
@@ -367,6 +369,8 @@ func registerAdminDownloadStorage(reg *Registry) {
 		out.Body.RealtimeChannel = string(evt.ChannelDownloadPreparations)
 		out.Body.Devices = reg.deps.AdminDownloadDevices != nil
 		out.Body.Revocation = out.Body.Devices
+		out.Body.ClientIP = out.Body.Devices
+		out.Body.ChangeEvents = out.Body.Devices
 		return out, nil
 	})
 

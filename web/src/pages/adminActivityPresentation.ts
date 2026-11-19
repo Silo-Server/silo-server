@@ -700,27 +700,27 @@ function formatContainer(container?: string): string | null {
 }
 
 export function getPlaybackSessionTitle(session: AdminSession): string {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
-    return session.episode_name || `S${session.season_number}E${session.episode_number}`;
+  if (session.series_title && session.season_number != null && session.episode_number != null) {
+    return session.media_title || `S${session.season_number}E${session.episode_number}`;
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
+  if (session.series_title && session.season_number != null && session.episode_number != null) {
     const code = t("web.detail.episodeCode", {
       season: codeNumber(session.season_number),
       episode: codeNumber(session.episode_number),
     });
     return t("web.common.activity.subtitle.episode", {
       code,
-      series: session.series_name,
+      series: session.series_title,
     });
   }
   if (session.media_type === "movie") {
     return t("web.common.activity.subtitle.movie");
   }
-  if (session.media_type === "series") {
+  if (session.media_type === "series" || session.media_type === "episode") {
     return t("web.common.activity.subtitle.series");
   }
   return null;

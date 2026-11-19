@@ -2817,11 +2817,14 @@ export interface AdminSession {
   profile_name?: string;
   media_file_id: number;
   requested_media_file_id: number;
-  content_id?: string;
+  /** Catalog content id of what is playing: the episode for an episode. */
+  media_item_id?: string;
+  /** Episode or item title, as admin playback history names it. */
   media_title: string;
+  /** `episode`, or the catalog item type. */
   media_type: string;
-  series_name?: string;
-  episode_name?: string;
+  /** Series title for an episode; absent otherwise. */
+  series_title?: string;
   season_number?: number | null;
   episode_number?: number | null;
   poster_url?: string;
@@ -3104,7 +3107,9 @@ export type EventChannel =
   | "settings"
   | "notifications"
   // Admin-only changes to the offline-download preparation queue.
-  | "download_preparations";
+  | "download_preparations"
+  // Admin-only download.changed for managed device downloads.
+  | "downloads";
 
 export interface NotificationReasonFlags {
   // episode.available reasons
@@ -3409,7 +3414,7 @@ export interface AdminPlaybackHistoryItem {
   started_at: string;
   ended_at: string;
   /** Where the play ended, not how long it was watched. */
-  watched_seconds: number;
+  end_position_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
   /** Measured watch time; null for a play recorded before it was measured. */
@@ -4145,6 +4150,8 @@ export interface PluginInstallation {
   update_failure?: PluginUpdateFailure | null;
   /** The release signature check of the installed package. */
   signature: PluginSignature;
+  /** Whether the config test endpoint has a connection check to run for this plugin. */
+  connection_check_supported: boolean;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;

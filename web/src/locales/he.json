@@ -2035,6 +2035,104 @@
       "value": "שפת האפליקציה"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "בסוף"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "דקה אחת לפני הסוף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " דקות לפני הסוף"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " דקות לפני הסוף"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "שנייה אחת לפני הסוף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " שניות לפני הסוף"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " שניות לפני הסוף"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "הצגת הפרק הבא"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "כבוי"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -57728,7 +57826,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "המשימות נרשמות כשהשרת מופעל, ולכן הפעלה או כיבוי של משימה נכנסים לתוקף אחרי הפעלה מחדש. אחרי שמשימה נוצרה, אפשר לשנות את לוח הזמנים שלה בדף המשימה."
+      "value": "הפעלה או כיבוי של משימה נכנסים לתוקף בלי הפעלה מחדש, אבל לשרתים אחרים ייתכן שיידרש רגע קצר כדי לקלוט את השינוי. אחרי שמשימה הופעלה, אפשר לשנות את לוח הזמנים שלה בדף המשימה."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79091,6 +79189,12 @@
     {
       "type": 0,
       "value": "התחברות בטלוויזיה: התחלה"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "בקשות פוסטר"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -103485,6 +103589,12 @@
       "value": "הספריות שלך"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "המספר לא זמין"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -105537,6 +105647,24 @@
       "value": "הוספה"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לבדוק אם אפשר להוסיף פריטים."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "ניסיון טעינה חוזר"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "מתבצעת בדיקה אם אפשר להוסיף פריטים…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -105555,6 +105683,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "השרת הזה לא יכול להוסיף פריטים באופן בטוח כשרק חלק מהאוסף נטען. עדיין אפשר להסיר פריטים ולערוך את האוסף."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "יש לטעון שוב את הפריטים לפני הוספת פריטים נוספים."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -105569,6 +105709,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "מתבצעת טעינת פריטים לפני הוספת פריטים נוספים…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -114957,6 +115103,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "גם באוספים"
     }
   ],
   "web.detail.sections.cast": [

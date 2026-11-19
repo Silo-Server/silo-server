@@ -2016,6 +2016,74 @@
       "value": "アプリの言語"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "終了時"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "終了の"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "分前"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "終了の"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "秒前"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "次のエピソードを表示"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "オフ"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -46625,7 +46693,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "タスクはサーバーの起動時に登録されるため、オン/オフの切り替えは再起動後に反映されます。タスクが作成されたら、スケジュールはそのタスクのページで変更してください。"
+      "value": "タスクのオン/オフの切り替えは再起動なしで反映されますが、他のサーバーに反映されるまで少し時間がかかる場合があります。タスクをオンにしたら、スケジュールはそのタスクのページで変更してください。"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -66255,6 +66323,12 @@
     {
       "type": 0,
       "value": "テレビのサインイン：開始"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "ポスターのリクエスト"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -86431,6 +86505,12 @@
       "value": "ライブラリ"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "件数を取得できません"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -88293,6 +88373,24 @@
       "value": "追加"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "タイトルを追加できるか確認できませんでした。"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "もう一度読み込む"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "タイトルを追加できるか確認しています…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -88305,6 +88403,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "このサーバーでは、コレクションの一部しか読み込まれていない状態でタイトルを安全に追加できません。タイトルの削除とコレクションの編集は引き続き行えます。"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "さらに追加する前に、タイトルをもう一度読み込んでください。"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -88321,6 +88431,12 @@
     {
       "type": 0,
       "value": "からタイトルを追加"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "追加の前にタイトルを読み込んでいます…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -96250,6 +96366,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "収録コレクション"
     }
   ],
   "web.detail.sections.cast": [

@@ -2027,6 +2027,88 @@
       "value": "App language"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "At end"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute before end"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes before end"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " second before end"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seconds before end"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Show Next Up"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -52448,7 +52530,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tasks are registered when the server starts, so turning one on or off takes effect after a restart. Once a task exists, change its schedule on its task page."
+      "value": "Turning a task on or off applies without a restart, though other servers can take a moment to pick it up. Once a task is on, change its schedule on its task page."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -72817,6 +72899,12 @@
     {
       "type": 0,
       "value": "TV sign-in: start"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poster requests"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -95394,6 +95482,12 @@
       "value": "your libraries"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Count unavailable"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97382,6 +97476,24 @@
       "value": "Add"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't check whether titles can be added."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Try loading again"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Checking whether titles can be added…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97400,6 +97512,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "This server can't safely add titles while only part of the collection is loaded. You can still remove titles and edit the collection."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Load the titles again before adding more."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97414,6 +97538,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Loading titles before adding more…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -106158,6 +106288,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Also in"
     }
   ],
   "web.detail.sections.cast": [

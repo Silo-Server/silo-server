@@ -2016,6 +2016,74 @@
       "value": "应用语言"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "结束时"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "结束前"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "分钟"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "结束前"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "秒"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "显示接下来"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "关闭"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -46933,7 +47001,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "任务在服务器启动时注册，因此开启或关闭任务需重启后才会生效。任务创建后，请在其任务页面更改计划。"
+      "value": "开启或关闭任务无需重启即可生效，但其他服务器可能需要片刻才能应用此更改。任务开启后，请在其任务页面更改计划。"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -66667,6 +66735,12 @@
     {
       "type": 0,
       "value": "电视登录：开始"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "海报请求"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -87171,6 +87245,12 @@
       "value": "你的媒体库"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "无法获取数量"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -89057,6 +89137,24 @@
       "value": "添加"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "无法检查是否可以添加作品。"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "重新加载"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "正在检查是否可以添加作品……"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -89073,6 +89171,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "合集只加载了一部分时，此服务器无法安全地添加作品。你仍然可以移除作品和编辑合集。"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "请先重新加载作品，再添加更多作品。"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -89093,6 +89203,12 @@
     {
       "type": 0,
       "value": "添加作品"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "正在加载作品，之后才能添加更多……"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -97130,6 +97246,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "同样收录于"
     }
   ],
   "web.detail.sections.cast": [

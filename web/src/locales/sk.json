@@ -2049,6 +2049,132 @@
       "value": "Jazyk aplikácie"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Na konci"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minúta pred koncom"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minúty pred koncom"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minúty pred koncom"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minút pred koncom"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekunda pred koncom"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundy pred koncom"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundy pred koncom"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekúnd pred koncom"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Zobraziť ďalšie epizódy"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Vypnuté"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -64520,7 +64646,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Úlohy sa registrujú pri spustení servera, takže zapnutie alebo vypnutie úlohy sa prejaví až po reštarte. Keď úloha existuje, jej plán zmeníte na stránke úlohy."
+      "value": "Zapnutie alebo vypnutie úlohy sa prejaví bez reštartu, hoci ostatným serverom môže chvíľu trvať, kým zmenu zaznamenajú. Keď je úloha zapnutá, jej plán zmeníte na stránke úlohy."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -86739,6 +86865,12 @@
     {
       "type": 0,
       "value": "Prihlásenie na TV: začiatok"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Požiadavky na plagáty"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -113790,6 +113922,12 @@
       "value": "vaše knižnice"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Počet nie je k dispozícii"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -115894,6 +116032,24 @@
       "value": "Pridať"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa overiť, či je možné pridať tituly."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Skúsiť načítať znova"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Overuje sa, či je možné pridať tituly…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -115912,6 +116068,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Tento server nedokáže bezpečne pridávať tituly, kým je načítaná iba časť kolekcie. Tituly môžete naďalej odoberať a kolekciu upravovať."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Pred pridaním ďalších titulov tituly znova načítajte."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -115926,6 +116094,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Načítavajú sa tituly pred pridaním ďalších…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -126256,6 +126430,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Aj v kolekciách"
     }
   ],
   "web.detail.sections.cast": [

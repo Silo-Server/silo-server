@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -47,21 +48,23 @@ func (r PlaybackEndReason) userInitiated() bool {
 // AdminPlaybackHistoryEntry is the finalized admin-facing record for a
 // playback attempt.
 type AdminPlaybackHistoryEntry struct {
-	SessionID       string
-	UserID          int
-	ProfileID       string
-	ProfileName     string
-	MediaItemID     string
-	MediaFileID     int
-	PlayMethod      string
-	StartedAt       string
-	EndedAt         string
-	WatchedSeconds  float64
-	DurationSeconds *float64
-	Completed       bool
-	ClientIP        string
-	// Watch is the session's measured watch time. WatchedSeconds is where the
-	// play ended, not how much of it was watched.
+	SessionID   string
+	UserID      int
+	ProfileID   string
+	ProfileName string
+	MediaItemID string
+	MediaFileID int
+	PlayMethod  string
+	StartedAt   string
+	EndedAt     string
+	// EndPositionSeconds is where the play ended, stored in the
+	// watched_seconds column.
+	EndPositionSeconds float64
+	DurationSeconds    *float64
+	Completed          bool
+	ClientIP           string
+	// Watch is the session's measured watch time. EndPositionSeconds is
+	// where the play ended, not how much of it was watched.
 	Watch playback.WatchTime
 	// DeviceID, DevicePlatform, ClientName, ClientVersion, VideoDecision and
 	// AudioDecision describe the play itself, so the first finalization that
@@ -72,6 +75,11 @@ type AdminPlaybackHistoryEntry struct {
 	// EndReason is why this finalization ended the attempt; empty records
 	// none.
 	EndReason PlaybackEndReason
+	// Subtitle is the subtitle the session's plan delivered when the play
+	// ended; nil when it showed none. The finalization that ended later
+	// decides it, whatever position it ended at: a play can seek back,
+	// switch subtitles and stop before where an earlier end left it.
+	Subtitle *playback.SessionSubtitle
 }
 
 // PlaybackAdminStore persists finalized playback history and manages the
@@ -138,11 +146,13 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			 play_method, started_at, ended_at, watched_seconds, duration_seconds, completed, client_ip,
 			 start_position_seconds, played_seconds, paused_seconds, measured, measured_since, measured_until,
 			 device_id, device_platform, client_name, client_version, video_decision, audio_decision,
-			 end_reason, end_reason_at)
+			 end_reason, end_reason_at, subtitle)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet, $14, $15, $16, $17, $18, $19,
-			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END)
+			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END, $27)
 		ON CONFLICT (session_id) DO UPDATE SET
 			watched_seconds = GREATEST(admin_playback_history.watched_seconds, EXCLUDED.watched_seconds),
+			subtitle = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at
+				THEN EXCLUDED.subtitle ELSE admin_playback_history.subtitle END,
 			duration_seconds = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 				THEN COALESCE(EXCLUDED.duration_seconds, admin_playback_history.duration_seconds)
 				ELSE admin_playback_history.duration_seconds END,
@@ -167,6 +177,8 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			OR (EXCLUDED.measured AND NOT admin_playback_history.measured)
 			OR (EXCLUDED.completed AND NOT admin_playback_history.completed)
 			OR `+laterStretch+`
+			OR (EXCLUDED.ended_at > admin_playback_history.ended_at
+				AND EXCLUDED.subtitle IS DISTINCT FROM admin_playback_history.subtitle)
 	`,
 		entry.SessionID,
 		entry.UserID,
@@ -177,7 +189,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		entry.PlayMethod,
 		entry.StartedAt,
 		entry.EndedAt,
-		entry.WatchedSeconds,
+		entry.EndPositionSeconds,
 		duration,
 		entry.Completed,
 		nullableIP(entry.ClientIP),
@@ -194,6 +206,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		nullableString(entry.VideoDecision),
 		nullableString(entry.AudioDecision),
 		nullableString(string(entry.EndReason)),
+		entry.Subtitle,
 	)
 	queueHistoryFacts(batch, entry)
 	return batch
@@ -218,7 +231,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 			COALESCE(device_id, ''), COALESCE(device_platform, ''),
 			COALESCE(transcode_audio, FALSE), COALESCE(target_video_codec, ''),
 			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE),
-			COALESCE(timeline_duration_seconds, 0), adaptation_reasons
+			COALESCE(timeline_duration_seconds, 0), adaptation_reasons, subtitle
 		FROM (
 			SELECT 0 AS source, live.* FROM playback_sessions_sync live WHERE live.session_id = $1
 			UNION ALL
@@ -236,7 +249,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		&live.DeviceID, &live.DevicePlatform,
 		&live.TranscodeAudio, &live.TargetVideoCodec,
 		&live.Position, &live.IsJellyfinCompat,
-		&live.TimelineDuration, &live.AdaptationReasons,
+		&live.TimelineDuration, &live.AdaptationReasons, &live.Subtitle,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -250,6 +263,36 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		live.StartedAt = *startedAt
 	}
 	return &live, nil
+}
+
+// SessionWatch is the watch-time measurement the server holding sessionID
+// last saved on its lifecycle row (when it started, then on each live-session
+// sync). ok is false when none was saved.
+func (s *PGPlaybackAdminStore) SessionWatch(ctx context.Context, sessionID string) (watch playback.WatchTime, ok bool, err error) {
+	id := lifecycleIDParam(sessionID)
+	if s == nil || s.pool == nil || id == nil {
+		return playback.WatchTime{}, false, nil
+	}
+	var raw []byte
+	err = s.pool.QueryRow(ctx, `SELECT watch FROM playback_session_lifecycle WHERE session_id = $1`, id).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && raw == nil) {
+		return playback.WatchTime{}, false, nil
+	}
+	if err != nil {
+		return playback.WatchTime{}, false, fmt.Errorf("reading saved watch time: %w", err)
+	}
+	if err := json.Unmarshal(raw, &watch); err != nil {
+		return playback.WatchTime{}, false, fmt.Errorf("decoding saved watch time: %w", err)
+	}
+	return watch, watch.Measured, nil
+}
+
+// nullableJSON stores an absent document as NULL.
+func nullableJSON(data json.RawMessage) any {
+	if len(data) == 0 {
+		return nil
+	}
+	return string(data)
 }
 
 // HistoryEndReason is the end reason the admin log holds for sessionID, or

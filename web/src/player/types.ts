@@ -30,6 +30,9 @@ export interface PlayerFileVersion {
   presentation_kind?: string;
   presentation_group_key?: string;
   presentation_part_index?: number;
+  presentation_part_total?: number;
+  multi_episode_start?: number;
+  multi_episode_end?: number;
   effective_audio_track_index?: number;
   effective_audio_language?: string;
   audio_channels?: number;
@@ -271,6 +274,8 @@ export interface PlayerPlaybackStateChange {
   currentTime: number;
   duration: number;
   playing: boolean;
+  /** The file playing now, once the player has chosen one. */
+  fileId?: number;
 }
 
 export interface PlayerPlaybackTransport {
@@ -342,9 +347,6 @@ export interface WatchPageProps {
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
-  autoPlayNextPreview?: boolean;
-  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
-  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
