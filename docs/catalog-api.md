@@ -1137,7 +1137,8 @@ title. `getCatalogSearchCapabilities` reports `item_collections: true` on a serv
   the viewer can open, and has members the viewer can see, as on a row of collections. A hidden
   collection is never listed.
 - A personal collection is listed when it stores the title and the acting profile can see it:
-  its own, or another profile's shared on the same login.
+  its own, or another profile's shared on the same login when that profile may see the title too,
+  since the collection's page lists only what its owner can see.
 - Smart collections are not listed, server or personal, including a server collection made smart
   that still holds the rows it stored as a manual one.
 - A server collection synced from a TMDB collection (`source_config.mode` `tmdb_collection`) is
@@ -1147,7 +1148,9 @@ title. `getCatalogSearchCapabilities` reports `item_collections: true` on a serv
 When `items` holds exactly one collection, `preview_items` carries up to 6 of that collection's
 other titles as `CatalogItem` cards: the first page `listCatalogItems` answers for the collection,
 so the same order, Show only filter and access rules apply (for another profile's collection, only
-titles its owner can see too). The title itself is never among them. A page shows these titles under the
+titles its owner can see too, and for a server collection, only titles in the library its card's
+`library_id` names). The title itself is never among them. A failure reading them leaves
+`preview_items` empty and still returns `items`. A page shows these titles under the
 collection's name, with a link to the collection, in place of the "Also in" row. It falls back to
 the row when `preview_items` is empty, as for a collection that holds only this title. With
 several collections `preview_items` is empty and the page shows every card. `preview_items` is

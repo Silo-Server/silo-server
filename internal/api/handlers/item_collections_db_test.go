@@ -181,9 +181,10 @@ func (gOnlyOwners) OwnerFilter(ctx context.Context, _ int, _ string) (catalog.Ac
 // personal collections that store the title, server collections first, each
 // group by title. A hidden server collection, one in no library the viewer
 // can open, a smart collection (also one made smart after storing titles),
-// another profile's unshared collection and
-// the synced copy of the box set the page already shows are left out. A
-// title the viewer cannot see is not found, whatever holds it.
+// another profile's unshared collection, another profile's shared one when
+// its owner may not see the title, and the synced copy of the box set the
+// page already shows are left out. A title the viewer cannot see is not
+// found, whatever holds it.
 func TestItemCollectionsDB(t *testing.T) {
 	f := seedItemCollections(t)
 	zebra := f.server(t, "Zebra picks", "manual", "visible", f.shown, "", f.title)
@@ -200,7 +201,9 @@ func TestItemCollectionsDB(t *testing.T) {
 	}
 	f.server(t, "Mature pick", "manual", "visible", f.shown, "", f.mature)
 	own := f.personal(t, f.viewer, "My picks", false, f.title)
-	shared := f.personal(t, f.sibling, "Family night", true, f.title)
+	// The sibling may see only G titles, so its shared collection's own page
+	// does not list this PG title.
+	f.personal(t, f.sibling, "Family night", true, f.title)
 	f.personal(t, f.sibling, "Sibling's private", false, f.title)
 	f.personal(t, f.viewer, "Without it", false, f.sequel)
 
@@ -211,7 +214,7 @@ func TestItemCollectionsDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{ghibli, otherFranchise, zebra, shared, own}; !slices.Equal(cardIDs(got), want) {
+	if want := []string{ghibli, otherFranchise, zebra, own}; !slices.Equal(cardIDs(got), want) {
 		t.Errorf("Also in = %v, want %v", cardIDs(got), want)
 	}
 	if len(got.Preview) != 0 {
@@ -251,7 +254,7 @@ func TestItemCollectionsPreviewDB(t *testing.T) {
 	only := f.server(t, "Only home", "manual", "visible", f.shown, "", ordered...)
 	lone := f.addMovie(t, "lone", "PG", 400)
 	f.server(t, "Just one", "manual", "visible", f.shown, "", lone)
-	solo := f.addMovie(t, "solo", "PG", 401)
+	solo := f.addMovie(t, "solo", "G", 401)
 	gentle := f.addMovie(t, "gentle", "G", 402)
 	family := f.personal(t, f.sibling, "Family night", true, members[2], gentle, f.mature, solo, members[3])
 
@@ -277,6 +280,52 @@ func TestItemCollectionsPreviewDB(t *testing.T) {
 		if !slices.Equal(previewIDs(got), tc.wantPreviews) {
 			t.Errorf("%s: preview = %v, want %v", tc.name, previewIDs(got), tc.wantPreviews)
 		}
+	}
+}
+
+// TestItemCollectionsPreviewLibraryDB pins that a server collection spanning
+// two libraries previews only the titles of the library its card opens,
+// as Explore all lists them, however the title's page was opened.
+func TestItemCollectionsPreviewLibraryDB(t *testing.T) {
+	f := seedItemCollections(t)
+	here := f.addMovie(t, "here", "PG", 500)
+	there := f.prefix + "-there"
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age) VALUES($1,'movie',$1,'matched','{}','PG',8)`, there); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, there, f.other); err != nil {
+		t.Fatal(err)
+	}
+	c, err := f.repo.Create(t.Context(), catalog.CreateLibraryCollectionInput{LibraryID: f.shown, LibraryIDs: []int{f.shown, f.other}, Slug: f.prefix + "-spanning", Title: "Spanning", CollectionType: "manual", Visibility: "visible"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{there, f.title, here} {
+		if err := f.repo.AddItem(t.Context(), c.ID, id, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx := access.SetScope(t.Context(), access.Scope{AllowedLibraryIDs: []int{f.shown, f.other}, LibrariesRestricted: true, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}})
+	filter := AccessFilterFromContext(ctx, "")
+	filter.UserID, filter.ProfileID = f.account, f.viewer
+	other := f.other
+	// The page was opened from the other library, whose titles the card's
+	// library does not hold.
+	filter.PresentationLibraryID = &other
+	got, err := f.service().ItemCollections(ctx, ItemViewer{Access: filter, ProfileID: f.viewer}, f.account, f.title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Cards) != 1 || got.Cards[0].LibraryID == nil {
+		t.Fatalf("cards = %+v, want the spanning collection with its library", got.Cards)
+	}
+	want := []string{here}
+	if *got.Cards[0].LibraryID == f.other {
+		want = []string{there}
+	}
+	if !slices.Equal(previewIDs(got), want) {
+		t.Errorf("preview in library %d = %v, want %v", *got.Cards[0].LibraryID, previewIDs(got), want)
 	}
 }
 

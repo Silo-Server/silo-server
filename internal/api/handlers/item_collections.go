@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -76,8 +77,14 @@ func (s *ItemCollections) ItemCollections(ctx context.Context, v ItemViewer, use
 	}
 	out := ItemCollectionsView{Cards: cards}
 	if len(cards) == 1 {
+		// The preview only adds to a card that already passed every check,
+		// so a failed read keeps the card and previews nothing.
 		if out.Preview, err = s.preview(ctx, v, contentID, cards[0]); err != nil {
-			return ItemCollectionsView{}, err
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ItemCollectionsView{}, ctxErr
+			}
+			slog.WarnContext(ctx, "reading a title's collection preview", "component", "api", "content_id", contentID, "collection_id", cards[0].ID, "error", err)
+			out.Preview = nil
 		}
 	}
 	return out, nil
@@ -98,6 +105,9 @@ func (s *ItemCollections) cards(ctx context.Context, v ItemViewer, userID int, c
 	if err != nil {
 		return nil, err
 	}
+	if cards, err = s.dropOwnerHidden(ctx, v, userID, contentID, cards); err != nil {
+		return nil, err
+	}
 	// Server cards keep the repository's title order; personal ids come
 	// unordered, so their cards sort by title here.
 	firstPersonal := slices.IndexFunc(cards, func(c sections.CollectionCard) bool { return c.Source == sections.CollectionCardUser })
@@ -107,6 +117,57 @@ func (s *ItemCollections) cards(ctx context.Context, v ItemViewer, userID int, c
 		})
 	}
 	return cards, nil
+}
+
+// dropOwnerHidden leaves out another profile's collection when its owner
+// may not see contentID: that collection's own page, read with the owner's
+// access, does not list the title, so the row must not claim it does.
+func (s *ItemCollections) dropOwnerHidden(ctx context.Context, v ItemViewer, userID int, contentID string, cards []sections.CollectionCard) ([]sections.CollectionCard, error) {
+	var owners catalog.PersonalCollectionAccess
+	if s.Cards.Personal != nil {
+		owners = s.Cards.Personal.CollectionOwners
+	}
+	checked := map[string]bool{}
+	kept := cards[:0]
+	for _, card := range cards {
+		if card.Source != sections.CollectionCardUser || card.CreatorProfileID == nil || *card.CreatorProfileID == v.ProfileID {
+			kept = append(kept, card)
+			continue
+		}
+		owner := *card.CreatorProfileID
+		visible, seen := checked[owner]
+		if !seen {
+			var err error
+			if visible, err = s.ownerSees(ctx, owners, v, userID, owner, contentID); err != nil {
+				return nil, err
+			}
+			checked[owner] = visible
+		}
+		if visible {
+			kept = append(kept, card)
+		}
+	}
+	return kept, nil
+}
+
+// ownerSees reports whether contentID is in what both the viewer and the
+// collection owner may see.
+func (s *ItemCollections) ownerSees(ctx context.Context, owners catalog.PersonalCollectionAccess, v ItemViewer, userID int, owner, contentID string) (bool, error) {
+	filter, err := catalog.PersonalCollectionFilter(ctx, owners, v.Access, userID, v.ProfileID, owner)
+	if errors.Is(err, catalog.ErrPersonalCollectionOwnerAccess) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch err := s.Items.EnsureAccessible(ctx, contentID, filter); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, catalog.ErrItemNotFound):
+		return false, nil
+	default:
+		return false, fmt.Errorf("checking a collection owner's access to a title: %w", err)
+	}
 }
 
 // serverRefs lists the visible server collections that store contentID,
@@ -129,8 +190,14 @@ func (s *ItemCollections) serverRefs(ctx context.Context, v ItemViewer, contentI
 		_, synced := catalog.TMDBCollectionSourceID(c.SourceConfig)
 		return synced
 	}) {
+		// Without the box set the synced copy stays listed: a repeated
+		// franchise beats losing every card over an optional read.
 		if boxSet, err = s.shownBoxSet(ctx, v, contentID); err != nil {
-			return nil, err
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			slog.WarnContext(ctx, "finding a title's box set for its collections", "component", "api", "content_id", contentID, "error", err)
+			boxSet = 0
 		}
 	}
 	refs := make([]recipes.CollectionRef, 0, len(containing))
@@ -196,11 +263,23 @@ func (s *ItemCollections) preview(ctx context.Context, v ItemViewer, contentID s
 		Limit:          itemCollectionPreviewSize + 1,
 		SkipTotal:      true,
 		UseSourceOrder: true,
+		// The first page listCatalogItems reads, which pages the
+		// collection's members in the database. Without it the read loads
+		// and checks every member of the collection to keep seven.
+		CursorPaging: true,
 	}
+	// listCatalogItems reads a collection with no presentation library, so
+	// the page's library_id must not reach the preview either.
+	v.Access.PresentationLibraryID = nil
+	v.Access.ScopeFilesToLibrary = false
+	v.Access.SeriesLibraryCoversEpisodes = false
 	if card.Source == sections.CollectionCardLibrary {
 		req.Source = catalog.CatalogSourceLibraryCollection
-		// The titles open in the library the collection's card opens.
-		v.Access.PresentationLibraryID = card.LibraryID
+		// Explore all opens the collection in the card's library, which
+		// keeps its titles in that library; the preview keeps the same ones.
+		if card.LibraryID != nil {
+			req.Query.LibraryIDs = []int{*card.LibraryID}
+		}
 	}
 	page, err := s.Browser.Browse(ctx, v, req, false)
 	if err != nil {
