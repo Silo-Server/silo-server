@@ -15609,6 +15609,11 @@
               "null"
             ]
           },
+          "end_position_seconds": {
+            "description": "Position the play ended at, in seconds: how far into the media it got, not how long it was watched. A play resumed partway through ends past its resume point; played_seconds is the watch time",
+            "format": "double",
+            "type": "number"
+          },
           "end_reason": {
             "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
             "enum": [
@@ -15652,7 +15657,7 @@
             "type": "boolean"
           },
           "measured_since": {
-            "description": "First progress report behind the measurement",
+            "description": "First sample behind the measurement: the start, once its stream was prepared, or the first progress report",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -15662,7 +15667,7 @@
             ]
           },
           "measured_until": {
-            "description": "Last progress report behind the measurement",
+            "description": "Last sample behind the measurement: the latest progress report, or the final position the stop carried",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -15692,7 +15697,7 @@
             "type": "string"
           },
           "paused_seconds": {
-            "description": "Seconds the play spent paused between progress reports",
+            "description": "Seconds the play spent paused between samples",
             "format": "double",
             "type": [
               "number",
@@ -15772,11 +15777,6 @@
               "string",
               "null"
             ]
-          },
-          "watched_seconds": {
-            "description": "Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time",
-            "format": "double",
-            "type": "number"
           }
         },
         "required": [
@@ -15792,7 +15792,7 @@
           "play_method",
           "started_at",
           "ended_at",
-          "watched_seconds",
+          "end_position_seconds",
           "duration_seconds",
           "completed",
           "played_seconds",
@@ -25162,6 +25162,7 @@
             "type": "string"
           },
           "watched_seconds": {
+            "description": "Seconds watched across the window's plays: each play's measured watch time (playback history played_seconds), excluding pauses, seeks and buffering. A play recorded before measurement existed counts its end position, capped at how long the play lasted",
             "format": "double",
             "minimum": 0,
             "type": "number"

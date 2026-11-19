@@ -19699,6 +19699,11 @@ export interface components {
        */
       duration_seconds: number | null;
       /**
+       * Format: double
+       * @description Position the play ended at, in seconds: how far into the media it got, not how long it was watched. A play resumed partway through ends past its resume point; played_seconds is the watch time
+       */
+      end_position_seconds: number;
+      /**
        * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
        * @enum {string|null}
        */
@@ -19722,12 +19727,12 @@ export interface components {
       measured: boolean;
       /**
        * Format: date-time
-       * @description First progress report behind the measurement
+       * @description First sample behind the measurement: the start, once its stream was prepared, or the first progress report
        */
       measured_since: string | null;
       /**
        * Format: date-time
-       * @description Last progress report behind the measurement
+       * @description Last sample behind the measurement: the latest progress report, or the final position the stop carried
        */
       measured_until: string | null;
       /**
@@ -19743,7 +19748,7 @@ export interface components {
       media_type: string;
       /**
        * Format: double
-       * @description Seconds the play spent paused between progress reports
+       * @description Seconds the play spent paused between samples
        */
       paused_seconds: number | null;
       play_method: string;
@@ -19786,11 +19791,6 @@ export interface components {
        * @enum {string|null}
        */
       video_decision: "direct" | "remux" | "transcode" | null;
-      /**
-       * Format: double
-       * @description Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time
-       */
-      watched_seconds: number;
     };
     AdminPlaybackReliability: {
       /** Format: int64 */
@@ -23303,7 +23303,10 @@ export interface components {
        * @description Start of the window: now minus days
        */
       since: string;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Seconds watched across the window's plays: each play's measured watch time (playback history played_seconds), excluding pauses, seeks and buffering. A play recorded before measurement existed counts its end position, capped at how long the play lasted
+       */
       watched_seconds: number;
     };
     AdminWatchProvider: {

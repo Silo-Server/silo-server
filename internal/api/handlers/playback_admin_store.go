@@ -48,21 +48,23 @@ func (r PlaybackEndReason) userInitiated() bool {
 // AdminPlaybackHistoryEntry is the finalized admin-facing record for a
 // playback attempt.
 type AdminPlaybackHistoryEntry struct {
-	SessionID       string
-	UserID          int
-	ProfileID       string
-	ProfileName     string
-	MediaItemID     string
-	MediaFileID     int
-	PlayMethod      string
-	StartedAt       string
-	EndedAt         string
-	WatchedSeconds  float64
-	DurationSeconds *float64
-	Completed       bool
-	ClientIP        string
-	// Watch is the session's measured watch time. WatchedSeconds is where the
-	// play ended, not how much of it was watched.
+	SessionID   string
+	UserID      int
+	ProfileID   string
+	ProfileName string
+	MediaItemID string
+	MediaFileID int
+	PlayMethod  string
+	StartedAt   string
+	EndedAt     string
+	// EndPositionSeconds is where the play ended, stored in the
+	// watched_seconds column.
+	EndPositionSeconds float64
+	DurationSeconds    *float64
+	Completed          bool
+	ClientIP           string
+	// Watch is the session's measured watch time. EndPositionSeconds is
+	// where the play ended, not how much of it was watched.
 	Watch playback.WatchTime
 	// DeviceID, DevicePlatform, ClientName, ClientVersion, VideoDecision and
 	// AudioDecision describe the play itself, so the first finalization that
@@ -178,7 +180,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		entry.PlayMethod,
 		entry.StartedAt,
 		entry.EndedAt,
-		entry.WatchedSeconds,
+		entry.EndPositionSeconds,
 		duration,
 		entry.Completed,
 		nullableIP(entry.ClientIP),

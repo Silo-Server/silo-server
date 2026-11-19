@@ -1616,7 +1616,7 @@ so summing that would report three hours for a movie someone abandoned after a
 minute. An entry with no finalized session in the window reports `0`. Each
 session contributes its measured watch time (`played_seconds`, below). A
 session recorded before watch time was measured only knows where it ended
-(`watched_seconds`), so its end position is capped at its wall-clock length;
+(`end_position_seconds`), so its end position is capped at its wall-clock length;
 that estimate still counts pauses and seeks.
 
 Profile display names live in the per-user stores rather than in watch history,
@@ -1810,22 +1810,33 @@ from one window is refused under another. Each entry also carries `series_title`
 episode and its series (`series_title` is empty when the series left the catalog); for
 anything else they are empty and null.
 
-`watched_seconds` is where the attempt ended, not how long it was watched: an attempt
-resumed partway through reports the resume point plus what was watched. `played_seconds`
-is the measured watch time: media advanced through by normal playback, without pauses,
-seeks or buffering. The playback session measures it from its progress reports
-(`playback.WatchTime`): a position advance between two reports counts as watched when it
-fits playback at up to twice normal speed plus a short allowance for report jitter, and
-anything larger is a seek. Time after the last progress report before the stop is not
-counted. A session finalized more than once keeps the largest measurement when the
-copies overlap in time (copies on several replicas), and adds them when one began
-measuring after the other ended (a session rebuilt under the same id after it was
-finalized). `measured` says whether the attempt has a measurement. With one,
-`start_position_seconds` is the first position it saw (where the play began or
-resumed), `paused_seconds` the time spent paused between reports, and `measured_since`
-and `measured_until` the first and last report behind it. Without one, which includes
-every attempt recorded before measurement existed, `played_seconds` and those four
-fields are null.
+`end_position_seconds` is where the attempt ended, not how long it was watched: an
+attempt resumed partway through ends past its resume point. `played_seconds` is the
+measured watch time: media advanced through by normal playback, without pauses, seeks or
+buffering. The playback session measures it from position samples
+(`playback.WatchTime`): the start position once the start has prepared its stream, each
+progress report, and the final position the stop carries. A position advance between two
+samples counts as watched when it fits playback at up to twice normal speed plus a short
+allowance for report jitter, and anything larger is a seek. Time after the last sample is
+not counted, so a stop without a final position, such as an administrator stop the
+player confirms, ends the measurement at the last progress report.
+
+The measurement survives the session's live copy. The server holding the session saves
+it with the session's lifecycle state when the session starts and on every live-session
+sync (every 15 seconds, and once more at a graceful shutdown). A session rebuilt after a
+restart or on another server carries on from the saved measurement, and so does a stop
+recorded by a server that does not hold the session, which then measures the stop's own
+final position. Such a stop can miss reports that arrived since the last save, so its
+`played_seconds` may fall short by up to one sync interval; it is never credited time the
+position does not account for. A session finalized more than once keeps the largest
+measurement when the copies overlap in time (copies on several replicas), and adds them
+when one began measuring after the other ended (a session rebuilt under the same id
+after it was finalized). `measured` says whether the attempt has a measurement. With one,
+`start_position_seconds` is the first position it saw (where the play began or resumed),
+`paused_seconds` the time spent paused between samples, and `measured_since` and
+`measured_until` the first and last sample behind it. Without one, which includes every
+attempt recorded before measurement existed, `played_seconds` and those four fields are
+null.
 
 `client_ip` is the viewer's last address on the playback session, or null when none was
 recorded. Rows written by earlier server versions hold the address of the request that
