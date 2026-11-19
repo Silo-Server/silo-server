@@ -647,7 +647,8 @@ func TestEveryEndRecordsTheAdminLog(t *testing.T) {
 
 // TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end and a
 // rebuilt session read from the shared live row, including a row that never
-// recorded a start, and from the start row once no live row is left.
+// recorded a start, and from the start row once no live row is left. The
+// subtitle round-trips through both, which is how it outlives a restart.
 func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -669,8 +670,9 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	synced, bare := "synced-"+suffix, "bare-"+suffix
 	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync
 		(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method, started_at, client_ip,
-		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec, position_seconds, compat_origin)
-		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264', 1800, TRUE)`,
+		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec, position_seconds, compat_origin, subtitle)
+		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264', 1800, TRUE,
+			'{"track_id":"file:7:subtitle:1","codec":"hdmv_pgs_subtitle","source":"embedded","delivery":"burn_in","forced":true,"hearing_impaired":false}')`,
 		synced, account, started); err != nil {
 		t.Fatal(err)
 	}
@@ -685,7 +687,8 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	want := playback.Session{ID: synced, UserID: account, ProfileID: "p-1", MediaFileID: 7, RequestedMediaFileID: 8,
 		PlayMethod: playback.PlayTranscode, StartedAt: started, ClientIP: "203.0.113.9", ClientName: "Jellyfin Web",
 		ClientVersion: "10.9", DeviceID: "browser-1", DevicePlatform: "web", TranscodeAudio: true,
-		TargetVideoCodec: "h264", Position: 1800, IsJellyfinCompat: true}
+		TargetVideoCodec: "h264", Position: 1800, IsJellyfinCompat: true,
+		Subtitle: &playback.SessionSubtitle{TrackID: "file:7:subtitle:1", Codec: "hdmv_pgs_subtitle", Source: "embedded", Delivery: "burn_in", Forced: true}}
 	if live.StartedAt.Equal(started) {
 		live.StartedAt = started
 	}
@@ -702,9 +705,10 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	// Once no live row is left, as after a graceful restart, the session is
 	// read from the row it stored when it started.
 	startOnly := uuid.NewString()
+	subtitle := &playback.SessionSubtitle{TrackID: "file:7:subtitle:0", Language: "fr", Codec: "subrip", Format: "vtt", Source: "external", Delivery: "sidecar"}
 	row, err := worker.SessionSyncRowJSON(worker.SessionSync{
 		SessionID: startOnly, UserID: account, ProfileID: "p-1", ClientName: "Silo Android TV",
-		ClientUserAgent: "ktor-client", DeviceID: "device-1", DevicePlatform: "android-tv",
+		ClientUserAgent: "ktor-client", DeviceID: "device-1", DevicePlatform: "android-tv", Subtitle: subtitle,
 	}, "node-1")
 	if err != nil {
 		t.Fatal(err)
@@ -717,8 +721,8 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	}
 	if live, err = store.LiveSession(ctx, startOnly); err != nil || live.UserID != account || live.ProfileID != "p-1" ||
 		live.ClientName != "Silo Android TV" || live.ClientUserAgent != "ktor-client" ||
-		live.DeviceID != "device-1" || live.DevicePlatform != "android-tv" {
-		t.Fatalf("start row = %+v, %v; want the client the session started on", live, err)
+		live.DeviceID != "device-1" || live.DevicePlatform != "android-tv" || !reflect.DeepEqual(live.Subtitle, subtitle) {
+		t.Fatalf("start row = %+v, %v; want the client and subtitle the session started on", live, err)
 	}
 }
 

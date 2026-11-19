@@ -72,6 +72,10 @@ type AdminPlaybackHistoryEntry struct {
 	// EndReason is why this finalization ended the attempt; empty records
 	// none.
 	EndReason PlaybackEndReason
+	// Subtitle is the subtitle the session's plan delivered when the play
+	// ended; nil when it showed none. A finalization that got further than
+	// the row replaces it.
+	Subtitle *playback.SessionSubtitle
 }
 
 // PlaybackAdminStore persists finalized playback history and manages the
@@ -138,11 +142,13 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			 play_method, started_at, ended_at, watched_seconds, duration_seconds, completed, client_ip,
 			 start_position_seconds, played_seconds, paused_seconds, measured, measured_since, measured_until,
 			 device_id, device_platform, client_name, client_version, video_decision, audio_decision,
-			 end_reason, end_reason_at)
+			 end_reason, end_reason_at, subtitle)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet, $14, $15, $16, $17, $18, $19,
-			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END)
+			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END, $27)
 		ON CONFLICT (session_id) DO UPDATE SET
 			watched_seconds = GREATEST(admin_playback_history.watched_seconds, EXCLUDED.watched_seconds),
+			subtitle = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
+				THEN EXCLUDED.subtitle ELSE admin_playback_history.subtitle END,
 			duration_seconds = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 				THEN COALESCE(EXCLUDED.duration_seconds, admin_playback_history.duration_seconds)
 				ELSE admin_playback_history.duration_seconds END,
@@ -194,6 +200,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		nullableString(entry.VideoDecision),
 		nullableString(entry.AudioDecision),
 		nullableString(string(entry.EndReason)),
+		entry.Subtitle,
 	)
 	queueHistoryFacts(batch, entry)
 	return batch
@@ -218,7 +225,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 			COALESCE(device_id, ''), COALESCE(device_platform, ''),
 			COALESCE(transcode_audio, FALSE), COALESCE(target_video_codec, ''),
 			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE),
-			COALESCE(timeline_duration_seconds, 0), adaptation_reasons
+			COALESCE(timeline_duration_seconds, 0), adaptation_reasons, subtitle
 		FROM (
 			SELECT 0 AS source, live.* FROM playback_sessions_sync live WHERE live.session_id = $1
 			UNION ALL
@@ -236,7 +243,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		&live.DeviceID, &live.DevicePlatform,
 		&live.TranscodeAudio, &live.TargetVideoCodec,
 		&live.Position, &live.IsJellyfinCompat,
-		&live.TimelineDuration, &live.AdaptationReasons,
+		&live.TimelineDuration, &live.AdaptationReasons, &live.Subtitle,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound

@@ -1244,6 +1244,7 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		DevicePlatform:  session.DevicePlatform,
 		ClientName:      session.ClientName,
 		ClientVersion:   session.ClientVersion,
+		Subtitle:        session.Subtitle,
 	}
 	// The decisions the live admin row showed for the transport the play
 	// ended on.
@@ -1663,6 +1664,7 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 		session.PlayMethod = live.PlayMethod
 		session.TranscodeAudio = live.TranscodeAudio
 		session.TargetVideoCodec = live.TargetVideoCodec
+		session.Subtitle = live.Subtitle
 	}
 	fill(&session.ClientIP, live.ClientIP)
 	fill(&session.ClientName, live.ClientName)
@@ -1731,6 +1733,9 @@ func (h *PlaybackHandler) restoreReconstructedClient(ctx context.Context, card *
 	fill(&card.DevicePlatform, live.DevicePlatform)
 	if len(card.AdaptationReasons) == 0 {
 		card.AdaptationReasons = live.AdaptationReasons
+	}
+	if card.Subtitle == nil {
+		card.Subtitle = live.Subtitle
 	}
 }
 

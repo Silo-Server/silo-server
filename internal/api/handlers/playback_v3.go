@@ -3272,7 +3272,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	}
 	var sessionRecipe *playback.RecipeCard
 	if mode.headerAuth {
-		sessionRecipe = sessionRecipeCardV3(identityRecipeCard(&routeSession), session, result.AdaptationReasons)
+		sessionRecipe = sessionRecipeCardV3(identityRecipeCard(&routeSession), session, result)
 	}
 	return preparedTransportV3{
 		sessionRecipe:      sessionRecipe,
@@ -4348,7 +4348,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	card.RoutingEgress = string(noderouting.EgressAPI)
 	var sessionRecipe *playback.RecipeCard
 	if mode.headerAuth {
-		sessionRecipe = sessionRecipeCardV3(card, session, result.AdaptationReasons)
+		sessionRecipe = sessionRecipeCardV3(card, session, result)
 	} else {
 		url = appendStreamToken(url, h.signSessionToken(card, mode.headerAuth))
 	}
@@ -4695,7 +4695,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}
 	var sessionRecipe *playback.RecipeCard
 	if mode.headerAuth {
-		sessionRecipe = sessionRecipeCardV3(card, session, result.AdaptationReasons)
+		sessionRecipe = sessionRecipeCardV3(card, session, result)
 	}
 	return preparedTransportV3{sessionRecipe: sessionRecipe, url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
@@ -4843,6 +4843,7 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		AudioTrackIndex:               plannedAudioTrackIndexV3(result, session.AudioTrackIndex),
 		TranscodeAudio:                result.TranscodeAudio,
 		AdaptationReasons:             result.AdaptationReasons,
+		Subtitle:                      playback.SessionSubtitleFromPlanV3(result.Plan),
 		RemuxDVMode:                   remuxDVModeForPlanV3(result.Plan),
 		RemuxResumeLeadingPictureDrop: result.RemuxResumeLeadingPictureDrop,
 		TranscodeHWAccel:              transport.hwAccel,
@@ -6117,6 +6118,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				// The bytes are unchanged, but a subtitle change can change why
 				// the route adapts.
 				transport.sessionRecipe.AdaptationReasons = result.AdaptationReasons
+				transport.sessionRecipe.Subtitle = playback.SessionSubtitleFromPlanV3(result.Plan)
 			}
 		}
 		slog.InfoContext(r.Context(), "protocol v3 replan reused active HLS A/V transport",
