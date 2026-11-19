@@ -316,7 +316,9 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 		}
 	}
 	switch {
-	case strings.HasPrefix(resolved, "/"):
+	// One leading slash is a path on this server; "//host/..." is another
+	// host, which the tool this route serves may not reach.
+	case strings.HasPrefix(resolved, "/") && !strings.HasPrefix(resolved, "//"):
 		return resolved, false, true, nil
 	case isHTTPURL(resolved):
 		return resolved, true, true, nil

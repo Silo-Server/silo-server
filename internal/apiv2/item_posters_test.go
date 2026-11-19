@@ -205,3 +205,18 @@ func TestPosterResolveMemoBoundsPluginCalls(t *testing.T) {
 		t.Fatalf("new path after expiry: ok=%v full=%v, want room", ok, full)
 	}
 }
+
+type schemeRelativePresignFake struct{}
+
+func (schemeRelativePresignFake) PresignURL(context.Context, string, string) string {
+	return "//images.example/poster.jpg"
+}
+
+// A plugin answer of "//host/..." names another host, not a path on this
+// server, so the route must not redirect a tool that cannot reach it there.
+func TestItemPosterDoesNotRedirectToSchemeRelativeAnswer(t *testing.T) {
+	posters := artworkurl.NewItemPosters("test-secret", time.Hour, schemeRelativePresignFake{})
+	source := &posterSourceFake{paths: map[string]string{"movie-plugin": "tmdb://poster/1"}}
+	h := NewHandler(Dependencies{ItemPosters: posters, ItemPosterSource: source, RemotePosters: &posterFetcherFake{}})
+	requireProblem(t, do(t, h, http.MethodGet, posters.Link("movie-plugin", time.Now()), "", nil), TypeNotFound)
+}
