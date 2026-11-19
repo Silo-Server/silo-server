@@ -745,6 +745,9 @@
 # Stored sidecar subtitles take the scanner's reading of their names.
 ./internal/database TestPostgresExternalSubtitleNameBackfill
 
+# Stored content-rating ages take what access.Normalize resolves now.
+./internal/database TestPostgresContentRatingAgeRederive
+
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
 
