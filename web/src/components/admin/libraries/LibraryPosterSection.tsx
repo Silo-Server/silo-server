@@ -72,6 +72,7 @@ export function LibraryPosterSection({ library }: { library: Library }) {
             onClick={() => deleteMutation.mutate(library.id)}
             disabled={deleteMutation.isPending}
             title={t("web.admin.common.libraryEditor.poster.remove")}
+            aria-label={t("web.admin.common.libraryEditor.poster.remove")}
           >
             <Trash2 className="h-3 w-3" />
           </Button>

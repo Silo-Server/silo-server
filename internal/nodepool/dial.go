@@ -3,6 +3,7 @@ package nodepool
 import (
 	"context"
 	"net"
+	"net/http"
 	"time"
 )
 
@@ -22,4 +23,12 @@ const NodeUnacknowledgedTimeout = 10 * time.Second
 // NodeDialContext is the DialContext for HTTP transports that call nodes.
 func NodeDialContext() func(ctx context.Context, network, address string) (net.Conn, error) {
 	return (&net.Dialer{Timeout: NodeDialTimeout, KeepAlive: 30 * time.Second, Control: controlNodeSocket}).DialContext
+}
+
+// RefuseRedirects is the CheckRedirect of every HTTP client that calls a
+// stream node. A signed request names one node; following a redirect would
+// send the caller's request, and its result, to an address no one registered.
+// The caller gets the 3xx response instead.
+func RefuseRedirects(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }

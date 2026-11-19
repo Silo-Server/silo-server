@@ -1,7 +1,8 @@
 import { useId, type ReactNode } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { SortableContext, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeSortable } from "@/hooks/useSortableList";
 import { Info, MinusCircle, Pin, Users } from "lucide-react";
 
 import type { GroupSortMode, LibraryCollection } from "@/api/types";
@@ -66,7 +67,7 @@ function SortableCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({
+  } = useMotionSafeSortable({
     id: `col:${collection.id}`,
     disabled,
     data: {
@@ -128,7 +129,7 @@ export function GroupCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({
+  } = useMotionSafeSortable({
     id: `shelf:${shelf.id}`,
     disabled: dragDisabled,
     data: { kind: "shelf", id: shelf.id } satisfies ArrangeDragData,

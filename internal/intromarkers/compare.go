@@ -56,6 +56,10 @@ const (
 	// shortIntroSeconds is the duration below which a match is treated as
 	// short.
 	shortIntroSeconds = 20.0
+	// minimumShortIntroPartners is how many partner episodes must agree on a
+	// short match before it is written. A recurring music cue is often shared
+	// by a single pair of episodes; a title card recurs across the season.
+	minimumShortIntroPartners = 2
 	// seasonDurationToleranceSeconds is how far a file's intro duration may
 	// be from the season's usual intro duration and still agree with it.
 	seasonDurationToleranceSeconds = 1.5
@@ -83,6 +87,11 @@ type matchProfile struct {
 	AdjustedMaxSeconds float64
 	// ShortSeconds is the duration below which a match rates ShortConfidence.
 	ShortSeconds float64
+	// MinimumShortPartners is how many partner episodes must agree on a short
+	// match before it is written; zero writes every short match. A file whose
+	// neighbors give it only a short match with fewer partners also gets the
+	// wider search, which may find the rest.
+	MinimumShortPartners int
 	// SeasonToleranceSeconds is how far a file's match duration may be from
 	// the season's usual duration and still agree with it.
 	SeasonToleranceSeconds float64
@@ -110,6 +119,7 @@ func introProfile(cfg Config) matchProfile {
 		AdjustedMinSeconds:     minimumAdjustedIntroSeconds,
 		AdjustedMaxSeconds:     maximumAdjustedIntroSeconds,
 		ShortSeconds:           shortIntroSeconds,
+		MinimumShortPartners:   minimumShortIntroPartners,
 		SeasonToleranceSeconds: seasonDurationToleranceSeconds,
 		Algorithm:              ChromaprintAlgorithm,
 		ConsistentConfidence:   chromaprintConsistentConfidence,
@@ -138,6 +148,11 @@ func compareFingerprints(inputs []fingerprintInput, profile matchProfile) map[in
 	for fileID, match := range matches {
 		segment := match.Segment
 		duration := segment.End - segment.Start
+		// A short match only one partner episode supports is as likely a
+		// recurring music cue as an intro, so it is not written.
+		if profile.weakShortMatch(segment, match.Confirmations) {
+			continue
+		}
 		switch {
 		case duration < profile.ShortSeconds:
 			segment.Confidence = profile.ShortConfidence
@@ -204,6 +219,21 @@ func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]season
 		record(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left, profile))
 		record(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right, profile))
 	}
+	// compareFor records only file i's side of a pair and leaves the pair
+	// unmarked, so a wider search for a weak short match changes no other
+	// file's results, and the partner's own wider search still runs as usual.
+	compareFor := func(i, j int) {
+		left, right := ordered[min(i, j)], ordered[max(i, j)]
+		leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, profile)
+		if !ok {
+			return
+		}
+		if i < j {
+			record(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left, profile))
+		} else {
+			record(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right, profile))
+		}
+	}
 	comparable := func(i, j int) bool {
 		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
 		return a != "" && b != "" && a != b
@@ -233,12 +263,15 @@ func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]season
 		}
 	}
 	// A file whose intro its neighbors lack, such as one sharing an opening
-	// with episodes elsewhere in the season, gets a wider search. Eligibility
-	// is fixed after the neighbor pass: a result another file's wider search
-	// records for this one must not cancel its own.
+	// with episodes elsewhere in the season, gets a wider search, and so does
+	// one whose neighbors give it only a short match too few partners confirm.
+	// Eligibility is fixed after the neighbor pass: a result another file's
+	// wider search records for this one must not cancel its own.
 	neighborMatched := make(map[int]bool, len(results))
-	for fileID := range results {
-		neighborMatched[fileID] = true
+	weakShort := map[int]bool{}
+	for fileID, byPartner := range results {
+		weakShort[fileID] = profile.weakShortMatch(consensusSegment(byPartner))
+		neighborMatched[fileID] = !weakShort[fileID]
 	}
 	// The search walks episodes, not files, outward from the file's own: a
 	// file among many versions of its episode would otherwise reach every
@@ -268,7 +301,12 @@ func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]season
 					if _, done := compared[[2]int{min(i, j), max(i, j)}]; done {
 						continue
 					}
-					if within(extra, compareFallbackEpisodes, ordered[j].Candidate.EpisodeID) {
+					if !within(extra, compareFallbackEpisodes, ordered[j].Candidate.EpisodeID) {
+						continue
+					}
+					if weakShort[ordered[i].Candidate.FileID] {
+						compareFor(i, j)
+					} else {
 						compare(i, j)
 					}
 				}
@@ -305,6 +343,12 @@ func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]season
 		}
 	}
 	return matches
+}
+
+// weakShortMatch reports a short match fewer partner episodes confirm than
+// the profile requires before writing one.
+func (p matchProfile) weakShortMatch(segment Segment, confirmations int) bool {
+	return p.MinimumShortPartners > 0 && segment.End-segment.Start < p.ShortSeconds && confirmations < p.MinimumShortPartners
 }
 
 // episodeGroups splits files sorted in episode order into [start, end) index

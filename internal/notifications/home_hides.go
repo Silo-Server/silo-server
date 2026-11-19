@@ -17,25 +17,15 @@ type droppedSeriesLister interface {
 	ListDropped(ctx context.Context, userID int, profileID string, seriesIDs []string) ([]catalog.DroppedSeries, error)
 }
 
-// homeHides is what a profile removed from Home for one series. The
-// continue_watching and next_up interest reasons follow those removals, so a
-// series the profile removed from a surface stops notifying for that reason.
-// Favorites and watchlist are unaffected.
+// homeHides is what a profile removed from Home's Next Up for one series. The
+// next_up interest reason follows those removals, so a series the profile
+// removed from Next Up stops notifying.
 type homeHides struct {
-	// dropped is an active series drop, which hides the series from both
-	// surfaces until the profile watches it again.
+	// dropped is an active series drop, which hides the series from Home
+	// until the profile watches it again.
 	dropped bool
-	// continueWatching holds the profile's per-card Continue Watching
-	// dismissals, each valid only for the progress stamp it captured.
-	continueWatching catalog.HomeDismissalIndex
 	// nextUp holds the items the profile dismissed from Next Up.
 	nextUp map[string]struct{}
-}
-
-// continueWatchingVisible reports whether any in-progress episode of the
-// series still shows in Continue Watching.
-func (h homeHides) continueWatchingVisible(inProgress []userstore.WatchProgress) bool {
-	return !h.dropped && len(h.continueWatching.FilterProgress(inProgress)) > 0
 }
 
 // nextUpVisible reports whether the series still shows in Next Up, given the
@@ -51,40 +41,129 @@ func (h homeHides) nextUpVisible(nextEpisodeID string) bool {
 	return !dismissed
 }
 
-// completedEpisode is a completed progress row of the series. at is the
-// store's UpdatedAt, the time Home's Continue Watching compares
-// (catalog.ProgressSnapshots).
-type completedEpisode struct {
+// nextUpAnchor is the completion Home anchors a series' Next Up on
+// (catalog's nextUpAnchorsCTE): the most recently completed episode, ties to
+// the later one.
+type nextUpAnchor struct {
+	// key is the anchor episode's key after the special move.
 	key int
-	at  time.Time
+	// at is the completion that picked the anchor, at full precision.
+	at time.Time
+	// moved is set when a special anchor moved to a regular episode because
+	// the series has regular seasons.
+	moved bool
+	// regularAt is the completion a moved anchor stands on: the most recent
+	// completed regular episode. hasRegularAt is false before there is one.
+	regularAt    time.Time
+	hasRegularAt bool
 }
 
-// supersededInProgress returns the in-progress episodes Home's Continue
-// Watching hides because a later episode of the series was completed more
-// recently: the viewer moved past them. Specials have no airing position, so
-// only a later special supersedes a special. It applies the rule of
-// catalog.ContinueWatchingProgressFilter to the series' progress the
-// recompute already holds.
-func supersededInProgress(inProgress []userstore.WatchProgress, completed []completedEpisode, episodeKeys map[string]int) map[string]struct{} {
-	superseded := make(map[string]struct{})
+// progressTime is a progress row's update time at the store's full precision.
+func progressTime(entry userstore.WatchProgress) time.Time {
+	if !entry.UpdatedAtTime.IsZero() {
+		return entry.UpdatedAtTime
+	}
+	at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+	return at
+}
+
+// partlyWatchedSinceAnchor reports whether an in-progress episode keeps the
+// series off Home's Next Up: one whose progress is newer than the anchor
+// completion (catalog.buildListNextUpQuery's inProgressExclusion). Once a
+// special anchor has moved, a regular episode is measured against the regular
+// completion the anchor moved to, and before any regular completion every
+// regular episode in progress counts. Without a progress anchor (completed
+// history only), any episode in progress counts. inProgress holds the
+// series' progress rows that have a position and are not completed.
+func partlyWatchedSinceAnchor(anchor *nextUpAnchor, inProgress []userstore.WatchProgress, episodeKeys map[string]int) bool {
 	for _, entry := range inProgress {
 		key, ok := episodeKeys[entry.MediaItemID]
 		if !ok {
 			continue
 		}
-		at, err := time.Parse(time.RFC3339, entry.UpdatedAt)
-		if err != nil {
-			continue
+		if anchor == nil {
+			return true
 		}
-		special := key < firstRegularEpisodeKey
-		for _, done := range completed {
-			if done.key > key && done.at.After(at) && special == (done.key < firstRegularEpisodeKey) {
-				superseded[entry.MediaItemID] = struct{}{}
-				break
+		since := anchor.at
+		if anchor.moved && key >= firstRegularEpisodeKey {
+			if !anchor.hasRegularAt {
+				return true
 			}
+			since = anchor.regularAt
+		}
+		if progressTime(entry).After(since) {
+			return true
 		}
 	}
-	return superseded
+	return false
+}
+
+// nextUpCursor places the Next Up cursor after anchor. Walking the episodes
+// the catalog lists for the series in key order from anchor + 1, the cursor
+// moves past each one the profile has started and stops at the first it has
+// not, whether or not that episode's file is in the library yet. The first
+// listed episode at or after the cursor is therefore the one the profile
+// waits for: a listed episode whose file has not arrived holds that place, so
+// a later episode landing first does not notify. When every listed episode
+// after the anchor is started, the cursor sits after the last of them and the
+// first episode to arrive there is the next. That is what lets a rewatcher be
+// told about a new season: caught up through S05 and rewatching S01E01, the
+// cursor still lands after S05.
+//
+// episodeKeys maps every listed episode to its key and started lists the
+// episodes the profile has started. A key counts as started when any episode
+// with that key is.
+func nextUpCursor(anchor int, episodeKeys map[string]int, started []string) int {
+	startedKeys := make(map[int]struct{}, len(started))
+	for _, id := range started {
+		if key, ok := episodeKeys[id]; ok && key > anchor {
+			startedKeys[key] = struct{}{}
+		}
+	}
+	// waiting is the first listed episode after the anchor the profile has
+	// not started; the walk stops there.
+	waiting, found := 0, false
+	for _, key := range episodeKeys {
+		if key <= anchor {
+			continue
+		}
+		if _, ok := startedKeys[key]; ok {
+			continue
+		}
+		if !found || key < waiting {
+			waiting, found = key, true
+		}
+	}
+	cursor := anchor + 1
+	for key := range startedKeys {
+		if !found || key < waiting {
+			cursor = max(cursor, key+1)
+		}
+	}
+	return cursor
+}
+
+// postgresStartedEpisodes returns the series' episodes the profile has a
+// Postgres progress row for that is completed or has a position, including
+// rows a history hide covers. That is Home's test for a started episode
+// (catalog.buildListNextUpQuery's next_ep lateral), and the profile's store
+// leaves hidden rows out of its own listing, so the cursor walk adds these to
+// what the store reports. It is empty for a store that keeps progress outside
+// Postgres.
+func (u *InterestUpdater) postgresStartedEpisodes(ctx context.Context, userID int, profileID, seriesID string) ([]string, error) {
+	rows, err := u.pool.Query(ctx, `
+		SELECT uwp.media_item_id FROM user_watch_progress uwp
+		JOIN episodes e ON e.content_id = uwp.media_item_id
+		WHERE uwp.user_id = $1 AND uwp.profile_id = $2 AND e.series_id = $3
+		  AND (uwp.completed = TRUE OR uwp.position_seconds > 0)`, userID, profileID, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("list started episodes: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("scan started episodes: %w", err)
+	}
+	return ids, nil
 }
 
 // nextUpEpisode returns the episode Home's Next Up shows after its anchor:
@@ -92,9 +171,9 @@ func supersededInProgress(inProgress []userstore.WatchProgress, completed []comp
 // that the profile has not started. "Started" is the Home query's test
 // (catalog.buildListNextUpQuery's next_ep lateral: any Postgres progress row
 // that is completed or has a position, including rows a history hide covers)
-// joined with the started episodes the profile's own store reports, which
-// covers stores that keep progress outside Postgres. It is empty when there
-// is none.
+// joined with the started episodes the caller passes: those the profile's own
+// store reports, which covers stores that keep progress outside Postgres, and
+// those with a completed history entry. It is empty when there is none.
 func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profileID, seriesID string, from int, started []string) (string, error) {
 	var episodeID string
 	err := u.pool.QueryRow(ctx, `
@@ -102,9 +181,7 @@ func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profile
 		WHERE e.series_id = $3
 		  AND `+availabilityOrdinalGuard+`
 		  AND `+availabilityKeyExpr+` >= $4
-		  AND EXISTS (
-			SELECT 1 FROM media_files mf
-			WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL)
+		  AND `+presentEpisodeFileSQL+`
 		  AND NOT (e.content_id = ANY($5))
 		  AND NOT EXISTS (
 			SELECT 1 FROM user_watch_progress uwp
@@ -123,9 +200,9 @@ func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profile
 }
 
 // loadHomeHides reads the profile's Home removals that apply to the series:
-// its drop, and its per-card dismissals of the given items on each surface.
-// A surface with no items is not read.
-func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.UserStore, userID int, profileID, seriesID string, continueWatchingItems, nextUpItems []string) (homeHides, error) {
+// its drop, and its Next Up dismissals of the given items. No items reads no
+// dismissals.
+func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.UserStore, userID int, profileID, seriesID string, nextUpItems []string) (homeHides, error) {
 	var hides homeHides
 	if u.drops != nil {
 		drops, err := u.drops.ListDropped(ctx, userID, profileID, []string{seriesID})
@@ -134,19 +211,12 @@ func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.Use
 		}
 		for _, drop := range drops {
 			if drop.Active {
-				// A drop hides both surfaces; per-card dismissals add nothing.
+				// A drop hides the series; per-card dismissals add nothing.
 				return homeHides{dropped: true}, nil
 			}
 		}
 	}
 
-	if len(continueWatchingItems) > 0 {
-		dismissals, err := listHomeDismissals(ctx, store, profileID, userstore.HomeSurfaceContinueWatching, continueWatchingItems)
-		if err != nil {
-			return homeHides{}, err
-		}
-		hides.continueWatching = catalog.NewHomeDismissalIndex(dismissals)
-	}
 	if len(nextUpItems) > 0 {
 		dismissals, err := listHomeDismissals(ctx, store, profileID, userstore.HomeSurfaceNextUp, nextUpItems)
 		if err != nil {

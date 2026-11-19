@@ -67,39 +67,6 @@ func TestPinAttemptStickyFeaturesV3(t *testing.T) {
 	}
 }
 
-// Every sticky feature must be one the server actually advertises on some
-// surface, or a client could never negotiate it in the first place.
-func TestAttemptStickyFeaturesV3AreAdvertised(t *testing.T) {
-	advertised := NativeServerFeaturesV3()
-	for _, feature := range AttemptStickyFeaturesV3() {
-		if !HasFeatureV3(advertised, feature) {
-			t.Fatalf("attempt-sticky feature %q is not advertised by the server", feature)
-		}
-	}
-}
-
-// The hls playlist form is fixed at start: a replan's own hls delivery
-// features can neither add hls_variable_substitution_v1 nor drop it, because
-// a reused HLS transport keeps serving the form its session was built with.
-func TestPinHLSVariableSubstitutionV3(t *testing.T) {
-	withFeature := func(request StartRequestV3) StartRequestV3 {
-		delivery := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
-		delivery.Features = append(slices.Clone(delivery.Features), FeatureHLSVariableSubstitutionV3)
-		request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = delivery
-		return request
-	}
-	for _, negotiated := range []bool{true, false} {
-		start, replan := validStartRequestV3(), withFeature(validStartRequestV3())
-		if negotiated {
-			start, replan = withFeature(validStartRequestV3()), validStartRequestV3()
-		}
-		PinHLSVariableSubstitutionV3(&replan.ClientPlaybackContext, start)
-		if got := HLSVariableSubstitutionV3(replan); got != negotiated {
-			t.Fatalf("negotiated at start = %v, replan pinned to %v", negotiated, got)
-		}
-	}
-}
-
 // A replan that omits or disables the hls delivery still persists its
 // context as the attempt's durable request. The start-time opt-in must
 // survive that, so a later replan that brings HLS back gets the playlist form

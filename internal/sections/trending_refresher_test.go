@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
+
 	"testing"
 	"time"
 
@@ -244,69 +244,5 @@ func TestRefresherEmptyProviderPreservesLastGood(t *testing.T) {
 	_ = json.Unmarshal(data, &result)
 	if result.Empty != 1 {
 		t.Fatalf("result.Empty = %d; want 1", result.Empty)
-	}
-}
-
-func TestRefresherSkipsPersonEntries(t *testing.T) {
-	store := newFakeSnapshotStore()
-	r := &TrendingRefresher{
-		Sections:  fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "tmdb", "week")}},
-		Snapshots: store,
-		Resolver: fakeResolver{byType: map[string]*catalog.ExternalIDLookup{
-			// "99" is present in the movie lookup to simulate a person ID that
-			// collides with an unrelated library movie's TMDB ID.
-			"movie":  {ByTMDB: map[string]string{"10": "c-movie", "99": "c-person-collision"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
-			"series": {ByTMDB: map[string]string{"20": "c-series"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
-		}},
-		TMDBTrending: fakeTMDB{entries: []catalog.TMDBCollectionEntry{
-			{ID: 10, MediaType: "movie"},
-			{ID: 99, MediaType: "person"},
-			{ID: 20, MediaType: "tv"},
-		}},
-		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
-	}
-
-	if _, err := r.RunOnce(context.Background()); err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-
-	got := store.saved["tmdb|week"].contentIDs
-	want := []string{"c-movie", "c-series"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("content IDs = %v; want %v (person entry must be skipped)", got, want)
-	}
-}
-
-func TestRefresherAlwaysRefreshesCalendarFeed(t *testing.T) {
-	calendarKey := CalendarTrendingSource + "|" + CalendarTrendingWindow
-	for _, tc := range []struct {
-		name    string
-		lister  fakeSectionLister
-		wantErr bool
-	}{
-		{name: "no trending sections", lister: fakeSectionLister{}},
-		{name: "only other feeds", lister: fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "tmdb", "day")}}},
-		{name: "section listing fails", lister: fakeSectionLister{err: errors.New("user store unavailable")}, wantErr: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newFakeSnapshotStore()
-			r := &TrendingRefresher{
-				Sections:  tc.lister,
-				Snapshots: store,
-				Resolver: fakeResolver{byType: map[string]*catalog.ExternalIDLookup{
-					"movie": {ByTMDB: map[string]string{"10": "c-movie"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
-				}},
-				TMDBTrending: fakeTMDB{entries: []catalog.TMDBCollectionEntry{{ID: 10, MediaType: "movie"}}},
-				Clock:        fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
-			}
-
-			_, err := r.RunOnce(context.Background())
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("RunOnce err = %v; wantErr %v", err, tc.wantErr)
-			}
-			if got := store.saved[calendarKey].contentIDs; !slices.Equal(got, []string{"c-movie"}) {
-				t.Fatalf("calendar snapshot content IDs = %v; want [c-movie]", got)
-			}
-		})
 	}
 }

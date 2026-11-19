@@ -118,11 +118,17 @@ func (r *MediaItemLocalizationRepository) ClearMatchText(ctx context.Context, co
 
 // UpsertAITranslation writes AI-translated overview/tagline values. A nil
 // pointer leaves that field untouched. Per field, the write lands only when the
-// existing value is empty or already AI-sourced: provider and manual text is
-// never overwritten, not even by an explicit re-translation. Rows created here
-// carry empty titles/artwork — the serving layer falls back to the base item
-// for empty localized fields.
-func (r *MediaItemLocalizationRepository) UpsertAITranslation(ctx context.Context, contentID, language string, overview, tagline *string) error {
+// existing value is empty, or, for a forced re-translation, already
+// AI-sourced: provider and manual text is never overwritten, not even by a
+// forced one. A plain job fills only fields that are still empty when it
+// writes, so it can't undo a forced re-translation that finished after it
+// read the source (#2472). fromOverview and fromTagline are the base texts
+// the translations were made from: a translation lands only while the item's
+// base text still equals it, so a job that translated text since edited
+// writes nothing, forced or not (#4237). Rows created here carry empty
+// titles/artwork — the serving layer falls back to the base item for empty
+// localized fields.
+func (r *MediaItemLocalizationRepository) UpsertAITranslation(ctx context.Context, contentID, language string, overview, tagline *string, fromOverview, fromTagline string, force bool) error {
 	if contentID == "" || language == "" {
 		return fmt.Errorf("invalid media item AI localization")
 	}
@@ -137,39 +143,46 @@ func (r *MediaItemLocalizationRepository) UpsertAITranslation(ctx context.Contex
 			backdrop_path, backdrop_source_path, backdrop_thumbhash,
 			logo_path, logo_source_path,
 			overview_source, tagline_source
-		) VALUES (
+		)
+		SELECT
 			$1, $2, '', '', COALESCE($3, ''), COALESCE($4, ''),
 			'', '', '', '', '', '', '', '',
 			CASE WHEN $3::text IS NULL THEN 'provider' ELSE 'ai' END,
 			CASE WHEN $4::text IS NULL THEN 'provider' ELSE 'ai' END
-		)
+		FROM media_items mi
+		WHERE mi.content_id = $1
+		  AND ($3::text IS NULL OR COALESCE(mi.overview, '') = $6)
+		  AND ($4::text IS NULL OR COALESCE(mi.tagline, '') = $7)
+		-- Waits for an edit of the base text in flight, then checks the
+		-- committed text.
+		FOR SHARE OF mi
 		ON CONFLICT (content_id, language) DO UPDATE SET
 			overview = CASE
 				WHEN $3::text IS NULL OR media_item_localizations.overview_source = 'manual'
 					THEN media_item_localizations.overview
-				WHEN media_item_localizations.overview_source = 'ai' OR media_item_localizations.overview = ''
+				WHEN ($5 AND media_item_localizations.overview_source = 'ai') OR media_item_localizations.overview = ''
 					THEN EXCLUDED.overview
 				ELSE media_item_localizations.overview END,
 			overview_source = CASE
 				WHEN $3::text IS NULL OR media_item_localizations.overview_source = 'manual'
 					THEN media_item_localizations.overview_source
-				WHEN media_item_localizations.overview_source = 'ai' OR media_item_localizations.overview = ''
+				WHEN ($5 AND media_item_localizations.overview_source = 'ai') OR media_item_localizations.overview = ''
 					THEN 'ai'
 				ELSE media_item_localizations.overview_source END,
 			tagline = CASE
 				WHEN $4::text IS NULL OR media_item_localizations.tagline_source = 'manual'
 					THEN media_item_localizations.tagline
-				WHEN media_item_localizations.tagline_source = 'ai' OR media_item_localizations.tagline = ''
+				WHEN ($5 AND media_item_localizations.tagline_source = 'ai') OR media_item_localizations.tagline = ''
 					THEN EXCLUDED.tagline
 				ELSE media_item_localizations.tagline END,
 			tagline_source = CASE
 				WHEN $4::text IS NULL OR media_item_localizations.tagline_source = 'manual'
 					THEN media_item_localizations.tagline_source
-				WHEN media_item_localizations.tagline_source = 'ai' OR media_item_localizations.tagline = ''
+				WHEN ($5 AND media_item_localizations.tagline_source = 'ai') OR media_item_localizations.tagline = ''
 					THEN 'ai'
 				ELSE media_item_localizations.tagline_source END,
 			updated_at = NOW()
-	`, contentID, language, overview, tagline)
+	`, contentID, language, overview, tagline, force, fromOverview, fromTagline)
 	if err != nil {
 		return fmt.Errorf("upserting media item AI localization: %w", err)
 	}
@@ -368,29 +381,33 @@ func (r *SeasonLocalizationRepository) BulkUpsert(ctx context.Context, localizat
 
 // UpsertAIOverview writes an AI-translated season overview (see
 // MediaItemLocalizationRepository.UpsertAITranslation for the precedence).
-func (r *SeasonLocalizationRepository) UpsertAIOverview(ctx context.Context, seasonContentID, language, overview string) error {
+func (r *SeasonLocalizationRepository) UpsertAIOverview(ctx context.Context, seasonContentID, language, overview, from string, force bool) error {
 	if seasonContentID == "" || language == "" {
 		return fmt.Errorf("invalid season AI localization")
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO season_localizations (
 			season_content_id, language, title, overview, poster_path, poster_source_path, poster_thumbhash, overview_source
-		) VALUES ($1, $2, '', $3, '', '', '', 'ai')
+		)
+		SELECT $1, $2, '', $3, '', '', '', 'ai'
+		FROM seasons b
+		WHERE b.content_id = $1 AND COALESCE(b.overview, '') = $5
+		FOR SHARE OF b
 		ON CONFLICT (season_content_id, language) DO UPDATE SET
 			overview = CASE
 				WHEN season_localizations.overview_source = 'manual'
 					THEN season_localizations.overview
-				WHEN season_localizations.overview_source = 'ai' OR season_localizations.overview = ''
+				WHEN ($4 AND season_localizations.overview_source = 'ai') OR season_localizations.overview = ''
 					THEN EXCLUDED.overview
 				ELSE season_localizations.overview END,
 			overview_source = CASE
 				WHEN season_localizations.overview_source = 'manual'
 					THEN season_localizations.overview_source
-				WHEN season_localizations.overview_source = 'ai' OR season_localizations.overview = ''
+				WHEN ($4 AND season_localizations.overview_source = 'ai') OR season_localizations.overview = ''
 					THEN 'ai'
 				ELSE season_localizations.overview_source END,
 			updated_at = NOW()
-	`, seasonContentID, language, overview)
+	`, seasonContentID, language, overview, force, from)
 	if err != nil {
 		return fmt.Errorf("upserting season AI localization: %w", err)
 	}
@@ -533,28 +550,31 @@ func (r *EpisodeLocalizationRepository) BulkUpsert(ctx context.Context, localiza
 
 // UpsertAIOverview writes an AI-translated episode overview (see
 // MediaItemLocalizationRepository.UpsertAITranslation for the precedence).
-func (r *EpisodeLocalizationRepository) UpsertAIOverview(ctx context.Context, episodeContentID, language, overview string) error {
+func (r *EpisodeLocalizationRepository) UpsertAIOverview(ctx context.Context, episodeContentID, language, overview, from string, force bool) error {
 	if episodeContentID == "" || language == "" {
 		return fmt.Errorf("invalid episode AI localization")
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO episode_localizations (episode_content_id, language, title, overview, overview_source)
-		VALUES ($1, $2, '', $3, 'ai')
+		SELECT $1, $2, '', $3, 'ai'
+		FROM episodes b
+		WHERE b.content_id = $1 AND COALESCE(b.overview, '') = $5
+		FOR SHARE OF b
 		ON CONFLICT (episode_content_id, language) DO UPDATE SET
 			overview = CASE
 				WHEN episode_localizations.overview_source = 'manual'
 					THEN episode_localizations.overview
-				WHEN episode_localizations.overview_source = 'ai' OR episode_localizations.overview = ''
+				WHEN ($4 AND episode_localizations.overview_source = 'ai') OR episode_localizations.overview = ''
 					THEN EXCLUDED.overview
 				ELSE episode_localizations.overview END,
 			overview_source = CASE
 				WHEN episode_localizations.overview_source = 'manual'
 					THEN episode_localizations.overview_source
-				WHEN episode_localizations.overview_source = 'ai' OR episode_localizations.overview = ''
+				WHEN ($4 AND episode_localizations.overview_source = 'ai') OR episode_localizations.overview = ''
 					THEN 'ai'
 				ELSE episode_localizations.overview_source END,
 			updated_at = NOW()
-	`, episodeContentID, language, overview)
+	`, episodeContentID, language, overview, force, from)
 	if err != nil {
 		return fmt.Errorf("upserting episode AI localization: %w", err)
 	}

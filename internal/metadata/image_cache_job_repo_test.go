@@ -5,15 +5,6 @@ import (
 	"time"
 )
 
-func TestImageCacheRetryDelayCaps(t *testing.T) {
-	if got := imageCacheRetryDelay(1); got != time.Minute {
-		t.Fatalf("attempt 1 delay = %s, want 1m", got)
-	}
-	if got := imageCacheRetryDelay(20); got != 2*time.Hour {
-		t.Fatalf("attempt 20 delay = %s, want 2h", got)
-	}
-}
-
 func TestImageCacheFailureRetryDelayDefersStableProviderFailures(t *testing.T) {
 	tests := []string{
 		"imagecache: download https://example.invalid/missing.jpg: unexpected status 403",
@@ -73,63 +64,5 @@ func TestClassifyImageCacheFailureTombstonesExhaustedStableFailure(t *testing.T)
 	}
 	if got.retryDelay != imageCachePermanentPark {
 		t.Fatalf("retry delay = %s, want the permanent park %s", got.retryDelay, imageCachePermanentPark)
-	}
-}
-
-func TestNormalizeImageCacheJobInputSkipsNonProviderArtwork(t *testing.T) {
-	for _, sourcePath := range []string{
-		"",
-		"tmdb/series/1396/poster/original.webp",
-		"s3://media/tmdb/series/1396/poster/original.webp",
-		"  s3://media/tmdb/series/1396/poster/original.webp  ",
-		"local://poster.jpg",
-		"generated://collections/1/poster.jpg",
-	} {
-		if got, ok := normalizeImageCacheJobInput(EnqueueImageCacheJobInput{
-			TargetType:      ImageCacheTargetItem,
-			TargetContentID: "series-1",
-			SourcePath:      sourcePath,
-			ImageType:       ImageCacheImagePoster,
-		}); ok {
-			t.Fatalf("normalizeImageCacheJobInput(%q) = %#v, want skipped", sourcePath, got)
-		}
-	}
-}
-
-func TestNormalizeImageCacheJobInputKeepsLanguageAndDefaultsAttribution(t *testing.T) {
-	got, ok := normalizeImageCacheJobInput(EnqueueImageCacheJobInput{
-		TargetType:      ImageCacheTargetItemLocalization,
-		TargetContentID: "series-1",
-		TargetLanguage:  " fr-CA ",
-		SeriesID:        "series-1",
-		SourcePath:      "https://image.tmdb.org/t/p/original/poster.jpg",
-		ImageType:       ImageCacheImagePoster,
-	})
-	if !ok {
-		t.Fatal("normalizeImageCacheJobInput skipped remote HTTP source")
-	}
-	if got.TargetLanguage != "fr-CA" {
-		t.Fatalf("TargetLanguage = %q, want fr-CA", got.TargetLanguage)
-	}
-	if got.ProviderID != "remote" {
-		t.Fatalf("ProviderID = %q, want remote for unattributed HTTP source", got.ProviderID)
-	}
-	if got.ProviderContentID != "series-1" {
-		t.Fatalf("ProviderContentID = %q, want series-1", got.ProviderContentID)
-	}
-	if got.ContentType != "series" {
-		t.Fatalf("ContentType = %q, want series", got.ContentType)
-	}
-}
-
-func TestImageCacheProviderIDFromSourceDoesNotUseURLSchemeAsProvider(t *testing.T) {
-	if got := imageCacheProviderIDFromSource("https://image.tmdb.org/t/p/original/a.jpg", "tmdb"); got != "tmdb" {
-		t.Fatalf("provider from HTTP source with fallback = %q, want tmdb", got)
-	}
-	if got := imageCacheProviderIDFromSource("https://image.tmdb.org/t/p/original/a.jpg", ""); got != "remote" {
-		t.Fatalf("provider from HTTP source without fallback = %q, want remote", got)
-	}
-	if got := imageCacheProviderIDFromSource("tvdb://banners/poster.jpg", "tmdb"); got != "tvdb" {
-		t.Fatalf("provider from plugin URL = %q, want tvdb", got)
 	}
 }

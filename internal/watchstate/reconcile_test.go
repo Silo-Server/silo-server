@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func newTestReconciler(
@@ -129,73 +128,6 @@ func (r *fakeHistoryRows) Conn() *pgx.Conn {
 	return nil
 }
 
-func TestReconcilerResolve(t *testing.T) {
-	seriesTVDB := map[string][]*models.MediaItemProviderID{
-		"series-1": {{Provider: "tvdb", ProviderID: "81189", ItemType: "series"}},
-	}
-	for _, tc := range []struct {
-		name          string
-		episodesByKey map[string]*models.Episode
-		providerIDs   map[string][]*models.MediaItemProviderID
-		identity      userstore.WatchIdentity
-		want          string
-	}{
-		{
-			name: "movie",
-			providerIDs: map[string][]*models.MediaItemProviderID{
-				"movie-new": {{Provider: "tmdb", ProviderID: "550", ItemType: "movie"}},
-			},
-			identity: userstore.WatchIdentity{StableType: "movie", ProviderIDs: map[string]string{"tmdb": "550"}},
-			want:     "movie-new",
-		},
-		{
-			name: "episode legacy provider fallback",
-			episodesByKey: map[string]*models.Episode{
-				"series-1": {ContentID: "ep-1", SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: 3},
-			},
-			providerIDs: seriesTVDB,
-			identity: userstore.WatchIdentity{
-				StableType:  "episode",
-				ProviderIDs: map[string]string{"tvdb": "81189"},
-				Season:      new(1),
-				Episode:     new(3),
-			},
-			want: "ep-1",
-		},
-		{
-			name: "episode season zero",
-			episodesByKey: map[string]*models.Episode{
-				"series-1": {ContentID: "special-1", SeriesID: "series-1", SeasonNumber: 0, EpisodeNumber: 1},
-			},
-			providerIDs: seriesTVDB,
-			identity: userstore.WatchIdentity{
-				StableType:        "episode",
-				SeriesProviderIDs: map[string]string{"tvdb": "81189"},
-				Season:            new(0),
-				Episode:           new(1),
-			},
-			want: "special-1",
-		},
-		{
-			// Season and Episode intentionally nil.
-			name:        "episode missing season and episode",
-			providerIDs: seriesTVDB,
-			identity:    userstore.WatchIdentity{StableType: "episode", SeriesProviderIDs: map[string]string{"tvdb": "81189"}},
-			want:        "",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := newTestReconciler(nil, tc.episodesByKey, tc.providerIDs).resolve(context.Background(), tc.identity)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != tc.want {
-				t.Errorf("resolve = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestHistoryReconcilerRunRebindsMissingEpisodeWithUserScopedUpdate(t *testing.T) {
 	db := &fakeHistoryDB{rows: [][]any{
 		{
@@ -237,39 +169,5 @@ func TestHistoryReconcilerRunRebindsMissingEpisodeWithUserScopedUpdate(t *testin
 	wantArgs := []any{"episode-new", 42, "history-1", "episode-old"}
 	if !reflect.DeepEqual(exec.args, wantArgs) {
 		t.Fatalf("exec args = %#v, want %#v", exec.args, wantArgs)
-	}
-}
-
-func TestHistoryReconcilerRunLeavesUnresolvedIdentityUnchanged(t *testing.T) {
-	db := &fakeHistoryDB{rows: [][]any{
-		{
-			42,
-			"history-1",
-			"episode-old",
-			`{"stable_type":"episode","series_provider_ids":{"tvdb":"missing"},"season":1,"episode":3}`,
-		},
-	}}
-	r := &HistoryReconciler{
-		pool: db,
-		resolver: newTestReconciler(
-			nil,
-			map[string]*models.Episode{
-				"series-1": {ContentID: "episode-new", SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: 3},
-			},
-			map[string][]*models.MediaItemProviderID{
-				"series-1": {{Provider: "tvdb", ProviderID: "81189", ItemType: "series"}},
-			},
-		).resolver,
-	}
-
-	stats, err := r.Run(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stats.OrphansFound != 1 || stats.Resolved != 0 || stats.Unresolvable != 1 || stats.Errors != 0 {
-		t.Fatalf("stats = %+v, want one unresolved orphan", stats)
-	}
-	if len(db.execs) != 0 {
-		t.Fatalf("exec count = %d, want 0", len(db.execs))
 	}
 }

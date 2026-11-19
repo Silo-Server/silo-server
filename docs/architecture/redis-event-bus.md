@@ -64,9 +64,9 @@ server to move to.
 - A subscription runs on every node, the publisher's included. Work that must
   happen once per event observes the publish on the node that made it:
   `cache.ObservedEventBus` hands each event its process publishes to its
-  observers, with or without Redis. [Plugin event
-  delivery](plugin-event-delivery.md) and the smart collection count refresh
-  after a scan work this way.
+  observers, with or without Redis. The smart collection count refresh after a
+  scan works this way. [Plugin event delivery](plugin-event-delivery.md) gets
+  the same guarantee from its own hub's envelopes.
 - Publish and subscribe through `RedisEventBus`, or publish with
   `cache.PublishEvent` when a caller needs its own client. A `PUBLISH` or
   `SUBSCRIBE` sent on a go-redis client directly uses the bare name and reaches

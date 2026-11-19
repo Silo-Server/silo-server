@@ -111,9 +111,13 @@ in flight. An excess cold request answers 404 for the player to retry.
 
 Errors tell the caller what to do. `ErrNotSupportedContainer`, `ErrMalformed`,
 `ErrNoCues`, `ErrIncompleteCues`, `ErrUnsupported` and `ErrTooLarge` describe
-the file: fall back to FFmpeg. `ErrFileChanged` means index the file again. A
-`DamagedError` comes with the packets that were readable; a whole-track
-reader falls back. Any other error is a failed read or the caller's context.
+the file: fall back to FFmpeg. `ErrSlowReads` describes its storage, for a
+read that set `ReadOptions.SlowRead`: once its last 16 reads took longer than
+that on average, it sends no more (those already sent finish, so a read that
+needs no more still succeeds), and the caller falls back to FFmpeg too.
+`ErrFileChanged` means index the file again. A `DamagedError` comes with the
+packets that were readable; a whole-track reader falls back. Any other error
+is a failed read or the caller's context.
 
 ## Bounds
 
@@ -139,7 +143,8 @@ or, for an on-demand segment, with an empty segment.
 | Packet reads | eight operations across the process, including canceled ones until every worker exits; one operation per file version, track and window; a busy key or full limit fails a new read promptly |
 | Local copies of kept tracks | 1 GiB per node by default, least recently used first; a copy being written, fetched or read, holds its size from before its first byte, so eviction makes room ahead, and fetches may not hold more than the budget |
 | Kept tracks | a text track 16 MiB, a PGS track 128 MiB; one media file's tracks together at most the file's own size and 1 GiB; every kept text track together 16 GiB and every kept PGS track 48 GiB, past which no more are kept. The file and store checks are approximate (see Budget). A track past a bound isn't kept and is demuxed when requested |
-| Whole-track flights | 16 running or queued per store and 8 per source file, including canceled workers until they exit; callers may join an admitted track at capacity; a request for another track is answered `503` with `Retry-After`, and whole-track text conversions (jellycompat, AI translation) demux instead; a flight still waiting for a read slot stops when its last caller goes |
+| Whole-track flights | 16 running or queued per store and 8 per source file, including canceled workers until they exit; callers may join an admitted track at capacity; a request for another track is answered `503` with `Retry-After`, and whole-track text conversions demux instead: jellycompat within the source demux bound, AI translation in its job slots; a flight still waiting for a read slot stops when its last caller goes |
+| Source demuxes | four FFmpeg runs reading a source file for a request's subtitle at once across the process, whichever subtitle cache runs them (native, jellycompat, transcode node): whole-track demuxes, a demux whose kept copy failed running again in the same slot, window demuxes of any length, and jellycompat's batch extract, one slot for all its tracks; a run past it is refused, not queued, and answered `503` with `Retry-After: 5` when nothing has been written yet, otherwise the response ends as a failed demux does; requests joining a running demux need no slot, a demux keeps its slot until FFmpeg exits even after its viewers leave, and warms (two slots per cache) and AI translation jobs (their job slots) are bounded on their own |
 | Cold mirror downloads | eight workers and 256 MiB of recorded output bytes reserved across the process, including temporary files until their worker finishes cleanup; past these or the copies' budget no fetch starts: a whole track streams the object from storage, checked against the row's size and SHA-256 at its end, and a window reads the source; local copies and callers joining a fetch remain available |
 | Opens and stats | observe the caller's context; one kernel call per path and 32 per process until it returns |
 | One read's memory (`MaxBytes`) | 256 MiB by default, 128 MiB for a kept PGS track's whole read and 16 MiB for a text track's, 16 MiB (`WindowMaxBytes`) for a window; it counts packet data, blocks being read, decompression buffers before they grow, 1 KiB per selected cue or sample, 512 bytes per packet, and a window's visited flags and cue times, so a 16 MiB window selects at most about 16,000 cues |
@@ -281,7 +286,19 @@ row.
 three minutes, and storing to one. A request waits on the read for at most
 90 seconds, well inside the response's write stall window, which runs until
 the first byte; it then demuxes the source, which streams its first cues at
-once, while the read goes on and keeps the track.
+once, while the read goes on and keeps the track. Every demux of the source
+for a request takes one of the process's source demux slots first, or is
+refused busy (see Bounds).
+
+A whole read gives way sooner where its reads average over 500 ms with 16 in
+flight (`ErrSlowReads`), as on a mount of remote storage that fetches a large
+chunk for each small read: reading every cue there takes minutes and starves
+any playback stream reading the same file. So does a sidecar window open to
+the end that `keptsub.Store.Window` reads from the source when its kept
+track's copy fails. A sidecar request then demuxes, which keeps the track.
+Jellycompat and translation demux without keeping it, and a prefetch skips
+the track, so on such storage only sidecar requests keep tracks. A track
+only the index can read has no demux to give way to, and is read as before.
 
 **The first byte.** Players give up on a silent response sooner than the
 server does: Android's player client reads with a 30-second timeout, and
@@ -297,8 +314,9 @@ first of them aborts the response instead of answering 500. ASS and SUP
 output have no constant prefix (an ASS header is the track's own, and a SUP
 stream starts with a timestamp), so their first byte waits on the read, as
 does a SubRip or ASS answer that jellycompat or translation builds whole
-before writing it; a client that times out leaves the read running, and its
-retry finds the track kept or joins the read.
+before writing it; a client that times out leaves the read running (unless
+it gave way to slow reads), and its retry finds the track kept or joins the
+read.
 
 ## Serving
 
@@ -320,8 +338,20 @@ covers most of the track, so it is read whole and kept first, as a
 whole-track request would; a PGS one is answered from the node's cached
 `.sup` first, when there is one. A PGS window answered from the source warms
 the cached `.sup` in the background, as a demuxed one did, which keeps the
-track too. Only a file without usable cues and without a kept track
-still runs FFmpeg over the source for a window.
+track too. FFmpeg still runs over the source for a window of a file
+without usable cues and without a kept track, and for a window that can't
+be read in time.
+
+A window with a duration waits at most 10 seconds for the kept track or the
+index, then is demuxed instead. Players give up on a silent window
+(the web player after 30 seconds), and on storage where each random read
+costs about a second, such as a FUSE mount of remote storage, reading one
+window through the index takes minutes. A PGS window that gave up this way
+warms the cached `.sup` with a demux, not a whole read through the index:
+that read would be slower still, and its random reads would starve the
+playback stream reading the same file. A track only the index can read waits
+for its window, and on-demand HLS rendition windows (above) have no such
+bound.
 
 The native route, offline downloads' embedded sidecars and AI translation
 share the API's cache; jellycompat's cache uses the same store, for track

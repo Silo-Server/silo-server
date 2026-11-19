@@ -89,6 +89,9 @@ type Session struct {
 	TargetBitrateKbps      int          // requested output bitrate cap for transcodes
 	TranscodeHWAccel       string       // effective hardware acceleration mode for transcodes
 	ToneMapMode            tonemap.Mode // effective HDR-to-SDR executor for transcodes
+	// AdaptationReasons says why the route changes the file (see
+	// AdaptationReasons); empty for direct play or an unplanned session.
+	AdaptationReasons []string
 
 	// Byte-affecting transcode recipe fields the offloaded restart path needs to
 	// rebuild the exact same stream after an audio switch. Local transcodes read
@@ -104,6 +107,14 @@ type Session struct {
 	// Watch measures how much of the session was actually watched; Position
 	// is only where the player is now. See WatchTime.
 	Watch WatchTime
+	// TimelineDuration is the length in seconds of the timeline Position is
+	// measured on when that is more than the session's file, such as a whole
+	// Audiobookshelf book of several files. Zero means the file's own
+	// duration.
+	TimelineDuration float64
+	// ReportedListening is the highest running listening total the client
+	// has reported for the play (see UpdateProgressReported).
+	ReportedListening float64
 	// StopReported marks a session a client reported stopped without an ID
 	// that could end it (#1454). It only hides the session from the live
 	// admin view: pause state and idle grace are untouched, so a stale stop
@@ -158,6 +169,7 @@ type SessionStreamState struct {
 	TargetBitrateKbps             int
 	TranscodeHWAccel              string
 	ToneMapMode                   tonemap.Mode
+	AdaptationReasons             []string
 	TranscodeNodeURL              string
 	TranscodeTransportID          string
 	TranscodeRouteSet             bool
@@ -1004,6 +1016,37 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 	return m.updateProgress(sessionID, position, isPaused, -1)
 }
 
+// UpdateProgressReported is UpdateProgress for a playing client that reports
+// its listening as a running total for the play: the session credits how far
+// the total rose past the highest one seen (see WatchTime.Credit), so a late
+// or repeated report credits nothing. A report that does not raise the total
+// leaves the listening baseline where it was, so the next rise is still
+// capped by all the time since the last one. A client that has not reported a
+// total is measured from its position instead, as UpdateProgress does.
+func (m *SessionManager) UpdateProgressReported(sessionID string, position, total float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.Position = position
+	s.IsPaused = false
+	s.StopReported = false
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	switch {
+	case total <= 0 && s.ReportedListening <= 0:
+		s.Watch.Observe(position, false, s.UpdatedAt)
+	case total > s.ReportedListening:
+		listened := total - s.ReportedListening
+		s.ReportedListening = total
+		s.Watch.Credit(position, listened, s.StartedAt, s.UpdatedAt)
+	}
+	return nil
+}
+
 // UpdateProgressSample keeps a confirmed pause state when an already accepted
 // sequenced sample is replayed. Position and activity still persist normally.
 func (m *SessionManager) UpdateProgressSample(sessionID string, sample ProgressSampleV3) error {
@@ -1222,6 +1265,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
+	s.AdaptationReasons = state.AdaptationReasons
 	if state.TranscodeRouteSet {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
@@ -1273,6 +1317,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		TargetBitrateKbps:             s.TargetBitrateKbps,
 		TranscodeHWAccel:              s.TranscodeHWAccel,
 		ToneMapMode:                   s.ToneMapMode,
+		AdaptationReasons:             s.AdaptationReasons,
 		TranscodeNodeURL:              s.TranscodeNodeURL,
 		TranscodeTransportID:          s.TranscodeTransportID,
 		TranscodeRouteSet:             true,
@@ -1316,6 +1361,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
+	s.AdaptationReasons = state.AdaptationReasons
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
 	s.RoutingNetworkProvider = state.RoutingNetworkProvider
@@ -1629,6 +1675,22 @@ func (m *SessionManager) SetProgressPersistenceDisabled(sessionID string, disabl
 	return nil
 }
 
+// SetTimelineDuration records the length of the timeline the session's
+// Position is measured on, for a player whose position spans more than the
+// session's file. See Session.TimelineDuration.
+func (m *SessionManager) SetTimelineDuration(sessionID string, seconds float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	s.TimelineDuration = seconds
+	return nil
+}
+
 // TouchActivity refreshes the session's activity timestamp without changing
 // any other playback state.
 func (m *SessionManager) TouchActivity(sessionID string) error {
@@ -1855,6 +1917,21 @@ func (m *SessionManager) AnnounceStart(ctx context.Context, sessionID, frontend 
 	for _, hook := range hooks {
 		if hook.Started != nil {
 			hook.Started(ctx, &started, frontend)
+		}
+	}
+}
+
+// AnnounceDetachedStart tells the lifecycle hooks a frontend started a play
+// that no replica holds in memory, such as an Audiobookshelf play a client
+// only reports. The caller supplies the snapshot; registered sessions are
+// left as they are.
+func (m *SessionManager) AnnounceDetachedStart(ctx context.Context, s Session, frontend string) {
+	m.mu.RLock()
+	hooks := append([]LifecycleHooks{}, m.lifecycleHooks...)
+	m.mu.RUnlock()
+	for _, hook := range hooks {
+		if hook.Started != nil {
+			hook.Started(ctx, &s, frontend)
 		}
 	}
 }

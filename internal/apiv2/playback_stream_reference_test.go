@@ -53,6 +53,7 @@ func TestPlaybackDeliveryAcceptsStreamReferenceAlone(t *testing.T) {
 		{http.MethodGet, stream},
 		{http.MethodHead, stream},
 		{http.MethodGet, transcode + "/master.m3u8"},
+		{http.MethodHead, transcode + "/master.m3u8"},
 		{http.MethodGet, transcode + "/segment/seg_00001.m4s"},
 		{http.MethodGet, stream + "/subtitles/0.vtt"},
 		{http.MethodHead, stream + "/subtitles/0.vtt"},

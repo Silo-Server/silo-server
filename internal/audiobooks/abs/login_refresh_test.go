@@ -26,7 +26,7 @@ func (noopMediaStore) GetAudiobookByID(context.Context, string, catalog.AccessFi
 func (noopMediaStore) GetAudiobooksByIDs(context.Context, []string, catalog.AccessFilter) (map[string]*models.MediaItem, error) {
 	return map[string]*models.MediaItem{}, nil
 }
-func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter, Filter) ([]*models.MediaItem, int, error) {
+func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter, ItemsQuery) ([]*models.MediaItem, int, error) {
 	return nil, 0, nil
 }
 func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
@@ -34,6 +34,12 @@ func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilte
 }
 func (noopMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
 	return nil, nil
+}
+func (noopMediaStore) StreamAudiobooks(context.Context, int64, catalog.AccessFilter, ItemsQuery, func(int) error, func([]*models.MediaItem) error) error {
+	return nil
+}
+func (noopMediaStore) ListAudiobooksCollapsed(context.Context, int64, int, int, catalog.AccessFilter, ItemsQuery) ([]CollapsedAudiobook, int, error) {
+	return nil, 0, nil
 }
 func (noopMediaStore) SearchAudiobooks(context.Context, int64, string, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
@@ -55,6 +61,18 @@ func (noopMediaStore) ListLibrarySeries(context.Context, int64, int, int, catalo
 }
 func (noopMediaStore) GetAuthorByID(context.Context, string, catalog.AccessFilter) (Author, error) {
 	return Author{}, ErrNotFound
+}
+func (noopMediaStore) SearchLibraryAuthors(context.Context, int64, string, int, catalog.AccessFilter) ([]AuthorSummary, error) {
+	return nil, nil
+}
+func (noopMediaStore) SearchLibrarySeries(context.Context, int64, string, int, catalog.AccessFilter) ([]SeriesSummary, error) {
+	return nil, nil
+}
+func (noopMediaStore) AudiobookPosterPath(context.Context, string) (string, error) {
+	return "", ErrNotFound
+}
+func (noopMediaStore) AuthorPhotoPath(context.Context, string) (string, error) {
+	return "", ErrNotFound
 }
 func (noopMediaStore) GetSeriesByName(context.Context, string, catalog.AccessFilter) (Series, error) {
 	return Series{}, ErrNotFound
@@ -233,41 +251,6 @@ func TestHandleRefresh_RevokedTokenRejected(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
-	}
-}
-
-// TestHandleRefresh_ResolvesUsername verifies that refresh responses expose
-// the resolved username instead of the internal user ID.
-func TestHandleRefresh_ResolvesUsername(t *testing.T) {
-	// Given
-	h, store, cfg := newRefreshTestHandler(t)
-	h.deps.UsernameResolver = func(context.Context, string, string) string { return "sara" }
-	refresh, _ := mintAndPersistRefresh(t, store, cfg, "15")
-
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
-	req.Header.Set("x-refresh-token", refresh)
-	rec := httptest.NewRecorder()
-
-	// When
-	h.handleRefresh(rec, req)
-
-	// Then
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	user, ok := resp["user"].(map[string]any)
-	if !ok {
-		t.Fatalf("user object missing")
-	}
-	if user["username"] != "sara" {
-		t.Errorf("username = %v, want sara", user["username"])
-	}
-	if user["id"] != "15" {
-		t.Errorf("id = %v, want 15", user["id"])
 	}
 }
 

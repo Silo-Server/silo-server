@@ -257,7 +257,7 @@ func onViewNotConfigured(cause error) *APIError {
 		Message: "On-view translation is not enabled on this server", cause: cause}
 }
 
-// SearchPeopleScoped serves v2 people search with media scope and exact-name ranking.
+// SearchPeopleScoped serves v2 people search with media scope, ranked as catalog.PersonRepository.SearchScoped describes.
 func (h *PeopleHandler) SearchPeopleScoped(ctx context.Context, query string, limit int, mediaScope string, filter catalog.AccessFilter) ([]PersonView, error) {
 	people, err := h.personRepo.SearchScoped(ctx, query, limit, mediaScope, filter)
 	if err != nil {

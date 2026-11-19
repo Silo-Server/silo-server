@@ -20,6 +20,7 @@ import {
   PlayerFetchError,
 } from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
+import { t } from "@/i18n";
 import { randomUUID } from "@/lib/uuid";
 
 export type ProgressSample = { position: number; is_paused: boolean };
@@ -103,7 +104,7 @@ async function mutationFetch(
     signal: AbortSignal.timeout(timeout),
   });
   if (!response.ok) {
-    let message = `Playback update failed (${response.status})`;
+    let message = t("web.player.error.updateFailed", { status: response.status });
     let code: string | undefined;
     const text = await response.text().catch(() => "");
     try {

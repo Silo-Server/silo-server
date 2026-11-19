@@ -3,10 +3,11 @@ package apiv2
 import (
 	"bytes"
 	"context"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"sync"
 	"testing"
 
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
@@ -55,24 +56,47 @@ func subtitleMultipart(t *testing.T, h http.Handler, path, filename string, data
 	h.ServeHTTP(rec, req)
 	return rec
 }
-func TestSubtitleUploadV2MultipartAndLimits(t *testing.T) {
+
+// heldBody is a request body that signals its first read and then blocks, so
+// a request stays in flight inside its operation until release closes.
+type heldBody struct {
+	reading chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *heldBody) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.reading) })
+	<-b.release
+	return 0, io.ErrUnexpectedEOF
+}
+
+func TestSubtitleDetectV2RefusesBeyondAnAccountsConcurrentDetections(t *testing.T) {
 	deps, _ := catalogDeps(t)
-	f := new(fakeSubtitleUploads)
-	deps.SubtitleUploads = f
 	h := newTestHandler(t, deps)
-	fields := map[string]string{"media_file_id": "42", "language": "fr", "language_override": "true", "hearing_impaired": "true", "release_name": "Synthetic"}
-	rec := subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("synthetic bytes"), fields, true)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"7"`) || strings.Contains(rec.Body.String(), "PRIVATE") || strings.Contains(rec.Body.String(), "downloaded_by") {
-		t.Fatal(rec.Code, rec.Body.String())
+	detect := func() *httptest.ResponseRecorder {
+		return subtitleMultipart(t, h, "/subtitles/detect-language", "synthetic.en.srt", []byte("synthetic bytes"), nil, true)
 	}
-	if f.calls != 1 || f.access.UserID != 1 || f.access.ProfileID != "p-owner" || f.request.UserID != nil || !f.request.PreferUserLanguage || !f.request.HearingImpaired || string(f.request.Data) != "synthetic bytes" || f.request.Filename != "synthetic.en.srt" {
-		t.Fatalf("multipart lost authority/data: %+v", f)
+	release := make(chan struct{})
+	var done sync.WaitGroup
+	for range 2 {
+		body := &heldBody{reading: make(chan struct{}), release: release}
+		req := httptest.NewRequest(http.MethodPost, Prefix+"/subtitles/detect-language", body)
+		req.Header.Set("Content-Type", "multipart/form-data; boundary=held")
+		for key, value := range viewerHeaders() {
+			req.Header.Set(key, value)
+		}
+		done.Go(func() { h.ServeHTTP(httptest.NewRecorder(), req) })
+		<-body.reading
 	}
-	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("x"), fields, false), TypeAuthenticationRequired)
-	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", bytes.Repeat([]byte("x"), subtitles.MaxUploadSize+1), fields, true), TypePayloadTooLarge)
-	fields["media_file_id"] = "0"
-	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("x"), fields, true), TypeValidationFailed)
-	if f.calls != 1 {
-		t.Fatal("rejected multipart reached upload service")
+	rec := detect()
+	requireProblem(t, rec, TypeRateLimited)
+	if rec.Header().Get("Retry-After") != "1" {
+		t.Fatalf("refused detection carries Retry-After %q", rec.Header().Get("Retry-After"))
+	}
+	close(release)
+	done.Wait()
+	if rec = detect(); rec.Code != http.StatusOK {
+		t.Fatalf("detection after the slots were released: %d %s", rec.Code, rec.Body.String())
 	}
 }

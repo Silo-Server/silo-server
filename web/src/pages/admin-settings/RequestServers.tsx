@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { Plus, Trash2 } from "lucide-react";
 import { Link } from "react-router";
 
@@ -127,7 +128,7 @@ function connectedMessage(t: Translate, options: RequestIntegrationOptions): str
           count_text: folders,
         })
       : null,
-  ].filter(Boolean);
+  ].filter((part): part is string => Boolean(part));
   const detected = detectedService(options);
   const lead = detected
     ? t("web.admin.settings.requests.serverEditor.testDetected", { service: detected.label })
@@ -135,7 +136,7 @@ function connectedMessage(t: Translate, options: RequestIntegrationOptions): str
   return parts.length > 0
     ? t("web.admin.settings.requests.serverEditor.testResult", {
         result: lead,
-        details: parts.join(", "),
+        details: joinList(parts),
       })
     : lead;
 }

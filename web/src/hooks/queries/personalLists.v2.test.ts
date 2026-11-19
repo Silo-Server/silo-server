@@ -95,13 +95,13 @@ describe("personal lists on the v2 contract", () => {
     const set = renderHook(() => useSetRating("movie:c"), { wrapper });
     const remove = renderHook(() => useDeleteRating("movie:c"), { wrapper });
     await act(async () => {
-      await set.result.current.mutateAsync(4);
+      await set.result.current.mutateAsync(7);
       await remove.result.current.mutateAsync();
     });
 
     const setCall = callOf(fetchMock, 0);
     expect(setCall).toMatchObject({ url: "/api/v2/ratings/movie%3Ac", method: "PUT" });
-    expect(JSON.parse(String(setCall.body))).toEqual({ rating: 4 });
+    expect(JSON.parse(String(setCall.body))).toEqual({ rating: 7 });
     expect(callOf(fetchMock, 1)).toMatchObject({
       url: "/api/v2/ratings/movie%3Ac",
       method: "DELETE",

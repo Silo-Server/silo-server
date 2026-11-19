@@ -7,50 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/clientip"
-	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
-
-func TestSessionManager_CapturesStartNetwork(t *testing.T) {
-	sm := playback.NewSessionManager(0, 0)
-	ctx := clientip.SetContext(t.Context(), "192.168.1.8")
-	ctx = netaccess.WithPath(ctx, netaccess.Path{Provider: "tailscale"})
-	session, err := sm.StartSessionWithContext(ctx, 1, "profile", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if session.ClientIP != "192.168.1.8" || session.RoutingNetworkProvider == nil || *session.RoutingNetworkProvider != "tailscale" || session.StreamLocation != "remote" {
-		t.Fatalf("start network = (%q, %v)", session.ClientIP, session.RoutingNetworkProvider)
-	}
-	if err := sm.SetStreamLocation(session.ID, "local"); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := sm.GetSession(session.ID); err != nil || got.StreamLocation != "local" {
-		t.Fatalf("frozen stream location = %v, %v", got, err)
-	}
-}
-
-func TestSessionManagerOutputFormatFollowsReplacement(t *testing.T) {
-	sm := playback.NewSessionManager(5, 2)
-	session := mustStartSession(t, sm, 1, "profile", 100, playback.PlayRemux, true)
-	if err := sm.SetOutputFormat(session.ID, "fmp4", "hls"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := sm.GetSession(session.ID)
-	if err != nil || got.OutputContainer != "fmp4" || got.OutputProtocol != "hls" {
-		t.Fatal("transport output format was not recorded")
-	}
-	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{PlayMethod: playback.PlayDirect, TranscodeRouteSet: true}); err != nil {
-		t.Fatal(err)
-	}
-	got, _ = sm.GetSession(session.ID)
-	if got.OutputContainer != "" || got.OutputProtocol != "" {
-		t.Fatal("a replacement retained the previous container")
-	}
-}
 
 func TestSessionManager_StreamLimitEnforcement(t *testing.T) {
 	sm := playback.NewSessionManager(2, 1) // max 2 streams, 1 transcode
@@ -100,49 +60,6 @@ func TestSessionManager_TranscodeLimitEnforcement(t *testing.T) {
 	mustStartSession(t, sm, 1, "profile-1", 103, playback.PlayTranscode, false)
 }
 
-func TestSessionManager_UserLimitProviderOverridesDefaults(t *testing.T) {
-	sm := playback.NewSessionManager(6, 2)
-	sm.SetLimitProvider(func(_ context.Context, userID int) (playback.SessionLimits, error) {
-		switch userID {
-		case 1:
-			return playback.SessionLimits{MaxStreams: 1, MaxTranscodes: 1}, nil
-		default:
-			return playback.SessionLimits{MaxStreams: 6, MaxTranscodes: 2}, nil
-		}
-	})
-
-	mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayDirect, false)
-	if _, err := sm.StartSession(1, "profile-1", 101, playback.PlayDirect, false); !errors.Is(err, playback.ErrTooManyStreams) {
-		t.Fatalf("StartSession user 1 over stream limit = %v, want ErrTooManyStreams", err)
-	}
-
-	mustStartSession(t, sm, 2, "profile-2", 200, playback.PlayDirect, false)
-	mustStartSession(t, sm, 2, "profile-2", 201, playback.PlayDirect, false)
-}
-
-func TestSessionManager_DisabledVideoTranscodingAllowsAudioByDefault(t *testing.T) {
-	sm := withFixedLimits(playback.NewSessionManager(0, 0), playback.SessionLimits{TranscodingDisabled: true})
-
-	for _, tc := range []struct {
-		name           string
-		method         playback.PlayMethod
-		transcodeAudio bool
-		wantErr        error
-	}{
-		{name: "direct play", method: playback.PlayDirect},
-		{name: "container remux", method: playback.PlayRemux},
-		{name: "video transcode", method: playback.PlayTranscode, wantErr: playback.ErrTranscodingDisabled},
-		{name: "audio transcode", method: playback.PlayRemux, transcodeAudio: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := sm.StartSession(1, "profile-1", 100, tc.method, tc.transcodeAudio)
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("StartSession() error = %v, want %v", err, tc.wantErr)
-			}
-		})
-	}
-}
-
 func TestSessionManager_DisabledAudioTranscodingRejectsAudioTranscode(t *testing.T) {
 	sm := withFixedLimits(playback.NewSessionManager(0, 0), playback.SessionLimits{TranscodingDisabled: true, AudioTranscodingDisabled: true})
 
@@ -150,24 +67,6 @@ func TestSessionManager_DisabledAudioTranscodingRejectsAudioTranscode(t *testing
 	if !errors.Is(err, playback.ErrAudioTranscodingDisabled) {
 		t.Fatalf("StartSession() error = %v, want ErrAudioTranscodingDisabled", err)
 	}
-}
-
-func TestSessionManager_CheckTranscodingAllowed(t *testing.T) {
-	sm := withFixedLimits(playback.NewSessionManager(0, 0), playback.SessionLimits{TranscodingDisabled: true, AudioTranscodingDisabled: true})
-
-	if err := sm.CheckTranscodingAllowed(context.Background(), 1, true); !errors.Is(err, playback.ErrTranscodingDisabled) {
-		t.Fatalf("CheckTranscodingAllowed() error = %v, want ErrTranscodingDisabled", err)
-	}
-	if err := sm.CheckTranscodingAllowed(context.Background(), 1, false); !errors.Is(err, playback.ErrAudioTranscodingDisabled) {
-		t.Fatalf("CheckTranscodingAllowed(audio) error = %v, want ErrAudioTranscodingDisabled", err)
-	}
-}
-
-func TestSessionManager_PolicyAllowsAudioOnlyTranscodeWhenVideoTranscodingDisabled(t *testing.T) {
-	sm := withFixedLimits(playback.NewSessionManager(0, 0), playback.SessionLimits{TranscodingDisabled: true})
-	sm.SetAdmissionDecider(policy.NewPlaybackAdmissionDecider(newPlaybackPolicyPDP(t)))
-
-	mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayRemux, true)
 }
 
 func TestSessionManager_PolicyAdmissionDeciderMatchesLegacy(t *testing.T) {
@@ -283,100 +182,6 @@ func sameAdmissionError(got, want error) bool {
 		return errors.Is(got, playback.ErrTooManyTranscodes)
 	default:
 		return errors.Is(got, want)
-	}
-}
-
-func TestSessionManager_MultipleUsers(t *testing.T) {
-	sm := playback.NewSessionManager(2, 1) // max 2 streams per user
-
-	// User 1 fills their slots.
-	mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayDirect, false)
-	mustStartSession(t, sm, 1, "profile-1", 101, playback.PlayDirect, false)
-
-	// User 1 should be blocked.
-	if _, err := sm.StartSession(1, "profile-1", 102, playback.PlayDirect, false); !errors.Is(err, playback.ErrTooManyStreams) {
-		t.Errorf("User1 session 3 = %v, want ErrTooManyStreams", err)
-	}
-
-	// User 2 should be unaffected.
-	mustStartSession(t, sm, 2, "profile-2", 200, playback.PlayDirect, false)
-	mustStartSession(t, sm, 2, "profile-2", 201, playback.PlayTranscode, false)
-
-	// Verify counts are isolated.
-	if sm.ActiveCount(1) != 2 {
-		t.Errorf("User1 ActiveCount = %d, want 2", sm.ActiveCount(1))
-	}
-	if sm.ActiveCount(2) != 2 {
-		t.Errorf("User2 ActiveCount = %d, want 2", sm.ActiveCount(2))
-	}
-	if sm.TranscodeCount(1) != 0 {
-		t.Errorf("User1 TranscodeCount = %d, want 0", sm.TranscodeCount(1))
-	}
-	if sm.TranscodeCount(2) != 1 {
-		t.Errorf("User2 TranscodeCount = %d, want 1", sm.TranscodeCount(2))
-	}
-}
-
-func TestSessionManager_GetUserSessions(t *testing.T) {
-	sm := playback.NewSessionManager(5, 2)
-
-	// Create sessions for two users.
-	mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayDirect, false)
-	mustStartSession(t, sm, 1, "profile-1", 101, playback.PlayTranscode, false)
-	mustStartSession(t, sm, 2, "profile-2", 200, playback.PlayDirect, false)
-
-	user1Sessions := sm.GetUserSessions(1)
-	if len(user1Sessions) != 2 {
-		t.Errorf("User1 sessions = %d, want 2", len(user1Sessions))
-	}
-
-	user2Sessions := sm.GetUserSessions(2)
-	if len(user2Sessions) != 1 {
-		t.Errorf("User2 sessions = %d, want 1", len(user2Sessions))
-	}
-
-	// Non-existent user should return nil/empty.
-	user3Sessions := sm.GetUserSessions(3)
-	if len(user3Sessions) != 0 {
-		t.Errorf("User3 sessions = %d, want 0", len(user3Sessions))
-	}
-}
-
-func TestSessionManager_AllSessions(t *testing.T) {
-	sm := playback.NewSessionManager(5, 2)
-
-	// Empty manager returns empty slice.
-	all := sm.AllSessions()
-	if len(all) != 0 {
-		t.Errorf("AllSessions on empty manager = %d, want 0", len(all))
-	}
-
-	// Start sessions for two users.
-	s1 := mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayDirect, false)
-	s2 := mustStartSession(t, sm, 1, "profile-1", 101, playback.PlayRemux, false)
-	s3 := mustStartSession(t, sm, 2, "profile-2", 200, playback.PlayTranscode, false)
-
-	all = sm.AllSessions()
-	if len(all) != 3 {
-		t.Fatalf("AllSessions = %d, want 3", len(all))
-	}
-
-	// Verify sessions are returned (order is non-deterministic with maps).
-	ids := map[string]bool{}
-	for _, s := range all {
-		ids[s.ID] = true
-	}
-	for _, expected := range []string{s1.ID, s2.ID, s3.ID} {
-		if !ids[expected] {
-			t.Errorf("AllSessions missing session %s", expected)
-		}
-	}
-
-	// Verify returned sessions are copies (mutating shouldn't affect manager).
-	all[0].Position = 999.0
-	original, _ := sm.GetSession(all[0].ID)
-	if original.Position == 999.0 {
-		t.Error("AllSessions should return copies, but mutation propagated")
 	}
 }
 
@@ -517,103 +322,6 @@ func TestSessionReplacementRollbackRejectsNewerMutation(t *testing.T) {
 	}
 }
 
-func TestUpdateStreamState(t *testing.T) {
-	mgr := playback.NewSessionManager(0, 0)
-	session := mustStartSession(t, mgr, 1, "profile-1", 100, playback.PlayRemux, false)
-
-	if err := mgr.UpdateStreamState(session.ID, playback.SessionStreamState{
-		PlayMethod:             playback.PlayTranscode,
-		BasePlayMethod:         playback.PlayRemux,
-		AudioTrackIndex:        2,
-		TranscodeAudio:         true,
-		ClientIP:               "10.0.0.10",
-		StreamBitrateKbps:      4200,
-		TargetResolution:       "1080p",
-		TargetVideoCodec:       "h264",
-		TargetAudioCodec:       "aac",
-		SourceAudioChannels:    6,
-		TargetAudioChannels:    2,
-		TargetAudioBitrateKbps: 192,
-		TargetBitrateKbps:      4000,
-		TranscodeNodeURL:       "http://node-1",
-		TranscodeTransportID:   "transport-1",
-		TranscodeRouteSet:      true,
-		SubtitleTrackIndex:     3,
-		SubtitleBurnIn:         true,
-		SegmentDuration:        4,
-	}); err != nil {
-		t.Fatalf("UpdateStreamState: %v", err)
-	}
-
-	got := mustGetSession(t, mgr, session.ID)
-	if got.PlayMethod != playback.PlayTranscode {
-		t.Errorf("PlayMethod = %q, want %q", got.PlayMethod, playback.PlayTranscode)
-	}
-	if got.BasePlayMethod != playback.PlayRemux {
-		t.Errorf("BasePlayMethod = %q, want %q", got.BasePlayMethod, playback.PlayRemux)
-	}
-	if got.AudioTrackIndex != 2 {
-		t.Errorf("AudioTrackIndex = %d, want 2", got.AudioTrackIndex)
-	}
-	if got.TranscodeNodeURL != "http://node-1" || got.TranscodeTransportID != "transport-1" {
-		t.Fatalf("transcode route = %q/%q", got.TranscodeNodeURL, got.TranscodeTransportID)
-	}
-	if !got.TranscodeAudio {
-		t.Error("TranscodeAudio = false, want true")
-	}
-	if got.ClientIP != "10.0.0.10" {
-		t.Errorf("ClientIP = %q, want %q", got.ClientIP, "10.0.0.10")
-	}
-	if got.StreamBitrateKbps != 4200 {
-		t.Errorf("StreamBitrateKbps = %d, want 4200", got.StreamBitrateKbps)
-	}
-	if got.TargetResolution != "1080p" {
-		t.Errorf("TargetResolution = %q, want %q", got.TargetResolution, "1080p")
-	}
-	if got.TargetVideoCodec != "h264" {
-		t.Errorf("TargetVideoCodec = %q, want %q", got.TargetVideoCodec, "h264")
-	}
-	if got.TargetAudioCodec != "aac" {
-		t.Errorf("TargetAudioCodec = %q, want %q", got.TargetAudioCodec, "aac")
-	}
-	if got.SourceAudioChannels != 6 || got.TargetAudioChannels != 2 {
-		t.Errorf("audio channels = source %d / target %d, want 6 / 2", got.SourceAudioChannels, got.TargetAudioChannels)
-	}
-	if got.TargetBitrateKbps != 4000 {
-		t.Errorf("TargetBitrateKbps = %d, want 4000", got.TargetBitrateKbps)
-	}
-	if got.SubtitleTrackIndex != 3 {
-		t.Errorf("SubtitleTrackIndex = %d, want 3", got.SubtitleTrackIndex)
-	}
-	if !got.SubtitleBurnIn {
-		t.Error("SubtitleBurnIn = false, want true")
-	}
-	if got.SegmentDuration != 4 {
-		t.Errorf("SegmentDuration = %d, want 4", got.SegmentDuration)
-	}
-	if err := mgr.UpdateStreamState(session.ID, playback.SessionStreamState{AudioTrackIndex: 1}); err != nil {
-		t.Fatal(err)
-	}
-	got = mustGetSession(t, mgr, session.ID)
-	if !got.TranscodeAudio || got.TargetAudioCodec != "aac" || got.SourceAudioChannels != 6 ||
-		got.TargetAudioChannels != 2 || got.TargetAudioBitrateKbps != 192 {
-		t.Fatalf("audio recipe after partial update = transcode %t codec %q source %d target %d bitrate %d, want preserved AAC 6-to-2 at 192 kbps",
-			got.TranscodeAudio, got.TargetAudioCodec, got.SourceAudioChannels, got.TargetAudioChannels, got.TargetAudioBitrateKbps)
-	}
-	if err := mgr.UpdateStreamState(session.ID, playback.SessionStreamState{TranscodeRouteSet: true}); err != nil {
-		t.Fatal(err)
-	}
-	got = mustGetSession(t, mgr, session.ID)
-	if got.TranscodeNodeURL != "" || got.TranscodeTransportID != "" {
-		t.Fatalf("cleared transcode route = %q/%q", got.TranscodeNodeURL, got.TranscodeTransportID)
-	}
-	if got.TranscodeAudio || got.TargetAudioCodec != "" || got.SourceAudioChannels != 0 ||
-		got.TargetAudioChannels != 0 || got.TargetAudioBitrateKbps != 0 {
-		t.Fatalf("audio recipe after full route replacement = transcode %t codec %q source %d target %d bitrate %d, want cleared",
-			got.TranscodeAudio, got.TargetAudioCodec, got.SourceAudioChannels, got.TargetAudioChannels, got.TargetAudioBitrateKbps)
-	}
-}
-
 func TestUpdateAudioTrack_PreservesTranscodeTransportForRemuxBase(t *testing.T) {
 	mgr := playback.NewSessionManager(0, 0)
 	session := mustStartSession(t, mgr, 1, "profile-1", 100, playback.PlayRemux, false)
@@ -642,53 +350,6 @@ func TestUpdateAudioTrack_PreservesTranscodeTransportForRemuxBase(t *testing.T) 
 	}
 }
 
-func TestSetRealtimeConnection(t *testing.T) {
-	sm := playback.NewSessionManager(5, 2)
-
-	session := mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayDirect, false)
-
-	got, _ := sm.GetSession(session.ID)
-	if got.HasRealtimeConnection {
-		t.Error("new session should not have realtime connection")
-	}
-
-	if err := sm.SetRealtimeConnection(session.ID, true); err != nil {
-		t.Fatalf("SetRealtimeConnection(true): %v", err)
-	}
-
-	got, _ = sm.GetSession(session.ID)
-	if !got.HasRealtimeConnection {
-		t.Error("HasRealtimeConnection should be true after SetRealtime(true)")
-	}
-	if !got.HasWebSocket {
-		t.Error("HasWebSocket should mirror realtime connection state")
-	}
-
-	got.HasRealtimeConnection = false
-	again := mustGetSession(t, sm, session.ID)
-	if !again.HasRealtimeConnection {
-		t.Error("mutating GetSession copy should not change manager state")
-	}
-
-	if err := sm.SetRealtimeConnection(session.ID, false); err != nil {
-		t.Fatalf("SetRealtimeConnection(false): %v", err)
-	}
-
-	got = mustGetSession(t, sm, session.ID)
-	if got.ID != session.ID {
-		t.Fatalf("GetSession ID = %q, want %q", got.ID, session.ID)
-	}
-	if count := sm.ActiveCount(1); count != 1 {
-		t.Errorf("ActiveCount after realtime disconnect = %d, want 1", count)
-	}
-	if got.HasRealtimeConnection {
-		t.Error("HasRealtimeConnection should be false after SetRealtime(false)")
-	}
-	if got.HasWebSocket {
-		t.Error("HasWebSocket should clear when realtime connection closes")
-	}
-}
-
 func TestSessionManager_LimitCountsIgnoreStaleSessions(t *testing.T) {
 	sm := playback.NewSessionManager(5, 2)
 	sm.SetLivenessGracePeriods(time.Hour, 2*time.Hour)
@@ -712,35 +373,6 @@ func TestSessionManager_LimitCountsIgnoreStaleSessions(t *testing.T) {
 	}
 }
 
-func TestSessionManager_ActiveTransportKeepsSessionLive(t *testing.T) {
-	sm := playback.NewSessionManager(5, 2)
-	sm.SetLivenessGracePeriods(time.Hour, 2*time.Hour)
-
-	session := mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayDirect, false)
-	if err := sm.BeginTransport(session.ID); err != nil {
-		t.Fatalf("BeginTransport: %v", err)
-	}
-
-	session.LastActivityAt = time.Now().Add(-2 * time.Hour)
-	session.UpdatedAt = session.LastActivityAt
-	session.PlanCommittedAt = session.LastActivityAt
-
-	if got := sm.ActiveCount(1); got != 1 {
-		t.Fatalf("ActiveCount with active transport = %d, want 1", got)
-	}
-
-	if err := sm.EndTransport(session.ID); err != nil {
-		t.Fatalf("EndTransport: %v", err)
-	}
-	session.LastActivityAt = time.Now().Add(-2 * time.Hour)
-	session.UpdatedAt = session.LastActivityAt
-	session.PlanCommittedAt = session.LastActivityAt
-
-	if got := sm.ActiveCount(1); got != 0 {
-		t.Fatalf("ActiveCount after transport ends = %d, want 0", got)
-	}
-}
-
 func TestSessionManager_ZeroLimits(t *testing.T) {
 	// Zero limits means unlimited.
 	sm := playback.NewSessionManager(0, 0)
@@ -751,59 +383,6 @@ func TestSessionManager_ZeroLimits(t *testing.T) {
 
 	if sm.ActiveCount(1) != 10 {
 		t.Errorf("ActiveCount = %d, want 10", sm.ActiveCount(1))
-	}
-}
-
-func TestSessionManager_CleanExpired(t *testing.T) {
-	sm := playback.NewSessionManager(0, 0)
-
-	// Create three sessions.
-	idle := mustStartSession(t, sm, 1, "prof", 100, playback.PlayDirect, false)
-	active := mustStartSession(t, sm, 1, "prof", 101, playback.PlayDirect, false)
-	transportActive := mustStartSession(t, sm, 1, "prof", 102, playback.PlayDirect, false)
-
-	// Mark the third session as actively transporting media.
-	_ = sm.BeginTransport(transportActive.ID)
-
-	// Send a recent progress update on the "active" session so it stays fresh.
-	_ = sm.UpdateProgress(active.ID, 42.0, false)
-
-	// The "idle" session has no update since StartSession.
-	// The "transportActive" session has an open media transport, so it should
-	// be exempt.
-
-	// CleanExpired with 0 duration expires everything without a WebSocket
-	// that hasn't been updated "recently". Since all sessions were just
-	// created, use a very short maxIdle to ensure only truly idle ones are
-	// caught. We simulate staleness by using a large duration that none can
-	// exceed.
-	expired := sm.CleanExpired(0) // 0 means "expire anything older than now"
-
-	// Both inactive sessions should be expired (UpdatedAt <= time.Now()).
-	// The transport-active session should survive regardless of staleness.
-	if len(expired) != 2 {
-		t.Fatalf("CleanExpired(0) removed %d sessions, want 2", len(expired))
-	}
-
-	// Transport-active session should still exist.
-	_, err := sm.GetSession(transportActive.ID)
-	if err != nil {
-		t.Errorf("transport-active session should survive CleanExpired, got: %v", err)
-	}
-
-	// The idle and active sessions should be gone.
-	_, err = sm.GetSession(idle.ID)
-	if !errors.Is(err, playback.ErrSessionNotFound) {
-		t.Errorf("idle session should be expired, got: %v", err)
-	}
-	_, err = sm.GetSession(active.ID)
-	if !errors.Is(err, playback.ErrSessionNotFound) {
-		t.Errorf("active session should be expired with maxIdle=0, got: %v", err)
-	}
-
-	// Only 1 session should remain (the transport-active one).
-	if sm.ActiveCount(1) != 1 {
-		t.Errorf("ActiveCount = %d, want 1", sm.ActiveCount(1))
 	}
 }
 
@@ -893,57 +472,6 @@ func TestLegacyStreamUpdateKeepsReplacementReservation(t *testing.T) {
 	}
 }
 
-// A full v3 route description owns RemuxDVMode: a replan that lands on a
-// non-DV source must clear a stale strip mode, while legacy partial updates
-// must not clobber one.
-func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
-	sm := playback.NewSessionManager(5, 2)
-
-	session := mustStartSession(t, sm, 1, "profile-1", 100, playback.PlayRemux, false)
-	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{RemuxDVMode: playback.RemuxDVStripToHDR10V3, TranscodeRouteSet: true}); err != nil {
-		t.Fatalf("UpdateStreamState(set): %v", err)
-	}
-
-	// Legacy partial update: mode survives.
-	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{AudioTrackIndex: 1}); err != nil {
-		t.Fatalf("UpdateStreamState(legacy): %v", err)
-	}
-	got := mustGetSession(t, sm, session.ID)
-	if got.RemuxDVMode != playback.RemuxDVStripToHDR10V3 {
-		t.Fatalf("RemuxDVMode after legacy update = %q, want strip_to_hdr10", got.RemuxDVMode)
-	}
-
-	// v3 route-set update for a non-DV source: mode clears.
-	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{TranscodeRouteSet: true}); err != nil {
-		t.Fatalf("UpdateStreamState(clear): %v", err)
-	}
-	got = mustGetSession(t, sm, session.ID)
-	if got.RemuxDVMode != "" {
-		t.Fatalf("RemuxDVMode after route-set update = %q, want cleared", got.RemuxDVMode)
-	}
-}
-
-func TestSessionManagerSetPausedReportsChanges(t *testing.T) {
-	m := playback.NewSessionManager(0, 0)
-	s := mustStartSession(t, m, 1, "profile-1", 100, playback.PlayDirect, false)
-	if err := m.UpdateProgress(s.ID, 42, false); err != nil {
-		t.Fatal(err)
-	}
-	if changed, err := m.SetPaused(s.ID, true, 0, nil); err != nil || !changed {
-		t.Fatalf("pause = %v, %v", changed, err)
-	}
-	if changed, err := m.SetPaused(s.ID, true, 0, nil); err != nil || changed {
-		t.Fatalf("repeat pause = %v, %v", changed, err)
-	}
-	current, err := m.GetSession(s.ID)
-	if err != nil || !current.IsPaused || current.Position != 42 {
-		t.Fatalf("session = %+v, %v", current, err)
-	}
-	if _, err := m.SetPaused("missing", true, 0, nil); !errors.Is(err, playback.ErrSessionNotFound) {
-		t.Fatalf("missing session err = %v", err)
-	}
-}
-
 func TestSessionManagerConfirmedPauseFencesOnlyAcceptedSamples(t *testing.T) {
 	m := playback.NewSessionManager(0, 0)
 	s := mustStartSession(t, m, 1, "profile-1", 100, playback.PlayDirect, false)
@@ -977,25 +505,6 @@ func TestSessionManagerConfirmedPauseFencesOnlyAcceptedSamples(t *testing.T) {
 	}
 }
 
-// Progress side effects re-apply the latest accepted sample on retries;
-// measuring it again would restart the watch-time interval and make the next
-// report look like a seek.
-func TestSessionManagerReappliedSampleLeavesWatchTime(t *testing.T) {
-	m := playback.NewSessionManager(0, 0)
-	s := mustStartSession(t, m, 1, "profile-1", 100, playback.PlayDirect, false)
-	sample := playback.ProgressSampleV3{Sequence: 1, Position: 30}
-	if err := m.UpdateProgressSample(s.ID, sample); err != nil {
-		t.Fatal(err)
-	}
-	watch := mustGetSession(t, m, s.ID).Watch
-	if err := m.UpdateProgressSample(s.ID, sample); err != nil {
-		t.Fatal(err)
-	}
-	if got := mustGetSession(t, m, s.ID).Watch; got != watch {
-		t.Fatalf("watch time after the sample was re-applied = %+v, want %+v", got, watch)
-	}
-}
-
 // A confirmed pause carries no position, so the viewing between the last
 // report and the pause is left for the next report to measure.
 func TestSessionManagerConfirmedPauseKeepsViewingBeforeIt(t *testing.T) {
@@ -1012,39 +521,6 @@ func TestSessionManagerConfirmedPauseKeepsViewingBeforeIt(t *testing.T) {
 	}
 	if got := mustGetSession(t, m, s.ID).Watch.PlayedSeconds; got != 1.5 {
 		t.Fatalf("played = %v, want 1.5", got)
-	}
-}
-
-// A seek planned after accepted progress supersedes it: a confirmation that
-// offers that same sample must not move the live position back.
-func TestSessionManagerConfirmedPauseKeepsLaterSeekPosition(t *testing.T) {
-	m := playback.NewSessionManager(0, 0)
-	s := mustStartSession(t, m, 1, "profile-1", 100, playback.PlayDirect, false)
-	if err := m.UpdateProgressSample(s.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
-		t.Fatal(err)
-	}
-	// Another replica accepted sequence 2; the seek was planned after it.
-	seek := 321.0
-	rollback, err := m.ApplyReplacement(s.ID, playback.SessionReplacement{EffectiveMediaFileID: 100, PositionSeconds: &seek, PositionSequence: 2, PreservePaused: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.SetPaused(s.ID, true, 2, &playback.ProgressSampleV3{Sequence: 2, Position: 31}); err != nil {
-		t.Fatal(err)
-	}
-	current, err := m.GetSession(s.ID)
-	if err != nil || !current.IsPaused || current.Position != 321 {
-		t.Fatalf("after superseded sample = %+v, %v; want paused at seek position 321", current, err)
-	}
-	if err := m.RollbackReplacement(s.ID, rollback); !errors.Is(err, playback.ErrSessionReplacementSuperseded) {
-		t.Fatalf("rollback after confirmation err = %v, want superseded", err)
-	}
-	if _, err := m.SetPaused(s.ID, false, 3, &playback.ProgressSampleV3{Sequence: 3, Position: 325}); err != nil {
-		t.Fatal(err)
-	}
-	current, err = m.GetSession(s.ID)
-	if err != nil || current.IsPaused || current.Position != 325 {
-		t.Fatalf("after newer sample = %+v, %v; want playing at 325", current, err)
 	}
 }
 

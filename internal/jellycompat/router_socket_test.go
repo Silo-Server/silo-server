@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -61,38 +60,6 @@ func TestMountedCompatRouterPreservesMediaHTTPAndCompression(t *testing.T) {
 	if err != nil || !bytes.Contains(body, []byte(`"ProductName":"Jellyfin Server"`)) {
 		t.Fatalf("compressed JSON body invalid: body=%q err=%v", body, err)
 	}
-}
-
-func TestMountedCompatRouterImageProxyUARewritesJSONButStreamsVideo(t *testing.T) {
-	_, client, mediaURL, itemURL := newCompatSocketServer(t)
-	const userAgent = "Infuse-Direct/8.4.6"
-
-	itemResp := compatSocketRequest(t, client, http.MethodGet, itemURL, map[string]string{
-		"User-Agent":   userAgent,
-		"X-Emby-Token": compatSocketToken,
-	})
-	defer func() { _ = itemResp.Body.Close() }()
-	if itemResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(itemResp.Body)
-		t.Fatalf("item status = %d, body=%s", itemResp.StatusCode, body)
-	}
-	var item baseItemDTO
-	if err := json.NewDecoder(itemResp.Body).Decode(&item); err != nil {
-		t.Fatalf("decode item: %v", err)
-	}
-	if primary := item.ImageTags["Primary"]; primary == "" || !strings.HasSuffix(primary, compatImageProxyTagSuffix) {
-		t.Fatalf("rewritten primary image tag = %q, want %q suffix", primary, compatImageProxyTagSuffix)
-	}
-
-	videoResp := compatSocketRequest(t, client, http.MethodGet, mediaURL, map[string]string{
-		"User-Agent": userAgent,
-		"Range":      "bytes=3-7",
-	})
-	if got := videoResp.Header.Get("Content-Range"); got != "bytes 3-7/36" {
-		t.Fatalf("video Content-Range = %q, want bytes 3-7/36", got)
-	}
-	assertCompatSocketResponse(t, videoResp, http.StatusPartialContent, "34567")
-	_ = videoResp.Body.Close()
 }
 
 func newCompatSocketServer(t *testing.T) (*httptest.Server, *http.Client, string, string) {

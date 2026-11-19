@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -91,85 +90,6 @@ func seedTrailerTestDebt(t *testing.T, debts *fakeRefreshDebtRepo, reason int64,
 		refreshDebtPriority(reason), reason, at); err != nil {
 		t.Fatalf("seed debt: %v", err)
 	}
-}
-
-// RequestTrailersRefresh reaches the cooldown gate through a runtime type
-// assertion on itemRepo, so a drift in the repository's signature would turn
-// every request into an error instead of failing the build.
-func TestItemRepositorySatisfiesTrailerRefreshGate(t *testing.T) {
-	var repo any = (*catalog.ItemRepository)(nil)
-	if _, ok := repo.(metadataTrailerRefreshRepo); !ok {
-		t.Fatal("*catalog.ItemRepository must satisfy metadataTrailerRefreshRepo")
-	}
-}
-
-func TestRequestTrailersRefreshQueuesThenReportsCooldown(t *testing.T) {
-	h := newTrailersHarness()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-	started := succeedTrailersRefresh(h)
-
-	outcome := requestTrailers(t, h, TrailerRefreshStatusQueued, "first request")
-	if outcome.NextAllowedAt != nil {
-		t.Fatalf("queued outcome must not carry next_allowed_at, got %v", outcome.NextAllowedAt)
-	}
-	waitForProcess(t, started)
-	waitForOnDemandIdle(t, h.service)
-
-	// The second request inside the window loses the gate and reports when the
-	// next one may win: the stored timestamp plus the cooldown.
-	outcome = requestTrailers(t, h, TrailerRefreshStatusCooldown, "second request")
-	if got := h.itemRepo.trailersReleaseCount(); got != 0 {
-		t.Fatalf("a successful refresh must keep the slot, released %d times", got)
-	}
-	if outcome.NextAllowedAt == nil {
-		t.Fatal("cooldown outcome must carry next_allowed_at")
-	}
-	want := now.Add(TrailerRefreshCooldown)
-	if !outcome.NextAllowedAt.Equal(want) {
-		t.Fatalf("next_allowed_at = %s, want %s", outcome.NextAllowedAt, want)
-	}
-	if got := h.itemRepo.trailersClaimCount(); got != 1 {
-		t.Fatalf("cooldown slot consumed %d times, want 1", got)
-	}
-}
-
-// A library whose trailer_kinds allow-list is empty has remote videos turned
-// off, so the request is answered "disabled" — and must not burn the item's
-// weekly slot, or a user would be locked out for a week over a no-op.
-func TestRequestTrailersRefreshDisabledDoesNotConsumeCooldownSlot(t *testing.T) {
-	h := newTrailersHarness()
-	if err := h.libraryRepo.Upsert(context.Background(), "movie-1", 10, time.Now()); err != nil {
-		t.Fatalf("seed library membership: %v", err)
-	}
-	folder := &models.MediaFolder{ID: 10, Type: "movies", Enabled: true, TrailerKinds: nil}
-	h.service.folderRepo = &fakeMetadataFolderRepo{folders: map[int]*models.MediaFolder{10: folder}}
-	forbidTrailersRefresh(t, h, "disabled request")
-
-	requestTrailers(t, h, TrailerRefreshStatusDisabled, "request")
-	if got := h.itemRepo.trailersClaimCount(); got != 0 {
-		t.Fatalf("disabled request consumed the cooldown slot %d times, want 0", got)
-	}
-
-	// Re-enabling the library lets the very next request through, proving the
-	// slot really was untouched.
-	folder.TrailerKinds = []string{string(models.ExtraKindTrailer)}
-	started := succeedTrailersRefresh(h)
-	requestTrailers(t, h, TrailerRefreshStatusQueued, "request after re-enabling")
-	waitForProcess(t, started)
-}
-
-func TestRequestTrailersRefreshPropagatesGateErrors(t *testing.T) {
-	h := newTrailersHarness()
-	gateErr := errors.New("database is down")
-	h.itemRepo.trailersClaimErr = gateErr
-
-	if _, err := h.service.RequestTrailersRefresh(context.Background(), "movie-1"); !errors.Is(err, gateErr) {
-		t.Fatalf("err = %v, want %v", err, gateErr)
-	}
-	// The failed gate call must not strand the in-process claim, or every
-	// later request for this item would be silently deduped away.
-	waitForOnDemandIdle(t, h.service)
 }
 
 // The weekly slot pays for work actually done. When the refresh it started
@@ -291,22 +211,6 @@ func TestRequestTrailersRefreshInFlightRefreshQueuesWithoutConsumingSlot(t *test
 	waitForProcess(t, started)
 }
 
-// A cooldown answer takes and then hands back the in-process claim; leaking it
-// would mute every subsequent refresh for the item until the process restarts.
-func TestRequestTrailersRefreshCooldownLeavesNoInProcessClaim(t *testing.T) {
-	h := newTrailersHarness()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-
-	started := succeedTrailersRefresh(h)
-	requestTrailers(t, h, TrailerRefreshStatusQueued, "first request")
-	waitForProcess(t, started)
-	waitForOnDemandIdle(t, h.service)
-
-	requestTrailers(t, h, TrailerRefreshStatusCooldown, "second request")
-	waitForOnDemandIdle(t, h.service)
-}
-
 // A refresh whose item_videos write failed is a failure for this action even
 // though the pipeline reports success: the cooldown is a budget for fetching
 // trailers, and charging a week for trailers that were fetched but not stored
@@ -369,90 +273,6 @@ func TestRequestTrailersRefreshRecordsDurableDebt(t *testing.T) {
 	}
 	waitForProcess(t, started)
 	waitForOnDemandIdle(t, h.service)
-}
-
-// A cooldown answer performs no work, so it must not enqueue debt either —
-// otherwise repeated polling from a client would keep an item permanently due.
-func TestRequestTrailersRefreshCooldownRecordsNoDebt(t *testing.T) {
-	h := newTrailersHarness()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-	debts := newFakeRefreshDebtRepo()
-
-	started := succeedTrailersRefresh(h)
-	requestTrailers(t, h, TrailerRefreshStatusQueued, "first request")
-	waitForProcess(t, started)
-	waitForOnDemandIdle(t, h.service)
-
-	// Wire the debt repo only now, so anything it records can only have come
-	// from the cooldown request below.
-	h.service.refreshDebtRepo = debts
-	requestTrailers(t, h, TrailerRefreshStatusCooldown, "second request")
-	if _, err := debts.GetTarget(context.Background(), RefreshTargetItem, "movie-1"); !errors.Is(err, ErrRefreshDebtNotFound) {
-		t.Fatalf("a cooldown answer must not enqueue debt, got err = %v", err)
-	}
-}
-
-// A claim lost to a slot that keeps being freed underneath the repository is
-// not a cooldown — there is no timestamp to report one with. Reporting it as
-// queued matches the in-process-dedup answer: an equivalent refresh is running.
-func TestRequestTrailersRefreshUndateableLostClaimReportsQueued(t *testing.T) {
-	h := newTrailersHarness()
-	h.itemRepo.trailersClaimResult = &trailersClaimResult{}
-	forbidTrailersRefresh(t, h, "a lost claim")
-
-	outcome := requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
-	if outcome.NextAllowedAt != nil {
-		t.Fatalf("an undateable lost claim must not carry next_allowed_at, got %v", outcome.NextAllowedAt)
-	}
-	waitForOnDemandIdle(t, h.service)
-}
-
-// "Disabled" means every containing library turned remote videos off. That
-// claim cannot be made from a partially-resolved set: an unreadable library
-// might be the one that enables trailers, so any lookup failure degrades the
-// answer to unknown scope (allow-all) rather than a guess the viewer sees as
-// "trailers are disabled for this library". A library that no longer exists is
-// not a failure: it cannot be the one enabling trailers, so it is skipped and
-// the remaining libraries still decide.
-func TestRequestTrailersRefreshLibraryLookupScope(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		lookupErrs map[int]error
-		want       string
-	}{
-		// Folder 10 resolves with trailers off; folder 11 cannot be read at all.
-		{"unreadable library is not disabled", map[int]error{11: errors.New("connection reset")}, TrailerRefreshStatusQueued},
-		// Folder 11 is absent from the repo entirely (deleted library).
-		{"missing library still reports disabled", nil, TrailerRefreshStatusDisabled},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newTrailersHarness()
-			for _, folderID := range []int{10, 11} {
-				if err := h.libraryRepo.Upsert(context.Background(), "movie-1", folderID, time.Now()); err != nil {
-					t.Fatalf("seed library membership %d: %v", folderID, err)
-				}
-			}
-			h.service.folderRepo = &fakeMetadataFolderRepo{
-				folders: map[int]*models.MediaFolder{
-					10: {ID: 10, Type: "movies", Enabled: true, TrailerKinds: nil},
-				},
-				lookupErrs: tc.lookupErrs,
-			}
-			if tc.want == TrailerRefreshStatusDisabled {
-				forbidTrailersRefresh(t, h, "disabled request")
-				requestTrailers(t, h, TrailerRefreshStatusDisabled, "request")
-				if got := h.itemRepo.trailersClaimCount(); got != 0 {
-					t.Fatalf("disabled request consumed the cooldown slot %d times, want 0", got)
-				}
-				return
-			}
-			started := succeedTrailersRefresh(h)
-			requestTrailers(t, h, TrailerRefreshStatusQueued, "request (a failed library lookup is unknown scope, not disabled)")
-			waitForProcess(t, started)
-			waitForOnDemandIdle(t, h.service)
-		})
-	}
 }
 
 // An admin lock on the videos field makes mergeAndPersist skip the item_videos

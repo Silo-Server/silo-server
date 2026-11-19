@@ -184,3 +184,41 @@ func TestTaskScheduleSeedFailureDoesNotRunUnpersistedDefaults(t *testing.T) {
 		t.Fatalf("seed failure activated defaults: %+v", got)
 	}
 }
+
+type followingTask struct{ scheduleTask }
+
+func (followingTask) FollowsDefaultTriggers() bool { return true }
+
+// A DefaultFollowingTask runs its defaults without saving them, so defaults
+// that change between starts apply, until an administrator saves a schedule,
+// which then wins.
+func TestDefaultFollowingTaskRunsUnsavedDefaults(t *testing.T) {
+	store := &scheduleStore{}
+	start := func(defaults []taskmanager.TriggerConfig) *taskmanager.TaskManager {
+		m := taskmanager.New(store, scheduleHistory{}, func(c taskmanager.TriggerConfig) taskmanager.Trigger {
+			return scheduleTrigger{config: c}
+		}, slog.New(slog.DiscardHandler))
+		m.Register(followingTask{scheduleTask{defaults: defaults}})
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(func() { cancel(); m.Stop() })
+		m.Start(ctx)
+		return m
+	}
+	startup := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+	daily := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:00"}}
+	edited := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeInterval, IntervalMs: 600_000}}
+
+	if got := start(startup).GetTaskInfo("schedule_test").Triggers; !slices.Equal(got, startup) || store.saveCalls != 0 {
+		t.Fatalf("first start runs %+v after %d saves, want the unsaved defaults", got, store.saveCalls)
+	}
+	m := start(daily)
+	if got := m.GetTaskInfo("schedule_test").Triggers; !slices.Equal(got, daily) {
+		t.Fatalf("changed defaults run %+v, want %+v", got, daily)
+	}
+	if err := m.UpdateTriggers("schedule_test", edited); err != nil {
+		t.Fatal(err)
+	}
+	if got := start(startup).GetTaskInfo("schedule_test").Triggers; !slices.Equal(got, edited) {
+		t.Fatalf("after an edit the task runs %+v, want the saved %+v", got, edited)
+	}
+}

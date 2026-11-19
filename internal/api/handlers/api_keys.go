@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -40,6 +42,11 @@ type APIKeyHandler struct {
 	// one from a child profile would hand that profile every other profile on
 	// the account. Without Stores creation fails closed.
 	Stores userstore.UserStoreProvider
+	// ProfilesOutsidePostgres is set when the profile store is not the
+	// Postgres one (userdb.backend=sqlite). A user key's profile binding and
+	// the PIN recheck at its insert both read user_profiles in Postgres, so
+	// user keys are off there whatever the server setting says.
+	ProfilesOutsidePostgres bool
 }
 
 // MayCreatePersonalAPIKey reports whether the caller acting as
@@ -49,6 +56,128 @@ type APIKeyHandler struct {
 // The admin-role check stays with the callers, which run it first.
 func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profile *userstore.Profile) error) (bool, error) {
 	return mayManageHouseholdOf(ctx, h.Stores, userID, activeProfileID, verify)
+}
+
+// personalAPIKeyStore is the storage behind keys an account creates for
+// itself; auth.APIKeyRepository provides it.
+type personalAPIKeyStore interface {
+	UserAPIKeysEnabled(ctx context.Context) (bool, error)
+	CreatePersonal(ctx context.Context, userID int, acting auth.APIKeyActingProfile, profileID, label string, scopes []string) (*models.APIKey, error)
+	ListByUserProfilePage(ctx context.Context, userID int, profileID string, after *auth.APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error)
+	DeleteForProfile(ctx context.Context, id int64, userID int, profileID string) error
+}
+
+func (h *APIKeyHandler) personal() (personalAPIKeyStore, error) {
+	store, ok := h.repo.(personalAPIKeyStore)
+	if !ok {
+		return nil, apiError(501, "capability_unsupported", "Personal API keys are unavailable")
+	}
+	return store, nil
+}
+
+// UserAPIKeysEnabled reports whether accounts that are not admins, and
+// profiles other than the primary one, may create keys for themselves.
+func (h *APIKeyHandler) UserAPIKeysEnabled(ctx context.Context) (bool, error) {
+	store, err := h.personal()
+	if err != nil || h.ProfilesOutsidePostgres {
+		return false, nil //nolint:nilerr // A store without personal keys has them off.
+	}
+	return store.UserAPIKeysEnabled(ctx)
+}
+
+// MayCreateProfileAPIKey reports whether the caller acting as activeProfileID
+// may mint a personal key that is not an admin's account key: one bound to
+// targetProfileID, or (empty target) an account key on an account that is not
+// an admin. The household manager may mint either, for any profile on the
+// account. Every other profile may mint only a key bound to itself, and only
+// with its own PIN proof: verify returns access.ErrProfileUnverified without
+// it. Only the account's own login session mints these, never a view-as
+// session or a remote-playback handoff. The acting profile comes back at the
+// PIN revision it was verified against, for CreatePersonalAPIKey to recheck
+// where the key is stored.
+func (h *APIKeyHandler) MayCreateProfileAPIKey(ctx context.Context, userID int, activeProfileID, targetProfileID string, verify func(profile *userstore.Profile) error) (bool, auth.APIKeyActingProfile, error) {
+	none := auth.APIKeyActingProfile{}
+	if !apimw.GetClaims(ctx).IsOwnLoginSession() || h.Stores == nil || h.ProfilesOutsidePostgres {
+		return false, none, nil
+	}
+	store, err := h.Stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, none, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return false, none, nil
+	}
+	if verify == nil {
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
+	}
+	manager, active, err := householdManagerAs(ctx, store, activeProfileID, verify)
+	if err != nil {
+		return false, none, err
+	}
+	if !manager {
+		if activeProfileID == "" || targetProfileID != activeProfileID {
+			return false, none, nil
+		}
+		if active, err = store.GetProfile(ctx, activeProfileID); err != nil || active == nil {
+			return false, none, err
+		}
+		if err := verify(active); err != nil {
+			return false, none, err
+		}
+	}
+	if active == nil {
+		// A profile-less household manager has no PIN proof to recheck.
+		return true, none, nil
+	}
+	return true, auth.APIKeyActingProfile{ID: active.ID, PINRevision: active.PINRevision}, nil
+}
+
+// CreatePersonalAPIKey mints the key MayCreateProfileAPIKey authorized. The
+// store holds it to user scopes, the server setting and the account's key
+// limit in the inserting transaction.
+func (h *APIKeyHandler) CreatePersonalAPIKey(ctx context.Context, userID int, acting auth.APIKeyActingProfile, profileID, label string, scopes []string) (*models.APIKey, error) {
+	if userID <= 0 || label == "" {
+		return nil, ErrInvalidAPIKeyCreation
+	}
+	normalized, err := auth.NormalizeAPIKeyScopes(scopes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAPIKeyCreation, err)
+	}
+	store, err := h.personal()
+	if err != nil {
+		return nil, err
+	}
+	return store.CreatePersonal(ctx, userID, acting, profileID, label, normalized)
+}
+
+// PersonalAPIKeyView decides which of the account's keys the caller acting as
+// activeProfileID may list and revoke. The primary profile sees them all. Any
+// other profile sees only the keys bound to it, returned as only. A request
+// naming no profile sees them all: the operations run the household profile
+// gate first, which refuses one on a household with a limited profile, so a
+// device cannot drop the header to reach another profile's keys.
+func (h *APIKeyHandler) PersonalAPIKeyView(ctx context.Context, userID int, activeProfileID string) (only string, allowed bool, err error) {
+	if h.Stores == nil {
+		return "", false, nil
+	}
+	store, err := h.Stores.ForUser(ctx, userID)
+	if err != nil {
+		return "", false, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return "", false, nil
+	}
+	if activeProfileID == "" {
+		return "", true, nil
+	}
+	active, err := store.GetProfile(ctx, activeProfileID)
+	if err != nil || active == nil {
+		return "", false, err
+	}
+	if active.IsPrimary {
+		return "", true, nil
+	}
+	return active.ID, true, nil
 }
 
 // checkOwnerAccount refuses the admin key operations on the Owner's account
@@ -107,6 +236,7 @@ type APIKeyConfiguration struct {
 	KeyPrefix string    `json:"key_prefix"`
 	RateTier  string    `json:"rate_tier"`
 	Scopes    []string  `json:"scopes"`
+	ProfileID string    `json:"profile_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Revision  int64     `json:"revision"`
 }
@@ -122,7 +252,7 @@ type AdminAPIKeyListItem struct {
 }
 
 func apiKeyConfigurationOf(k *models.APIKeyMetadata) APIKeyConfiguration {
-	return APIKeyConfiguration{ID: k.ID, UserID: k.UserID, Label: k.Label, KeyPrefix: k.KeyPrefix, RateTier: k.RateTier, Scopes: apiKeyScopesOrEmpty(k.Scopes), CreatedAt: k.CreatedAt, Revision: k.Revision}
+	return APIKeyConfiguration{ID: k.ID, UserID: k.UserID, Label: k.Label, KeyPrefix: k.KeyPrefix, RateTier: k.RateTier, Scopes: apiKeyScopesOrEmpty(k.Scopes), ProfileID: k.ProfileID, CreatedAt: k.CreatedAt, Revision: k.Revision}
 }
 func apiKeyListItemOf(k *models.APIKeyMetadataWithUsage) APIKeyListItem {
 	return APIKeyListItem{APIKeyConfiguration: apiKeyConfigurationOf(&k.APIKeyMetadata), LastUsedAt: k.LastUsedAt}
@@ -213,20 +343,30 @@ func (h *APIKeyHandler) ListAdminUserAPIKeysPage(ctx context.Context, userID int
 	return out, more, nil
 }
 
-// ListPersonalAPIKeysPage returns only metadata belonging to the login account.
-func (h *APIKeyHandler) ListPersonalAPIKeysPage(ctx context.Context, userID int, after *auth.APIKeyPageKey, limit int) ([]APIKeyListItem, bool, error) {
-	rows, more, err := h.ListAdminUserAPIKeysPage(ctx, userID, after, limit)
+// ListPersonalAPIKeysPage returns only metadata belonging to the login
+// account, narrowed to the keys bound to profileID when it is set.
+func (h *APIKeyHandler) ListPersonalAPIKeysPage(ctx context.Context, userID int, profileID string, after *auth.APIKeyPageKey, limit int) ([]APIKeyListItem, bool, error) {
+	store, err := h.personal()
+	if err != nil {
+		return nil, false, err
+	}
+	rows, more, err := store.ListByUserProfilePage(ctx, userID, profileID, after, limit)
 	if err != nil {
 		return nil, false, err
 	}
 	items := make([]APIKeyListItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, row.APIKeyListItem)
+		items = append(items, apiKeyListItemOf(&row.APIKeyMetadataWithUsage))
 	}
 	return items, more, nil
 }
 
-// RevokePersonalAPIKey checks ownership in the deleting statement.
-func (h *APIKeyHandler) RevokePersonalAPIKey(ctx context.Context, userID int, id int64) error {
-	return h.repo.Delete(ctx, id, userID)
+// RevokePersonalAPIKey checks ownership, and the profile binding when
+// profileID is set, in the deleting statement.
+func (h *APIKeyHandler) RevokePersonalAPIKey(ctx context.Context, userID int, profileID string, id int64) error {
+	store, err := h.personal()
+	if err != nil {
+		return err
+	}
+	return store.DeleteForProfile(ctx, id, userID, profileID)
 }

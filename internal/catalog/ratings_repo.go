@@ -13,12 +13,25 @@ import (
 
 // UserRating represents a user's rating for a media item.
 type UserRating struct {
-	UserID      int       `json:"user_id"`
-	ProfileID   string    `json:"profile_id"`
-	MediaItemID string    `json:"media_item_id"`
-	Rating      int       `json:"rating"`
-	RatedAt     time.Time `json:"rated_at"`
+	UserID      int    `json:"user_id"`
+	ProfileID   string `json:"profile_id"`
+	MediaItemID string `json:"media_item_id"`
+	// Score is the rating from 1 to 10 (see MaxRatingScore).
+	Score   int       `json:"score"`
+	RatedAt time.Time `json:"rated_at"`
 }
+
+// Stars answers the rating in whole stars, rounding half up (7 is 4 stars),
+// the scale the recommendation weights are defined on.
+func (r UserRating) Stars() int { return (r.Score + 1) / 2 }
+
+// MaxRatingScore is the top of the scale personal ratings are stored on:
+// integer scores from 1 to 10, shown as five stars with half stars.
+const MaxRatingScore = 10
+
+// ScoreFromStars converts whole stars (1 to 5), the scale clients used
+// before scores, to a score.
+func ScoreFromStars(stars int) int { return stars * 2 }
 
 // RatingKey is the keyset position ListPage resumes after: the (RatedAt,
 // MediaItemID) of the last row a caller already holds, copied verbatim from
@@ -41,13 +54,13 @@ func NewRatingsRepo(pool *pgxpool.Pool) *RatingsRepo {
 }
 
 // Set creates or updates a user's rating for an item.
-func (r *RatingsRepo) Set(ctx context.Context, userID int, profileID, mediaItemID string, rating int) error {
+func (r *RatingsRepo) Set(ctx context.Context, userID int, profileID, mediaItemID string, score int) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
 		VALUES ($1, $2, $3, $4, NOW())
 		ON CONFLICT (user_id, profile_id, media_item_id)
 		DO UPDATE SET rating = EXCLUDED.rating, rated_at = EXCLUDED.rated_at`,
-		userID, profileID, mediaItemID, rating,
+		userID, profileID, mediaItemID, score,
 	)
 	if err != nil {
 		return fmt.Errorf("set rating: %w", err)
@@ -56,9 +69,9 @@ func (r *RatingsRepo) Set(ctx context.Context, userID int, profileID, mediaItemI
 }
 
 // ObservedRating is the rating and rating time a caller read earlier, used to
-// detect a change made since. A zero Rating means the item was unrated.
+// detect a change made since. A zero Score means the item was unrated.
 type ObservedRating struct {
-	Rating  int
+	Score   int
 	RatedAt time.Time
 }
 
@@ -68,10 +81,10 @@ type ObservedRating struct {
 // ratedAt is the time the new rating was made. It reports whether the write
 // applied; false means a concurrent change won, and the caller should re-read
 // before retrying.
-func (r *RatingsRepo) SetIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, observed ObservedRating, rating int, ratedAt time.Time) (bool, error) {
+func (r *RatingsRepo) SetIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, observed ObservedRating, score int, ratedAt time.Time) (bool, error) {
 	var query string
-	args := []any{userID, profileID, mediaItemID, rating, ratedAt}
-	if observed.Rating == 0 {
+	args := []any{userID, profileID, mediaItemID, score, ratedAt}
+	if observed.Score == 0 {
 		query = `
 			INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
 			VALUES ($1, $2, $3, $4, $5)
@@ -80,7 +93,7 @@ func (r *RatingsRepo) SetIfUnchanged(ctx context.Context, userID int, profileID,
 		query = `
 			UPDATE user_ratings SET rating = $4, rated_at = $5
 			WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3 AND rating = $6 AND rated_at = $7`
-		args = append(args, observed.Rating, observed.RatedAt)
+		args = append(args, observed.Score, observed.RatedAt)
 	}
 	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
@@ -95,7 +108,7 @@ func (r *RatingsRepo) DeleteIfUnchanged(ctx context.Context, userID int, profile
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM user_ratings
 		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3 AND rating = $4 AND rated_at = $5`,
-		userID, profileID, mediaItemID, observed.Rating, observed.RatedAt,
+		userID, profileID, mediaItemID, observed.Score, observed.RatedAt,
 	)
 	if err != nil {
 		return false, fmt.Errorf("delete rating if unchanged: %w", err)
@@ -131,7 +144,7 @@ const userRatingSQL = `
 // scanUserRating reads the row userRatingSQL selects, nil when there is none.
 func scanUserRating(row pgx.Row) (*UserRating, error) {
 	var ur UserRating
-	err := row.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt)
+	err := row.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Score, &ur.RatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -179,7 +192,7 @@ func (r *RatingsRepo) ListPage(ctx context.Context, userID int, profileID string
 	var ratings []UserRating
 	for rows.Next() {
 		var ur UserRating
-		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt); err != nil {
+		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Score, &ur.RatedAt); err != nil {
 			return nil, fmt.Errorf("scan rating: %w", err)
 		}
 		ratings = append(ratings, ur)
@@ -225,7 +238,7 @@ func (r *RatingsRepo) List(ctx context.Context, userID int, profileID string, li
 	var ratings []UserRating
 	for rows.Next() {
 		var ur UserRating
-		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt); err != nil {
+		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Score, &ur.RatedAt); err != nil {
 			return nil, fmt.Errorf("scan rating: %w", err)
 		}
 		ratings = append(ratings, ur)
@@ -251,7 +264,7 @@ func (r *RatingsRepo) ListAll(ctx context.Context, userID int, profileID string)
 	var ratings []UserRating
 	for rows.Next() {
 		var ur UserRating
-		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt); err != nil {
+		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Score, &ur.RatedAt); err != nil {
 			return nil, fmt.Errorf("scan rating: %w", err)
 		}
 		ratings = append(ratings, ur)

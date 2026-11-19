@@ -1,10 +1,11 @@
 import { useMemo, type ComponentProps } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { Direction } from "radix-ui";
-import { DateLib, DayPicker, type Labels } from "react-day-picker";
+import { DateLib, DayPicker, type Formatters, type Labels } from "react-day-picker";
 
 import { buttonVariants } from "@/components/ui/button";
 import { useT, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 import { cn } from "@/lib/utils";
 
 // The full date a screen reader says for a day ("Friday, November 6th, 2026"),
@@ -43,11 +44,29 @@ function calendarLabels(t: Translate): Partial<Labels> {
   };
 }
 
+// Month captions, month dropdown entries and weekday headers are shown text:
+// format them in the format locale, not react-day-picker's English default.
+// The grid is Gregorian, so month names are too, even where the locale's own
+// calendar is not (fa-IR, th-TH).
+const calendarFormatters: Partial<Formatters> = {
+  formatCaption: (month) =>
+    new Intl.DateTimeFormat(formatLocale(), {
+      month: "long",
+      year: "numeric",
+      calendar: "gregory",
+    }).format(month),
+  formatMonthDropdown: (month) =>
+    new Intl.DateTimeFormat(formatLocale(), { month: "long", calendar: "gregory" }).format(month),
+  formatWeekdayName: (weekday) =>
+    new Intl.DateTimeFormat(formatLocale(), { weekday: "short" }).format(weekday),
+};
+
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
   labels,
+  formatters,
   ...props
 }: ComponentProps<typeof DayPicker>) {
   const t = useT();
@@ -60,6 +79,7 @@ function Calendar({
       dir={dir}
       showOutsideDays={showOutsideDays}
       labels={translatedLabels}
+      formatters={{ ...calendarFormatters, ...formatters }}
       className={cn("p-3", className)}
       classNames={{
         months: "relative flex flex-col gap-4 sm:flex-row",

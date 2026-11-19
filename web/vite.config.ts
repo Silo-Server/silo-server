@@ -310,6 +310,12 @@ export default defineConfig(({ mode }) => {
       environment: "jsdom",
       globals: true,
       setupFiles: ["./src/test-setup.ts"],
+      // vmThreads workers are threads in one process, and vitest's default
+      // recycle limit is total RAM divided by the worker count, so together
+      // they may grow to nearly all of the machine's memory. Recycling each
+      // worker at 512MB bounds that without lowering the worker count or
+      // slowing the run; a lower limit recycles so often that it does slow.
+      vmMemoryLimit: "512MB",
       projects: [
         {
           extends: true,

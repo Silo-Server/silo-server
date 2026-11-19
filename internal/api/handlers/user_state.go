@@ -27,16 +27,6 @@ type itemUserStateOptions struct {
 	EbookProgressStore EbookReaderProgressLister
 }
 
-func resolveItemUserStates(
-	ctx context.Context,
-	store userstore.UserStore,
-	profileID string,
-	episodeRepo *catalog.EpisodeRepository,
-	items []*models.MediaItem,
-) (map[string]*itemUserStateResponse, error) {
-	return resolveItemUserStatesWithOptions(ctx, store, profileID, episodeRepo, items, itemUserStateOptions{})
-}
-
 func resolveItemUserStatesWithOptions(
 	ctx context.Context,
 	store userstore.UserStore,

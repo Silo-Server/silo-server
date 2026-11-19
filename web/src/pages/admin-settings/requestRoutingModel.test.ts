@@ -1,31 +1,17 @@
 import { describe, expect, it } from "vitest";
-
-import { createAppIntl, englishText, setAppIntl } from "@/i18n";
 import type { PluginAdminForm, PluginAdminFormField, RequestIntegration } from "@/api/types";
-import type {
-  RequestRoute,
-  RequestRouteConditions,
-  RequestRoutePreviewRule,
-} from "@/api/v2/adminRequests";
+import type { RequestRoute, RequestRouteConditions } from "@/api/v2/adminRequests";
 
 import {
-  autoRuleName,
   cleanConditions,
   conditionRows,
-  destinationSentence,
-  factsSentence,
   overrideFields,
-  overridesSummary,
-  passThroughLabel,
   ratingAge,
   ROUTING_RATINGS,
   ruleBody,
   ruleDraft,
-  ruleSentence,
   rowsToConditions,
-  SERVER_NAMED_OVERRIDES,
   splitOverrideFields,
-  traceLine,
 } from "./requestRoutingModel";
 import { adminLanguage, presetsInUse } from "./requestRoutingPresets";
 import {
@@ -90,148 +76,6 @@ const fallback = (hd?: string, uhd?: string, mediaType: "movie" | "series" = "mo
     hd: hd ? { integration_id: hd } : {},
     uhd: uhd ? { integration_id: uhd } : {},
   });
-
-const users = { users: new Map([[2, "kid"]]) };
-
-describe("rule sentences", () => {
-  it("reads a rule's conditions as one sentence", () => {
-    expect(ruleSentence({ anime: true }, "series")).toBe("When a series is anime");
-    expect(ruleSentence({ exclude_original_languages: ["en"] }, "movie")).toBe(
-      "When a movie isn't originally in English",
-    );
-    expect(ruleSentence({ genre_ids: [10751, 10762], max_content_rating: "PG" }, "series")).toBe(
-      "When a series is Family or Kids and is rated PG or lower",
-    );
-    expect(
-      ruleSentence(
-        { genre_ids: [10751], max_content_rating: "PG", requester_user_ids: [2] },
-        "series",
-        users,
-      ),
-    ).toBe("When a series is Family, is rated PG or lower and is requested by kid");
-    expect(ruleSentence({ year_to: 1989 }, "movie")).toBe(
-      "When a movie came out in 1989 or earlier",
-    );
-    expect(ruleSentence({ year_from: 1980, year_to: 1989 }, "series")).toBe(
-      "When a series first aired in 1980–1989",
-    );
-    expect(ruleSentence({ exclude_genre_ids: [27, 53] }, "movie")).toBe(
-      "When a movie is neither Horror nor Thriller",
-    );
-    expect(ruleSentence({ company_ids: [10342] }, "movie")).toBe(
-      "When a movie is made by studio 10342",
-    );
-    expect(ruleSentence({ series_statuses: ["ended", "cancelled"] }, "series")).toBe(
-      "When a series is ended or cancelled",
-    );
-  });
-
-  it("names a rule from its conditions when the admin leaves the name blank", () => {
-    expect(autoRuleName({ anime: true }, "series")).toBe("Anime");
-    expect(autoRuleName({ exclude_original_languages: ["en"] }, "movie")).toBe("Not English");
-    expect(autoRuleName({ genre_ids: [10751], max_content_rating: "PG" }, "movie")).toBe(
-      "Family, PG or lower",
-    );
-    expect(autoRuleName({ requester_user_ids: [2] }, "movie", users)).toBe("Requested by kid");
-    // A preset's set of statuses is named after the preset.
-    expect(
-      autoRuleName({ series_statuses: ["upcoming", "returning", "in_production"] }, "series"),
-    ).toBe("Continuing or upcoming");
-    expect(autoRuleName({ series_statuses: ["ended"] }, "series")).toBe("Ended");
-    setAppIntl(createAppIntl("ar", {}, "ar-EG")); // A saved name keeps Latin digits.
-    const saved = autoRuleName({ year_from: 2000, year_to: 2000 }, "movie", undefined, englishText);
-    setAppIntl(createAppIntl("en", {}));
-    expect(saved).toBe("2000");
-  });
-
-  it("reads a destination with names, not IDs, and only what it overrides", () => {
-    const names = {
-      options: {
-        quality_profile_id: [{ value: "3", label: "Anime 1080p" }],
-        tags: [{ value: "2", label: "anime" }],
-      },
-      fields: [
-        {
-          key: "series_type",
-          label: "Series type",
-          control: "SELECT",
-          options: [{ value: "anime", label: "Anime" }],
-        } as PluginAdminFormField,
-      ],
-    };
-    expect(
-      destinationSentence(
-        {
-          integration_id: "s2",
-          overrides: {
-            series_type: "anime",
-            tags: [2],
-            root_folder: "/tv/anime",
-            quality_profile_id: 3,
-          },
-        },
-        servers,
-        names,
-      ),
-    ).toBe("Sonarr Anime · /tv/anime · Anime 1080p · anime · Series type: Anime");
-    expect(destinationSentence({ integration_id: "r1" }, servers)).toBe("Radarr");
-  });
-
-  it("names overrides, from the server's options once loaded", () => {
-    expect(overridesSummary({ root_folder: "/anime", quality_profile_id: 4 })).toBe(
-      "Folder /anime · Quality 4",
-    );
-    expect(
-      overridesSummary(
-        { quality_profile_id: 4 },
-        { options: { quality_profile_id: [{ value: "4", label: "Ultra-HD" }] } },
-      ),
-    ).toBe("Quality Ultra-HD");
-  });
-
-  it("names a Sonarr metadata language from the server's options", () => {
-    // A route row loads the server's options only for these keys.
-    expect(SERVER_NAMED_OVERRIDES.has("metadata_language")).toBe(true);
-    expect(
-      overridesSummary(
-        { metadata_language: 8 },
-        {
-          options: { metadata_language: [{ value: "8", label: "Japanese" }] },
-          fields: [
-            { key: "metadata_language", label: "Metadata language" } as PluginAdminFormField,
-          ],
-        },
-      ),
-    ).toBe("Metadata language Japanese");
-  });
-});
-
-describe("the pass-through choice", () => {
-  const below = [route({ id: "b", hd: { integration_id: "r4" } })];
-
-  it("names Everything else's server when no rule below decides the copy", () => {
-    expect(passThroughLabel("hd", [], fallback("r1", "r4"), servers)).toBe(
-      "Same as Everything else (Radarr)",
-    );
-    expect(passThroughLabel("uhd", below, fallback("r1"), servers)).toBe(
-      "Same as Everything else (no 4K version)",
-    );
-  });
-
-  it("leaves it to the rules below when one of them decides the copy", () => {
-    expect(passThroughLabel("hd", below, fallback("r1"), servers)).toBe(
-      "Let the rules below decide",
-    );
-    // A rule that is off decides nothing.
-    expect(
-      passThroughLabel("hd", [{ ...below[0]!, enabled: false }], fallback("r1"), servers),
-    ).toBe("Same as Everything else (Radarr)");
-    // Skipping 4K decides the 4K copy.
-    expect(
-      passThroughLabel("uhd", [route({ skip_uhd: true })], fallback("r1", "r4"), servers),
-    ).toBe("Let the rules below decide");
-  });
-});
 
 describe("condition rows", () => {
   it("round-trips includes, exclusions, years and a rating", () => {
@@ -398,123 +242,6 @@ describe("routing warnings", () => {
     expect(
       routingWarnings(input({ forceDual: true, fallback: fallback("s1", "s2", "series") })).size,
     ).toBe(0);
-  });
-});
-
-describe("how it was decided", () => {
-  const facts = {
-    anime: false,
-    genre_ids: [16],
-    keyword_ids: [],
-    network_ids: [],
-    company_ids: [],
-    origin_countries: ["US"],
-    original_language: "en",
-    year: 2019,
-  };
-  const ctx = { facts, mediaType: "series" as const, names: users };
-  const step = (extra: Partial<RequestRoutePreviewRule>): RequestRoutePreviewRule => ({
-    route_id: "x",
-    route_name: "Rule",
-    is_fallback: false,
-    enabled: true,
-    unmet_conditions: [],
-    hd: "no_match",
-    uhd: "no_match",
-    ...extra,
-  });
-
-  it("lists the title's facts", () => {
-    expect(
-      factsSentence({ ...facts, content_rating: "TV-Y7", series_status: "returning" }, "series"),
-    ).toBe("English · United States · 2019 · Returning · Rated TV-Y7 · Animation");
-    expect(factsSentence(facts, "series")).toBe(
-      "English · United States · 2019 · Status unknown · No rating · Animation",
-    );
-    expect(factsSentence({ ...facts, anime: true }, "movie")).toBe(
-      "anime · English · United States · 2019 · No rating · Animation",
-    );
-    // A title's own country's rating, when it has no US one.
-    expect(factsSentence({ ...facts, content_rating: "JP:PG12" }, "movie")).toBe(
-      "English · United States · 2019 · Rated PG12 (JP) · Animation",
-    );
-    expect(
-      traceLine(
-        step({ route_name: "Kids", unmet_conditions: ["max_content_rating"] }),
-        1,
-        { max_content_rating: "PG" },
-        { ...ctx, facts: { ...facts, content_rating: "JP:PG12" } },
-      ),
-    ).toBe("1. Kids — doesn't match: rated PG12 (JP) (wants PG or lower)");
-  });
-
-  it("explains each rule in plain sentences", () => {
-    expect(
-      traceLine(step({ route_name: "Anime", hd: "sends", uhd: "passes" }), 1, { anime: true }, ctx),
-    ).toBe("1. Anime — matches · decides HD");
-    expect(
-      traceLine(
-        step({
-          route_name: "Kids & family",
-          unmet_conditions: ["genre_ids", "max_content_rating"],
-        }),
-        3,
-        { genre_ids: [10751, 10762], max_content_rating: "PG" },
-        ctx,
-      ),
-    ).toBe(
-      "3. Kids & family — doesn't match: genre is Animation (wants Family or Kids); no rating (wants PG or lower)",
-    );
-    expect(traceLine(step({ route_name: "Old anime", enabled: false }), 2, {}, ctx)).toBe(
-      "Off: Old anime",
-    );
-    expect(
-      traceLine(
-        step({
-          is_fallback: true,
-          route_name: "Everything else",
-          hd: "already_decided",
-          uhd: "skips",
-        }),
-        0,
-        {},
-        ctx,
-      ),
-    ).toBe("Everything else — decides 4K: none");
-    expect(
-      traceLine(
-        step({ is_fallback: true, route_name: "Everything else", hd: "skips", uhd: "sends" }),
-        0,
-        {},
-        ctx,
-      ),
-    ).toBe("Everything else — decides HD: none · decides 4K");
-    expect(
-      traceLine(
-        step({ unmet_conditions: ["year_from", "year_to"] }),
-        1,
-        { year_from: 1980, year_to: 1989 },
-        ctx,
-      ),
-    ).toBe("1. Rule — doesn't match: year is 2019 (wants 1980–1989)");
-    expect(
-      traceLine(
-        step({ unmet_conditions: ["requester_user_ids", "exclude_original_languages"] }),
-        1,
-        { requester_user_ids: [2], exclude_original_languages: ["en"] },
-        ctx,
-      ),
-    ).toBe(
-      "1. Rule — doesn't match: requested by anyone (wants kid); language is English (wants anything but English)",
-    );
-    expect(
-      traceLine(
-        step({ route_name: "Ended", unmet_conditions: ["series_statuses"] }),
-        1,
-        { series_statuses: ["ended", "cancelled"] },
-        { ...ctx, facts: { ...facts, series_status: "returning" } },
-      ),
-    ).toBe("1. Ended — doesn't match: status is Returning (wants Ended or Cancelled)");
   });
 });
 
@@ -705,61 +432,6 @@ describe("review fixes", () => {
     );
     expect(conditionsCover({ max_content_rating: "TV-14" }, { max_content_rating: "PG-13" })).toBe(
       true,
-    );
-  });
-
-  it("names networks and studios from separate maps", () => {
-    const names = {
-      networks: new Map([[174, "AMC"]]),
-      studios: new Map([[174, "Warner Bros. Pictures"]]),
-    };
-    expect(ruleSentence({ network_ids: [174] }, "series", names)).toBe("When a series is on AMC");
-    expect(ruleSentence({ company_ids: [174] }, "movie", names)).toBe(
-      "When a movie is made by Warner Bros. Pictures",
-    );
-    expect(autoRuleName({ network_ids: [174] }, "series", names)).toBe("AMC");
-    expect(autoRuleName({ company_ids: [174] }, "movie", names)).toBe("Warner Bros. Pictures");
-    const facts = {
-      anime: false,
-      genre_ids: [],
-      keyword_ids: [],
-      network_ids: [174],
-      company_ids: [174],
-      origin_countries: [],
-    };
-    const step = {
-      route_id: "x",
-      route_name: "Rule",
-      is_fallback: false,
-      enabled: true,
-      hd: "no_match" as const,
-      uhd: "no_match" as const,
-    };
-    expect(
-      traceLine(
-        { ...step, unmet_conditions: ["exclude_network_ids"] },
-        1,
-        { exclude_network_ids: [174] },
-        {
-          facts,
-          mediaType: "series",
-          names,
-        },
-      ),
-    ).toBe("1. Rule — doesn't match: network is AMC (wants anything but AMC)");
-    expect(
-      traceLine(
-        { ...step, unmet_conditions: ["exclude_company_ids"] },
-        1,
-        { exclude_company_ids: [174] },
-        {
-          facts,
-          mediaType: "movie",
-          names,
-        },
-      ),
-    ).toBe(
-      "1. Rule — doesn't match: studio is Warner Bros. Pictures (wants anything but Warner Bros. Pictures)",
     );
   });
 

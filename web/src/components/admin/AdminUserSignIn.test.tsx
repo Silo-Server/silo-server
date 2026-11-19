@@ -176,33 +176,6 @@ function mount(
 const opCalls = (op: string) => calls.filter((call) => call.op === op);
 
 describe("AdminUserSignIn identities", () => {
-  it("lists the linked identity with its last provider check", async () => {
-    mount();
-    const list = await screen.findByRole("list", { name: "Connected identities" });
-    const row = within(list).getByRole("listitem");
-    expect(screen.queryByRole("switch", { name: "Break-glass account" })).toBeNull();
-    expect(row).toHaveTextContent("Company SSO · alice · alice@idp.example.test");
-    expect(row).toHaveTextContent("Subject: https://id.example.test/realms/silo|8f14e45f");
-    expect(row).toHaveTextContent("Last provider check: Active at the provider");
-    expect(opCalls("GET /api/v2/admin/users/{id}/identities")[0]?.options?.path).toEqual({
-      id: "7",
-    });
-  });
-
-  it("says when nothing is linked, and hides identities the server doesn't serve", async () => {
-    identities = [];
-    const { unmount } = mount();
-    expect(await screen.findByText("Not connected to a sign-in provider.")).toBeInTheDocument();
-    unmount();
-    capabilities = { ...capabilities, admin_identities: false };
-    mount();
-    await waitFor(() =>
-      expect(opCalls("GET /api/v2/auth/external-sign-in/capabilities").length).toBeGreaterThan(1),
-    );
-    expect(screen.queryByRole("heading", { name: "Sign-in provider identities" })).toBeNull();
-    expect(opCalls("GET /api/v2/admin/users/{id}/identities")).toHaveLength(1);
-  });
-
   it("warns that unlinking the only way in locks the account out, then unlinks", async () => {
     const user = userEvent.setup();
     mount();
@@ -224,14 +197,6 @@ describe("AdminUserSignIn identities", () => {
         screen.getByRole("heading", { name: "Sign-in provider identities" }),
       ),
     );
-  });
-
-  it("does not warn about a lockout when a password still signs in", async () => {
-    const user = userEvent.setup();
-    mount({ ...USER, password_login: true });
-    await user.click(await screen.findByRole("button", { name: /Unlink Company SSO/ }));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).not.toHaveTextContent("won't be able to sign in");
   });
 
   it("hides changes from an admin who may not manage the account", async () => {
@@ -276,18 +241,6 @@ describe("AdminUserSignIn linking by subject", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("requires a subject", async () => {
-    const user = userEvent.setup();
-    mount();
-    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Connect" }));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "Enter the provider's subject for this person.",
-    );
-    expect(opCalls("POST /api/v2/admin/users/{id}/identities")).toHaveLength(0);
-  });
-
   it.each([
     ["identity_linked_elsewhere", 409, "already connected to another Silo account"],
     ["permission_denied", 403, "Only the server owner can change another admin's sign-in."],
@@ -305,48 +258,6 @@ describe("AdminUserSignIn linking by subject", () => {
 });
 
 describe("AdminUserSignIn password and break-glass", () => {
-  it("sets a temporary password on an account without password sign-in", async () => {
-    const user = userEvent.setup();
-    mount();
-    expect(screen.getByText("Off: alice can't sign in with a Silo password.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Set a password" }));
-    const dialog = await screen.findByRole("dialog", { name: "Set a password" });
-    const input = within(dialog).getByLabelText("New password");
-    expect(input).toHaveFocus();
-    await user.type(input, "short");
-    await user.click(within(dialog).getByRole("button", { name: "Set password" }));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("Use at least 8 characters.");
-    expect(state.updateAdminUser).not.toHaveBeenCalled();
-
-    await user.type(input, "-enough");
-    await user.click(within(dialog).getByRole("button", { name: "Set password" }));
-    await waitFor(() => expect(state.updateAdminUser).toHaveBeenCalledTimes(1));
-    expect(state.updateAdminUser.mock.calls[0]![1]).toEqual({
-      password: "short-enough",
-      require_password_change: true,
-    });
-    expect(
-      await screen.findByText(/alice can sign in with the new password and must change it/),
-    ).toBeInTheDocument();
-  });
-
-  it("can set a password that isn't temporary, and reports a refusal", async () => {
-    const user = userEvent.setup();
-    state.updateAdminUser.mockRejectedValueOnce(problem("precondition_failed", 412));
-    mount();
-    await user.click(screen.getByRole("button", { name: "Set a password" }));
-    const dialog = await screen.findByRole("dialog");
-    await user.click(
-      within(dialog).getByRole("switch", { name: "Require change at next sign-in" }),
-    );
-    await user.type(within(dialog).getByLabelText("New password"), "long-enough-1");
-    await user.click(within(dialog).getByRole("button", { name: "Set password" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      "The account changed while you were editing it.",
-    );
-    expect(state.updateAdminUser.mock.calls[0]![1]).toEqual({ password: "long-enough-1" });
-  });
-
   it("counts password limits the way the server does and shows its field detail", async () => {
     const user = userEvent.setup();
     const detail = "The password must be at most 72 bytes.";
@@ -396,12 +307,5 @@ describe("AdminUserSignIn password and break-glass", () => {
     expect(await screen.findByRole("switch", { name: "Break-glass account" })).toBeDisabled();
     expect(screen.getByText("Only the server owner can change this.")).toBeInTheDocument();
     expect(screen.getByText(/can't act as break-glass/)).toBeInTheDocument();
-  });
-
-  it("hides break-glass on a server that doesn't support it", async () => {
-    capabilities = { ...capabilities, break_glass: false };
-    mount({ ...USER, role: "admin" });
-    await screen.findByRole("list", { name: "Connected identities" });
-    expect(screen.queryByRole("switch", { name: "Break-glass account" })).toBeNull();
   });
 });

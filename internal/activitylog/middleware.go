@@ -24,11 +24,15 @@ import (
 // operational probes, and the admin log endpoints, which the log viewer
 // polls (logging a read of the activity log into the activity log feeds
 // itself). /api/v2/admin/logs covers the app, audit, ws, ws-ticket and
-// ws/capabilities operations under that prefix.
+// ws/capabilities operations under that prefix. Transcode nodes call
+// /api/internal/nodes/ every second to report and ship their logs: those calls
+// are machine traffic, not activity, and a logged log shipment would feed
+// itself too.
 var excludedPrefixes = []string{
 	"/api/v1/health",
 	"/api/v1/ready",
 	"/api/v2/admin/logs",
+	"/api/internal/nodes/",
 }
 
 // streamPrefixes are paths logged only at session-start (not per-chunk), so

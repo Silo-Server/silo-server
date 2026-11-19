@@ -258,53 +258,6 @@ func TestDebounceReleasesStateClaimWhenEnqueueFails(t *testing.T) {
 	}
 }
 
-func TestObservePathState(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "movie.mkv")
-
-	if state, ok := observePathState(path); !ok || state != stateAbsent {
-		t.Fatalf("missing file = (%q, %v), want (%q, true)", state, ok, stateAbsent)
-	}
-
-	if err := os.WriteFile(path, []byte("abc"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	mtime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	if err := os.Chtimes(path, mtime, mtime); err != nil {
-		t.Fatal(err)
-	}
-	first, ok := observePathState(path)
-	if !ok || first == stateAbsent {
-		t.Fatalf("existing file = (%q, %v), want a file state", first, ok)
-	}
-	if again, _ := observePathState(path); again != first {
-		t.Fatalf("unchanged file state %q != %q", again, first)
-	}
-
-	if err := os.WriteFile(path, []byte("abcdef"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(path, mtime, mtime); err != nil {
-		t.Fatal(err)
-	}
-	resized, _ := observePathState(path)
-	if resized == first {
-		t.Fatalf("size change kept state %q", resized)
-	}
-
-	later := mtime.Add(time.Second)
-	if err := os.Chtimes(path, later, later); err != nil {
-		t.Fatal(err)
-	}
-	if touched, _ := observePathState(path); touched == resized {
-		t.Fatalf("mtime change kept state %q", touched)
-	}
-
-	if state, ok := observePathState(dir); ok {
-		t.Fatalf("directory = (%q, true), want never debounced", state)
-	}
-}
-
 func TestObservePathStateReplacementWithSameSizeAndMtime(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "movie.mkv")

@@ -8,7 +8,8 @@ import type { EpisodeRef } from "../types";
 
 interface NextEpisodeOverlayProps {
   episode: EpisodeRef;
-  secondsRemaining: number;
+  /** Seconds until the automatic start, or null when the card waits for the viewer. */
+  secondsRemaining: number | null;
   onSkip: () => void;
   onCancel: () => void;
   /** Height of the control dock while it is up; the card sits just above it. */
@@ -17,6 +18,7 @@ interface NextEpisodeOverlayProps {
 
 /**
  * Card shown during the credits region with a countdown to the next episode.
+ * With auto-play off it offers the episode without a countdown.
  */
 export function NextEpisodeOverlay({
   episode,
@@ -31,7 +33,10 @@ export function NextEpisodeOverlay({
     spoilerPrefs.hideImages &&
     isEpisodeUnwatched(episode.watchState) &&
     isEpisodeStill(episode.stillIsEpisodeStill);
-  const elapsed = Math.min(1, Math.max(0, 1 - secondsRemaining / NEXT_EPISODE_COUNTDOWN_SECONDS));
+  const elapsed =
+    secondsRemaining === null
+      ? null
+      : Math.min(1, Math.max(0, 1 - secondsRemaining / NEXT_EPISODE_COUNTDOWN_SECONDS));
 
   return (
     <div
@@ -57,12 +62,14 @@ export function NextEpisodeOverlay({
         ) : null}
         <div className="flex min-w-0 flex-col justify-center gap-1">
           <p className="text-xs font-semibold text-[var(--hud-ash)]" aria-live="polite">
-            {t("web.player.nextEpisode.upNextIn", {
-              count: secondsRemaining,
-              num: (chunks) => (
-                <span className="text-[var(--hud-lamp)] tabular-nums">{chunks}</span>
-              ),
-            })}
+            {secondsRemaining === null
+              ? t("web.player.upNext.heading")
+              : t("web.player.nextEpisode.upNextIn", {
+                  count: secondsRemaining,
+                  num: (chunks) => (
+                    <span className="text-[var(--hud-lamp)] tabular-nums">{chunks}</span>
+                  ),
+                })}
           </p>
           <p className="text-xs text-[var(--hud-ash)] tabular-nums">
             {t("web.player.nextEpisode.seasonEpisode", {
@@ -85,12 +92,14 @@ export function NextEpisodeOverlay({
         </button>
       </div>
       {/* Countdown as a lamp-coloured fill along the card's bottom edge. */}
-      <div aria-hidden="true" className="h-1 bg-white/10">
-        <div
-          className="h-full bg-[var(--hud-lamp)] transition-[width] duration-1000 ease-linear"
-          style={{ width: `${elapsed * 100}%` }}
-        />
-      </div>
+      {elapsed !== null && (
+        <div aria-hidden="true" className="h-1 bg-white/10">
+          <div
+            className="h-full bg-[var(--hud-lamp)] transition-[width] duration-1000 ease-linear"
+            style={{ width: `${elapsed * 100}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -19,12 +19,18 @@ import (
 
 func TestStreamingProtocolOriginResponses(t *testing.T) {
 	const secret = "synthetic-streaming-protocol"
-	for _, tc := range []struct{ method, suffix string }{
-		{http.MethodGet, "master.m3u8"}, {http.MethodHead, "master.m3u8"}, {http.MethodGet, "segment/seg_00001.ts"},
+	// The node serves the playlist on GET only, so a HEAD asks it with GET.
+	for _, tc := range []struct{ method, upstream, suffix string }{
+		{http.MethodGet, http.MethodGet, "master.m3u8"},
+		{http.MethodHead, http.MethodGet, "master.m3u8"},
+		{http.MethodGet, http.MethodGet, "segment/seg_00001.ts"},
 	} {
 		t.Run(tc.method+tc.suffix, func(t *testing.T) {
 			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != tc.method || r.URL.Path != "/transcode/transport/"+tc.suffix || r.URL.RawQuery != "opaque=1" || !nodeauthtest.Signed(r, secret) || r.Header.Get("X-Silo-Stream-Token") == "" {
+				if r.Method != tc.upstream {
+					t.Errorf("node asked with %s, want %s", r.Method, tc.upstream)
+				}
+				if r.URL.Path != "/transcode/transport/"+tc.suffix || r.URL.RawQuery != "opaque=1" || !nodeauthtest.Signed(r, secret) || r.Header.Get("X-Silo-Stream-Token") == "" {
 					t.Error("relay identity/query lost")
 				}
 				segment := strings.HasPrefix(tc.suffix, "segment/")
@@ -34,6 +40,10 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 				w.Header().Set("Content-Type", "application/x-origin-fixture")
 				w.Header().Set("X-Origin-Fixture", "preserved")
 				w.Header().Set(transcodeproxy.GenerationHeader, "private")
+				if tc.method == http.MethodHead {
+					// The node drops the connection mid-body; a HEAD never needed the body.
+					w.Header().Set("Content-Length", "100")
+				}
 				w.WriteHeader(418)
 				_, _ = io.WriteString(w, "origin refusal")
 			}))
@@ -46,8 +56,8 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 				t.Fatal(response.status, response.header)
 			}
 			if tc.method == http.MethodHead {
-				if response.body != "" {
-					t.Fatal("HEAD bytes")
+				if response.body != "" || response.header.Get("Content-Length") != "100" {
+					t.Fatal("HEAD bytes or length", response.body, response.header)
 				}
 			} else if response.body != "origin refusal" {
 				t.Fatal(response.body)

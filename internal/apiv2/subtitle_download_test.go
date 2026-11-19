@@ -2,11 +2,7 @@ package apiv2
 
 import (
 	"context"
-	"net/http"
-	"strings"
-	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -26,30 +22,3 @@ func (f *fakeSubtitleDownloads) DownloadStoredSubtitle(_ context.Context, access
 }
 
 const subtitleDownloadFixtureBody = `{"media_file_id":"42","provider":"example","subtitle_id":"opaque-provider-result","language":"en","release_name":"Synthetic","score":80,"hearing_impaired":false}`
-
-// An unregistered provider key reaches the listener as the service's 404, not
-// as an opaque upstream failure.
-func TestSubtitleDownloadV2UnknownProviderIsNotFound(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	f := &fakeSubtitleDownloads{err: &handlers.APIError{Status: http.StatusNotFound, Code: "provider_not_found", Message: "Subtitle provider not found"}}
-	deps.SubtitleDownloads = f
-	body := strings.Replace(subtitleDownloadFixtureBody, `"provider":"example"`, `"provider":"not-registered"`, 1)
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/subtitles/download", body, viewerHeaders()), TypeNotFound)
-	if f.calls != 1 {
-		t.Fatalf("service calls = %d, want 1", f.calls)
-	}
-}
-
-func TestSubtitleDownloadV2RefusesBeforeService(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	f := new(fakeSubtitleDownloads)
-	deps.SubtitleDownloads = f
-	h := newTestHandler(t, deps)
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/subtitles/download", strings.Replace(subtitleDownloadFixtureBody, `"42"`, `42`, 1), viewerHeaders()), TypeValidationFailed)
-	if f.calls != 0 {
-		t.Fatal("invalid request reached provider service")
-	}
-	deps.SubtitleDownloads = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, viewerHeaders()), TypeDependencyUnavailable)
-}

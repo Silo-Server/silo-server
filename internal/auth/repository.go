@@ -460,6 +460,10 @@ func updateUser(ctx context.Context, db interface {
 		normalized := NormalizeUsername(*input.Username)
 		username = &normalized
 	}
+	previousUsername, err := updatePreviousUsername(ctx, db, id, username)
+	if err != nil {
+		return err
+	}
 	var permissions []string
 	if input.Permissions != nil {
 		normalized, err := NormalizePermissions(*input.Permissions)
@@ -569,6 +573,11 @@ func updateUser(ctx context.Context, db interface {
 
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if username != nil && previousUsername != "" && previousUsername != *username {
+		if err := renamePrimaryProfileWithAccount(ctx, db, id, previousUsername, *username); err != nil {
+			return err
+		}
 	}
 	if roleChanging {
 		if err := endImpersonationsInvolving(ctx, db, id); err != nil {

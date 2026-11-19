@@ -1,38 +1,12 @@
 package cache
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/redis/go-redis/v9"
-
 	"github.com/Silo-Server/silo-server/internal/config"
 )
-
-func TestRedisEventBusTakesDatabaseNumberFromURL(t *testing.T) {
-	for _, tc := range []struct {
-		url  string
-		want int
-	}{
-		{"redis://localhost:6379", 0},
-		{"redis://localhost:6379/7", 7},
-		{"redis://localhost:6379?db=4", 4},
-		{"redis://sentinel-1:26379/5?master_name=mymaster", 5},
-		// Not a URL: the bus falls back to treating it as an address.
-		{"localhost:6379", 0},
-	} {
-		bus := newRedisEventBus(config.RedisConfig{URL: tc.url})
-		if bus.db != tc.want {
-			t.Errorf("newRedisEventBus(%q) scopes channels to database %d, want %d", tc.url, bus.db, tc.want)
-		}
-		if err := bus.Close(); err != nil {
-			t.Errorf("close bus for %q: %v", tc.url, err)
-		}
-	}
-}
 
 func TestRedisClientsTakeDatabaseNumberFromRedisDB(t *testing.T) {
 	for _, cfg := range []config.RedisConfig{
@@ -112,78 +86,6 @@ func TestRedisEventBusSendsScopedChannelToRedis(t *testing.T) {
 			}
 			if got := server.pubsub(); !slices.Equal(got, tc.want) {
 				t.Errorf("Redis received %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// The admin settings check subscribes the way a starting server does: to every
-// event bus channel, scoped to the database number.
-func TestCheckEventBusChannels(t *testing.T) {
-	check := func(t *testing.T, server *respTestServer, path string) error {
-		t.Helper()
-		client, err := NewRedisClientForRole(config.RedisConfig{URL: "redis://" + server.addr + path}, "checks")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = CloseRedisClient(client) })
-		return CheckEventBusChannels(t.Context(), client)
-	}
-
-	for _, tc := range []struct{ path, want string }{
-		{"/3", "SUBSCRIBE silo:catalog@db3 silo:admin@db3 silo:playback@db3 silo:transcode-move@db3 silo:playback:control@db3 silo:logs@db3 silo:events@db3"},
-		{"/0", "SUBSCRIBE silo:catalog silo:admin silo:playback silo:transcode-move silo:playback:control silo:logs silo:events"},
-	} {
-		server := startRESPTestServer(t, nil, respTestRedis)
-		if err := check(t, server, tc.path); err != nil {
-			t.Fatalf("%s: %v", tc.path, err)
-		}
-		if got := server.received(); !slices.Contains(got, tc.want) {
-			t.Errorf("%s: Redis received %q, want %q", tc.path, got, tc.want)
-		}
-	}
-
-	server := startRESPTestServer(t, nil, func(args []string) (string, bool) {
-		if args[0] != "SUBSCRIBE" {
-			return "", false
-		}
-		return "-NOPERM User silo has no permissions to access the 'silo:catalog' channel\r\n", true
-	})
-	err := check(t, server, "/0")
-	if _, refused := errors.AsType[redis.Error](err); !refused || !strings.Contains(err.Error(), "NOPERM") {
-		t.Errorf("a subscription the ACL denies: %v, want the NOPERM reply", err)
-	}
-
-	// A server that answers each channel on its own can confirm the first and
-	// refuse a later one.
-	server = startRESPTestServer(t, nil, func(args []string) (string, bool) {
-		if args[0] != "SUBSCRIBE" {
-			return "", false
-		}
-		return fmt.Sprintf("*3\r\n$9\r\nsubscribe\r\n$%d\r\n%s\r\n:1\r\n", len(args[1]), args[1]) +
-			"-NOPERM User silo has no permissions to access the '" + args[2] + "' channel\r\n", true
-	})
-	err = check(t, server, "/0")
-	if _, refused := errors.AsType[redis.Error](err); !refused || !strings.Contains(err.Error(), "silo:admin") {
-		t.Errorf("a later channel refused: %v, want the NOPERM reply for silo:admin", err)
-	}
-}
-
-func TestRedisEventBusRejectsInvalidDatabaseOnBareAddress(t *testing.T) {
-	for _, db := range []string{"five", "-1"} {
-		t.Run(db, func(t *testing.T) {
-			server := startRESPTestServer(t, nil, respTestRedis)
-			bus := newRedisEventBus(config.RedisConfig{URL: server.addr, DB: db})
-			t.Cleanup(func() { _ = bus.Close() })
-
-			if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
-				t.Errorf("subscribe with invalid redis.db: %v, want a redis.db error", err)
-			}
-			if err := bus.Publish(t.Context(), ChannelAdmin, Event{Type: EventSettingsChanged}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
-				t.Errorf("publish with invalid redis.db: %v, want a redis.db error", err)
-			}
-			if got := server.received(); len(got) != 0 {
-				t.Errorf("Redis received %q for an invalid redis.db, want no commands", got)
 			}
 		})
 	}

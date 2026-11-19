@@ -472,6 +472,14 @@ const USER_SETTINGS_GROUPS: UserSettingsNavGroupSource[] = [
         ],
       },
       {
+        path: "api-keys",
+        label: "web.settings.apiKeys.title",
+        icon: KeyRound,
+        description: "web.settings.nav.apiKeys.description",
+        keywords: ["api", "key", "token", "script", "automation", "export", "sync", "websocket"],
+        settings: ["web.settings.apiKeys.createKey"],
+      },
+      {
         path: "watch-providers",
         label: "web.settings.watchProviders.title",
         icon: Cloud,
@@ -556,9 +564,6 @@ const USER_SETTINGS_GROUPS: UserSettingsNavGroupSource[] = [
         keywords: ["new episodes", "email", "discord", "browser push", "webhooks", "alerts"],
         settings: [
           "web.settings.notifications.episodes.title",
-          "web.settings.notifications.reason.favorites",
-          "web.settings.notifications.reason.watchlist",
-          "web.settings.notifications.reason.continueWatching",
           "web.settings.notifications.reason.nextUp",
           "web.settings.notifications.push.title",
           "web.settings.notifications.email.title",

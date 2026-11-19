@@ -25,6 +25,8 @@ interface MiniBarProps {
   prefs: AudiobookPrefs;
   onClose?: () => void;
   onExpand?: () => void;
+  /** Focus the expand tile on mount (set once Now Listening has been opened). */
+  autoFocusExpand?: boolean;
 }
 
 export function MiniBar({
@@ -35,6 +37,7 @@ export function MiniBar({
   prefs,
   onClose,
   onExpand,
+  autoFocusExpand,
 }: MiniBarProps) {
   const t = useT();
   const barRef = usePlaybackBarHeight("audiobook");
@@ -67,6 +70,7 @@ export function MiniBar({
             posterUrl={posterUrl}
             title={title}
             onExpand={onExpand}
+            autoFocus={autoFocusExpand}
           />
           <div className="flex min-w-0 flex-col gap-0.5">
             {title ? (

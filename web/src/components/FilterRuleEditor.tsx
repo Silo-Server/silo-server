@@ -856,6 +856,7 @@ export default function FilterRuleEditor({
               variant="ghost"
               size="sm"
               className="text-muted-foreground hover:text-destructive h-7 w-7 p-0"
+              aria-label={t("web.home.addRow.rules.removeGroup", { number: groupIdx + 1 })}
               onClick={() => removeGroup(groupIdx)}
             >
               <Trash2 className="h-3.5 w-3.5" />

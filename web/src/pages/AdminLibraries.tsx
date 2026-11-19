@@ -1,5 +1,5 @@
 import { JobPageControls } from "@/components/admin/JobPageControls";
-import { Fragment, useState, useEffect, useMemo, type ComponentProps } from "react";
+import { Fragment, useId, useState, useEffect, useMemo, type ComponentProps } from "react";
 import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { Library, LibraryRealtimeMonitoringEntry, ScanRun } from "@/api/types";
@@ -81,15 +81,12 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { DragStartEvent, DragEndEvent, SensorDescriptor, SensorOptions } from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-  arrayMove,
-} from "@dnd-kit/sortable";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeOverlay, useMotionSafeSortable } from "@/hooks/useSortableList";
 import { useT, type Translate } from "@/i18n";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 // Not translated: a separator glyph.
 const SEPARATOR = "·";
@@ -166,9 +163,13 @@ function LibrariesPage() {
   const sortableAccessibility = useSortableAccessibility(
     orderedLibraries.map((library) => ({ id: library.id, name: library.name })),
   );
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
 
   useEffect(() => {
@@ -416,6 +417,8 @@ function LibraryTable({
   onDragCancel: () => void;
 }) {
   const t = useT();
+  const overlayMotion = useMotionSafeOverlay();
+  const nameIdBase = useId();
   return (
     <DndContext
       sensors={sensors}
@@ -445,10 +448,13 @@ function LibraryTable({
             <TableBody>
               {rows.map((row) => {
                 const { library: lib, scan, refresh, mountCheck, cleanup } = row;
+                const nameId = `${nameIdBase}-${lib.id}`;
                 return (
                   <Fragment key={lib.id}>
                     <SortableLibraryRow id={lib.id}>
-                      <TableCell className="font-medium">{lib.name}</TableCell>
+                      <TableCell id={nameId} className="font-medium">
+                        {lib.name}
+                      </TableCell>
                       <TableCell className="text-xs">
                         {lib.paths.length === 1 ? (
                           <span dir="ltr" className="text-muted-foreground font-mono">
@@ -555,6 +561,8 @@ function LibraryTable({
                               size="icon"
                               className="text-destructive h-7 w-7"
                               title={t("web.admin.libraries.list.confirmCleanupTitle")}
+                              aria-label={t("web.admin.libraries.list.confirmCleanupTitle")}
+                              aria-describedby={nameId}
                               disabled={cleanup.pending}
                               onClick={cleanup.run}
                             >
@@ -587,7 +595,7 @@ function LibraryTable({
           </SortableContext>
         </Table>
       </div>
-      <DragOverlay>
+      <DragOverlay {...overlayMotion}>
         {activeLibrary ? (
           <Table>
             <TableBody>
@@ -860,9 +868,10 @@ function getLibraryScanGroupName(t: Translate, library: Library | null, libraryI
 
 function SortableLibraryRow({ id, children }: { id: number; children: React.ReactNode }) {
   const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id,
+    });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),

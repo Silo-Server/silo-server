@@ -615,6 +615,18 @@ supported for resumable/background downloads. `HEAD` is accepted like
 `/direct-download`: it returns the same headers with no body so clients can
 probe size and resumability before issuing ranged `GET`s.
 
+For an ephemeral row, a `HEAD` leaves the row's status unchanged, even when it
+fails. Only a `GET` whose response carries the whole file (a complete `200`, or one
+`206` range spanning every byte) marks the row `completed`. A partial range, `304` or
+`416` leaves its status as it was.
+
+An ephemeral original row moves from `queued` to `downloading` on its first `GET`,
+and its transfer holds a lease. A `GET` renews the lease when it starts and every
+minute while it sends; a `HEAD` does not. A later `GET` within five minutes of the
+last renewal continues the transfer. After that the row is marked `failed` and
+refused with `409 conflict`. A prepared (remux or transcode) ephemeral row has no
+lease: it stays `ready` until a whole-file response completes it.
+
 Common responses:
 
 - `200` or `206`: media bytes. Multipart ranges and `416` follow ordinary HTTP
@@ -748,7 +760,13 @@ should use managed `POST /api/v2/downloads` plus `/api/v2/downloads/{id}/file`.
 `file_id` is a canonical positive decimal string; `format` may be absent, empty, or
 `original`. Duplicate and unknown query parameters return `422`.
 The Jellyfin-compatible `/Items/{id}/Download` route serves through the same
-path and rules; see [jellycompat-api.md](jellycompat-api.md).
+path and rules; see [jellycompat-api.md](jellycompat-api.md). So does the
+Audiobookshelf-compatible (beta) `/api/items/{id}/file/{ino}/download` route,
+which answers `403` when they refuse; its sign-in and `/me` user object reports
+the outcome as `permissions.download`. Its bare `/api/items/{id}/file/{ino}`
+route is a stream, as in Audiobookshelf itself, and plays without download
+permission. An account that may not download cannot open an Audiobookshelf RSS
+feed, and an open feed answers `404` once its owner may no longer download.
 
 A browser navigation cannot send headers, so it opens a short-lived link
 instead. Mint one with an ordinary profile-scoped request:
@@ -850,9 +868,10 @@ its own. A device that needs the bytes again (it lost its copy, or a transfer re
 after the cache period) gets `409 prepared_file_expired` from the file route and calls
 this operation.
 
-The response is `200` with the current `DownloadEntry`. A finished entry whose file
-expired returns to `preparing` and becomes `ready` like a new download, with the same
-`revision`, because the recipe is unchanged. An entry whose file is still on the
+The response is `200` with the current `DownloadEntry`. A finished entry, or one
+its device was still transferring, whose file expired returns to `preparing` and
+becomes `ready` like a new download, with the same `revision`, because the recipe is
+unchanged. An entry whose file is still on the
 server, an `original` entry (served from the source), and one already preparing come
 back unchanged. A `revoked`, `failed`, or `cancelled` entry answers `409 conflict`;
 create a new download instead. Returning to `preparing` counts toward the account's
@@ -1765,7 +1784,7 @@ operations use:
 | 422  | `validation_failed`      | A well-formed request with an invalid domain value: quality, status, revision guard, device identity, subtitle ref, subscription option, non-canonical decimal ID, or an unknown/duplicated query parameter. `errors[].location` names the member. |
 | 428  | `precondition_required`  | A subscription mutation without `If-Match`.                               |
 | 412  | `precondition_failed`    | A stale `If-Match` validator.                                             |
-| 429  | `rate_limited`           | Concurrent download cap or period quota hit. New managed entries that register `ready` (original quality, or a prepared file that is already ready) count only toward the period quota; the app queues their transfers. |
+| 429  | `rate_limited`           | Concurrent download cap or period quota hit. The concurrent cap counts entries being prepared and account-level rows that are queued or transferring. A managed entry its device reported as `downloading` does not count, so a transfer the device abandons cannot hold a place. New managed entries that register `ready` (original quality, or a prepared file that is already ready) count only toward the period quota; the app queues their transfers. Replacing an entry with a quality whose prepared file is not ready takes a place like a new entry, and a replacement never counts toward the period quota, because it creates no download. |
 | 500  | `internal_error`         | Unexpected server error.                                                  |
 | 501  | `capability_unsupported` | The requested delivery is not supported by configuration or policy — tone mapping disabled or disallowed, a quality the server cannot prepare, or a missing prepare pipeline. |
 | 503  | `dependency_unavailable` | Downloads, offline assets, series monitoring, or capability discovery is temporarily unavailable; retry the same request. |
@@ -2129,7 +2148,11 @@ Redis budget call has a one-second deadline. Clients must handle incomplete
 bodies. Managed downloads retry
 through their existing Range/resume flow after dependency recovery. A stopped
 ephemeral original download marks its row `failed`, which later requests
-reject, so the client starts a new ephemeral download instead.
+reject, so the client starts a new ephemeral download instead. The server
+process serving such a transfer renews its row every minute; when that process
+dies mid-transfer, the row stops counting toward
+`download.max_concurrent_per_user` five minutes after its last renewal, and the
+next request for it marks it `failed` and is rejected the same way.
 
 `download.max_per_period` counts registrations independently for each account
 in the rolling `download.period_duration`; zero is unlimited. It is not a

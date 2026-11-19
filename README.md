@@ -12,7 +12,7 @@
   <a href="https://github.com/Silo-Server/silo-server/releases"><img alt="Latest GitHub release" src="https://img.shields.io/github/v/release/Silo-Server/silo-server?include_prereleases&amp;sort=semver&amp;display_name=tag&amp;style=flat-square&amp;label=release"></a>
   <a href="https://github.com/orgs/Silo-Server/packages/container/package/silo-server"><img alt="Container image on GHCR" src="https://img.shields.io/badge/container-GHCR-2496ED?style=flat-square&amp;logo=docker&amp;logoColor=white"></a>
   <a href="https://github.com/Silo-Server/silo-server/actions/workflows/ci.yml"><img alt="Continuous integration" src="https://img.shields.io/github/actions/workflow/status/Silo-Server/silo-server/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
-  <img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white">
+  <img alt="Go 1.27" src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white">
   <a href="LICENSE"><img alt="AGPL-3.0-or-later license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-555555?style=flat-square"></a>
 </p>
@@ -77,8 +77,9 @@ Existing library data is preserved when upgrading.
     </td>
     <td width="33%" valign="top">
       <strong>Scale</strong><br><br>
-      Start with one integrated server; split proxy and transcode roles across
-      shared PostgreSQL and Redis when you need to.
+      Start with one integrated server; add transcode nodes that need only its
+      URL and a key, or proxy nodes that share its PostgreSQL and Redis, when
+      you need to.
     </td>
   </tr>
 </table>
@@ -105,9 +106,9 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-Hardware transcoding (VA-API or NVIDIA) and access for proxy or transcode
-nodes on other hosts are commented out in `docker-compose.yml`; uncomment the
-lines you need.
+Hardware transcoding (VA-API or NVIDIA) and PostgreSQL and Redis access for
+proxy nodes on other hosts are commented out in `docker-compose.yml`; uncomment
+the lines you need. Transcode nodes reach the server on its web port.
 
 ### Updating an install from before the omnibus image
 

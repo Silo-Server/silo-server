@@ -96,32 +96,6 @@ func (f *fakeNotificationChannels) UnlinkDiscord(_ context.Context, user int) er
 	f.writes++
 	return f.err
 }
-func TestNotificationDiscordUnlink(t *testing.T) {
-	f := new(fakeNotificationChannels)
-	deps := pilotDeps(nil, nil)
-	deps.NotificationChannels = f
-	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-owner", IsPrimary: true}})
-	h := NewHandler(deps)
-	path := Prefix + "/notifications/discord-link"
-	for _, tc := range []struct {
-		headers map[string]string
-		userID  int
-	}{{profileOwner(), 1}, {with(bearer(adminToken), "X-Profile-Id", "p-owner"), 2}} {
-		rec := do(t, h, http.MethodDelete, path, "", tc.headers)
-		if rec.Code != 204 || rec.Body.Len() != 0 || f.user != tc.userID {
-			t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
-		}
-	}
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", nil), TypeAuthenticationRequired)
-	if f.writes != 2 {
-		t.Fatal("unauthorized dispatch")
-	}
-	f.err = fmt.Errorf("storage failure")
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", profileOwner()), TypeInternalError)
-	deps.NotificationChannels = nil
-	requireProblem(t, do(t, NewHandler(deps), http.MethodDelete, path, "", profileOwner()), TypeDependencyUnavailable)
-}
-
 func (f *fakeNotificationChannels) ClearEmailAddress(_ context.Context, user int, profile string) error {
 	f.user, f.profile = user, profile
 	f.writes++

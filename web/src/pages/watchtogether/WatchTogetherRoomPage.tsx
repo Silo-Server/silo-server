@@ -30,6 +30,7 @@ import { VotingStage } from "./room/stage/VotingStage";
 import { BrowseShelf, type BrowseSelection } from "./room/browse/BrowseShelf";
 import { CandidateStage, type CandidateChoice } from "./room/browse/CandidateStage";
 import { itemHeadline } from "./room/stage/StagedHero";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 function describeRoomError(error: unknown, t: Translate) {
   if (error === "not_found") return t("web.watchTogether.common.roomNotFound");
@@ -270,7 +271,7 @@ export default function WatchTogetherRoomPage() {
     setCandidate(selection);
     // On one column the stage is above the shelf: bring the candidate up so
     // its action is never below the fold.
-    stageRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    stageRef.current?.scrollIntoView?.({ block: "start", behavior: motionScrollBehavior() });
   }, []);
 
   const handleConfirm = useCallback(

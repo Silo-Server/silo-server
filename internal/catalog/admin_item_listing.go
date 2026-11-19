@@ -37,6 +37,9 @@ type AdminCatalogItemFilter struct {
 	// People loads the cast and crew of movies and series. It changes no
 	// row, only what each row carries.
 	People bool `json:",omitempty"`
+	// FilePaths fills each version's FilePath. Like People, it changes only
+	// what each row carries.
+	FilePaths bool `json:",omitempty"`
 }
 
 // AdminCatalogItem is one movie, series or episode present in an enabled
@@ -93,6 +96,8 @@ type AdminCatalogVersion struct {
 	BitrateKbps   int
 	FileSize      int64
 	Edition       string
+	// FilePath is the stored on-disk path, set only with filter.FilePaths.
+	FilePath string
 }
 
 // AdminCatalogItemPage is one content_id-ordered page.
@@ -148,7 +153,7 @@ func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter Admin
 	if len(page.Items) > limit {
 		page.Items, page.HasMore = page.Items[:limit], true
 	}
-	if err := attachAdminCatalogVersions(ctx, tx, page.Items); err != nil {
+	if err := attachAdminCatalogVersions(ctx, tx, page.Items, filter.FilePaths); err != nil {
 		return page, err
 	}
 	if filter.People {
@@ -253,8 +258,9 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 
 // attachAdminCatalogVersions loads every present, non-extra file in an enabled
 // library for the page's movies and episodes. A multi-episode file belongs to
-// its first episode; a series has no files of its own.
-func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCatalogItem) error {
+// its first episode; a series has no files of its own. filePaths also reads
+// each file's stored path.
+func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCatalogItem, filePaths bool) error {
 	var movieIDs, episodeIDs []string
 	byID := make(map[string]*AdminCatalogItem, len(items))
 	for i := range items {
@@ -275,12 +281,13 @@ func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCat
 		SELECT mf.id, coalesce(mf.episode_id, mf.content_id), mf.media_folder_id,
 			coalesce(mf.resolution, ''), coalesce(mf.codec_video, ''), coalesce(mf.codec_audio, ''),
 			coalesce(mf.audio_channels, 0), coalesce(mf.hdr, false), coalesce(mf.container, ''),
-			coalesce(mf.bitrate, 0), coalesce(mf.file_size, 0), mf.edition_key, mf.video_tracks, mf.audio_tracks
+			coalesce(mf.bitrate, 0), coalesce(mf.file_size, 0), mf.edition_key, mf.video_tracks, mf.audio_tracks,
+			CASE WHEN $3 THEN mf.file_path ELSE '' END
 		FROM media_files mf
 		JOIN media_folders f ON f.id = mf.media_folder_id AND f.enabled
 		WHERE mf.missing_since IS NULL AND mf.extra_id IS NULL
 			AND (mf.episode_id = ANY($1::text[]) OR (mf.content_id = ANY($2::text[]) AND mf.episode_id IS NULL))
-		ORDER BY mf.id`, episodeIDs, movieIDs)
+		ORDER BY mf.id`, episodeIDs, movieIDs, filePaths)
 	if err != nil {
 		return fmt.Errorf("listing admin catalog versions: %w", err)
 	}
@@ -290,7 +297,8 @@ func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCat
 		var videoJSON, audioJSON []byte
 		var file models.MediaFile
 		if err := rows.Scan(&file.ID, &owner, &file.MediaFolderID, &file.Resolution, &file.CodecVideo, &file.CodecAudio,
-			&file.AudioChannels, &file.HDR, &file.Container, &file.Bitrate, &file.FileSize, &file.EditionKey, &videoJSON, &audioJSON); err != nil {
+			&file.AudioChannels, &file.HDR, &file.Container, &file.Bitrate, &file.FileSize, &file.EditionKey, &videoJSON, &audioJSON,
+			&file.FilePath); err != nil {
 			return fmt.Errorf("scanning admin catalog version: %w", err)
 		}
 		if len(videoJSON) > 0 {
@@ -360,7 +368,7 @@ func adminCatalogVersion(file *models.MediaFile) AdminCatalogVersion {
 		FileID: file.ID, LibraryID: file.MediaFolderID, Resolution: file.Resolution,
 		CodecVideo: file.CodecVideo, CodecAudio: file.CodecAudio, AudioChannels: file.AudioChannels,
 		Container: file.Container, BitrateKbps: file.Bitrate, FileSize: file.FileSize,
-		Edition: naming.EditionDisplayLabel(file.EditionKey),
+		Edition: naming.EditionDisplayLabel(file.EditionKey), FilePath: file.FilePath,
 	}
 	if len(file.VideoTracks) > 0 {
 		primary := file.VideoTracks[0]

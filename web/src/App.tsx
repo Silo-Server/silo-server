@@ -34,6 +34,7 @@ import { requestAdminMessages, useT } from "@/i18n";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { RouteLoading } from "@/components/RouteLoading";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
@@ -162,6 +163,7 @@ const HomeScreenSettings = lazy(() => import("@/pages/settings/HomeScreenSetting
 const TitlePagesSettings = lazy(() => import("@/pages/settings/TitlePagesSettings"));
 const PersonalizeSettings = lazy(() => import("@/pages/settings/PersonalizeSettings"));
 const ConnectAppsSettings = lazy(() => import("@/pages/settings/ConnectAppsSettings"));
+const ApiKeysSettings = lazy(() => import("@/pages/settings/ApiKeysSettings"));
 const InterfaceSettings = lazy(() => import("@/pages/settings/InterfaceSettings"));
 const AccountSettings = lazy(() => import("@/pages/settings/AccountSettings"));
 const WatchPartyHub = lazy(() => import("@/pages/watchtogether/WatchPartyHub"));
@@ -689,6 +691,7 @@ function AppRoutes() {
                   <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="your-data" element={<YourDataSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
+                  <Route path="api-keys" element={<ApiKeysSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
                 </Route>
                 <Route
@@ -852,10 +855,14 @@ function AdminRealtimeEventChannels() {
   useEventChannel("scans");
   useEventChannel("settings");
   useEventChannel("download_preparations");
+  // A background helper on every page: if its chunk fails to load, go without
+  // it rather than take the page down.
   return (
-    <Suspense fallback={null}>
-      <AdminDownloadPreparationsRefresh />
-    </Suspense>
+    <LocalErrorBoundary>
+      <Suspense fallback={null}>
+        <AdminDownloadPreparationsRefresh />
+      </Suspense>
+    </LocalErrorBoundary>
   );
 }
 

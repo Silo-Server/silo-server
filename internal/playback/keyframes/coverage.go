@@ -127,7 +127,7 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 			}
 			clusterTicks, haveTicks = matroska.Uint(b), true
 		case idSimpleBlock:
-			track, rel, flags, err := readBlockHeader(r, data, size)
+			track, rel, flags, _, err := readBlockHeader(r, data, size)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -176,19 +176,20 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 }
 
 // readBlockHeader reads a (Simple)Block's track number, timestamp relative
-// to its cluster, and flags.
-func readBlockHeader(r io.ReaderAt, off, size int64) (track uint64, rel int64, flags byte, err error) {
+// to its cluster, flags, and the header's length, after which the frame
+// data starts.
+func readBlockHeader(r io.ReaderAt, off, size int64) (track uint64, rel int64, flags byte, headerLen int64, err error) {
 	var buf [12]byte
 	n := min(int64(len(buf)), size)
 	if _, err := r.ReadAt(buf[:n], off); err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 	track, trackLen, ok := matroska.ReadVint(buf[:n], false)
 	if !ok || int64(trackLen+3) > n {
-		return 0, 0, 0, fmt.Errorf("short block header at %d", off)
+		return 0, 0, 0, 0, fmt.Errorf("short block header at %d", off)
 	}
 	rel = int64(int16(binary.BigEndian.Uint16(buf[trackLen:])))
-	return track, rel, buf[trackLen+2], nil
+	return track, rel, buf[trackLen+2], int64(trackLen + 3), nil
 }
 
 // readBlockGroup reads a BlockGroup's block header, whether it is a keyframe
@@ -208,7 +209,7 @@ func readBlockGroup(r io.ReaderAt, off, size int64) (track uint64, rel int64, ke
 		}
 		switch id {
 		case idBlock:
-			track, rel, _, err = readBlockHeader(r, at+headerLen, childSize)
+			track, rel, _, _, err = readBlockHeader(r, at+headerLen, childSize)
 			if err != nil {
 				return 0, 0, false, 0, err
 			}

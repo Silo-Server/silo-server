@@ -54,7 +54,7 @@ func (ProfileExportDocument) Schema(huma.Registry) *huma.Schema {
 type ProfileExportCapability struct {
 	Capability
 	Format         string   `json:"format" doc:"The document format exports carry and imports accept" example:"silo-profile-export"`
-	Version        int      `json:"version" doc:"The newest format version this server writes and reads" example:"1"`
+	Version        int      `json:"version" doc:"The newest format version this server writes and reads" example:"2"`
 	MaxImportBytes int      `json:"max_import_bytes" doc:"The largest document an import accepts"`
 	DataTypes      []string `json:"data_types" doc:"The data types an export carries, in import order"`
 }

@@ -48,7 +48,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
 import { toast } from "sonner";
 import type { ReactNode } from "react";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 
 // Example paths and URLs shown as placeholders; not translated.
 const LOCAL_PATH_EXAMPLE = "/catalog-seeds/my-catalog.json.gz";
@@ -502,7 +502,7 @@ export default function AdminCatalogMaintenance() {
           {importJobsQuery.isFetching ? (
             <Badge variant="outline">{t("web.admin.catalogMaintenance.jobs.refreshing")}</Badge>
           ) : (
-            <Badge variant="secondary">{importJobs.length}</Badge>
+            <Badge variant="secondary">{numberText(importJobs.length)}</Badge>
           )}
         </div>
         <JobPageControls
@@ -605,7 +605,7 @@ export default function AdminCatalogMaintenance() {
           {exportJobsQuery.isFetching ? (
             <Badge variant="outline">{t("web.admin.catalogMaintenance.jobs.refreshing")}</Badge>
           ) : (
-            <Badge variant="secondary">{exportJobs.length}</Badge>
+            <Badge variant="secondary">{numberText(exportJobs.length)}</Badge>
           )}
         </div>
         <JobPageControls

@@ -582,6 +582,66 @@ func TestEventsSocketV2AdmitsMonitorKey(t *testing.T) {
 	}
 }
 
+// A user key opens the events socket as the profile it acts as: with the user
+// role even on an admin account, held to the channels of its event scopes, and
+// rechecked against the key, its binding and the profile's viewer scope.
+func TestEventsSocketV2AdmitsUserKey(t *testing.T) {
+	f := newMonitorKeySocket(t)
+	h, keys := f.h, f.keys
+	f.viewer.scope = access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}
+	keys.key.Store(&models.APIKeyMetadata{ID: 3, UserID: 7, ProfileID: "kid", Scopes: []string{auth.ScopeWatchRead}, Revision: 40})
+	identity := evt.SocketIdentity{UserID: 7, Role: "user", APIKeyID: 3, ProfileID: "kid", AccessExpiresAt: time.Now().Add(evt.APIKeySocketMaxLifetime)}
+	mint := func() evt.SocketIdentity {
+		t.Helper()
+		ticket, err := h.Mint(t.Context(), identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := h.Tickets.Consume(t.Context(), ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return proof
+	}
+	proof := mint()
+	if proof.AccessFingerprint == "" || proof.APIKeyRevision != 40 || proof.ProfileID != "kid" {
+		t.Fatalf("user key ticket = %+v", proof)
+	}
+	_, claims, err := h.Validate(t.Context(), proof)
+	if err != nil || claims.Role != "user" || claims.TokenType != auth.TokenTypeAPIKey || claims.APIKeyProfileID != "kid" {
+		t.Fatalf("user key claims = %+v, %v", claims, err)
+	}
+	if channels := allowedChannelsForClaims(claims); !slices.Equal(channels, []evt.EventChannel{evt.ChannelUserState}) {
+		t.Fatalf("watch:read key channels = %v", channels)
+	}
+	both := *claims
+	both.APIKeyScopes = []string{auth.ScopeCatalogRead, auth.ScopeWatchRead, auth.ScopeNotifications, auth.ScopeRequests}
+	if channels := allowedChannelsForClaims(&both); !slices.Equal(channels, []evt.EventChannel{evt.ChannelCatalog, evt.ChannelUserState, evt.ChannelNotifications}) {
+		t.Fatalf("user key channels = %v", channels)
+	}
+	accessChanged := func(name string, proof evt.SocketIdentity) {
+		t.Helper()
+		if _, _, err := h.Validate(t.Context(), proof); !errors.Is(err, errSocketAccessChanged) {
+			t.Fatalf("%s: error = %v, want an access change", name, err)
+		}
+	}
+	other := proof
+	other.ProfileID = "parent"
+	accessChanged("another profile than the key's", other)
+	f.viewer.scope.PolicyRevision = 2
+	accessChanged("changed viewer scope", proof)
+	f.viewer.scope.PolicyRevision = 1
+	keys.edit(func(k *models.APIKeyMetadata) { k.Scopes = []string{auth.ScopeRequests} })
+	accessChanged("event scope removed", proof)
+	if _, err := h.Mint(t.Context(), identity); err == nil {
+		t.Fatal("key without an event scope minted")
+	}
+	keys.key.Store(nil)
+	if _, _, err := h.Validate(t.Context(), proof); !errors.Is(err, evt.ErrSocketTicket) || errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("revoked key: %v", err)
+	}
+}
+
 // A revoked key closes an open monitoring socket at the next recheck.
 func TestEventsSocketV2ClosesWhenKeyRevoked(t *testing.T) {
 	f := newMonitorKeySocket(t)

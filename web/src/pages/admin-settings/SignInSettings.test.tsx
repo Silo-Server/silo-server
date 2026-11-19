@@ -39,6 +39,7 @@ vi.mock("@/hooks/useSettingsForm", () => ({
       save: state.save,
       discard: state.discard,
       isSaving: false,
+      envVar: () => undefined,
     };
   },
 }));

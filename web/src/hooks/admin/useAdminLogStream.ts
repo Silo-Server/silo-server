@@ -43,11 +43,7 @@ export function applyAdminLogAppend<T extends { id: number }>(rows: T[], entry: 
   return next.slice(0, limit);
 }
 
-export function applyAdminLogAppends<T extends { id: number }>(
-  rows: T[],
-  entries: T[],
-  limit: number,
-) {
+function applyAdminLogAppends<T extends { id: number }>(rows: T[], entries: T[], limit: number) {
   return entries.reduce((current, entry) => applyAdminLogAppend(current, entry, limit), rows);
 }
 

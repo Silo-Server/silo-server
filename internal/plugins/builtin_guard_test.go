@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -20,24 +21,6 @@ func TestReservedPluginIDRejected(t *testing.T) {
 	}
 	if isReservedPluginID("community.example") {
 		t.Error("community plugin ids must stay installable")
-	}
-}
-
-// PreloadEnabled must skip builtin installations explicitly: the sentinel
-// install path has no manifest on disk, and without the skip preload would
-// fail (its caller is log.Fatalf) or at best emit spurious warnings.
-func TestPreloadEnabledSkipsBuiltinInstallation(t *testing.T) {
-	store := newFakeServiceInstallationStore(&Installation{
-		ID:          1,
-		PluginID:    "silo.builtin",
-		Kind:        KindBuiltin,
-		Enabled:     true,
-		InstallPath: "/nonexistent/silo-builtin",
-	})
-	svc := &Service{installations: store}
-
-	if err := svc.PreloadEnabled(context.Background()); err != nil {
-		t.Fatalf("PreloadEnabled with builtin-only store = %v, want nil (builtin must be skipped)", err)
 	}
 }
 
@@ -118,8 +101,8 @@ func TestInstallationStoreUpdateFailureDB(t *testing.T) {
 	// A failure recorded against a version that is no longer installed (a
 	// manual update won the race) leaves the row alone.
 	stale := "0.9.0"
-	if err := store.Update(ctx, id, UpdateInstallationInput{IfVersion: &stale, UpdateFailure: &UpdateFailure{Version: "2.0.0", Reason: "late", FailedAt: failedAt}}); err != nil {
-		t.Fatalf("stale guarded write = %v, want a no-op", err)
+	if err := store.Update(ctx, id, UpdateInstallationInput{IfVersion: &stale, UpdateFailure: &UpdateFailure{Version: "2.0.0", Reason: "late", FailedAt: failedAt}}); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("stale guarded write = %v, want ErrInstallationChanged", err)
 	}
 	if got := readFailure(); got == nil || got.Version != "1.1.0" {
 		t.Fatalf("failure after stale guarded write = %+v, want the 1.1.0 record kept", got)

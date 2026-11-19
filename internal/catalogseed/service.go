@@ -31,6 +31,9 @@ var (
 	ErrUnsupportedBundleVersion = errors.New("unsupported catalog seed version")
 	ErrInvalidConflictMode      = errors.New("invalid catalog seed conflict mode")
 	ErrInvalidBundle            = errors.New("invalid catalog seed bundle")
+	// ErrReadingSource reports that reading the bundle's source failed
+	// partway, for example a storage read that was cut off.
+	ErrReadingSource = errors.New("reading catalog seed source")
 )
 
 type UnmatchedRootsError struct {
@@ -83,10 +86,21 @@ func (s *Service) Export(ctx context.Context, opts ExportOptions) ([]byte, error
 }
 
 func (s *Service) Import(ctx context.Context, data []byte, opts ImportOptions) (*ImportResult, error) {
-	return s.ImportWithProgress(ctx, data, opts, nil)
+	return s.ImportReader(ctx, bytes.NewReader(data), opts, nil)
 }
 
 func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts ImportOptions, progress func(ImportProgress)) (*ImportResult, error) {
+	return s.ImportReader(ctx, bytes.NewReader(data), opts, progress)
+}
+
+// ImportReader imports the gzipped bundle read from r. It decodes the bundle
+// one record at a time, so neither the gzip nor the raw JSON stays in memory,
+// builds insert rows one batch at a time, and drops each section of the bundle
+// once it is written. Memory still grows with the decoded bundle, which is
+// held until validation passes and its sections are written.
+//
+//nolint:funlen,gocyclo // both write paths as they were before reading moved to a stream; splitting them is separate work
+func (s *Service) ImportReader(ctx context.Context, r io.Reader, opts ImportOptions, progress func(ImportProgress)) (*ImportResult, error) {
 	if opts.ConflictMode == "" {
 		opts.ConflictMode = ConflictModeSkipExisting
 	}
@@ -106,7 +120,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	}
 
 	reportProgress("Reading catalog bundle", 0, 0)
-	bundle, err := decodeBundle(data)
+	bundle, err := decodeBundle(r)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +171,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 		return nil, err
 	}
 	result.EmbeddingsSkipped = len(bundle.Embeddings) - len(embeddings)
+	bundle.Embeddings = nil
 	currentWork += result.EmbeddingsSkipped
 	folderIDMap := make(map[int]int, len(libraries))
 	for _, library := range libraries {
@@ -177,25 +192,6 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 
 	if emptyTarget {
 		// Empty-target fast path: use COPY protocol for maximum throughput.
-		itemRows := make([][]any, 0, len(bundle.Items))
-		for _, item := range bundle.Items {
-			studios, networks, countries, keywords := itemRecordStringArrays(item)
-			contentRatingAge := access.StoredRating(item.ContentRating)
-			advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
-			itemRows = append(itemRows, []any{
-				item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
-				item.ContentRating, item.Runtime, item.Overview, item.Tagline,
-				item.RatingIMDB, item.RatingTMDB, item.RatingRTCritic, item.RatingRTAudience,
-				item.ImdbID, item.TmdbID, item.TvdbID,
-				item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
-				item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
-				studios, networks, countries, keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
-				item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
-				item.CreatedAt, item.UpdatedAt,
-				contentRatingAge,
-				advisoryAge, advisorySource,
-			})
-		}
 		if err := copyInsertBatches(ctx, tx, "media_items",
 			[]string{
 				"content_id", "type", "title", "sort_title", "original_title", "year", "genres",
@@ -210,7 +206,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				"content_rating_age",
 				"advisory_age", "advisory_source",
 			},
-			itemRows, func(processed int) {
+			bundle.Items, rowsOf(itemRow), func(processed int) {
 				currentWork += processed
 				reportProgress("Importing catalog items", currentWork, totalWork)
 			}); err != nil {
@@ -229,11 +225,13 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 		if err := importTMDBRatingSources(ctx, tx, bundle.Items, itemStates, bundle.Manifest.TMDBRatingSources); err != nil {
 			return nil, err
 		}
+		bundle.Items = nil
 
 		reportProgress("Importing people", currentWork, totalWork)
 		if err := s.replacePeople(ctx, tx, bundle.People, itemStates, ConflictModeOverwrite, result); err != nil {
 			return nil, err
 		}
+		bundle.People = nil
 		if err := s.importEmbeddings(ctx, tx, embeddings, true, result, func(processed int) {
 			currentWork += processed
 			reportProgress("Importing embeddings", currentWork, totalWork)
@@ -246,19 +244,16 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 		currentWork++
 		reportProgress("Importing embeddings", currentWork, totalWork)
 
-		seasonRows := make([][]any, 0, len(bundle.Seasons))
+		// Child sections are filtered in place: the bundle belongs to this
+		// import, and a filtered copy would double each section.
+		seasons := bundle.Seasons[:0]
 		seasonIDs := make(map[string]struct{}, len(bundle.Seasons))
 		for _, season := range bundle.Seasons {
 			if _, ok := itemIDs[season.SeriesID]; !ok {
 				continue // skip orphan season
 			}
 			seasonIDs[season.ContentID] = struct{}{}
-			seasonRows = append(seasonRows, []any{
-				season.ContentID, season.SeriesID, season.SeasonNumber, season.Title, season.Overview, season.AirDate,
-				season.PosterPath, season.PosterThumbhash, season.MetadataS3Path, season.MetadataEtag,
-				season.CreatedAt, season.UpdatedAt, cloneInts(season.LockedFields),
-				season.OriginalTitle, season.Tagline, season.ImdbID, season.TmdbID, season.TvdbID,
-			})
+			seasons = append(seasons, season)
 		}
 		if err := copyInsertBatches(ctx, tx, "seasons",
 			[]string{
@@ -266,15 +261,16 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				"poster_path", "poster_thumbhash", "metadata_s3_path", "metadata_etag", "created_at", "updated_at", "locked_fields",
 				"original_title", "tagline", "imdb_id", "tmdb_id", "tvdb_id",
 			},
-			seasonRows, func(processed int) {
+			seasons, rowsOf(seasonRow), func(processed int) {
 				currentWork += processed
 				reportProgress("Importing seasons", currentWork, totalWork)
 			}); err != nil {
 			return nil, err
 		}
-		result.SeasonsCreated = len(seasonRows)
+		result.SeasonsCreated = len(seasons)
+		bundle.Seasons = nil
 
-		episodeRows := make([][]any, 0, len(bundle.Episodes))
+		episodes := bundle.Episodes[:0]
 		episodeIDs := make(map[string]struct{}, len(bundle.Episodes))
 		for _, episode := range bundle.Episodes {
 			// Skip episodes whose series or season doesn't exist.
@@ -287,13 +283,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				}
 			}
 			episodeIDs[episode.ContentID] = struct{}{}
-			episodeRows = append(episodeRows, []any{
-				episode.ContentID, episode.SeriesID, nullableString(episode.SeasonID), episode.SeasonNumber, episode.EpisodeNumber,
-				episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.RatingIMDB, episode.RatingTMDB,
-				episode.StillPath, episode.StillThumbhash, episode.MetadataS3Path, episode.MetadataEtag,
-				episode.CreatedAt, episode.UpdatedAt, cloneInts(episode.LockedFields),
-				episode.SortTitle, episode.OriginalTitle, episode.Tagline,
-			})
+			episodes = append(episodes, episode)
 		}
 		if err := copyInsertBatches(ctx, tx, "episodes",
 			[]string{
@@ -302,15 +292,16 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				"still_path", "still_thumbhash", "metadata_s3_path", "metadata_etag", "created_at", "updated_at", "locked_fields",
 				"sort_title", "original_title", "tagline",
 			},
-			episodeRows, func(processed int) {
+			episodes, rowsOf(episodeRow), func(processed int) {
 				currentWork += processed
 				reportProgress("Importing episodes", currentWork, totalWork)
 			}); err != nil {
 			return nil, err
 		}
-		result.EpisodesCreated = len(episodeRows)
+		result.EpisodesCreated = len(episodes)
+		bundle.Episodes = nil
 
-		rewrittenFiles := make([]FileRecord, 0, len(bundle.Files))
+		rewrittenFiles := bundle.Files[:0]
 		for _, file := range bundle.Files {
 			// Skip files referencing non-existent items or episodes.
 			if file.ContentID != "" {
@@ -330,33 +321,6 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			rewritten.MediaFolderID = folderIDMap[file.MediaFolderID]
 			rewrittenFiles = append(rewrittenFiles, rewritten)
 		}
-		fileRows := make([][]any, 0, len(rewrittenFiles))
-		for _, file := range rewrittenFiles {
-			videoTracksJSON, jsonErr := json.Marshal(file.VideoTracks)
-			if jsonErr != nil {
-				return nil, fmt.Errorf("marshaling video tracks for %s: %w", file.FilePath, jsonErr)
-			}
-			audioTracksJSON, jsonErr := json.Marshal(file.AudioTracks)
-			if jsonErr != nil {
-				return nil, fmt.Errorf("marshaling audio tracks for %s: %w", file.FilePath, jsonErr)
-			}
-			subtitleTracksJSON, jsonErr := json.Marshal(file.SubtitleTracks)
-			if jsonErr != nil {
-				return nil, fmt.Errorf("marshaling subtitle tracks for %s: %w", file.FilePath, jsonErr)
-			}
-			externalSubtitlesJSON, jsonErr := json.Marshal(file.ExternalSubtitles)
-			if jsonErr != nil {
-				return nil, fmt.Errorf("marshaling external subtitles for %s: %w", file.FilePath, jsonErr)
-			}
-			fileRows = append(fileRows, []any{
-				nullableString(file.ContentID), nullableString(file.EpisodeID), nilIfZero(file.SeasonNumber), nilIfZero(file.EpisodeNumber),
-				file.MediaFolderID, file.FilePath, file.FileSize, nullableString(file.FileHash),
-				file.CodecVideo, file.CodecAudio, file.Resolution, nilIfZero(file.AudioChannels), file.HDR, file.Container,
-				nilIfZero(file.Duration), nilIfZero(file.Bitrate), videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON,
-				file.IntroStart, file.IntroEnd, file.CreditsStart, file.CreditsEnd,
-				nullableString(file.ProbeSource), file.ProbeUpdatedAt, file.MissingSince, file.CreatedAt, file.UpdatedAt,
-			})
-		}
 		if err := copyInsertBatches(ctx, tx, "media_files",
 			[]string{
 				"content_id", "episode_id", "season_number", "episode_number",
@@ -366,32 +330,33 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				"intro_start", "intro_end", "credits_start", "credits_end",
 				"probe_source", "probe_updated_at", "missing_since", "created_at", "updated_at",
 			},
-			fileRows, func(processed int) {
+			rewrittenFiles, rowsOf(fileCopyRow), func(processed int) {
 				currentWork += processed
 				reportProgress("Importing media files", currentWork, totalWork)
 			}); err != nil {
 			return nil, err
 		}
 		result.FilesCreated = len(rewrittenFiles)
+		bundle.Files = nil
 
-		linkRows := make([][]any, 0, len(bundle.LibraryLinks))
+		links := bundle.LibraryLinks[:0]
 		for _, link := range bundle.LibraryLinks {
 			if _, ok := itemIDs[link.ContentID]; !ok {
 				continue
 			}
-			linkRows = append(linkRows, []any{
-				link.ContentID, folderIDMap[link.MediaFolderID], link.FirstSeenAt,
-			})
+			link.MediaFolderID = folderIDMap[link.MediaFolderID]
+			links = append(links, link)
 		}
 		if err := copyInsertBatches(ctx, tx, "media_item_libraries",
 			[]string{"content_id", "media_folder_id", "first_seen_at"},
-			linkRows, func(processed int) {
+			links, rowsOf(libraryLinkRow), func(processed int) {
 				currentWork += processed
 				reportProgress("Linking items to libraries", currentWork, totalWork)
 			}); err != nil {
 			return nil, err
 		}
-		result.LinksCreated = len(linkRows)
+		result.LinksCreated = len(links)
+		bundle.LibraryLinks = nil
 
 		reportProgress("Finalizing catalog import", currentWork, totalWork)
 		if err := tx.Commit(ctx); err != nil {
@@ -417,35 +382,31 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	if err := importTMDBRatingSources(ctx, tx, bundle.Items, itemStates, bundle.Manifest.TMDBRatingSources); err != nil {
 		return nil, err
 	}
+	bundle.Items = nil
 
 	reportProgress("Importing people", currentWork, totalWork)
 	if err := s.replacePeople(ctx, tx, bundle.People, itemStates, opts.ConflictMode, result); err != nil {
 		return nil, fmt.Errorf("replacing people: %w", err)
 	}
+	bundle.People = nil
 	if err := s.importEmbeddings(ctx, tx, embeddings, false, result, func(processed int) {
 		currentWork += processed
 		reportProgress("Importing embeddings", currentWork, totalWork)
 	}); err != nil {
 		return nil, fmt.Errorf("importing embeddings: %w", err)
 	}
+	// Search updates are enqueued once, after the last section; each section
+	// adds its IDs once written, so it can be dropped.
+	searchIDs := catalogSeedSearchUpsertIDs(itemStates, embeddings, nil, nil)
 
 	// Batch import seasons.
-	seasonRows := make([][]any, 0, len(bundle.Seasons))
-	for _, season := range bundle.Seasons {
-		seasonRows = append(seasonRows, []any{
-			season.ContentID, season.SeriesID, season.SeasonNumber, season.Title, season.Overview, season.AirDate,
-			season.PosterPath, season.PosterThumbhash, season.MetadataS3Path, season.MetadataEtag,
-			season.CreatedAt, season.UpdatedAt, cloneInts(season.LockedFields),
-			season.OriginalTitle, season.Tagline, season.ImdbID, season.TmdbID, season.TvdbID,
-		})
-	}
-	seasonCounts, err := executeUpsertBatches(ctx, tx, `
+	seasonCounts, err := executeUpsertChunks(ctx, tx, `
 		INSERT INTO seasons (
 			content_id, series_id, season_number, title, overview, air_date,
 			poster_path, poster_thumbhash, metadata_s3_path, metadata_etag, created_at, updated_at, locked_fields,
 			original_title, tagline, imdb_id, tmdb_id, tvdb_id
 		) VALUES `,
-		seasonRows, 18, nil,
+		bundle.Seasons, rowsOf(seasonRow), 18, nil,
 		` ON CONFLICT (content_id) DO NOTHING`,
 		`
 		ON CONFLICT (content_id) DO UPDATE SET
@@ -475,26 +436,17 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	result.SeasonsCreated = seasonCounts.Created
 	result.SeasonsUpdated = seasonCounts.Updated
 	result.Skipped += seasonCounts.Skipped
+	bundle.Seasons = nil
 
 	// Batch import episodes.
-	episodeRows := make([][]any, 0, len(bundle.Episodes))
-	for _, episode := range bundle.Episodes {
-		episodeRows = append(episodeRows, []any{
-			episode.ContentID, episode.SeriesID, nullableString(episode.SeasonID), episode.SeasonNumber, episode.EpisodeNumber,
-			episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.RatingIMDB, episode.RatingTMDB,
-			episode.StillPath, episode.StillThumbhash, episode.MetadataS3Path, episode.MetadataEtag,
-			episode.CreatedAt, episode.UpdatedAt, cloneInts(episode.LockedFields),
-			episode.SortTitle, episode.OriginalTitle, episode.Tagline,
-		})
-	}
-	episodeCounts, err := executeUpsertBatches(ctx, tx, `
+	episodeCounts, err := executeUpsertChunks(ctx, tx, `
 		INSERT INTO episodes (
 			content_id, series_id, season_id, season_number, episode_number,
 			title, overview, air_date, runtime, rating_imdb, rating_tmdb,
 			still_path, still_thumbhash, metadata_s3_path, metadata_etag, created_at, updated_at, locked_fields,
 			sort_title, original_title, tagline
 		) VALUES `,
-		episodeRows, 21, nil,
+		bundle.Episodes, rowsOf(episodeRow), 21, nil,
 		` ON CONFLICT (content_id) DO NOTHING`,
 		`
 		ON CONFLICT (content_id) DO UPDATE SET
@@ -527,45 +479,18 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	result.EpisodesCreated = episodeCounts.Created
 	result.EpisodesUpdated = episodeCounts.Updated
 	result.Skipped += episodeCounts.Skipped
+	bundle.Episodes = nil
 
-	// Rewrite file paths and batch import files.
-	rewrittenFiles := make([]FileRecord, 0, len(bundle.Files))
-	for _, file := range bundle.Files {
+	// Rewrite file paths in place and batch import files.
+	for i, file := range bundle.Files {
 		rewritten, rewriteErr := rewriteFileRecord(file, rewrites, folderPaths)
 		if rewriteErr != nil {
 			return nil, rewriteErr
 		}
 		rewritten.MediaFolderID = folderIDMap[file.MediaFolderID]
-		rewrittenFiles = append(rewrittenFiles, rewritten)
+		bundle.Files[i] = rewritten
 	}
-	fileRows := make([][]any, 0, len(rewrittenFiles))
-	for _, file := range rewrittenFiles {
-		videoTracksJSON, jsonErr := json.Marshal(file.VideoTracks)
-		if jsonErr != nil {
-			return nil, fmt.Errorf("marshaling video tracks for %s: %w", file.FilePath, jsonErr)
-		}
-		audioTracksJSON, jsonErr := json.Marshal(file.AudioTracks)
-		if jsonErr != nil {
-			return nil, fmt.Errorf("marshaling audio tracks for %s: %w", file.FilePath, jsonErr)
-		}
-		subtitleTracksJSON, jsonErr := json.Marshal(file.SubtitleTracks)
-		if jsonErr != nil {
-			return nil, fmt.Errorf("marshaling subtitle tracks for %s: %w", file.FilePath, jsonErr)
-		}
-		externalSubtitlesJSON, jsonErr := json.Marshal(file.ExternalSubtitles)
-		if jsonErr != nil {
-			return nil, fmt.Errorf("marshaling external subtitles for %s: %w", file.FilePath, jsonErr)
-		}
-		fileRows = append(fileRows, []any{
-			nullableString(file.ContentID), nullableString(file.EpisodeID), nilIfZero(file.SeasonNumber), nilIfZero(file.EpisodeNumber),
-			file.MediaFolderID, file.FilePath, file.FileSize, nullableString(file.FileHash),
-			file.CodecVideo, file.CodecAudio, file.Resolution, nilIfZero(file.AudioChannels), file.HDR, file.Container,
-			nilIfZero(file.Duration), nilIfZero(file.Bitrate), string(videoTracksJSON), string(audioTracksJSON), string(subtitleTracksJSON), string(externalSubtitlesJSON),
-			file.IntroStart, file.IntroEnd, file.CreditsStart, file.CreditsEnd,
-			nullableString(file.ProbeSource), file.ProbeUpdatedAt, file.MissingSince, file.CreatedAt, file.UpdatedAt,
-		})
-	}
-	fileCounts, err := executeUpsertBatches(ctx, tx, `
+	fileCounts, err := executeUpsertChunks(ctx, tx, `
 		INSERT INTO media_files (
 			content_id, episode_id, season_number, episode_number,
 			media_folder_id, file_path, file_size, file_hash,
@@ -574,7 +499,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			intro_start, intro_end, credits_start, credits_end,
 			probe_source, probe_updated_at, missing_since, created_at, updated_at
 		) VALUES `,
-		fileRows, 29,
+		bundle.Files, rowsOf(fileUpsertRow), 29,
 		map[int]string{16: "::jsonb", 17: "::jsonb", 18: "::jsonb", 19: "::jsonb"},
 		` ON CONFLICT (file_path) DO NOTHING`,
 		`
@@ -616,16 +541,17 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	result.FilesCreated = fileCounts.Created
 	result.FilesUpdated = fileCounts.Updated
 	result.Skipped += fileCounts.Skipped
+	searchIDs = append(searchIDs, catalogSeedSearchUpsertIDs(nil, nil, bundle.Files, nil)...)
+	bundle.Files = nil
 
 	// Batch import library links.
-	linkRows := make([][]any, 0, len(bundle.LibraryLinks))
-	for _, link := range bundle.LibraryLinks {
-		linkRows = append(linkRows, []any{link.ContentID, folderIDMap[link.MediaFolderID], link.FirstSeenAt})
+	for i := range bundle.LibraryLinks {
+		bundle.LibraryLinks[i].MediaFolderID = folderIDMap[bundle.LibraryLinks[i].MediaFolderID]
 	}
-	linksAffected, err := executeInsertBatchesCounted(ctx, tx, `
+	linksAffected, err := executeInsertChunksCounted(ctx, tx, `
 		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
 		VALUES `,
-		linkRows, 3, nil,
+		bundle.LibraryLinks, rowsOf(libraryLinkRow), 3, nil,
 		` ON CONFLICT (content_id, media_folder_id) DO NOTHING`,
 		func(processed int) {
 			currentWork += processed
@@ -636,7 +562,11 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	}
 	result.LinksCreated = int(linksAffected)
 
-	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, catalogSeedSearchUpsertIDs(itemStates, embeddings, bundle.Files, bundle.LibraryLinks)); err != nil {
+	searchIDs = append(searchIDs, catalogSeedSearchUpsertIDs(nil, nil, nil, bundle.LibraryLinks)...)
+	bundle.LibraryLinks = nil
+	searchIDs = dedupeStrings(searchIDs)
+	sort.Strings(searchIDs)
+	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, searchIDs); err != nil {
 		return nil, fmt.Errorf("enqueueing catalog search seed import updates: %w", err)
 	}
 	currentWork++
@@ -648,6 +578,138 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 
 	reportProgress("Catalog import completed", totalWork, totalWork)
 	return result, nil
+}
+
+// itemRow is an item's media_items values, in column order.
+func itemRow(item ItemRecord) []any {
+	studios, networks, countries, keywords := itemRecordStringArrays(item)
+	contentRatingAge := access.StoredRating(item.ContentRating)
+	advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
+	return []any{
+		item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
+		item.ContentRating, item.Runtime, item.Overview, item.Tagline,
+		item.RatingIMDB, item.RatingTMDB, item.RatingRTCritic, item.RatingRTAudience,
+		item.ImdbID, item.TmdbID, item.TvdbID,
+		item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
+		item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
+		studios, networks, countries, keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
+		item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
+		item.CreatedAt, item.UpdatedAt,
+		contentRatingAge,
+		advisoryAge, advisorySource,
+	}
+}
+
+// seasonRow is a season's seasons values, in column order.
+func seasonRow(season SeasonRecord) []any {
+	return []any{
+		season.ContentID, season.SeriesID, season.SeasonNumber, season.Title, season.Overview, season.AirDate,
+		season.PosterPath, season.PosterThumbhash, season.MetadataS3Path, season.MetadataEtag,
+		season.CreatedAt, season.UpdatedAt, cloneInts(season.LockedFields),
+		season.OriginalTitle, season.Tagline, season.ImdbID, season.TmdbID, season.TvdbID,
+	}
+}
+
+// episodeRow is an episode's episodes values, in column order.
+func episodeRow(episode EpisodeRecord) []any {
+	return []any{
+		episode.ContentID, episode.SeriesID, nullableString(episode.SeasonID), episode.SeasonNumber, episode.EpisodeNumber,
+		episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.RatingIMDB, episode.RatingTMDB,
+		episode.StillPath, episode.StillThumbhash, episode.MetadataS3Path, episode.MetadataEtag,
+		episode.CreatedAt, episode.UpdatedAt, cloneInts(episode.LockedFields),
+		episode.SortTitle, episode.OriginalTitle, episode.Tagline,
+	}
+}
+
+// fileCopyRow is a file's media_files values for COPY, in column order.
+func fileCopyRow(file FileRecord) []any {
+	videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON := fileTracksJSON(file)
+	return []any{
+		nullableString(file.ContentID), nullableString(file.EpisodeID), nilIfZero(file.SeasonNumber), nilIfZero(file.EpisodeNumber),
+		file.MediaFolderID, file.FilePath, file.FileSize, nullableString(file.FileHash),
+		file.CodecVideo, file.CodecAudio, file.Resolution, nilIfZero(file.AudioChannels), file.HDR, file.Container,
+		nilIfZero(file.Duration), nilIfZero(file.Bitrate), videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON,
+		file.IntroStart, file.IntroEnd, file.CreditsStart, file.CreditsEnd,
+		nullableString(file.ProbeSource), file.ProbeUpdatedAt, file.MissingSince, file.CreatedAt, file.UpdatedAt,
+	}
+}
+
+// fileUpsertRow is a file's media_files values for INSERT, in column order,
+// with its track JSON as text for the statement to cast to jsonb.
+func fileUpsertRow(file FileRecord) []any {
+	videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON := fileTracksJSON(file)
+	return []any{
+		nullableString(file.ContentID), nullableString(file.EpisodeID), nilIfZero(file.SeasonNumber), nilIfZero(file.EpisodeNumber),
+		file.MediaFolderID, file.FilePath, file.FileSize, nullableString(file.FileHash),
+		file.CodecVideo, file.CodecAudio, file.Resolution, nilIfZero(file.AudioChannels), file.HDR, file.Container,
+		nilIfZero(file.Duration), nilIfZero(file.Bitrate), string(videoTracksJSON), string(audioTracksJSON), string(subtitleTracksJSON), string(externalSubtitlesJSON),
+		file.IntroStart, file.IntroEnd, file.CreditsStart, file.CreditsEnd,
+		nullableString(file.ProbeSource), file.ProbeUpdatedAt, file.MissingSince, file.CreatedAt, file.UpdatedAt,
+	}
+}
+
+// fileTracksJSON marshals a file's track lists for their jsonb columns. The
+// record types hold only strings, integers, and booleans, so marshaling them
+// cannot fail.
+func fileTracksJSON(file FileRecord) (video, audio, subtitles, external []byte) {
+	video, _ = json.Marshal(file.VideoTracks)
+	audio, _ = json.Marshal(file.AudioTracks)
+	subtitles, _ = json.Marshal(file.SubtitleTracks)
+	external, _ = json.Marshal(file.ExternalSubtitles)
+	return video, audio, subtitles, external
+}
+
+// libraryLinkRow is a link's media_item_libraries values, in column order.
+// The link's folder must already be the local one.
+func libraryLinkRow(link LibraryLinkRecord) []any {
+	return []any{link.ContentID, link.MediaFolderID, link.FirstSeenAt}
+}
+
+// rowsOf returns a builder for the rows of a batch of records.
+func rowsOf[T any](row func(T) []any) func([]T) [][]any {
+	return func(records []T) [][]any {
+		rows := make([][]any, 0, len(records))
+		for _, record := range records {
+			rows = append(rows, row(record))
+		}
+		return rows
+	}
+}
+
+// inChunks calls fn with consecutive chunks of at most size records.
+func inChunks[T any](records []T, size int, fn func(chunk []T) error) error {
+	for start := 0; start < len(records); start += size {
+		if err := fn(records[start:min(start+size, len(records))]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// executeUpsertChunks is executeUpsertBatches over records, building only one
+// batch of rows at a time.
+func executeUpsertChunks[T any](ctx context.Context, tx pgx.Tx, prefix string, records []T, buildRows func([]T) [][]any, columnsPerRow int, casts map[int]string, skipSuffix, upsertSuffix string, mode ConflictMode, onBatch func(processed int)) (batchUpsertCounts, error) {
+	var total batchUpsertCounts
+	err := inChunks(records, catalogImportBatchSize, func(chunk []T) error {
+		counts, err := executeUpsertBatches(ctx, tx, prefix, buildRows(chunk), columnsPerRow, casts, skipSuffix, upsertSuffix, mode, onBatch)
+		total.Created += counts.Created
+		total.Updated += counts.Updated
+		total.Skipped += counts.Skipped
+		return err
+	})
+	return total, err
+}
+
+// executeInsertChunksCounted is executeInsertBatchesCounted over records,
+// building only one batch of rows at a time.
+func executeInsertChunksCounted[T any](ctx context.Context, tx pgx.Tx, prefix string, records []T, buildRows func([]T) [][]any, columnsPerRow int, casts map[int]string, suffix string, onBatch func(processed int)) (int64, error) {
+	var total int64
+	err := inChunks(records, catalogImportBatchSize, func(chunk []T) error {
+		affected, err := executeInsertBatchesCounted(ctx, tx, prefix, buildRows(chunk), columnsPerRow, casts, suffix, onBatch)
+		total += affected
+		return err
+	})
+	return total, err
 }
 
 func (s *Service) exportFolders(ctx context.Context, libraryIDs []int) ([]LibraryRecord, error) {
@@ -893,23 +955,138 @@ func encodeBundle(bundle Bundle) ([]byte, error) {
 	return raw.Bytes(), nil
 }
 
-func decodeBundle(data []byte) (*Bundle, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(data))
+// decodeBundle reads a gzipped bundle from r. json.Decoder.Decode buffers a
+// whole JSON value before decoding it, so the bundle is walked one top-level
+// key and one section record at a time instead: decoding it in one call would
+// hold the raw JSON, several times the size of the gzip, beside the records.
+func decodeBundle(r io.Reader) (*Bundle, error) {
+	// A failure of the source itself, such as a storage read cut off midway,
+	// says nothing about the bundle, so it is reported apart from one.
+	source := &readErrorRecorder{r: r}
+	gz, err := gzip.NewReader(source)
 	if err != nil {
+		if source.err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrReadingSource, source.err)
+		}
 		return nil, fmt.Errorf("%w: opening catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 	defer gz.Close()
 
-	payload, err := io.ReadAll(gz)
-	if err != nil {
-		return nil, fmt.Errorf("%w: reading catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
-	}
-
+	unpacked := &readErrorRecorder{r: gz}
 	var bundle Bundle
-	if err := json.Unmarshal(payload, &bundle); err != nil {
+	if err := decodeBundleJSON(json.NewDecoder(unpacked), &bundle); err != nil {
+		if source.err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrReadingSource, source.err)
+		}
+		if unpacked.err != nil {
+			return nil, fmt.Errorf("%w: reading catalog seed bundle: %v", ErrInvalidBundle, unpacked.err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
+		}
 		return nil, fmt.Errorf("%w: decoding catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 	return &bundle, nil
+}
+
+// readErrorRecorder remembers the first error other than io.EOF from r, so a
+// failing source or a corrupt gzip stream is not reported as bad JSON.
+type readErrorRecorder struct {
+	r   io.Reader
+	err error
+}
+
+func (rr *readErrorRecorder) Read(p []byte) (int, error) {
+	n, err := rr.r.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) && rr.err == nil {
+		rr.err = err
+	}
+	return n, err
+}
+
+// decodeBundleJSON decodes the bundle object from dec as json.Unmarshal
+// would: keys match fields case-insensitively, unknown keys are skipped, a
+// null section is nil, and nothing but whitespace may follow the object.
+func decodeBundleJSON(dec *json.Decoder, bundle *Bundle) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch tok {
+	case nil:
+		// A null bundle decodes to an empty one.
+	case json.Delim('{'):
+		for dec.More() {
+			keyToken, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := keyToken.(string)
+			switch {
+			case strings.EqualFold(key, "manifest"):
+				err = dec.Decode(&bundle.Manifest)
+			case strings.EqualFold(key, "libraries"):
+				err = decodeSection(dec, &bundle.Libraries)
+			case strings.EqualFold(key, "items"):
+				err = decodeSection(dec, &bundle.Items)
+			case strings.EqualFold(key, "people"):
+				err = decodeSection(dec, &bundle.People)
+			case strings.EqualFold(key, "embeddings"):
+				err = decodeSection(dec, &bundle.Embeddings)
+			case strings.EqualFold(key, "seasons"):
+				err = decodeSection(dec, &bundle.Seasons)
+			case strings.EqualFold(key, "episodes"):
+				err = decodeSection(dec, &bundle.Episodes)
+			case strings.EqualFold(key, "files"):
+				err = decodeSection(dec, &bundle.Files)
+			case strings.EqualFold(key, "library_links"):
+				err = decodeSection(dec, &bundle.LibraryLinks)
+			default:
+				err = dec.Decode(&json.RawMessage{})
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if _, err := dec.Token(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("catalog seed bundle is %v, not an object", tok)
+	}
+	// Reading to the end also makes gzip verify the stream's checksum.
+	if tok, err := dec.Token(); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("unexpected %v after the catalog seed bundle", tok)
+	}
+	return nil
+}
+
+// decodeSection decodes one bundle section, a JSON array, record by record.
+func decodeSection[T any](dec *json.Decoder, records *[]T) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if tok == nil {
+		*records = nil
+		return nil
+	}
+	if tok != json.Delim('[') {
+		return fmt.Errorf("catalog seed section is %v, not an array", tok)
+	}
+	out := []T{}
+	for dec.More() {
+		var record T
+		if err := dec.Decode(&record); err != nil {
+			return err
+		}
+		out = append(out, record)
+	}
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+	*records = out
+	return nil
 }
 
 func prepareLibraries(records []LibraryRecord, rewrites []PathRewrite) ([]LibraryRecord, map[int][]string, []string, error) {
@@ -1320,28 +1497,15 @@ func (s *Service) importEmbeddings(ctx context.Context, tx pgx.Tx, embeddings []
 		}
 	}
 
-	rows := make([][]any, 0, len(embeddings))
 	for _, rec := range embeddings {
-		padded := rec.Embedding
-		if len(padded) > recommendations.CanonicalEmbeddingDimensions {
+		if len(rec.Embedding) > recommendations.CanonicalEmbeddingDimensions {
 			return fmt.Errorf(
 				"embedding vector length %d exceeds canonical dimension %d for media item %s",
-				len(padded),
+				len(rec.Embedding),
 				recommendations.CanonicalEmbeddingDimensions,
 				rec.MediaItemID,
 			)
 		}
-		if len(padded) < recommendations.CanonicalEmbeddingDimensions {
-			p := make([]float32, recommendations.CanonicalEmbeddingDimensions)
-			copy(p, padded)
-			padded = p
-		}
-		rows = append(rows, []any{
-			rec.MediaItemID,
-			pgvector.NewVector(padded),
-			rec.Model,
-			rec.CanonicalText,
-		})
 	}
 
 	batchCallback := func(processed int) {
@@ -1363,8 +1527,8 @@ func (s *Service) importEmbeddings(ctx context.Context, tx pgx.Tx, embeddings []
 			    updated_at     = NOW()`
 	}
 
-	for start := 0; start < len(rows); start += embeddingImportBatchSize {
-		end := min(start+embeddingImportBatchSize, len(rows))
+	for start := 0; start < len(embeddings); start += embeddingImportBatchSize {
+		end := min(start+embeddingImportBatchSize, len(embeddings))
 
 		var builder strings.Builder
 		builder.WriteString(`
@@ -1376,7 +1540,14 @@ func (s *Service) importEmbeddings(ctx context.Context, tx pgx.Tx, embeddings []
 				builder.WriteString(", ")
 			}
 			builder.WriteString(buildValuesClause(len(args)+1, 4, nil))
-			args = append(args, rows[rowIndex]...)
+			rec := embeddings[rowIndex]
+			padded := rec.Embedding
+			if len(padded) < recommendations.CanonicalEmbeddingDimensions {
+				p := make([]float32, recommendations.CanonicalEmbeddingDimensions)
+				copy(p, padded)
+				padded = p
+			}
+			args = append(args, rec.MediaItemID, pgvector.NewVector(padded), rec.Model, rec.CanonicalText)
 		}
 		builder.WriteString(suffix)
 
@@ -1633,27 +1804,22 @@ const copyBatchSize = 10000
 
 // copyInsertBatches uses PostgreSQL's COPY protocol for fast bulk loading.
 // Much faster than multi-row INSERT as it bypasses query parsing/planning.
-// Only suitable for empty tables (no ON CONFLICT support).
-func copyInsertBatches(ctx context.Context, tx pgx.Tx, table string, columns []string, rows [][]any, onBatch func(int)) error {
-	if len(rows) == 0 {
-		return nil
-	}
-
-	for start := 0; start < len(rows); start += copyBatchSize {
-		end := min(start+copyBatchSize, len(rows))
-		_, err := tx.CopyFrom(ctx,
+// Only suitable for empty tables (no ON CONFLICT support). It builds each
+// batch's rows from records only when that batch is sent.
+func copyInsertBatches[T any](ctx context.Context, tx pgx.Tx, table string, columns []string, records []T, buildRows func([]T) [][]any, onBatch func(int)) error {
+	return inChunks(records, copyBatchSize, func(chunk []T) error {
+		if _, err := tx.CopyFrom(ctx,
 			pgx.Identifier{table},
 			columns,
-			pgx.CopyFromRows(rows[start:end]),
-		)
-		if err != nil {
+			pgx.CopyFromRows(buildRows(chunk)),
+		); err != nil {
 			return fmt.Errorf("copy into %s: %w", table, err)
 		}
 		if onBatch != nil {
-			onBatch(end - start)
+			onBatch(len(chunk))
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func buildValuesClause(base, columns int, casts map[int]string) string {
@@ -2071,28 +2237,6 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 		return itemStates, 0, 0, 0, nil
 	}
 
-	rows := make([][]any, 0, len(items))
-	contentIDs := make([]string, 0, len(items))
-	for _, item := range items {
-		studios, networks, countries, keywords := itemRecordStringArrays(item)
-		contentRatingAge := access.StoredRating(item.ContentRating)
-		advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
-		contentIDs = append(contentIDs, item.ContentID)
-		rows = append(rows, []any{
-			item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
-			item.ContentRating, item.Runtime, item.Overview, item.Tagline,
-			item.RatingIMDB, item.RatingTMDB, item.RatingRTCritic, item.RatingRTAudience,
-			item.ImdbID, item.TmdbID, item.TvdbID,
-			item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
-			item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
-			studios, networks, countries, keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
-			item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
-			item.CreatedAt, item.UpdatedAt,
-			contentRatingAge,
-			advisoryAge, advisorySource,
-		})
-	}
-
 	const colCount = 46
 	prefix := `
 		INSERT INTO media_items (
@@ -2162,8 +2306,8 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 		RETURNING content_id, (xmax = 0)`
 	}
 
-	for start := 0; start < len(rows); start += catalogImportBatchSize {
-		end := min(start+catalogImportBatchSize, len(rows))
+	for start := 0; start < len(items); start += catalogImportBatchSize {
+		end := min(start+catalogImportBatchSize, len(items))
 
 		var builder strings.Builder
 		builder.WriteString(prefix)
@@ -2173,7 +2317,7 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 				builder.WriteString(", ")
 			}
 			builder.WriteString(buildValuesClause(len(args)+1, colCount, nil))
-			args = append(args, rows[rowIndex]...)
+			args = append(args, itemRow(items[rowIndex])...)
 		}
 		builder.WriteString(suffix)
 
@@ -2197,7 +2341,8 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 			if queryErr = queryRows.Err(); queryErr != nil {
 				return nil, 0, 0, 0, fmt.Errorf("iterating imported items: %w", queryErr)
 			}
-			for _, cid := range contentIDs[start:end] {
+			for _, item := range items[start:end] {
+				cid := item.ContentID
 				if _, ok := createdSet[cid]; ok {
 					itemStates[cid] = true
 					created++

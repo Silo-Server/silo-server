@@ -49,6 +49,7 @@ import {
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { v2ErrorText } from "@/api/v2/request";
 import type {
   WebhookSyncConnection,
   WebhookSyncDiscoveredUser,
@@ -775,9 +776,7 @@ export default function WebhookSyncSettings() {
           <div className="flex items-start gap-2.5 rounded-md bg-red-500/10 px-3 py-2.5">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
             <p className="text-sm leading-relaxed text-red-300">
-              {connectionsQuery.error instanceof Error
-                ? connectionsQuery.error.message
-                : t("web.settings.webhooks.servers.loadFailed")}
+              {v2ErrorText(connectionsQuery.error, t("web.settings.webhooks.servers.loadFailed"))}
             </p>
           </div>
         ) : connections.length === 0 ? (
@@ -1022,9 +1021,10 @@ export default function WebhookSyncSettings() {
                       <div className="flex items-start gap-2.5 rounded-md bg-red-500/10 px-3 py-2.5">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                         <p className="text-sm leading-relaxed text-red-300">
-                          {mappingsQuery.error instanceof Error
-                            ? mappingsQuery.error.message
-                            : t("web.settings.webhooks.mapping.loadFailed")}
+                          {v2ErrorText(
+                            mappingsQuery.error,
+                            t("web.settings.webhooks.mapping.loadFailed"),
+                          )}
                         </p>
                       </div>
                     ) : mappingRows.length > 0 ? (
@@ -1202,9 +1202,7 @@ export default function WebhookSyncSettings() {
               <div className="flex items-start gap-2.5 rounded-md bg-red-500/10 px-3 py-2.5">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                 <p className="text-sm leading-relaxed text-red-300">
-                  {eventsQuery.error instanceof Error
-                    ? eventsQuery.error.message
-                    : t("web.settings.webhooks.deliveries.loadFailed")}
+                  {v2ErrorText(eventsQuery.error, t("web.settings.webhooks.deliveries.loadFailed"))}
                 </p>
               </div>
             ) : (eventsQuery.data?.length ?? 0) > 0 ? (
@@ -1329,6 +1327,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped <= 0}
                         onClick={() => setEventPage(0)}
                         title={t("web.settings.webhooks.deliveries.firstPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.firstPage")}
                       >
                         <ChevronsLeft className="h-3.5 w-3.5" />
                       </Button>
@@ -1339,6 +1338,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped <= 0}
                         onClick={() => setEventPage((p) => Math.max(0, p - 1))}
                         title={t("web.settings.webhooks.deliveries.previousPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.previousPage")}
                       >
                         <ChevronLeft className="h-3.5 w-3.5" />
                       </Button>
@@ -1349,6 +1349,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped >= eventTotalPages - 1}
                         onClick={() => setEventPage((p) => Math.min(eventTotalPages - 1, p + 1))}
                         title={t("web.settings.webhooks.deliveries.nextPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.nextPage")}
                       >
                         <ChevronRight className="h-3.5 w-3.5" />
                       </Button>
@@ -1359,6 +1360,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped >= eventTotalPages - 1}
                         onClick={() => setEventPage(eventTotalPages - 1)}
                         title={t("web.settings.webhooks.deliveries.lastPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.lastPage")}
                       >
                         <ChevronsRight className="h-3.5 w-3.5" />
                       </Button>

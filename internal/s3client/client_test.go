@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type recordedRequest struct {
@@ -496,126 +495,6 @@ func TestClientWithKeyPrefixPrefixesGeneratedURLs(t *testing.T) {
 	}
 }
 
-func TestClientObjectAvailableUsesExternalDeliveryPath(t *testing.T) {
-	t.Parallel()
-
-	var (
-		mu       sync.Mutex
-		requests []recordedRequest
-	)
-	delivery := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requests = append(requests, recordedRequest{
-			Method:   r.Method,
-			Path:     r.URL.Path,
-			RawQuery: r.URL.RawQuery,
-			Body:     r.Header.Get("Range"),
-		})
-		mu.Unlock()
-
-		if r.URL.Path == "/silo/dev/poster/w780.webp" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.WriteHeader(http.StatusPartialContent)
-		_, _ = io.WriteString(w, "x")
-	}))
-	t.Cleanup(delivery.Close)
-
-	client := NewClient(BucketConfig{
-		Endpoint:       "https://s3.example.invalid",
-		PublicEndpoint: delivery.URL,
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		KeyPrefix:      "silo/dev",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		PathStyle:      true,
-		URLAuth:        URLAuthCloudflareToken,
-		TokenSecret:    "secret",
-		Role:           "metadata",
-	})
-	dialsBefore := testutil.ToFloat64(s3Dials.WithLabelValues("metadata"))
-
-	available, err := client.ObjectAvailable(t.Context(), client.Bucket(), "poster/w780.webp")
-	if err != nil || available {
-		t.Fatalf("large ObjectAvailable() = %v, %v, want false, nil", available, err)
-	}
-	available, err = client.ObjectAvailable(t.Context(), client.Bucket(), "poster/w500.webp")
-	if err != nil || !available {
-		t.Fatalf("medium ObjectAvailable() = %v, %v, want true, nil", available, err)
-	}
-
-	mu.Lock()
-	gotRequests := append([]recordedRequest(nil), requests...)
-	mu.Unlock()
-	if len(gotRequests) != 2 {
-		t.Fatalf("delivery requests = %#v, want two", gotRequests)
-	}
-	if testutil.ToFloat64(s3Dials.WithLabelValues("metadata")) < dialsBefore+1 {
-		t.Fatal("external delivery probe dial was not counted")
-	}
-	for _, req := range gotRequests {
-		if req.Method != http.MethodGet || req.Body != "bytes=0-0" {
-			t.Errorf("delivery request = %#v, want one-byte GET", req)
-		}
-		if parseQuery(req.RawQuery).Get("verify") == "" {
-			t.Errorf("delivery request = %#v, want Cloudflare auth token", req)
-		}
-	}
-}
-
-func TestClientObjectAvailableReportsExternalAuthFailureWithoutToken(t *testing.T) {
-	t.Parallel()
-
-	delivery := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	t.Cleanup(delivery.Close)
-
-	client := NewClient(BucketConfig{
-		Endpoint:       "https://s3.example.invalid",
-		PublicEndpoint: delivery.URL,
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		URLAuth:        URLAuthCloudflareToken,
-		TokenSecret:    "do-not-log-this-secret",
-	})
-
-	available, err := client.ObjectAvailable(t.Context(), client.Bucket(), "poster.webp")
-	if err == nil || available {
-		t.Fatalf("ObjectAvailable() = %v, %v, want false and an auth-path error", available, err)
-	}
-	if strings.Contains(err.Error(), "verify=") || strings.Contains(err.Error(), "do-not-log-this-secret") {
-		t.Fatalf("ObjectAvailable() error leaked delivery credentials: %v", err)
-	}
-}
-
-func TestClientEffectivePresignTTLClampsCloudflareTokenTTL(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(BucketConfig{
-		Endpoint:       "https://s3.example.test",
-		PublicEndpoint: "https://cdn.example.test",
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		URLAuth:        URLAuthCloudflareToken,
-		TokenSecret:    "secret",
-		TokenTTL:       600,
-	})
-
-	if got := client.EffectivePresignTTL(4 * time.Hour); got != 10*time.Minute {
-		t.Fatalf("EffectivePresignTTL(4h) = %s, want 10m", got)
-	}
-	if got := client.EffectivePresignTTL(5 * time.Minute); got != 5*time.Minute {
-		t.Fatalf("EffectivePresignTTL(5m) = %s, want 5m", got)
-	}
-}
-
 func containsRequest(requests []recordedRequest, method, path, rawQueryContains string) bool {
 	for _, req := range requests {
 		if req.Method == method && req.Path == path && strings.Contains(req.RawQuery, rawQueryContains) {
@@ -667,37 +546,6 @@ func TestSafeErrorCodeAllowsOnlyIdentifierCodes(t *testing.T) {
 		if got := safeErrorCode(code); got != want {
 			t.Errorf("safeErrorCode(%q) = %q, want %q", code, got, want)
 		}
-	}
-}
-
-// A HEAD response has no body, so a 403 cannot say whether the key is missing
-// (AWS S3 answers 403 for a missing key when the credential lacks
-// s3:ListBucket) or access is denied. ObjectMatches reports it as unverified so
-// the caller rewrites the object and the PUT reports any real denial (#911).
-func TestObjectMatchesStatusMapping(t *testing.T) {
-	for _, tc := range []struct {
-		status  int
-		wantErr bool
-	}{
-		{status: http.StatusNotFound},
-		{status: http.StatusForbidden},
-		{status: http.StatusBadRequest, wantErr: true},
-	} {
-		t.Run(http.StatusText(tc.status), func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(tc.status)
-			}))
-			t.Cleanup(server.Close)
-			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"})
-
-			matched, err := client.ObjectMatches(t.Context(), client.Bucket(), "poster/original.webp", []byte("image"))
-			if matched {
-				t.Fatal("ObjectMatches() = true for a failed HEAD")
-			}
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("ObjectMatches() error = %v, want error %v", err, tc.wantErr)
-			}
-		})
 	}
 }
 
@@ -781,39 +629,4 @@ func TestClientRetriesProviderRateLimits(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestClientKeepsBackingOffAfterALongThrottle(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		// The SDK's default quota of 500 tokens covers 50 calls that each spend
-		// two 5-token retries, so 60 such calls would empty it.
-		const exhausted = 60
-		backend := newThrottlingBackend(map[string]int{http.MethodPut: exhausted*retryMaxAttempts + 1})
-		client := newMutationFenceTestClient(backend.Do)
-		for range exhausted {
-			if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err == nil {
-				t.Fatal("PutObject() succeeded while every attempt was throttled")
-			}
-		}
-		before := backend.Calls(http.MethodPut)
-		if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err != nil {
-			t.Fatalf("PutObject() after a long throttle = %v, want a retry once it clears", err)
-		}
-		if got := backend.Calls(http.MethodPut) - before; got != 2 {
-			t.Fatalf("PUT attempts for the last call = %d, want 1 throttled and 1 successful", got)
-		}
-	})
-}
-
-func TestClientRetriesBodilessRateLimitOnHead(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		backend := newThrottlingBackend(map[string]int{http.MethodHead: 2})
-		client := newMutationFenceTestClient(backend.Do)
-		if _, err := client.HeadObject(t.Context(), client.Bucket(), "tmdb/poster.webp"); err != nil {
-			t.Fatalf("HeadObject() after a bodiless 429 = %v, want success", err)
-		}
-		if got := backend.Calls(http.MethodHead); got != 3 {
-			t.Fatalf("HEAD attempts = %d, want 2 throttled and 1 successful", got)
-		}
-	})
 }

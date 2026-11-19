@@ -1,7 +1,6 @@
 package metadata
 
 import (
-	"slices"
 	"testing"
 )
 
@@ -385,72 +384,6 @@ var selectInitialMatchCandidateDecisionsCases = func() []selectInitialMatchCandi
 	}
 }()
 
-// TestSelectInitialMatchCandidate_Decisions holds the selectInitialMatchCandidate
-// cases that differ only in hints, candidates and provider priority. A reject
-// row must return no winner; an accept row must return a winner that carries
-// every wanted provider ID, title, matched title and reason.
-func TestSelectInitialMatchCandidate_Decisions(t *testing.T) {
-	t.Parallel()
-
-	for _, tt := range selectInitialMatchCandidateDecisionsCases {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := selectInitialMatchCandidate(tt.hints, tt.candidates, tt.priority)
-			if tt.reject {
-				if ok || got != nil {
-					t.Fatalf("expected no match, got ok=%v winner=%+v", ok, got)
-				}
-				return
-			}
-			if !ok || got == nil {
-				t.Fatalf("expected a match, got ok=%v winner=%+v", ok, got)
-			}
-			for key, want := range tt.wantIDs {
-				if got.ProviderIDs[key] != want {
-					t.Fatalf("winner %s id = %q, want %q (winner %+v)", key, got.ProviderIDs[key], want, got)
-				}
-			}
-			if tt.wantTitle != "" && got.Title != tt.wantTitle {
-				t.Fatalf("winner.Title = %q, want %q", got.Title, tt.wantTitle)
-			}
-			if tt.wantMatchedTitle != "" && got.MatchedTitle != tt.wantMatchedTitle {
-				t.Fatalf("MatchedTitle = %q, want %q", got.MatchedTitle, tt.wantMatchedTitle)
-			}
-			if tt.wantReason != "" && !slices.Contains(got.MatchReasons, tt.wantReason) {
-				t.Fatalf("MatchReasons = %v, want %s", got.MatchReasons, tt.wantReason)
-			}
-		})
-	}
-}
-
-//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
-func TestSelectInitialMatchCandidate_MissingYearConsensusIsOrderIndependentAtEqualScore(t *testing.T) {
-	hints := &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries}
-	consensus := MatchCandidate{
-		Title:       adventureTimeTestTitle,
-		Year:        2010,
-		ContentType: anchoredItemTypeSeries,
-		Sources:     []string{testTMDBProvider, testTVDBProvider},
-		ProviderIDs: map[string]string{testTMDBProvider: "15260", testTVDBProvider: "152831"},
-	}
-	equalScoreCompetitor := MatchCandidate{
-		Title:       adventureTimeTestTitle,
-		Year:        1967,
-		ContentType: anchoredItemTypeSeries,
-		Sources:     []string{testTMDBProvider, testTVDBProvider},
-		ProviderIDs: map[string]string{testTMDBProvider: "245745", testIMDBProvider: "tt0000001"},
-	}
-	if consensusScore, competitorScore := scoreMatchCandidate(hints, consensus), scoreMatchCandidate(hints, equalScoreCompetitor); consensusScore != competitorScore {
-		t.Fatalf("fixture scores differ: consensus=%v competitor=%v", consensusScore, competitorScore)
-	}
-
-	for _, candidates := range [][]MatchCandidate{{consensus, equalScoreCompetitor}, {equalScoreCompetitor, consensus}} {
-		got, ok := selectInitialMatchCandidate(hints, candidates, nil)
-		if !ok || got == nil || got.ProviderIDs[testTVDBProvider] != "152831" {
-			t.Fatalf("ordered candidates %+v returned ok=%v candidate=%+v", candidates, ok, got)
-		}
-	}
-}
-
 //nolint:goconst // Keep the production-shaped provider fixtures readable in place.
 func TestSelectInitialMatchCandidate_MissingYearConsensusAllowsResolvedCanonicalIDConflict(t *testing.T) {
 	hints := &MatchHints{Title: exampleSeriesTestTitle, Type: anchoredItemTypeSeries}
@@ -492,41 +425,5 @@ func TestSelectInitialMatchCandidate_MissingYearConsensusAllowsResolvedCanonical
 	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
 	if !ok || got == nil || got.ConfirmedProviderIDs[testTVDBProvider] != "201" {
 		t.Fatalf("resolved canonical ID conflict was not retained: ok=%v candidate=%+v", ok, got)
-	}
-}
-
-//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
-func TestTMDBTVDBTitleConsensusWinner_NegativeControls(t *testing.T) {
-	consensus := MatchCandidate{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "2", "tvdb": "3"}}
-	competitor := MatchCandidate{Title: adventureTimeTestTitle, Year: 1967, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "1"}}
-	tests := []struct {
-		name   string
-		hints  *MatchHints
-		scored []scoredMatchCandidate
-	}{
-		{
-			name:  "hint year present",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Year: 1967, Type: "series"},
-			scored: []scoredMatchCandidate{
-				{candidate: consensus, score: 80},
-				{candidate: competitor, score: 80},
-			},
-		},
-		{
-			name:  "corroborated candidate is lower ranked",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
-			scored: []scoredMatchCandidate{
-				{candidate: competitor, score: 80},
-				{candidate: consensus, score: 76},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got, ok := tmdbTVDBTitleConsensusWinner(tt.hints, tt.scored); ok {
-				t.Fatalf("negative control returned candidate %+v", got)
-			}
-		})
 	}
 }

@@ -156,7 +156,9 @@ Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
 Autoscan webhook endpoint secrets (`autoscan_webhook_endpoints.secret_ref`),
 push device APNs and FCM tokens (`push_devices`), notification webhook and
 server channel URLs and signing secrets (`notification_webhooks`,
-`notification_server_channels`), queued email-verification messages
+`notification_server_channels`), plugin notification destination settings
+(`notification_plugin_destinations.config_ciphertext`, AAD
+`notification_plugin_destination:<id>:config`), queued email-verification messages
 (`notification_email_verifications.payload_ciphertext`), plugin instance state
 (`plugin_instance_state.state_value`),
 history-import admin/session tokens, temporary server-list credentials and
@@ -170,7 +172,12 @@ state (`plugin_auth_identities.refresh_state`, AAD
 [external-sign-in.md](external-sign-in.md#provider-re-check)). After a
 `SECRET_KEY` change that state no longer decrypts: it is sent as none, the
 OIDC plugin answers `UNSUPPORTED`, and those identities' sessions fall back to
-the absolute session age until the person signs in again. Plugin runtime configuration is encrypted as one opaque
+the absolute session age until the person signs in again. A transcode node's
+request-signing key (`stream_nodes.node_key_ciphertext`, AAD
+`stream_nodes:node_key_ciphertext:<id>`) is written encrypted when it is issued
+and has no plaintext backfill; after a `SECRET_KEY` change it no longer decrypts
+and the node counts as keyless until an admin issues it a new key (see
+[transcode nodes](transcode-nodes.md#node-keys)). Plugin runtime configuration is encrypted as one opaque
 row-bound envelope rather than by manifest field. Consequently, runtime code
 must use `RuntimeConfigStore`; database JSON-member queries and indexes are not
 supported for `plugin_runtime_configs.config_value`.
