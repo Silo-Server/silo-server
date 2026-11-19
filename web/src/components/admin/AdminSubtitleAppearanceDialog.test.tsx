@@ -33,7 +33,7 @@ function renderDialog(
   onSave: (s: AdminDeviceSetting, value: string) => Promise<unknown>,
   onReset = vi.fn(),
 ) {
-  render(
+  return render(
     <AdminSubtitleAppearanceDialog
       setting={setting}
       isOverride
@@ -91,5 +91,18 @@ it("doesn't send a queued change after the override is reset", async () => {
   await act(async () => first.resolve());
 
   expect(onReset).toHaveBeenCalledTimes(1);
+  expect(onSave).toHaveBeenCalledTimes(1);
+});
+
+it("doesn't send a queued change after the editor closes", async () => {
+  const first = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const { unmount } = renderDialog(onSave);
+
+  fireEvent.click(radio("Large"));
+  fireEvent.click(radio("Monospace"));
+  unmount();
+  await act(async () => first.resolve());
+
   expect(onSave).toHaveBeenCalledTimes(1);
 });

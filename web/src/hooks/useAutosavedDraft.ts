@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Save<T> = (next: T) => Promise<unknown>;
 
@@ -51,9 +51,10 @@ function send<T>(
  * acknowledged value without undoing newer edits; callers report the failure
  * themselves (the save function may toast and rethrow).
  *
- * The queue keeps draining after the editor unmounts, so closing it right
- * after a change doesn't drop that change; call `discardQueued` before
- * clearing the stored value instead.
+ * Unmounting drops edits that haven't been sent, so nothing goes out after
+ * the editor is gone (where a reset or a reopened editor couldn't stop it);
+ * a save already in flight still completes. Call `discardQueued` before
+ * clearing the stored value while the editor is mounted.
  */
 export function useAutosavedDraft<T extends object>(initial: T) {
   const machine = useRef<Machine<T>>({
@@ -63,6 +64,14 @@ export function useAutosavedDraft<T extends object>(initial: T) {
     queuedSave: null,
   });
   const [view, setView] = useState({ value: initial, saving: false });
+
+  useEffect(() => {
+    const m = machine.current;
+    return () => {
+      m.queued = null;
+      m.queuedSave = null;
+    };
+  }, []);
 
   const publish = useCallback((m: Machine<T>) => {
     setView({
