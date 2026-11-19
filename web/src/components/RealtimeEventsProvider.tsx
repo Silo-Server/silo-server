@@ -345,8 +345,11 @@ function catalogEventLibraryID(data: unknown) {
   if (!data || typeof data !== "object" || !("library_id" in data)) {
     return undefined;
   }
+  // The server sends v2 string IDs; the query keys hold the library's number.
   const value = (data as { library_id?: unknown }).library_id;
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value)) return undefined;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : undefined;
 }
 
 function catalogEventContentID(data: unknown) {
