@@ -247,12 +247,9 @@ func (f *RemoteFetcher) fetch(ctx context.Context, id, rawURL string) (RemoteIma
 }
 
 func (f *RemoteFetcher) download(ctx context.Context, rawURL string) (RemoteImage, error) {
-	data, err := download(ctx, f.client, rawURL, true)
+	data, err := download(ctx, f.client, rawURL, true, remoteResultMaxBytes)
 	if err != nil {
 		return RemoteImage{}, err
-	}
-	if len(data) > remoteResultMaxBytes {
-		return RemoteImage{}, ErrRemoteTooLarge
 	}
 	contentType, ok := ServedImageType(data)
 	if !ok {
