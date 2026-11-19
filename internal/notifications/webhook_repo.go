@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -195,11 +194,10 @@ func (r *WebhookRepository) Delete(ctx context.Context, userID int, profileID, i
 	return err
 }
 
-// DeleteAllForProfile removes a deleted account profile's webhooks.
+// DeleteAllForProfile removes a deleted account profile's webhooks (see
+// deleteProfileTargetsInOrder for the locking).
 func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
-	return err
+	return deleteProfileTargetsInOrder(ctx, r.pool, "notification_webhooks", userID, profileID)
 }
 
 // RecordSuccess resets the failure streak after a delivered attempt.
@@ -268,30 +266,13 @@ func scanDeliveryAttempts(rows pgx.Rows) ([]DeliveryAttempt, error) {
 }
 
 // EnqueueAttempts inserts `pending` outbox rows inside the fanout
-// transaction. attempt_number starts at 0 (no send tried yet).
+// transaction. attempt_number starts at 0 (no send tried yet). A webhook
+// deleted after the caller listed it gets no attempt instead of aborting the
+// delivery transaction on the foreign key (see
+// PluginDestinationRepository.EnqueueAttempts).
 func (r *WebhookRepository) EnqueueAttempts(ctx context.Context, tx pgx.Tx, attempts []DeliveryAttempt) error {
-	if len(attempts) == 0 {
-		return nil
-	}
-	var sb strings.Builder
-	sb.WriteString(`
-		INSERT INTO webhook_delivery_attempts
-			(id, notification_delivery_id, webhook_id, attempt_number, outcome)
-		VALUES `)
-	args := make([]any, 0, len(attempts)*5)
-	for i, attempt := range attempts {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		base := len(args)
-		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5))
-		args = append(args, attempt.ID, attempt.NotificationDeliveryID, attempt.TargetID, 0, WebhookOutcomePending)
-	}
-	sb.WriteString(" ON CONFLICT DO NOTHING")
-	if _, err := tx.Exec(ctx, sb.String(), args...); err != nil {
-		return fmt.Errorf("enqueue webhook attempts: %w", err)
-	}
-	return nil
+	_, err := enqueueAttemptsForLiveTargets(ctx, tx, "webhook_delivery_attempts", "webhook_id", "notification_webhooks", attempts)
+	return err
 }
 
 // claimLease is how long a claimed attempt is invisible to other claimers. A

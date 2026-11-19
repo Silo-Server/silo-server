@@ -733,6 +733,18 @@ export function notificationToast(
       description: approved ? undefined : notification.reason_flags?.reason,
     };
   }
+  if (notification.type === "webhook.auto_disabled") {
+    return {
+      title: t("web.notifications.inbox.webhookStopped"),
+      description: t("web.notifications.inbox.fixInSettings"),
+    };
+  }
+  if (notification.type === "plugin_destination.auto_disabled") {
+    return {
+      title: t("web.notifications.inbox.destinationStopped"),
+      description: t("web.notifications.inbox.fixInSettings"),
+    };
+  }
   return null;
 }
 
