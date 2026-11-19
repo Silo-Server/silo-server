@@ -9,15 +9,18 @@ import (
 
 const startupDelay = 5 * time.Second
 
-// StartupTrigger fires once, shortly after Start() is called. Subsequent
-// calls to Start() (e.g. re-arming after execution) are no-ops.
+// StartupTrigger fires once, shortly after Start() is called. Once it has
+// fired, later calls to Start() (re-arming after execution) are no-ops. A
+// Stop before it fires, such as the rearm after a run that was already going
+// when this trigger was installed, leaves it unfired, so the next Start arms
+// it again.
 type StartupTrigger struct {
 	cfg     taskmanager.TriggerConfig
 	ch      chan struct{}
 	delay   time.Duration
 	nextRun time.Time
-	timer   *time.Timer
 	stopCh  chan struct{}
+	armed   bool
 	fired   bool
 	mu      sync.Mutex
 }
@@ -44,26 +47,32 @@ func (s *StartupTrigger) Start(_ *taskmanager.ExecutionResult) {
 		s.nextRun = time.Time{}
 		return
 	}
-	s.fired = true
+	if s.armed {
+		return
+	}
+	s.armed = true
 
 	stopCh := make(chan struct{})
 	s.nextRun = time.Now().Add(s.delay)
 	timer := time.NewTimer(s.delay)
 	s.stopCh = stopCh
-	s.timer = timer
 
 	go func() {
 		select {
 		case <-stopCh:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			timer.Stop()
 			return
 		case <-timer.C:
 			s.mu.Lock()
+			select {
+			case <-stopCh:
+				// Stopped as the timer fired: not fired, so Start rearms it.
+				s.mu.Unlock()
+				return
+			default:
+			}
+			s.armed = false
+			s.fired = true
 			s.nextRun = time.Time{}
 			s.mu.Unlock()
 			select {
@@ -84,6 +93,7 @@ func (s *StartupTrigger) Stop() {
 			close(s.stopCh)
 		}
 	}
+	s.armed = false
 	s.nextRun = time.Time{}
 }
 

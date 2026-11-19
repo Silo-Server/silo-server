@@ -53,7 +53,7 @@ func newTaskWorker(task Task, manager *TaskManager) *taskWorker {
 	}
 }
 
-// isRetired reports whether retire ran. Callers hold w.mu.
+// isRetired reports whether retire ran.
 func (w *taskWorker) isRetired() bool {
 	select {
 	case <-w.retired:
@@ -61,6 +61,13 @@ func (w *taskWorker) isRetired() bool {
 	default:
 		return false
 	}
+}
+
+// generation returns triggerGen.
+func (w *taskWorker) generation() uint64 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.triggerGen
 }
 
 // retire stops a worker its manager no longer holds: its triggers stop, its
@@ -84,6 +91,9 @@ func (w *taskWorker) retire() {
 	if cancel != nil {
 		cancel()
 	}
+	// Task lists refetch on task.updated, so they drop the task now
+	// rather than at their next refresh.
+	w.notify()
 }
 
 // info returns a snapshot of the worker's current state as a TaskInfo.

@@ -181,7 +181,7 @@ func registerAdminTasks(reg *Registry) {
 	cancel.Errors = append(cancel.Errors, http.StatusConflict)
 	Register(reg, cancel, reg.cancelAdminTask)
 	Register(reg, adminTaskOp("GET", "/{key}/triggers", "getAdminTaskSchedule", "Read persisted schedule configuration and its canonical validator."), reg.getAdminTaskSchedule)
-	update := adminTaskOp("PUT", "/{key}/triggers", "updateAdminTaskSchedule", "Replace a captured schedule and apply it on this process. Other processes reload on restart.")
+	update := adminTaskOp("PUT", "/{key}/triggers", "updateAdminTaskSchedule", "Replace a captured schedule and apply it on this process. Other processes install a plugin task's schedule at their next periodic plugin task sync, and a core task's when they restart.")
 	update.Guarded = true
 	Register(reg, update, reg.updateAdminTaskSchedule)
 	cursors := NewCursors(reg.deps.CursorSecret)

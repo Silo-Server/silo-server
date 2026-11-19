@@ -3742,7 +3742,7 @@ restart. An omitted `auto_provision` is true, and enabling an auth binding while
 is enabled is 409 `provider_already_enabled`
 ([external-sign-in.md](architecture/external-sign-in.md)). The task binding applies on
 every API server without a restart and answers 200 with `restart_required` false: a disabled
-binding removes the task from the task manager, an enabled one registers it while its
+binding removes the task from the task manager and cancels a run in progress, an enabled one registers it while its
 installation is enabled, and a changed trigger becomes the task's default schedule. Each
 server applies it at its next successful plugin task sync; this server attempts one before
 answering and retries a failed one. `restart_required` is true only on a server with

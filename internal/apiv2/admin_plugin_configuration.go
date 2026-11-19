@@ -191,7 +191,7 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		}
 		return &AdminPluginAuthBindingOutput{RestartRequired: authBindingRestartRequired}, nil
 	})
-	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
+	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task and cancels a run in progress, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
 	Register(reg, task, func(ctx context.Context, in *AdminPluginTaskBindingInput) (*AdminPluginTaskBindingOutput, error) {
 		if reg.deps.AdminPluginConfiguration == nil {
 			return nil, unavailable("plugin configuration")

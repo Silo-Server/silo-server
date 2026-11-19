@@ -272,29 +272,12 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}()
 		}
 
-		var firedTrigger Trigger
-		select {
-		case <-ctx.Done():
-			close(done)
+		firedTrigger, wait := m.awaitFiring(ctx, w, gen, fired)
+		close(done)
+		if wait == firingStop {
 			return
-		case <-w.retired:
-			close(done)
-			return
-		case <-w.triggerUpdate:
-			// Wait on the new triggers. An update never runs the task.
-			close(done)
-			continue
-		case firedTrigger = <-fired:
-			close(done)
 		}
-
-		// A trigger replaced since the loop read them fired before it
-		// stopped; the update that replaced it wakes the loop for the new
-		// ones.
-		w.mu.RLock()
-		replaced := w.triggerGen != gen
-		w.mu.RUnlock()
-		if replaced {
+		if wait == firingReplaced {
 			continue
 		}
 
@@ -313,6 +296,11 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 		if !shouldRun {
 			m.rearmTriggersFromNow(w)
 			continue
+		}
+		if w.isRetired() {
+			// Unregistered since the firing: claiming it would make every
+			// other server skip a firing this one won't run.
+			return
 		}
 		if !m.claimFiring(ctx, w, firedTrigger) {
 			// Another server runs this firing. Rearm from now, as after a
@@ -355,6 +343,41 @@ func (m *TaskManager) shouldRunScheduledTask(ctx context.Context, w *taskWorker)
 		return true, nil
 	}
 	return task.ShouldRun(ctx)
+}
+
+// firingWait is how awaitFiring ended.
+type firingWait int
+
+const (
+	firingRun      firingWait = iota // a current trigger fired
+	firingReplaced                   // the triggers changed: wait on the new ones
+	firingStop                       // the manager stopped or the task was retired
+)
+
+// awaitFiring waits for one of the triggers read at generation gen to fire.
+// An update signal for a generation the loop already read is stale (it was
+// sent while the loop ran the task or handled an earlier update) and is
+// ignored, so it can't discard a firing a forwarder already took from a
+// one-shot trigger. A firing from triggers replaced since gen is dropped:
+// the update that replaced them wakes the loop for the new ones.
+func (m *TaskManager) awaitFiring(ctx context.Context, w *taskWorker, gen uint64, fired <-chan Trigger) (Trigger, firingWait) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, firingStop
+		case <-w.retired:
+			return nil, firingStop
+		case <-w.triggerUpdate:
+			if w.generation() != gen {
+				return nil, firingReplaced
+			}
+		case tr := <-fired:
+			if w.generation() != gen {
+				return nil, firingReplaced
+			}
+			return tr, firingRun
+		}
+	}
 }
 
 // rearmTriggers stops and restarts all triggers for a worker.
@@ -588,7 +611,8 @@ func (m *TaskManager) GetSchedule(ctx context.Context, key string) (Schedule, er
 }
 
 // UpdateSchedule persists under the original revision and installs that schedule
-// on this process. Other running processes do not automatically reload it.
+// on this process. Other running processes reload it only through
+// ReloadSchedule, which the plugin task registry calls for plugin tasks.
 func (m *TaskManager) UpdateSchedule(ctx context.Context, key string, expected int64, configs []TriggerConfig) (Schedule, error) {
 	w, err := m.getWorker(key)
 	if err != nil {

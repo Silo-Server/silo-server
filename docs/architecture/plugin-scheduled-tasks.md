@@ -23,7 +23,9 @@ A plugin task runs the first of these:
    interval, `interval_ms` is at least 60000.
 4. One run shortly after the task starts on a server: at server start, and on
    a running server when the task registers (install or enable) or its
-   schedule changes to this one.
+   schedule changes to this one. That run claims its firing like any other,
+   so it is skipped within 10 minutes of the task's last claim (see "One run
+   per firing").
 
 "Can run" means a type the task manager knows (`interval`, `daily`, `weekly`,
 `startup`) with the fields that type reads: a positive interval, an `HH:MM`
@@ -85,8 +87,9 @@ Each API server syncs:
   `Service.AddLifecycleHook` hook: install, enable, disable, upgrade,
   uninstall, auto-update);
 - before a task binding write on that server returns. The write then
-  publishes `cache.EventPluginTasksChanged` on `cache.ChannelAdmin`, which only
-  task registries read;
+  publishes `cache.EventPluginTasksChanged` on `cache.ChannelAdmin`. It is
+  its own event type, so listeners that rebuild on `plugins_changed`, such as
+  proxy nodes and plugin event dispatchers, ignore it;
 - on every `cache.EventPluginTasksChanged` and `cache.EventPluginsChanged`,
   which lifecycle changes on other servers publish;
 - every `plugins.TaskSyncInterval` (one minute), and 10 seconds after a

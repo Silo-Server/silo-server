@@ -445,6 +445,78 @@ func TestReloadScheduleRunsTaskThatHadNoTriggers(t *testing.T) {
 	})
 }
 
+// gatedTask blocks its first run until release closes, then counts runs.
+type gatedTask struct {
+	stubTask
+	entered chan struct{}
+	release chan struct{}
+	runs    chan struct{}
+}
+
+func (t gatedTask) Execute(context.Context, taskmanager.ProgressReporter) error {
+	select {
+	case t.entered <- struct{}{}:
+		<-t.release
+	default:
+	}
+	t.runs <- struct{}{}
+	return nil
+}
+
+// A schedule edit during a run leaves its wake-up signal pending until the
+// run ends. That stale signal must not discard a firing of the new trigger:
+// triggers fire once until rearmed, so a dropped firing leaves the task
+// unscheduled.
+func TestScheduleEditDuringRunKeepsNextFiring(t *testing.T) {
+	for range 3000 {
+		synctest.Test(t, func(t *testing.T) {
+			const key = "plugin:7:sync"
+			hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+			var mu sync.Mutex
+			var armed []*fakeTrigger
+			factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+				tr := &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+				mu.Lock()
+				armed = append(armed, tr)
+				mu.Unlock()
+				return tr
+			}
+			latest := func() *fakeTrigger {
+				mu.Lock()
+				defer mu.Unlock()
+				return armed[len(armed)-1]
+			}
+			manager := taskmanager.New(&fakeTriggerRepository{}, fakeExecutionRepository{}, factory, slog.New(slog.DiscardHandler))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer synctest.Wait()
+			defer cancel()
+			task := gatedTask{
+				stubTask: stubTask{key: key, triggers: []taskmanager.TriggerConfig{hourly}},
+				entered:  make(chan struct{}, 1), release: make(chan struct{}), runs: make(chan struct{}, 2),
+			}
+			task.entered <- struct{}{} // consumed by the first run, which then waits
+			<-task.entered
+			manager.Register(task)
+			manager.Start(ctx)
+
+			latest().ch <- struct{}{}
+			synctest.Wait() // the first run waits on release
+			if err := manager.UpdateTriggers(key, []taskmanager.TriggerConfig{hourly}); err != nil {
+				t.Fatal(err)
+			}
+			latest().ch <- struct{}{} // the new trigger is already due
+			close(task.release)
+			<-task.runs
+			synctest.Wait()
+			select {
+			case <-task.runs:
+			default:
+				t.Fatal("the new trigger's firing was discarded")
+			}
+		})
+	}
+}
+
 type manualMarkerTask struct {
 	stubTask
 	seen chan bool

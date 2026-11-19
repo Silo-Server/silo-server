@@ -4006,7 +4006,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task and cancels a run in progress, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginTaskBinding"];
     post?: never;
     delete?: never;
@@ -5817,7 +5817,7 @@ export interface paths {
     };
     /** Read persisted schedule configuration and its canonical validator. */
     get: operations["getAdminTaskSchedule"];
-    /** Replace a captured schedule and apply it on this process. Other processes reload on restart. */
+    /** Replace a captured schedule and apply it on this process. Other processes install a plugin task's schedule at their next periodic plugin task sync, and a core task's when they restart. */
     put: operations["updateAdminTaskSchedule"];
     post?: never;
     delete?: never;

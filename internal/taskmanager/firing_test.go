@@ -180,3 +180,51 @@ func TestTriggerLoopRunsOnlyClaimedFirings(t *testing.T) {
 		t.Fatal("a won claim did not run the task")
 	}
 }
+
+// unregisteringTask is unregistered while its firing passes the preflight,
+// as when a plugin task registry sync removes it at that moment.
+type unregisteringTask struct {
+	claimingTask
+	m *TaskManager
+}
+
+func (t unregisteringTask) ShouldRun(context.Context) (bool, error) {
+	t.m.Unregister(t.Key())
+	return true, nil
+}
+
+// A worker retired after its trigger fired must not claim the firing: the
+// claim would make every other server skip a firing that runs nowhere.
+func TestRetiredWorkerDoesNotClaimFiring(t *testing.T) {
+	claims := &recordingClaims{win: true}
+	m := New(claimTestTriggers{}, claimTestExecutions{}, func(TriggerConfig) Trigger { return newTestTrigger() }, nil)
+	m.SetFiringClaims(claims)
+	task := unregisteringTask{claimingTask: claimingTask{ran: make(chan struct{}, 1)}, m: m}
+	m.Register(task)
+	w, err := m.getWorker(task.Key())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hourly := TriggerConfig{Type: TriggerTypeInterval, IntervalMs: 3_600_000}
+	w.setTriggers([]TriggerConfig{hourly}, func(cfg TriggerConfig) Trigger {
+		return configuredTrigger{testTrigger: newTestTrigger(), cfg: cfg}
+	}, nil, false)
+	loopDone := make(chan struct{})
+	go func() {
+		m.triggerLoop(ctx, w)
+		close(loopDone)
+	}() // the trigger fired when setTriggers started it
+
+	select {
+	case <-loopDone:
+	case <-time.After(time.Second):
+		t.Fatal("the retired worker's trigger loop did not end")
+	}
+	claims.mu.Lock()
+	defer claims.mu.Unlock()
+	if len(claims.slots) != 0 {
+		t.Fatalf("retired worker claimed %d firings, want none", len(claims.slots))
+	}
+}
