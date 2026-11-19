@@ -46969,7 +46969,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "작업은 서버가 시작될 때 등록되므로, 작업을 켜거나 끈 변경 사항은 재시작 후에 적용돼요. 작업이 생성된 후에는 해당 작업 페이지에서 일정을 변경하세요."
+      "value": "작업을 켜거나 끄면 재시작 없이 적용되지만, 다른 서버에 반영되기까지 잠시 걸릴 수 있어요. 작업을 켠 후에는 해당 작업 페이지에서 일정을 변경하세요."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -66611,6 +66611,12 @@
     {
       "type": 0,
       "value": "TV 로그인: 시작"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "포스터 요청"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

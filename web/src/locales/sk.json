@@ -64646,7 +64646,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Úlohy sa registrujú pri spustení servera, takže zapnutie alebo vypnutie úlohy sa prejaví až po reštarte. Keď úloha existuje, jej plán zmeníte na stránke úlohy."
+      "value": "Zapnutie alebo vypnutie úlohy sa prejaví bez reštartu, hoci ostatným serverom môže chvíľu trvať, kým zmenu zaznamenajú. Keď je úloha zapnutá, jej plán zmeníte na stránke úlohy."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -86865,6 +86865,12 @@
     {
       "type": 0,
       "value": "Prihlásenie na TV: začiatok"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Požiadavky na plagáty"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

@@ -58274,7 +58274,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Le attività vengono registrate all’avvio del server, quindi attivarne o disattivarne una ha effetto dopo un riavvio. Una volta creata un’attività, modificane la pianificazione nella sua pagina."
+      "value": "Attivare o disattivare un’attività ha effetto senza riavvio, anche se gli altri server possono impiegare qualche istante per recepire la modifica. Una volta attivata un’attività, modificane la pianificazione nella pagina dell’attività."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -79542,6 +79542,12 @@
     {
       "type": 0,
       "value": "Accesso TV: avvio"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Richieste di locandine"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

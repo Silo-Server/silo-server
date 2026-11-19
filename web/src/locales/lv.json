@@ -59417,7 +59417,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Uzdevumi tiek reģistrēti, kad serveris startē, tāpēc uzdevuma ieslēgšana vai izslēgšana stājas spēkā pēc restartēšanas. Kad uzdevums ir izveidots, mainiet tā grafiku uzdevuma lapā."
+      "value": "Uzdevuma ieslēgšana vai izslēgšana stājas spēkā bez restartēšanas, taču citiem serveriem var būt vajadzīgs brīdis, lai to pārņemtu. Kad uzdevums ir ieslēgts, mainiet tā grafiku uzdevuma lapā."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -80825,6 +80825,12 @@
     {
       "type": 0,
       "value": "Pierakstīšanās televizorā: sākšana"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakātu pieprasījumi"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

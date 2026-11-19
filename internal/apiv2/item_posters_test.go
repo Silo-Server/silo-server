@@ -214,6 +214,14 @@ func TestPosterResolveMemoBoundsPluginCalls(t *testing.T) {
 	if _, ok, full := memo.get("tmdb://poster/new", now.Add(itemPosterResolveMemo)); ok || full {
 		t.Fatalf("new path after expiry: ok=%v full=%v, want room", ok, full)
 	}
+	// A path whose plugin ran out of time answers busy, then is asked again.
+	memo.putBusy("tmdb://poster/slow", now.Add(itemPosterResolveMemo))
+	if _, ok, busy := memo.get("tmdb://poster/slow", now.Add(itemPosterResolveMemo+time.Second)); ok || !busy {
+		t.Fatalf("path after a plugin timeout: ok=%v busy=%v, want busy", ok, busy)
+	}
+	if _, ok, busy := memo.get("tmdb://poster/slow", now.Add(itemPosterResolveMemo+itemPosterResolveRetry)); ok || busy {
+		t.Fatalf("path after the retry wait: ok=%v busy=%v, want a new plugin call", ok, busy)
+	}
 }
 
 func TestItemPosterReusesPluginAnswerAfterDisconnect(t *testing.T) {

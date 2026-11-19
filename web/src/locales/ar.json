@@ -75206,7 +75206,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "تُسجَّل المهام عند بدء تشغيل الخادم، لذا لا يسري تفعيل مهمة أو تعطيلها إلا بعد إعادة التشغيل. بعد إنشاء المهمة، غيّر جدولتها من صفحة المهمة."
+      "value": "يسري تفعيل مهمة أو تعطيلها دون إعادة تشغيل، وإن كانت الخوادم الأخرى قد تستغرق لحظات لرصد التغيير. بعد تفعيل المهمة، غيّر جدولتها من صفحة المهمة."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -98739,6 +98739,12 @@
     {
       "type": 0,
       "value": "تسجيل الدخول على التلفزيون: البدء"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "طلبات الملصقات"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

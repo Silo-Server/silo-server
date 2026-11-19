@@ -55,13 +55,17 @@ const (
 	itemPosterResolveMemo = time.Minute
 	// itemPosterResolveTimeout bounds a plugin lookup that outlives its caller.
 	itemPosterResolveTimeout = 10 * time.Second
+	// itemPosterResolveRetry is how long a path whose plugin ran out of time
+	// answers busy before the plugin is asked again.
+	itemPosterResolveRetry = 10 * time.Second
 	// itemPosterResolveMax bounds how many plugin answers are kept.
 	itemPosterResolveMax = 4096
 )
 
 // errPosterResolveBusy reports that a plugin poster path has no answer yet:
 // the plugin-answer memo is full, so the path is refused instead of calling
-// its plugin on every request, or the plugin did not answer in time.
+// its plugin on every request, or the plugin did not answer in time and the
+// path is waiting out itemPosterResolveRetry.
 var errPosterResolveBusy = errors.New("poster resolution is busy")
 
 // itemPosterHandler serves GET /api/v2/item-posters/{content_id}.
@@ -83,16 +87,23 @@ type posterResolveMemo struct {
 }
 
 type posterResolution struct {
-	url   string
+	url string
+	// busy marks a path whose plugin ran out of time: no answer, and no new
+	// plugin call until the entry expires.
+	busy  bool
 	until time.Time
 }
 
-// get returns the remembered answer for path. full reports that there is
-// none and no room to keep a new one.
-func (m *posterResolveMemo) get(path string, now time.Time) (url string, ok, full bool) {
+// get returns the remembered answer for path. busy reports that there is
+// none and the plugin must not be asked now: the path is waiting out a
+// timeout, or there is no room to keep a new answer.
+func (m *posterResolveMemo) get(path string, now time.Time) (url string, ok, busy bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if entry, found := m.urls[path]; found && now.Before(entry.until) {
+		if entry.busy {
+			return "", false, true
+		}
 		return entry.url, true, false
 	}
 	if len(m.urls) < itemPosterResolveMax {
@@ -115,15 +126,23 @@ func (m *posterResolveMemo) get(path string, now time.Time) (url string, ok, ful
 }
 
 func (m *posterResolveMemo) put(path, url string, now time.Time) {
+	m.store(path, posterResolution{url: url, until: now.Add(itemPosterResolveMemo)})
+}
+
+// putBusy records that path's plugin ran out of time.
+func (m *posterResolveMemo) putBusy(path string, now time.Time) {
+	m.store(path, posterResolution{busy: true, until: now.Add(itemPosterResolveRetry)})
+}
+
+func (m *posterResolveMemo) store(path string, entry posterResolution) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.urls == nil {
 		m.urls = make(map[string]posterResolution)
 	}
-	until := now.Add(itemPosterResolveMemo)
-	m.urls[path] = posterResolution{url: url, until: until}
-	if len(m.urls) == 1 || m.firstExpiry.IsZero() {
-		m.firstExpiry = until
+	m.urls[path] = entry
+	if len(m.urls) == 1 || m.firstExpiry.IsZero() || entry.until.Before(m.firstExpiry) {
+		m.firstExpiry = entry.until
 	}
 }
 
@@ -307,9 +326,9 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 	// A plugin path: its plugin answers with a stored artwork route or a URL.
 	// The answer is reused for itemPosterResolveMemo, failures included, so a
 	// link cannot make the plugin work on every request.
-	resolved, known, full := h.resolved.get(posterPath, time.Now())
+	resolved, known, busy := h.resolved.get(posterPath, time.Now())
 	switch {
-	case full:
+	case busy:
 		return "", false, false, errPosterResolveBusy
 	case !known:
 		// Keep the plugin's answer for the next request even if this client leaves.
@@ -317,8 +336,10 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 		defer cancel()
 		resolved = h.posters.Presign(resolveCtx, posterPath)
 		// A plugin that ran out of time gave no answer. Keeping the empty
-		// result would hide a poster the plugin can still resolve.
+		// result for the whole memo would hide a poster the plugin can still
+		// resolve, so the path answers busy for a short while instead.
 		if resolveCtx.Err() != nil {
+			h.resolved.putBusy(posterPath, time.Now())
 			return "", false, false, errPosterResolveBusy
 		}
 		h.resolved.put(posterPath, resolved, time.Now())
