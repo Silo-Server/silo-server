@@ -21,6 +21,7 @@ import { useT } from "@/i18n";
 import {
   effectiveValue,
   evaluateShowWhen,
+  ownValue,
   validateSchemaValues,
   type SchemaOption,
 } from "./schemaFormUtils";
@@ -63,7 +64,7 @@ function optionsFor(
   dynamicOptions: Record<string, SchemaOption[]> | undefined,
 ): SchemaOption[] {
   if (field.dynamic_options) {
-    return dynamicOptions?.[field.key] ?? field.options ?? [];
+    return ownValue(dynamicOptions, field.key) ?? field.options ?? [];
   }
   return field.options ?? [];
 }
@@ -221,7 +222,7 @@ export function SchemaForm({
 
   // The reason a locked field cannot change, tied to its control.
   function renderLockNote(field: PluginAdminFormField): React.ReactNode {
-    const reason = lockedKeys[field.key];
+    const reason = ownValue(lockedKeys, field.key);
     return reason ? (
       <p id={lockNoteId(field)} className="text-muted-foreground text-xs">
         {reason}
@@ -231,7 +232,7 @@ export function SchemaForm({
 
   function renderControl(field: PluginAdminFormField): React.ReactNode {
     const id = `${idPrefix}-${field.key}`;
-    const locked = lockedKeys[field.key] !== undefined;
+    const locked = ownValue(lockedKeys, field.key) !== undefined;
     const describedBy = locked ? lockNoteId(field) : undefined;
 
     if (field.control === "SELECT") {
@@ -346,7 +347,7 @@ export function SchemaForm({
 
   // A non-switch field: label + optional description stacked above the control.
   function renderField(field: PluginAdminFormField): React.ReactNode {
-    const err = mergedErrors[field.key];
+    const err = ownValue(mergedErrors, field.key);
     // A field that only appears because its show_when passed reads as nested
     // under whatever toggle gates it (e.g. the anime overrides under anime_enabled).
     const nested = Boolean(field.show_when);
@@ -371,7 +372,7 @@ export function SchemaForm({
   // the toggle at the end. No outer border — the group container owns it.
   function renderSwitchRow(field: PluginAdminFormField): React.ReactNode {
     const id = `${idPrefix}-${field.key}`;
-    const err = mergedErrors[field.key];
+    const err = ownValue(mergedErrors, field.key);
     return (
       <div key={field.key} className="px-3.5 py-3 transition-colors">
         <div className="flex items-start gap-3">
@@ -380,8 +381,10 @@ export function SchemaForm({
             className="mt-0.5 shrink-0"
             checked={Boolean(effectiveValue(field, values))}
             onCheckedChange={(checked) => setField(field.key, checked)}
-            disabled={lockedKeys[field.key] !== undefined}
-            aria-describedby={lockedKeys[field.key] !== undefined ? lockNoteId(field) : undefined}
+            disabled={ownValue(lockedKeys, field.key) !== undefined}
+            aria-describedby={
+              ownValue(lockedKeys, field.key) !== undefined ? lockNoteId(field) : undefined
+            }
           />
           <div className="min-w-0 space-y-0.5">
             <Label htmlFor={id} className="cursor-pointer font-medium">
@@ -465,7 +468,7 @@ export function SchemaForm({
             section={section}
             values={values}
             fields={descriptor.fields}
-            forceOpen={section.field_keys.some((key) => mergedErrors[key] != null)}
+            forceOpen={section.field_keys.some((key) => ownValue(mergedErrors, key) != null)}
             expanded={expandSections}
             renderFields={(keys) => renderFieldList(resolveKeys(keys))}
           />
