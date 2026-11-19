@@ -857,3 +857,47 @@ func TestRebuiltSessionTakesItsSubtitleFromTheAttempt(t *testing.T) {
 		t.Fatalf("rebuilt card client %q subtitle %+v; want the live row's client and the attempt's subtitle", card.ClientName, card.Subtitle)
 	}
 }
+
+// TestRecoveryCardTakesItsSubtitleFromThePlan pins that a header-authenticated
+// recovery card reports the subtitle of the plan it is bound to: the card is
+// frozen before the transport attaches a sidecar, so it holds none of its own.
+func TestRecoveryCardTakesItsSubtitleFromThePlan(t *testing.T) {
+	plan := playback.PlanV3{PlanID: "plan-1", Subtitle: playback.SubtitleDecisionV3{
+		Mode: playback.SubtitleConvertV3, TrackID: "file:7:subtitle:2", Artifact: &playback.SubtitleArtifactV3{Format: "vtt"},
+		Inventory: []playback.SubtitleInventoryItemV3{{TrackID: "file:7:subtitle:2", Source: "external", Language: "en"}},
+	}}
+	attempts := playback.NewMemoryPlanStoreV3()
+	if err := attempts.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: "s-1", UserID: 7, ProfileID: "p-1",
+		CurrentPlanID: "plan-1", CurrentPlan: plan, ExpiresAt: time.Now().Add(time.Hour),
+		NormalizedRequest: playback.StartRequestV3{ClientFeatures: []string{playback.FeatureHeaderAuthenticatedMediaV3}}}); err != nil {
+		t.Fatal(err)
+	}
+	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{"s-1": {
+		SessionID: "s-1", UserID: 7, ProfileID: "p-1", PlanID: "plan-1", RequireMediaAuthorization: true, ClientName: "Silo Web",
+	}}}
+	card, err := storedSessionRecipeV3(t.Context(), recipes, attempts, "s-1", 7)
+	if err != nil || card == nil || card.Subtitle == nil || card.Subtitle.TrackID != "file:7:subtitle:2" || card.Subtitle.Delivery != "sidecar" {
+		t.Fatalf("recovery card = %+v, %v; want the plan's sidecar subtitle", card, err)
+	}
+}
+
+// TestLifecycleSweepRecordsTheAttemptsSubtitle pins that a sweep recording a
+// play's end from its start row keeps the subtitle its last replan committed,
+// not the one it started with: history keeps whichever end is later.
+func TestLifecycleSweepRecordsTheAttemptsSubtitle(t *testing.T) {
+	started := &playback.SessionSubtitle{TrackID: "file:42:subtitle:0", Source: "embedded", Delivery: "burn_in"}
+	admin := &liveRowAdminStore{live: &playback.Session{ID: "s-1", UserID: 7, ProfileID: "p-1", MediaFileID: 42,
+		PlayMethod: playback.PlayTranscode, StartedAt: time.Now().Add(-time.Hour), Position: 60, Subtitle: started}}
+	h := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile()).handler
+	store := playback.NewMemoryPlanStoreV3()
+	if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: "s-1", UserID: 7, ProfileID: "p-1",
+		CurrentPlanID: "plan-2", CurrentPlan: playback.PlanV3{Subtitle: playback.SubtitleDecisionV3{Mode: playback.SubtitleOffV3}},
+		ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	h.PlanStoreV3 = store
+	h.endLifecycleWith(t.Context(), nil, "s-1", PlaybackEndExpired, time.Now(), nil)
+	if len(admin.history) != 1 || admin.history[0].Subtitle != nil {
+		t.Fatalf("admin history = %+v, want one end with the subtitle turned off", admin.history)
+	}
+}

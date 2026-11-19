@@ -225,6 +225,10 @@ func storedSessionRecipeV3(ctx context.Context, recipes sessionRecipeStoreV3, at
 	if profileID := apimw.GetProfileID(ctx); profileID != "" && profileID != record.ProfileID {
 		return nil, nil
 	}
+	// The card was frozen before the transport attached its sidecar, and an
+	// executor move rewrites it from the moved transport; the plan it is bound
+	// to says what the session shows.
+	card.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
 	return card, nil
 }
 
