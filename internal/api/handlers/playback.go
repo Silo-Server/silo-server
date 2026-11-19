@@ -627,6 +627,12 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 				// cannot revive the old runtime on this origin.
 				return session, playback.SessionLoaded, nil, nil, nil
 			}
+			if card != nil && card.TranscodeNodeURL != "" {
+				// The card runs on a node this copy does not know about: another
+				// replica replanned the session there. The serve handler relays
+				// to the card's node; nothing is rebuilt here (#4601).
+				return session, playback.SessionLoaded, card, claims, nil
+			}
 			if card != nil {
 				if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
 					return nil, playback.SessionMissing, nil, nil, nil
@@ -2137,6 +2143,9 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 			return
 		}
 	}
+	if transcodeSession == nil && h.relayStaleCopyToCardNode(w, r, session, card, "/master.m3u8") {
+		return
+	}
 	if transcodeSession == nil {
 		// Local transcode whose process state was lost: reconstruct it from the
 		// token recipe. The manifest path has no segment context, so pass -1 (use
@@ -2273,6 +2282,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		if served {
 			return
 		}
+	}
+	if transcodeSession == nil && h.relayStaleCopyToCardNode(w, r, session, card, "/segment/"+chi.URLParam(r, "name")) {
+		return
 	}
 	if transcodeSession == nil {
 		// Resume near the segment the client is fetching so reconstruct does not

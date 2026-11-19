@@ -149,6 +149,42 @@ func (h *PlaybackHandler) remoteTransportDenied(w http.ResponseWriter, r *http.R
 	return true
 }
 
+// relayStaleCopyToCardNode serves a manifest or segment request from the node
+// the request's recipe card names when this replica's copy of the session
+// names no node. Without session affinity that copy can predate a replan made
+// on another replica. It reports whether a response was written.
+//
+// It only relays. When the node cannot be reached the session is reported
+// missing so the client replans: the card may be older than this copy, so
+// neither a local rebuild nor a move to another executor is safe from it.
+func (h *PlaybackHandler) relayStaleCopyToCardNode(
+	w http.ResponseWriter,
+	r *http.Request,
+	session *playback.Session,
+	card *playback.RecipeCard,
+	suffix string,
+) bool {
+	if session == nil || session.TranscodeNodeURL != "" || card == nil || card.TranscodeNodeURL == "" {
+		return false
+	}
+	transportID := card.TranscodeTransportID
+	if transportID == "" {
+		transportID = session.ID
+	}
+	if transportID != session.ID && h.StreamDeny.Denied(r.Context(), transportID) {
+		writePlaybackSessionEnded(w)
+		return true
+	}
+	h.touchSessionActivity(session.ID)
+	if err := h.relayToTranscodeNode(w, r, card.TranscodeNodeURL, "/transcode/"+transportID+suffix); err != nil {
+		slog.WarnContext(r.Context(), "could not relay a stale session copy to its card's transcode node",
+			"component", "api", "node", logredact.SanitizeURL(card.TranscodeNodeURL),
+			"playback_session_id", session.ID, "error", logredact.SanitizeText(err.Error()))
+		writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
+	}
+	return true
+}
+
 // relayOrRehomeTranscode serves a manifest or segment request for a transcode
 // that runs on a transcode node and leaves through this server. suffix is the
 // node route after the transport id ("/master.m3u8" or "/segment/<name>").

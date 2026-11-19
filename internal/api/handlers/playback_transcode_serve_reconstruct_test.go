@@ -58,6 +58,73 @@ func TestTranscodeServeReconstructsPlainTranscodeFromTokenOnLiveSession(t *testi
 	}
 }
 
+// Without session affinity, a replica can keep the copy of a session it
+// started (direct play, or an earlier local transcode) after another replica
+// replans it onto a transcode node. The client's new token names that node.
+// This replica relays to it and never starts its own FFmpeg (#4601). When
+// the node cannot be reached the client hears 404 and replans.
+func TestTranscodeServeStaleCopyRelaysToTheTokensNode(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		method    playback.PlayMethod
+		reachable bool
+	}{
+		{"direct copy", playback.PlayDirect, true},
+		{"local transcode copy", playback.PlayTranscode, true},
+		{"node unreachable", playback.PlayDirect, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionMgr := playback.NewSessionManager(0, 0)
+			handler := newKeyedPlaybackHandler(sessionMgr)
+			handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), t.TempDir())
+			handler.JWTSecret = "test-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("test-secret")
+			node, hits := countingNode(t, http.StatusOK)
+			nodeURL := node.URL
+			if !tc.reachable {
+				nodeURL = unreachableNodeURL(t)
+			}
+
+			stale, err := sessionMgr.StartSession(1, "profile-1", 42, tc.method, true)
+			if err != nil {
+				t.Fatalf("start live session: %v", err)
+			}
+			card := playback.NewRecipeCard(1, "profile-1", 42, nodeURL, playback.TranscodeOpts{
+				SessionID: stale.ID, InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+				AudioTrackIndex: -1, SubtitleTrackIndex: -1,
+			})
+			token := handler.signSessionToken(card, false)
+			if token == "" {
+				t.Fatal("sign stream token returned empty")
+			}
+
+			rec := httptest.NewRecorder()
+			handler.HandleGetTranscodeManifest(rec, playbackTestRequest(http.MethodGet,
+				"/api/v2/playback/transcode/"+stale.ID+"/master.m3u8?st="+token,
+				nil, map[string]string{"session_id": stale.ID}))
+			t.Cleanup(func() {
+				if ts := handler.tm.GetTranscodeSession(stale.ID); ts != nil {
+					_ = ts.Close()
+				}
+			})
+
+			if handler.tm.GetTranscodeSession(stale.ID) != nil {
+				t.Fatal("started a local transcode for a session that runs on a node")
+			}
+			if tc.reachable {
+				if rec.Code != http.StatusOK || rec.Body.String() != "node answer" || hits.Load() != 1 {
+					t.Fatalf("status = %d, body = %q, node hits = %d; want the node's manifest", rec.Code, rec.Body.String(), hits.Load())
+				}
+				return
+			}
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, body = %s, want 404 so the client replans", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 // TestTranscodeServePlainCardRecoveryFailureStays404 pins that a plain
 // transcode whose token recipe cannot be rebuilt keeps the 404 semantics of
 // the second-chance reconstruct branch instead of degrading into a 503.
