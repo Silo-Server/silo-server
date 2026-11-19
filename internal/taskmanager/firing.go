@@ -130,7 +130,11 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 			"task", w.task.Key(), "trigger", trigger.Type)
 		return false
 	}
-	won, err := claims.ClaimFiring(ctx, w.task.Key(), slot, window, firedAt)
+	// A waiting claim holds this worker's admission lock. Bound how long a
+	// database stall can delay a task edit or retirement.
+	claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	won, err := claims.ClaimFiring(claimCtx, w.task.Key(), slot, window, firedAt)
 	if err != nil {
 		m.logger.WarnContext(ctx, "claiming scheduled task firing failed; skipping it",
 			"task", w.task.Key(), "error", err)

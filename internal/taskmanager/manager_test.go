@@ -317,7 +317,7 @@ func TestStartTaskReservesBeforeAcknowledgment(t *testing.T) {
 	if _, err := manager.StartTask(task.Key()); !errors.Is(err, taskmanager.ErrTaskAlreadyRunning) {
 		t.Fatalf("second start: %v", err)
 	}
-	if err := manager.CancelTask(task.Key()); err != nil {
+	if _, err := manager.CancelTask(task.Key()); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -387,7 +387,7 @@ func TestTaskManagerRegisterAndUnregisterAfterStart(t *testing.T) {
 	default:
 		t.Fatal("Unregister left the trigger armed")
 	}
-	if err := manager.CancelTask(key); !errors.Is(err, taskmanager.ErrTaskNotFound) {
+	if _, err := manager.CancelTask(key); !errors.Is(err, taskmanager.ErrTaskNotFound) {
 		t.Fatalf("CancelTask after Unregister = %v, want ErrTaskNotFound", err)
 	}
 	select {
@@ -432,7 +432,7 @@ func TestReloadScheduleRunsTaskThatHadNoTriggers(t *testing.T) {
 		if err := triggerRepo.SetTriggers(ctx, key, []taskmanager.TriggerConfig{hourly}); err != nil {
 			t.Fatal(err)
 		}
-		if err := manager.ReloadSchedule(ctx, key); err != nil {
+		if err := manager.ReloadSchedule(ctx, key, false); err != nil {
 			t.Fatal(err)
 		}
 		synctest.Wait()
@@ -453,10 +453,14 @@ type gatedTask struct {
 	runs    chan struct{}
 }
 
-func (t gatedTask) Execute(context.Context, taskmanager.ProgressReporter) error {
+func (t gatedTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
 	select {
 	case t.entered <- struct{}{}:
-		<-t.release
+		select {
+		case <-t.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	default:
 	}
 	t.runs <- struct{}{}

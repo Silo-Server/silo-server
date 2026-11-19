@@ -295,7 +295,11 @@ func TestTaskRegistryRetriesFailedSyncNowAfterTheWait(t *testing.T) {
 		manager := taskmanager.New(&memoryTriggerStore{saved: map[string][]taskmanager.TriggerConfig{}}, noExecutions{},
 			func(cfg taskmanager.TriggerConfig) taskmanager.Trigger { return idleTrigger{cfg: cfg} }, slog.New(slog.DiscardHandler))
 		defer manager.Stop()
-		registry := NewTaskRegistry(&fakeInstallationStore{}, bindings, nil, manager)
+		installations := &fakeInstallationStore{
+			installations: []*Installation{{ID: 5}},
+			capabilities:  map[int][]*Capability{5: {scheduledTaskCapability(t, "sync", "", nil)}},
+		}
+		registry := NewTaskRegistry(installations, bindings, nil, manager)
 		go registry.RunSyncs(ctx, time.Hour, TaskSyncRetryWait)
 		synctest.Wait()
 

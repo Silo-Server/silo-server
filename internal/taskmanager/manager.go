@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,7 +30,9 @@ type TaskManager struct {
 	firingClaims   FiringClaims
 	// startCtx is the context Start ran under, nil before Start. A task
 	// registered later runs its trigger loop under it.
-	startCtx context.Context //nolint:containedctx // Start's context outlives the call: tasks registered after Start run under it
+	startCtx  context.Context //nolint:containedctx // Start's context outlives the call: tasks registered after Start run under it
+	stopLoops context.CancelFunc
+	stopped   atomic.Bool
 }
 
 // New creates a new TaskManager.
@@ -72,66 +75,104 @@ func (m *TaskManager) SetLibraryTypes(fn LibraryTypesFunc) {
 // registered with no automatic runs until ReloadSchedule or an edit installs
 // one; RegisterLive reports the failure instead.
 func (m *TaskManager) Register(task Task) {
-	w, ctx := m.add(task)
-	if ctx == nil {
-		return
-	}
-	if err := m.startWorker(ctx, w); err != nil {
-		m.logger.ErrorContext(ctx, "failed to load triggers", "task", task.Key(), "error", err)
+	if err := m.register(context.Background(), task, false); err != nil {
+		m.logger.Error("failed to load triggers", "task", task.Key(), "error", err)
 	}
 }
 
 // RegisterLive is Register for a caller that retries, such as the plugin
 // task registry: when Start has run and the task's schedule cannot be read,
 // it leaves no task under the key and returns the error.
-func (m *TaskManager) RegisterLive(task Task) error {
-	w, ctx := m.add(task)
-	if ctx == nil {
-		return nil
-	}
-	err := m.startWorker(ctx, w)
-	if err != nil {
-		m.mu.Lock()
-		if m.tasks[task.Key()] == w {
-			delete(m.tasks, task.Key())
-		}
-		m.mu.Unlock()
-		w.retire()
-	}
-	return err
+func (m *TaskManager) RegisterLive(ctx context.Context, task Task) error {
+	return m.register(ctx, task, true)
 }
 
-// add installs a worker for task, retiring the one it replaces, and returns
-// Start's context, nil before Start.
-func (m *TaskManager) add(task Task) (*taskWorker, context.Context) {
+// register initializes a live worker before exposing it to callers.
+func (m *TaskManager) register(loadCtx context.Context, task Task, requireSchedule bool) error {
 	w := newTaskWorker(task, m)
+	key := task.Key()
 	m.mu.Lock()
-	replaced := m.tasks[task.Key()]
-	m.tasks[task.Key()] = w
 	ctx := m.startCtx
+	if m.stopped.Load() {
+		m.mu.Unlock()
+		return context.Canceled
+	}
+	if ctx == nil {
+		replaced := m.tasks[key]
+		m.tasks[key] = w
+		m.mu.Unlock()
+		if replaced != nil {
+			replaced.retire()
+		}
+		return nil
+	}
+	m.mu.Unlock()
+
+	if !requireSchedule {
+		loadCtx = ctx
+	}
+	err := m.loadWorker(loadCtx, w)
+	if err != nil && requireSchedule {
+		return err
+	}
+	m.mu.Lock()
+	replaced := m.tasks[key]
+	if m.stopped.Load() || ctx.Err() != nil {
+		m.mu.Unlock()
+		w.stopTriggers()
+		return context.Canceled
+	}
+	if replaced != nil && replaced.isRetired() {
+		m.mu.Unlock()
+		w.stopTriggers()
+		return ErrTaskAlreadyRunning
+	}
+	m.tasks[key] = w
 	m.mu.Unlock()
 	if replaced != nil {
 		replaced.retire()
 	}
-	return w, ctx
+	go m.triggerLoop(ctx, w)
+	w.notify()
+	return err
 }
 
 // Unregister removes a task: its triggers stop, its trigger loop ends and a
 // run in progress is canceled. Its saved schedule and history stay, so
 // registering the key again resumes that schedule. An unknown key is ignored.
 func (m *TaskManager) Unregister(key string) {
+	w, err := m.getWorker(key)
+	if err != nil {
+		return
+	}
+	w.retire()
+	m.removeRetiredWorker(w)
+}
+
+// A retired worker is hidden immediately. Keep it under its key until
+// Execute returns, so a rapid disable and enable cannot start a second run.
+func (m *TaskManager) removeRetiredWorker(w *taskWorker) {
+	if !w.isRetired() {
+		return
+	}
 	m.mu.Lock()
-	w := m.tasks[key]
-	delete(m.tasks, key)
-	m.mu.Unlock()
-	if w != nil {
-		w.retire()
+	defer m.mu.Unlock()
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	key := w.task.Key()
+	if m.tasks[key] == w && w.state == TaskStateIdle {
+		delete(m.tasks, key)
 	}
 }
 
 // Start loads triggers from the repository and begins all scheduling loops.
 func (m *TaskManager) Start(ctx context.Context) {
 	m.mu.Lock()
+	if m.stopped.Load() {
+		m.mu.Unlock()
+		return
+	}
+	ctx, m.stopLoops = context.WithCancel(ctx)
 	m.startCtx = ctx //nolint:fatcontext // set once, by Start
 	workers := make([]*taskWorker, 0, len(m.tasks))
 	for _, w := range m.tasks {
@@ -140,16 +181,17 @@ func (m *TaskManager) Start(ctx context.Context) {
 	m.mu.Unlock()
 
 	for _, w := range workers {
-		if err := m.startWorker(ctx, w); err != nil {
+		if err := m.loadWorker(ctx, w); err != nil {
 			m.logger.ErrorContext(ctx, "failed to load triggers", "task", w.task.Key(), "error", err)
 		}
+		go m.triggerLoop(ctx, w)
+		w.notify()
 	}
 	m.logger.InfoContext(ctx, "task manager started", "tasks", len(workers))
 }
 
-// startWorker loads a task's last result and schedule (savedSchedule) and
-// starts its trigger loop. It returns a schedule read failure.
-func (m *TaskManager) startWorker(ctx context.Context, w *taskWorker) error {
+// loadWorker loads a task's last result and schedule before its loop starts.
+func (m *TaskManager) loadWorker(ctx context.Context, w *taskWorker) error {
 	key := w.task.Key()
 	latest, err := m.historyRepo.GetLatest(ctx, key)
 	if err == nil && latest != nil {
@@ -160,17 +202,10 @@ func (m *TaskManager) startWorker(ctx context.Context, w *taskWorker) error {
 		latest = nil
 	}
 
-	// An administrator edit made while the task registers waits, so the
-	// schedule read here cannot replace it.
 	w.scheduleMu.Lock()
 	configs, err := m.savedSchedule(ctx, w)
-	// On a storage failure configs is nil, so automatic runs stay idle. The
-	// trigger loop still starts so a later administrator edit or
-	// ReloadSchedule can recover the task.
 	w.setTriggers(configs, m.triggerFactory, latest, false)
 	w.scheduleMu.Unlock()
-
-	go m.triggerLoop(ctx, w)
 	return err
 }
 
@@ -207,7 +242,7 @@ func (m *TaskManager) savedSchedule(ctx context.Context, w *taskWorker) ([]Trigg
 // saved schedule, except to seed DefaultTriggers for a task that has none and
 // does not follow them. Before Start it does nothing: Start loads every
 // schedule.
-func (m *TaskManager) ReloadSchedule(ctx context.Context, key string) error {
+func (m *TaskManager) ReloadSchedule(ctx context.Context, key string, presentationChanged bool) error {
 	w, err := m.getWorker(key)
 	if err != nil {
 		return err
@@ -219,13 +254,25 @@ func (m *TaskManager) ReloadSchedule(ctx context.Context, key string) error {
 		return nil
 	}
 	w.scheduleMu.Lock()
-	defer w.scheduleMu.Unlock()
+	if w.isRetired() {
+		w.scheduleMu.Unlock()
+		return ErrTaskNotFound
+	}
 	configs, err := m.savedSchedule(ctx, w)
 	if err != nil {
+		w.scheduleMu.Unlock()
+		if presentationChanged {
+			w.notify()
+		}
 		return err
 	}
-	if !w.runsSchedule(configs) {
+	scheduleChanged := !w.runsSchedule(configs)
+	if scheduleChanged {
 		w.setTriggers(configs, m.triggerFactory, nil, true)
+	}
+	w.scheduleMu.Unlock()
+	if scheduleChanged || presentationChanged {
+		w.notify()
 	}
 	return nil
 }
@@ -290,51 +337,62 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			// RunTask always bypasses the gate.
 			m.logger.WarnContext(ctx, "scheduled task preflight failed; skipping run",
 				"task", w.task.Key(), "error", shouldRunErr)
-			m.rearmTriggersFromNow(w)
+			m.rearmTriggersFromNow(w, gen)
 			continue
 		}
 		if !shouldRun {
-			m.rearmTriggersFromNow(w)
+			m.rearmTriggersFromNow(w, gen)
 			continue
 		}
-		if w.isRetired() {
-			// Unregistered since the firing: claiming it would make every
-			// other server skip a firing this one won't run.
+		execCtx, cancel, err := m.reserveFiring(ctx, w, gen, firedTrigger)
+		switch {
+		case errors.Is(err, ErrTaskNotFound):
 			return
-		}
-		if !m.claimFiring(ctx, w, firedTrigger) {
+		case errors.Is(err, errFiringNotClaimed):
 			// Another server runs this firing. Rearm from now, as after a
 			// skipped preflight: this server's last result is older than that
 			// run, so an interval would otherwise fire again at once.
 			m.reloadLastResult(ctx, w)
-			m.rearmTriggersFromNow(w)
+			m.rearmTriggersFromNow(w, gen)
+			continue
+		case err != nil:
 			continue
 		}
 
-		result, err := w.run(ctx, firedTrigger.Config().MaxRuntime())
-		if errors.Is(err, ErrTaskNotFound) {
-			// Unregistered while this firing waited: the worker is retired.
-			return
+		result := w.executeReserved(execCtx, cancel)
+		if err := m.historyRepo.Insert(ctx, *result); err != nil {
+			m.logger.ErrorContext(ctx, "failed to persist execution result", "task", w.task.Key(), "error", err)
 		}
-		if err != nil {
-			// If the task is already running (e.g. via manual RunTask), don't
-			// rearm — the concurrent runner will rearm when it finishes.
-			// For other errors, rearm so the trigger fires again later.
-			if !errors.Is(err, ErrTaskAlreadyRunning) {
-				m.rearmTriggers(w)
-			}
-			continue
-		}
-
-		if result != nil {
-			if insertErr := m.historyRepo.Insert(ctx, *result); insertErr != nil {
-				m.logger.ErrorContext(ctx, "failed to persist execution result",
-					"task", w.task.Key(), "error", insertErr)
-			}
-		}
-
-		m.rearmTriggers(w)
 	}
+}
+
+var (
+	errFiringNotClaimed = errors.New("scheduled firing not claimed")
+	errFiringReplaced   = errors.New("scheduled firing was replaced")
+)
+
+// reserveFiring serializes the claim and local reservation with schedule
+// edits, retirement, and manual admission. Any retirement after admission
+// cancels a reserved run, which still records an execution result.
+func (m *TaskManager) reserveFiring(ctx context.Context, w *taskWorker, gen uint64, trigger Trigger) (context.Context, context.CancelFunc, error) {
+	w.scheduleMu.Lock()
+	defer w.scheduleMu.Unlock()
+	if w.isRetired() {
+		return nil, nil, ErrTaskNotFound
+	}
+	w.mu.RLock()
+	current, idle := w.triggerGen, w.state == TaskStateIdle
+	w.mu.RUnlock()
+	if current != gen {
+		return nil, nil, errFiringReplaced
+	}
+	if !idle {
+		return nil, nil, ErrTaskAlreadyRunning
+	}
+	if !m.claimFiring(ctx, w, trigger) {
+		return nil, nil, errFiringNotClaimed
+	}
+	return w.reserve(ctx, trigger.Config().MaxRuntime())
 }
 
 func (m *TaskManager) shouldRunScheduledTask(ctx context.Context, w *taskWorker) (bool, error) {
@@ -380,37 +438,33 @@ func (m *TaskManager) awaitFiring(ctx context.Context, w *taskWorker, gen uint64
 	}
 }
 
-// rearmTriggers stops and restarts all triggers for a worker.
-func (m *TaskManager) rearmTriggers(w *taskWorker) {
-	w.mu.Lock()
-	lastResult := w.lastResult
-	for _, tr := range w.triggers {
-		tr.Stop()
-		tr.Start(lastResult)
-	}
-	w.mu.Unlock()
-	w.notify()
-}
-
 // rearmTriggersFromNow restarts triggers after a skipped conditional task. This
 // intentionally ignores lastResult; otherwise an old completed_at can make an
 // interval trigger fire immediately in a loop while there is no work.
-func (m *TaskManager) rearmTriggersFromNow(w *taskWorker) {
+func (m *TaskManager) rearmTriggersFromNow(w *taskWorker, gen uint64) {
 	w.mu.Lock()
-	for _, tr := range w.triggers {
-		tr.Stop()
-		tr.Start(nil)
+	if w.triggerGen != gen || w.state != TaskStateIdle {
+		w.mu.Unlock()
+		return
 	}
+	w.rearmTriggersLocked(nil)
 	w.mu.Unlock()
 	w.notify()
 }
 
 // Stop stops all triggers and cancels running tasks.
 func (m *TaskManager) Stop() {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	m.mu.Lock()
+	m.stopped.Store(true)
+	if m.stopLoops != nil {
+		m.stopLoops()
+	}
+	workers := make([]*taskWorker, 0, len(m.tasks))
 	for _, w := range m.tasks {
+		workers = append(workers, w)
+	}
+	m.mu.Unlock()
+	for _, w := range workers {
 		w.stopTriggers()
 		w.mu.RLock()
 		if w.cancel != nil {
@@ -439,7 +493,6 @@ func (m *TaskManager) RunTask(ctx context.Context, key string) error {
 		}
 	}
 
-	m.rearmTriggers(w)
 	return nil
 }
 
@@ -464,7 +517,9 @@ func (m *TaskManager) StartTask(key string) (TaskInfo, error) {
 	if err != nil {
 		return TaskInfo{}, err
 	}
+	w.scheduleMu.Lock()
 	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true), 0)
+	w.scheduleMu.Unlock()
 	if err != nil {
 		return TaskInfo{}, err
 	}
@@ -474,16 +529,15 @@ func (m *TaskManager) StartTask(key string) (TaskInfo, error) {
 		if err := m.historyRepo.Insert(context.Background(), *result); err != nil {
 			m.logger.Error("failed to persist execution result", "task", key, "error", err)
 		}
-		m.rearmTriggers(w)
 	}()
 	return info, nil
 }
 
 // CancelTask requests cancellation of a running task.
-func (m *TaskManager) CancelTask(key string) error {
+func (m *TaskManager) CancelTask(key string) (TaskInfo, error) {
 	w, err := m.getWorker(key)
 	if err != nil {
-		return err
+		return TaskInfo{}, err
 	}
 	return w.requestCancel()
 }
@@ -531,7 +585,7 @@ func (m *TaskManager) listTasks(include func(*taskWorker) bool) []TaskInfo {
 
 	var infos []TaskInfo
 	for _, w := range m.tasks {
-		if include(w) {
+		if !w.isRetired() && include(w) {
 			infos = append(infos, w.info())
 		}
 	}
@@ -578,6 +632,9 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 	}
 	w.scheduleMu.Lock()
 	defer w.scheduleMu.Unlock()
+	if w.isRetired() {
+		return ErrTaskNotFound
+	}
 	if isManualOnly(w.task) && len(triggerConfigs) > 0 {
 		return ErrTaskManualOnly
 	}
@@ -587,7 +644,7 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 	}
 
 	w.setTriggers(triggerConfigs, m.triggerFactory, nil, true)
-	m.notifyTaskUpdated(w.info())
+	w.notify()
 	return nil
 }
 
@@ -627,11 +684,15 @@ func (m *TaskManager) UpdateSchedule(ctx context.Context, key string, expected i
 	}
 	w.scheduleMu.Lock()
 	defer w.scheduleMu.Unlock()
+	if w.isRetired() {
+		return Schedule{}, ErrTaskNotFound
+	}
 	saved, err := repo.ReplaceSchedule(ctx, key, expected, configs)
 	if err != nil {
 		return Schedule{}, err
 	}
 	w.setTriggers(saved.Triggers, m.triggerFactory, nil, true)
+	w.notify()
 	return saved, nil
 }
 
@@ -652,7 +713,7 @@ func (m *TaskManager) getWorker(key string) (*taskWorker, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	w, ok := m.tasks[key]
-	if !ok {
+	if !ok || w.isRetired() {
 		return nil, ErrTaskNotFound
 	}
 	return w, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -227,4 +228,63 @@ func TestRetiredWorkerDoesNotClaimFiring(t *testing.T) {
 	if len(claims.slots) != 0 {
 		t.Fatalf("retired worker claimed %d firings, want none", len(claims.slots))
 	}
+}
+
+type gatedFiringClaim struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c gatedFiringClaim) ClaimFiring(ctx context.Context, _ string, _ time.Time, _ time.Duration, _ time.Time) (bool, error) {
+	close(c.entered)
+	select {
+	case <-c.release:
+		return true, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+type oneShotTestTrigger struct{ configuredTrigger }
+
+func (t oneShotTestTrigger) Start(*ExecutionResult) {}
+
+func TestRetirementRecordsRunForClaimAlreadyInFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		claim := gatedFiringClaim{entered: make(chan struct{}), release: make(chan struct{})}
+		m := New(claimTestTriggers{}, claimTestExecutions{}, nil, nil)
+		m.SetFiringClaims(claim)
+		task := claimingTask{ran: make(chan struct{}, 1)}
+		m.Register(task)
+		w, err := m.getWorker(task.Key())
+		if err != nil {
+			t.Fatal(err)
+		}
+		trigger := oneShotTestTrigger{configuredTrigger{testTrigger: newTestTrigger(), cfg: TriggerConfig{Type: TriggerTypeStartup}}}
+		w.setTriggers([]TriggerConfig{trigger.Config()}, func(TriggerConfig) Trigger { return trigger }, nil, false)
+		go m.triggerLoop(ctx, w)
+		trigger.ch <- struct{}{}
+		<-claim.entered
+
+		retired := make(chan struct{})
+		go func() {
+			m.Unregister(task.Key())
+			close(retired)
+		}()
+		// A mutex waiter is not quiescent to synctest. If the claim left
+		// admission open, let retirement finish before committing it.
+		if w.scheduleMu.TryLock() {
+			w.scheduleMu.Unlock()
+			<-retired
+		}
+		close(claim.release)
+		<-retired
+		synctest.Wait()
+
+		if w.info().LastExecution == nil {
+			t.Fatal("claim committed without recording a scheduled execution")
+		}
+	})
 }

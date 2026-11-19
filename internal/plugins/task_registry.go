@@ -28,7 +28,12 @@ type scheduledTaskResolver interface {
 }
 
 type taskInstallationStore interface {
-	ListEnabled(ctx context.Context) ([]*Installation, error)
+	ListEnabled(context.Context) ([]*Installation, error)
+	ListCapabilities(context.Context, int) ([]*Capability, error)
+}
+
+type scheduledTaskStore interface {
+	ListEnabledWithCapabilityTypes(ctx context.Context, capabilityTypes []string) ([]*Installation, error)
 	ListCapabilities(ctx context.Context, installationID int) ([]*Capability, error)
 }
 
@@ -38,9 +43,9 @@ type taskBindingStore interface {
 
 // taskScheduler is the part of the task manager the registry drives.
 type taskScheduler interface {
-	RegisterLive(task taskmanager.Task) error
+	RegisterLive(context.Context, taskmanager.Task) error
 	Unregister(key string)
-	ReloadSchedule(ctx context.Context, key string) error
+	ReloadSchedule(ctx context.Context, key string, presentationChanged bool) error
 }
 
 // TaskSyncInterval is how often an API server re-syncs plugin tasks without
@@ -60,12 +65,12 @@ const (
 // the others through cache.EventPluginTasksChanged or
 // cache.EventPluginsChanged and the periodic resync (RunSyncs).
 type TaskRegistry struct {
-	installations taskInstallationStore
+	installations scheduledTaskStore
 	bindings      taskBindingStore
 	host          scheduledTaskResolver
 	scheduler     taskScheduler
 
-	mu         sync.Mutex
+	syncGate   chan struct{}
 	registered map[string]*pluginTask
 	// wake asks RunSyncs for a sync; one pending request is enough.
 	wake chan struct{}
@@ -75,7 +80,7 @@ type TaskRegistry struct {
 }
 
 func NewTaskRegistry(
-	installations taskInstallationStore,
+	installations scheduledTaskStore,
 	bindings taskBindingStore,
 	host scheduledTaskResolver,
 	scheduler taskScheduler,
@@ -85,6 +90,7 @@ func NewTaskRegistry(
 		bindings:      bindings,
 		host:          host,
 		scheduler:     scheduler,
+		syncGate:      make(chan struct{}, 1),
 		registered:    make(map[string]*pluginTask),
 		wake:          make(chan struct{}, 1),
 		retry:         make(chan struct{}, 1),
@@ -92,7 +98,7 @@ func NewTaskRegistry(
 }
 
 func NewTaskRegistryWithTypedResolver(
-	installations taskInstallationStore,
+	installations scheduledTaskStore,
 	bindings taskBindingStore,
 	resolver interface {
 		ScheduledTaskClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.ScheduledTaskClient, error)
@@ -112,8 +118,12 @@ func NewTaskRegistryWithTypedResolver(
 // bindings. A read failure changes nothing, so a transient database error
 // never unregisters a task.
 func (r *TaskRegistry) Sync(ctx context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	select {
+	case r.syncGate <- struct{}{}:
+		defer func() { <-r.syncGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 
 	specs, err := r.scan(ctx)
 	if err != nil {
@@ -125,10 +135,10 @@ func (r *TaskRegistry) Sync(ctx context.Context) error {
 	for _, spec := range specs {
 		wanted[spec.key] = struct{}{}
 		if task, ok := r.registered[spec.key]; ok {
-			task.update(spec)
+			presentationChanged := task.update(spec)
 			// A default changed by a binding write or plugin update, or a
 			// schedule saved on the task page of any server, applies here.
-			if err := r.scheduler.ReloadSchedule(ctx, spec.key); err != nil {
+			if err := r.scheduler.ReloadSchedule(ctx, spec.key, presentationChanged); err != nil {
 				errs = append(errs, fmt.Errorf("reload plugin task %s schedule: %w", spec.key, err))
 			}
 			continue
@@ -138,7 +148,7 @@ func (r *TaskRegistry) Sync(ctx context.Context) error {
 		// unregistered, so the retry after the failed sync registers it.
 		task := &pluginTask{installationID: spec.installationID, capabilityID: spec.capabilityID, resolver: r.host}
 		task.update(spec)
-		if err := r.scheduler.RegisterLive(task); err != nil {
+		if err := r.scheduler.RegisterLive(ctx, task); err != nil {
 			errs = append(errs, fmt.Errorf("register plugin task %s: %w", spec.key, err))
 			continue
 		}
@@ -222,9 +232,12 @@ type pluginTaskSpec struct {
 // scan lists the scheduled task capabilities of enabled installations whose
 // binding is not disabled.
 func (r *TaskRegistry) scan(ctx context.Context) ([]pluginTaskSpec, error) {
-	installations, err := r.installations.ListEnabled(ctx)
+	installations, err := r.installations.ListEnabledWithCapabilityTypes(ctx, []string{"scheduled_task.v1"})
 	if err != nil {
 		return nil, fmt.Errorf("list enabled plugin installations: %w", err)
+	}
+	if len(installations) == 0 {
+		return nil, nil
 	}
 	bindingRows, err := r.bindings.ListTaskBindings(ctx)
 	if err != nil {
@@ -270,7 +283,7 @@ func (r *TaskRegistry) scan(ctx context.Context) ([]pluginTaskSpec, error) {
 }
 
 // pluginTask is a registered plugin task. Sync updates its presentation and
-// default schedule in place, so a plugin upgrade never interrupts a run.
+// default schedule in place, without canceling it during reconciliation.
 type pluginTask struct {
 	installationID int
 	capabilityID   string
@@ -282,10 +295,12 @@ type pluginTask struct {
 	triggers    []taskmanager.TriggerConfig
 }
 
-func (t *pluginTask) update(spec pluginTaskSpec) {
+func (t *pluginTask) update(spec pluginTaskSpec) (presentationChanged bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	presentationChanged = t.name != spec.name || t.description != spec.description
 	t.name, t.description, t.triggers = spec.name, spec.description, spec.triggers
+	return presentationChanged
 }
 
 type scheduledTaskResolverFunc func(ctx context.Context, installationID int, capabilityID string) (scheduledTaskClient, error)
