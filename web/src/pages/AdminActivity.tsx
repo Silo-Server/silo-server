@@ -351,7 +351,15 @@ export default function AdminActivity() {
         getSessionRouteNodes(s).some((node) => node.key === nodeFilter),
       );
     }
-    if (typeFilter) result = result.filter((s) => s.media_type === typeFilter);
+    if (typeFilter) {
+      // A file linked to a show with no matching episode row is reported as
+      // the show itself, so the episode choice keeps both.
+      result = result.filter((s) =>
+        typeFilter === "episode"
+          ? s.media_type === "episode" || s.media_type === "series"
+          : s.media_type === typeFilter,
+      );
+    }
 
     return [...result].sort((a, b) => {
       let cmp = 0;
