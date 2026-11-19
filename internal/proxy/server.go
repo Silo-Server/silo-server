@@ -782,8 +782,12 @@ func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, c
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "direct_play")
-	release := s.tracker.Hold(r.Context(), info)
-	defer release(context.WithoutCancel(r.Context()))
+	// A striping player plays one file through many short range requests, so
+	// the session stays counted between them: the last request to end lingers
+	// when it delivered media. A HEAD, a refusal or an unsatisfiable range
+	// delivered none, so it adds no linger and ends none that is running.
+	release := s.tracker.HoldLingering(r.Context(), info)
+	defer func() { release(context.WithoutCancel(r.Context()), deliveredMedia(r)) }()
 
 	// Serve through the same path the integrated server uses rather than a bare
 	// http.ServeFile: direct_stream_resume_v1 requires the strong ETag that
