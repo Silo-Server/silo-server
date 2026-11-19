@@ -1437,14 +1437,30 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 	// Outside rows come from stored titles and vectors; new seeds' lists
 	// wait for the next outside-title run.
 	if w.ExternalEnabled() {
-		if _, err := w.rebuildProfileExternalRows(refreshCtx, userID, profileID, signals); err != nil {
-			return fmt.Errorf("rebuild outside rows: %w", err)
+		if err := w.refreshExternalRows(refreshCtx, userID, profileID, signals); err != nil {
+			return err
 		}
 	} else if err := w.engine.purgeIfProfileDeleted(refreshCtx, userID, profileID); err != nil {
 		return fmt.Errorf("check profile still exists: %w", err)
 	}
 	if err := repo.ClearStaleAt(refreshCtx, userID, profileID, started); err != nil {
 		slog.WarnContext(ctx, "failed to clear stale profile marker", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+	}
+	return nil
+}
+
+// refreshExternalRows rebuilds a refreshed profile's outside rows. Only a
+// failed deleted-profile check fails the refresh. A failed rebuild leaves the
+// profile fresh: its library rows are written, and the outside-title job
+// rebuilds the rows on its next run, where keeping the profile stale would
+// redo its whole refresh on every sweep while the failure lasts.
+func (w *Worker) refreshExternalRows(ctx context.Context, userID int, profileID string, signals *tasteSignals) error {
+	_, err := w.rebuildProfileExternalRows(ctx, userID, profileID, signals)
+	if errors.Is(err, errProfilePurgeCheck) {
+		return fmt.Errorf("rebuild outside rows: %w", err)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "rebuilding a profile's outside rows failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
 	}
 	return nil
 }

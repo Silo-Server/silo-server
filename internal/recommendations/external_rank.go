@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -140,7 +139,7 @@ func (e *Engine) rebuildExternalRows(ctx context.Context, userID int, profileID 
 		res.Deleted += int(n)
 		return res, err
 	}
-	lockRaw, lock, err := e.repo.externalRowLock(ctx)
+	lockVersion, lock, err := e.repo.externalRowLock(ctx)
 	if err != nil {
 		return res, err
 	}
@@ -193,7 +192,7 @@ func (e *Engine) rebuildExternalRows(ctx context.Context, userID int, profileID 
 		written, err := e.repo.writeExternalRowUnderLock(ctx, ExternalRow{
 			UserID: userID, ProfileID: profileID, MediaType: mediaType,
 			Items: items, EmbeddingModel: lock.Model, BuiltAt: builtAt,
-		}, lockRaw)
+		}, lockVersion)
 		if err != nil {
 			return res, err
 		}
@@ -206,31 +205,26 @@ func (e *Engine) rebuildExternalRows(ctx context.Context, userID int, profileID 
 	return res, nil
 }
 
-// externalRowLock returns the stored embedding lock and its raw value, or
-// nil when none is stored.
+// externalRowLock returns the stored embedding lock and the version of its
+// row, or nil when none is stored. The version, not the lock's JSON, names
+// the lock a row was ranked under: a reset followed by an embedding run with
+// the same model writes byte-identical JSON in a new row.
 func (r *Repo) externalRowLock(ctx context.Context) (string, *EmbeddingLock, error) {
-	var raw string
-	err := r.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil, nil
-	}
-	if err != nil {
-		return "", nil, fmt.Errorf("read embedding lock: %w", err)
-	}
-	lock, err := ParseEmbeddingLock(raw)
-	if err != nil {
+	lock, err := ReadEmbeddingLock(ctx, r.pool)
+	if err != nil || lock == nil {
 		return "", nil, err
 	}
-	return raw, lock, nil
+	return lock.rowVersion, lock, nil
 }
 
 // writeExternalRowUnderLock writes row in one statement when the stored
-// embedding lock is still lockRaw, and reports whether it did. The statement
-// share-locks the lock's row: an embeddings reset that deleted it first makes
-// the write wait for the reset and then find no lock, and a write that locked
-// it first commits before the reset deletes the lock, so the reset's later
-// delete of every outside row removes this one too.
-func (r *Repo) writeExternalRowUnderLock(ctx context.Context, row ExternalRow, lockRaw string) (bool, error) {
+// embedding lock's row is still lockVersion (see externalRowLock), and
+// reports whether it did. The statement share-locks the lock's row: an
+// embeddings reset that deleted it first makes the write wait for the reset
+// and then find no lock, and a write that locked it first commits before the
+// reset deletes the lock, so the reset's later delete of every outside row
+// removes this one too.
+func (r *Repo) writeExternalRowUnderLock(ctx context.Context, row ExternalRow, lockVersion string) (bool, error) {
 	items := row.Items
 	if items == nil {
 		items = []ExternalRowItem{}
@@ -243,11 +237,11 @@ func (r *Repo) writeExternalRowUnderLock(ctx context.Context, row ExternalRow, l
 		INSERT INTO external_recommendation_rows (user_id, profile_id, media_type, items, embedding_model, built_at)
 		SELECT $1, $2, $3, $4, $5, $6
 		FROM   server_settings s
-		WHERE  s.key = $7 AND s.value = $8
+		WHERE  s.key = $7 AND s.xmin::text || ':' || s.ctid::text = $8
 		FOR SHARE OF s
 		ON CONFLICT (user_id, profile_id, media_type) DO UPDATE
 			SET items = EXCLUDED.items, embedding_model = EXCLUDED.embedding_model, built_at = EXCLUDED.built_at`,
-		row.UserID, row.ProfileID, row.MediaType, raw, row.EmbeddingModel, row.BuiltAt, embeddingLockSettingKey, lockRaw)
+		row.UserID, row.ProfileID, row.MediaType, raw, row.EmbeddingModel, row.BuiltAt, embeddingLockSettingKey, lockVersion)
 	if err != nil {
 		return false, fmt.Errorf("write outside row for user %d profile %s %s: %w", row.UserID, row.ProfileID, row.MediaType, err)
 	}

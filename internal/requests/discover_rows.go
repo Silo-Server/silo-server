@@ -121,9 +121,11 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 	}
 	_ = group.Wait()
 
-	// Empty personal rows must not hide an outage behind an empty page.
-	tmdbRows, tmdbFailed := 0, 0
-	var firstErr error
+	// Empty personal rows must not hide an outage behind an empty page. A
+	// page fails when it has no titles and every TMDB row failed, or, with
+	// no TMDB row, every personal row did.
+	tmdbRows, tmdbFailed, personalFailed := 0, 0, 0
+	var firstErr, firstPersonalErr error
 	for i, section := range sections {
 		_, personal := titleRows[i].source.(discoverrows.PersonalSource)
 		if !personal {
@@ -134,6 +136,11 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 				tmdbFailed++
 				if firstErr == nil {
 					firstErr = errs[i]
+				}
+			} else {
+				personalFailed++
+				if firstPersonalErr == nil {
+					firstPersonalErr = errs[i]
 				}
 			}
 			slog.WarnContext(ctx, "requests: discover row failed", "component", "requests", "row", titleRows[i].row.ID, "type", titleRows[i].row.Type, "error", errs[i])
@@ -146,6 +153,9 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 	}
 	if len(out.Sections) == 0 && tmdbFailed > 0 && tmdbFailed == tmdbRows {
 		return nil, firstErr
+	}
+	if len(out.Sections) == 0 && tmdbRows == 0 && personalFailed > 0 && personalFailed == len(titleRows) {
+		return nil, firstPersonalErr
 	}
 	return out, nil
 }

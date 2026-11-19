@@ -1088,6 +1088,14 @@ func (r *Repo) ClearTasteProfile(ctx context.Context, userID int, profileID stri
 		userID, profileID); err != nil {
 		return fmt.Errorf("delete cached rows for user %d profile %s: %w", userID, profileID, err)
 	}
+	// Outside rows were ranked against the cleared vector too. A refresh
+	// with outside recommendations off does not rebuild them, so they would
+	// be served again when the feature is turned back on.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM external_recommendation_rows WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("delete outside rows for user %d profile %s: %w", userID, profileID, err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit cleared taste profile for user %d profile %s: %w", userID, profileID, err)
 	}

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 )
 
@@ -159,6 +161,32 @@ func TestDiscoverRowsFailWhenEveryTMDBRowFails(t *testing.T) {
 	service := newLayoutService(t, discoverrows.DefaultRows(), &rowsTMDB{chartErr: outage}, nil, "")
 	if _, err := service.DiscoverRows(t.Context(), testViewer(1)); !errors.Is(err, outage) {
 		t.Fatalf("err = %v, want the TMDB error", err)
+	}
+}
+
+// failingRecommendations is a recommendations reader whose reads fail.
+type failingRecommendations struct{ err error }
+
+func (failingRecommendations) ExternalRecommendationsEnabled() bool { return true }
+
+func (f failingRecommendations) ExternalRecommendations(context.Context, int, string, string, catalog.AccessFilter) ([]recommendations.ExternalRecommendation, error) {
+	return nil, f.err
+}
+
+// A layout of recommended rows only must not answer an outage with an
+// empty page.
+func TestDiscoverRowsFailWhenEveryPersonalRowFails(t *testing.T) {
+	outage := errors.New("database down")
+	var rows []discoverrows.Row
+	for _, row := range discoverrows.DefaultRows() {
+		if row.Type == discoverrows.TypeRecommended {
+			rows = append(rows, row)
+		}
+	}
+	service := newLayoutService(t, rows, &rowsTMDB{}, nil, "")
+	service.SetRecommendations(failingRecommendations{err: outage})
+	if _, err := service.DiscoverRows(t.Context(), testViewer(1)); !errors.Is(err, outage) {
+		t.Fatalf("err = %v, want the read error", err)
 	}
 }
 

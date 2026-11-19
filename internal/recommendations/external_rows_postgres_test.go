@@ -33,7 +33,7 @@ type externalRowsScenario struct {
 	seed1, seed2     string
 	library1         int
 	titles           []ExternalTitleKey
-	lockRaw          string
+	lockVersion      string
 	externalSwitchOn bool
 }
 
@@ -88,9 +88,11 @@ func newExternalRowsScenario(t *testing.T, base int) *externalRowsScenario {
 	if err := repo.SetEmbeddingLock(ctx, EmbeddingLock{BaseURL: "http://embed.test", Model: externalTestModel, SourceDimensions: 4, StorageDimensions: CanonicalEmbeddingDimensions}); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&s.lockRaw); err != nil {
-		t.Fatal(err)
+	version, lock, err := repo.externalRowLock(ctx)
+	if err != nil || lock == nil {
+		t.Fatal(lock, err)
 	}
+	s.lockVersion = version
 	if err := repo.UpsertTasteProfile(ctx, s.userID, s.profileID, axisVector(0, nil), map[string]int{}, "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +188,7 @@ func TestExternalRowRefusalsDB(t *testing.T) {
 	row := ExternalRow{UserID: s.userID, ProfileID: s.profileID, MediaType: ExternalMediaMovie,
 		Items: []ExternalRowItem{{TMDBID: s.titles[0].TMDBID}}, EmbeddingModel: externalTestModel, BuiltAt: time.Now()}
 
-	if written, err := repo.writeExternalRowUnderLock(ctx, row, s.lockRaw+" "); err != nil || written || s.row() != nil {
+	if written, err := repo.writeExternalRowUnderLock(ctx, row, s.lockVersion+" "); err != nil || written || s.row() != nil {
 		t.Fatalf("write under a changed lock = %v, %v", written, err)
 	}
 
@@ -206,7 +208,7 @@ func TestExternalRowRefusalsDB(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		written, err := repo.writeExternalRowUnderLock(ctx, row, s.lockRaw)
+		written, err := repo.writeExternalRowUnderLock(ctx, row, s.lockVersion)
 		done <- result{written, err}
 	}()
 	waitForLockWait(t, s.pool, "INSERT INTO external_recommendation_rows")
@@ -221,6 +223,11 @@ func TestExternalRowRefusalsDB(t *testing.T) {
 	// removed by the rebuild's own check.
 	if err := repo.SetEmbeddingLock(ctx, EmbeddingLock{BaseURL: "http://embed.test", Model: externalTestModel, SourceDimensions: 4, StorageDimensions: CanonicalEmbeddingDimensions}); err != nil {
 		t.Fatal(err)
+	}
+	// The same model's lock written again after the reset is another lock:
+	// a row ranked before the reset is refused.
+	if written, err := repo.writeExternalRowUnderLock(ctx, row, s.lockVersion); err != nil || written || s.row() != nil {
+		t.Fatalf("write under a recreated lock = %v, %v", written, err)
 	}
 	raw, lock, err := repo.externalRowLock(ctx)
 	if err != nil || lock == nil {

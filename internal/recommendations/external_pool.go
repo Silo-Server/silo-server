@@ -568,7 +568,10 @@ func (r *externalRun) fetchSet(ctx context.Context, set externalSet) (res Extern
 // chooseExternalPool), deletes stored titles past maxTitles, and marks the
 // sources and titles the pool uses as referenced.
 func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile, setKeys []string, maxTitles int) ([]ExternalTitleKey, error) {
-	pools := make([][]ExternalPoolTitle, len(profiles))
+	// Every profile's pool is held until the choice, so only what the choice
+	// reads is kept: the seed lists alone would take about half a megabyte
+	// a profile.
+	pools := make([][]externalPoolCount, len(profiles))
 	var sources []string
 	for i, p := range profiles {
 		seedSources := p.SeedSources()
@@ -576,7 +579,7 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 		if err != nil {
 			return nil, err
 		}
-		pools[i] = pool
+		pools[i] = countPool(pool)
 		sources = append(sources, seedSources...)
 	}
 	sets, err := r.e.repo.externalSetTitles(ctx, setKeys)
@@ -644,6 +647,22 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 	return chosen, nil
 }
 
+// externalPoolCount is a pool title as chooseExternalPool reads it: the
+// title and the number of the profile's seeds that name it.
+type externalPoolCount struct {
+	Key   ExternalTitleKey
+	seeds int
+}
+
+// countPool reduces a profile's pool to externalPoolCounts, in its order.
+func countPool(pool []ExternalPoolTitle) []externalPoolCount {
+	out := make([]externalPoolCount, len(pool))
+	for i, t := range pool {
+		out[i] = externalPoolCount{Key: t.Key, seeds: len(t.Seeds)}
+	}
+	return out
+}
+
 // externalSetTitles is one shared set's titles, best rank first.
 type externalSetTitles struct {
 	key    string
@@ -670,7 +689,7 @@ func isRecentSet(key string) bool { return strings.HasPrefix(key, "set:recent:")
 // named counts, for every title in an uncapped profile pool, the profiles
 // that have it, so the stored titles the pool no longer uses can be dropped
 // least-named first.
-func chooseExternalPool(sets []externalSetTitles, pools [][]ExternalPoolTitle, owned map[ExternalTitleKey]bool, listCap, maxTitles int) (chosen []ExternalTitleKey, named map[ExternalTitleKey]int) {
+func chooseExternalPool(sets []externalSetTitles, pools [][]externalPoolCount, owned map[ExternalTitleKey]bool, listCap, maxTitles int) (chosen []ExternalTitleKey, named map[ExternalTitleKey]int) {
 	named = map[ExternalTitleKey]int{}
 	profiles := map[ExternalTitleKey]int{}
 	seeds := map[ExternalTitleKey]int{}
@@ -681,12 +700,12 @@ func chooseExternalPool(sets []externalSetTitles, pools [][]ExternalPoolTitle, o
 				continue
 			}
 			named[t.Key]++
-			if len(t.Seeds) == 0 || listed == listCap {
+			if t.seeds == 0 || listed == listCap {
 				continue
 			}
 			listed++
 			profiles[t.Key]++
-			seeds[t.Key] += len(t.Seeds)
+			seeds[t.Key] += t.seeds
 		}
 	}
 	inChosen := map[ExternalTitleKey]bool{}

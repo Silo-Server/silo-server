@@ -221,6 +221,10 @@ func (w *Worker) rebuildAllExternalRows(ctx context.Context, held clusterLock) (
 // externalPurgeTimeout bounds the deleted-profile check after a rebuild.
 const externalPurgeTimeout = 10 * time.Second
 
+// errProfilePurgeCheck marks a failed deleted-profile check, which a refresh
+// must not treat as done, apart from a failed rebuild of the rows themselves.
+var errProfilePurgeCheck = errors.New("check profile still exists")
+
 // rebuildProfileExternalRows is RebuildExternalRows for a caller holding the
 // profile's lock. A profile deleted after the rebuild read it, and purged
 // before the rebuild wrote, would keep the rows written; like a refresh, it
@@ -232,7 +236,7 @@ func (w *Worker) rebuildProfileExternalRows(ctx context.Context, userID int, pro
 	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), externalPurgeTimeout)
 	defer cancel()
 	if purgeErr := w.engine.purgeIfProfileDeleted(purgeCtx, userID, profileID); purgeErr != nil {
-		err = errors.Join(err, fmt.Errorf("check profile still exists: %w", purgeErr))
+		err = errors.Join(err, fmt.Errorf("%w: %w", errProfilePurgeCheck, purgeErr))
 	}
 	return built, err
 }

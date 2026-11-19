@@ -40,13 +40,19 @@ are enabled and `recommendations.external.enabled` is set), `running`, `count`
 (outside titles stored), `rows` (stored outside rows, one per profile and
 media type) and `last_run` in the job run shape. Its `result` holds
 `enabled`, the retention counts (`pruned_titles`, `pruned_sources`,
-`pruned_links`), the pool counts (`titles_stored`, `pool_titles`,
-`sources_fetched`, `sources_failed`, `sources_left`, `details_fetched`,
-`details_not_found`, `details_failed`, `details_left`, `tmdb_requests`,
-`embeddings` with the embedding job's counts, `budget_exhausted`, and
-`vectors_skipped`, the reason no vectors could be stored), and the row counts
-(`row_profiles`, `rows_built`, `rows_deleted`, `rows_refused`,
-`row_failures`, `rows_busy`). A run with the feature off only applies
+`pruned_links`, and `prune_failed`, present and true when retention failed),
+the pool counts (`profiles`, `seeds` (distinct seed titles across profiles),
+`titles_stored`, `pool_titles`, `titles_deleted` (stored titles deleted for the
+cap or because the library now has them), `sources_fetched`,
+`sources_failed`, `sources_left`, `details_fetched`, `details_not_found`,
+`details_failed`, `details_left`, `details_owned` (fetched titles the library
+has under their IMDb or TVDB ID), `text_unchanged` (refetched titles whose
+vector was kept), `refused_skipped` (titles whose text the provider refused
+before), `tmdb_requests`, `embeddings` with the embedding job's counts,
+`budget_exhausted`, and `vectors_skipped`, the reason no vectors could be
+stored), and the row counts (`row_profiles`, `rows_built`, `rows_deleted`,
+`rows_refused`, `row_failures`, `rows_busy`, `rows_remaining` (profiles not
+reached when the run stopped)). A run with the feature off only applies
 retention. Saving either switch as off cancels active generation when the
 worker receives the change. If only the main recommendations switch is turned
 off, Discover can still serve stored rows until restart.

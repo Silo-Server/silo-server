@@ -138,7 +138,7 @@ func TestChooseExternalPool(t *testing.T) {
 	// and 3, not 4; B keeps 5 and 3, not 9. Title 3 is named by both
 	// profiles, so it leads the lists.
 	sets := []externalSetTitles{{key: "set:recent:movie", titles: []ExternalTitleKey{k(100), k(101)}}}
-	chosen, named := chooseExternalPool(sets, [][]ExternalPoolTitle{profileA, profileB}, owned, 2, 100)
+	chosen, named := chooseExternalPool(sets, [][]externalPoolCount{countPool(profileA), countPool(profileB)}, owned, 2, 100)
 	want := []ExternalTitleKey{k(100), k(101), k(3), k(1), k(5)}
 	if !slices.Equal(chosen, want) {
 		t.Fatalf("chosen = %v, want %v", chosen, want)
@@ -148,7 +148,7 @@ func TestChooseExternalPool(t *testing.T) {
 	}
 
 	// The server cap keeps sets first, then the most-named list titles.
-	chosen, _ = chooseExternalPool(sets, [][]ExternalPoolTitle{profileA, profileB}, owned, 2, 4)
+	chosen, _ = chooseExternalPool(sets, [][]externalPoolCount{countPool(profileA), countPool(profileB)}, owned, 2, 4)
 	if want := want[:4]; !slices.Equal(chosen, want) {
 		t.Fatalf("capped = %v, want %v", chosen, want)
 	}
@@ -189,7 +189,7 @@ func TestChooseExternalPoolHalvesSets(t *testing.T) {
 	// 28 slots: sets get 14, the recent set 6 of them, and the language sets
 	// share 8 as 4, 2 and 2. Before the half rule the 46 set titles took
 	// every slot and no list title was kept.
-	chosen, _ := chooseExternalPool(sets, [][]ExternalPoolTitle{pool}, nil, 500, 28)
+	chosen, _ := chooseExternalPool(sets, [][]externalPoolCount{countPool(pool)}, nil, 500, 28)
 	var want []ExternalTitleKey
 	for _, part := range [][]ExternalTitleKey{keys(1, 6), keys(200, 4), keys(300, 2), keys(400, 2), keys(900, 14)} {
 		want = append(want, part...)
@@ -208,7 +208,7 @@ func TestChooseExternalPoolHalvesSets(t *testing.T) {
 		{key: "set:lang:hi:top:movie", titles: append(keys(200, 8), k(300))},
 		{key: "set:recent:movie", titles: keys(1, 4)},
 	}
-	chosen, _ = chooseExternalPool(overlap, [][]ExternalPoolTitle{pool}, nil, 500, 28)
+	chosen, _ = chooseExternalPool(overlap, [][]externalPoolCount{countPool(pool)}, nil, 500, 28)
 	setTitles := 0
 	for _, key := range chosen {
 		if key.TMDBID < 900 {
@@ -220,7 +220,7 @@ func TestChooseExternalPoolHalvesSets(t *testing.T) {
 	}
 
 	// Sets that fit leave the rest of their half to list titles.
-	chosen, _ = chooseExternalPool(sets[3:], [][]ExternalPoolTitle{pool}, nil, 500, 28)
+	chosen, _ = chooseExternalPool(sets[3:], [][]externalPoolCount{countPool(pool)}, nil, 500, 28)
 	if want := append(keys(1, 6), keys(900, 20)...); !slices.Equal(chosen, want) {
 		t.Fatalf("chosen = %v\nwant %v", chosen, want)
 	}
