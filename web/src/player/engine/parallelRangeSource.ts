@@ -377,7 +377,12 @@ export class ParallelRangeSource extends InternalUrlSource {
       wake = null;
       resolve?.();
     };
-    const started = this.seeks;
+    // A run that starts with only reads recorded at a seek restarts a read queued before that
+    // seek: it serves the replaced playback, so it counts as older from its start.
+    const restartsOldRead =
+      worker.pendingSlices.length > 0 &&
+      worker.pendingSlices.every((slice) => this.readsAtSeeks.has(slice));
+    const started = restartsOldRead ? this.seeks - 1 : this.seeks;
     const status = () => this.runStatus(worker, started);
     const token: SlotToken = { status };
     this.slots.wakers.add(notify);

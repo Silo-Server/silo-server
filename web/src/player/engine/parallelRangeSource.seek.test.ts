@@ -127,6 +127,44 @@ describe("seek while both read workers are busy", () => {
     }
   });
 
+  // A read queued before a seek starts on a new worker once an old one stops. That worker serves
+  // the replaced playback, so the seek's next read retires it and does not wait for it.
+  it("retires a worker that restarted a read queued before the seek", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = new FakeServer(pattern(SIZE));
+      server.fault = () => ({ kind: "slowBody", intervalMs: 1_000 });
+      const { source } = makeSource(server);
+      source.endWarmHead();
+      const a = read(source, 0, 5 * MIB);
+      const b = read(source, 34 * MIB, 39 * MIB);
+      await advanceUntil(
+        () => orchestratorOf(source).workers.length === 2 && server.inFlight === 4,
+        900,
+      );
+      const queued = read(source, 67 * MIB, SIZE);
+      expect(orchestratorOf(source).queuedReads.length).toBe(1);
+      source.endWarmHead();
+      const first = read(source, 33 * MIB, 33 * MIB + KIB);
+      // The old worker that was kept finishes what it owes, and the queued read takes its place.
+      await advanceUntil(() => requestFor(server, 67 * MIB) !== undefined, 60_000);
+      const before = server.requests.length;
+      const second = read(source, 10 * MIB, 10 * MIB + KIB);
+      await advanceUntil(() => requestFor(server, 10 * MIB, before) !== undefined, 1_000);
+      expect(same(await settled(second), server.bytes.subarray(10 * MIB, 10 * MIB + KIB))).toBe(
+        true,
+      );
+      expect(same(await settled(first), server.bytes.subarray(33 * MIB, 33 * MIB + KIB))).toBe(
+        true,
+      );
+      expect(same(await settled(queued), server.bytes.subarray(67 * MIB, SIZE))).toBe(true);
+      expect(same(await settled(a), server.bytes.subarray(0, 5 * MIB))).toBe(true);
+      expect(same(await settled(b), server.bytes.subarray(34 * MIB, 39 * MIB))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaves the seek's ranges alone when a read from the replaced playback contends", async () => {
     vi.useFakeTimers();
     try {
