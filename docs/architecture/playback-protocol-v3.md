@@ -144,6 +144,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `native_embedded_limitations_v1` | The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
 | `hls_subtitle_renditions_all_v1` | Only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
+| `surround_bitstream_conversion_v1` | Advertised only. A client whose exact audio evidence shows it would decode a surround track to PCM, while its sink validates E-AC-3 or AC-3 5.1 but not the source codec, may receive a copy-video `server_remux_hls` that converts the track to that codec (`decision_reason: surround_bitstream_conversion`, §11) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -1482,6 +1483,8 @@ must not branch on an unrecognized value.
 `hls_audio_adaptation`, `hls_packaging_required`, `subtitle_burn_in_required`,
 `client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
 `client_dv8_base_layer`, `evidence_insufficient_for_direct`,
+`surround_bitstream_conversion` (§11; advertised on `/api/v2` as the
+`surround_bitstream_conversion_v1` server feature),
 and the quality reasons `quality_auto_source`, `quality_fixed_rung`,
 `quality_device_limit`, `quality_bandwidth_limit` (a measured estimate could
 not carry the source), `quality_bandwidth_cap`, and `quality_original` (an
@@ -2265,6 +2268,8 @@ A transformation is a named, versioned media operation with claims attached.
 | Name | Executor | Recipe version | Promises | Claims |
 | --- | --- | --- | --- | --- |
 | `audio_to_aac` | `server` | `4` | — | `audio_decode` |
+| `audio_to_eac3` | `server` | `1` | E-AC-3 5.1, 48 kHz, 640 kbps | `audio_decode` |
+| `audio_to_ac3` | `server` | `1` | AC-3 5.1, 48 kHz, 640 kbps | `audio_decode` |
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
 | `video_to_hevc` | `server` | `1` | `sdr` output | `hevc_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
@@ -2310,6 +2315,30 @@ clock (version 3 did this for the stereo downmix only). When a source with more 
 stereo, FFmpeg first rematrixes it to stereo, then applies up to 6 dB of input
 gain through a limiter with a -2 dBFS sample ceiling. Mono output, surround
 output, stereo sources, and copied audio do not use the boost.
+
+`audio_to_eac3` and `audio_to_ac3` serve the surround bitstream conversion
+(`decision_reason: surround_bitstream_conversion`). A client that would decode a
+track with more than two channels to PCM may lose its surround channels: an
+Android TV's own HDMI/eARC output commonly mixes app PCM to stereo, and Android
+cannot tell that mixer from one that carries multichannel PCM. When the client
+attests `exact` audio evidence and `layout_aware_passthrough`, its sink
+validates E-AC-3 (preferred) or AC-3 at six channels with a `5.1` layout, and
+the sink does not validate the source codec, the planner prefers a copy-video
+`server_remux_hls` that converts the selected track to 5.1 in the first of
+those codecs an HLS executor offers. This route ranks ahead of the original
+file. The
+plan claims passthrough for the converted codec and carries an
+`audio_converted` warning. Only routes that keep the original picture and
+subtitle presentation qualify: the source quality with no server bitrate cap,
+the native dynamic range, no Dolby Vision Profile 7 handling, and the same
+subtitle mode and claims as the original route. When no executor offers the recipe or the client already attempted the
+plan, the planner returns the route the conversion improved on. When session
+admission or route preparation refuses the conversion on a start or replan,
+the server re-plans once without it; the refused start's session records no
+watch history. A seek reanchor keeps its frozen recipe and reports the refusal
+instead. A device whose mixer does carry
+multichannel PCM therefore trades lossless PCM for E-AC-3 5.1 on codecs its
+sink cannot take; a sink that passes the source codec through is unaffected.
 
 Recipe 2 is fenced at every byte-producing boundary during a rolling upgrade.
 Token-based proxy remuxes use `/stream/remux/audio-v2/{token}`; Jellyfin-compatible
@@ -2369,6 +2398,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
 | `server_dv7_to_dv81` | `ffmpeg -bsfs` contains `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and bounded silent-frame smoke tests execute the exact timestamp-normalisation graph (stereo input) and stereo-downmix limiter graph (5.1 input) |
+| `audio_to_eac3`, `audio_to_ac3` | `ffmpeg -encoders` contains the `eac3` / `ac3` encoder and a bounded silent-frame smoke test encodes 48 kHz 5.1 at 640 kbps into fragmented MP4 |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `video_to_hevc` | `ffmpeg -encoders` contains `libx265` and a bounded one-frame `libx265` 8-bit SDR encode succeeds; the transcode backend probe validates a hardware HEVC encoder before that backend is selected |
 | `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor. The Dolby Vision kind is smoke-tested only on executors whose filter applies an RPU (`tonemapx`, `tonemap_opencl`, `tonemap_cuda`, each run with `apply_dovi=1`), and the full-range PQ kind only on the software executor (`tonemapx` or the Hable fallback) |
