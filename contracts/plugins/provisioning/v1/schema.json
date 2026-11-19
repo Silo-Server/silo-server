@@ -19,7 +19,11 @@
       "additionalProperties": false,
       "properties": {
         "catalog": { "const": "silo", "default": "silo" },
-        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$" },
+        "version": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$"
+        },
         "config": {
           "type": "object",
           "propertyNames": { "minLength": 1 },

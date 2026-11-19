@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,9 +51,11 @@ type ProvisionWriter struct {
 	document      *ProvisionDocument
 	placeMetadata func(context.Context, pgx.Tx, int) error
 
+	sessionName      string
 	conn             *pgx.Conn
 	retry            bool
 	placementPending bool
+	heldForRestore   bool
 	started          bool
 
 	localMu     sync.RWMutex
@@ -62,7 +65,8 @@ type ProvisionWriter struct {
 
 func NewProvisionWriter(pool *pgxpool.Pool, repositories *RepositoryStore, installations *InstallationStore, installer *Installer, catalog *CatalogService, configs *RuntimeConfigStore, service *Service, document *ProvisionDocument, placeMetadata func(context.Context, pgx.Tx, int) error) *ProvisionWriter {
 	return &ProvisionWriter{
-		pool: pool, repositories: repositories, installations: installations, installer: installer, catalog: catalog,
+		sessionName: "silo-plugin-provision-" + cryptorand.Text(),
+		pool:        pool, repositories: repositories, installations: installations, installer: installer, catalog: catalog,
 		configs: configs, service: service, document: document, placeMetadata: placeMetadata,
 	}
 }
@@ -100,33 +104,45 @@ func (w *ProvisionWriter) tryWriter(ctx context.Context) (bool, error) {
 	defer cancel()
 	// This session lives outside the service pool. It still owns the lock
 	// while other readers and preparation use the pool.
-	conn, err := pgx.ConnectConfig(ctx, w.pool.Config().ConnConfig.Copy())
+	cfg := w.pool.Config().ConnConfig.Copy()
+	cfg.RuntimeParams["application_name"] = w.sessionName
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return false, err
 	}
 	var acquired bool
 	err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1::int,$2::int)`, provisionLockNamespace, provisionLockID).Scan(&acquired)
+	if err == nil && !acquired && w.started {
+		// A broken TCP connection can leave our old backend holding the
+		// lock. Retry that case, but yield permanently to a different writer.
+		var otherWriter bool
+		err = conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 `+provisionLockFrom+`
+			AND pid NOT IN (SELECT pid FROM pg_stat_activity WHERE application_name = $3))`,
+			uint32(provisionLockNamespace), uint32(provisionLockID), w.sessionName).Scan(&otherWriter)
+		if err == nil && !otherWriter {
+			err = errors.New("waiting to reacquire the provisioning writer lock")
+		}
+	}
 	if err != nil || !acquired {
 		_ = conn.Close(ctx)
 		return false, err
 	}
 	w.conn = conn
+	w.started = true
 	return true, nil
 }
+
+const provisionLockFrom = `FROM pg_locks
+	WHERE locktype = 'advisory' AND granted AND mode = 'ExclusiveLock'
+	  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+	  AND classid = $1::oid AND objid = $2::oid AND objsubid = 2`
 
 func verifyProvisionAuthority(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }) error {
 	var held bool
-	err := q.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM pg_locks
-			WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()
-			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-			  AND classid = $1::oid AND objid = $2::oid AND objsubid = 2
-			  AND mode = 'ExclusiveLock'
-		)
-	`, uint32(provisionLockNamespace), uint32(provisionLockID)).Scan(&held)
+	err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 `+provisionLockFrom+` AND pid = pg_backend_pid())`,
+		uint32(provisionLockNamespace), uint32(provisionLockID)).Scan(&held)
 	if err != nil || !held {
 		return errProvisionAuthorityLost
 	}
@@ -158,7 +174,6 @@ func (w *ProvisionWriter) StartOffline(ctx context.Context) error {
 		w.reportConflict(ctx)
 		return nil
 	}
-	w.started = true
 	w.placementPending = w.placeMetadata != nil
 	if err := w.installer.CleanupProvisionStaging(); err != nil {
 		slog.WarnContext(ctx, "could not clear abandoned plugin staging files", "component", "plugins")
@@ -329,8 +344,21 @@ func (w *ProvisionWriter) loseAuthority() {
 	w.setLocalStatus("pending", "The provisioning writer lost its database session and will retry after obtaining authority.")
 }
 
-func (w *ProvisionWriter) saveStatuses(ctx context.Context, statuses []ProvisionStatus) error {
+func (w *ProvisionWriter) saveFailureStatus(ctx context.Context, state, detail string, refusal *provisionRefusalError) error {
 	return pgx.BeginFunc(ctx, w.conn, func(tx pgx.Tx) error {
+		statuses := w.statuses(state, detail)
+		if len(statuses) == 0 {
+			var err error
+			statuses, err = statusOfUnappliedRelease(ctx, tx, nil, state, detail)
+			if err != nil {
+				return err
+			}
+		}
+		for i := range statuses {
+			if refusal != nil && statuses[i].PluginID == refusal.pluginID {
+				statuses[i].Detail = refusal.detail
+			}
+		}
 		if err := writeProvisionStatuses(ctx, tx, statuses); err != nil {
 			return err
 		}
@@ -377,7 +405,7 @@ func (s *RuntimeConfigStore) ListProvisionStatus(ctx context.Context) ([]Provisi
 		if err != nil {
 			return nil, err
 		}
-		return s.statusOfUnappliedRelease(ctx, committed, state, detail)
+		return statusOfUnappliedRelease(ctx, s.pool, committed, state, detail)
 	}
 	local := s.provisionWriter.statuses(state, detail)
 	records := make(map[string]ProvisionStatus)
@@ -393,13 +421,13 @@ func (s *RuntimeConfigStore) ListProvisionStatus(ctx context.Context) ([]Provisi
 // An empty declaration requests release of the previously managed plugins.
 // Its local failure belongs to those plugin IDs even though the document has
 // none of its own.
-func (s *RuntimeConfigStore) statusOfUnappliedRelease(ctx context.Context, committed []ProvisionStatus, state, detail string) ([]ProvisionStatus, error) {
+func statusOfUnappliedRelease(ctx context.Context, db provisionConfigQuery, committed []ProvisionStatus, state, detail string) ([]ProvisionStatus, error) {
 	records := make(map[string]ProvisionStatus)
 	for _, status := range committed {
 		status.State, status.Detail = state, detail
 		records[status.PluginID] = status
 	}
-	rows, err := s.pool.Query(ctx, `SELECT i.plugin_id, i.version FROM plugin_installations i
+	rows, err := db.Query(ctx, `SELECT i.plugin_id, i.version FROM plugin_installations i
 		JOIN plugin_provision_ownership o ON o.plugin_installation_id = i.id`)
 	if err != nil {
 		return nil, err

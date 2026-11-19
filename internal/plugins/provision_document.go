@@ -66,18 +66,18 @@ const maxProvisionBytes = 1 << 20
 // ReadProvisionDocument is called by API hosts only. A nil document means
 // that this instance reads the committed deployment state.
 func ReadProvisionDocument() (*ProvisionDocument, error) {
-	inline, hasInline := os.LookupEnv("SILO_PLUGINS")
-	path, hasFile := os.LookupEnv("SILO_PLUGINS_FILE")
+	inline := os.Getenv("SILO_PLUGINS")
+	path := os.Getenv("SILO_PLUGINS_FILE")
 	switch {
-	case hasInline && hasFile:
+	case inline != "" && path != "":
 		return nil, errors.New("set only one of SILO_PLUGINS and SILO_PLUGINS_FILE")
-	case hasFile:
+	case path != "":
 		data, err := readProvisionFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("SILO_PLUGINS_FILE: %w", err)
 		}
 		return parseProvisionDocument(data, true)
-	case hasInline:
+	case inline != "":
 		return parseProvisionDocument([]byte(inline), false)
 	default:
 		return nil, nil
@@ -85,7 +85,7 @@ func ReadProvisionDocument() (*ProvisionDocument, error) {
 }
 
 func readProvisionFile(path string) ([]byte, error) {
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) //nolint:gosec // The operator selects the declaration or credential mount.
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, errors.New("expected a readable regular file")
 	}
@@ -156,10 +156,10 @@ func parseProvisionDocument(data []byte, allowYAML bool) (*ProvisionDocument, er
 	var secretBytes int
 	document.secrets = make(map[provisionReference]string)
 	for _, id := range slices.Sorted(maps.Keys(document.Plugins)) {
-		if _, ok := officialPluginRepository(id); !ok {
-			return nil, fmt.Errorf("plugins.%s is not an official plugin", id)
-		}
 		plugin := document.Plugins[id]
+		if _, err := validateOfficialReleaseRequest(id, plugin.Version); err != nil {
+			return nil, fmt.Errorf("plugins.%s: %w", id, err)
+		}
 		if plugin.Catalog == "" {
 			plugin.Catalog = "silo"
 			document.Plugins[id] = plugin

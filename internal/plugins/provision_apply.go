@@ -38,12 +38,15 @@ func (e *provisionRefusalError) Error() string {
 func (w *ProvisionWriter) apply(ctx context.Context, offline bool) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
+	if w.heldForRestore {
+		return w.recordRestoreHold(ctx)
+	}
 	hold, err := ProvisionRestoreHold(ctx, w.pool)
 	if err != nil {
 		return true, nil
 	}
 	if hold != "" {
-		return true, w.saveStatuses(ctx, w.statuses("held", "A restore withheld plugin authority. Acknowledge the current hold through Silo's recovery command."))
+		return w.recordRestoreHold(ctx)
 	}
 
 	staged, needsFetch, err := w.prepareWithAuthority(ctx, offline)
@@ -71,19 +74,22 @@ func (w *ProvisionWriter) apply(ctx context.Context, offline bool) (bool, error)
 		if offline && refusal.local {
 			return false, refusal
 		}
-		statuses := w.statuses("refused", "The declaration contains a plugin that was refused.")
-		for i := range statuses {
-			if statuses[i].PluginID == refusal.pluginID {
-				statuses[i].Detail = refusal.detail
-			}
-		}
-		err := w.saveStatuses(ctx, statuses)
+		err := w.saveFailureStatus(ctx, "refused", "The declaration contains a plugin that was refused.", refusal)
 		return err != nil, err
 	}
 	if errors.Is(err, errProvisionRestoreHeld) {
-		return true, w.saveStatuses(ctx, w.statuses("held", "A restore withheld plugin authority. Acknowledge the current hold through Silo's recovery command."))
+		return w.recordRestoreHold(ctx)
 	}
-	return true, w.saveStatuses(ctx, w.statuses("pending", "Waiting for the current catalog, package, or database state."))
+	return true, w.saveFailureStatus(ctx, "pending", "Waiting for the current catalog, package, or database state.", nil)
+}
+
+// Acknowledgment releases a reviewed deployment on its next startup. Even if
+// this writer reconnects, its original declaration predates that review.
+func (w *ProvisionWriter) recordRestoreHold(ctx context.Context) (bool, error) {
+	w.heldForRestore = true
+	w.placementPending = false
+	err := w.saveFailureStatus(ctx, "held", "Review the declaration, acknowledge the restore hold and restart the provisioning instance.", nil)
+	return err != nil, err
 }
 
 // prepareWithAuthority keeps all uses of the advisory lock's connection on one

@@ -315,10 +315,10 @@ var officialVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]
 func validateOfficialReleaseRequest(pluginID, version string) (string, error) {
 	repoURL, ok := officialPluginRepository(pluginID)
 	if !ok {
-		return "", fmt.Errorf("plugin %q is outside the official catalog", pluginID)
+		return "", packageError(nil, "The requested plugin is outside the official catalog.")
 	}
 	if version != "" && (len(version) > 128 || !officialVersionPattern.MatchString(version) || !semver.IsValid("v"+version)) {
-		return "", fmt.Errorf("invalid official plugin version %q", version)
+		return "", packageError(nil, "The requested version is not a valid official plugin release.")
 	}
 	return repoURL, nil
 }

@@ -11,6 +11,32 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
+func TestReadProvisionDocumentEmptyEnvironment(t *testing.T) {
+	const release = `{"apiVersion":1,"plugins":{}}`
+	path := filepath.Join(t.TempDir(), "plugins.json")
+	if err := os.WriteFile(path, []byte(release), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, inline, path      string
+		wantDocument, wantError bool
+	}{
+		{"empty variables use committed state", "", "", false, false},
+		{"inline release", release, "", true, false},
+		{"file release", "", path, true, false},
+		{"two declarations", release, path, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SILO_PLUGINS", tc.inline)
+			t.Setenv("SILO_PLUGINS_FILE", tc.path)
+			doc, err := ReadProvisionDocument()
+			if (err != nil) != tc.wantError || (doc != nil) != tc.wantDocument {
+				t.Fatalf("document present = %t, error = %v", doc != nil, err)
+			}
+		})
+	}
+}
+
 func TestProvisionDocumentResolvesOnlyVerifiedSecretFields(t *testing.T) {
 	const id = "silo.auth.oidc"
 	dir := t.TempDir()
@@ -90,6 +116,28 @@ func TestProvisionDocumentRejectsAmbiguousInputs(t *testing.T) {
 	}
 	if _, err := parseProvisionDocument([]byte(`{"apiVersion":1,"plugins":{}}`), false); err != nil {
 		t.Fatalf("explicit release: %v", err)
+	}
+}
+
+func TestProvisionVersionMatchesOfficialReleaseRules(t *testing.T) {
+	for _, version := range []string{"1.0.0-01", "1.0.0-alpha.01", "1.0.0-alpha..2", "1.0.0-" + strings.Repeat("a", 123), "1.0.0-01a.0", "1.0.0-" + strings.Repeat("a", 122)} {
+		input := fmt.Sprintf(`{"apiVersion":1,"plugins":{"silo.auth.oidc":{"version":%q}}}`, version)
+		schema, err := provisionSchema()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields any
+		if err := json.Unmarshal([]byte(input), &fields); err != nil {
+			t.Fatal(err)
+		}
+		_, catalogErr := validateOfficialReleaseRequest("silo.auth.oidc", version)
+		valid := catalogErr == nil
+		if (schema.Validate(fields) == nil) != valid {
+			t.Errorf("published schema disagrees with the catalog for %q", version)
+		}
+		if _, err := parseProvisionDocument([]byte(input), false); (err == nil) != valid {
+			t.Errorf("document loader disagrees with the catalog for %q", version)
+		}
 	}
 }
 

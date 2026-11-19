@@ -1470,4 +1470,6 @@
 # writer on a dedicated session, and preserves generations on identical input.
 ./internal/plugins TestProvisionWriterAtomicOfflineDB
 ./internal/plugins TestProvisionWriterMetadataPlacementRecoveryDB
+./internal/plugins TestProvisionWriterOrphanedSessionDB
+./internal/plugins TestProvisionWriterRestartsAfterRestoreHoldDB
 ./internal/plugins TestAutomaticInstallHonorsRestoreHoldDB
