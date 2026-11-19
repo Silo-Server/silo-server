@@ -558,10 +558,12 @@ notice to the profile's inbox — a type that is itself excluded from webhook
 dispatch so a broken webhook cannot loop.
 
 Inbox retention keeps a delivery while one of its webhook or plugin
-destination attempts is still pending or retrying and was touched in the
-last week: deleting the delivery would cascade to the attempt and cancel a
-retry still on its schedule. The week bound lets a stranded attempt (webhooks
-turned off server-wide, for example) release its row.
+destination attempts is still pending or retrying: deleting the delivery
+would cascade to the attempt and cancel a retry still on its schedule. It
+keeps it always while the attempt is claimed or scheduled (`retrying` with
+`next_retry_at` ahead), and otherwise only while the delivery is younger than
+the plugin attempt age cap (36 hours, `pluginAttemptMaxAge`), so a stranded
+attempt (webhooks turned off server-wide, for example) releases its row.
 
 ## Plugin destinations
 
@@ -724,9 +726,15 @@ to the plugin service, so neither package imports the other.
     `auto_disabled`.
   - Age cap: whatever its attempt count, an attempt whose delivery is older
     than the schedule's span and half again (36 hours for its 24,
-    `pluginAttemptMaxAge`) is finished as `failed` without a send and
-    without disabling, so `retrying` rows can't pile up when the single retry
-    sweep falls behind.
+    `pluginAttemptMaxAge`) is finished without a send, so `retrying` rows
+    can't pile up when the single retry sweep falls behind. Long
+    `retry_after_seconds` waits can reach the cap before the schedule runs
+    out, so the cap applies the exhausted schedule's rule: when the
+    attempt's last stored failure was an ordinary one, the destination is
+    disabled if it stayed quiet since the message was queued. After a
+    plugin-unavailable or decrypt failure, or before any send, it is not.
+    The attempt stores only its last failure's message, so those two kinds
+    are told apart by the host's fixed text for them.
 - **Finishing.** The attempt's outcome, the failure count, the disable and
   the `plugin_destination.auto_disabled` notice's inbox row commit in one
   transaction, and the notice, which reaches no webhook or plugin

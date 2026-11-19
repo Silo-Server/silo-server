@@ -570,6 +570,7 @@
 ./internal/notifications TestPluginDestinationAttemptAgeCapDB
 ./internal/notifications TestPluginDestinationPurgeWaitsForADeliveryDB
 ./internal/notifications TestPluginDestinationTakenNameAtTheLimitDB
+./internal/notifications TestPluginDestinationAutoDisableAndAccountDeletionDontDeadlockDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess

@@ -80,6 +80,22 @@ type pluginSendResult struct {
 	stopErr error
 }
 
+// The messages of the failures the destination isn't at fault for
+// (pluginSendResult.keepEnabled). An attempt stores only its last failure's
+// message, so the age cap tells these from ordinary failures by their text
+// (keptEnabledFailure).
+const (
+	pluginUnavailableText        = "The plugin that provides this destination isn't available."
+	pluginNoAnswerText           = "The plugin didn't answer."
+	pluginSettingsUnreadableText = "The stored settings can't be read on this server."
+)
+
+// keptEnabledFailure reports whether an attempt's stored failure message is
+// one of a failure the destination isn't at fault for.
+func keptEnabledFailure(message string) bool {
+	return message == pluginUnavailableText || message == pluginNoAnswerText || message == pluginSettingsUnreadableText
+}
+
 // pluginSendResultOf maps a plugin's answer onto what the sender does
 // (docs/architecture/notifications.md, "Plugin destinations"). An
 // unreachable plugin (pluginUnreachable) retries and never disables. Any
@@ -94,9 +110,9 @@ func pluginSendResultOf(resp *pluginv1.SendNotificationResponse, err error) plug
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrPluginChannelUnavailable):
-			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin that provides this destination isn't available.", keepEnabled: true}
+			return pluginSendResult{outcome: pluginSendRetry, message: pluginUnavailableText, keepEnabled: true}
 		case pluginUnreachable(err):
-			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin didn't answer.", keepEnabled: true}
+			return pluginSendResult{outcome: pluginSendRetry, message: pluginNoAnswerText, keepEnabled: true}
 		case errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded:
 			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin took too long to send the message."}
 		}
@@ -239,8 +255,10 @@ func (s *pluginDestinationSender) enqueueable(ctx context.Context, tx pgx.Tx, pr
 
 // pluginAttemptMaxAge bounds how old a delivery's plugin attempt may get:
 // the retry schedule's span and half again (36 hours for its 24). An attempt
-// past it is finished as failed without a send and without disabling, so
-// retrying rows can't pile up when the retry sweep falls behind.
+// past it is finished without a send, so retrying rows can't pile up when
+// the retry sweep falls behind. It disables the destination only as an
+// exhausted schedule would: the last failure was an ordinary one and the
+// destination stayed quiet since the message was queued.
 var pluginAttemptMaxAge = webhookRetrySchedule[len(webhookRetrySchedule)-1] * 3 / 2
 
 // pluginAttemptFinish is everything one attempt's outcome changes,
@@ -292,7 +310,18 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 		return
 	}
 	if time.Since(row.CreatedAt) > pluginAttemptMaxAge {
-		s.finish(ctx, attempt, d, pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "not delivered in time"})
+		// Long retry waits can reach the age cap before the schedule runs
+		// out, so the cap applies the exhausted schedule's rule to the
+		// attempt's last failure: an ordinary one disables a destination
+		// that stayed quiet since the message was queued.
+		aged := pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "not delivered in time"}
+		if attempt.FailureMessage != nil && !keptEnabledFailure(*attempt.FailureMessage) {
+			queued := row.CreatedAt
+			aged.message = *attempt.FailureMessage
+			aged.disableReason = "Deliveries failed for 24 hours"
+			aged.quietSince = &queued
+		}
+		s.finish(ctx, attempt, d, aged)
 		return
 	}
 
@@ -378,6 +407,14 @@ func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt Deli
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// A disable writes a notice, whose foreign key key-share locks the
+	// account. That lock comes first, as in a create, because an account
+	// deletion locks the account before its cascade reaches the destination.
+	if d != nil && f.disableReason != "" {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR KEY SHARE`, d.UserID); err != nil {
+			return nil, false, err
+		}
+	}
 	// The destination is locked before its attempt, in the order a delete
 	// locks them (the row, then its attempts by cascade), so the two can't
 	// deadlock.
@@ -458,7 +495,7 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 	if err != nil {
 		// Like a webhook URL this server can't decrypt: a temporary
 		// failure, since a server with the right key can still send.
-		return pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true}
+		return pluginSendResult{outcome: pluginSendRetry, message: pluginSettingsUnreadableText, keepEnabled: true}
 	}
 	test := claimed == nil
 	attemptNumber := 1
@@ -531,7 +568,7 @@ func (s *pluginDestinationSender) recheckBeforeSend(ctx context.Context, claimed
 		return current, stored, nil
 	}
 	if stored, err = s.decryptConfig(current); err != nil {
-		return d, stored, &pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true, sent: current}
+		return d, stored, &pluginSendResult{outcome: pluginSendRetry, message: pluginSettingsUnreadableText, keepEnabled: true, sent: current}
 	}
 	return current, stored, nil
 }
@@ -551,7 +588,7 @@ func (s *pluginDestinationSender) rereadBeforeTest(ctx context.Context, d *Plugi
 		return current, stored, nil
 	}
 	if stored, err = s.decryptConfig(current); err != nil {
-		return d, stored, &pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true, sent: current}
+		return d, stored, &pluginSendResult{outcome: pluginSendRetry, message: pluginSettingsUnreadableText, keepEnabled: true, sent: current}
 	}
 	return current, stored, nil
 }

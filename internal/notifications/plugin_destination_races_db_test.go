@@ -3,8 +3,11 @@ package notifications
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -251,8 +254,9 @@ func TestPluginDestinationNULMessageIsStoredDB(t *testing.T) {
 }
 
 // An attempt whose delivery is older than the retry window and its margin
-// finishes as failed without a send and without disabling, whatever its
-// attempt count.
+// finishes without a send, whatever its attempt count. It disables only as
+// an exhausted schedule would: after an ordinary failure, never after one
+// the destination isn't at fault for or before any send.
 func TestPluginDestinationAttemptAgeCapDB(t *testing.T) {
 	pool := pluginDestinationDB(t)
 	ctx := t.Context()
@@ -278,6 +282,41 @@ func TestPluginDestinationAttemptAgeCapDB(t *testing.T) {
 	got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID)
 	if outcome != WebhookOutcomeFailed || len(host.sent) != 0 || !got.Enabled || got.ConsecutiveFailures != 0 {
 		t.Fatalf("aged attempt: outcome %s, %d sends, destination %+v; want failed, unsent, the destination untouched", outcome, len(host.sent), got)
+	}
+
+	for _, tc := range []struct {
+		lastFailure string
+		disable     bool
+	}{
+		{lastFailure: pluginUnavailableText},
+		{lastFailure: pluginSettingsUnreadableText},
+		{lastFailure: "rate limited", disable: true},
+	} {
+		deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
+		enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
+		// The destination was edited when it was created, before this
+		// delivery is backdated past it.
+		if _, err := pool.Exec(ctx, `UPDATE notification_deliveries SET created_at = now() - $2::interval WHERE id = $1`,
+			deliveryID, pluginAttemptMaxAge+time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE notification_plugin_destinations SET updated_at = now() - $2::interval WHERE id = $1`,
+			d.ID, pluginAttemptMaxAge+time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET attempt_number = 3, failure_message = $2 WHERE notification_delivery_id = $1`,
+			deliveryID, tc.lastFailure); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := sender.repo.ClaimPendingForDelivery(ctx, deliveryID)
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("claim = %d, %v", len(claimed), err)
+		}
+		sender.processAttempt(ctx, claimed[0])
+		got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID)
+		if got.Enabled == tc.disable || len(host.sent) != 0 {
+			t.Fatalf("aged attempt after %q: enabled %v, %d sends; want disabled %v and no send", tc.lastFailure, got.Enabled, len(host.sent), tc.disable)
+		}
 	}
 }
 
@@ -362,4 +401,73 @@ func TestPluginDestinationTakenNameAtTheLimitDB(t *testing.T) {
 	if err := sender.repo.InsertWithLimit(ctx, d, 1); !errors.Is(err, ErrPluginDestinationLimit) {
 		t.Fatalf("new name at the limit = %v, want ErrPluginDestinationLimit", err)
 	}
+}
+
+// An auto-disable writes a notice whose foreign key key-share locks the
+// account, so it takes that lock before the destination's, the order an
+// account deletion takes them. Otherwise the two deadlock and PostgreSQL
+// aborts the disable.
+func TestPluginDestinationAutoDisableAndAccountDeletionDontDeadlockDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	// The inbox row goes with its account, as in production.
+	if _, err := pool.Exec(ctx, `ALTER TABLE notification_deliveries ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	host := &scriptedChannelHost{}
+	service, sender := newTestPluginDestinationService(t, pool, host)
+	recordNotices(pool, sender)
+	var logs strings.Builder
+	var logMu sync.Mutex
+	sender.logger = slog.New(slog.NewTextHandler(lockedWriter{&logMu, &logs}, nil))
+	d := createTestDestination(t, service, map[string]any{"topic": "alerts"})
+	deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
+	enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
+	claimed, err := sender.repo.ClaimPendingForDelivery(ctx, deliveryID)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %d, %v", len(claimed), err)
+	}
+	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "revoked"})
+
+	deletion, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = deletion.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := deletion.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, accountA); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sender.processAttempt(ctx, claimed[0])
+	}()
+	waitForLockWait(t, pool)
+	if _, err := deletion.Exec(ctx, `DELETE FROM users WHERE id = $1`, accountA); err != nil {
+		t.Fatalf("account deletion alongside an auto-disable: %v", err)
+	}
+	if err := deletion.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	logMu.Lock()
+	defer logMu.Unlock()
+	if strings.Contains(logs.String(), "40P01") {
+		t.Fatalf("the auto-disable deadlocked with the account deletion: %s", logs.String())
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification_plugin_destinations`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d destinations left, %v; want none", left, err)
+	}
+}
+
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
