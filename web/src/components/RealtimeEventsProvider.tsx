@@ -47,7 +47,6 @@ import {
   createCatalogInvalidationScheduler,
   invalidateAccessDependentState,
   invalidateCatalogState,
-  scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
 } from "@/components/realtimeCatalogInvalidation";
 import { jobCancelledError, jobFailedError } from "@/lib/adminJobErrors";
@@ -525,20 +524,16 @@ function handleUserStateEvent(
           // A mark changes which titles More like this lists.
           skipSimilarItems: payload.change !== "not_interested",
           knownRelatedIds,
+          cancelHomeReads: payload.change === "progress",
         }
-      : { skipSimilarItems: true },
+      : { skipSimilarItems: true, cancelHomeReads: payload.change === "progress" },
   );
-  // Resetting home's load queue re-runs every section fetch. Membership
-  // changes do it immediately; progress ticks coalesce into one trailing
-  // refresh per window so an open home still catches another client's
-  // playback without a per-tick storm. Mark the home sections stale before
-  // an immediate reset because the surface invalidation above is debounced.
+  // Membership changes refresh immediately. Progress uses the coalesced
+  // media surface invalidation above, which already refreshes Home.
   if (userStateChangeAffectsSectionMembership(payload.change)) {
     void queryClient
       .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
       .then(() => bumpHomeRefreshSignal(queryClient));
-  } else {
-    scheduleProgressHomeRefresh(queryClient);
   }
   void queryClient.invalidateQueries({
     queryKey: adminKeys.stats(),
@@ -580,6 +575,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   // An unexpected drop on a visible page is not caught up at once, but the
   // next return from a hide catches up the frames it lost.
   const droppedSinceCatchUpRef = useRef(false);
+  const watchStateCatchUpRef = useRef<ProfileRequestContextSnapshot | null>(null);
+  const watchStateScopeRef = useRef<ProfileRequestContextSnapshot | null>(null);
+  // A focus read can land before a connection comes back. It cannot see a
+  // stop later in that gap, so only the subscription clears this obligation.
+  const watchStateMissedFramesRef = useRef(false);
   const [hiddenGraceExpired, setHiddenGraceExpired] = useState(false);
   // Bumping these replaces the socket, or runs a catch-up while the page is visible.
   const [socketGeneration, setSocketGeneration] = useState(0);
@@ -929,6 +929,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     hiddenAtRef.current = null;
     if (!authenticatedUserID) {
       shouldCatchUpOnFocusRef.current = false;
+      watchStateCatchUpRef.current = null;
+      watchStateScopeRef.current = null;
+      watchStateMissedFramesRef.current = false;
       return;
     }
     // A suspended page (a phone browser in the background) runs no timers, so
@@ -937,13 +940,18 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     if (hiddenAt !== null && Date.now() - hiddenAt >= HIDDEN_EVENTS_SOCKET_GRACE_MS) {
       shouldCatchUpOnFocusRef.current = true;
       if (socketRef.current) {
+        watchStateMissedFramesRef.current = true;
         setSocketGeneration((generation) => generation + 1);
       }
     }
     if (hiddenAt !== null && droppedSinceCatchUpRef.current) {
       shouldCatchUpOnFocusRef.current = true;
     }
-    if (!shouldCatchUpOnFocusRef.current) {
+    const watchStateAuthority = watchStateCatchUpRef.current;
+    const catchUpWatchState =
+      watchStateAuthority !== null && isEventsAuthorityActive(watchStateAuthority);
+    const catchUpOnFocus = shouldCatchUpOnFocusRef.current;
+    if (!catchUpOnFocus && !catchUpWatchState) {
       return;
     }
     // The foreground player covers the routed app and owns everything it
@@ -956,6 +964,32 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const homeAuthority = catchUpWatchState ? watchStateAuthority : captureEventsAuthority();
+    watchStateCatchUpRef.current = null;
+    if (homeAuthority?.profileId) {
+      watchStateScopeRef.current = homeAuthority;
+      // Home's row queries have no live observers. Mark them stale before
+      // restarting its load queue, including a first read that raced the gap.
+      const homeQueries = { queryKey: sectionKeys.home() };
+      void queryClient
+        .cancelQueries(homeQueries)
+        .then(() => {
+          if (isEventsAuthorityActive(homeAuthority)) {
+            // The focus catch-up already refetches the active layout query.
+            return queryClient.invalidateQueries({
+              ...homeQueries,
+              refetchType: catchUpOnFocus ? "none" : "active",
+            });
+          }
+        })
+        .then(() => {
+          if (isEventsAuthorityActive(homeAuthority)) bumpHomeRefreshSignal(queryClient);
+        });
+    }
+    if (!catchUpOnFocus) {
+      droppedSinceCatchUpRef.current = false;
+      return;
+    }
     shouldCatchUpOnFocusRef.current = false;
     droppedSinceCatchUpRef.current = false;
     void queryClient.refetchQueries({
@@ -983,6 +1017,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     if (!keepSocketOpen) {
       // Frames sent from now on are missed; catch up when the page returns.
       shouldCatchUpOnFocusRef.current = true;
+      watchStateMissedFramesRef.current = true;
       setConnectionState("disconnected");
       return;
     }
@@ -1079,6 +1114,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       // The server sends access_changed and then closes with
       // EVENTS_ACCESS_CHANGED_CLOSE_CODE; whichever arrives first refreshes.
       let accessChangeHandled = false;
+      let watchStateSubscribed = false;
       const handleAccessChanged = () => {
         if (accessChangeHandled) return;
         accessChangeHandled = true;
@@ -1112,6 +1148,25 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             sendSubscribe();
             return;
           case "subscribed": {
+            if (
+              !watchStateSubscribed &&
+              authority.profileId &&
+              Array.isArray(message.channels) &&
+              message.channels.includes("user_state")
+            ) {
+              watchStateSubscribed = true;
+              const priorScope = watchStateScopeRef.current;
+              watchStateScopeRef.current = authority;
+              const firstSubscription = !priorScope || !isEventsAuthorityActive(priorScope);
+              const cachedHome = queryClient
+                .getQueriesData({ queryKey: sectionKeys.home() })
+                .some(([, data]) => data !== undefined);
+              if (watchStateMissedFramesRef.current || (firstSubscription && cachedHome)) {
+                watchStateMissedFramesRef.current = false;
+                watchStateCatchUpRef.current = authority;
+                setCatchUpSignal((signal) => signal + 1);
+              }
+            }
             // A profile_required rejection means the profile binding was lost
             // (the ticket mint failed or the ticket was not honored). Left
             // alone, this socket would stay healthy for hours while silently
@@ -1182,6 +1237,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           handleAccessChanged();
         } else if (!closedByEffect) {
           droppedSinceCatchUpRef.current = true;
+          watchStateMissedFramesRef.current = true;
         }
         if (!closedByEffect && event.code === EVENTS_CREDENTIAL_INVALID_CLOSE_CODE) {
           // A revoked session fails the refresh and signs out, which ends

@@ -48,6 +48,7 @@ interface InvalidateMediaSurfaceOptions {
    */
   skipItemQueries?: boolean;
   skipSimilarItems?: boolean;
+  cancelHomeReads?: boolean;
   // Items already found related to itemId, such as through a watch detail
   // dropped since (dropInactiveWatchDetail), which was the only link from an
   // episode to its series.
@@ -534,6 +535,11 @@ export async function invalidateMediaSurfaceQueries(
       : options;
   const matches = (query: Query) =>
     shouldInvalidateMediaSurfaceQuery(query.queryKey, scoped, relatedIds);
+  if (options.cancelHomeReads) {
+    // Home's layout seeds row caches. Cancel both that read and the one-shot
+    // row reads before pre-event responses can mark the old rows fresh.
+    await queryClient.cancelQueries({ queryKey: sectionKeys.home() });
+  }
   const runningLetterIndexes = refetchLetterIndexesWhenDone(queryClient, matches);
   const holdsCatalogLists =
     !options.skipFirstReadHold && holdCatalogListsForFirstReads(queryClient, matches);
@@ -750,6 +756,7 @@ export function scheduleMediaSurfaceInvalidation(
             ...(options.knownRelatedIds ?? []),
           ])
         : undefined,
+    cancelHomeReads: existing?.options.cancelHomeReads || options.cancelHomeReads,
     watchedKeys: [...(existing?.options.watchedKeys ?? []), ...(options.watchedKeys ?? [])],
     // A later event without a series (one whose lookup failed, say) mustn't
     // drop the series an earlier event for the same item named.

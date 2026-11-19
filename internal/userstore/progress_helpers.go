@@ -8,6 +8,66 @@ import (
 	"time"
 )
 
+// SequencedPlaybackProgressWriter orders a heartbeat against the same attempt's
+// final stop. A skipped sample reports written=false and has no side effects.
+type SequencedPlaybackProgressWriter interface {
+	WriteSequencedPlaybackProgress(ctx context.Context, sessionID string, sequence int64, profileID, mediaItemID string,
+		position, duration float64, thresholds ProgressThresholds, hints VersionHints) (written, completed bool, err error)
+}
+
+// WritePlaybackProgress prefers the attempt fence. Stores without a shared
+// attempt table use their ordinary progress write.
+func WritePlaybackProgress(ctx context.Context, store UserStore, sessionID string, sequence int64, profileID, mediaItemID string,
+	position, duration float64, thresholds ProgressThresholds, hints VersionHints) (written, completed bool, err error) {
+	if writer, ok := store.(SequencedPlaybackProgressWriter); ok {
+		return writer.WriteSequencedPlaybackProgress(ctx, sessionID, sequence, profileID, mediaItemID, position, duration, thresholds, hints)
+	}
+	completed, err = UpdateProgressReportingCompletion(ctx, store, profileID, mediaItemID, position, duration, thresholds)
+	if err != nil {
+		return false, false, err
+	}
+	return true, completed, store.UpdateProgressHints(ctx, profileID, mediaItemID, hints)
+}
+
+// PlaybackStopWrite is the final progress, version hints, and history for one
+// stop, including episodes covered by the same file. Entry.ID identifies the
+// stop and lets a retry recover its committed result.
+type PlaybackStopWrite struct {
+	Entry           WatchHistoryEntry
+	PositionSeconds float64
+	Thresholds      ProgressThresholds
+	Hints           VersionHints
+	SpannedTargets  []MarkWatchedTarget
+	SpannedHistory  []WatchHistoryEntry
+}
+
+type PlaybackStopWriter interface {
+	CommitPlaybackStop(context.Context, PlaybackStopWrite) (spanned []WatchHistoryEntry, alreadyRecorded bool, err error)
+}
+
+func CommitPlaybackStop(ctx context.Context, store UserStore, stop PlaybackStopWrite) ([]WatchHistoryEntry, bool, error) {
+	if writer, ok := store.(PlaybackStopWriter); ok {
+		return writer.CommitPlaybackStop(ctx, stop)
+	}
+	entry := stop.Entry
+	if err := store.SetProgress(ctx, entry.ProfileID, entry.MediaItemID, stop.PositionSeconds, entry.DurationSeconds, stop.Thresholds); err != nil {
+		return nil, false, err
+	}
+	if err := store.UpdateProgressHints(ctx, entry.ProfileID, entry.MediaItemID, stop.Hints); err != nil {
+		return nil, false, err
+	}
+	spanned, err := MarkWatchedBatch(ctx, store, entry.ProfileID, stop.SpannedTargets, stop.SpannedHistory)
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := AddVisibleHistory(ctx, store, entry); errors.Is(err, ErrHistoryEntryExists) {
+		return spanned, true, nil
+	} else if err != nil {
+		return nil, false, err
+	}
+	return spanned, false, nil
+}
+
 type HistoryVisibilityStore interface {
 	VisibleHistoryTimestamps(ctx context.Context, profileID string, mediaItemIDs []string, at time.Time) (map[string]string, error)
 }

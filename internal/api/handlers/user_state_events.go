@@ -25,7 +25,10 @@ type userStateEventState struct {
 	NotInterested *bool
 }
 
-const userStateChangedEvent = "user_state.changed"
+const (
+	userStateChangedEvent   = "user_state.changed"
+	userStateChangeProgress = "progress"
+)
 
 func publishUserStateEvent(
 	ctx context.Context,

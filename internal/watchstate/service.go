@@ -40,6 +40,8 @@ type PlaybackStopResult struct {
 	MediaItemID           string
 	DurationSeconds       float64
 	FinalPositionSeconds  float64
+	ProgressWritten       bool
+	WatchStateErr         error
 	Completed             bool
 	SkippedBelowMinResume bool
 	HistoryID             string
@@ -148,6 +150,7 @@ func (s *Service) RecordPlaybackStop(
 	if err := store.SetProgress(ctx, profileID, targetID, position, duration, thresholds); err != nil {
 		return result, err
 	}
+	result.ProgressWritten = true
 	if hints.FileID > 0 {
 		if err := store.UpdateProgressHints(ctx, profileID, targetID, hints); err != nil {
 			return result, err
@@ -172,6 +175,60 @@ func (s *Service) RecordPlaybackStop(
 	result.HistoryID = historyID
 	if entry.Completed {
 		s.notifyWatchedCompleted(ctx, userID, profileID, []string{targetID})
+	}
+	return result, nil
+}
+
+// RecordFinalPlaybackStop persists the watch state for an arbitrated native
+// stop. The stop identity survives lease takeover and reply loss.
+func (s *Service) RecordFinalPlaybackStop(
+	ctx context.Context,
+	userID int,
+	profileID, targetID string,
+	duration, position float64,
+	watchedAt time.Time,
+	hints userstore.VersionHints,
+	thresholds userstore.ProgressThresholds,
+	historyID string,
+	spannedTargets []LeafWatchTarget,
+) (PlaybackStopResult, error) {
+	result := PlaybackStopResult{MediaItemID: targetID, DurationSeconds: duration, FinalPositionSeconds: position}
+	_, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
+		result.SkippedBelowMinResume = true
+		return result, nil
+	}
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return result, err
+	}
+	entry := userstore.WatchHistoryEntry{
+		ID: historyID, ProfileID: profileID, MediaItemID: targetID,
+		WatchedAt: formatWatchedAt(watchedAt), DurationSeconds: duration,
+		Completed: completed, Source: userstore.WatchHistorySourcePlayback,
+	}
+	s.applyStableIdentity(ctx, &entry)
+	spannedIDs := make([]string, 0, len(spannedTargets))
+	for _, target := range spannedTargets {
+		spannedIDs = append(spannedIDs, target.MediaItemID)
+	}
+	targets, entries := s.markWatchedBatchEntries(ctx, profileID, spannedIDs, watchedAt, userstore.WatchHistorySourcePlayback, false)
+	spanned, alreadyRecorded, err := userstore.CommitPlaybackStop(ctx, store, userstore.PlaybackStopWrite{
+		Entry: entry, PositionSeconds: position, Thresholds: thresholds, Hints: hints, SpannedTargets: targets, SpannedHistory: entries,
+	})
+	if err != nil {
+		return result, err
+	}
+	result.Completed = completed
+	result.AlreadyRecorded = alreadyRecorded
+	result.ProgressWritten = true
+	result.HistoryID = historyID
+	if completed && !alreadyRecorded {
+		ids := []string{targetID}
+		for _, episode := range spanned {
+			ids = append(ids, episode.MediaItemID)
+		}
+		s.notifyWatchedCompleted(ctx, userID, profileID, ids)
 	}
 	return result, nil
 }

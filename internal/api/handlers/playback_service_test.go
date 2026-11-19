@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -241,6 +243,125 @@ func TestStopPlaybackV2FirstStopWinsAndLaterStopsReplay(t *testing.T) {
 	assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
 	_, err = f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString(), Sequence: 5})
 	assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
+}
+
+func TestNativePlaybackStopPublishesSavedProgressToProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		detached bool
+	}{
+		{name: "live session"},
+		{name: "detached session", detached: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			store := newPlaybackTestStore(t)
+			f.handler.StoreProvider = testUserStoreProvider{store: store}
+			f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{
+				ID: 100, ContentID: "series-1", EpisodeID: "episode-1", Duration: 3600,
+			}}
+			f.handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{SeriesID: "series-1"}}
+			f.handler.EventsHub = evt.NewHub("playback-test", nil)
+			events, unsubscribe := f.handler.EventsHub.Subscribe()
+			t.Cleanup(unsubscribe)
+			if tc.detached {
+				if err := f.manager.StopSession(f.session.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			_, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 600})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case event := <-events:
+				t.Fatalf("position-only sample published %s", event.Event)
+			default:
+			}
+
+			if !tc.detached {
+				f.handler.sessionMgr = liveStopSnapshotRace{f.manager}
+			}
+			command := PlaybackStopCommand{StopID: "c2c87108-1bb1-4d1b-b25d-c37d928a9bd7", Sequence: 2, Position: new(900.0)}
+			stopped, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, command)
+			if err != nil || stopped.Outcome != PlaybackOutcomeStopped {
+				t.Fatalf("stop: %+v, %v", stopped, err)
+			}
+			select {
+			case event := <-events:
+				var payload userStateEventPayload
+				if err := jsonv2.Unmarshal(event.Data, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if event.Channel != evt.ChannelUserState || event.Event != userStateChangedEvent ||
+					event.UserID != f.caller.UserID || event.ProfileID != f.caller.ProfileID ||
+					payload.ProfileID != f.caller.ProfileID || payload.ContentID != "episode-1" ||
+					payload.SeriesID != "series-1" || payload.Change != "progress" {
+					t.Fatalf("unexpected watch-state event: %+v, payload %+v", event, payload)
+				}
+			default:
+				t.Fatal("saved playback stop did not publish a watch-state event")
+			}
+			saved, err := store.GetProgress(t.Context(), f.caller.ProfileID, "episode-1")
+			if err != nil || saved == nil || saved.PositionSeconds != 900 {
+				t.Fatalf("saved progress: %+v, %v", saved, err)
+			}
+			replayed, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, command)
+			if err != nil || replayed.Outcome != PlaybackOutcomeReplayed {
+				t.Fatalf("replay: %+v, %v", replayed, err)
+			}
+			select {
+			case event := <-events:
+				t.Fatalf("replayed stop published %s", event.Event)
+			default:
+			}
+		})
+	}
+}
+
+func TestNativePlaybackStopFinalizesAfterSenderDisconnects(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	store := newPlaybackTestStore(t)
+	f.handler.StoreProvider = testUserStoreProvider{store: store}
+	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{
+		ID: 100, ContentID: "movie-1", Duration: 3600,
+	}}
+	attempts := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	record, err := f.handler.PlanStoreV3.GetAttempt(t.Context(), f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, first, err := attempts.StopAttempt(t.Context(), f.session.ID, uuid.NewString(), &playback.ProgressSampleV3{Sequence: 1, Position: 900})
+	if err != nil || !first {
+		t.Fatalf("accept stop: %+v, %v", receipt, err)
+	}
+	disconnected, cancel := context.WithCancel(f.ctx)
+	cancel()
+	final := f.handler.finalizeStopV2(disconnected, attempts, record, f.session.ID, receipt)
+	if !final.Finalized || final.HistoryID == "" {
+		t.Fatalf("accepted stop did not finish: %+v", final)
+	}
+	if saved, err := store.GetProgress(t.Context(), f.caller.ProfileID, "movie-1"); err != nil || saved == nil || saved.PositionSeconds != 900 {
+		t.Fatalf("saved progress: %+v, %v", saved, err)
+	}
+}
+
+type liveStopSnapshotRace struct {
+	*playback.SessionManager
+}
+
+func (m liveStopSnapshotRace) GetSession(id string) (*playback.Session, error) {
+	session, err := m.SessionManager.GetSession(id)
+	if err == nil && session.Position == 900 {
+		// An accepted heartbeat finally reaches the live copy after the
+		// stop applied 900 to it, but before teardown snapshots the copy.
+		if updateErr := m.UpdateProgress(id, 600, false); updateErr != nil {
+			return nil, updateErr
+		}
+		return m.SessionManager.GetSession(id)
+	}
+	return session, err
 }
 
 // TestStopPlaybackV2RefusesServerStopIDs covers a client stop that names one
