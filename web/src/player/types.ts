@@ -271,6 +271,8 @@ export interface PlayerPlaybackStateChange {
   currentTime: number;
   duration: number;
   playing: boolean;
+  /** The file playing now, once the player has chosen one. */
+  fileId?: number;
 }
 
 export interface PlayerPlaybackTransport {
@@ -342,9 +344,6 @@ export interface WatchPageProps {
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
-  autoPlayNextPreview?: boolean;
-  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
-  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
