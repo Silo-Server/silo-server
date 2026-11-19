@@ -1929,9 +1929,9 @@ func TestCarryMatchesAProfileWithinItsAccountDB(t *testing.T) {
 }
 
 // TestCarrySwapsDestinationNamesDB: two destinations whose names were
-// swapped since the backup are carried in one upsert, which would collide on
-// the per-profile name constraint part way through if it were checked row by
-// row.
+// swapped since the backup are carried in one upsert, which collides on the
+// immediate per-profile name constraint part way through unless the restored
+// names are staged out of the way first.
 func TestCarrySwapsDestinationNamesDB(t *testing.T) {
 	live, liveURL := backuptest.Database(t)
 	restored, restoredURL := backuptest.Database(t)
