@@ -698,8 +698,11 @@ the way never record it.
 
 1. The grant must verify, be unexpired, be younger than `MaxGrantAge` and name
    the calling node (`403`). There is no catalog query: the catalog is checked
-   at open and at every renewal, so the check behind a request is up to one
-   grant lifetime old (see [sources/open](#sourcesopen)).
+   when the grant is minted, from the row its caller read, and again at open
+   and at every renewal. A request needs an unexpired grant, so the last check
+   behind it is up to one grant lifetime old (see [sources/open](#sourcesopen)),
+   plus, for a grant never renewed, the time between the caller's read and the
+   mint.
    The core does not cut a response it is already sending when the source is
    withdrawn, and keeps serving new requests that carry an unexpired grant. A
    node that renews ends the source at its next renewal, which the core refuses
