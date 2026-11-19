@@ -129,7 +129,6 @@ func TestWindowCooldownAfterABreachKeepsTheBudgetReason(t *testing.T) {
 		CacheIdentity:   "virtual-text-breach",
 	}
 	cache.SetWindowExtractBudgetForTest(time.Millisecond)
-	cache.SetWindowExtractBudgetForTest(time.Millisecond)
 	// Slow enough that the request-path budget kills it.
 	extract := func(ctx context.Context, opts StreamExtractOpts) error {
 		<-ctx.Done()
