@@ -213,6 +213,7 @@ func goMigrations() []*goose.Migration {
 		pushAttemptKeyScopeMigration(),
 		externalSubtitleNameBackfillMigration(),
 		blobGCQueueChapterFileIndexMigration(),
+		contentRatingAgeRederiveMigration(),
 	}
 }
 

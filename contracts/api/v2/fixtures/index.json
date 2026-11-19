@@ -9908,6 +9908,86 @@
       "body_file": "list_because_watched_profile_header_required.json"
     },
     {
+      "name": "list_catalog_item_collections_authentication_required",
+      "operation_id": "listCatalogItemCollections",
+      "scenario": "The Also in row without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/catalog/items/movie:harbor-lights-2019/collections"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_catalog_item_collections_authentication_required.json"
+    },
+    {
+      "name": "list_catalog_item_collections_not_found",
+      "operation_id": "listCatalogItemCollections",
+      "scenario": "A title the viewer cannot see answers 404, whatever collections hold it.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/catalog/items/movie:hidden/collections",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_catalog_item_collections_not_found.json"
+    },
+    {
+      "name": "list_catalog_item_collections_ok",
+      "operation_id": "listCatalogItemCollections",
+      "scenario": "The collections a movie's page lists under Also in: a server collection, then one of the profile's own.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/catalog/items/movie:harbor-lights-2019/collections?library_id=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollections",
+      "body_file": "list_catalog_item_collections_ok.json"
+    },
+    {
+      "name": "list_catalog_item_collections_single_preview",
+      "operation_id": "listCatalogItemCollections",
+      "scenario": "A movie only one collection holds: its card, and its other titles to show in place of the card.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/catalog/items/movie:night-ferry-2021/collections?library_id=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollections",
+      "body_file": "list_catalog_item_collections_single_preview.json"
+    },
+    {
       "name": "list_catalog_item_episodes_invalid_image_size",
       "operation_id": "listCatalogItemEpisodes",
       "scenario": "An image size outside the enum.",

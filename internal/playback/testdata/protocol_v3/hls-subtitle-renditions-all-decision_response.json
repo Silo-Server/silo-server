@@ -31,6 +31,7 @@
     "native_embedded_limitations_v1",
     "hls_subtitle_renditions_all_v1",
     "progressive_range_refusal_v1",
+    "surround_bitstream_conversion_v1",
     "parallel_range_origin_v1"
   ],
   "outcome": "playable",

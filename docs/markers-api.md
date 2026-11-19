@@ -255,7 +255,8 @@ duration validation retains its one-second tolerance; an unknown duration cannot
 supply a default end.
 
 Credits from every source follow the placement local detection uses, because
-players open Up Next at the credits start. When the duration is known, credits
+skipping credits that run to the end of the file finishes the item. When the
+duration is known, credits
 must start in the file's tail window (for an episode the last 450 seconds or
 40% of the file, whichever is shorter; for anything else the last 900 seconds
 or 25%), at or after the end of the intro, and run from 15 seconds up to the

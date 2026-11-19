@@ -186,8 +186,13 @@ listing (`listAdminCatalogItems`, see
 | `files_changed` | One of the item's versions in `library_id` was added, removed (deleted, gone missing, or turned into an extra), moved or renamed on disk, or changed what the listing shows (size, resolution, codecs, tracks, container, bitrate, edition, or the item or library it belongs to) |
 
 ```json
-{"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":3,"content_id":"movie-tmdb-949","change":"added"}}
+{"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":"3","content_id":"movie-tmdb-949","change":"added"}}
 ```
+
+`library_id` is a string, like every v2 identifier, on this event and on the
+other `catalog` events (`catalog.library.changed`, `library.changed`,
+`library.item_added`, `metadata.updated`). A `metadata_updated` change made
+outside one library, such as an artwork edit, has no `library_id`.
 
 `content_id` names a movie, series or episode. Books, podcasts and their
 episodes produce none of these, except when one is deleted outright and its type
@@ -249,8 +254,7 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
 
 1. On subscribe, and after each `sessions.replaced`, read every page of
    `GET /api/v2/admin/sessions`. The `sessions.replaced` frame and the channel's
-   snapshot keep the older row shape and at most 200 rows; use them only as a
-   cue to re-read.
+   subscribe snapshot carry `data: null`; they are only the cue to re-read.
 2. Per session id, the record with the higher `lifecycle_seq` or `seq` decides whether
    the session is live and whether it is paused. A row and an event with equal numbers
    carry the same state. Position and stream fields are observations: take them from

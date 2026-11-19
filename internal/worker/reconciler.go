@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -74,6 +75,11 @@ type SessionSync struct {
 	IsPaused                bool
 	HasWebSocket            bool
 	IsJellyfinCompat        bool
+	// Watch is the session's watch-time measurement (playback.WatchTime as
+	// JSON), saved on its lifecycle row rather than the sync row: the sync
+	// row goes when this node shuts down, and the measurement must outlive
+	// it. Nil when the session has none yet.
+	Watch json.RawMessage
 }
 
 // AggregateData represents the aggregate counts for a single user that are
@@ -290,6 +296,9 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
+	if err := r.saveWatch(ctx, sessions); err != nil {
+		log.Printf("reconciler: failed to save watch time for node %s: %v", reportingNode, err)
+	}
 	// The two publishes serve different consumers and are not alternatives:
 	// the events hub pushes "sessions.replaced" to connected admin clients,
 	// while the cache bus invalidates the playback-derived admin aggregates
@@ -317,6 +326,53 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 	}
 
 	return nil
+}
+
+// saveWatch saves each session's watch-time measurement on its lifecycle
+// row, so a stop recorded on another server, or after this one restarts,
+// carries on from it. It runs outside the sync transaction and leaves
+// updated_at alone, which the idle sweep reads as activity. A measurement
+// older than the saved one, from a copy that stopped receiving reports,
+// never replaces it.
+func (r *Reconciler) saveWatch(ctx context.Context, sessions []SessionSync) error {
+	type row struct {
+		SessionID string          `json:"session_id"`
+		Watch     json.RawMessage `json:"watch"`
+	}
+	rows := make([]row, 0, len(sessions))
+	for _, s := range sessions {
+		if len(s.Watch) == 0 {
+			continue
+		}
+		if _, err := uuid.Parse(s.SessionID); err != nil {
+			continue
+		}
+		rows = append(rows, row{SessionID: s.SessionID, Watch: s.Watch})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, `
+		UPDATE playback_session_lifecycle lc SET watch = v.watch
+		FROM jsonb_to_recordset($1::jsonb) AS v(session_id uuid, watch jsonb)
+		WHERE lc.session_id = v.session_id AND lc.state <> 'stopped'
+		  AND lc.watch IS DISTINCT FROM v.watch
+		  AND (lc.watch IS NULL OR (lc.watch->>'until')::timestamptz <= (v.watch->>'until')::timestamptz)`, string(data))
+	return err
+}
+
+// SaveWatch saves the measurements of every session this node holds now, so
+// a graceful shutdown leaves the latest ones for the server that rebuilds or
+// stops the sessions.
+func (r *Reconciler) SaveWatch(ctx context.Context) error {
+	if r.sessionProvider == nil {
+		return nil
+	}
+	return r.saveWatch(ctx, r.sessionProvider())
 }
 
 // loadNodeSessionsSnapshot loads the normalized live-session view for one node.

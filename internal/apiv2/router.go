@@ -500,6 +500,9 @@ type Dependencies struct {
 	LiteraryWorks LiteraryWorkService
 	// BoxSets answers box set search and detail (*handlers.CatalogHandler).
 	BoxSets BoxSetService
+	// ItemCollections answers a title page's "Also in" row
+	// (*handlers.ItemCollections).
+	ItemCollections ItemCollectionService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.

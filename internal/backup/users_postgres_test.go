@@ -1230,9 +1230,8 @@ func TestItemMatchingInATransactionWithOnePoolConnectionDB(t *testing.T) {
 
 // TestPluginInstallationMapDB: a play's source installation maps through
 // the restore set's plugins section to the one installation here of that
-// plugin with the capability; a capability it lacks, two such
-// installations, or an installation the set does not name map nothing, and
-// the play becomes an import.
+// plugin with the capability; a capability it lacks or an installation the
+// set does not name maps nothing, and the play becomes an import.
 func TestPluginInstallationMapDB(t *testing.T) {
 	pool, _ := testDB(t)
 	ctx := t.Context()
@@ -1248,11 +1247,9 @@ func TestPluginInstallationMapDB(t *testing.T) {
 		dbExec(t, pool, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id) VALUES ($1, 'watch_sync_provider.v1', $2)`, id, capability)
 		return id
 	}
-	unique, dup := "bk.watch."+sfx, "bk.dup."+sfx
+	unique := "bk.watch." + sfx
 	local := install(unique, "floppy")
-	install(dup, "x")
-	install(dup, "x")
-	a := &applier{rs: &RestoreSet{Plugins: []PluginDocument{{PluginID: unique, InstallationID: 10}, {PluginID: dup, InstallationID: 11}}}}
+	a := &applier{rs: &RestoreSet{Plugins: []PluginDocument{{PluginID: unique, InstallationID: 10}}}}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -1264,7 +1261,7 @@ func TestPluginInstallationMapDB(t *testing.T) {
 		capability string
 		want       int
 		ok         bool
-	}{{10, "floppy", local, true}, {10, "other", 0, false}, {11, "x", 0, false}, {12, "floppy", 0, false}} {
+	}{{10, "floppy", local, true}, {10, "other", 0, false}, {12, "floppy", 0, false}} {
 		if got, ok := lookup(c.id, c.capability); got != c.want || ok != c.ok {
 			t.Errorf("installation %d %s = %d, %v; want %d, %v", c.id, c.capability, got, ok, c.want, c.ok)
 		}

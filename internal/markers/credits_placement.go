@@ -11,7 +11,7 @@ import (
 // Credits placement bounds, validated against frame-checked episodes and
 // movies. Credits start in the file's tail window: the last TailSeconds, or
 // TailFraction of a shorter file. Local detection and every other marker
-// source share these bounds, since players open Up Next at the credits start.
+// source share these bounds, since skipping credits at the end finishes the item.
 const (
 	CreditsMinimumSeconds = 15.0
 

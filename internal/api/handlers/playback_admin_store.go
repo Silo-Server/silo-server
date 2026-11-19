@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -47,21 +48,23 @@ func (r PlaybackEndReason) userInitiated() bool {
 // AdminPlaybackHistoryEntry is the finalized admin-facing record for a
 // playback attempt.
 type AdminPlaybackHistoryEntry struct {
-	SessionID       string
-	UserID          int
-	ProfileID       string
-	ProfileName     string
-	MediaItemID     string
-	MediaFileID     int
-	PlayMethod      string
-	StartedAt       string
-	EndedAt         string
-	WatchedSeconds  float64
-	DurationSeconds *float64
-	Completed       bool
-	ClientIP        string
-	// Watch is the session's measured watch time. WatchedSeconds is where the
-	// play ended, not how much of it was watched.
+	SessionID   string
+	UserID      int
+	ProfileID   string
+	ProfileName string
+	MediaItemID string
+	MediaFileID int
+	PlayMethod  string
+	StartedAt   string
+	EndedAt     string
+	// EndPositionSeconds is where the play ended, stored in the
+	// watched_seconds column.
+	EndPositionSeconds float64
+	DurationSeconds    *float64
+	Completed          bool
+	ClientIP           string
+	// Watch is the session's measured watch time. EndPositionSeconds is
+	// where the play ended, not how much of it was watched.
 	Watch playback.WatchTime
 	// DeviceID, DevicePlatform, ClientName, ClientVersion, VideoDecision and
 	// AudioDecision describe the play itself, so the first finalization that
@@ -177,7 +180,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		entry.PlayMethod,
 		entry.StartedAt,
 		entry.EndedAt,
-		entry.WatchedSeconds,
+		entry.EndPositionSeconds,
 		duration,
 		entry.Completed,
 		nullableIP(entry.ClientIP),
@@ -250,6 +253,36 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		live.StartedAt = *startedAt
 	}
 	return &live, nil
+}
+
+// SessionWatch is the watch-time measurement the server holding sessionID
+// last saved on its lifecycle row (when it started, then on each live-session
+// sync). ok is false when none was saved.
+func (s *PGPlaybackAdminStore) SessionWatch(ctx context.Context, sessionID string) (watch playback.WatchTime, ok bool, err error) {
+	id := lifecycleIDParam(sessionID)
+	if s == nil || s.pool == nil || id == nil {
+		return playback.WatchTime{}, false, nil
+	}
+	var raw []byte
+	err = s.pool.QueryRow(ctx, `SELECT watch FROM playback_session_lifecycle WHERE session_id = $1`, id).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && raw == nil) {
+		return playback.WatchTime{}, false, nil
+	}
+	if err != nil {
+		return playback.WatchTime{}, false, fmt.Errorf("reading saved watch time: %w", err)
+	}
+	if err := json.Unmarshal(raw, &watch); err != nil {
+		return playback.WatchTime{}, false, fmt.Errorf("decoding saved watch time: %w", err)
+	}
+	return watch, watch.Measured, nil
+}
+
+// nullableJSON stores an absent document as NULL.
+func nullableJSON(data json.RawMessage) any {
+	if len(data) == 0 {
+		return nil
+	}
+	return string(data)
 }
 
 // HistoryEndReason is the end reason the admin log holds for sessionID, or

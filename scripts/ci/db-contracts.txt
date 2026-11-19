@@ -25,7 +25,8 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestRecentlyReleasedOrdersByReleaseDate
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
-./internal/sections TestBookMediaScopeRowsKeepTheirTypePostgres
+./internal/sections TestMediaScopeRowsMatchSeeAllPostgres
+./internal/sections TestEpisodeScopeRowReadsPastOneCursorPagePostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
 ./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
@@ -303,6 +304,7 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
+./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -642,6 +644,7 @@
 ./internal/downloads TestStaleAbandonedPreparationsAreRetiredNotClaimedDB
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresCollectionsHolding
 ./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
 ./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
@@ -743,6 +746,9 @@
 
 # Stored sidecar subtitles take the scanner's reading of their names.
 ./internal/database TestPostgresExternalSubtitleNameBackfill
+
+# Stored content-rating ages take what access.Normalize resolves now.
+./internal/database TestPostgresContentRatingAgeRederive
 
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
@@ -856,6 +862,14 @@
 # A plugin replacement that finishes after another install of the same plugin is
 # refused, and the newer release, its stored archive and its files stay.
 ./internal/plugins TestInstallerReplacementRefusedAfterInstallationChangedDB
+
+# A plugin has one installation: an archive link for an installed plugin
+# replaces it, and a second create for the same plugin is refused.
+./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
+
+# Cleaning up duplicate installations keeps a break-glass account's local
+# credentials and moves a deleted duplicate's marker provider settings.
+./migrations TestUniquePluginInstallationCleanupPostgres
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
@@ -1065,6 +1079,9 @@
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
 ./internal/api/handlers TestCollectionRowCardsFollowTheViewerDB
 ./internal/api/handlers TestCollectionRowCardsShowVisiblePersonalCollectionsDB
+./internal/api/handlers TestItemCollectionsDB
+./internal/api/handlers TestItemCollectionsPreviewDB
+./internal/api/handlers TestItemCollectionsPreviewLibraryDB
 ./internal/sections TestRowOfCollectionsReferencesItsCollectionsPostgres
 
 # A scan that adds or removes titles refreshes the stored counts of the smart

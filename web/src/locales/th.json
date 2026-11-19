@@ -2016,6 +2016,66 @@
       "value": "ภาษาของแอป"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "เมื่อจบตอน"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " นาทีก่อนจบ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " วินาทีก่อนจบ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "แสดงตอนถัดไป"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "ปิด"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -47852,6 +47912,12 @@
       "value": "ปิด การเรียกใช้จะล้างเรื่องเก่าออกเท่านั้น"
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "หยุดการสร้างแล้ว คำแนะนำที่จัดเก็บไว้จะยังแสดงในหน้าสำรวจจนกว่าเซิร์ฟเวอร์จะรีสตาร์ท"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -87605,6 +87671,12 @@
       "value": "คลังของคุณ"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "ไม่มีข้อมูลจำนวน"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -89503,6 +89575,24 @@
       "value": "เพิ่ม"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบไม่ได้ว่าเพิ่มรายการได้หรือไม่"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "โหลดอีกครั้ง"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "กำลังตรวจสอบว่าเพิ่มรายการได้หรือไม่…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -89521,6 +89611,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์นี้เพิ่มรายการอย่างปลอดภัยไม่ได้ขณะที่โหลดคอลเลกชันมาเพียงบางส่วน คุณยังนำรายการออกและแก้ไขคอลเลกชันได้"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "โหลดรายการอีกครั้งก่อนเพิ่มรายการอื่น"
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -89535,6 +89637,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "กำลังโหลดรายการก่อนเพิ่มรายการอื่น…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -97560,6 +97668,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "อยู่ในคอลเลกชันเหล่านี้ด้วย"
     }
   ],
   "web.detail.sections.cast": [
@@ -115823,34 +115937,6 @@
       "value": " ในรายการที่อยากดู"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "เพราะคุณดู "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "เพราะคุณดู "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " และ "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -115913,6 +115999,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "คล้ายกับ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "คล้ายกับ "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " และ "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [

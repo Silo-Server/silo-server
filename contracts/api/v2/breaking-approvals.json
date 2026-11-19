@@ -1,3 +1,11 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "listAdminPlaybackHistory",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "e366105d14c81fd0cd67eb1b4a73b3ff871e0d79c1f5eb51e0b536bb4d9b902a",
+      "reason": "History's watched_seconds held the end position, not watch time, and is renamed end_position_seconds before the lock. No first-party client reads it (silo-apple, silo-android and silo-roku main checked); the web admin is updated in the same change.",
+      "approved_in": "#4552"
+    }
+  ]
 }
