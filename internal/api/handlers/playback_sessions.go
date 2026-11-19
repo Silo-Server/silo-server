@@ -22,39 +22,41 @@ import (
 // method for the active stream; component-level behavior is exposed separately
 // via video_decision and audio_decision.
 type playbackSessionRow struct {
-	SessionID            string    `json:"session_id"`
-	UserID               int       `json:"user_id"`
-	Username             string    `json:"username"`
-	ProfileID            string    `json:"profile_id"`
-	ProfileName          string    `json:"profile_name,omitempty"`
-	MediaFileID          int       `json:"media_file_id"`
-	RequestedMediaFileID int       `json:"requested_media_file_id"`
-	ContentID            string    `json:"content_id,omitempty"`
-	MediaTitle           string    `json:"media_title"`
-	MediaType            string    `json:"media_type"`
-	SeriesName           string    `json:"series_name,omitempty"`
-	EpisodeName          string    `json:"episode_name,omitempty"`
-	SeasonNumber         *int      `json:"season_number,omitempty"`
-	EpisodeNumber        *int      `json:"episode_number,omitempty"`
-	PosterURL            string    `json:"poster_url,omitempty"`
-	PlayMethod           string    `json:"play_method"`
-	ReportingNode        string    `json:"reporting_node"`
-	NodeDisplayName      string    `json:"node_display_name,omitempty"`
-	FileDuration         *int      `json:"file_duration"`
-	StartedAt            time.Time `json:"started_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	PositionSeconds      float64   `json:"position_seconds"`
-	IsPaused             bool      `json:"is_paused"`
-	HasPlaybackControl   bool      `json:"has_playback_control"`
-	ClientIP             string    `json:"client_ip,omitempty"`
-	StreamLocation       string    `json:"-"`
-	ClientName           string    `json:"client_name,omitempty"`
-	ClientVersion        string    `json:"client_version,omitempty"`
-	ClientBuild          string    `json:"client_build,omitempty"`
-	ClientChannel        string    `json:"client_channel,omitempty"`
-	ClientLabel          string    `json:"client_label,omitempty"`
-	ClientLabelFull      string    `json:"client_label_full,omitempty"`
-	ClientUserAgent      string    `json:"client_user_agent,omitempty"`
+	SessionID            string `json:"session_id"`
+	UserID               int    `json:"user_id"`
+	Username             string `json:"username"`
+	ProfileID            string `json:"profile_id"`
+	ProfileName          string `json:"profile_name,omitempty"`
+	MediaFileID          int    `json:"media_file_id"`
+	RequestedMediaFileID int    `json:"requested_media_file_id"`
+	// MediaItemID, MediaTitle and MediaType describe what is playing as
+	// admin playback history does: an episode is its own item, titled by the
+	// episode, with its show in SeriesTitle.
+	MediaItemID        string    `json:"media_item_id,omitempty"`
+	MediaTitle         string    `json:"media_title"`
+	MediaType          string    `json:"media_type"`
+	SeriesTitle        string    `json:"series_title,omitempty"`
+	SeasonNumber       *int      `json:"season_number,omitempty"`
+	EpisodeNumber      *int      `json:"episode_number,omitempty"`
+	PosterURL          string    `json:"poster_url,omitempty"`
+	PlayMethod         string    `json:"play_method"`
+	ReportingNode      string    `json:"reporting_node"`
+	NodeDisplayName    string    `json:"node_display_name,omitempty"`
+	FileDuration       *int      `json:"file_duration"`
+	StartedAt          time.Time `json:"started_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	PositionSeconds    float64   `json:"position_seconds"`
+	IsPaused           bool      `json:"is_paused"`
+	HasPlaybackControl bool      `json:"has_playback_control"`
+	ClientIP           string    `json:"client_ip,omitempty"`
+	StreamLocation     string    `json:"-"`
+	ClientName         string    `json:"client_name,omitempty"`
+	ClientVersion      string    `json:"client_version,omitempty"`
+	ClientBuild        string    `json:"client_build,omitempty"`
+	ClientChannel      string    `json:"client_channel,omitempty"`
+	ClientLabel        string    `json:"client_label,omitempty"`
+	ClientLabelFull    string    `json:"client_label_full,omitempty"`
+	ClientUserAgent    string    `json:"client_user_agent,omitempty"`
 	// DeviceID and DevicePlatform are native-only: the frozen v1 projection
 	// does not carry them.
 	DeviceID       string `json:"-"`
@@ -288,10 +290,9 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			s.media_file_id,
 			COALESCE(s.requested_media_file_id, s.media_file_id, 0),
 			COALESCE(mf.episode_id, mf.content_id, ''),
-			COALESCE(mi.title, ''),
-			COALESCE(mi.type, ''),
+			CASE WHEN e.content_id IS NOT NULL THEN COALESCE(e.title, '') ELSE COALESCE(mi.title, '') END,
+			COALESCE(CASE WHEN e.content_id IS NOT NULL THEN 'episode' ELSE mi.type END, ''),
 			COALESCE(series_mi.title, ''),
-			COALESCE(e.title, ''),
 			e.season_number,
 			e.episode_number,
 			COALESCE(CASE WHEN e.series_id IS NOT NULL THEN series_mi.poster_path ELSE mi.poster_path END, ''),
@@ -411,8 +412,8 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 		var audioTracksJSON []byte
 		if err := rows.Scan(
 			&total,
-			&s.SessionID, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.ContentID,
-			&s.MediaTitle, &s.MediaType, &s.SeriesName, &s.EpisodeName, &s.SeasonNumber, &s.EpisodeNumber,
+			&s.SessionID, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.MediaItemID,
+			&s.MediaTitle, &s.MediaType, &s.SeriesTitle, &s.SeasonNumber, &s.EpisodeNumber,
 			&posterPath,
 			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.TimelineDuration, &s.StartedAt, &s.UpdatedAt,
 			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,

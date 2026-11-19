@@ -25,13 +25,12 @@ type AdminPlaybackSession struct {
 	ProfileName              string   `json:"profile_name,omitempty"`
 	MediaFileID              ID       `json:"media_file_id"`
 	RequestedMediaFileID     ID       `json:"requested_media_file_id"`
-	ContentID                string   `json:"content_id,omitempty"`
-	MediaTitle               string   `json:"media_title"`
-	MediaType                string   `json:"media_type"`
-	SeriesName               string   `json:"series_name,omitempty"`
-	EpisodeName              string   `json:"episode_name,omitempty"`
-	SeasonNumber             *int     `json:"season_number,omitempty"`
-	EpisodeNumber            *int     `json:"episode_number,omitempty"`
+	MediaItemID              string   `json:"media_item_id,omitempty" doc:"Catalog content id of what is playing: the episode for an episode, as admin playback history's media_item_id. Absent when unknown"`
+	MediaTitle               string   `json:"media_title" doc:"Episode or item title, as admin playback history names it; empty when the item is no longer in the catalog"`
+	MediaType                string   `json:"media_type" doc:"episode, or the catalog item type; empty when unknown"`
+	SeriesTitle              string   `json:"series_title,omitempty" doc:"Series title for an episode; absent otherwise"`
+	SeasonNumber             *int     `json:"season_number,omitempty" doc:"Episode season; absent when not an episode"`
+	EpisodeNumber            *int     `json:"episode_number,omitempty" doc:"Episode number; absent when not an episode"`
 	PosterURL                string   `json:"poster_url,omitempty" format:"uri-reference"`
 	PlayMethod               string   `json:"play_method"`
 	ReportingNode            string   `json:"reporting_node"`
@@ -127,11 +126,10 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		ProfileName:              v.ProfileName,
 		MediaFileID:              IDFromInt(int64(v.MediaFileID)),
 		RequestedMediaFileID:     IDFromInt(int64(v.RequestedMediaFileID)),
-		ContentID:                v.ContentID,
+		MediaItemID:              v.MediaItemID,
 		MediaTitle:               v.MediaTitle,
 		MediaType:                v.MediaType,
-		SeriesName:               v.SeriesName,
-		EpisodeName:              v.EpisodeName,
+		SeriesTitle:              v.SeriesTitle,
 		SeasonNumber:             v.SeasonNumber,
 		EpisodeNumber:            v.EpisodeNumber,
 		PosterURL:                v.PosterURL,
@@ -333,7 +331,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		for _, row := range rows {
 			out.Body.Items = append(out.Body.Items, AdminPlaybackSummaryItem{
 				UserID: IDFromInt(int64(row.UserID)), MediaTitle: row.MediaTitle, MediaType: row.MediaType,
-				SeriesName: row.SeriesName, EpisodeName: row.EpisodeName, SeasonNumber: row.SeasonNumber,
+				SeriesTitle: row.SeriesTitle, SeasonNumber: row.SeasonNumber,
 				EpisodeNumber: row.EpisodeNumber, IsPaused: row.IsPaused,
 			})
 		}
@@ -344,10 +342,9 @@ func registerAdminPlaybackSessions(reg *Registry) {
 // A fixed projection keeps diagnostic identifiers and network details out of summary credentials.
 type AdminPlaybackSummaryItem struct {
 	UserID        ID     `json:"user_id"`
-	MediaTitle    string `json:"media_title"`
-	MediaType     string `json:"media_type"`
-	SeriesName    string `json:"series_name,omitempty"`
-	EpisodeName   string `json:"episode_name,omitempty"`
+	MediaTitle    string `json:"media_title" doc:"Episode or item title, as the session row names it"`
+	MediaType     string `json:"media_type" doc:"episode, or the catalog item type; empty when unknown"`
+	SeriesTitle   string `json:"series_title,omitempty" doc:"Series title for an episode; absent otherwise"`
 	SeasonNumber  *int   `json:"season_number,omitempty"`
 	EpisodeNumber *int   `json:"episode_number,omitempty"`
 	IsPaused      bool   `json:"is_paused"`

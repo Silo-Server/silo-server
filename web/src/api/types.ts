@@ -2807,11 +2807,14 @@ export interface AdminSession {
   profile_name?: string;
   media_file_id: number;
   requested_media_file_id: number;
-  content_id?: string;
+  /** Catalog content id of what is playing: the episode for an episode. */
+  media_item_id?: string;
+  /** Episode or item title, as admin playback history names it. */
   media_title: string;
+  /** `episode`, or the catalog item type. */
   media_type: string;
-  series_name?: string;
-  episode_name?: string;
+  /** Series title for an episode; absent otherwise. */
+  series_title?: string;
   season_number?: number | null;
   episode_number?: number | null;
   poster_url?: string;

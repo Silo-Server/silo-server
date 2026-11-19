@@ -333,8 +333,7 @@ export default function AdminActivity() {
           s.username?.toLowerCase().includes(q) ||
           s.profile_name?.toLowerCase().includes(q) ||
           s.media_title?.toLowerCase().includes(q) ||
-          s.series_name?.toLowerCase().includes(q) ||
-          s.episode_name?.toLowerCase().includes(q) ||
+          s.series_title?.toLowerCase().includes(q) ||
           // Search the exact label, not the compact one: "which sessions are on
           // build 5?" is the question this identity exists to answer, and the
           // compact label deliberately omits the build.
@@ -531,7 +530,7 @@ export default function AdminActivity() {
           </div>
         )}
         <div className={SEGMENTED_GROUP_CLASS}>
-          {(["movie", "series"] as const).map((type) => (
+          {(["movie", "episode"] as const).map((type) => (
             <button
               key={type}
               type="button"
@@ -842,7 +841,7 @@ function StreamRow({
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <TitleLink session={session} />
-              {session.series_name ? (
+              {session.series_title ? (
                 // An episode's own title doesn't say which show it is.
                 <div className="text-muted-foreground truncate text-[12px]">
                   {getPlaybackSessionSubtitle(session)}
@@ -924,7 +923,7 @@ function Poster({ session, size }: { session: AdminSession; size: "table" | "sta
 function TitleLink({ session }: { session: AdminSession }) {
   const t = useT();
   const title = getDisplayTitle(session, t);
-  const itemHref = session.content_id ? `/item/${session.content_id}` : "";
+  const itemHref = session.media_item_id ? `/item/${session.media_item_id}` : "";
   return itemHref ? (
     <Link
       to={itemHref}
@@ -1799,9 +1798,9 @@ function getDisplayTitle(
   session: AdminSession,
   t: (id: MessageKey, values?: TextValues) => string,
 ): string {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
+  if (session.series_title && session.season_number != null && session.episode_number != null) {
     return (
-      session.episode_name ||
+      session.media_title ||
       t("web.detail.episodeCode", {
         season: codeNumber(session.season_number),
         episode: codeNumber(session.episode_number),
