@@ -177,6 +177,16 @@ func NewSystem(
 	if cipher != nil {
 		pluginDestinationSenderInst = newPluginDestinationSender(NewPluginDestinationRepository(pool), deliveries, cipher)
 		pluginDestinationService = newPluginDestinationService(pluginDestinationSenderInst.repo, pluginDestinationSenderInst)
+		if stores != nil {
+			pluginDestinationService.profileExists = func(ctx context.Context, userID int, profileID string) (bool, error) {
+				store, err := stores.ForUser(ctx, userID)
+				if err != nil {
+					return false, err
+				}
+				profile, err := store.GetProfile(ctx, profileID)
+				return profile != nil, err
+			}
+		}
 		pluginDestinationDispatcher = newPluginDestinationDispatcher(pluginDestinationSenderInst)
 		dispatchers = append(dispatchers, pluginDestinationDispatcher)
 	}

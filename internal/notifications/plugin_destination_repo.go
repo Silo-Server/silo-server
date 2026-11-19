@@ -87,25 +87,28 @@ func isPluginDestinationNameViolation(err error) bool {
 
 // InsertWithLimit stores a new destination unless the profile already has
 // maxPerProfile. The count and insert run under an advisory lock on the
-// account profile, so concurrent creates can't both pass the check. The
-// profile row is key-share locked first: a profile deleted before that
-// refuses the create with ErrPluginDestinationProfileGone, and a deletion
-// after it waits for this insert and then purges the new destination with
-// the profile's others, so none is left behind to receive notices.
+// account profile, so concurrent creates can't both pass the check.
+//
+// The account row is key-share locked first, the one row lock this takes,
+// as the insert's foreign key would: an account deletion locks that row
+// before its cascade reaches the profile and its destinations, so the two
+// wait on each other in one order and can't deadlock. An account deleted
+// before that refuses the create with ErrPluginDestinationProfileGone.
+// Profiles may live outside PostgreSQL, so the profile is checked by the
+// service, through the user store, not here.
 func (r *PluginDestinationRepository) InsertWithLimit(ctx context.Context, d PluginDestination, maxPerProfile int) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin plugin destination insert: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
-	var profileExists bool
+	var accountExists bool
 	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR KEY SHARE)`,
-		d.UserID, d.ProfileID).Scan(&profileExists); err != nil {
-		return fmt.Errorf("lock plugin destination profile: %w", err)
+		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 FOR KEY SHARE)`, d.UserID).Scan(&accountExists); err != nil {
+		return fmt.Errorf("lock plugin destination account: %w", err)
 	}
-	if !profileExists {
+	if !accountExists {
 		return ErrPluginDestinationProfileGone
 	}
 	if _, err := tx.Exec(ctx,
@@ -135,6 +138,12 @@ func (r *PluginDestinationRepository) InsertWithLimit(ctx context.Context, d Plu
 		return fmt.Errorf("insert plugin destination: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// deleteByID removes a destination, and its attempts by cascade.
+func (r *PluginDestinationRepository) deleteByID(ctx context.Context, id string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM notification_plugin_destinations WHERE id = $1`, id)
+	return err
 }
 
 // GetByID returns one of the account profile's destinations, or
@@ -212,6 +221,8 @@ func (r *PluginDestinationRepository) ListEnabledByProfiles(ctx context.Context,
 
 // UpdateGuarded reads, checks and rewrites a destination's configuration
 // under one row lock. Delivery bookkeeping is never copied from an editor.
+// The lock is FOR NO KEY UPDATE, since the row's key doesn't change: it
+// doesn't wait for a delivery transaction's key-share lock on the row.
 func (r *PluginDestinationRepository) UpdateGuarded(ctx context.Context, userID int, profileID, id string, apply func(*PluginDestination) error) (*PluginDestination, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -219,7 +230,7 @@ func (r *PluginDestinationRepository) UpdateGuarded(ctx context.Context, userID 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	d, err := scanPluginDestination(tx.QueryRow(ctx,
-		`SELECT `+pluginDestinationColumns+` FROM notification_plugin_destinations WHERE user_id = $1 AND profile_id = $2 AND id = $3 FOR UPDATE`,
+		`SELECT `+pluginDestinationColumns+` FROM notification_plugin_destinations WHERE user_id = $1 AND profile_id = $2 AND id = $3 FOR NO KEY UPDATE`,
 		userID, profileID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrPluginDestinationNotFound
@@ -282,11 +293,30 @@ func (r *PluginDestinationRepository) DeleteGuarded(ctx context.Context, userID 
 	return tx.Commit(ctx)
 }
 
-// DeleteAllForProfile removes a deleted account profile's destinations.
+// DeleteAllForProfile removes a deleted account profile's destinations. It
+// locks them in id order first, the order a delivery's enqueue locks them,
+// so a purge and a concurrent enqueue for the profile can't deadlock.
 func (r *PluginDestinationRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_plugin_destinations WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
-	return err
+	return deleteProfileTargetsInOrder(ctx, r.pool, "notification_plugin_destinations", userID, profileID)
+}
+
+// deleteProfileTargetsInOrder deletes an account profile's rows of a
+// delivery target table after locking them in id order (see
+// enqueueAttemptsForLiveTargets). The table name is a constant of the
+// callers.
+func deleteProfileTargetsInOrder(ctx context.Context, pool *pgxpool.Pool, table string, userID int, profileID string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM `+table+` WHERE user_id = $1 AND profile_id = $2 ORDER BY id FOR UPDATE`, userID, profileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE user_id = $1 AND profile_id = $2`, userID, profileID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // lockForFinish locks a destination row for an attempt's bookkeeping. A
@@ -301,47 +331,48 @@ type pluginDestinationExec interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
-// RecordSuccess clears the failure streak after a delivered message.
+// RecordSuccess clears the failure streak after a delivered message, while
+// the destination is at sentRevision, the revision the send used.
 //
 // Delivery bookkeeping leaves revision alone: revision guards the owner's
 // edits, and a send finishing must not turn an edit in progress into a 412.
-func (r *PluginDestinationRepository) RecordSuccess(ctx context.Context, q pluginDestinationExec, id string) error {
+func (r *PluginDestinationRepository) RecordSuccess(ctx context.Context, q pluginDestinationExec, id string, sentRevision int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET last_success_at = now(), consecutive_failures = 0
-		WHERE id = $1`, id)
+		WHERE id = $1 AND revision = $2`, id, sentRevision)
 	return err
 }
 
-// RecordFailure extends the failure streak and keeps the plugin's reason.
-// Like Disable it applies only while the destination still has the settings
-// the failed send used (sentConfig): new settings start with a clean streak.
-// It leaves revision alone, as RecordSuccess does.
-func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, q pluginDestinationExec, id, message, sentConfig string) error {
+// RecordFailure extends the failure streak and keeps the plugin's reason,
+// while the destination is at sentRevision: an owner who edited it during
+// the send starts with a clean streak. It leaves revision alone, as
+// RecordSuccess does.
+func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, q pluginDestinationExec, id, message string, sentRevision int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET last_failure_at = now(), last_failure_message = left($2, 256),
 		    consecutive_failures = consecutive_failures + 1
-		WHERE id = $1 AND config_ciphertext = $3`, id, message, sentConfig)
+		WHERE id = $1 AND revision = $3`, id, message, sentRevision)
 	return err
 }
 
 // Disable turns a destination off with a reason its owner sees.
 //
-// It applies only while the destination still has the settings a failed send
-// used (sentConfig) and is enabled, and reports whether it did: an owner who
-// saved new settings during that send keeps them working. With quietSince,
-// it applies only when the destination had no successful send and no owner
+// It applies only while the destination is enabled and at sentRevision, the
+// revision a failed send used, and reports whether it did: an owner who
+// edited it during that send keeps the edit working. With quietSince, it
+// applies only when the destination had no successful send and no owner
 // edit since then (updated_at moves on every edit, and on a disable). Unlike
 // the other bookkeeping it bumps revision: it changes enabled, which the
 // owner edits, so an editor that hasn't seen the disable must reload first.
-func (r *PluginDestinationRepository) Disable(ctx context.Context, q pluginDestinationExec, id, reason, sentConfig string, quietSince *time.Time) (bool, error) {
+func (r *PluginDestinationRepository) Disable(ctx context.Context, q pluginDestinationExec, id, reason string, sentRevision int64, quietSince *time.Time) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET enabled = false, disabled_reason = left($2, 256), revision = revision + 1, updated_at = now()
-		WHERE id = $1 AND config_ciphertext = $3 AND enabled
+		WHERE id = $1 AND revision = $3 AND enabled
 		  AND ($4::timestamptz IS NULL
-		       OR ((last_success_at IS NULL OR last_success_at < $4) AND updated_at < $4))`, id, reason, sentConfig, quietSince)
+		       OR ((last_success_at IS NULL OR last_success_at < $4) AND updated_at < $4))`, id, reason, sentRevision, quietSince)
 	if err != nil {
 		return false, err
 	}
@@ -349,7 +380,9 @@ func (r *PluginDestinationRepository) Disable(ctx context.Context, q pluginDesti
 }
 
 // EnqueueAttempts inserts pending outbox rows inside the delivery's
-// transaction. attempt_number starts at 0: no send tried yet.
+// transaction and returns the deliveries it queued an attempt for, the only
+// ones worth handing to the dispatcher. attempt_number starts at 0: no send
+// tried yet.
 //
 // The destinations were read without a lock, so one may be deleted before
 // this insert. Its foreign key would then abort the whole delivery
@@ -357,18 +390,21 @@ func (r *PluginDestinationRepository) Disable(ctx context.Context, q pluginDesti
 // instead key-share locks the destinations that still exist and queues only
 // for those: a deletion committed first drops its attempt, and one after
 // waits for this transaction and then cascades. The lock blocks nothing but
-// deletion, and the delivery transaction makes no plugin call.
-func (r *PluginDestinationRepository) EnqueueAttempts(ctx context.Context, tx pgx.Tx, attempts []DeliveryAttempt) error {
+// deletion and key changes, and the delivery transaction makes no plugin
+// call.
+func (r *PluginDestinationRepository) EnqueueAttempts(ctx context.Context, tx pgx.Tx, attempts []DeliveryAttempt) (map[string]bool, error) {
 	return enqueueAttemptsForLiveTargets(ctx, tx, "plugin_destination_delivery_attempts", "destination_id", "notification_plugin_destinations", attempts)
 }
 
 // enqueueAttemptsForLiveTargets inserts pending attempts into an outbox
 // table for the targets that still exist, key-share locking them until the
-// transaction ends (see PluginDestinationRepository.EnqueueAttempts).
-// The table and column names are constants of the callers.
-func enqueueAttemptsForLiveTargets(ctx context.Context, tx pgx.Tx, table, targetColumn, targetTable string, attempts []DeliveryAttempt) error {
+// transaction ends (see PluginDestinationRepository.EnqueueAttempts), and
+// returns the delivery IDs it inserted an attempt for. The targets are
+// locked in id order, the order a profile purge locks them, so the two
+// can't deadlock. The table and column names are constants of the callers.
+func enqueueAttemptsForLiveTargets(ctx context.Context, tx pgx.Tx, table, targetColumn, targetTable string, attempts []DeliveryAttempt) (map[string]bool, error) {
 	if len(attempts) == 0 {
-		return nil
+		return nil, nil
 	}
 	ids := make([]string, len(attempts))
 	deliveries := make([]string, len(attempts))
@@ -376,16 +412,30 @@ func enqueueAttemptsForLiveTargets(ctx context.Context, tx pgx.Tx, table, target
 	for i, attempt := range attempts {
 		ids[i], deliveries[i], targets[i] = attempt.ID, attempt.NotificationDeliveryID, attempt.TargetID
 	}
-	query := `INSERT INTO ` + table + ` (id, notification_delivery_id, ` + targetColumn + `, attempt_number, outcome)
-		SELECT a.id, a.delivery_id, t.id, 0, $4
+	query := `WITH live AS (
+			SELECT t.id FROM ` + targetTable + ` t WHERE t.id = ANY($3::text[])
+			ORDER BY t.id
+			FOR KEY SHARE
+		)
+		INSERT INTO ` + table + ` (id, notification_delivery_id, ` + targetColumn + `, attempt_number, outcome)
+		SELECT a.id, a.delivery_id, live.id, 0, $4
 		FROM unnest($1::text[], $2::text[], $3::text[]) AS a(id, delivery_id, target_id)
-		JOIN ` + targetTable + ` t ON t.id = a.target_id
-		FOR KEY SHARE OF t
-		ON CONFLICT DO NOTHING`
-	if _, err := tx.Exec(ctx, query, ids, deliveries, targets, WebhookOutcomePending); err != nil {
-		return fmt.Errorf("enqueue %s: %w", table, err)
+		JOIN live ON live.id = a.target_id
+		ON CONFLICT DO NOTHING
+		RETURNING notification_delivery_id`
+	rows, err := tx.Query(ctx, query, ids, deliveries, targets, WebhookOutcomePending)
+	if err != nil {
+		return nil, fmt.Errorf("enqueue %s: %w", table, err)
 	}
-	return nil
+	queued, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("enqueue %s: %w", table, err)
+	}
+	out := make(map[string]bool, len(queued))
+	for _, id := range queued {
+		out[id] = true
+	}
+	return out, nil
 }
 
 // pluginDestinationClaimLease hides a claimed attempt from other claimers.

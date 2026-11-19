@@ -616,7 +616,8 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 // same two filters as webhooks: wants, the destination's switch for the
 // delivery, and a per-profile rate limit. Nothing is queued until the plugin
 // runtime is wired, or for a destination whose plugin is off or removed. It
-// marks the rows it queued attempts for, which alone reach the dispatcher.
+// marks the rows an attempt was inserted for, which alone reach the
+// dispatcher.
 func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, wants func(InsertedDelivery, PluginDestination) bool) error {
 	if w.pluginSender == nil || len(inserted) == 0 {
 		return nil
@@ -627,7 +628,7 @@ func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pg
 	}
 	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	rateLimited := 0
-	for i, row := range inserted {
+	for _, row := range inserted {
 		key := row.key()
 		for _, destination := range byProfile[key] {
 			if !wants(row, destination) {
@@ -642,13 +643,16 @@ func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pg
 				NotificationDeliveryID: row.ID,
 				TargetID:               destination.ID,
 			})
-			inserted[i].pluginAttempts = true
 		}
 	}
 	if rateLimited > 0 {
 		w.logger.WarnContext(ctx, "plugin destination deliveries rate limited", "skipped", rateLimited)
 	}
-	return w.pluginSender.repo.EnqueueAttempts(ctx, tx, attempts)
+	queued, err := w.pluginSender.repo.EnqueueAttempts(ctx, tx, attempts)
+	for i := range inserted {
+		inserted[i].pluginAttempts = queued[inserted[i].ID]
+	}
+	return err
 }
 
 type eventDisplay struct {

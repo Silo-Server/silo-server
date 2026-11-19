@@ -57,31 +57,44 @@ type pluginSendResult struct {
 	message    string
 	retryAfter time.Duration
 	duration   time.Duration
-	// unavailable marks a send no plugin answered: the channel's plugin is
-	// off, removed or unreachable, its process exited during the call, or
-	// the call ran out of time. The destination isn't at fault.
-	unavailable bool
+	// keepEnabled marks a failure the destination isn't at fault for, so
+	// running out of retries drops the message without disabling it: no
+	// plugin could be reached (pluginUnreachable), or this server can't read
+	// the stored settings (a wrong at-rest key on one node must not turn off
+	// every destination).
+	keepEnabled bool
 	// claimLost marks a send skipped because this server's claim on the
 	// attempt ran out (or nearly) before it started: another server may own
 	// the attempt, so nothing is sent or recorded.
 	claimLost bool
+	// skipped marks a send that never started because the destination was
+	// deleted or turned off while its plugin was reached.
+	skipped bool
+	// sent is the destination as it was when the plugin was called: the
+	// revision success and failure bookkeeping apply to. nil when no call
+	// was made.
+	sent *PluginDestination
 }
 
-// pluginSendResultOf maps a plugin's answer onto what the sender does. A
-// gRPC error, a timeout, or an unreachable plugin is temporary; a transport
-// failure also marks the plugin unavailable (pluginTransportFailure). An empty
-// response acknowledges the message. An outcome from a newer SDK that this
-// host doesn't know drops the message without touching the destination,
-// which can neither loop nor lose a working destination. The plugin's
-// message is returned as written: send masks it before it is stored, shown
-// or logged.
+// pluginSendResultOf maps a plugin's answer onto what the sender does
+// (docs/architecture/notifications.md, "Plugin destinations"). An
+// unreachable plugin (pluginUnreachable) retries and never disables. Any
+// other error, including the send's own timeout and a DeadlineExceeded or
+// Canceled status the plugin returned, is an ordinary failed attempt. An
+// empty response acknowledges the message. An outcome from a newer SDK that
+// this host doesn't know drops the message without touching the
+// destination, which can neither loop nor lose a working destination. The
+// plugin's message is returned as written: send masks it before it is
+// stored, shown or logged.
 func pluginSendResultOf(resp *pluginv1.SendNotificationResponse, err error) pluginSendResult {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrPluginChannelUnavailable):
-			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin that provides this destination isn't available.", unavailable: true}
-		case pluginTransportFailure(err):
-			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin didn't answer.", unavailable: true}
+			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin that provides this destination isn't available.", keepEnabled: true}
+		case pluginUnreachable(err):
+			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin didn't answer.", keepEnabled: true}
+		case errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded:
+			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin took too long to send the message."}
 		}
 		return pluginSendResult{outcome: pluginSendRetry, message: "The plugin couldn't send the message."}
 	}
@@ -103,23 +116,17 @@ func pluginSendResultOf(resp *pluginv1.SendNotificationResponse, err error) plug
 	return result
 }
 
-// pluginTransportFailure reports whether a call's error means no plugin
-// answered it: the connection failed or closed (the process exited), the
-// plugin was unavailable, or the call ran out of time or was canceled. An
-// error status the plugin itself returned is not one.
-func pluginTransportFailure(err error) bool {
+// pluginUnreachable reports whether a call's error means the host couldn't
+// reach the plugin: the connection failed or closed (the process exited),
+// or the transport answered Unavailable. A timeout or cancellation, the
+// send's own included, is not one, and neither is any status the plugin
+// returned.
+func pluginUnreachable(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
+		return false
 	}
 	st, ok := status.FromError(err)
-	if !ok {
-		return true
-	}
-	switch st.Code() {
-	case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
-		return true
-	}
-	return false
+	return !ok || st.Code() == codes.Unavailable
 }
 
 // pluginChannelHostBox lets the host be wired after NewSystem.
@@ -133,10 +140,12 @@ type pluginDestinationSender struct {
 	deliveries *DeliveryRepository
 	cipher     *secret.Cipher
 	hostBox    atomic.Pointer[pluginChannelHostBox]
-	// Wired by NewSystem after construction. insertNotice writes the
-	// auto-disable notice in the transaction that disables the
-	// destination; dispatchNotice sends it to live clients after commit.
-	insertNotice   func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error)
+	// Wired by NewSystem after construction. noticeWriter, called before
+	// the transaction that disables a destination begins, returns what
+	// writes the auto-disable notice in that transaction, reading only
+	// through it; dispatchNotice sends the notice to live clients after
+	// commit.
+	noticeWriter   func(ctx context.Context) func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error)
 	dispatchNotice func(ctx context.Context, row InsertedDelivery)
 	posterURL      func(ctx context.Context, posterPath, posterSourcePath string) string
 	linkBase       func(ctx context.Context) string
@@ -224,16 +233,24 @@ func (s *pluginDestinationSender) enqueueable(ctx context.Context, tx pgx.Tx, pr
 	return byProfile, nil
 }
 
+// pluginAttemptMaxAge bounds how old a delivery's plugin attempt may get:
+// the retry schedule's span and half again (36 hours for its 24). An attempt
+// past it is finished as failed without a send and without disabling, so
+// retrying rows can't pile up when the retry sweep falls behind.
+var pluginAttemptMaxAge = webhookRetrySchedule[len(webhookRetrySchedule)-1] * 3 / 2
+
 // pluginAttemptFinish is everything one attempt's outcome changes,
 // committed together by finish.
 type pluginAttemptFinish struct {
 	outcome string
 	message string
 	next    *time.Time
-	// success clears the failure streak; failure extends it.
+	// success clears the failure streak; failure extends it. Both apply only
+	// while the destination is at the revision that was sent.
 	success bool
 	failure bool
-	// disableReason, when set, turns the destination off and posts a notice.
+	// disableReason, when set, turns the destination off and posts a notice,
+	// while it is at the revision that was sent.
 	disableReason string
 	// quietSince, when set, disables only a destination that had no
 	// successful send and no owner edit since then, when the failing
@@ -270,10 +287,21 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 		s.finish(ctx, attempt, d, pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "delivery doesn't belong to this destination"})
 		return
 	}
+	if time.Since(row.CreatedAt) > pluginAttemptMaxAge {
+		s.finish(ctx, attempt, d, pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "not delivered in time"})
+		return
+	}
 
 	result := s.send(ctx, host, d, *row, &attempt)
 	if result.claimLost {
 		return
+	}
+	if result.skipped {
+		s.finish(ctx, attempt, result.sent, pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "destination deleted or turned off"})
+		return
+	}
+	if result.sent != nil {
+		d = result.sent
 	}
 	failed := pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: result.message, failure: true}
 	switch result.outcome {
@@ -300,10 +328,10 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 	// The retry schedule ran out: about a day of failures for this message.
 	// The destination is disabled only when nothing reached it since the
 	// message was queued and its owner hasn't edited it since; otherwise
-	// this one message is dropped. When no plugin answered the last send,
-	// the message is dropped and the destination stays enabled, so it
-	// resumes once its plugin is back.
-	if !result.unavailable {
+	// this one message is dropped. A failure the destination isn't at fault
+	// for (keepEnabled) only drops the message, so the destination resumes
+	// once its plugin or this server's key is back.
+	if !result.keepEnabled {
 		queued := row.CreatedAt
 		failed.disableReason = "Deliveries failed for 24 hours"
 		failed.quietSince = &queued
@@ -316,8 +344,10 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 // part way leaves none of it: the claim then expires and the attempt runs
 // again. Nothing applies when the claim no longer holds: another server owns
 // the attempt and its result stands. The notice reaches live clients after
-// commit. d is nil for a deleted destination.
+// commit. d is the destination at the revision that was sent, nil for a
+// deleted one.
 func (s *pluginDestinationSender) finish(ctx context.Context, attempt DeliveryAttempt, d *PluginDestination, f pluginAttemptFinish) {
+	f.message = storablePluginText(f.message)
 	notice, disabled, err := s.commitFinish(ctx, attempt, d, f)
 	if err != nil {
 		s.logger.WarnContext(ctx, "plugin destination attempt finalize failed", "attempt_id", attempt.ID, "error", err)
@@ -332,6 +362,13 @@ func (s *pluginDestinationSender) finish(ctx context.Context, attempt DeliveryAt
 }
 
 func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt DeliveryAttempt, d *PluginDestination, f pluginAttemptFinish) (*InsertedDelivery, bool, error) {
+	// Everything the notice needs from outside the transaction is read
+	// before it begins: a transaction waiting on a second connection from an
+	// exhausted pool would never disable anything.
+	var insertNotice func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error)
+	if d != nil && f.disableReason != "" && s.noticeWriter != nil {
+		insertNotice = s.noticeWriter(ctx)
+	}
 	tx, err := s.repo.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, err
@@ -345,12 +382,25 @@ func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt Deli
 			return nil, false, err
 		}
 	}
-	// Disabling applies only while the destination still has the settings
-	// the send used. It runs first so the attempt records whether it did;
-	// a finalize that no longer holds the claim rolls it back.
+	// Bookkeeping applies only while the destination is at the revision the
+	// send used: an owner who saved new settings, renamed it or turned it
+	// off during the send starts clean. The failure is counted before a
+	// disable moves the revision on, and the disable runs before the attempt
+	// is finalized so the attempt records whether it did; a finalize that no
+	// longer holds the claim rolls all of it back.
+	if d != nil && f.failure {
+		if err := s.repo.RecordFailure(ctx, tx, d.ID, f.message, d.Revision); err != nil {
+			return nil, false, err
+		}
+	}
+	if d != nil && f.success {
+		if err := s.repo.RecordSuccess(ctx, tx, d.ID, d.Revision); err != nil {
+			return nil, false, err
+		}
+	}
 	disabled := false
 	if d != nil && f.disableReason != "" {
-		if disabled, err = s.repo.Disable(ctx, tx, d.ID, disableText(f), d.ConfigCiphertext, f.quietSince); err != nil {
+		if disabled, err = s.repo.Disable(ctx, tx, d.ID, disableText(f), d.Revision, f.quietSince); err != nil {
 			return nil, false, err
 		}
 		if f.quietSince != nil && disabled {
@@ -361,25 +411,9 @@ func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt Deli
 	if err != nil || !applied {
 		return nil, false, err
 	}
-	if d == nil {
-		return nil, false, tx.Commit(ctx)
-	}
-	if f.success {
-		if err := s.repo.RecordSuccess(ctx, tx, d.ID); err != nil {
-			return nil, false, err
-		}
-	}
-	// Failure bookkeeping applies only while the destination still has the
-	// settings the send used: an owner who saved new ones during the send
-	// starts clean.
-	if f.failure {
-		if err := s.repo.RecordFailure(ctx, tx, d.ID, f.message, d.ConfigCiphertext); err != nil {
-			return nil, false, err
-		}
-	}
 	var notice *InsertedDelivery
-	if disabled && s.insertNotice != nil {
-		if notice, err = s.insertNotice(ctx, tx, autoDisableNotice(d)); err != nil {
+	if disabled && insertNotice != nil {
+		if notice, err = insertNotice(ctx, tx, autoDisableNotice(d)); err != nil {
 			return nil, false, err
 		}
 	}
@@ -420,11 +454,7 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 	if err != nil {
 		// Like a webhook URL this server can't decrypt: a temporary
 		// failure, since a server with the right key can still send.
-		return pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server."}
-	}
-	config, err := structpb.NewStruct(stored.Values)
-	if err != nil {
-		return pluginSendResult{outcome: pluginSendInvalid, message: "The stored settings can't be sent to the plugin."}
+		return pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true}
 	}
 	test := claimed == nil
 	attemptNumber := 1
@@ -443,10 +473,32 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 		return result
 	}
 	if claimed != nil {
+		// Reaching the plugin can take seconds. Just before the call the
+		// claim must still hold, and the destination is read again: one
+		// turned off or deleted meanwhile gets nothing, and one edited
+		// meanwhile is sent its new settings, which the bookkeeping then
+		// applies to.
 		held, err := s.repo.ClaimHeld(ctx, *claimed, pluginSendTimeout+pluginClaimMargin)
 		if err != nil || !held {
 			return pluginSendResult{claimLost: true}
 		}
+		current, err := s.repo.getByIDUnscoped(ctx, d.ID)
+		if err != nil {
+			return pluginSendResult{claimLost: true}
+		}
+		if current == nil || !current.Enabled {
+			return pluginSendResult{skipped: true, sent: current}
+		}
+		if current.Revision != d.Revision {
+			if stored, err = s.decryptConfig(current); err != nil {
+				return pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true, sent: current}
+			}
+		}
+		d = current
+	}
+	config, err := structpb.NewStruct(stored.Values)
+	if err != nil {
+		return pluginSendResult{outcome: pluginSendInvalid, message: "The stored settings can't be sent to the plugin.", sent: d}
 	}
 	callCtx, cancel := context.WithTimeout(ctx, pluginSendTimeout)
 	defer cancel()
@@ -462,6 +514,7 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 	result := pluginSendResultOf(resp, err)
 	result.message = redactPluginText(result.message, channel, stored)
 	result.duration = time.Since(started)
+	result.sent = d
 	if err != nil {
 		s.logSendError(ctx, d, channel, stored, err)
 	}

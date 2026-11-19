@@ -31,6 +31,8 @@ type scriptedChannelHost struct {
 	validating func()
 	// unavailable makes sends fail as if the plugin were turned off.
 	unavailable bool
+	// connecting runs inside the next Connect, before it answers.
+	connecting func()
 	// reject makes settings checks refuse with this message.
 	reject string
 	// sendErr makes the next send fail with this error instead of answering.
@@ -62,7 +64,12 @@ func (h *scriptedChannelHost) Channels(context.Context) ([]PluginChannel, error)
 func (h *scriptedChannelHost) Connect(ctx context.Context, ref PluginChannelRef) (*PluginChannel, PluginChannelClient, error) {
 	h.mu.Lock()
 	unavailable := h.unavailable
+	connecting := h.connecting
+	h.connecting = nil
 	h.mu.Unlock()
+	if connecting != nil {
+		connecting()
+	}
 	if unavailable {
 		return nil, nil, ErrPluginChannelUnavailable
 	}
@@ -126,8 +133,18 @@ func pluginDestinationDB(t *testing.T) *pgxpool.Pool {
 	if _, err := pool.Exec(t.Context(), up); err != nil {
 		t.Fatal(err)
 	}
-	// Destinations are created only for profiles that exist.
-	if _, err := pool.Exec(t.Context(), `CREATE TABLE user_profiles (LIKE public.user_profiles INCLUDING DEFAULTS)`); err != nil {
+	// Destinations are created only for accounts and profiles that exist,
+	// and go with their account, as in production.
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TABLE users (LIKE public.users INCLUDING DEFAULTS);
+		ALTER TABLE users ADD PRIMARY KEY (id);
+		CREATE TABLE user_profiles (LIKE public.user_profiles INCLUDING DEFAULTS);
+		ALTER TABLE user_profiles ADD PRIMARY KEY (user_id, id),
+			ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+		ALTER TABLE notification_plugin_destinations ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO users (id, role, username) VALUES ($1, 'user', 'a'), ($2, 'user', 'b')`, accountA, accountB); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'A'), ($1, $3, 'B')`,
@@ -146,7 +163,13 @@ func newTestPluginDestinationService(t *testing.T, pool *pgxpool.Pool, host Plug
 	sender := newPluginDestinationSender(NewPluginDestinationRepository(pool), NewDeliveryRepository(pool), cipher)
 	sender.logger = slog.New(slog.DiscardHandler)
 	sender.hostBox.Store(&pluginChannelHostBox{host: host})
-	return newPluginDestinationService(sender.repo, sender), sender
+	service := newPluginDestinationService(sender.repo, sender)
+	service.profileExists = func(ctx context.Context, userID int, profileID string) (bool, error) {
+		var exists bool
+		err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2)`, userID, profileID).Scan(&exists)
+		return exists, err
+	}
+	return service, sender
 }
 
 func insertTestDelivery(t *testing.T, pool *pgxpool.Pool, userID int, profileID string) string {
@@ -176,7 +199,7 @@ func enqueueTestAttempt(t *testing.T, pool *pgxpool.Pool, repo *PluginDestinatio
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(t.Context())) }()
-	if err := repo.EnqueueAttempts(t.Context(), tx, []DeliveryAttempt{{ID: "attempt-" + deliveryID, NotificationDeliveryID: deliveryID, TargetID: destinationID}}); err != nil {
+	if _, err := repo.EnqueueAttempts(t.Context(), tx, []DeliveryAttempt{{ID: "attempt-" + deliveryID, NotificationDeliveryID: deliveryID, TargetID: destinationID}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(t.Context()); err != nil {
@@ -190,12 +213,14 @@ func anyRevision(int64) error { return nil }
 // in its own transaction as the system does, and returns them as committed.
 func recordNotices(pool *pgxpool.Pool, sender *pluginDestinationSender) *[]Delivery {
 	var notices []Delivery
-	sender.insertNotice = func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
-		inserted, err := NewDeliveryRepository(pool).BulkInsert(ctx, tx, []Delivery{notice})
-		if err != nil || len(inserted) == 0 {
-			return nil, err
+	sender.noticeWriter = func(context.Context) func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+		return func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+			inserted, err := NewDeliveryRepository(pool).BulkInsert(ctx, tx, []Delivery{notice})
+			if err != nil || len(inserted) == 0 {
+				return nil, err
+			}
+			return &inserted[0], nil
 		}
-		return &inserted[0], nil
 	}
 	sender.dispatchNotice = func(_ context.Context, row InsertedDelivery) {
 		notices = append(notices, Delivery{ID: row.ID, UserID: row.UserID, ProfileID: row.ProfileID, Type: DeliveryTypePluginDestinationAutoDisabled})
@@ -656,8 +681,13 @@ func TestPluginDestinationEnqueueSurvivesADeleteDB(t *testing.T) {
 	if err := service.DeleteGuarded(ctx, accountA, sharedID, d.ID, anyRevision); err != nil {
 		t.Fatal(err)
 	}
-	if err := sender.repo.EnqueueAttempts(ctx, tx, []DeliveryAttempt{{ID: "attempt-race", NotificationDeliveryID: inserted[0].ID, TargetID: d.ID}}); err != nil {
+	queued, err := sender.repo.EnqueueAttempts(ctx, tx, []DeliveryAttempt{{ID: "attempt-race", NotificationDeliveryID: inserted[0].ID, TargetID: d.ID}})
+	if err != nil {
 		t.Fatalf("enqueue after the delete: %v", err)
+	}
+	// The delivery isn't handed to the dispatcher: it has no attempt.
+	if queued[inserted[0].ID] {
+		t.Fatal("enqueue reported an attempt for the deleted destination")
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit after the delete: %v", err)
@@ -680,9 +710,11 @@ func TestPluginDestinationFinishIsAtomicDB(t *testing.T) {
 	host := &scriptedChannelHost{}
 	service, sender := newTestPluginDestinationService(t, pool, host)
 	notices := recordNotices(pool, sender)
-	insertNotice := sender.insertNotice
-	sender.insertNotice = func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
-		return nil, errors.New("server stopped")
+	noticeWriter := sender.noticeWriter
+	sender.noticeWriter = func(context.Context) func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+		return func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+			return nil, errors.New("server stopped")
+		}
 	}
 	d := createTestDestination(t, service, map[string]any{"topic": "alerts"})
 
@@ -694,7 +726,7 @@ func TestPluginDestinationFinishIsAtomicDB(t *testing.T) {
 	}
 
 	// Once the lease runs out the attempt runs again and finishes whole.
-	sender.insertNotice = insertNotice
+	sender.noticeWriter = noticeWriter
 	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET next_retry_at = now() - interval '1 second' WHERE id = $1`, attempt.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -748,6 +780,14 @@ func TestPluginDestinationUnreadableSettingsDB(t *testing.T) {
 	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); got.ConfigCiphertext != foreign {
 		t.Fatal("the refused edit changed the stored settings")
 	}
+
+	// An edit that doesn't touch settings never reads or rewrites them, so
+	// it goes through and leaves the ciphertext as it was.
+	renamed, off, quiet := "Laptop", false, false
+	edited, err := service.UpdateGuarded(ctx, accountA, sharedID, d.ID, PluginDestinationInput{Name: &renamed, Enabled: &off, NotifyNextUp: &quiet, NotifyRequests: &quiet}, anyRevision)
+	if err != nil || edited.Name != renamed || edited.Enabled || edited.ConfigCiphertext != foreign {
+		t.Fatalf("metadata edit of unreadable settings = %+v, %v; want it applied with the ciphertext unchanged", edited, err)
+	}
 }
 
 // Text from a plugin can quote a credential. It is masked before it is
@@ -782,40 +822,67 @@ func TestPluginDestinationTextNeverCarriesSecretsDB(t *testing.T) {
 	}
 }
 
-// Inbox retention keeps a delivery while its destination attempt is still
-// on the retry schedule: deleting it would cascade to the attempt.
+// Inbox retention keeps a delivery while its destination attempt can still
+// run: deleting it would cascade to the attempt. A claimed attempt is kept
+// however old, since a server is sending it under a live lease; waiting work
+// only until the age cap, past which the attempt is finished without a send.
 func TestPluginDestinationRetryOutlivesInboxRetentionDB(t *testing.T) {
 	pool := pluginDestinationDB(t)
 	ctx := t.Context()
 	service, sender := newTestPluginDestinationService(t, pool, &scriptedChannelHost{})
-	name := "Phone"
-	d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
-		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
-		Settings: map[string]any{"topic": "alerts"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
-	enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
-	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET outcome = 'retrying', next_retry_at = now() + interval '6 hours'`); err != nil {
-		t.Fatal(err)
-	}
+	d := createTestDestination(t, service, map[string]any{"topic": "alerts"})
 	future := time.Now().Add(time.Hour)
-	if _, err := sender.deliveries.DeleteOld(ctx, future, future, future); err != nil {
+	prune := func() {
+		t.Helper()
+		if _, err := sender.deliveries.DeleteOld(ctx, future, future, future); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kept := func(deliveryID string) bool {
+		t.Helper()
+		row, err := sender.deliveries.GetRowByID(ctx, deliveryID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row != nil
+	}
+	queue := func(age time.Duration) string {
+		t.Helper()
+		deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
+		enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
+		if _, err := pool.Exec(ctx, `UPDATE notification_deliveries SET created_at = now() - $2::interval WHERE id = $1`, deliveryID, age); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET attempted_at = now() - $2::interval WHERE notification_delivery_id = $1`, deliveryID, age); err != nil {
+			t.Fatal(err)
+		}
+		return deliveryID
+	}
+
+	// Scheduled inside the window.
+	scheduled := queue(time.Hour)
+	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET outcome = 'retrying', next_retry_at = now() + interval '6 hours' WHERE notification_delivery_id = $1`, scheduled); err != nil {
 		t.Fatal(err)
 	}
-	if row, err := sender.deliveries.GetRowByID(ctx, deliveryID); err != nil || row == nil {
-		t.Fatalf("delivery with a retry still due = %v, %v; want it kept", row, err)
+	// Eight days old, claimed again just now: its lease is live.
+	leased := queue(8 * 24 * time.Hour)
+	if claimed, err := sender.repo.ClaimPendingForDelivery(ctx, leased); err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %d, %v", len(claimed), err)
 	}
+	// Waiting past the age cap, unclaimed: the sweep finishes such attempts.
+	stranded := queue(pluginAttemptMaxAge + time.Hour)
+	prune()
+	if !kept(scheduled) || !kept(leased) || kept(stranded) {
+		t.Fatalf("after pruning: scheduled kept %v, leased kept %v, stranded kept %v; want the first two kept",
+			kept(scheduled), kept(leased), kept(stranded))
+	}
+
 	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET outcome = 'failed'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sender.deliveries.DeleteOld(ctx, future, future, future); err != nil {
-		t.Fatal(err)
-	}
-	if row, err := sender.deliveries.GetRowByID(ctx, deliveryID); err != nil || row != nil {
-		t.Fatalf("delivery whose attempt resolved = %v, %v; want it pruned", row, err)
+	prune()
+	if kept(scheduled) || kept(leased) {
+		t.Fatal("deliveries whose attempts resolved weren't pruned")
 	}
 }
 

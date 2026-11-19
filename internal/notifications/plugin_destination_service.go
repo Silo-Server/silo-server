@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -22,6 +23,10 @@ const pluginValidateTimeout = 10 * time.Second
 type PluginDestinationService struct {
 	repo   *PluginDestinationRepository
 	sender *pluginDestinationSender
+	// profileExists asks the user store, which owns profiles in every
+	// configuration (PostgreSQL or the per-account SQLite store), whether an
+	// account profile exists. nil skips the check.
+	profileExists func(ctx context.Context, userID int, profileID string) (bool, error)
 }
 
 func newPluginDestinationService(repo *PluginDestinationRepository, sender *pluginDestinationSender) *PluginDestinationService {
@@ -126,10 +131,40 @@ func (s *PluginDestinationService) Create(ctx context.Context, userID int, profi
 	if d.ConfigCiphertext, err = s.sender.encryptConfig(d.ID, settings); err != nil {
 		return nil, err
 	}
+	if err := s.checkProfile(ctx, userID, profileID); err != nil {
+		return nil, err
+	}
 	if err := s.repo.InsertWithLimit(ctx, d, PluginDestinationMaxPerProfile); err != nil {
 		return nil, err
 	}
+	// The profile is checked again after the insert commits. A deletion
+	// that committed before this check is seen here, and the new
+	// destination goes; one that commits after it purges the profile's
+	// destinations once it has, this one included.
+	if err := s.checkProfile(ctx, userID, profileID); err != nil {
+		if errors.Is(err, ErrPluginDestinationProfileGone) {
+			if deleteErr := s.repo.deleteByID(context.WithoutCancel(ctx), d.ID); deleteErr != nil {
+				return nil, fmt.Errorf("remove a destination of a deleted profile: %w", deleteErr)
+			}
+		}
+		return nil, err
+	}
 	return s.repo.GetByID(ctx, userID, profileID, d.ID)
+}
+
+// checkProfile refuses a create for a profile that doesn't exist.
+func (s *PluginDestinationService) checkProfile(ctx context.Context, userID int, profileID string) error {
+	if s.profileExists == nil {
+		return nil
+	}
+	exists, err := s.profileExists(ctx, userID, profileID)
+	if err != nil {
+		return fmt.Errorf("check plugin destination profile: %w", err)
+	}
+	if !exists {
+		return ErrPluginDestinationProfileGone
+	}
+	return nil
 }
 
 // UpdateGuarded applies in after check accepts the stored revision, under

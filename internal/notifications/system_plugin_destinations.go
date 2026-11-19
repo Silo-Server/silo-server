@@ -21,9 +21,13 @@ func (s *System) wirePluginDestinationSender() {
 	if s.pluginDestinationSender == nil {
 		return
 	}
-	// The notice reaches no webhook or plugin destination (loop guard).
-	s.pluginDestinationSender.insertNotice = func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
-		return s.insertOperational(ctx, tx, notice, OperationalDispatch{}, nil)
+	// The notice reaches no webhook or plugin destination (loop guard). Its
+	// channel settings are read before the sender's transaction begins.
+	s.pluginDestinationSender.noticeWriter = func(ctx context.Context) func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+		channels := s.operationalChannels(ctx)
+		return func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+			return s.insertOperational(ctx, tx, notice, OperationalDispatch{}, nil, channels)
+		}
 	}
 	s.pluginDestinationSender.dispatchNotice = s.dispatchOperationalRow
 	s.pluginDestinationSender.posterURL = s.discordPosterURL

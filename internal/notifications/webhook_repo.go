@@ -195,10 +195,11 @@ func (r *WebhookRepository) Delete(ctx context.Context, userID int, profileID, i
 }
 
 // DeleteAllForProfile removes a deleted account profile's webhooks.
+//
+// The webhooks are locked in id order first, as a delivery's enqueue locks
+// them, so a purge and a concurrent enqueue can't deadlock.
 func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
-	return err
+	return deleteProfileTargetsInOrder(ctx, r.pool, "notification_webhooks", userID, profileID)
 }
 
 // RecordSuccess resets the failure streak after a delivered attempt.
@@ -272,7 +273,8 @@ func scanDeliveryAttempts(rows pgx.Rows) ([]DeliveryAttempt, error) {
 // delivery transaction on the foreign key (see
 // PluginDestinationRepository.EnqueueAttempts).
 func (r *WebhookRepository) EnqueueAttempts(ctx context.Context, tx pgx.Tx, attempts []DeliveryAttempt) error {
-	return enqueueAttemptsForLiveTargets(ctx, tx, "webhook_delivery_attempts", "webhook_id", "notification_webhooks", attempts)
+	_, err := enqueueAttemptsForLiveTargets(ctx, tx, "webhook_delivery_attempts", "webhook_id", "notification_webhooks", attempts)
+	return err
 }
 
 // claimLease is how long a claimed attempt is invisible to other claimers. A

@@ -20,6 +20,10 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
+// The failure classification docs/architecture/notifications.md states:
+// only a plugin the host couldn't reach keeps the destination enabled when
+// the schedule runs out. A timeout, the send's own included, and any status
+// the plugin returned are ordinary failures.
 func TestPluginSendResultOf(t *testing.T) {
 	outcome := func(o pluginv1.NotificationSendOutcome, retryAfter int32) *pluginv1.SendNotificationResponse {
 		return &pluginv1.SendNotificationResponse{Outcome: o, RetryAfterSeconds: retryAfter, Message: "m"}
@@ -30,9 +34,9 @@ func TestPluginSendResultOf(t *testing.T) {
 		err        error
 		want       pluginSendOutcome
 		retryAfter time.Duration
-		// unavailable: no plugin answered, so an exhausted schedule
-		// drops the message without disabling the destination.
-		unavailable bool
+		// keepEnabled: the plugin couldn't be reached, so an exhausted
+		// schedule drops the message without disabling the destination.
+		keepEnabled bool
 	}{
 		// An empty response acknowledges, as the SDK documents.
 		{name: "empty response", resp: &pluginv1.SendNotificationResponse{}, want: pluginSendDelivered},
@@ -43,20 +47,29 @@ func TestPluginSendResultOf(t *testing.T) {
 		{name: "destination invalid", resp: outcome(pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, 0), want: pluginSendInvalid},
 		// An outcome from a newer SDK drops the message and keeps the destination.
 		{name: "unknown outcome", resp: outcome(pluginv1.NotificationSendOutcome(99), 0), want: pluginSendFailed},
-		{name: "plugin gone", err: fmt.Errorf("%w: not installed", ErrPluginChannelUnavailable), want: pluginSendRetry, unavailable: true},
-		// The plugin process exited mid-call, or the call ran out of time.
-		{name: "connection closed", err: status.Error(codes.Unavailable, "error reading from server: EOF"), want: pluginSendRetry, unavailable: true},
-		{name: "call deadline", err: status.Error(codes.DeadlineExceeded, "context deadline exceeded"), want: pluginSendRetry, unavailable: true},
-		{name: "not a status", err: context.DeadlineExceeded, want: pluginSendRetry, unavailable: true},
-		// An error the plugin returned is its answer.
+		// No enabled installation, or the client wasn't acquired in time:
+		// Connect wraps both in ErrPluginChannelUnavailable.
+		{name: "plugin gone", err: fmt.Errorf("%w: not installed", ErrPluginChannelUnavailable), want: pluginSendRetry, keepEnabled: true},
+		{name: "start timed out", err: fmt.Errorf("%w: %w", ErrPluginChannelUnavailable, context.DeadlineExceeded), want: pluginSendRetry, keepEnabled: true},
+		// The connection failed or closed: the plugin process exited mid-call.
+		{name: "transport unavailable", err: status.Error(codes.Unavailable, "error reading from server: EOF"), want: pluginSendRetry, keepEnabled: true},
+		{name: "connection error", err: errors.New("connection refused"), want: pluginSendRetry, keepEnabled: true},
+		// The send's 15 seconds ran out, or the plugin returned a timeout or
+		// cancellation itself: ordinary failures.
+		{name: "send timed out", err: status.Error(codes.DeadlineExceeded, "context deadline exceeded"), want: pluginSendRetry},
+		{name: "send timed out, raw", err: context.DeadlineExceeded, want: pluginSendRetry},
+		{name: "plugin canceled", err: status.Error(codes.Canceled, "canceled"), want: pluginSendRetry},
 		{name: "plugin error status", err: status.Error(codes.Internal, "boom"), want: pluginSendRetry},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := pluginSendResultOf(tc.resp, tc.err)
-			if got.outcome != tc.want || got.retryAfter != tc.retryAfter || got.unavailable != tc.unavailable {
-				t.Fatalf("pluginSendResultOf() = %+v, want outcome %v retryAfter %v unavailable %v", got, tc.want, tc.retryAfter, tc.unavailable)
+			if got.outcome != tc.want || got.retryAfter != tc.retryAfter || got.keepEnabled != tc.keepEnabled {
+				t.Fatalf("pluginSendResultOf() = %+v, want outcome %v retryAfter %v keepEnabled %v", got, tc.want, tc.retryAfter, tc.keepEnabled)
 			}
 		})
+	}
+	if pluginAttemptMaxAge != 36*time.Hour {
+		t.Fatalf("pluginAttemptMaxAge = %s, want half again the 24-hour schedule", pluginAttemptMaxAge)
 	}
 }
 

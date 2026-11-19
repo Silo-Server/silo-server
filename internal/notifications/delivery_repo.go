@@ -425,11 +425,13 @@ func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int
 // A watchlist.available row created at or after arrivalCutoff, the fanout
 // staleness horizon, is kept whatever the retention settings: it is what
 // stops a later episode inside the horizon from telling the profile again.
-// A row with a webhook or plugin destination attempt still pending or
-// retrying is kept while the attempt was last touched within a week, well
-// past the retry schedule's end: its deletion would cascade to the attempt
-// and cancel a retry still on schedule. The bound lets the row go when an
-// attempt is stranded, such as while webhooks are turned off.
+// A row with a webhook or plugin destination attempt still to finish is
+// kept, since its deletion would cascade to the attempt: always while the
+// attempt is claimed or scheduled (retrying with next_retry_at ahead, which
+// covers a live claim lease), and while it waits otherwise for as long as
+// the row is younger than pluginAttemptMaxAge, past which a plugin attempt
+// is finished without a send. The bound lets the row go when an attempt is
+// stranded, such as while webhooks are turned off.
 func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff, arrivalCutoff time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM notification_deliveries d
@@ -438,11 +440,11 @@ func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCu
 		  AND NOT (d.type = '`+DeliveryTypeWatchlistAvailable+`' AND d.created_at >= $3)
 		  AND NOT EXISTS (SELECT 1 FROM webhook_delivery_attempts a
 		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
-		                    AND a.attempted_at > now() - interval '7 days')
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))
 		  AND NOT EXISTS (SELECT 1 FROM plugin_destination_delivery_attempts a
 		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
-		                    AND a.attempted_at > now() - interval '7 days')`,
-		readCutoff, unreadCutoff, arrivalCutoff)
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))`,
+		readCutoff, unreadCutoff, arrivalCutoff, pluginAttemptMaxAge)
 	if err != nil {
 		return 0, err
 	}
