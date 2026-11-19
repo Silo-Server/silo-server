@@ -316,6 +316,98 @@ func TestConcurrentVersionStartsAdoptOnlyTheSameFile(t *testing.T) {
 	}
 }
 
+// replaceAfterAttachStore lets a concurrent switch replace the upstream
+// session right after this request attaches its own.
+type replaceAfterAttachStore struct {
+	CompatPlaybackStore
+	attached string
+	replace  func()
+}
+
+func (s *replaceAfterAttachStore) Update(id string, mutate func(*PlaybackSession) error) error {
+	err := s.CompatPlaybackStore.Update(id, mutate)
+	if current, ok := s.Get(id); err == nil && ok && current.UpstreamSessionID == s.attached && s.replace != nil {
+		replace := s.replace
+		s.replace = nil
+		replace()
+	}
+	return err
+}
+
+// TestAttachedUpstreamReplacedBeforeServing covers a request whose attach
+// succeeds but that a switch to another version replaces before it serves:
+// it must not go on under the session that now streams the other version.
+func TestAttachedUpstreamReplacedBeforeServing(t *testing.T) {
+	codec := NewResourceIDCodec()
+	first := testCompatSource(codec, testCompatVersion())
+	secondVersion := testCompatVersion()
+	secondVersion.FileID = 43
+	second := testCompatSource(codec, secondVersion)
+	inner := NewPlaybackSessionStore(time.Hour, nil)
+	inner.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "compat-token", RouteItemID: "item-1",
+		MediaSources: []PlaybackMediaSource{first, second},
+	})
+	store := &replaceAfterAttachStore{CompatPlaybackStore: inner, attached: "upstream-started"}
+	store.replace = func() {
+		_ = inner.Update("play-1", func(current *PlaybackSession) error {
+			current.UpstreamSessionID, current.UpstreamMediaFileID = "upstream-second", second.FileID
+			return nil
+		})
+	}
+	manager := &testCompatSessionManager{sessions: map[string]*playback.Session{}}
+	handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
+
+	updated, err := handler.ensureUpstreamPlayback(t.Context(),
+		&Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}, "play-1", first, "direct")
+	if !errors.Is(err, errUpstreamReplaced) {
+		t.Fatalf("result = %v, want errUpstreamReplaced instead of serving under %+v", err, updated)
+	}
+}
+
+// TestChildHLSRequestForAnotherVersionKeepsThePlay covers a late child
+// playlist for the version a play switched away from: only the master
+// manifest switches versions, so the request is refused and the version
+// being watched keeps its session.
+func TestChildHLSRequestForAnotherVersionKeepsThePlay(t *testing.T) {
+	codec := NewResourceIDCodec()
+	first := testCompatSource(codec, testCompatVersion())
+	secondVersion := testCompatVersion()
+	secondVersion.FileID = 43
+	second := testCompatSource(codec, secondVersion)
+	recipe := playback.NewRecipeCard(7, "profile-1", second.FileID, "", playback.TranscodeOpts{SessionID: "upstream-second"})
+	assignment := playback.NodeRoutingAssignment{
+		Workload: string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionAPI),
+		Egress: string(noderouting.EgressAPI),
+	}
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "compat-token", RouteItemID: "item-1",
+		UpstreamSessionID: "upstream-second", UpstreamPlayMethod: "transcode", UpstreamMediaFileID: second.FileID,
+		MediaSources: []PlaybackMediaSource{first, second}, Recipe: &recipe, RoutingAssignment: &assignment,
+	})
+	manager := &testCompatSessionManager{sessions: map[string]*playback.Session{
+		"upstream-second": {ID: "upstream-second", UserID: 7, MediaFileID: second.FileID, PlayMethod: playback.PlayTranscode},
+	}}
+	handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
+
+	request := httptest.NewRequest(http.MethodGet, "/Videos/item-1/hls/play-1/stream.m3u8?MediaSourceId="+first.ID, nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", "item-1")
+	routeCtx.URLParams.Add("playlistId", "play-1")
+	ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-token", StreamAppUserID: 7})
+	recorder := httptest.NewRecorder()
+	handler.HandleHLSManifest(recorder, request.WithContext(ctx))
+
+	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"Error":"`+compatRoutingPolicyUnsatisfiedCode+`"`) {
+		t.Fatalf("child response = %d %s, want the obsolete-route refusal", recorder.Code, recorder.Body.String())
+	}
+	if len(manager.stopCalls) != 0 || manager.startCalls != 0 {
+		t.Fatalf("stops = %v, starts = %d; want the watched version's session left alone", manager.stopCalls, manager.startCalls)
+	}
+}
+
 // TestMethodSwitchEndsTheReplacedSession covers the session a Jellyfin
 // method switch leaves behind: whether this replica held its copy or not,
 // the switch records it as replaced once the play has moved to the new

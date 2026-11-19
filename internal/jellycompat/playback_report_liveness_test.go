@@ -75,6 +75,31 @@ func postProgressReport(handler *PlaybackHandler, body string) *httptest.Respons
 	return rec
 }
 
+// TestReportForAnotherVersionRevivesTheStreamedOne covers a late progress
+// report for the version a play switched away from, arriving after its
+// upstream was reaped: the revive restores the version the play streams.
+func TestReportForAnotherVersionRevivesTheStreamedOne(t *testing.T) {
+	handler, manager, _, firstID := newReportLivenessHandler("upstream-reaped", false)
+	secondVersion := testCompatVersion()
+	secondVersion.FileID = 43
+	second := testCompatSource(handler.codec, secondVersion)
+	if err := handler.playbackStore.Update("play-1", func(current *PlaybackSession) error {
+		current.MediaSources = append(current.MediaSources, second)
+		current.UpstreamMediaFileID = second.FileID
+		return nil
+	}); err != nil {
+		t.Fatalf("bind the second version: %v", err)
+	}
+
+	rec := postProgressReport(handler, `{"PlaySessionId":"play-1","MediaSourceId":"`+firstID+`","PositionTicks":100000000,"IsPaused":false}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if revived := manager.sessions["upstream-started"]; revived == nil || revived.MediaFileID != second.FileID {
+		t.Fatalf("revived session = %+v, want one for file %d", revived, second.FileID)
+	}
+}
+
 // TestHandlePlaybackReport_MediaSourceIDFallbackWhenItemUnknown covers clients
 // that omit or send an unmatchable ItemId: the MediaSourceId in the report
 // still identifies the play session.
