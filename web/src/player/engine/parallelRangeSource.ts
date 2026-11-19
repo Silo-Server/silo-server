@@ -62,10 +62,7 @@ const MAX_STRIPE_URL_RANGES = MAX_RANGES_IN_FLIGHT - 1;
  */
 const STRIPE_INACTIVITY_MS = 8_000;
 
-/**
- * How many completed responses the source asks the browser about before it stops asking which
- * protocol the striped URL speaks. A browser that never says leaves the source striping.
- */
+/** How many completed responses the source asks the browser about the protocol of. */
 const PROTOCOL_CHECKS = 8;
 
 /** A `Content-Range` that names the range and the file's size. */
@@ -196,6 +193,9 @@ export class ParallelRangeSource extends InternalUrlSource {
     const profile = orchestrator.options.prefetchProfile;
     orchestrator.options.prefetchProfile = (start, end, workers) => {
       const range = profile(start, end, workers);
+      // The stock reader keeps its own read-ahead: over one connection, a 32 MiB target would
+      // hold a seek back, and nothing here retires a stock worker.
+      if (this.ignoresRange || this.multiplexed) return range;
       return { start: range.start, end: Math.max(range.end, start + READ_AHEAD_BYTES) };
     };
     // `read()` is synchronous and calls `createWorker` for a new read before it looks at the
@@ -532,11 +532,19 @@ export class ParallelRangeSource extends InternalUrlSource {
       this.wakeWorkers();
     }
     // The plan's URL ignores `Range`, or the striped URL shares one connection: the stock source
-    // reads the file from here on. A worker already at its target has nothing left to read, and
-    // the stock source would ask for the bytes after it.
-    if (!worker.aborted && worker.currentPos >= worker.targetPos) {
-      orchestrator.signalWorkerStoppedRunning(worker);
-      return;
+    // reads the file from here on. It gets the bytes this worker's reads still wait for, and not
+    // the striped read-ahead beyond them. A worker with none left has nothing to read, and the
+    // stock source would ask for the bytes after its target.
+    if (!worker.aborted) {
+      worker.targetPos = ParallelRangeSource.owedEnd(
+        worker.currentPos,
+        worker.targetPos,
+        worker.pendingSlices,
+      );
+      if (worker.currentPos >= worker.targetPos) {
+        orchestrator.signalWorkerStoppedRunning(worker);
+        return;
+      }
     }
     return super._runWorker(worker);
   }
@@ -696,15 +704,14 @@ export class ParallelRangeSource extends InternalUrlSource {
   /**
    * Asks the browser which protocol a completed response from the striped URL came over, and
    * hands the source to the stock reader when it was HTTP/2 or HTTP/3. A cross-origin response
-   * says only when its server sent `Timing-Allow-Origin`; without an answer the source keeps
-   * striping and asks again after the next response, up to `PROTOCOL_CHECKS` times.
+   * says only when its server sent `Timing-Allow-Origin`. It asks about the first
+   * `PROTOCOL_CHECKS` completed responses, since a front can answer the first over HTTP/1.1 and
+   * later ones over HTTP/3; without an answer the source keeps striping.
    */
   private checkProtocol(url: string | URL | Request): void {
     if (this.multiplexed || this.protocolChecks >= PROTOCOL_CHECKS) return;
     this.protocolChecks++;
     const protocol = responseProtocol(url);
-    if (protocol === "") return;
-    this.protocolChecks = PROTOCOL_CHECKS;
     if (protocol === "h2" || protocol === "h3") {
       this.multiplexed = true;
       this.wakeWorkers();

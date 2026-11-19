@@ -407,6 +407,13 @@ describe("ParallelRangeSource failures", () => {
       ).toBe(true);
       const stripeAfter = server.requests.filter((r) => r.url === STRIPE_URL).length;
       expect(stripeAfter > stripeBefore).toBe(stripes);
+      // Over one connection the stock reader keeps its own, shorter read-ahead.
+      const targets = (
+        source as unknown as {
+          _orchestrator: { workers: { startPos: number; targetPos: number }[] };
+        }
+      )._orchestrator.workers.map((w) => w.targetPos - w.startPos);
+      expect(targets.some((bytes) => bytes >= 32 * MIB)).toBe(stripes);
     } finally {
       delete timing.getEntriesByName;
       vi.unstubAllGlobals();
