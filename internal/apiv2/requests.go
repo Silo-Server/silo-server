@@ -684,7 +684,7 @@ func (reg *Registry) listDiscoverSections(ctx context.Context, _ *struct{}) (*Di
 	reg.markInWatchlist(ctx, marks)
 	order := make([]DiscoverRowRef, 0, len(page.Order))
 	for _, r := range page.Order {
-		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(r.Key, r.Title), nil)})
+		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(r.Key, r.Title, r.Type), nil)})
 	}
 	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items), RowOrder: order}}, nil
 }
@@ -939,20 +939,6 @@ func requestMediaStateOf(s mediarequests.RequestState) RequestMediaState {
 	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID), Following: s.Following, RequestedByViewer: s.RequestedByViewer, State: string(s.State), Download: requestDownloadOf(s.Download)}
 }
 
-func requestMediaResultsOf(results []mediarequests.MediaResult) []RequestMediaResult {
-	out := make([]RequestMediaResult, 0, len(results))
-	for _, r := range results {
-		out = append(out, RequestMediaResult{
-			MediaType: string(r.MediaType), TMDBID: r.TMDBID, Title: r.Title, Year: r.Year, Overview: r.Overview,
-			PosterPath: r.PosterPath, BackdropPath: r.BackdropPath, ReleaseDate: calendarDate(r.ReleaseDate),
-			Popularity: r.Popularity, VoteAverage: r.VoteAverage, Availability: string(r.Availability),
-			LibraryContentID: r.LibraryContentID, Request: requestMediaStateOf(r.Request),
-			Reasons: requestMediaReasonsOf(r.Reasons),
-		})
-	}
-	return out
-}
-
 func requestMediaPageOf(p *mediarequests.MediaPage) RequestMediaPage {
 	return RequestMediaPage{Page: p.Page, TotalPages: p.TotalPages, TotalResults: p.TotalResults, Results: requestMediaResultsOf(p.Results)}
 }
@@ -990,7 +976,7 @@ func requestMediaSeasonsOf(seasons []mediarequests.RequestSeason) []RequestMedia
 
 func discoverSectionOf(s *mediarequests.DiscoverySection) DiscoverSection {
 	return DiscoverSection{
-		Key: s.Key, Title: s.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(s.Key, s.Title), nil), Page: s.Page, TotalPages: s.TotalPages, TotalResults: s.TotalResults,
+		Key: s.Key, Title: s.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(s.Key, s.Title, s.Type), nil), Page: s.Page, TotalPages: s.TotalPages, TotalResults: s.TotalResults,
 		Results: requestMediaResultsOf(s.Results), NextPage: s.NextPage,
 	}
 }

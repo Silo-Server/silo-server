@@ -163,10 +163,10 @@ func TestExternalSourcesToFetchDB(t *testing.T) {
 	f.record("empty-stale", ExternalSourceEmpty)
 	f.record("failed", ExternalSourceOK, link)
 	f.record("failed", ExternalSourceFailed)
-	f.exec(`UPDATE external_title_sources SET fetched_at = now() - interval '40 days' WHERE source_key = ANY($1)`,
-		[]string{f.source("ok-stale"), f.source("empty-stale")})
+	f.exec(`UPDATE external_title_sources SET fetched_at = now() - interval '40 days' WHERE source_key = $1`, f.source("ok-stale"))
+	f.exec(`UPDATE external_title_sources SET fetched_at = now() - interval '45 days' WHERE source_key = $1`, f.source("empty-stale"))
 
-	names := []string{"failed", "never", "ok-fresh", "ok-stale", "empty-fresh", "empty-stale"}
+	names := []string{"failed", "ok-fresh", "ok-stale", "empty-fresh", "empty-stale", "never"}
 	keys := make([]string, len(names))
 	for i, n := range names {
 		keys[i] = f.source(n)
@@ -175,7 +175,7 @@ func TestExternalSourcesToFetchDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{f.source("never"), f.source("ok-stale"), f.source("empty-stale"), f.source("failed")}
+	want := []string{f.source("never"), f.source("empty-stale"), f.source("ok-stale"), f.source("failed")}
 	if !slices.Equal(got, want) {
 		t.Fatalf("to fetch = %v, want %v", got, want)
 	}
@@ -300,7 +300,8 @@ func TestExternalSimilaritiesDB(t *testing.T) {
 	const model = "test-model"
 	if err := f.repo.UpsertExternalEmbeddings(ctx, []ExternalEmbedding{
 		{Key: f.movie(1), Vector: []float32{0, 0, 1}, Model: model},
-		{Key: f.movie(2), Vector: []float32{1, 0, 0}, Model: model},
+		// The stored vector is valid even when a coordinate exceeds half precision.
+		{Key: f.movie(2), Vector: []float32{100000, 0, 0}, Model: model},
 		{Key: f.movie(3), Vector: []float32{0.6, 0.8, 0}, Model: model},
 		{Key: f.movie(4), Vector: []float32{1, 0, 0}, Model: "other-model"},
 		{Key: series, Vector: []float32{1, 0, 0}, Model: model},

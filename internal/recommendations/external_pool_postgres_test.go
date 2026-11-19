@@ -149,8 +149,8 @@ func newExternalPoolScenario(t *testing.T, base int) *externalPoolScenario {
 	p1 := []ExternalSeed{seed("a", movie(1), 3), seed("b", movie(2), 2)}
 	p2 := []ExternalSeed{seed("a", movie(1), 1), seed("c", series(3), 1)}
 	s.profiles = []ExternalProfile{
-		{UserID: 1, ProfileID: "p1", Seeds: p1, SetSources: externalProfileSetSources(p1)},
-		{UserID: 2, ProfileID: "p2", Seeds: p2, SetSources: externalProfileSetSources(p2)},
+		{Seeds: p1, SetSources: externalProfileSetSources(p1)},
+		{Seeds: p2, SetSources: externalProfileSetSources(p2)},
 	}
 	return s
 }

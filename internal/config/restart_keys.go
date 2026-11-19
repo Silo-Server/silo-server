@@ -121,7 +121,8 @@ var restartRequiredPrefixes = []string{
 }
 
 const (
-	externalRecommendationsEnabledKey   = "recommendations.external.enabled"
+	// ExternalRecommendationsEnabledKey is the live switch for Discover recommendations.
+	ExternalRecommendationsEnabledKey   = "recommendations.external.enabled"
 	externalRecommendationsMaxTitlesKey = "recommendations.external.max_titles"
 )
 
@@ -129,7 +130,7 @@ const (
 // are read at each use instead: the recommendations worker and reader take the
 // outside-title switch and its title cap from the live config.
 var liveKeysUnderRestartPrefixes = map[string]bool{
-	externalRecommendationsEnabledKey:   true,
+	ExternalRecommendationsEnabledKey:   true,
 	externalRecommendationsMaxTitlesKey: true,
 }
 

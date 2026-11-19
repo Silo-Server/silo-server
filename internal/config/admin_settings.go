@@ -504,7 +504,7 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.recommendations_cron":       "0 5 * * *",
 	"recommendations.taste_decay_half_life_days": "180",
 	"recommendations.diversity_lambda":           "0.7",
-	externalRecommendationsEnabledKey:            "false",
+	ExternalRecommendationsEnabledKey:            "false",
 	externalRecommendationsMaxTitlesKey:          strconv.Itoa(DefaultExternalRecommendationsMaxTitles),
 	"recommendations.external_cron":              "0 6 * * *",
 
@@ -759,7 +759,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", JellyfinCompatAddressStreamGrantSettingKey, "recommendations.enabled",
-		externalRecommendationsEnabledKey, "subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
+		ExternalRecommendationsEnabledKey, "subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",

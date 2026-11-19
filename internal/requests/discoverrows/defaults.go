@@ -114,7 +114,7 @@ var defaultTitleKeys = map[string]string{
 // a built-in one still holding its default title, and "" for any other title,
 // which an admin typed. A title an admin typed that equals the default's
 // English gets the key too; the English is the same.
-func TitleKey(id, title string) string {
+func TitleKey(id, title string, rowType Type) string {
 	key, ok := defaultTitleKeys[id]
 	if !ok {
 		return ""
@@ -122,6 +122,9 @@ func TitleKey(id, title string) string {
 	for _, rows := range [][]Row{recommendedRows, legacyRows, brandRows} {
 		for _, r := range rows {
 			if r.ID == id && r.Title == title {
+				if r.Type == TypeRecommended && rowType != TypeRecommended {
+					return ""
+				}
 				return key
 			}
 		}

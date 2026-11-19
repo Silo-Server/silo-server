@@ -152,7 +152,7 @@ var reservedIDs = map[string]bool{"rows": true, "browse": true}
 // specs canonical, limits defaulted, and an ID on every new row. A built-in
 // row (one of the six original charts) keeps its ID and chart; its title,
 // limit, switch and hide_available can change. The two default recommended
-// rows keep their type and media type. A brand row's ID is its type, so each
+// rows keep their media type. A brand row's ID is its type, so each
 // appears at most once.
 func NormalizeLayout(rows []Row) ([]Row, FieldErrors) {
 	errs := FieldErrors{}
@@ -242,9 +242,6 @@ func checkRowID(row *Row) string {
 	}
 	if IsLegacyID(row.ID) && row.Type != TypeTMDBChart {
 		return "a built-in row stays a chart row"
-	}
-	if _, ok := recommendedRow(row.ID); ok && row.Type != TypeRecommended {
-		return "a built-in row stays a recommended row"
 	}
 	return ""
 }

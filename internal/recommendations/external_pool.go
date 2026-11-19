@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log/slog"
 	"maps"
 	"slices"
 	"strconv"
@@ -16,10 +15,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
@@ -30,12 +29,9 @@ const (
 	// externalProfileListCap is how many seed-list titles a profile's pool
 	// keeps: those named by the most of its seeds.
 	externalProfileListCap = 500
-	// DefaultExternalMaxTitles is the server cap when the caller passes none.
-	DefaultExternalMaxTitles = 5000
-
-	externalSeedRefetch   = 30 * 24 * time.Hour
-	externalSetRefetch    = 7 * 24 * time.Hour
-	externalDetailRefetch = 120 * 24 * time.Hour
+	externalSeedRefetch    = 30 * 24 * time.Hour
+	externalSetRefetch     = 7 * 24 * time.Hour
+	externalDetailRefetch  = 120 * 24 * time.Hour
 
 	externalRetentionDetail       = 150 * 24 * time.Hour
 	externalRetentionUnreferenced = 30 * 24 * time.Hour
@@ -96,10 +92,12 @@ func (e *Engine) externalOwnedLookup() externalOwnedLookup {
 // ExternalPoolOptions configures BuildExternalPool.
 type ExternalPoolOptions struct {
 	// MaxTitles caps the outside titles the server stores;
-	// DefaultExternalMaxTitles when <= 0.
+	// the configured default when <= 0.
 	MaxTitles int
 	// held owns the PostgreSQL session used for pool writes.
 	held clusterLock
+	// partialProfiles prevents cap eviction if some profiles could not be read.
+	partialProfiles bool
 }
 
 // ExternalPoolCounts reports one BuildExternalPool run.
@@ -163,19 +161,30 @@ func (e *Engine) BuildExternalPool(ctx context.Context, opts ExternalPoolOptions
 		return ExternalPoolCounts{}, err
 	}
 	profiles := make([]ExternalProfile, 0, len(subjects))
+	var firstErr error
+	failed := 0
 	for _, s := range subjects {
 		if err := ctx.Err(); err != nil {
 			return ExternalPoolCounts{}, err
 		}
 		p, ok, err := e.externalProfile(ctx, s.UserID, s.ProfileID, nil)
 		if err != nil {
-			return ExternalPoolCounts{}, err
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if ok {
 			profiles = append(profiles, p)
 		}
 	}
-	return e.buildExternalPool(ctx, profiles, opts, externalLimits{tmdbRequests: externalTMDBRequestBudget, embeds: externalEmbedBudget})
+	opts.partialProfiles = failed > 0
+	counts, err := e.buildExternalPool(ctx, profiles, opts, externalLimits{tmdbRequests: externalTMDBRequestBudget, embeds: externalEmbedBudget})
+	if failed > 0 {
+		err = errors.Join(err, fmt.Errorf("read outside-title seeds for %d of %d profiles: %w", failed, len(subjects), firstErr))
+	}
+	return counts, err
 }
 
 // externalRun is one BuildExternalPool run past the seed reads.
@@ -187,7 +196,8 @@ type externalRun struct {
 	writer externalPoolWriter
 	counts ExternalPoolCounts
 	// tmdbLeft is the TMDB requests the run may still make.
-	tmdbLeft int
+	tmdbLeft        int
+	partialProfiles bool
 	// failures counts TMDB calls in a row that failed.
 	failures atomic.Int32
 	mu       sync.Mutex
@@ -199,13 +209,13 @@ func (e *Engine) buildExternalPool(ctx context.Context, profiles []ExternalProfi
 	}
 	maxTitles := opts.MaxTitles
 	if maxTitles <= 0 {
-		maxTitles = DefaultExternalMaxTitles
+		maxTitles = config.DefaultExternalRecommendationsMaxTitles
 	}
 	now, err := e.repo.Now(ctx)
 	if err != nil {
 		return ExternalPoolCounts{}, err
 	}
-	r := &externalRun{e: e, tmdb: e.externalTMDB, now: now, held: opts.held}
+	r := &externalRun{e: e, tmdb: e.externalTMDB, now: now, held: opts.held, partialProfiles: opts.partialProfiles}
 	r.writer = e.repo.externalPoolWriter
 	if opts.held != nil {
 		r.writer = opts.held.poolWriter(r.writer)
@@ -616,7 +626,6 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 		return nil, err
 	}
 	chosen, named := chooseExternalPool(sets, pools, owned, externalProfileListCap, maxTitles)
-	r.counts.PoolTitles = len(chosen)
 
 	// Stored titles the library now has go with the links that name them,
 	// so a title owned under its IMDb or TVDB ID is not chosen and fetched
@@ -634,17 +643,40 @@ func (r *externalRun) choosePool(ctx context.Context, profiles []ExternalProfile
 		return nil, err
 	}
 	r.counts.TitlesDeleted = int64(len(nowOwned))
-	if excess := externalExcessTitles(unowned, chosen, named, maxTitles); len(excess) > 0 {
+	if r.partialProfiles {
+		chosen = preserveExternalPool(chosen, unowned, maxTitles)
+	} else if excess := externalExcessTitles(unowned, chosen, named, maxTitles); len(excess) > 0 {
 		deleted, err := r.writer.DeleteExternalTitles(ctx, excess)
 		if err != nil {
 			return nil, err
 		}
 		r.counts.TitlesDeleted += deleted
 	}
+	r.counts.PoolTitles = len(chosen)
 	if err := r.writer.TouchExternalReferences(ctx, uniqueSorted(append(sources, setKeys...)), chosen); err != nil {
 		return nil, err
 	}
 	return chosen, nil
+}
+
+// preserveExternalPool keeps already stored titles when a partial scan cannot
+// tell which ones a failed profile still needs. New titles use only free slots.
+func preserveExternalPool(chosen, stored []ExternalTitleKey, maxTitles int) []ExternalTitleKey {
+	kept := make(map[ExternalTitleKey]bool, len(stored))
+	for _, key := range stored {
+		kept[key] = true
+	}
+	room := maxTitles - len(stored)
+	return slices.DeleteFunc(chosen, func(key ExternalTitleKey) bool {
+		if kept[key] {
+			return false
+		}
+		if room <= 0 {
+			return true
+		}
+		room--
+		return false
+	})
 }
 
 // externalPoolCount is a pool title as chooseExternalPool reads it: the
@@ -940,51 +972,4 @@ func (r *Repo) externalStoredTitleIDs(ctx context.Context) ([]externalTitleIDs, 
 		return nil, fmt.Errorf("list outside titles: %w", err)
 	}
 	return out, nil
-}
-
-// PruneExternalTitles applies outside-title retention: titles whose last
-// detail fetch is externalRetentionDetail old, and titles and sources nothing
-// has referenced for externalRetentionUnreferenced. It calls neither TMDB nor
-// the embedding provider, so it runs whether or not the feature is enabled.
-func (e *Engine) PruneExternalTitles(ctx context.Context) (ExternalRetentionResult, error) {
-	return pruneExternalTitles(ctx, e.repo)
-}
-
-func pruneExternalTitles(ctx context.Context, repo *Repo) (ExternalRetentionResult, error) {
-	now, err := repo.Now(ctx)
-	if err != nil {
-		return ExternalRetentionResult{}, err
-	}
-	res, err := repo.PruneExternalTitles(ctx, now.Add(-externalRetentionDetail), now.Add(-externalRetentionUnreferenced))
-	if err != nil {
-		return res, err
-	}
-	if res.Titles > 0 || res.Sources > 0 {
-		slog.InfoContext(ctx, "outside titles pruned", "component", "recommendations", "titles", res.Titles, "sources", res.Sources, "links", res.Links)
-	}
-	return res, nil
-}
-
-// externalRetentionInterval is how often RunExternalRetention prunes.
-const externalRetentionInterval = 24 * time.Hour
-
-// RunExternalRetention applies outside-title retention now and then daily,
-// until ctx ends. It is for a server started with recommendations off: such
-// a server has no Worker, so nothing else would delete the TMDB data an
-// earlier configuration stored. Every API server runs it; the deletes are
-// idempotent.
-func RunExternalRetention(ctx context.Context, pool *pgxpool.Pool) {
-	repo := NewRepo(pool)
-	ticker := time.NewTicker(externalRetentionInterval)
-	defer ticker.Stop()
-	for {
-		if _, err := pruneExternalTitles(ctx, repo); err != nil && ctx.Err() == nil {
-			slog.WarnContext(ctx, "outside-title retention failed", "component", "recommendations", "error", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }

@@ -27,7 +27,7 @@ import type {
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
 import { serverText } from "@/i18n";
-import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
+import { adminKeys, compatKeys, requestKeys, settingsKeys, themeKeys } from "../keys";
 import { invalidateAdminDefaultQueries } from "../settingValues";
 import { adminDefaultSettingFor } from "@/lib/settingsAdminDefaults";
 import { toast } from "sonner";
@@ -262,6 +262,12 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       ];
       if (keys.includes("auth.local_password_login") || keys.includes("server.public_url")) {
         invalidations.push(refreshAuthProviders(queryClient));
+      }
+      if (keys.includes("recommendations.external.enabled")) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: requestKeys.status() }),
+          queryClient.invalidateQueries({ queryKey: requestKeys.discovery() }),
+        );
       }
       if (keys.some((key) => key.startsWith("jellyfin_compat."))) {
         invalidations.push(

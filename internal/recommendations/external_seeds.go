@@ -51,8 +51,6 @@ func externalSeedSourceKey(k ExternalTitleKey) string {
 // ExternalProfile is what a profile's outside-title pool is built from: its
 // seeds, heaviest first, and the set sources it uses.
 type ExternalProfile struct {
-	UserID     int
-	ProfileID  string
 	Seeds      []ExternalSeed
 	SetSources []string
 }
@@ -89,7 +87,7 @@ func (p ExternalProfile) PoolQuery() ExternalPoolQuery {
 // exists. It reads only the database. A profile that no longer exists has no
 // seeds and no sets.
 func (e *Engine) externalProfile(ctx context.Context, userID int, profileID string, signals *tasteSignals) (ExternalProfile, bool, error) {
-	p := ExternalProfile{UserID: userID, ProfileID: profileID}
+	var p ExternalProfile
 	if e.storeProvider == nil || e.ratingsRepo == nil {
 		return p, false, fmt.Errorf("outside-title seeds for user %d profile %s: no user store or ratings", userID, profileID)
 	}
@@ -146,8 +144,9 @@ func selectExternalSeeds(weights map[string]float64, engaged map[string]bool, ti
 	slices.SortFunc(seeds, func(a, b ExternalSeed) int {
 		return cmp.Or(cmp.Compare(b.Weight, a.Weight), cmp.Compare(a.ContentID, b.ContentID))
 	})
-	seen := make(map[ExternalTitleKey]struct{}, len(seeds))
-	out := seeds[:0]
+	limit := min(externalMaxSeeds, len(seeds))
+	seen := make(map[ExternalTitleKey]struct{}, limit)
+	out := make([]ExternalSeed, 0, limit)
 	for _, s := range seeds {
 		if _, dup := seen[s.Key]; dup {
 			continue

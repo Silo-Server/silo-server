@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
@@ -150,7 +151,7 @@ func TestRebuildExternalRowsDB(t *testing.T) {
 	s := newExternalRowsScenario(t, 930_000_000)
 	ctx := context.Background()
 
-	built, err := s.engine.RebuildExternalRows(ctx, s.userID, s.profileID)
+	built, err := s.engine.rebuildExternalRows(ctx, nil, s.userID, s.profileID, nil)
 	if err != nil || built.Written != 1 {
 		t.Fatalf("rebuild = %+v, %v; want the movie row written", built, err)
 	}
@@ -173,8 +174,100 @@ func TestRebuildExternalRowsDB(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `DELETE FROM external_title_embeddings WHERE tmdb_id BETWEEN $1 + 12 AND $1 + 30`, s.f.base); err != nil {
 		t.Fatal(err)
 	}
-	if built, err = s.engine.RebuildExternalRows(ctx, s.userID, s.profileID); err != nil || built.Written != 0 || built.Deleted != 1 || s.row() != nil {
+	if built, err = s.engine.rebuildExternalRows(ctx, nil, s.userID, s.profileID, nil); err != nil || built.Written != 0 || built.Deleted != 1 || s.row() != nil {
 		t.Fatalf("rebuild with 2 candidates = %+v, %v, row %+v; want it deleted", built, err, s.row())
+	}
+}
+
+type loseExternalProfileLock struct {
+	pgClusterLock
+	profileKey int64
+}
+
+func (l loseExternalProfileLock) TryAlso(ctx context.Context, key int64) (func(), bool, error) {
+	release, acquired, err := l.pgClusterLock.TryAlso(ctx, key)
+	if err == nil && acquired && key == l.profileKey {
+		err = l.lock.Conn().Conn().Close(ctx)
+	}
+	return release, acquired, err
+}
+
+func TestExternalRowsStopWhenProfileLockSessionClosesDB(t *testing.T) {
+	s := newExternalRowsScenario(t, 937_000_000)
+	ctx := t.Context()
+	worker := newJobTestWorker(pgJobLocker{pool: s.pool}, nil)
+	worker.engine = s.engine
+	held, acquired, err := worker.locker.TryLock(ctx, jobLockKeys[JobExternal])
+	if err != nil || !acquired {
+		t.Fatalf("claim outside-title job: acquired=%t, err=%v", acquired, err)
+	}
+	defer held.Release()
+	lost := loseExternalProfileLock{held.(pgClusterLock), profileRefreshLock(s.userID, s.profileID)}
+
+	result, err := worker.rebuildAllExternalRows(ctx, lost)
+	if s.row() != nil || !errors.Is(err, errJobLockLost) {
+		t.Fatalf("lost session: rebuilt %+v, err=%v, has row=%t", result, err, s.row() != nil)
+	}
+}
+
+func TestExternalJobQueuesStaleProfileAfterRebuildDB(t *testing.T) {
+	s := newExternalRowsScenario(t, 939_000_000)
+	ctx := t.Context()
+	worker := newJobTestWorker(pgJobLocker{pool: s.pool}, nil)
+	worker.engine = s.engine
+	worker.profileRefreshCh = make(chan profileRefreshRequest, 1)
+	worker.profileRefreshPending = map[string]struct{}{}
+	if err := s.f.repo.MarkProfileStale(ctx, s.userID, s.profileID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := worker.rebuildAllExternalRows(ctx, nil); err != nil || result.RowsBuilt != 1 {
+		t.Fatalf("rebuild = %+v, err=%v", result, err)
+	}
+	select {
+	case refresh := <-worker.profileRefreshCh:
+		if refresh.userID != s.userID || refresh.profileID != s.profileID {
+			t.Fatalf("queued refresh = %+v", refresh)
+		}
+	default:
+		t.Fatal("stale profile was left for the next sweep")
+	}
+}
+
+type unavailableExternalUserStore struct {
+	userstore.UserStoreProvider
+	userID int
+	err    error
+}
+
+func (p unavailableExternalUserStore) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
+	if userID == p.userID {
+		return nil, p.err
+	}
+	return p.UserStoreProvider.ForUser(ctx, userID)
+}
+
+func TestExternalPoolContinuesPastUnreadableProfileDB(t *testing.T) {
+	s := newExternalRowsScenario(t, 940_000_000)
+	ctx := t.Context()
+	userID, profileID := newTasteTestAccount(t, s.pool, "ext-pool-unreadable")
+	if err := s.f.repo.UpsertTasteProfile(ctx, userID, profileID, axisVector(0, nil), nil, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	readErr := errors.New("one account store failed to open")
+	s.engine.storeProvider = unavailableExternalUserStore{s.engine.storeProvider, userID, readErr}
+	newTitle := s.f.movie(40)
+	tmdb := &fakeExternalTMDB{calls: map[ExternalTitleKey]int{}, discover: map[string][]int{ExternalMediaMovie: {newTitle.TMDBID}}}
+	s.engine.WithExternalTMDB(tmdb)
+
+	counts, err := s.engine.BuildExternalPool(ctx, ExternalPoolOptions{MaxTitles: len(s.titles)})
+	if !errors.Is(err, readErr) || counts.Profiles != 1 || tmdb.pages == 0 {
+		t.Fatalf("partial run = %+v, err=%v, discover calls=%d", counts, err, tmdb.pages)
+	}
+	if stored, err := s.f.repo.externalTitlesByKeys(ctx, s.titles); err != nil || len(stored) != len(s.titles) {
+		t.Fatalf("partial run removed stored titles: found %d of %d, err=%v", len(stored), len(s.titles), err)
+	}
+	if calls := tmdb.detailCalls(newTitle); calls != 0 {
+		t.Fatalf("new title should not replace a stored one while a profile is unreadable, got %d detail calls", calls)
 	}
 }
 
@@ -239,7 +332,7 @@ func TestExternalRowRefusalsDB(t *testing.T) {
 	s.f.exec(`DELETE FROM user_profiles WHERE id = $1`, s.profileID)
 	w := newJobTestWorker(&fakeLocker{}, nil)
 	w.engine = s.engine
-	if _, err := w.rebuildProfileExternalRows(ctx, s.userID, s.profileID, nil); err != nil || s.row() != nil {
+	if _, err := w.rebuildProfileExternalRows(ctx, nil, s.userID, s.profileID, nil); err != nil || s.row() != nil {
 		t.Fatalf("rebuild of a deleted profile = %v, row %+v", err, s.row())
 	}
 }
@@ -275,7 +368,7 @@ func waitForLockWait(t *testing.T, pool *pgxpool.Pool, text string) {
 func TestResetEmbeddingsClearsOutsideVectorsAndRowsDB(t *testing.T) {
 	s := newExternalRowsScenario(t, 932_000_000)
 	ctx := context.Background()
-	if _, err := s.engine.RebuildExternalRows(ctx, s.userID, s.profileID); err != nil || s.row() == nil {
+	if _, err := s.engine.rebuildExternalRows(ctx, nil, s.userID, s.profileID, nil); err != nil || s.row() == nil {
 		t.Fatalf("rebuild: %v", err)
 	}
 	res, err := s.f.repo.ResetEmbeddings(ctx)
@@ -343,7 +436,7 @@ func TestRunExternalRetentionPrunesWithoutAWorkerDB(t *testing.T) {
 func TestExternalRecommendationsReadDB(t *testing.T) {
 	s := newExternalRowsScenario(t, 934_000_000)
 	ctx := context.Background()
-	if _, err := s.engine.RebuildExternalRows(ctx, s.userID, s.profileID); err != nil {
+	if _, err := s.engine.rebuildExternalRows(ctx, nil, s.userID, s.profileID, nil); err != nil {
 		t.Fatal(err)
 	}
 	reader := NewReader(s.f.repo, nil, nil, pgstore.NewPostgresProvider(s.pool)).

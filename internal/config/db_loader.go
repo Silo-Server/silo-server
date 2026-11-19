@@ -515,7 +515,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.Recommendations.DiversityLambda = diversityLambda
 	cfg.Recommendations.CowatchCron = stringOr(m, "recommendations.cowatch_cron", "30 4 * * *")
-	if cfg.Recommendations.ExternalEnabled, err = boolOr(m, externalRecommendationsEnabledKey, false); err != nil {
+	if cfg.Recommendations.ExternalEnabled, err = boolOr(m, ExternalRecommendationsEnabledKey, false); err != nil {
 		return nil, err
 	}
 	if cfg.Recommendations.ExternalMaxTitles, err = intOr(m, externalRecommendationsMaxTitlesKey, DefaultExternalRecommendationsMaxTitles); err != nil {

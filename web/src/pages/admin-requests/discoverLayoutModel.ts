@@ -90,8 +90,10 @@ const STOCK_TITLE_KEYS: Readonly<Record<string, MessageKey>> = {
 };
 
 /** The key of a stock row that still holds its default title; none for any other row. */
-function stockTitleKey(row: Pick<DiscoverRowBody, "id" | "title">): MessageKey | undefined {
-  const stock = STOCK_ROWS.find((entry) => entry.id === row.id);
+function stockTitleKey(
+  row: Pick<DiscoverRowBody, "id" | "title" | "type">,
+): MessageKey | undefined {
+  const stock = STOCK_ROWS.find((entry) => entry.id === row.id && entry.type === row.type);
   return stock && stock.title === row.title ? STOCK_TITLE_KEYS[stock.id ?? ""] : undefined;
 }
 
@@ -217,8 +219,8 @@ export function isBuiltInRow(row: Pick<DiscoverRowBody, "id">): boolean {
 }
 
 /** One of the rows Discover starts with: built-in, recommended or brand. */
-export function isStockRow(row: Pick<DiscoverRowBody, "id">): boolean {
-  return STOCK_ROWS.some((stock) => stock.id === row.id);
+export function isStockRow(row: Pick<DiscoverRowBody, "id" | "type">): boolean {
+  return STOCK_ROWS.some((stock) => stock.id === row.id && stock.type === row.type);
 }
 
 /** A default recommended row, which keeps its media type. */

@@ -120,7 +120,7 @@ type ExternalRowsBuilt struct {
 	Refused int
 }
 
-// RebuildExternalRows rebuilds one profile's outside rows from stored data:
+// rebuildExternalRows rebuilds one profile's outside rows from stored data:
 // its pool, the outside vectors and its taste vector. It calls neither TMDB
 // nor the embedding provider. A profile with no taste vector, no stored
 // embedding lock, or fewer than externalMinCandidates candidates of a media
@@ -128,14 +128,14 @@ type ExternalRowsBuilt struct {
 // built under is still stored unchanged, so a row built across an embeddings
 // reset is refused. The caller holds the profile's refresh lock and, after
 // this returns, checks that the profile still exists (purgeIfProfileDeleted).
-func (e *Engine) RebuildExternalRows(ctx context.Context, userID int, profileID string) (ExternalRowsBuilt, error) {
-	return e.rebuildExternalRows(ctx, userID, profileID, nil)
-}
-
-func (e *Engine) rebuildExternalRows(ctx context.Context, userID int, profileID string, signals *tasteSignals) (ExternalRowsBuilt, error) {
+func (e *Engine) rebuildExternalRows(ctx context.Context, held clusterLock, userID int, profileID string, signals *tasteSignals) (ExternalRowsBuilt, error) {
 	var res ExternalRowsBuilt
+	writer := e.repo.externalPoolWriter
+	if held != nil {
+		writer = held.poolWriter(writer)
+	}
 	deleteAll := func() (ExternalRowsBuilt, error) {
-		n, err := e.repo.DeleteExternalRows(ctx, userID, profileID)
+		n, err := writer.deleteExternalRows(ctx, userID, profileID)
 		res.Deleted += int(n)
 		return res, err
 	}
@@ -182,14 +182,14 @@ func (e *Engine) rebuildExternalRows(ctx context.Context, userID int, profileID 
 		}
 		items := rankExternalCandidates(sims, pool, seedContentIDs)
 		if len(items) == 0 {
-			n, err := e.repo.deleteExternalRow(ctx, userID, profileID, mediaType)
+			n, err := writer.deleteExternalRow(ctx, userID, profileID, mediaType)
 			if err != nil {
 				return res, err
 			}
 			res.Deleted += int(n)
 			continue
 		}
-		written, err := e.repo.writeExternalRowUnderLock(ctx, ExternalRow{
+		written, err := writer.writeExternalRowUnderLock(ctx, ExternalRow{
 			UserID: userID, ProfileID: profileID, MediaType: mediaType,
 			Items: items, EmbeddingModel: lock.Model, BuiltAt: builtAt,
 		}, lockVersion)
@@ -224,7 +224,7 @@ func (r *Repo) externalRowLock(ctx context.Context) (string, *EmbeddingLock, err
 // and then find no lock, and a write that locked it first commits before the
 // reset deletes the lock, so the reset's later delete of every outside row
 // removes this one too.
-func (r *Repo) writeExternalRowUnderLock(ctx context.Context, row ExternalRow, lockVersion string) (bool, error) {
+func (w externalPoolWriter) writeExternalRowUnderLock(ctx context.Context, row ExternalRow, lockVersion string) (bool, error) {
 	items := row.Items
 	if items == nil {
 		items = []ExternalRowItem{}
@@ -233,7 +233,7 @@ func (r *Repo) writeExternalRowUnderLock(ctx context.Context, row ExternalRow, l
 	if err != nil {
 		return false, fmt.Errorf("marshal outside row: %w", err)
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := w.db.Exec(ctx, `
 		INSERT INTO external_recommendation_rows (user_id, profile_id, media_type, items, embedding_model, built_at)
 		SELECT $1, $2, $3, $4, $5, $6
 		FROM   server_settings s
@@ -249,8 +249,8 @@ func (r *Repo) writeExternalRowUnderLock(ctx context.Context, row ExternalRow, l
 }
 
 // deleteExternalRow deletes a profile's row of one media type.
-func (r *Repo) deleteExternalRow(ctx context.Context, userID int, profileID, mediaType string) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `
+func (w externalPoolWriter) deleteExternalRow(ctx context.Context, userID int, profileID, mediaType string) (int64, error) {
+	tag, err := w.db.Exec(ctx, `
 		DELETE FROM external_recommendation_rows
 		WHERE  user_id = $1 AND profile_id = $2 AND media_type = $3`, userID, profileID, mediaType)
 	if err != nil {

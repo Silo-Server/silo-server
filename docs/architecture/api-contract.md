@@ -1962,7 +1962,8 @@ A `recommended` row (the default layout opens with `recommended_movies` and
 `recommended_series`) holds the viewer's own recommendations of titles the
 library does not have, read from stored data without a TMDB call. Its results
 carry optional `reasons`, at most two `{content_id, title}` naming the library
-titles that led to each; no other row or operation sends them. Its totals count
+titles that led to each. The admin preview of a recommended row can also
+return reasons. Its totals count
 the titles the viewer gets, and its see all pages follow page+1 with no
 `next_page`. `GET /api/v2/requests/status` reports
 `personal_discover_rows_supported`, true while requests, recommendations and

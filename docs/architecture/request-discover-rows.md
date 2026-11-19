@@ -61,10 +61,10 @@ Checks (`discoverrows.NormalizeLayout`):
   into their two carousels (trending, popular), so a built-in row keeps its type and
   chart; its title, limit, switch and `hide_available` can change, and it can be
   removed.
-- **Recommended rows.** `recommended_movies` and `recommended_series` keep their
-  type and media type. They are not built-in IDs: `getDiscoverSection` does not
-  serve them, and shipped apps that merge carousels match the built-in keys
-  exactly, so they ignore them.
+- **Recommended rows.** The default `recommended_movies` and `recommended_series`
+  rows keep their media types. A saved custom row that already used either ID
+  can still be edited and saved. Clients read these rows through `row_order` and
+  `getDiscoverRow`.
 - **Brand rows.** A brand row's ID is its type, so each appears at most once.
 - **Custom rows.** A new row gets an opaque `r_` ID. `rows` and `browse` are
   reserved.

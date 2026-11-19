@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
@@ -190,7 +192,7 @@ func (w *Worker) rebuildAllExternalRows(ctx context.Context, held clusterLock) (
 			res.RowsRemaining = len(profiles) - i
 			return res, fmt.Errorf("outside rows stopped after %d of %d profiles: %w", i, len(profiles), err)
 		}
-		unlock, acquired, err := w.tryProfileLock(ctx, held, p.UserID, p.ProfileID)
+		lock, unlock, acquired, err := w.tryProfileLock(ctx, held, p.UserID, p.ProfileID)
 		if errors.Is(err, errJobLockLost) {
 			res.RowsRemaining = len(profiles) - i
 			return res, err
@@ -205,14 +207,30 @@ func (w *Worker) rebuildAllExternalRows(ctx context.Context, held clusterLock) (
 			w.markBusyProfileStale(ctx, p.UserID, p.ProfileID)
 			continue
 		}
-		built, err := w.rebuildProfileExternalRows(ctx, p.UserID, p.ProfileID, nil)
+		profileCtx, cancel := context.WithTimeout(ctx, profileRefreshTimeout)
+		built, err := w.rebuildProfileExternalRows(profileCtx, lock, p.UserID, p.ProfileID, nil)
+		cancel()
 		unlock()
 		res.RowsBuilt += built.Written
 		res.RowsDeleted += built.Deleted
 		res.RowsRefused += built.Refused
+		if errors.Is(err, errJobLockLost) {
+			res.RowsRemaining = len(profiles) - i
+			return res, err
+		}
 		if err != nil {
 			res.RowFailures++
 			slog.WarnContext(ctx, "rebuilding a profile's outside rows failed", "component", "recommendations", "user_id", p.UserID, "profile_id", p.ProfileID, "error", err)
+		}
+		// A signal refresh that arrived while this job held the profile lock
+		// left a durable stale mark. Queue it as soon as the lock is free.
+		var stale bool
+		if err := w.engine.pool.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2 AND stale_at IS NOT NULL
+		)`, p.UserID, p.ProfileID).Scan(&stale); err != nil {
+			slog.WarnContext(ctx, "checking stale profile after outside row rebuild failed", "component", "recommendations", "user_id", p.UserID, "profile_id", p.ProfileID, "error", err)
+		} else if stale {
+			w.RequestProfileRefresh(ctx, p.UserID, p.ProfileID)
 		}
 	}
 	return res, nil
@@ -225,18 +243,68 @@ const externalPurgeTimeout = 10 * time.Second
 // must not treat as done, apart from a failed rebuild of the rows themselves.
 var errProfilePurgeCheck = errors.New("check profile still exists")
 
-// rebuildProfileExternalRows is RebuildExternalRows for a caller holding the
+// rebuildProfileExternalRows rebuilds rows on the session holding the
 // profile's lock. A profile deleted after the rebuild read it, and purged
 // before the rebuild wrote, would keep the rows written; like a refresh, it
 // checks again after the last write and purges them. The check has its own
 // deadline and runs after a failed rebuild too: one that wrote the movie
 // row and then failed or timed out on the series row left a row behind.
-func (w *Worker) rebuildProfileExternalRows(ctx context.Context, userID int, profileID string, signals *tasteSignals) (ExternalRowsBuilt, error) {
-	built, err := w.engine.rebuildExternalRows(ctx, userID, profileID, signals)
+func (w *Worker) rebuildProfileExternalRows(ctx context.Context, lock clusterLock, userID int, profileID string, signals *tasteSignals) (ExternalRowsBuilt, error) {
+	built, err := w.engine.rebuildExternalRows(ctx, lock, userID, profileID, signals)
+	if err != nil && lock != nil && ctx.Err() == nil {
+		err = errors.Join(err, lock.Check(ctx))
+	}
 	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), externalPurgeTimeout)
 	defer cancel()
 	if purgeErr := w.engine.purgeIfProfileDeleted(purgeCtx, userID, profileID); purgeErr != nil {
 		err = errors.Join(err, fmt.Errorf("%w: %w", errProfilePurgeCheck, purgeErr))
 	}
 	return built, err
+}
+
+// PruneExternalTitles applies outside-title retention: titles whose last
+// detail fetch is externalRetentionDetail old, and titles and sources nothing
+// has referenced for externalRetentionUnreferenced. It calls neither TMDB nor
+// the embedding provider, so it runs whether or not the feature is enabled.
+func (e *Engine) PruneExternalTitles(ctx context.Context) (ExternalRetentionResult, error) {
+	return pruneExternalTitles(ctx, e.repo)
+}
+
+func pruneExternalTitles(ctx context.Context, repo *Repo) (ExternalRetentionResult, error) {
+	now, err := repo.Now(ctx)
+	if err != nil {
+		return ExternalRetentionResult{}, err
+	}
+	res, err := repo.PruneExternalTitles(ctx, now.Add(-externalRetentionDetail), now.Add(-externalRetentionUnreferenced))
+	if err != nil {
+		return res, err
+	}
+	if res.Titles > 0 || res.Sources > 0 {
+		slog.InfoContext(ctx, "outside titles pruned", "component", "recommendations", "titles", res.Titles, "sources", res.Sources, "links", res.Links)
+	}
+	return res, nil
+}
+
+// externalRetentionInterval is how often RunExternalRetention prunes.
+const externalRetentionInterval = 24 * time.Hour
+
+// RunExternalRetention applies outside-title retention now and then daily,
+// until ctx ends. It is for a server started with recommendations off: such
+// a server has no Worker, so nothing else would delete the TMDB data an
+// earlier configuration stored. Every API server runs it; the deletes are
+// idempotent.
+func RunExternalRetention(ctx context.Context, pool *pgxpool.Pool) {
+	repo := NewRepo(pool)
+	ticker := time.NewTicker(externalRetentionInterval)
+	defer ticker.Stop()
+	for {
+		if _, err := pruneExternalTitles(ctx, repo); err != nil && ctx.Err() == nil {
+			slog.WarnContext(ctx, "outside-title retention failed", "component", "recommendations", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

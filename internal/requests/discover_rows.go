@@ -229,7 +229,7 @@ func (s *Service) DiscoverRow(ctx context.Context, viewer Viewer, rowID string, 
 
 func discoverySectionOf(row discoverrows.Row, page *MediaPage, nextPage int) *DiscoverySection {
 	return &DiscoverySection{
-		Key: row.ID, Title: row.Title, Page: page.Page, TotalPages: page.TotalPages,
+		Key: row.ID, Title: row.Title, Type: row.Type, Page: page.Page, TotalPages: page.TotalPages,
 		TotalResults: page.TotalResults, Results: page.Results, NextPage: nextPage,
 	}
 }

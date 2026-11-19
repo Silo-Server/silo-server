@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { v2 } from "@/api/v2/request";
 import { t } from "@/i18n";
-import { adminKeys } from "../keys";
+import { adminKeys, requestKeys } from "../keys";
 import { toast } from "sonner";
 
 export function useRecommendationsStatus() {
@@ -127,6 +127,7 @@ export function useResetEmbeddings() {
       queryClient.invalidateQueries({ queryKey: adminKeys.recommendationsStatus() });
       // The lock card reads the lock from the stored settings.
       queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() });
+      queryClient.invalidateQueries({ queryKey: requestKeys.discovery() });
     },
   });
 }

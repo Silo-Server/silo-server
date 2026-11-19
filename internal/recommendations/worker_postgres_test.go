@@ -741,7 +741,7 @@ func TestJobLocksShareOneConnectionPostgres(t *testing.T) {
 		t.Fatalf("stale sweep lock = (%v, %v)", acquired, err)
 	}
 	profileKey := profileRefreshLock(7, "p")
-	unlockProfile, acquired, err := w.tryProfileLock(t.Context(), held, 7, "p")
+	_, unlockProfile, acquired, err := w.tryProfileLock(t.Context(), held, 7, "p")
 	if err != nil || !acquired {
 		t.Fatalf("profile lock = (%v, %v)", acquired, err)
 	}

@@ -3,7 +3,7 @@ package discoverrows
 import "testing"
 
 // A recommended row takes exactly its media type, always hides titles the
-// library has, and the two default ones keep their type and media type.
+// library has, and the two default ones keep their media type.
 func TestRecommendedRowNormalize(t *testing.T) {
 	row, errs := NormalizeRow(Row{Type: TypeRecommended, Title: "For you", Recommended: &RecommendedSpec{MediaType: " series "}})
 	if len(errs) > 0 || row.Recommended.MediaType != MediaSeries || !row.HideAvailable || row.Limit != DefaultLimit {
@@ -23,10 +23,12 @@ func TestRecommendedRowNormalize(t *testing.T) {
 	asSeries.Recommended = &RecommendedSpec{MediaType: MediaSeries}
 	asChart := movies
 	asChart.Type, asChart.Recommended, asChart.Chart = TypeTMDBChart, nil, &ChartSpec{Preset: presetPopular, MediaType: MediaMovie}
-	for name, rows := range map[string][]Row{"media type": {asSeries}, "type": {asChart}} {
-		if _, errs := NormalizeLayout(rows); len(errs) == 0 {
-			t.Errorf("a default recommended row changed its %s", name)
-		}
+	if _, errs := NormalizeLayout([]Row{asSeries}); len(errs) == 0 {
+		t.Error("a default recommended row changed its media type")
+	}
+	// A custom chart could already use this ID before recommended rows existed.
+	if _, errs := NormalizeLayout([]Row{asChart}); len(errs) > 0 {
+		t.Errorf("existing chart layout rejected: %v", errs)
 	}
 	if _, errs := NormalizeLayout(DefaultRows()); len(errs) > 0 {
 		t.Fatalf("default layout: %v", errs)

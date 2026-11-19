@@ -129,9 +129,10 @@ function DiscoverLayoutEditor() {
   const [restoreBusy, setRestoreBusy] = useState(false);
   const byId = useMemo(() => new Map(discoverRows.map((row) => [row.id, row])), [discoverRows]);
   const full = layout !== undefined && discoverRows.length >= layout.max_rows;
-  // Recommended rows stay empty until the server serves them; unknown counts as on.
+  const requestStatus = useRequestFeatureStatus().data;
   const personalRowsOff =
-    useRequestFeatureStatus().data?.personal_discover_rows_supported === false;
+    requestStatus?.requests_enabled === true &&
+    requestStatus.personal_discover_rows_supported === false;
 
   function openDialog(row: DiscoverRow | null) {
     setRowDialog({ key: ++dialogCount.current, row });

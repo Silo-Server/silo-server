@@ -1555,7 +1555,7 @@ func main() {
 			}
 			return nil
 		},
-		OnServerSettingUpdated: func(_ context.Context, key, value string) {
+		OnServerSettingUpdated: func(ctx context.Context, key, value string) {
 			// Key-scoped reload for the client-IP trust boundary: unlike the
 			// whole-config watcher reload below, this cannot be blocked by an
 			// unrelated malformed setting failing config.LoadFromDB. Uses a
@@ -1573,6 +1573,17 @@ func main() {
 			}
 			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) && defaultMarkerSharingStopped != nil {
 				defaultMarkerSharingStopped(context.Background())
+			}
+			// Discover refetches after saving this switch. Apply it on the
+			// serving node before replying so the read sees the saved value.
+			if key == config.ExternalRecommendationsEnabledKey {
+				reloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if err := configWatcher.ForceReload(reloadCtx); err == nil {
+					return
+				} else {
+					slog.WarnContext(ctx, "Discover recommendations setting reload failed", "component", "app", "error", err)
+				}
 			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op

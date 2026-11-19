@@ -189,9 +189,8 @@ func compareExternalKeys(a, b ExternalTitleKey) int {
 
 // ExternalSourcesToFetch returns the source keys that need a fetch: never
 // fetched, last fetch failed, or last fetched (with links or empty) before
-// staleBefore. They come in input order, those whose last fetch failed last,
-// so sources that keep failing cannot use up a run's requests ahead of ones
-// that have not been tried.
+// staleBefore. New sources come first, followed by the oldest fetches.
+// Failed sources come last. Input order breaks ties within each group.
 func (r *Repo) ExternalSourcesToFetch(ctx context.Context, sourceKeys []string, staleBefore time.Time) ([]string, error) {
 	if len(sourceKeys) == 0 {
 		return nil, nil
@@ -204,7 +203,7 @@ func (r *Repo) ExternalSourcesToFetch(ctx context.Context, sourceKeys []string, 
 		   OR  s.status = 'failed'
 		   OR  s.fetched_at IS NULL
 		   OR  s.fetched_at < $2
-		ORDER  BY COALESCE(s.status = 'failed', false), k.ord`, sourceKeys, staleBefore)
+		ORDER  BY COALESCE(s.status = 'failed', false), s.fetched_at ASC NULLS FIRST, k.ord`, sourceKeys, staleBefore)
 	if err != nil {
 		return nil, fmt.Errorf("list outside sources to fetch: %w", err)
 	}
@@ -525,13 +524,13 @@ func (r *Repo) ExternalSimilarities(ctx context.Context, taste []float32, model,
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT e.tmdb_id,
-		       1 - (e.embedding::halfvec(3072) <=> $1::halfvec(3072)) AS similarity,
+		       1 - (e.embedding <=> $1::vector(3072)) AS similarity,
 		       t.vote_count
 		FROM   external_title_embeddings e
 		JOIN   external_titles t ON t.media_type = e.media_type AND t.tmdb_id = e.tmdb_id
 		WHERE  e.media_type = $2 AND e.tmdb_id = ANY($3::int[]) AND e.model = $4
 		ORDER  BY similarity DESC, e.tmdb_id`,
-		pgvector.NewHalfVector(padded), mediaType, tmdbIDs, model)
+		pgvector.NewVector(padded), mediaType, tmdbIDs, model)
 	if err != nil {
 		return nil, fmt.Errorf("outside similarities: %w", err)
 	}
@@ -550,9 +549,9 @@ func (r *Repo) ExternalSimilarities(ctx context.Context, taste []float32, model,
 	return out, nil
 }
 
-// DeleteExternalRows deletes a profile's rows of every media type.
-func (r *Repo) DeleteExternalRows(ctx context.Context, userID int, profileID string) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM external_recommendation_rows WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
+// deleteExternalRows deletes a profile's rows of every media type.
+func (w externalPoolWriter) deleteExternalRows(ctx context.Context, userID int, profileID string) (int64, error) {
+	tag, err := w.db.Exec(ctx, `DELETE FROM external_recommendation_rows WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	if err != nil {
 		return 0, fmt.Errorf("delete outside rows for user %d profile %s: %w", userID, profileID, err)
 	}

@@ -103,12 +103,13 @@ type Service struct {
 }
 
 type DiscoverySection struct {
-	Key          string        `json:"key"`
-	Title        string        `json:"title"`
-	Page         int           `json:"page"`
-	TotalPages   int           `json:"total_pages"`
-	TotalResults int           `json:"total_results"`
-	Results      []MediaResult `json:"results"`
+	Key          string            `json:"key"`
+	Title        string            `json:"title"`
+	Type         discoverrows.Type `json:"-"`
+	Page         int               `json:"page"`
+	TotalPages   int               `json:"total_pages"`
+	TotalResults int               `json:"total_results"`
+	Results      []MediaResult     `json:"results"`
 	// NextPage is the cursor to request for the following page, needed when
 	// backfill (a rating ceiling, or a row hiding titles the library has)
 	// consumes more than one source page per request (page+1 would repeat

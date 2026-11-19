@@ -389,6 +389,27 @@ func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
 	}
 }
 
+func TestProfileRefreshKeepsRetryRequestedWhileLockWasBusy(t *testing.T) {
+	w, _ := newRefreshTestWorker()
+	ctx := t.Context()
+	if !w.claimProfileRefresh(profileRefreshKey(7, "p")) {
+		t.Fatal("could not claim profile refresh")
+	}
+	calls := 0
+	err := w.runProfileRefresh(ctx, nil, 7, "p", func(ctx context.Context, _ clusterLock, userID int, profileID string) error {
+		calls++
+		if calls == 1 {
+			w.RequestProfileRefresh(ctx, userID, profileID)
+			return errProfileRefreshElsewhere
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("refresh ran %d times, err=%v", calls, err)
+	}
+	assertNothingQueued(t, w, "retry completed")
+}
+
 // The catch-up pass runs under the embeddings job's claim: it skips while an
 // embedding run holds the job on this server or another.
 func TestEmbedMissingSkipsWhileTheEmbeddingsJobIsClaimed(t *testing.T) {
