@@ -355,12 +355,15 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 	// A plugin path: its plugin answers with a stored artwork route or a URL.
 	// The answer is reused for itemPosterResolveMemo, failures included, so a
 	// link cannot make the plugin work on every request.
-	resolved, known, busy := h.resolved.get(posterPath, time.Now())
-	if !known && !busy {
-		resolved, busy = h.askPlugin(ctx, posterPath)
-	}
-	if busy {
-		return "", false, false, errPosterResolveBusy
+	resolved, known, _ := h.resolved.get(posterPath, time.Now())
+	if !known {
+		// Whether there is room is decided inside the shared call, so a
+		// request for a path already being resolved joins that call even
+		// when its reservation is the memo's last place.
+		var busy bool
+		if resolved, busy = h.askPlugin(ctx, posterPath); busy {
+			return "", false, false, errPosterResolveBusy
+		}
 	}
 	switch {
 	// One leading slash is a path on this server; "//host/..." is another
