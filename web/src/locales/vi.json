@@ -131917,6 +131917,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Xóa khóa bí mật đã lưu"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131957,6 +131963,12 @@
     {
       "type": 0,
       "value": "Chưa có đích nào."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Giữ khóa bí mật đã lưu"
     }
   ],
   "web.settings.notifications.destinations.kind": [

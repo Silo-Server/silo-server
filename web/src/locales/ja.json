@@ -119828,6 +119828,12 @@
       "value": "」を追加しました"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "保存済みのシークレットをクリア"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -119868,6 +119874,12 @@
     {
       "type": 0,
       "value": "送信先はまだありません。"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "保存済みのシークレットを維持"
     }
   ],
   "web.settings.notifications.destinations.kind": [

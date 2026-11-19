@@ -9,7 +9,7 @@ import {
   notificationScope,
   requireNotificationAuthority,
 } from "@/api/v2/notifications";
-import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
+import { problemFieldDetail, v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { t } from "@/i18n";
 import { notificationKeys } from "./keys";
 
@@ -40,11 +40,28 @@ export function pluginDestinationErrorMessage(error: unknown, fallback: string):
 
 // pluginSettingsRejection is the plugin's own reason for refusing a
 // destination's settings, which the dialog shows under the settings fields.
-// It is null for any other error.
+// It is the plugin's text, shown as sent. It is null for any other error.
 export function pluginSettingsRejection(error: unknown): string | null {
   if (!(error instanceof V2ProblemError)) return null;
   const rejection = error.problem.errors?.find((e) => e.location === "body.settings");
   return rejection?.detail || null;
+}
+
+const settingsFieldLocation = "body.settings.";
+
+// pluginSettingsFieldErrors maps a 422's field errors at
+// body.settings.<field> to each field's message, translated from the
+// field error code. It is null when the error names no setting.
+export function pluginSettingsFieldErrors(error: unknown): Record<string, string> | null {
+  if (!(error instanceof V2ProblemError)) return null;
+  const out: Record<string, string> = {};
+  for (const fieldError of error.problem.errors ?? []) {
+    const key = fieldError.location.startsWith(settingsFieldLocation)
+      ? fieldError.location.slice(settingsFieldLocation.length)
+      : "";
+    if (key && !(key in out)) out[key] = problemFieldDetail(fieldError);
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 export function useNotificationPluginChannels(enabled = true) {

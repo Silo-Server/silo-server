@@ -142648,6 +142648,12 @@
       "value": "” adicionado"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Limpar segredo salvo"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -142688,6 +142694,12 @@
     {
       "type": 0,
       "value": "Nenhum destino ainda."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Manter segredo salvo"
     }
   ],
   "web.settings.notifications.destinations.kind": [

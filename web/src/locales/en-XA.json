@@ -142795,6 +142795,12 @@
       "value": "\" åđđéđ~~~~⟧"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ šåṽéđ šéçŕéţ~~~~~~~~⟧"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -142835,6 +142841,12 @@
     {
       "type": 0,
       "value": "⟦Ñö đéšţîñåţîöñš ýéţ.~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "⟦Ķééþ šåṽéđ šéçŕéţ~~~~~~~⟧"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -143085,6 +143085,12 @@
       "value": "“ je dodano"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Očisti spremljenu tajnu"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143125,6 +143131,12 @@
     {
       "type": 0,
       "value": "Još nema odredišta."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Zadrži spremljenu tajnu"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -131985,6 +131985,12 @@
       "value": "“ е добавена"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Изчистване на записаната секретна стойност"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132025,6 +132031,12 @@
     {
       "type": 0,
       "value": "Все още няма дестинации."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Запазване на записаната секретна стойност"
     }
   ],
   "web.settings.notifications.destinations.kind": [

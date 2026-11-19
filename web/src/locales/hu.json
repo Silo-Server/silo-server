@@ -131049,6 +131049,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Mentett titkos érték törlése"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131089,6 +131095,12 @@
     {
       "type": 0,
       "value": "Még nincsenek célhelyek."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Mentett titkos érték megtartása"
     }
   ],
   "web.settings.notifications.destinations.kind": [

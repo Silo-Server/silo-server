@@ -131717,6 +131717,12 @@
       "value": "” lisätty"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Tyhjennä tallennettu salaisuus"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131757,6 +131763,12 @@
     {
       "type": 0,
       "value": "Ei vielä kohteita."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Säilytä tallennettu salaisuus"
     }
   ],
   "web.settings.notifications.destinations.kind": [

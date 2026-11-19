@@ -120744,6 +120744,12 @@
       "value": "” 대상을 추가했어요"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "저장된 비밀 값 지우기"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -120784,6 +120790,12 @@
     {
       "type": 0,
       "value": "아직 대상이 없어요."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "저장된 비밀 값 유지"
     }
   ],
   "web.settings.notifications.destinations.kind": [

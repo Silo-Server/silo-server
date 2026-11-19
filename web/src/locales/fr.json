@@ -142402,6 +142402,12 @@
       "value": " » ajoutée"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Effacer le secret enregistré"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -142442,6 +142448,12 @@
     {
       "type": 0,
       "value": "Aucune destination pour l’instant."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Conserver le secret enregistré"
     }
   ],
   "web.settings.notifications.destinations.kind": [

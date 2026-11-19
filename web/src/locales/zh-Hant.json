@@ -121594,6 +121594,12 @@
       "value": "」"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "清除已儲存的機密"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -121634,6 +121640,12 @@
     {
       "type": 0,
       "value": "尚無目的地。"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "保留已儲存的機密"
     }
   ],
   "web.settings.notifications.destinations.kind": [

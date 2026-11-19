@@ -131551,6 +131551,12 @@
       "value": "\" added"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Clear saved secret"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131591,6 +131597,12 @@
     {
       "type": 0,
       "value": "No destinations yet."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Keep saved secret"
     }
   ],
   "web.settings.notifications.destinations.kind": [

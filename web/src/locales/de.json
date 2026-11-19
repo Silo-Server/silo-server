@@ -130958,6 +130958,12 @@
       "value": "“ hinzugefügt"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Gespeichertes Secret leeren"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -130998,6 +131004,12 @@
     {
       "type": 0,
       "value": "Noch keine Ziele."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Gespeichertes Secret behalten"
     }
   ],
   "web.settings.notifications.destinations.kind": [

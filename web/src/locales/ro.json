@@ -143202,6 +143202,12 @@
       "value": "” a fost adăugată"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Ștergeți secretul salvat"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143242,6 +143248,12 @@
     {
       "type": 0,
       "value": "Nicio destinație încă."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Păstrați secretul salvat"
     }
   ],
   "web.settings.notifications.destinations.kind": [

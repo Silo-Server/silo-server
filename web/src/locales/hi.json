@@ -130739,6 +130739,12 @@
       "value": "” को जोड़ दिया गया"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "सेव किया गया सीक्रेट साफ़ करें"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -130779,6 +130785,12 @@
     {
       "type": 0,
       "value": "अभी तक कोई डेस्टिनेशन नहीं है।"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "सेव किया गया सीक्रेट रखें"
     }
   ],
   "web.settings.notifications.destinations.kind": [

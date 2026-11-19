@@ -3,7 +3,7 @@ import { AlertTriangle, BellPlus, Loader2, Pencil, Plus, Send, Trash2 } from "lu
 import { toast } from "sonner";
 
 import { notificationScope } from "@/api/v2/notifications";
-import type { NotificationPreferences, PluginAdminForm } from "@/api/types";
+import type { NotificationPreferences, PluginAdminForm, PluginAdminFormField } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
 import {
@@ -36,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import { useNotificationPreferences } from "@/hooks/queries/notifications";
 import {
   pluginDestinationErrorMessage,
+  pluginSettingsFieldErrors,
   pluginSettingsRejection,
   useCreateNotificationPluginDestination,
   useDeleteNotificationPluginDestination,
@@ -55,6 +56,20 @@ import { DESTINATION_NOTIFY_FIELDS, type DestinationNotifyKey } from "./notifica
 const channelKey = (c: { plugin_id: string; capability_id: string }) =>
   `${c.plugin_id}/${c.capability_id}`;
 
+const knownControls = new Set(["text", "password", "number", "switch", "select"]);
+
+/**
+ * How SchemaForm renders a field: its control, or for a control this client
+ * doesn't know, the one its value type implies.
+ */
+function formControl(field: NotificationPluginSettingsField): PluginAdminFormField["control"] {
+  if (knownControls.has(field.control))
+    return field.control.toUpperCase() as Uppercase<typeof field.control>;
+  if (field.type === "boolean") return "SWITCH";
+  if (field.type === "integer" || field.type === "number") return "NUMBER";
+  return "TEXT";
+}
+
 /**
  * The destination's flat settings form as the shared SchemaForm renders it.
  * A setting the server lists in secretsSet is write-only even when the
@@ -72,24 +87,27 @@ function destinationForm(
       return {
         key: field.key,
         label: field.label,
-        description: field.description || undefined,
-        placeholder: field.placeholder || undefined,
-        control: secret
-          ? "PASSWORD"
-          : (field.control.toUpperCase() as Uppercase<typeof field.control>),
+        description: field.description,
+        placeholder: field.placeholder,
+        control: secret ? "PASSWORD" : formControl(field),
         required: field.required && !stored,
         secret,
         multiline: false,
         default_value: field.default_value,
-        options: field.options,
+        // SchemaForm selects by string; settings go out typed by the field's
+        // type (destinationFieldTypes).
+        options: field.options?.map((option) => ({
+          value: String(option.value),
+          label: option.label,
+        })),
         validation: {
-          has_min: field.minimum != null,
-          min: field.minimum ?? undefined,
-          has_max: field.maximum != null,
-          max: field.maximum ?? undefined,
-          pattern: field.pattern || undefined,
-          min_length: field.min_length ?? undefined,
-          max_length: field.max_length ?? undefined,
+          has_min: field.minimum !== undefined,
+          min: field.minimum,
+          has_max: field.maximum !== undefined,
+          max: field.maximum,
+          pattern: field.pattern,
+          min_length: field.min_length,
+          max_length: field.max_length,
         },
       };
     }),
@@ -168,6 +186,11 @@ function DestinationFormDialog({
   // The plugin's reason for refusing the last submitted settings, shown under
   // the fields until they change.
   const [settingsRejection, setSettingsRejection] = useState<string | null>(null);
+  // The server's field errors from the last save, shown under each field
+  // until the settings change.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // Saved optional secrets the user chose to remove on save.
+  const [clearing, setClearing] = useState<Set<string>>(new Set());
   const [settingsValid, setSettingsValid] = useState(true);
   const [reasons, setReasons] = useState<Record<DestinationNotifyKey, boolean>>({
     notify_next_up: destination?.notify_next_up ?? true,
@@ -179,6 +202,8 @@ function DestinationFormDialog({
   const secretsSet = destination?.secret_settings_set ?? [];
   const fields = channel?.settings_form.fields ?? [];
   const form = fields.length > 0 ? destinationForm(fields, secretsSet) : undefined;
+  // A saved secret that isn't required can be removed instead of replaced.
+  const clearable = fields.filter((field) => secretsSet.includes(field.key) && !field.required);
 
   // The form keeps number inputs as text and shows defaults it never
   // stores, so settings go out typed as each field declares.
@@ -193,18 +218,32 @@ function DestinationFormDialog({
   const updatedSettings = () =>
     Object.fromEntries(
       Object.entries(settingsToSend({ explicitClears: true }))
-        .filter(([key]) => !secretsSet.includes(key) || (settings[key] ?? "") !== "")
+        .filter(
+          ([key]) =>
+            !clearing.has(key) && (!secretsSet.includes(key) || (settings[key] ?? "") !== ""),
+        )
         .map(([key, value]) => [key, value === "" ? null : value]),
     );
 
+  const toggleClearing = (key: string) => {
+    const next = new Set(clearing);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setClearing(next);
+  };
+
   const submit = () => {
     setSettingsRejection(null);
+    setFieldErrors({});
     const onError = (error: unknown) => {
-      // The rejection shows under the settings fields; a channel without a
-      // form has none, so it falls back to a toast.
-      const rejection = pluginSettingsRejection(error);
-      if (rejection && form) setSettingsRejection(rejection);
-      else
+      // Field errors show under their fields, and the plugin's own refusal
+      // under the settings; a channel without a form has neither, so it
+      // falls back to a toast.
+      const perField = form ? pluginSettingsFieldErrors(error) : null;
+      const rejection = form ? pluginSettingsRejection(error) : null;
+      if (perField) setFieldErrors(perField);
+      if (rejection) setSettingsRejection(rejection);
+      if (!perField && !rejection)
         toast.error(
           pluginDestinationErrorMessage(
             error,
@@ -219,6 +258,7 @@ function DestinationFormDialog({
           etag: destination.etag,
           name: name.trim(),
           settings: updatedSettings(),
+          ...(clearing.size > 0 ? { clear_secrets: [...clearing] } : {}),
           ...reasons,
         },
         { onSuccess: () => onOpenChange(false), onError },
@@ -302,13 +342,43 @@ function DestinationFormDialog({
               <SchemaForm
                 descriptor={form}
                 values={settings}
+                errors={fieldErrors}
                 onChange={(next) => {
+                  // Typing a new value for a secret replaces it instead.
+                  const typed = [...clearing].filter((key) => (next[key] ?? "") !== "");
+                  if (typed.length > 0)
+                    setClearing(new Set([...clearing].filter((key) => !typed.includes(key))));
                   setSettings(next);
                   setSettingsRejection(null);
+                  setFieldErrors({});
                 }}
                 idPrefix={`plugin-destination-${kind}`}
                 onValidityChange={setSettingsValid}
               />
+              {clearable.map((field) => (
+                <div key={field.key} className="flex items-center justify-between gap-3 text-xs">
+                  <span
+                    className={
+                      clearing.has(field.key)
+                        ? "text-destructive line-through"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {field.label}
+                  </span>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    aria-pressed={clearing.has(field.key)}
+                    onClick={() => toggleClearing(field.key)}
+                  >
+                    {clearing.has(field.key)
+                      ? t("web.settings.notifications.destinations.keepSecret")
+                      : t("web.settings.notifications.destinations.clearSecret")}
+                  </Button>
+                </div>
+              ))}
               {settingsRejection && (
                 <p role="alert" className="text-destructive text-sm">
                   {settingsRejection}

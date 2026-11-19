@@ -144951,6 +144951,12 @@
       "value": "” ir pievienots"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Notīrīt saglabāto noslēpumu"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -144991,6 +144997,12 @@
     {
       "type": 0,
       "value": "Vēl nav galamērķu."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Paturēt saglabāto noslēpumu"
     }
   ],
   "web.settings.notifications.destinations.kind": [

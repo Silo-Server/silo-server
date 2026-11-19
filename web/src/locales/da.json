@@ -131353,6 +131353,12 @@
       "value": "” tilføjet"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Ryd gemt hemmelighed"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131393,6 +131399,12 @@
     {
       "type": 0,
       "value": "Ingen destinationer endnu."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Behold gemt hemmelighed"
     }
   ],
   "web.settings.notifications.destinations.kind": [

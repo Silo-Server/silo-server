@@ -174263,6 +174263,12 @@
       "value": "»"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "مسح القيمة السرية المحفوظة"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -174303,6 +174309,12 @@
     {
       "type": 0,
       "value": "لا توجد وجهات بعد."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "الاحتفاظ بالقيمة السرية المحفوظة"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -142799,6 +142799,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Borrar secreto guardado"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -142839,6 +142845,12 @@
     {
       "type": 0,
       "value": "Aún no hay destinos."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Conservar secreto guardado"
     }
   ],
   "web.settings.notifications.destinations.kind": [

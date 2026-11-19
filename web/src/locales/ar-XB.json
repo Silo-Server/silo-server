@@ -137963,6 +137963,12 @@
       "value": "\u202E\" added\u202C"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear saved secret\u202C"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -138003,6 +138009,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ENo destinations yet.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKeep saved secret\u202C"
     }
   ],
   "web.settings.notifications.destinations.kind": [

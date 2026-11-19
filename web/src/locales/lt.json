@@ -156281,6 +156281,12 @@
       "value": "“ pridėta"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Išvalyti išsaugotą slaptąją reikšmę"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -156321,6 +156327,12 @@
     {
       "type": 0,
       "value": "Paskirties vietų dar nėra."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Palikti išsaugotą slaptąją reikšmę"
     }
   ],
   "web.settings.notifications.destinations.kind": [

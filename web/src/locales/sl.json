@@ -154361,6 +154361,12 @@
       "value": "“ je dodan"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Počisti shranjeno skrivnost"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -154401,6 +154407,12 @@
     {
       "type": 0,
       "value": "Ciljev še ni."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Obdrži shranjeno skrivnost"
     }
   ],
   "web.settings.notifications.destinations.kind": [

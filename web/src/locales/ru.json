@@ -155675,6 +155675,12 @@
       "value": "» добавлен"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Очистить сохранённый секрет"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -155715,6 +155721,12 @@
     {
       "type": 0,
       "value": "Каналов пока нет."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Оставить сохранённый секрет"
     }
   ],
   "web.settings.notifications.destinations.kind": [

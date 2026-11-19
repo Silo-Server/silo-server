@@ -141544,6 +141544,12 @@
       "value": "” נוסף"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "ניקוי הסוד השמור"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -141584,6 +141590,12 @@
     {
       "type": 0,
       "value": "עדיין אין יעדים."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "שמירה על הסוד השמור"
     }
   ],
   "web.settings.notifications.destinations.kind": [

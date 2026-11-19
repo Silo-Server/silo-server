@@ -121636,6 +121636,12 @@
       "value": "” แล้ว"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "ล้างข้อมูลลับที่บันทึกไว้"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -121676,6 +121682,12 @@
     {
       "type": 0,
       "value": "ยังไม่มีปลายทาง"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "เก็บข้อมูลลับที่บันทึกไว้"
     }
   ],
   "web.settings.notifications.destinations.kind": [

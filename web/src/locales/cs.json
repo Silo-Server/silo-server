@@ -154759,6 +154759,12 @@
       "value": "“ byl přidán"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Vymazat uložený tajný údaj"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -154799,6 +154805,12 @@
     {
       "type": 0,
       "value": "Zatím žádné cíle."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Ponechat uložený tajný údaj"
     }
   ],
   "web.settings.notifications.destinations.kind": [

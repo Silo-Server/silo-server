@@ -120162,6 +120162,12 @@
       "value": "” ditambah"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Kosongkan rahsia yang disimpan"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -120202,6 +120208,12 @@
     {
       "type": 0,
       "value": "Belum ada destinasi."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Kekalkan rahsia yang disimpan"
     }
   ],
   "web.settings.notifications.destinations.kind": [

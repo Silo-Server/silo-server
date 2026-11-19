@@ -132139,6 +132139,12 @@
       "value": "» προστέθηκε"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Εκκαθάριση αποθηκευμένου μυστικού"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132179,6 +132185,12 @@
     {
       "type": 0,
       "value": "Δεν υπάρχουν ακόμη προορισμοί."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Διατήρηση αποθηκευμένου μυστικού"
     }
   ],
   "web.settings.notifications.destinations.kind": [

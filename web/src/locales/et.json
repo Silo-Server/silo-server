@@ -132411,6 +132411,12 @@
       "value": "“ on lisatud"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Eemalda salvestatud saladus"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -132451,6 +132457,12 @@
     {
       "type": 0,
       "value": "Sihtkohti veel pole."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Säilita salvestatud saladus"
     }
   ],
   "web.settings.notifications.destinations.kind": [

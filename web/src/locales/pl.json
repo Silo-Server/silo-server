@@ -155149,6 +155149,12 @@
       "value": "”"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Wyczyść zapisany sekret"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -155189,6 +155195,12 @@
     {
       "type": 0,
       "value": "Brak miejsc docelowych."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Zachowaj zapisany sekret"
     }
   ],
   "web.settings.notifications.destinations.kind": [

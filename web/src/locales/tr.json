@@ -130021,6 +130021,12 @@
       "value": "” eklendi"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Kayıtlı gizli değeri temizle"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -130061,6 +130067,12 @@
     {
       "type": 0,
       "value": "Henüz hedef yok."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Kayıtlı gizli değeri koru"
     }
   ],
   "web.settings.notifications.destinations.kind": [

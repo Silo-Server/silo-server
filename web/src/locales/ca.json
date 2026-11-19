@@ -143144,6 +143144,12 @@
       "value": "»"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Esborra el secret desat"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -143184,6 +143190,12 @@
     {
       "type": 0,
       "value": "Encara no hi ha cap destinació."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Conserva el secret desat"
     }
   ],
   "web.settings.notifications.destinations.kind": [

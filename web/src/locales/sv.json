@@ -131435,6 +131435,12 @@
       "value": "” tillagd"
     }
   ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Rensa sparad hemlighet"
+    }
+  ],
   "web.settings.notifications.destinations.createInProgress": [
     {
       "type": 0,
@@ -131475,6 +131481,12 @@
     {
       "type": 0,
       "value": "Inga destinationer än."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Behåll sparad hemlighet"
     }
   ],
   "web.settings.notifications.destinations.kind": [

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { V2ProblemError, type Problem } from "@/api/v2/request";
 import { PluginDestinationsSection } from "./PluginDestinationsSection";
 
 const state = vi.hoisted(() => ({
@@ -7,21 +8,14 @@ const state = vi.hoisted(() => ({
   update: vi.fn(),
   remove: vi.fn(),
 }));
-// field is one flat destination form field, as the server describes it.
+// field is one flat destination form field, as the server describes it:
+// optional members the plugin doesn't declare are absent.
 function field(overrides: Record<string, unknown>) {
   return {
-    description: "",
-    placeholder: "",
     control: "text",
     type: "string",
     required: false,
     secret: false,
-    options: [],
-    minimum: null,
-    maximum: null,
-    min_length: null,
-    max_length: null,
-    pattern: "",
     ...overrides,
   };
 }
@@ -36,8 +30,18 @@ vi.mock("@/hooks/queries/notificationWebhooks", () => ({
     data: { plugin_destinations: { available: true, max_per_profile: 10 } },
   }),
 }));
-vi.mock("@/hooks/queries/notificationPluginDestinations", () => ({
+vi.mock("@/hooks/queries/notificationPluginDestinations", async () => ({
   pluginDestinationErrorMessage: (_: unknown, fallback: string) => fallback,
+  pluginSettingsFieldErrors: (
+    await vi.importActual<typeof import("@/hooks/queries/notificationPluginDestinations")>(
+      "@/hooks/queries/notificationPluginDestinations",
+    )
+  ).pluginSettingsFieldErrors,
+  pluginSettingsRejection: (
+    await vi.importActual<typeof import("@/hooks/queries/notificationPluginDestinations")>(
+      "@/hooks/queries/notificationPluginDestinations",
+    )
+  ).pluginSettingsRejection,
   useNotificationPluginChannels: () => ({
     data: [
       {
@@ -115,4 +119,55 @@ it("deletes with the validator seen when the confirmation opened", () => {
 
   expect(state.remove).toHaveBeenCalledOnce();
   expect(state.remove.mock.calls[0]?.[0]).toEqual({ id: "dest-1", etag: '"r1"' });
+});
+
+it("shows the server's field errors under their fields and the plugin's refusal under the form", () => {
+  state.update.mockImplementation((_input, options: { onError: (error: unknown) => void }) =>
+    options.onError(
+      new V2ProblemError("updateNotificationPluginDestination", {
+        type: "https://silo.example.test/problems/validation_failed",
+        title: "Validation failed",
+        status: 422,
+        detail: "The request did not pass validation; see errors.",
+        errors: [
+          {
+            location: "body.settings.topic",
+            code: "required",
+            detail: "This setting is required.",
+          },
+          {
+            location: "body.settings",
+            code: "invalid",
+            detail: "ntfy says the topic is reserved.",
+          },
+        ],
+      } as Problem),
+    ),
+  );
+  render(<PluginDestinationsSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  const topic = screen.getByLabelText(/Topic/);
+  expect(topic.closest("div")?.parentElement?.textContent).toContain("This setting is required.");
+  expect(screen.getByRole("alert").textContent).toBe("ntfy says the topic is reserved.");
+});
+
+it("clears a saved optional secret on save, and typing a new value replaces it instead", () => {
+  render(<PluginDestinationsSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Clear saved secret" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(state.update).toHaveBeenCalledOnce();
+  expect(state.update.mock.calls[0]?.[0]?.clear_secrets).toEqual(["token"]);
+  expect(state.update.mock.calls[0]?.[0]?.settings).not.toHaveProperty("token");
+
+  state.update.mockReset();
+  fireEvent.click(screen.getByRole("button", { name: "Keep saved secret" }));
+  fireEvent.click(screen.getByRole("button", { name: "Clear saved secret" }));
+  fireEvent.change(screen.getByLabelText(/Token/), { target: { value: "fresh" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(state.update.mock.calls[0]?.[0]?.clear_secrets).toBeUndefined();
+  expect(state.update.mock.calls[0]?.[0]?.settings).toMatchObject({ token: "fresh" });
 });
