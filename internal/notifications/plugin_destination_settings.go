@@ -49,10 +49,11 @@ func checkPluginSettings(channel PluginChannel, merged map[string]any) error {
 			fields = append(fields, PluginSettingError{Code: pluginSettingInvalid, Message: "The settings don't fit this destination's form."})
 		}
 	}
+	// An integer too large to carry is out of range whatever else the schema
+	// says about it, such as not being one of a select's options.
 	for _, key := range unsafePluginIntegers(channel, merged) {
-		if !slices.ContainsFunc(fields, func(f PluginSettingError) bool { return f.Field == key }) {
-			fields = append(fields, PluginSettingError{Field: key, Code: "out_of_range", Message: "Out of the allowed range."})
-		}
+		fields = slices.DeleteFunc(fields, func(f PluginSettingError) bool { return f.Field == key })
+		fields = append(fields, PluginSettingError{Field: key, Code: "out_of_range", Message: "Out of the allowed range."})
 	}
 	if len(fields) == 0 {
 		return nil
@@ -256,8 +257,8 @@ func truncateRunes(text string, limit int) string {
 }
 
 // pluginSecretForms is how a secret can appear in text: as stored and
-// without its surrounding whitespace and, when at least minEncodedSecretLen
-// bytes, both of those in the encodings a provider or plugin is likely to
+// without its surrounding whitespace and, for each of those that is at least
+// minEncodedSecretLen bytes, in the encodings a provider or plugin is likely to
 // quote them in. A credential pasted with a stray space is sent with it, and
 // a plugin may trim it first.
 func pluginSecretForms(secret string) []string {
@@ -270,10 +271,12 @@ func pluginSecretForms(secret string) []string {
 		plain = append(plain, trimmed)
 	}
 	forms := slices.Clone(plain)
-	if len(trimmed) < minEncodedSecretLen {
-		return forms
-	}
 	for _, value := range plain {
+		// Each spelling is judged on its own length: the stored one can
+		// reach the minimum when the trimmed one doesn't.
+		if len(value) < minEncodedSecretLen {
+			continue
+		}
 		raw := []byte(value)
 		for _, form := range []string{
 			base64.StdEncoding.EncodeToString(raw),

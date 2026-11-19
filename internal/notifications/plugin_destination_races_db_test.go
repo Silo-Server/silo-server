@@ -291,6 +291,8 @@ func TestPluginDestinationAttemptAgeCapDB(t *testing.T) {
 		{lastFailure: pluginUnavailableText},
 		{lastFailure: pluginSettingsUnreadableText},
 		{lastFailure: "rate limited", disable: true},
+		// A plugin's bare RETRY stores no message; it is an ordinary failure.
+		{lastFailure: "", disable: true},
 	} {
 		deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
 		enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
@@ -300,11 +302,11 @@ func TestPluginDestinationAttemptAgeCapDB(t *testing.T) {
 			deliveryID, pluginAttemptMaxAge+time.Minute); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(ctx, `UPDATE notification_plugin_destinations SET updated_at = now() - $2::interval WHERE id = $1`,
+		if _, err := pool.Exec(ctx, `UPDATE notification_plugin_destinations SET enabled = true, disabled_reason = NULL, updated_at = now() - $2::interval WHERE id = $1`,
 			d.ID, pluginAttemptMaxAge+time.Hour); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET attempt_number = 3, failure_message = $2 WHERE notification_delivery_id = $1`,
+		if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET attempt_number = 3, failure_message = NULLIF($2, '') WHERE notification_delivery_id = $1`,
 			deliveryID, tc.lastFailure); err != nil {
 			t.Fatal(err)
 		}
@@ -454,6 +456,63 @@ func TestPluginDestinationAutoDisableAndAccountDeletionDontDeadlockDB(t *testing
 	defer logMu.Unlock()
 	if strings.Contains(logs.String(), "40P01") {
 		t.Fatalf("the auto-disable deadlocked with the account deletion: %s", logs.String())
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification_plugin_destinations`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d destinations left, %v; want none", left, err)
+	}
+}
+
+// A profile purge holds the profile's inbox lock before it locks the
+// profile's destinations. An auto-disable writes a notice into that inbox, so
+// it takes the inbox lock before the destination too and waits for the purge
+// instead of deadlocking with it.
+func TestPluginDestinationAutoDisableAndProfilePurgeDontDeadlockDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	host := &scriptedChannelHost{}
+	service, sender := newTestPluginDestinationService(t, pool, host)
+	recordNotices(pool, sender)
+	var logs strings.Builder
+	var logMu sync.Mutex
+	sender.logger = slog.New(slog.NewTextHandler(lockedWriter{&logMu, &logs}, nil))
+	d := createTestDestination(t, service, map[string]any{"topic": "alerts"})
+	deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
+	enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
+	claimed, err := sender.repo.ClaimPendingForDelivery(ctx, deliveryID)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %d, %v", len(claimed), err)
+	}
+	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "revoked"})
+
+	purge, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = purge.Rollback(context.WithoutCancel(ctx)) }()
+	if err := lockInboxProfiles(ctx, purge, []string{sharedID}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sender.processAttempt(ctx, claimed[0])
+	}()
+	waitForLockWait(t, pool)
+	if _, err := purge.Exec(ctx, `SELECT 1 FROM notification_plugin_destinations WHERE user_id = $1 AND profile_id = $2 ORDER BY id FOR UPDATE`, accountA, sharedID); err != nil {
+		t.Fatalf("purge lock: %v", err)
+	}
+	if _, err := purge.Exec(ctx, `DELETE FROM notification_plugin_destinations WHERE user_id = $1 AND profile_id = $2`, accountA, sharedID); err != nil {
+		t.Fatalf("purge delete: %v", err)
+	}
+	if err := purge.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	logMu.Lock()
+	defer logMu.Unlock()
+	if strings.Contains(logs.String(), "40P01") {
+		t.Fatalf("the auto-disable deadlocked with the purge: %s", logs.String())
 	}
 	var left int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification_plugin_destinations`).Scan(&left); err != nil || left != 0 {

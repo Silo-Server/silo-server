@@ -280,6 +280,14 @@ func TestCheckPluginSettings(t *testing.T) {
 	if err := checkPluginSettings(unbounded, map[string]any{"count": float64(9007199254740991)}); err != nil {
 		t.Fatalf("checkPluginSettings(2^53-1) = %v, want nil", err)
 	}
+	// Too large to carry outranks not being one of a select's options.
+	choice := channel
+	choice.Schema = &pluginv1.ConfigSchema{JsonSchema: `{"type":"object","properties":{"count":{"type":"integer","enum":[1,2]}}}`}
+	choice.PublicFields, choice.SecretFields = []string{"count"}, nil
+	err := checkPluginSettings(choice, map[string]any{"count": float64(1 << 53)})
+	if invalid, ok := errors.AsType[*PluginDestinationSettingsError](err); !ok || len(invalid.Fields) != 1 || invalid.Fields[0].Code != "out_of_range" {
+		t.Fatalf("checkPluginSettings(2^53 on a select) = %v, want one out_of_range", err)
+	}
 }
 
 // A plugin's text can quote a credential it was given. Every value that
@@ -314,6 +322,13 @@ func TestRedactPluginText(t *testing.T) {
 		if got := redactPluginText("auth header "+encoded+" refused", channel, withSecret); strings.Contains(got, encoded) {
 			t.Fatalf("redactPluginText() = %q, leaks the encoded secret %q", got, encoded)
 		}
+	}
+	// The stored spelling can be long enough for its encodings to be masked
+	// when the trimmed one isn't.
+	padded := pluginSettings{Values: map[string]any{"token": "tk_live "}, WriteOnly: []string{}}
+	paddedEncoded := base64.StdEncoding.EncodeToString([]byte("tk_live "))
+	if got := redactPluginText("auth header "+paddedEncoded+" refused", channel, padded); strings.Contains(got, paddedEncoded) {
+		t.Fatalf("redactPluginText() = %q, leaks the encoding of a secret stored with a trailing space", got)
 	}
 	if got := redactPluginText("code NDMyMQ== at 34333231", channel, stored); !strings.Contains(got, "NDMyMQ==") || !strings.Contains(got, "34333231") {
 		t.Fatalf("redactPluginText() = %q, masked encodings of a short value", got)

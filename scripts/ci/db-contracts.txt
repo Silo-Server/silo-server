@@ -571,6 +571,7 @@
 ./internal/notifications TestPluginDestinationPurgeWaitsForADeliveryDB
 ./internal/notifications TestPluginDestinationTakenNameAtTheLimitDB
 ./internal/notifications TestPluginDestinationAutoDisableAndAccountDeletionDontDeadlockDB
+./internal/notifications TestPluginDestinationAutoDisableAndProfilePurgeDontDeadlockDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess

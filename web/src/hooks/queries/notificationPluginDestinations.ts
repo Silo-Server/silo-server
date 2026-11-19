@@ -59,7 +59,7 @@ export function pluginSettingsFieldErrors(error: unknown): Record<string, string
     const key = fieldError.location.startsWith(settingsFieldLocation)
       ? fieldError.location.slice(settingsFieldLocation.length)
       : "";
-    if (key && !(key in out)) out[key] = problemFieldDetail(fieldError);
+    if (key && !Object.hasOwn(out, key)) out[key] = problemFieldDetail(fieldError);
   }
   return Object.keys(out).length > 0 ? out : null;
 }

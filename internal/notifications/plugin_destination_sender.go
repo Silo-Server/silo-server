@@ -314,10 +314,18 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 		// out, so the cap applies the exhausted schedule's rule to the
 		// attempt's last failure: an ordinary one disables a destination
 		// that stayed quiet since the message was queued.
+		// attempt_number counts sends: zero means none was made. A failed send
+		// with no message (a plugin's bare RETRY) is an ordinary failure too.
 		aged := pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "not delivered in time"}
-		if attempt.FailureMessage != nil && !keptEnabledFailure(*attempt.FailureMessage) {
+		lastFailure := ""
+		if attempt.FailureMessage != nil {
+			lastFailure = *attempt.FailureMessage
+		}
+		if attempt.AttemptNumber > 0 && !keptEnabledFailure(lastFailure) {
 			queued := row.CreatedAt
-			aged.message = *attempt.FailureMessage
+			if lastFailure != "" {
+				aged.message = lastFailure
+			}
 			aged.disableReason = "Deliveries failed for 24 hours"
 			aged.quietSince = &queued
 		}
@@ -407,10 +415,15 @@ func (s *pluginDestinationSender) commitFinish(ctx context.Context, attempt Deli
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	// A disable writes a notice, whose foreign key key-share locks the
-	// account. That lock comes first, as in a create, because an account
-	// deletion locks the account before its cascade reaches the destination.
+	// A disable writes a notice into the profile's inbox. Its locks are taken
+	// before the destination's, in the order the other writers use: a profile
+	// purge and a delivery hold the inbox lock before they reach the
+	// destination, and an account deletion locks the account before its
+	// cascade does. The notice's foreign key key-share locks the account.
 	if d != nil && f.disableReason != "" {
+		if err := lockInboxProfiles(ctx, tx, []string{d.ProfileID}); err != nil {
+			return nil, false, err
+		}
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR KEY SHARE`, d.UserID); err != nil {
 			return nil, false, err
 		}
