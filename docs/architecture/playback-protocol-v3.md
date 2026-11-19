@@ -2688,13 +2688,28 @@ A seek reanchor reuses the playing recipe and a seek failure recovery replays
 the stored start request; neither records nor clears a limit.
 
 A stall the server's own transcode caused is not the link's. When a replan
-reports `observed_rebuffer` while the playing transcode on the API server has
-no lead over the client (the client has fetched every produced segment but at
+would record an `observed_rebuffer` estimate while the playing transcode has no
+lead over the client (the client has fetched every produced segment but at
 most the newest), the encoder was slower than real time, as a heavy subtitle
 burn-in can be, and the server plans the replan under the estimate but records
 no limit. An encoder that keeps up runs ahead of the client up to the throttle
-window, so a slow link leaves it far ahead. A transcode on a remote node is not
-visible to the API server, so its stalls still record.
+window, so a slow link leaves it far ahead. A transcode on the replica that
+answers the replan is judged from its live session. A transcode on a remote
+node is judged by that node, which the replica asks with the signed
+`GET /transcode/{session_id}/output-bound` (see
+[worker HTTP contracts](worker-http-protocol.md)); the node counts a segment
+fetched when the relay that delivered it acknowledges it, so the answer is the
+same whichever API replica or proxy relays the stream.
+
+When the remote answer is unknown, the stall counts as the server's and
+records nothing: the replan found the node unreachable, the node no longer runs
+the transport, or the read failed or took longer than two seconds. Each is a
+server-side fault that stalls a client on any link, as a node dying mid-stream
+does. Skipping the record loses only memory, since the replan still plans under
+the estimate and a slow link stalls and is learned again, while a wrong limit
+lowers every file the device plays for a day. The read is made only for a
+replan that would otherwise record. A transcode running on another API replica
+is not visible to the one that answers the replan and still records.
 
 An Auto start or replan without `bandwidth_estimate_kbps` plans with the
 connection's current reading, the one `GET /api/v2/playback/connection`

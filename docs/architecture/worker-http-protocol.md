@@ -217,6 +217,16 @@ Repeating the exact acknowledgement is naturally idempotent; this is not a
 durable completion receipt and the generation header is never forwarded to the
 end client. Runtime acknowledgement and pruning behavior remain unchanged.
 
+The transcode `GET /transcode/{session_id}/output-bound` answers
+`{"output_bound": bool}` for a transport the node runs: `true` while FFmpeg
+runs and the client has fetched every produced segment but at most the newest,
+so playback is paced by the encoder. Those fetches are the acknowledgements
+above, so the answer is the same whichever relay delivered the segments. A
+progressive remux answers `false`. A transport the node does not run is 404;
+the read reconstructs nothing and does not refresh the session's idle timer.
+The core reads it before it learns a bandwidth limit from a stall (see
+[learned limits](playback-protocol-v3.md)).
+
 The retained transcode `POST /downloads/prepare` synchronously prepares or reuses
 an MP4 on that node. It requires node bearer authorization and a source grant
 the node opens for the whole preparation. The 64 KiB JSON decoder ignores
