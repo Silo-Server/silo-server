@@ -56,11 +56,15 @@ const (
 	subtitlePageRecoveryMaxEntries = 1024
 )
 
-// subtitlePageRecovery is one page's wait for its track's progressive artifact.
+// subtitlePageRecovery is one track's wait for its progressive artifact.
 type subtitlePageRecovery struct {
 	first     time.Time
 	lastSeen  time.Time
 	lastCover float64
+	// start is the page position that opened the wait. It is diagnostic only:
+	// the budget belongs to the track, because a client that re-anchors on every
+	// retry asks for a new start on the same artifact.
+	start float64
 }
 
 // pageRecoveryRefusal records this page's wait and answers it: the retryable
@@ -104,9 +108,17 @@ func (c *SubtitleCache) pageRecoveryNow() time.Time {
 	return time.Now()
 }
 
-// notePageRecovery updates one page's wait entry and reports how long it has
-// waited, whether this is its first refusal, and whether the artifact has
-// stopped advancing.
+// notePageRecovery updates one track's wait entry and reports how long it has
+// waited, whether this is the first refusal of that wait, and whether the
+// artifact has stopped advancing.
+//
+// The wait is keyed by the track, not by the refused page position. A client
+// re-anchors a few seconds forward on every bitmap-page retry, so a per-page
+// key gave each retry a fresh budget: the fill spent its 90 s, the next page
+// started a new wait, and the overlay sat on "loading" with no final answer —
+// the production deep-4K page. The artifact is a per-track object, so its wait
+// budget is too; a page at a different position of the same track inherits the
+// wait the earlier page opened, which is what makes the final answer reachable.
 func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered float64) (wait time.Duration, due, stalled bool) {
 	key, ok := c.pageRecoveryKey(opts, start)
 	if !ok {
@@ -129,12 +141,12 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		if len(c.pageWaits) >= subtitlePageRecoveryMaxEntries {
 			c.prunePageRecoveryLocked(now)
 		}
-		c.pageWaits[key] = subtitlePageRecovery{first: now, lastSeen: now, lastCover: covered}
+		c.pageWaits[key] = subtitlePageRecovery{first: now, lastSeen: now, lastCover: covered, start: start}
 		return 0, true, false
 	}
 	wait = now.Sub(entry.first)
 	stalled = !filling && covered <= entry.lastCover && now.Sub(entry.lastSeen) >= subtitlePageRecoveryStallWindow
-	// A fill that ended without committing since this page began its wait is
+	// A fill that ended without committing since this track began its wait is
 	// not going to move the coverage any further. When the reason is final for
 	// this page — the fill spent the budget the wait gave it — repeating the
 	// read cannot reach the page sooner, so the page ends now instead of after
@@ -144,6 +156,11 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 	}
 	entry.lastSeen = now
 	entry.lastCover = covered
+	if wait == 0 && start != entry.start {
+		// A different page of the same track, still inside the opening wait's
+		// window: remember it only for the diagnostics line.
+		entry.start = start
+	}
 	c.pageWaits[key] = entry
 	return wait, false, stalled
 }
@@ -163,10 +180,10 @@ func (c *SubtitleCache) progressiveFillInFlight(opts StreamExtractOpts) bool {
 	return c.inflight[key] != nil
 }
 
-// clearPageRecovery forgets a page's wait once it has been answered, so a later
-// visit pays its own bounded wait instead of inheriting this one.
-func (c *SubtitleCache) clearPageRecovery(opts StreamExtractOpts, start float64) {
-	key, ok := c.pageRecoveryKey(opts, start)
+// clearPageRecovery forgets a track's wait once a page of it has been answered,
+// so a later visit pays its own bounded wait instead of inheriting this one.
+func (c *SubtitleCache) clearPageRecovery(opts StreamExtractOpts, _ float64) {
+	key, ok := c.pageRecoveryKey(opts, 0)
 	if !ok {
 		return
 	}
@@ -175,12 +192,10 @@ func (c *SubtitleCache) clearPageRecovery(opts StreamExtractOpts, start float64)
 	c.pageWaitMu.Unlock()
 }
 
-func (c *SubtitleCache) pageRecoveryKey(opts StreamExtractOpts, start float64) (string, bool) {
-	key, ok := c.pageRecoveryFillKey(opts)
-	if !ok {
-		return "", false
-	}
-	return fmt.Sprintf("%s|%.3f", key, start), true
+// pageRecoveryKey names one track's wait. The page position is deliberately not
+// part of the key: see notePageRecovery.
+func (c *SubtitleCache) pageRecoveryKey(opts StreamExtractOpts, _ float64) (string, bool) {
+	return c.pageRecoveryFillKey(opts)
 }
 
 // pageRecoveryFillKey is the page ledger's per-track key: the same identity the
