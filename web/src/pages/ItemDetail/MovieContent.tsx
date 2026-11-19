@@ -13,6 +13,7 @@ import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
 import MovieBoxSetRow from "@/components/boxsets/MovieBoxSetRow";
+import ItemCollectionsRow from "@/components/collections/ItemCollectionsRow";
 import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
@@ -416,6 +417,8 @@ export default function MovieContent({
       {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
 
       <MovieBoxSetRow contentId={item.content_id} libraryId={libraryId} />
+
+      <ItemCollectionsRow contentId={item.content_id} libraryId={libraryId} />
 
       {/* More Like This */}
       {similarLoading ? (

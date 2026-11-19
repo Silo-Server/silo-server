@@ -38,6 +38,8 @@ async function invalidateLibraryCollectionQueries(queryClient: QueryClient) {
     // The Collections page's Server collections list, which the grid there
     // reads beside each library's list.
     queryClient.invalidateQueries({ queryKey: collectionKeys.server() }),
+    // The collections rows on title pages.
+    queryClient.invalidateQueries({ queryKey: collectionKeys.onTitles() }),
     queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
     markRowsStale(queryClient),
   ]);
