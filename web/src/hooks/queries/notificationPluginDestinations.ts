@@ -64,6 +64,13 @@ export function pluginSettingsFieldErrors(error: unknown): Record<string, string
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** The server's error on the destination's name, such as one already in use. */
+export function pluginDestinationNameError(error: unknown): string | null {
+  if (!(error instanceof V2ProblemError)) return null;
+  const nameError = error.problem.errors?.find((e) => e.location === "body.name");
+  return nameError ? problemFieldDetail(nameError) : null;
+}
+
 export function useNotificationPluginChannels(enabled = true) {
   const context = captureProfileRequestContext();
   return useQuery({

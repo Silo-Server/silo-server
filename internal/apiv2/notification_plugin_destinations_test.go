@@ -111,6 +111,8 @@ func TestNotificationPluginDestinationRoutes(t *testing.T) {
 		{name: "create while the plugin doesn't answer", method: http.MethodPost, path: base, body: create, headers: owner, err: fmt.Errorf("%w: timeout", notifications.ErrPluginChannelUnavailable), want: TypeDependencyUnavailable},
 		{name: "create with a setting out of range", method: http.MethodPost, path: base, body: create, headers: owner,
 			err: &notifications.PluginDestinationSettingsError{Fields: []notifications.PluginSettingError{{Field: "topic", Code: "out_of_range", Message: "Out of the allowed range."}}}, want: TypeValidationFailed, at: "body.settings.topic"},
+		{name: "create with a name the profile already uses", method: http.MethodPost, path: base, body: create, headers: owner,
+			err: fmt.Errorf("%w: %w", notifications.ErrPluginDestinationInvalid, notifications.ErrPluginDestinationNameTaken), want: TypeValidationFailed, at: "body.name"},
 		{name: "create refused by the plugin", method: http.MethodPost, path: base, body: create, headers: owner, err: &notifications.PluginDestinationRejectedError{Message: "unknown topic"}, want: TypeValidationFailed, at: "body.settings"},
 		{name: "update without If-Match", method: http.MethodPut, path: base + "/dest", body: `{"name":"Tablet"}`, headers: owner, want: TypePreconditionRequired},
 		{name: "update with a stale validator", method: http.MethodPut, path: base + "/dest", body: `{"name":"Tablet"}`, headers: stale, want: TypePreconditionFailed},

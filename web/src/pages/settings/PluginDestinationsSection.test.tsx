@@ -37,6 +37,11 @@ vi.mock("@/hooks/queries/notificationPluginDestinations", async () => ({
       "@/hooks/queries/notificationPluginDestinations",
     )
   ).pluginSettingsFieldErrors,
+  pluginDestinationNameError: (
+    await vi.importActual<typeof import("@/hooks/queries/notificationPluginDestinations")>(
+      "@/hooks/queries/notificationPluginDestinations",
+    )
+  ).pluginDestinationNameError,
   pluginSettingsRejection: (
     await vi.importActual<typeof import("@/hooks/queries/notificationPluginDestinations")>(
       "@/hooks/queries/notificationPluginDestinations",
@@ -151,6 +156,33 @@ it("shows the server's field errors under their fields and the plugin's refusal 
   const topic = screen.getByLabelText(/Topic/);
   expect(topic.closest("div")?.parentElement?.textContent).toContain("This setting is required.");
   expect(screen.getByRole("alert").textContent).toBe("ntfy says the topic is reserved.");
+});
+
+it("shows a name that is already in use under the Name field", () => {
+  state.update.mockImplementation((_input, options: { onError: (error: unknown) => void }) =>
+    options.onError(
+      new V2ProblemError("updateNotificationPluginDestination", {
+        type: "https://silo.example.test/problems/validation_failed",
+        title: "Validation failed",
+        status: 422,
+        detail: "The request did not pass validation; see errors.",
+        errors: [
+          {
+            location: "body.name",
+            code: "duplicate",
+            detail: "A destination with this name already exists.",
+          },
+        ],
+      } as Problem),
+    ),
+  );
+  render(<PluginDestinationsSection />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  const alert = screen.getByRole("alert");
+  expect(alert.textContent).toBe("A destination with this name already exists.");
+  expect(screen.getByLabelText("Name").getAttribute("aria-describedby")).toBe(alert.id);
 });
 
 it("clears a saved optional secret on save, and typing a new value replaces it instead", () => {

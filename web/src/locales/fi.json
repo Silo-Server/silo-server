@@ -287,6 +287,12 @@
       "value": "Tämä sähköpostiosoite on jo käytössä."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Tämä on jo käytössä."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

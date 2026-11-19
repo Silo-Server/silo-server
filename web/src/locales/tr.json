@@ -287,6 +287,12 @@
       "value": "Bu e-posta adresi zaten kullanılıyor."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Bu zaten kullanılıyor."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

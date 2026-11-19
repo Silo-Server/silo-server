@@ -287,6 +287,12 @@
       "value": "Den e-mailadresse er allerede i brug."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Dette er allerede i brug."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

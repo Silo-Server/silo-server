@@ -287,6 +287,12 @@
       "value": "عنوان البريد الإلكتروني هذا مستخدم بالفعل."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "هذه القيمة مستخدمة بالفعل."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

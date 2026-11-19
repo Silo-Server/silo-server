@@ -287,6 +287,12 @@
       "value": "Dat e-mailadres is al in gebruik."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Dit is al in gebruik."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

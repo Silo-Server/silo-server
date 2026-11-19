@@ -696,8 +696,9 @@ use (its schema doesn't compile), which it treats as not provided. A plugin that
 returns an error, times out or can't start) answers `503
 dependency_unavailable` with `Retry-After`; ten destinations answer `422`.
 Success is `201` with the destination and its `ETag`. The operation is
-non-retryable: a replay with the same name answers `422`, since names are
-unique per profile.
+non-retryable: a replay with the same name answers `422` with the field code
+`duplicate` at `body.name`, since names are unique per profile. A rename to a
+taken name answers the same.
 
 ### Update a destination
 
@@ -727,8 +728,9 @@ destination changes meanwhile, the update answers `412` with the current
 `DELETE /api/v2/notifications/plugin-destinations/{id}` (`deleteNotificationPluginDestination`)
 requires `If-Match` and removes the destination and its queued attempts.
 `POST /api/v2/notifications/plugin-destinations/{id}/test` (`testNotificationPluginDestination`)
-sends one test message now and answers `200` with `ok`, `message` and
-`duration_ms`; a failed send is `ok: false`, not retried and not counted. It
+sends one test message now and answers `200` with `ok` and `duration_ms`,
+plus `message` when the send failed or the plugin gave one; a failed send is
+`ok: false`, not retried and not counted. It
 is non-retryable.
 
 ## Ordered Apple registration storage

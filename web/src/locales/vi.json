@@ -287,6 +287,12 @@
       "value": "Địa chỉ email đó đã được sử dụng."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Giá trị này đã được sử dụng."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

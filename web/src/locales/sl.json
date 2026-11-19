@@ -287,6 +287,12 @@
       "value": "Ta e-poštni naslov je že v uporabi."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "To je že v uporabi."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

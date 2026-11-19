@@ -287,6 +287,12 @@
       "value": "该电子邮件地址已被使用。"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "此项已被使用。"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

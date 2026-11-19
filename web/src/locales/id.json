@@ -287,6 +287,12 @@
       "value": "Alamat email itu sudah digunakan."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Ini sudah digunakan."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

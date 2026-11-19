@@ -286,6 +286,8 @@ func notificationPluginDestinationProblem(err error) error {
 		return NewProblem(TypeConflict, "This server can't read the destination's stored settings, so they weren't changed.")
 	case errors.Is(err, notifications.ErrPluginDestinationLimit):
 		return NewProblem(TypeValidationFailed, "Notification destination limit reached.")
+	case errors.Is(err, notifications.ErrPluginDestinationNameTaken):
+		return validationProblem(locationBody+".name", codeDuplicate, "A destination with this name already exists.")
 	case errors.Is(err, notifications.ErrPluginDestinationInvalid):
 		detail := strings.TrimPrefix(err.Error(), notifications.ErrPluginDestinationInvalid.Error()+": ")
 		return validationProblem(locationBody, codeInvalid, detail)

@@ -77,7 +77,9 @@ func scanPluginDestinationAttempts(rows pgx.Rows) ([]DeliveryAttempt, error) {
 	return out, rows.Err()
 }
 
-var errPluginDestinationNameTaken = errors.New("a destination with this name already exists")
+// ErrPluginDestinationNameTaken means the profile already has a destination
+// with that name. It is also an ErrPluginDestinationInvalid.
+var ErrPluginDestinationNameTaken = errors.New("a destination with this name already exists")
 
 func isPluginDestinationNameViolation(err error) bool {
 	var pgErr *pgconn.PgError
@@ -133,7 +135,7 @@ func (r *PluginDestinationRepository) InsertWithLimit(ctx context.Context, d Plu
 		d.ID, d.UserID, d.ProfileID, d.PluginID, d.CapabilityID, d.Name, d.ConfigCiphertext, d.Enabled,
 		d.NotifyNextUp, d.NotifyRequests); err != nil {
 		if isPluginDestinationNameViolation(err) {
-			return fmt.Errorf("%w: %s", ErrPluginDestinationInvalid, errPluginDestinationNameTaken.Error())
+			return fmt.Errorf("%w: %w", ErrPluginDestinationInvalid, ErrPluginDestinationNameTaken)
 		}
 		return fmt.Errorf("insert plugin destination: %w", err)
 	}
@@ -253,7 +255,7 @@ func (r *PluginDestinationRepository) UpdateGuarded(ctx context.Context, userID 
 		d.NotifyNextUp, d.NotifyRequests,
 		d.ConsecutiveFailures, d.DisabledReason))
 	if isPluginDestinationNameViolation(err) {
-		return nil, fmt.Errorf("%w: %s", ErrPluginDestinationInvalid, errPluginDestinationNameTaken.Error())
+		return nil, fmt.Errorf("%w: %w", ErrPluginDestinationInvalid, ErrPluginDestinationNameTaken)
 	}
 	if err != nil {
 		return nil, err

@@ -287,6 +287,12 @@
       "value": "כתובת האימייל הזו כבר בשימוש."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "הערך הזה כבר בשימוש."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

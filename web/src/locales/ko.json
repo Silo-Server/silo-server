@@ -287,6 +287,12 @@
       "value": "이미 사용 중인 이메일 주소예요."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "이미 사용 중이에요."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

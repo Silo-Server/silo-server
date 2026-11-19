@@ -287,6 +287,12 @@
       "value": "यह ईमेल पता पहले से इस्तेमाल में है।"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "यह पहले से इस्तेमाल में है।"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

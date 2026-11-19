@@ -287,6 +287,12 @@
       "value": "Această adresă de e-mail este deja folosită."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Această valoare este deja folosită."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

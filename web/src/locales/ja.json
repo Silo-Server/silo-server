@@ -287,6 +287,12 @@
       "value": "このメールアドレスはすでに使用されています。"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "この値はすでに使用されています。"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

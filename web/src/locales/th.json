@@ -287,6 +287,12 @@
       "value": "อีเมลนี้มีผู้ใช้อยู่แล้ว"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "ค่านี้มีการใช้งานอยู่แล้ว"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

@@ -287,6 +287,12 @@
       "value": "Ця електронна адреса вже використовується."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Це вже використовується."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

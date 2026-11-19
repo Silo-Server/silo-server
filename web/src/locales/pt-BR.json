@@ -287,6 +287,12 @@
       "value": "Esse endereço de e-mail já está em uso."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Este valor já está em uso."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

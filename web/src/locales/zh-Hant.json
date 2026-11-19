@@ -287,6 +287,12 @@
       "value": "此電子郵件地址已有人使用。"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "此值已有人使用。"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

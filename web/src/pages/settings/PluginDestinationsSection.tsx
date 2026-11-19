@@ -36,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import { useNotificationPreferences } from "@/hooks/queries/notifications";
 import {
   pluginDestinationErrorMessage,
+  pluginDestinationNameError,
   pluginSettingsFieldErrors,
   pluginSettingsRejection,
   useCreateNotificationPluginDestination,
@@ -189,6 +190,7 @@ function DestinationFormDialog({
   // The server's field errors from the last save, shown under each field
   // until the settings change.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [nameError, setNameError] = useState<string | null>(null);
   // Saved optional secrets the user chose to remove on save.
   const [clearing, setClearing] = useState<Set<string>>(new Set());
   const [settingsValid, setSettingsValid] = useState(true);
@@ -235,7 +237,13 @@ function DestinationFormDialog({
   const submit = () => {
     setSettingsRejection(null);
     setFieldErrors({});
+    setNameError(null);
     const onError = (error: unknown) => {
+      const onName = pluginDestinationNameError(error);
+      if (onName) {
+        setNameError(onName);
+        return;
+      }
       // Field errors show under their fields, and the plugin's own refusal
       // under the settings; a channel without a form has neither, so it
       // falls back to a toast.
@@ -334,8 +342,22 @@ function DestinationFormDialog({
               id="plugin-destination-name"
               value={name}
               maxLength={64}
-              onChange={(event) => setName(event.target.value)}
+              aria-invalid={nameError != null}
+              aria-describedby={nameError ? "plugin-destination-name-error" : undefined}
+              onChange={(event) => {
+                setName(event.target.value);
+                setNameError(null);
+              }}
             />
+            {nameError && (
+              <p
+                id="plugin-destination-name-error"
+                role="alert"
+                className="text-destructive text-sm"
+              >
+                {nameError}
+              </p>
+            )}
           </div>
           {form && (
             <div className="space-y-1.5">

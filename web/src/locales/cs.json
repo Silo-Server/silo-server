@@ -287,6 +287,12 @@
       "value": "Tato e-mailová adresa se už používá."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Tato hodnota se už používá."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

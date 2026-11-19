@@ -287,6 +287,12 @@
       "value": "Ez az e-mail-cím már használatban van."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Ez már használatban van."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

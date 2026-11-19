@@ -287,6 +287,12 @@
       "value": "E-postadressen används redan."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Det här används redan."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

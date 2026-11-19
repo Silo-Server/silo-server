@@ -287,6 +287,12 @@
       "value": "Αυτή η διεύθυνση email χρησιμοποιείται ήδη."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Αυτή η τιμή χρησιμοποιείται ήδη."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,

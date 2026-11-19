@@ -287,6 +287,12 @@
       "value": "See e-posti aadress on juba kasutusel."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "See on juba kasutusel."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
