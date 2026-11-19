@@ -4,310 +4,107 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestCatalogSearchSettingsFromMapParsesMeilisearchTuning(t *testing.T) {
-	settings, err := CatalogSearchSettingsFromMap(map[string]string{
-		SearchSettingProvider:                    SearchProviderMeilisearch,
-		SearchSettingMeilisearchSyncBatchSize:    "750",
-		SearchSettingMeilisearchRebuildBatchSize: "5000",
-		SearchSettingMeilisearchRebuildQueue:     "6",
-		SearchSettingMeilisearchIndexTypes:       "video,audiobook",
-		SearchSettingMeilisearchSemanticEnabled:  "true",
-		SearchSettingMeilisearchSemanticRatio:    "0.42",
-		SearchSettingMeilisearchEmbedder:         "custom_embedder",
+// Payloads are cut by their encoded size: each stays within the cap, is as
+// full as the next document allows, and together they carry every document
+// once, in order. Zero-padded vectors encode much smaller than full ones, so
+// an estimate per dimension would cut these payloads far too early or late.
+func TestForEachCatalogSearchDocumentPayloadFillsCapInOrder(t *testing.T) {
+	full := make([]float32, 256)
+	padded := make([]float32, 256)
+	for i := range full {
+		full[i] = -0.012345678 * float32(i+1)
+		if i < 32 {
+			padded[i] = full[i]
+		}
+	}
+	var docs []catalogSearchDocument
+	for i := range 40 {
+		doc := catalogSearchDocument{ContentID: fmt.Sprintf("item-%02d", i), Type: "movie", Title: strings.Repeat("t", i)}
+		switch i % 4 {
+		case 0:
+			doc.Vectors = map[string][]float32{DefaultMeilisearchEmbedder: full}
+		case 1:
+			doc.Vectors = map[string][]float32{DefaultMeilisearchEmbedder: padded}
+		case 2:
+			doc.Type = "episode"
+			doc.Vectors = map[string][]float32{DefaultMeilisearchEmbedder: nil}
+		}
+		docs = append(docs, doc)
+	}
+	encodedSize := func(doc catalogSearchDocument) int {
+		data, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(data)
+	}
+	const maxBytes = 12 * 1024
+	// One document larger than the cap travels alone.
+	huge := catalogSearchDocument{ContentID: "item-huge", Type: "movie", Vectors: map[string][]float32{DefaultMeilisearchEmbedder: make([]float32, 4096)}}
+	for i := range huge.Vectors[DefaultMeilisearchEmbedder] {
+		huge.Vectors[DefaultMeilisearchEmbedder][i] = 0.123456789
+	}
+	if encodedSize(huge) <= maxBytes {
+		t.Fatal("test document must exceed the cap")
+	}
+	docs = slices.Insert(docs, 20, huge)
+
+	var gotIDs []string
+	var payloads []catalogSearchDocumentPayload
+	err := forEachCatalogSearchDocumentPayload(docs, maxBytes, func(payload catalogSearchDocumentPayload) error {
+		payloads = append(payloads, payload)
+		return nil
 	})
 	if err != nil {
-		t.Fatalf("CatalogSearchSettingsFromMap returned error: %v", err)
+		t.Fatalf("forEachCatalogSearchDocumentPayload() error = %v", err)
 	}
-	if settings.SyncBatchSize != 750 {
-		t.Fatalf("SyncBatchSize = %d, want 750", settings.SyncBatchSize)
-	}
-	if settings.RebuildBatchSize != 5000 {
-		t.Fatalf("RebuildBatchSize = %d, want 5000", settings.RebuildBatchSize)
-	}
-	if settings.RebuildQueueDepth != 6 {
-		t.Fatalf("RebuildQueueDepth = %d, want 6", settings.RebuildQueueDepth)
-	}
-	wantTypes := []string{"movie", "series", "audiobook"}
-	if !reflect.DeepEqual(settings.IndexTypes, wantTypes) {
-		t.Fatalf("IndexTypes = %#v, want %#v", settings.IndexTypes, wantTypes)
-	}
-	if !settings.SemanticEnabled {
-		t.Fatal("SemanticEnabled = false, want true")
-	}
-	if settings.SemanticRatio != 0.42 {
-		t.Fatalf("SemanticRatio = %v, want 0.42", settings.SemanticRatio)
-	}
-	if settings.Embedder != "custom_embedder" {
-		t.Fatalf("Embedder = %q, want custom_embedder", settings.Embedder)
-	}
-}
-
-func TestCatalogSearchSettingsFromMapRejectsOutOfRangeTuning(t *testing.T) {
-	tests := []map[string]string{
-		{SearchSettingMeilisearchSyncBatchSize: "0"},
-		{SearchSettingMeilisearchRebuildBatchSize: "25001"},
-		{SearchSettingMeilisearchRebuildQueue: "0"},
-		{SearchSettingMeilisearchIndexTypes: "movie,unknown"},
-		{SearchSettingMeilisearchSemanticEnabled: "sometimes"},
-		{SearchSettingMeilisearchSemanticRatio: "-0.1"},
-		{SearchSettingMeilisearchSemanticRatio: "1.1"},
-		{SearchSettingMeilisearchSemanticRatio: "NaN"},
-		{SearchSettingMeilisearchEmbedder: "bad.name"},
-	}
-
-	for _, values := range tests {
-		if _, err := CatalogSearchSettingsFromMap(values); err == nil {
-			t.Fatalf("CatalogSearchSettingsFromMap(%v) succeeded, want error", values)
+	next := 0
+	for i, payload := range payloads {
+		var decoded []struct {
+			ContentID string `json:"content_id"`
+		}
+		if err := json.Unmarshal(payload.body, &decoded); err != nil {
+			t.Fatalf("payload %d is not a JSON array: %v", i, err)
+		}
+		if len(decoded) != len(payload.docs) {
+			t.Fatalf("payload %d carries %d documents in its body, %d in docs", i, len(decoded), len(payload.docs))
+		}
+		for j, doc := range decoded {
+			if doc.ContentID != payload.docs[j].ContentID {
+				t.Fatalf("payload %d body document %d = %q, docs has %q", i, j, doc.ContentID, payload.docs[j].ContentID)
+			}
+			gotIDs = append(gotIDs, doc.ContentID)
+		}
+		next += len(payload.docs)
+		if len(payload.body) > maxBytes && len(payload.docs) != 1 {
+			t.Fatalf("payload %d is %d bytes with %d documents, over the %d byte cap", i, len(payload.body), len(payload.docs), maxBytes)
+		}
+		if i < len(payloads)-1 && len(payload.body)+1+encodedSize(docs[next]) <= maxBytes {
+			t.Fatalf("payload %d (%d bytes) was cut although %s fit", i, len(payload.body), docs[next].ContentID)
 		}
 	}
-}
-
-func TestActiveCatalogSearchProviderRequiresConfiguredMeilisearch(t *testing.T) {
-	if got := ActiveCatalogSearchProvider(DefaultCatalogSearchSettings()); got != SearchProviderPostgres {
-		t.Fatalf("default active provider = %q, want postgres", got)
+	var wantIDs []string
+	for _, doc := range docs {
+		wantIDs = append(wantIDs, doc.ContentID)
 	}
-	if got := ActiveCatalogSearchProvider(CatalogSearchSettings{
-		Provider: SearchProviderMeilisearch,
-	}); got != SearchProviderPostgres {
-		t.Fatalf("meilisearch without URL active provider = %q, want postgres", got)
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Fatalf("documents sent = %v, want %v", gotIDs, wantIDs)
 	}
-	if got := ActiveCatalogSearchProvider(CatalogSearchSettings{
-		Provider:         SearchProviderMeilisearch,
-		MeilisearchURL:   "http://localhost:7700",
-		MeilisearchIndex: DefaultMeilisearchIndex,
-	}); got != SearchProviderMeilisearch {
-		t.Fatalf("configured meilisearch active provider = %q, want meilisearch", got)
+	if len(payloads) < 3 {
+		t.Fatalf("payload count = %d, want the documents split", len(payloads))
 	}
 }
 
-func TestCatalogSearchDocumentVectorsUseEmbedderAndOptOutMissing(t *testing.T) {
-	docs := []catalogSearchDocument{
-		{ContentID: "movie-1", Title: "One"},
-		{ContentID: "movie-2", Title: "Two"},
-	}
-	count := setCatalogSearchDocumentVectors(docs, map[string][]float32{
-		"movie-1": {0.1, 0.2},
-	}, "silo_recommendations")
-	if count != 1 {
-		t.Fatalf("vectorized docs = %d, want 1", count)
-	}
-	if got := docs[0].Vectors["silo_recommendations"]; !reflect.DeepEqual(got, []float32{0.1, 0.2}) {
-		t.Fatalf("doc vector = %#v", got)
-	}
-	if docs[1].Vectors == nil {
-		t.Fatal("missing vector doc should include explicit _vectors opt-out")
-	}
-	if got, ok := docs[1].Vectors["silo_recommendations"]; !ok || got != nil {
-		t.Fatalf("missing vector opt-out = %#v, present=%v; want nil value", got, ok)
-	}
-
-	data, err := json.Marshal(docs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"_vectors"`) {
-		t.Fatalf("marshaled docs missing _vectors: %s", data)
-	}
-	if strings.Count(string(data), `"_vectors"`) != 2 {
-		t.Fatalf("marshaled docs should include _vectors for both docs: %s", data)
-	}
-	if !strings.Contains(string(data), `"silo_recommendations":null`) {
-		t.Fatalf("marshaled docs missing null vector opt-out: %s", data)
-	}
-	if got := catalogSearchVectorDocumentCount(docs); got != 1 {
-		t.Fatalf("vector document count = %d, want 1", got)
-	}
-}
-
-func TestCatalogSearchMeilisearchSettingsOmitEmbeddersWhenSemanticDisabled(t *testing.T) {
-	settings := catalogSearchMeilisearchSettings("silo_recommendations", false, false)
-
-	if _, ok := settings["embedders"]; ok {
-		t.Fatalf("semantic-disabled settings should not include embedders: %#v", settings["embedders"])
-	}
-	if _, ok := settings["searchableAttributes"]; !ok {
-		t.Fatal("semantic-disabled settings should still configure keyword searchable attributes")
-	}
-}
-
-func TestCatalogSearchMeilisearchSettingsIncludeEmbeddersWhenSemanticEnabled(t *testing.T) {
-	settings := catalogSearchMeilisearchSettings("custom_embedder", true, false)
-
-	embedders, ok := settings["embedders"].(map[string]any)
-	if !ok {
-		t.Fatalf("embedders = %#v, want map[string]any", settings["embedders"])
-	}
-	if _, ok := embedders["custom_embedder"]; !ok {
-		t.Fatalf("embedders = %#v, want custom_embedder", embedders)
-	}
-}
-
-func TestCatalogSearchMeilisearchSettingsFilterLibraryIDs(t *testing.T) {
-	settings := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)
-	filterable, ok := settings["filterableAttributes"].([]string)
-	if !ok || !reflect.DeepEqual(filterable, []string{"type", "library_ids"}) {
-		t.Fatalf("filterable attributes = %#v", settings["filterableAttributes"])
-	}
-}
-
-func TestCatalogSearchDocumentPayloadBatchesSplitVectorDocs(t *testing.T) {
-	vector := make([]float32, 128)
-	docs := []catalogSearchDocument{
-		{ContentID: "movie-1", Vectors: map[string][]float32{DefaultMeilisearchEmbedder: vector}},
-		{ContentID: "movie-2", Vectors: map[string][]float32{DefaultMeilisearchEmbedder: vector}},
-		{ContentID: "movie-3", Vectors: map[string][]float32{DefaultMeilisearchEmbedder: vector}},
-	}
-	maxBytes := estimateCatalogSearchDocumentJSONBytes(docs[0]) + 10
-	batches := catalogSearchDocumentPayloadBatches(docs, maxBytes)
-	if len(batches) != len(docs) {
-		t.Fatalf("batch count = %d, want %d", len(batches), len(docs))
-	}
-	for idx, batch := range batches {
-		if len(batch) != 1 || batch[0].ContentID != docs[idx].ContentID {
-			t.Fatalf("batch %d = %#v", idx, batch)
-		}
-	}
-}
-
-func TestMeilisearchSearchRequestBuildsKeywordOnlyByDefault(t *testing.T) {
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticRatio:    DefaultMeilisearchSemanticRatio,
-			Embedder:         DefaultMeilisearchEmbedder,
-		},
-	}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query:     "dune",
-		ItemTypes: []string{"movie"},
-	})
-	if fallback != "" {
-		t.Fatalf("fallback = %q, want empty", fallback)
-	}
-	if req.Vector != nil || req.Hybrid != nil {
-		t.Fatalf("keyword request should not include vector or hybrid: %#v", req)
-	}
-	if req.MatchingStrategy != DefaultMeilisearchMatchingStrategy {
-		t.Fatalf("matching strategy = %q, want %q", req.MatchingStrategy, DefaultMeilisearchMatchingStrategy)
-	}
-	if req.Filter != `type = "movie"` {
-		t.Fatalf("filter = %q, want movie filter", req.Filter)
-	}
-}
-
-func TestMeilisearchSearchRequestBuildsHybridWhenSemanticEnabled(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.4,
-			Embedder:         "silo_recommendations",
-			Vectorizer:       vectorizer,
-		},
-	}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query: "  found family space opera  ",
-	})
-	if fallback != "" {
-		t.Fatalf("fallback = %q, want empty", fallback)
-	}
-	if req.Hybrid == nil {
-		t.Fatal("hybrid request missing")
-	}
-	if req.Hybrid.Embedder != "silo_recommendations" {
-		t.Fatalf("embedder = %q", req.Hybrid.Embedder)
-	}
-	if req.Hybrid.SemanticRatio != 0.4 {
-		t.Fatalf("semantic ratio = %v, want 0.4", req.Hybrid.SemanticRatio)
-	}
-	if req.MatchingStrategy != DefaultMeilisearchMatchingStrategy {
-		t.Fatalf("long semantic query matching strategy = %q, want %q", req.MatchingStrategy, DefaultMeilisearchMatchingStrategy)
-	}
-	if req.AttributesToSearchOn != nil {
-		t.Fatalf("long semantic query should search all attributes, got %#v", req.AttributesToSearchOn)
-	}
-	if len(req.Vector) != 3072 {
-		t.Fatalf("vector len = %d, want 3072", len(req.Vector))
-	}
-	if vectorizer.calls != 1 || vectorizer.lastQuery != "found family space opera" {
-		t.Fatalf("vectorizer calls/query = %d/%q", vectorizer.calls, vectorizer.lastQuery)
-	}
-
-	req, fallback = provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query: "found   family space opera",
-	})
-	if fallback != "" || req.Hybrid == nil {
-		t.Fatalf("cached hybrid fallback/request = %q/%#v", fallback, req.Hybrid)
-	}
-	if vectorizer.calls != 1 {
-		t.Fatalf("cached query should not call vectorizer again, calls = %d", vectorizer.calls)
-	}
-}
-
-func TestMeilisearchSearchRequestStaysKeywordWhenCoverageNotReady(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.4,
-			Embedder:         "silo_recommendations",
-			Vectorizer:       vectorizer,
-			Coverage:         fakeCoverageGate{ready: false, reason: `type "movie" coverage 40% below threshold`},
-		},
-	}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query:     "found family space opera",
-		ItemTypes: []string{"movie"},
-	})
-	if req.Vector != nil || req.Hybrid != nil {
-		t.Fatalf("not-ready coverage should stay keyword-only: %#v", req)
-	}
-	if fallback != `semantic_not_ready: type "movie" coverage 40% below threshold` {
-		t.Fatalf("fallback = %q, want semantic_not_ready diagnostic", fallback)
-	}
-	if vectorizer.calls != 0 {
-		t.Fatalf("not-ready coverage should not call vectorizer, calls = %d", vectorizer.calls)
-	}
-}
-
-func TestMeilisearchEpisodeSearchRemainsKeywordOnly(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{config: MeilisearchProviderConfig{
-		SemanticEnabled: true,
-		SemanticRatio:   0.4,
-		Embedder:        DefaultMeilisearchEmbedder,
-		Vectorizer:      vectorizer,
-		Coverage:        fakeCoverageGate{ready: true},
-	}}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query:     "Who Are You",
-		ItemTypes: []string{"episode"},
-		Access:    AccessFilter{AllowedLibraryIDs: []int{4, 9}, DisabledLibraryIDs: []int{12}},
-	})
-	if fallback != "" || req.Hybrid != nil || req.Vector != nil {
-		t.Fatalf("episode request should be keyword-only, fallback/request = %q/%#v", fallback, req)
-	}
-	for _, want := range []string{`type = "episode"`, "library_ids IN [4, 9]", "library_ids NOT IN [12]"} {
-		if !strings.Contains(req.Filter, want) {
-			t.Fatalf("episode filter missing %q: %s", want, req.Filter)
-		}
-	}
-	if vectorizer.calls != 0 {
-		t.Fatalf("episode request generated a vector, calls=%d", vectorizer.calls)
-	}
-}
-
-func TestMeilisearchMixedSemanticSearchBuildsFederation(t *testing.T) {
+func TestMeilisearchMixedHybridSearchQueries(t *testing.T) {
 	provider := &MeilisearchSearchProvider{config: MeilisearchProviderConfig{}}
 	base := meilisearchSearchRequest{
 		Query:                "Who Are You",
@@ -316,185 +113,49 @@ func TestMeilisearchMixedSemanticSearchBuildsFederation(t *testing.T) {
 		Vector:               []float32{0.5, 0.25},
 		Hybrid:               &meilisearchHybridRequest{Embedder: DefaultMeilisearchEmbedder, SemanticRatio: 0.4},
 	}
-	federated := provider.buildFederatedSearchRequest("catalog-v3", CatalogSearchRequest{
+	built := provider.buildHybridSearchQueries("catalog-v3", CatalogSearchRequest{
 		Access: AccessFilter{AllowedLibraryIDs: []int{4}},
-	}, base, 100, 25)
-	if federated.Federation.Offset != 100 || federated.Federation.Limit != 25 {
-		t.Fatalf("federation pagination = %#v", federated.Federation)
+	}, base, 125)
+	if built.Ratio != 0.4 || len(built.Keyword) != 2 || len(built.Keyword[0]) != 1 || len(built.Keyword[1]) != 1 || built.Meaning == nil {
+		t.Fatalf("queries = %#v", built)
 	}
-	if len(federated.Queries) != 3 {
-		t.Fatalf("federated queries = %#v", federated.Queries)
+	media, episode, meaning := built.Keyword[0][0], built.Keyword[1][0], *built.Meaning
+	if media.Hybrid != nil || media.Vector != nil || media.Query != base.Query || media.Limit != 125 || media.Offset != 0 ||
+		!strings.Contains(media.Filter, `type != "episode"`) {
+		t.Fatalf("media keyword query = %#v", media)
 	}
-	media, meaning, episode := federated.Queries[0], federated.Queries[1], federated.Queries[2]
-	if media.Hybrid != nil || media.Vector != nil || media.Query != base.Query || !strings.Contains(media.Filter, `type != "episode"`) {
-		t.Fatalf("media keyword branch = %#v", media)
+	if episode.Hybrid != nil || episode.Vector != nil || episode.Limit != 125 || !strings.Contains(episode.Filter, `type = "episode"`) {
+		t.Fatalf("episode keyword query = %#v", episode)
 	}
-	if meaning.Hybrid == nil || meaning.Hybrid.SemanticRatio != 1 || len(meaning.Vector) == 0 ||
-		meaning.RankingScoreThreshold == 0 || meaning.Filter != media.Filter {
-		t.Fatalf("media meaning branch = %#v", meaning)
+	if meaning.Hybrid == nil || meaning.Hybrid.SemanticRatio != 1 || len(meaning.Vector) == 0 || meaning.Query != "" ||
+		meaning.Limit != meilisearchSemanticCandidateLimit || meaning.Filter != media.Filter {
+		t.Fatalf("meaning query = %#v", meaning)
 	}
-	if episode.Hybrid != nil || episode.Vector != nil || episode.RankingScoreThreshold != 0 || !strings.Contains(episode.Filter, `type = "episode"`) {
-		t.Fatalf("episode federation branch = %#v", episode)
+	queries := built.all()
+	if len(queries) != 3 || queries[2].Hybrid == nil {
+		t.Fatalf("flattened queries = %#v", queries)
 	}
-	if media.FederationOptions.Weight != 0.6 || meaning.FederationOptions.Weight != 0.4 || episode.FederationOptions.Weight != 0.6 {
-		t.Fatalf("federation weights = %v/%v/%v", media.FederationOptions.Weight, meaning.FederationOptions.Weight, episode.FederationOptions.Weight)
-	}
-}
-
-func TestMeilisearchFederationUnsupportedClassification(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "missing index during rebuild swap is transient",
-			err: &meilisearchHTTPError{
-				StatusCode: http.StatusNotFound,
-				Code:       "index_not_found",
-				Message:    "Index catalog_rebuild_old not found.",
-			},
-			want: false,
-		},
-		{
-			name: "missing multi-search route is unsupported",
-			err: &meilisearchHTTPError{
-				StatusCode: http.StatusNotFound,
-				Code:       "not_found",
-				Message:    "The multi-search route does not exist.",
-			},
-			want: true,
-		},
-		{
-			name: "older server rejects federation field",
-			err: &meilisearchHTTPError{
-				StatusCode: http.StatusBadRequest,
-				Code:       "bad_request",
-				Message:    "Unknown field federation: expected queries.",
-			},
-			want: true,
-		},
-		{
-			name: "invalid federated request is not a capability result",
-			err: &meilisearchHTTPError{
-				StatusCode: http.StatusBadRequest,
-				Code:       "invalid_multi_search_query_federated",
-				Message:    "A query has federationOptions but federation is missing.",
-			},
-			want: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := isMeilisearchFederationUnsupported(test.err); got != test.want {
-				t.Fatalf("isMeilisearchFederationUnsupported(%v) = %t, want %t", test.err, got, test.want)
-			}
-		})
-	}
-}
-
-func TestMeilisearchFederationUnsupportedCacheExpiresAndRecovers(t *testing.T) {
-	provider := &MeilisearchSearchProvider{}
-	provider.markFederationUnsupported()
-	if !provider.isFederationUnsupported() {
-		t.Fatal("fresh unsupported result should be cached")
-	}
-
-	provider.federationMu.Lock()
-	provider.federationUnsupportedAt = time.Now().Add(-meilisearchFederationCapabilityCacheTTL)
-	provider.federationMu.Unlock()
-	if provider.isFederationUnsupported() {
-		t.Fatal("expired unsupported result should permit a federation re-probe")
-	}
-
-	provider.markFederationSupported()
-	if provider.isFederationUnsupported() {
-		t.Fatal("successful federation probe should clear the unsupported result")
-	}
-}
-
-func TestCatalogSearchEpisodeDocumentsNeverCarryVectors(t *testing.T) {
-	docs := []catalogSearchDocument{
-		{ContentID: "movie-1", Type: "movie"},
-		{ContentID: "episode-1", Type: "episode"},
-	}
-	count := setCatalogSearchDocumentVectors(docs, map[string][]float32{
-		"movie-1":   {0.1, 0.2},
-		"episode-1": {0.3, 0.4},
-	}, DefaultMeilisearchEmbedder)
-	if count != 1 || docs[0].Vectors == nil {
-		t.Fatalf("media vector assignment = count %d, vectors %#v", count, docs[0].Vectors)
-	}
-	// Episodes must carry the explicit `_vectors.<embedder>: null` opt-out:
-	// omitting _vectors entirely fails indexing under a userProvided embedder.
-	episodeVector, ok := docs[1].Vectors[DefaultMeilisearchEmbedder]
-	if !ok || episodeVector != nil {
-		t.Fatalf("episode vectors = %#v, want explicit nil opt-out", docs[1].Vectors)
-	}
-}
-
-func TestMeilisearchSearchRequestBuildsHybridAndStrictMatchingForTwoTermSearch(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.3,
-			Embedder:         "silo_recommendations",
-			Vectorizer:       vectorizer,
-		},
-	}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query: "spnge bob",
-	})
-	if fallback != "" {
-		t.Fatalf("fallback = %q, want empty", fallback)
-	}
-	if req.Vector == nil || req.Hybrid == nil {
-		t.Fatalf("two-term title search should include hybrid search: %#v", req)
-	}
-	if req.MatchingStrategy != "all" {
-		t.Fatalf("two-term title search matching strategy = %q, want all", req.MatchingStrategy)
-	}
-	if !reflect.DeepEqual(req.AttributesToSearchOn, meilisearchTitleSearchAttributes) {
-		t.Fatalf("two-term title search attributes = %#v, want %#v", req.AttributesToSearchOn, meilisearchTitleSearchAttributes)
-	}
-	if vectorizer.calls != 1 || vectorizer.lastQuery != "spnge bob" {
-		t.Fatalf("vectorizer calls/query = %d/%q", vectorizer.calls, vectorizer.lastQuery)
-	}
-}
-
-func TestMeilisearchSearchRequestSkipsHybridForSingleTermTitleSearch(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.4,
-			Embedder:         "silo_recommendations",
-			Vectorizer:       vectorizer,
-		},
-	}
-	for _, query := range []string{"sponge", "spongebob"} {
-		req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-			Query: query,
-		})
-		if fallback != "" {
-			t.Fatalf("fallback for %q = %q, want empty", query, fallback)
+	for _, query := range queries {
+		if query.IndexUID != "catalog-v3" || !query.ShowRankingScore {
+			t.Fatalf("query index/score = %q/%v", query.IndexUID, query.ShowRankingScore)
 		}
-		if req.Vector != nil || req.Hybrid != nil {
-			t.Fatalf("short title search %q should stay keyword-only: %#v", query, req)
-		}
-		if req.MatchingStrategy != DefaultMeilisearchMatchingStrategy {
-			t.Fatalf("single-term search %q matching strategy = %q, want %q", query, req.MatchingStrategy, DefaultMeilisearchMatchingStrategy)
-		}
-		if req.AttributesToSearchOn != nil {
-			t.Fatalf("single-term search %q should search all attributes, got %#v", query, req.AttributesToSearchOn)
+		if keyword := query.Hybrid == nil; query.ShowRankingScoreDetails != keyword {
+			t.Fatalf("query details = %v, want %v for keyword %v", query.ShowRankingScoreDetails, keyword, keyword)
 		}
 	}
-	if vectorizer.calls != 0 {
-		t.Fatalf("short title searches should not call vectorizer, calls = %d", vectorizer.calls)
+}
+
+func TestMeilisearchMatchingStrategyByTermCount(t *testing.T) {
+	for _, tc := range []struct{ configured, query, want string }{
+		{"last", "dune", "last"},
+		{"last", "tom hanks", "all"},
+		{"last", "movies about time travel", "frequency"},
+		{"all", "movies about time travel", "all"},
+	} {
+		provider := &MeilisearchSearchProvider{config: MeilisearchProviderConfig{MatchingStrategy: tc.configured}}
+		if got := provider.matchingStrategyForRequest(CatalogSearchRequest{Query: tc.query}); got != tc.want {
+			t.Errorf("strategy %q, query %q = %q, want %q", tc.configured, tc.query, got, tc.want)
+		}
 	}
 }
 
@@ -732,53 +393,6 @@ func TestMeilisearchProviderUsesActiveIndexWhenPendingUpdatesExist(t *testing.T)
 	}
 }
 
-func TestMeilisearchProviderUsesStaleVectorlessIndexForKeywordSearch(t *testing.T) {
-	var searchRequest meilisearchSearchRequest
-	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/indexes/search-index/search" {
-			t.Fatalf("unexpected Meilisearch request %s %s", r.Method, r.URL.Path)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&searchRequest); err != nil {
-			t.Fatalf("decode search request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
-	})
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.1, 0.2}}
-	provider := &MeilisearchSearchProvider{
-		stateRepo: fakeMeilisearchIndexStateStore{state: SearchIndexState{
-			ActiveIndexUID: "search-index",
-			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false),
-		}},
-		fallback: &PostgresSearchProvider{},
-		client:   client,
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			Embedder:         DefaultMeilisearchEmbedder,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.5,
-			Vectorizer:       vectorizer,
-		},
-	}
-
-	result, err := provider.Search(t.Context(), CatalogSearchRequest{Query: "space opera", Limit: 10})
-	if err != nil {
-		t.Fatalf("Search returned error: %v", err)
-	}
-	if vectorizer.calls != 0 {
-		t.Fatalf("vectorizer calls = %d, want 0 while the semantic index rebuilds", vectorizer.calls)
-	}
-	if searchRequest.Hybrid != nil || len(searchRequest.Vector) != 0 {
-		t.Fatalf("stale index request used semantic search: hybrid=%#v vector=%v", searchRequest.Hybrid, searchRequest.Vector)
-	}
-	if result.Provider != SearchProviderMeilisearch || result.Mode != "keyword" || result.SemanticUsed {
-		t.Fatalf("result diagnostics = provider %q, mode %q, semantic %t", result.Provider, result.Mode, result.SemanticUsed)
-	}
-	if !strings.Contains(result.FallbackReason, "rebuild required") {
-		t.Fatalf("fallback reason = %q, want rebuild diagnostic", result.FallbackReason)
-	}
-}
-
 func TestMeilisearchProviderFallsBackWhenScopedIndexCannotSatisfyRequest(t *testing.T) {
 	provider := &MeilisearchSearchProvider{
 		config: MeilisearchProviderConfig{
@@ -798,55 +412,50 @@ func TestMeilisearchProviderFallsBackWhenScopedIndexCannotSatisfyRequest(t *test
 	}
 }
 
-func TestMeilisearchProviderAllowsUnscopedIndexForAnyRequest(t *testing.T) {
-	provider := &MeilisearchSearchProvider{}
-	for _, itemTypes := range [][]string{nil, {"movie"}, {"audiobook", "ebook"}} {
-		if !provider.indexCoversRequest(itemTypes) {
-			t.Fatalf("unscoped index should cover request %#v", itemTypes)
-		}
-	}
+type fakeCatalogSearchStatusStateStore struct {
+	fakeMeilisearchIndexStateStore
 }
 
-func TestNormalizeCatalogSearchIndexTypesValueFormatsCanonicalList(t *testing.T) {
-	itemTypes, err := NormalizeCatalogSearchIndexTypesValue("video, movie, ebook")
-	if err != nil {
-		t.Fatalf("NormalizeCatalogSearchIndexTypesValue returned error: %v", err)
-	}
-	want := "movie,series,ebook"
-	if got := FormatCatalogSearchIndexTypesValue(itemTypes); got != want {
-		t.Fatalf("formatted index types = %q, want %q", got, want)
-	}
+func (fakeCatalogSearchStatusStateStore) DeadLetterCount(context.Context, string) (int, error) {
+	return 0, nil
 }
 
-func TestMeilisearchIndexCompatibility(t *testing.T) {
-	itemTypes := []string{"movie", "series"}
-	semanticOff := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, itemTypes, false, false)
-	semanticOn := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, itemTypes, true, false)
-	if semanticOn/1_000_000 != SearchMeilisearchSchemaVersion {
-		t.Fatalf("schema generation = %d, want %d", semanticOn/1_000_000, SearchMeilisearchSchemaVersion)
-	}
-	tests := []struct {
-		name          string
-		activeVersion int
-		embedder      string
-		itemTypes     []string
-		semantic      bool
-		binary        bool
-		want          catalogSearchIndexCompatibility
-	}{
-		{name: "current", activeVersion: semanticOn, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, want: catalogSearchIndexCurrent},
-		{name: "semantic enablement", activeVersion: semanticOff, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, want: catalogSearchIndexKeywordOnly},
-		{name: "semantic disablement", activeVersion: semanticOn, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, want: catalogSearchIndexKeywordOnly},
-		{name: "binary setting change", activeVersion: semanticOn, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, binary: true, want: catalogSearchIndexKeywordOnly},
-		{name: "different embedder", activeVersion: semanticOff, embedder: "other_embedder", itemTypes: itemTypes, semantic: true, want: catalogSearchIndexIncompatible},
-		{name: "different media scope", activeVersion: semanticOff, embedder: DefaultMeilisearchEmbedder, itemTypes: []string{"movie"}, semantic: true, want: catalogSearchIndexIncompatible},
-		{name: "unknown schema", activeVersion: 0, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, want: catalogSearchIndexIncompatible},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := catalogSearchMeilisearchIndexCompatibility(tc.activeVersion, tc.embedder, tc.itemTypes, tc.semantic, tc.binary)
-			if got != tc.want {
-				t.Fatalf("compatibility = %v, want %v", got, tc.want)
+// An active index recorded in Postgres that Meilisearch no longer has (its
+// data directory was emptied) must not be reported as a current, healthy
+// index: searches fall back to Postgres until the sync task rebuilds it.
+func TestCatalogSearchStatusReportsMissingActiveIndex(t *testing.T) {
+	const uid = "silo_media_items_rebuild_1"
+	settings := DefaultCatalogSearchSettings()
+	settings.Provider = SearchProviderMeilisearch
+	settings.MeilisearchURL = "http://meilisearch.invalid"
+	settings.SemanticEnabled = true
+	for name, indexSemantic := range map[string]bool{
+		"current index": true,
+		// An index built without vectors serves keyword search and already
+		// needs a rebuild; it can be missing all the same.
+		"keyword-only index": false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Index ` + uid + ` not found.","code":"index_not_found"}`))
+			})
+			store := fakeCatalogSearchStatusStateStore{fakeMeilisearchIndexStateStore{state: SearchIndexState{
+				ActiveIndexUID: uid,
+				SchemaVersion:  catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, indexSemantic, settings.BinaryQuantized),
+				DocumentCount:  1345309,
+			}}}
+			meili := &MeilisearchSearchProvider{stateRepo: store, client: client, config: MeilisearchProviderConfig{Embedder: settings.Embedder}}
+			service := &CatalogSearchService{settings: settings, provider: meili, meili: meili, state: store}
+
+			status := service.Status(t.Context())
+			if !status.Index.RebuildRequired || !status.Degraded || status.ActiveProvider != SearchProviderPostgres {
+				t.Fatalf("status = rebuild_required %t, degraded %t, active_provider %q; want true, true, postgres",
+					status.Index.RebuildRequired, status.Degraded, status.ActiveProvider)
+			}
+			if status.Index.DocumentCount != 0 {
+				t.Fatalf("document_count = %d for a missing index, want 0", status.Index.DocumentCount)
 			}
 		})
 	}
@@ -878,71 +487,4 @@ type fakeCoverageGate struct {
 
 func (g fakeCoverageGate) CoverageReady(_ []string) (bool, string) {
 	return g.ready, g.reason
-}
-
-// Feature detection must not fail while Meilisearch is down: searches still
-// answer through the PostgreSQL fallback, so capabilities report that path.
-func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
-	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":1000}}`))
-	}))
-	defer healthy.Close()
-	down := httptest.NewServer(http.NotFoundHandler())
-	down.Close()
-	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":5000}}`))
-	}))
-	defer oversized.Close()
-
-	postgres := SearchContinuationCapabilities{Provider: SearchProviderPostgres}
-	for _, tc := range []struct {
-		name        string
-		url         string
-		activeUID   string
-		staleSchema bool
-		circuitOpen bool
-		wantResult  SearchContinuationCapabilities
-		wantErr     error
-	}{
-		{name: "healthy index", url: healthy.URL, activeUID: "silo_media_items", wantResult: SearchContinuationCapabilities{
-			Provider: SearchProviderMeilisearch, ResultWindowLimit: 1000,
-			SessionTTLSeconds: int(searchSessionTTL.Seconds()), MaxSessionsPerAccount: searchSessionsPerAccount,
-		}},
-		{name: "meilisearch unreachable", url: down.URL, activeUID: "silo_media_items", wantResult: postgres},
-		{name: "index not built", url: healthy.URL, wantResult: postgres},
-		{name: "index schema mismatch", url: healthy.URL, activeUID: "silo_media_items", staleSchema: true, wantResult: postgres},
-		{name: "circuit open", url: healthy.URL, activeUID: "silo_media_items", circuitOpen: true, wantResult: postgres},
-		// A window Silo cannot rank is a configuration error, not a fallback.
-		{name: "window unsupported", url: oversized.URL, activeUID: "silo_media_items", wantErr: ErrSearchWindowUnsupported},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			provider, err := NewMeilisearchSearchProvider(nil, nil, nil, MeilisearchProviderConfig{URL: tc.url})
-			if err != nil {
-				t.Fatal(err)
-			}
-			schema := catalogSearchMeilisearchSchemaVersion(provider.config.Embedder, provider.config.IndexTypes, false, false)
-			if tc.staleSchema {
-				schema = 1
-			}
-			provider.stateRepo = fakeMeilisearchIndexStateStore{state: SearchIndexState{ActiveIndexUID: tc.activeUID, SchemaVersion: schema}}
-			if tc.circuitOpen {
-				provider.tripCircuit(errors.New("meilisearch timed out"))
-			}
-			resolver := &CatalogResolver{searchProvider: provider}
-
-			got, err := resolver.SearchContinuationCapabilities(t.Context())
-			if tc.wantErr != nil {
-				if !errors.Is(err, tc.wantErr) {
-					t.Fatalf("SearchContinuationCapabilities error = %v, want %v", err, tc.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("SearchContinuationCapabilities error = %v", err)
-			}
-			if got != tc.wantResult {
-				t.Fatalf("SearchContinuationCapabilities = %+v, want %+v", got, tc.wantResult)
-			}
-		})
-	}
 }

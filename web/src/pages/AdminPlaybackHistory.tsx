@@ -27,6 +27,7 @@ import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import type { AdminPlaybackHistoryItem } from "@/api/types";
 import { useT, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 import type { MessageKey } from "@/locales/keys";
 
 import { episodeCode } from "./admin-users/detail/format";
@@ -235,14 +236,17 @@ export default function AdminPlaybackHistory() {
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <InfoCard label={t("web.admin.history.stats.visibleRows")} value={String(allRows.length)} />
+        <InfoCard
+          label={t("web.admin.history.stats.visibleRows")}
+          value={allRows.length.toLocaleString(formatLocale())}
+        />
         <InfoCard
           label={t("web.admin.history.stats.completed")}
-          value={String(allRows.filter((row) => row.completed).length)}
+          value={allRows.filter((row) => row.completed).length.toLocaleString(formatLocale())}
         />
         <InfoCard
           label={t("web.admin.history.stats.partial")}
-          value={String(allRows.filter((row) => !row.completed).length)}
+          value={allRows.filter((row) => !row.completed).length.toLocaleString(formatLocale())}
         />
       </div>
 

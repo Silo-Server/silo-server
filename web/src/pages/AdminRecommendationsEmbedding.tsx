@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { parseRecommendationEmbeddingLock } from "@/pages/admin-settings/recommendationsSettings";
-import { useT } from "@/i18n";
+import { useServerText, useT } from "@/i18n";
 
 export function RecEmbeddingLockCard({
   lock,
@@ -58,16 +58,21 @@ export function RecEmbeddingLockCard({
 
 export function RecEmbeddingResetCard({
   lockConflict,
+  lockConflictKey,
+  lockConflictArgs,
   disabled,
   isPending,
   onReset,
 }: {
   lockConflict: string;
+  lockConflictKey?: string;
+  lockConflictArgs?: Record<string, string>;
   disabled: boolean;
   isPending: boolean;
   onReset: () => void;
 }) {
   const t = useT();
+  const serverText = useServerText();
   const [confirming, setConfirming] = useState(false);
   return (
     <div className="surface-panel max-w-3xl space-y-3 rounded-2xl border-0 px-5 py-4">
@@ -77,7 +82,7 @@ export function RecEmbeddingResetCard({
           className="border-warning/30 bg-warning/10 text-warning flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <span>{lockConflict}</span>
+          <span>{serverText(lockConflictKey, lockConflictArgs, lockConflict)}</span>
         </div>
       )}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

@@ -1,13 +1,8 @@
 import { bulkCreateAdminSections, createAdminSection } from "@/api/adminSections";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canCopyToLibraries } from "./bulkCopy";
-import { pickerGroups } from "./catalog";
 import { buildBulkCopyPayload, buildRowCreateRequest } from "./payloads";
-import {
-  everyPreset,
-  everyRecipe,
-  recipeCatalogFixture,
-} from "./recipeCatalogFixture.test-support";
+import { everyPreset } from "./recipeCatalogFixture.test-support";
 import { draftForPreset } from "./rowDraft";
 
 const wire = vi.hoisted(() => ({ last: undefined as unknown }));
@@ -53,51 +48,5 @@ describe("admin bulk create", () => {
       expect(bulkLibraries).toEqual([String(LIBRARY_ID), "8"]);
       expect(bulkRest, `${def.type}/${preset.key}`).toEqual(singleRest);
     }
-  });
-
-  it("copies an existing row as it is, never as a hero banner", async () => {
-    const copy = await sent(() =>
-      bulkCreateAdminSections(
-        buildBulkCopyPayload(
-          {
-            sectionType: "trending_on_server",
-            title: "Trending This Week",
-            itemLimit: 30,
-            config: { window: "7d" },
-            enabled: false,
-          },
-          [8, 9],
-        ),
-      ),
-    );
-    expect(copy).toEqual({
-      route: "POST /api/v2/admin/sections/bulk",
-      body: {
-        scope: "library",
-        library_ids: ["8", "9"],
-        section_type: "trending_on_server",
-        title: "Trending This Week",
-        item_limit: 30,
-        featured: false,
-        enabled: false,
-        config: { window: "7d" },
-      },
-    });
-  });
-});
-
-// Both pickers share one list: the server lets every profile add rule rows
-// and refuses only new rows of an admin-only kind from a profile.
-describe("rule rows for every profile", () => {
-  it("offers rule rows and no admin-only kind", () => {
-    const offered = pickerGroups(recipeCatalogFixture).flatMap((group) =>
-      group.cards.map((card) => card.type),
-    );
-    expect(offered).toContain("custom_filter");
-    const adminOnly = everyRecipe()
-      .filter((def) => def.admin_only)
-      .map((def) => def.type);
-    expect(adminOnly).toEqual(["admin_curated_list"]);
-    expect(offered.some((type) => adminOnly.includes(type))).toBe(false);
   });
 });

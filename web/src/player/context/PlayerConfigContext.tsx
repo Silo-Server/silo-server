@@ -20,6 +20,13 @@ export interface PlayerConfig {
   refreshToken?: () => Promise<boolean>;
   /** Account/server generation; unchanged by automatic token rotation. */
   getAuthContext?: () => unknown;
+  /**
+   * Runs once the stop a player sends as it unmounts has settled, delivered
+   * or given up. The stop can write more than the last progress report (watch
+   * history, the later episodes of a multi-episode file), so pages that show
+   * watch state read it again here.
+   */
+  onSessionStopped?: () => void;
 }
 
 const PlayerConfigCtx = createContext<PlayerConfig | null>(null);

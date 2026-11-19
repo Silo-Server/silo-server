@@ -26,7 +26,8 @@ identity includes source path, modification time, size, track ordinal, and
 output format. A source change during extraction prevents publication. Cache
 failures do not prevent delivering a successful extraction, and incomplete
 extracts are not published. A node's first request may still require a complete
-file demux.
+file demux. A node already running as many subtitle demuxes as it allows answers
+`503 ServiceUnavailable` with `Retry-After` instead of starting another.
 
 Repeated unstarted playback negotiations replace only negotiations with the same
 source and track-selection variant. Distinct audio or subtitle selections keep

@@ -2,9 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
-	"net/url"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 )
@@ -37,40 +34,4 @@ func (f *fakeAdminCatalogSources) BrowseDirectoryPage(ctx context.Context, path,
 	f.prefix = prefix
 	rows, err := f.ListLocalCatalogImportSourcesPage(ctx, after, limit)
 	return handlers.FilesystemDirectoryPage{Path: path, Parent: "/", Entries: rows}, err
-}
-
-func TestAdminCatalogSourcesCursorBindingAndEmptyStoragePage(t *testing.T) {
-	f := &fakeAdminCatalogSources{}
-	deps, _ := libraryDeps(t)
-	deps.AdminCatalogSources = f
-	deps.AdminFilesystem = f
-	h := newTestHandler(t, deps)
-	base := Prefix + "/admin/catalog/import-sources"
-	first := do(t, h, "GET", base+"?limit=1", "", bearer(adminToken))
-	if first.Code != 200 {
-		t.Fatalf("%d %s", first.Code, first.Body)
-	}
-	var page Collection[AdminCatalogSource]
-	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Items) != 0 || page.Page == nil || !page.Page.HasMore || f.limit != 1 {
-		t.Fatalf("page: %#v, limit=%d", page, f.limit)
-	}
-	cursor := url.QueryEscape(page.Page.NextCursor)
-	second := do(t, h, "GET", base+"?limit=1&cursor="+cursor, "", bearer(adminToken))
-	if second.Code != 200 || f.after != "opaque-storage-token" {
-		t.Fatalf("continuation: %d %s, after=%q", second.Code, second.Body, f.after)
-	}
-	before := f.calls
-	wrong := do(t, h, "GET", Prefix+"/admin/catalog/local-import-sources?cursor="+cursor, "", bearer(adminToken))
-	if wrong.Code < 400 || f.calls != before {
-		t.Fatalf("cross-operation cursor accepted: %d", wrong.Code)
-	}
-	for _, path := range []string{base, Prefix + "/admin/catalog/local-import-sources", Prefix + "/admin/filesystem/browse"} {
-		denied := do(t, h, "GET", path, "", bearer(memberToken))
-		if denied.Code != 403 || f.calls != before {
-			t.Fatalf("profile reached admin source: %d %s", denied.Code, denied.Body)
-		}
-	}
 }

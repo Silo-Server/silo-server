@@ -245,6 +245,12 @@ const ROW_KINDS: Record<string, RowKind> = {
     label: "web.home.rows.kinds.collection",
     sentence: "web.home.rows.kindSentences.collection",
   },
+  collection_posters: {
+    group: "collections",
+    name: "Collections",
+    label: "web.home.rows.kinds.collectionPosters",
+    sentence: "web.home.rows.kindSentences.collectionPosters",
+  },
   custom_filter: {
     group: "collections",
     name: "Titles matching rules",

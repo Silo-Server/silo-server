@@ -22,7 +22,14 @@ export function countValues(count: number, text = String(count)) {
  */
 export function formatStorageBytes(bytes: number | null | undefined): string {
   const value = Math.max(bytes ?? 0, 0);
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  const units: MessageKey[] = [
+    "web.common.format.size.bytes",
+    "web.common.format.size.kb",
+    "web.common.format.size.mb",
+    "web.common.format.size.gb",
+    "web.common.format.size.tb",
+    "web.common.format.size.pb",
+  ];
   let index = 0;
   let scaled = value;
   // 999.5 and up would round to "1000", so it moves to the next unit.
@@ -30,8 +37,11 @@ export function formatStorageBytes(bytes: number | null | undefined): string {
     scaled /= 1000;
     index++;
   }
-  if (index === 0) return `${Math.round(scaled)} B`;
-  return `${scaled >= 100 ? Math.round(scaled) : formatDecimal(scaled, scaled >= 10 ? 0 : 1)} ${units[index]}`;
+  const unit = units[index] ?? "web.common.format.size.pb";
+  if (index === 0) return t(unit, { size: formatDecimal(Math.round(scaled), 0) });
+  return t(unit, {
+    size: formatDecimal(scaled, scaled >= 10 ? 0 : 1),
+  });
 }
 
 /** Fill at which a node stops taking playback sessions (scratch pressure). */

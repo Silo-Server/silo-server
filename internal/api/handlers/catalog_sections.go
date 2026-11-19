@@ -42,6 +42,11 @@ func (h *SectionHandler) ResolveCatalogSection(ctx context.Context, req catalog.
 // (hidden gems, forgotten favorites, ...) fetch a different selection at a
 // larger limit, so leading with the row keeps what the profile just saw.
 func (h *SectionHandler) fetchCatalogSectionItems(ctx context.Context, row catalogSectionRow, limit int) (catalog.SectionRowItems, error) {
+	// A row of collections lists collections, not titles, so it has no
+	// titles to browse.
+	if sections.HoldsCollections(row.section.SectionType) {
+		return catalog.SectionRowItems{Items: []*models.MediaItem{}}, nil
+	}
 	// Library pages never hide watched items; Home does per profile.
 	hideWatched := row.libraryID == nil && h.homeHidesWatchedItems(ctx)
 	shown, err := h.fetchCatalogSectionRow(ctx, row, row.section, hideWatched)

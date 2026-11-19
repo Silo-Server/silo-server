@@ -3,148 +3,77 @@ package plugins
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
-func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
-	installations := &fakeAutoUpdateInstallations{
-		list: []*Installation{
-			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.2.9", UpdatePolicy: "auto", Enabled: true},
-		},
-	}
-	host := &fakeAutoUpdateHost{}
-	installer := &fakeAutoUpdateInstaller{}
-	catalog := &fakeAutoUpdateCatalog{
-		entries: []CatalogEntry{
-			{
-				RepositoryID: 7,
-				RepoURL:      "https://github.com/Silo-Server/silo-plugin-metadata-tmdb",
-				Manifest: &pluginv1.PluginManifest{
-					PluginId: "silo.tmdb",
-					Version:  "1.2.10",
-				},
-			},
-		},
-		resolved: &ResolvedCatalogInstall{
-			RepositoryID: 7,
-			ArchiveURL:   "https://github.com/Silo-Server/silo-plugin-metadata-tmdb/releases/download/v1.2.10/plugin-linux-amd64",
-			Checksum:     "deadbeef",
-		},
-	}
+// A refused replacement package leaves the running plugin alone.
+func TestAutoUpdateServiceRefusedPackageLeavesPluginRunning(t *testing.T) {
+	events := []string{}
 	service := NewAutoUpdateService(
-		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, URL: DefaultRepositoryURL, Enabled: true}}},
-		installations,
-		catalog,
-		installer,
-		host,
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+		&fakeAutoUpdateInstallations{list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}}},
+		&fakeAutoUpdateCatalog{
+			entries:  []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"}}},
+			resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
+		},
+		&fakeAutoUpdateInstaller{replaceErr: packageError(errors.New("binary checksum mismatch"), "refused"), events: &events},
+		&fakeAutoUpdateHost{events: &events},
 		nil,
 		nil,
 	)
-
-	summary, err := service.Check(context.Background(), AutoUpdateOptions{
-		SeedDefaultRepository: true,
-		AutoInstallDefaults:   false,
-	})
-	if err != nil {
+	if _, err := service.Check(context.Background(), AutoUpdateOptions{}); err != nil {
 		t.Fatalf("Check() returned error: %v", err)
 	}
-	if summary.UpdatesApplied != 1 {
-		t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
-	}
-	if len(installations.deletedIDs) != 0 {
-		t.Fatalf("deleted installation IDs = %#v, want none", installations.deletedIDs)
-	}
-	if len(installer.replaceBinary) != 1 {
-		t.Fatalf("replace binary calls = %d, want 1", len(installer.replaceBinary))
-	}
-	if installer.replaceBinary[0].existingID != 41 {
-		t.Fatalf("replace binary existing_id = %d, want 41", installer.replaceBinary[0].existingID)
-	}
-	if len(host.stopped) != 1 || host.stopped[0] != 41 {
-		t.Fatalf("stopped installations = %#v, want [41]", host.stopped)
+	if want := []string{"prepare"}; !slices.Equal(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
 	}
 }
 
-func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
-	newOnChangeService := func(installations *fakeAutoUpdateInstallations, opts AutoUpdateOptions, calls *int) (AutoUpdateSummary, error) {
-		catalog := &fakeAutoUpdateCatalog{
-			entries: []CatalogEntry{{
-				RepositoryID: 7,
-				Manifest: &pluginv1.PluginManifest{
-					PluginId: "silo.tmdb",
-					Version:  "1.1.0",
-				},
-			}},
-			resolved: &ResolvedCatalogInstall{
-				RepositoryID: 7,
-				ArchiveURL:   "https://plugins.example.test/tmdb",
-				Checksum:     "deadbeef",
-			},
-		}
-		service := NewAutoUpdateService(
-			&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
-			installations,
-			catalog,
-			&fakeAutoUpdateInstaller{},
-			&fakeAutoUpdateHost{},
-			nil,
-			func(context.Context) { *calls++ },
-		)
-		return service.Check(context.Background(), opts)
+// An automatic update whose installation an admin's install replaced while
+// it downloaded leaves the newer release running and its refusal record
+// alone: it is skipped, not a refusal to show in web admin.
+func TestAutoUpdateServiceSkipsInstallationReplacedDuringDownload(t *testing.T) {
+	events := []string{}
+	installations := &fakeAutoUpdateInstallations{
+		list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", InstallPath: "/plugins/1.0.0/plugin", UpdatePolicy: "auto", Enabled: true,
+			UpdateFailure: &UpdateFailure{Version: "1.1.0", Reason: "earlier refusal"}}},
+		current: &Installation{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "2.0.0", InstallPath: "/plugins/2.0.0/plugin", UpdatePolicy: "auto", Enabled: true},
 	}
-
-	t.Run("applied auto-update fires onChange", func(t *testing.T) {
-		var calls int
-		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
+	service := NewAutoUpdateService(
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+		installations,
+		&fakeAutoUpdateCatalog{
+			entries:  []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"}}},
+			resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
+		},
+		&fakeAutoUpdateInstaller{events: &events},
+		&fakeAutoUpdateHost{events: &events},
+		nil,
+		nil,
+	)
+	summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+	if err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if want := []string{"prepare"}; !slices.Equal(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+	if summary.UpdatesApplied != 0 || len(summary.Failures) != 0 {
+		t.Fatalf("summary = %+v, want nothing applied and no failure", summary)
+	}
+	for _, update := range installations.updates {
+		if update.UpdateFailure != nil {
+			t.Fatalf("recorded failure %+v for a skipped update", update.UpdateFailure)
 		}
-		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
-		if err != nil {
-			t.Fatalf("Check() returned error: %v", err)
+		// A record on the newer release is about updating that release, so
+		// clearing the old snapshot's record must not reach it.
+		if update.ClearUpdateFailure && (update.IfInstallPath == nil || *update.IfInstallPath != "/plugins/1.0.0/plugin") {
+			t.Fatalf("clear guarded on %v, want the install path the pass read", update.IfInstallPath)
 		}
-		if summary.UpdatesApplied != 1 {
-			t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
-		}
-		if calls != 1 {
-			t.Fatalf("onChange calls = %d, want 1", calls)
-		}
-	})
-
-	t.Run("notify update fires onChange", func(t *testing.T) {
-		var calls int
-		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 42, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "notify", Enabled: true}},
-		}
-		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
-		if err != nil {
-			t.Fatalf("Check() returned error: %v", err)
-		}
-		if summary.UpdatesAvailable != 1 {
-			t.Fatalf("UpdatesAvailable = %d, want 1", summary.UpdatesAvailable)
-		}
-		if calls != 1 {
-			t.Fatalf("onChange calls = %d, want 1", calls)
-		}
-	})
-
-	t.Run("no mutation does not fire onChange", func(t *testing.T) {
-		var calls int
-		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 43, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.1.0", UpdatePolicy: "auto", Enabled: true}},
-		}
-		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
-		if err != nil {
-			t.Fatalf("Check() returned error: %v", err)
-		}
-		if summary.UpdatesApplied != 0 || summary.UpdatesAvailable != 0 {
-			t.Fatalf("unexpected mutation summary: %+v", summary)
-		}
-		if calls != 0 {
-			t.Fatalf("onChange calls = %d, want 0", calls)
-		}
-	})
+	}
 }
 
 // A refused automatic update is recorded on the installation so web admin
@@ -229,59 +158,6 @@ func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
 				t.Fatalf("recorded failure = %+v, want version %q reason %q and a time", recorded, tt.wantFailure.Version, tt.wantFailure.Reason)
 			}
 		})
-	}
-}
-
-func TestCompareVersions(t *testing.T) {
-	tests := []struct {
-		a, b string
-		want int
-	}{
-		{"1.2.9", "1.2.9", 0},
-		{"1.2.10", "1.2.9", 1},
-		{"1.2.9", "1.2.10", -1},
-		{"2.0.0", "1.9.9", 1},
-		{"1.0.0", "1.1.0", -1},
-		{"1.10.0", "1.9.0", 1},
-		{"0.0.30", "0.0.29", 1},
-		{"v1.2.3", "1.2.3", 0},
-		// A pre-release sorts below its release and above the previous one.
-		{"1.2.0-rc.1", "1.2.0", -1},
-		{"1.2.0", "1.2.0-rc.1", 1},
-		{"1.2.0-rc.1", "1.1.9", 1},
-		// Pre-release identifiers: numeric ones compare numerically and sort
-		// below alphanumeric ones, and a longer list wins a shared prefix.
-		{"1.2.0-rc.2", "1.2.0-rc.10", -1},
-		{"1.2.0-alpha", "1.2.0-beta", -1},
-		{"1.2.0-1", "1.2.0-alpha", -1},
-		{"1.2.0-alpha", "1.2.0-alpha.1", -1},
-		{"1.2.0-alpha.beta", "1.2.0-alpha.1", 1},
-		// Build metadata does not affect precedence.
-		{"1.2.0+build.5", "1.2.0+build.9", 0},
-		{"1.2.0-rc.1+abc", "1.2.0", -1},
-		// Missing minor and patch segments read as zero.
-		{"1.2", "1.2.0", 0},
-		{"2", "1.9.9", 1},
-		// An invalid version sorts below any valid one; two invalid versions
-		// compare by dot segment.
-		{"dev", "0.0.1", -1},
-		{"", "1.0.0", -1},
-		{"1.2.3", "1.2.3.1", 1},
-		{"1.2.3.1", "1.2.3.2", -1},
-		{"1.2.3.10", "1.2.3.9", 1},
-		{"1.2.3.4", "1.2.3.4.5", -1},
-		// Integer segments sort before text, so invalid versions stay
-		// transitive: 2.dev < 10.dev < 1a.dev.
-		{"2.dev", "10.dev", -1},
-		{"10.dev", "1a.dev", -1},
-		{"2.dev", "1a.dev", -1},
-		{"", "", 0},
-	}
-	for _, tt := range tests {
-		got := compareVersions(tt.a, tt.b)
-		if got != tt.want {
-			t.Errorf("compareVersions(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
-		}
 	}
 }
 
@@ -378,7 +254,9 @@ func (f *fakeAutoUpdateRepositories) Create(_ context.Context, input CreateRepos
 }
 
 type fakeAutoUpdateInstallations struct {
-	list       []*Installation
+	list []*Installation
+	// current, when set, is what GetByID reads, as after another install.
+	current    *Installation
 	updates    []UpdateInstallationInput
 	updateErr  error
 	deletedIDs []int
@@ -386,6 +264,18 @@ type fakeAutoUpdateInstallations struct {
 
 func (f *fakeAutoUpdateInstallations) List(context.Context) ([]*Installation, error) {
 	return f.list, nil
+}
+
+func (f *fakeAutoUpdateInstallations) GetByID(_ context.Context, id int) (*Installation, error) {
+	if f.current != nil {
+		return f.current, nil
+	}
+	for _, installation := range f.list {
+		if installation.ID == id {
+			return installation, nil
+		}
+	}
+	return nil, ErrInstallationNotFound
 }
 
 func (f *fakeAutoUpdateInstallations) Update(_ context.Context, _ int, input UpdateInstallationInput) error {
@@ -417,22 +307,14 @@ func pluginRepositoryID(id int) *int {
 	return &id
 }
 
-type replaceBinaryCall struct {
-	existingID int
-	req        InstallBinaryRequest
-}
-
-type replaceRemoteCall struct {
-	existingID int
-	req        InstallArchiveRequest
-}
-
 type fakeAutoUpdateInstaller struct {
-	replaceErr    error
-	replaceBinary []replaceBinaryCall
-	replaceRemote []replaceRemoteCall
-	binary        []InstallBinaryRequest
-	remote        []InstallArchiveRequest
+	// replaceErr refuses the replacement package while it is prepared.
+	replaceErr error
+	// prepared lists the installation IDs a replacement was prepared for.
+	prepared []int
+	binary   []InstallBinaryRequest
+	remote   []InstallArchiveRequest
+	events   *[]string
 }
 
 func (f *fakeAutoUpdateInstaller) InstallRemote(_ context.Context, req InstallArchiveRequest) (*InstallResult, error) {
@@ -445,24 +327,25 @@ func (f *fakeAutoUpdateInstaller) InstallBinary(_ context.Context, req InstallBi
 	return &InstallResult{}, nil
 }
 
-func (f *fakeAutoUpdateInstaller) ReplaceRemote(_ context.Context, existing *Installation, req InstallArchiveRequest) (*InstallResult, error) {
-	f.replaceRemote = append(f.replaceRemote, replaceRemoteCall{existingID: existing.ID, req: req})
-	return &InstallResult{Installation: existing}, nil
-}
-
-func (f *fakeAutoUpdateInstaller) ReplaceBinary(_ context.Context, existing *Installation, req InstallBinaryRequest) (*InstallResult, error) {
-	f.replaceBinary = append(f.replaceBinary, replaceBinaryCall{existingID: existing.ID, req: req})
+func (f *fakeAutoUpdateInstaller) PrepareCatalogReplacement(_ context.Context, existing *Installation, _ *ResolvedCatalogInstall) (*PreparedReplacement, error) {
+	recordTestEvent(f.events, "prepare")
+	f.prepared = append(f.prepared, existing.ID)
 	if f.replaceErr != nil {
 		return nil, f.replaceErr
 	}
-	return &InstallResult{Installation: existing}, nil
+	return &PreparedReplacement{apply: func(context.Context) (*InstallResult, error) {
+		recordTestEvent(f.events, "apply")
+		return &InstallResult{Installation: existing}, nil
+	}}, nil
 }
 
 type fakeAutoUpdateHost struct {
 	stopped []int
+	events  *[]string
 }
 
 func (f *fakeAutoUpdateHost) Stop(installationID int) error {
+	recordTestEvent(f.events, "stop")
 	f.stopped = append(f.stopped, installationID)
 	return nil
 }

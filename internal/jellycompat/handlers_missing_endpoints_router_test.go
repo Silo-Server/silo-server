@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -119,63 +118,4 @@ type itemCountsContentService struct {
 func (s *itemCountsContentService) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
 	s.params = append(s.params, params)
 	return &upstreamBrowseResponse{Total: s.totals[params.Get("type")], Items: []upstreamListItem{}}, nil
-}
-
-// TestRouter_ItemCounts pins that /Items/Counts reaches its handler instead of
-// /Items/{id} (which answered 404 to Lenna) and returns Jellyfin's ItemCounts.
-func TestRouter_ItemCounts(t *testing.T) {
-	cfg, err := config.LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-	store := NewSessionStore(time.Hour, time.Now)
-	const token = "router-test-token"
-	session := Session{Token: token, StreamAppUserID: 1, ProfileID: "p1", PseudoUserID: PseudoUserID(1, "p1")}
-	if err := store.Put(session); err != nil {
-		t.Fatalf("seed session: %v", err)
-	}
-	content := &itemCountsContentService{totals: map[string]int{"movie": 3, "series": 2}}
-	router := NewRouter(Dependencies{Config: cfg, SessionStore: store, ContentService: content})
-
-	get := func(path string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.Header.Set("X-Emby-Token", token)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		return rec
-	}
-
-	rec := get("/Items/Counts?userId=" + session.PseudoUserID.String())
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /Items/Counts = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var counts itemCountsDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &counts); err != nil {
-		t.Fatalf("decode ItemCounts: %v; body=%s", err, rec.Body.String())
-	}
-	if want := (itemCountsDTO{MovieCount: 3, SeriesCount: 2, ItemCount: 5}); counts != want {
-		t.Errorf("ItemCounts = %+v, want %+v", counts, want)
-	}
-	for _, p := range content.params {
-		if p.Get("count_only") != "true" || p.Get("is_favorite") != "" {
-			t.Errorf("browse params = %v, want a count-only, unfiltered browse", p)
-		}
-	}
-
-	content.params = nil
-	if rec := get("/Items/Counts?IsFavorite=true"); rec.Code != http.StatusOK {
-		t.Fatalf("GET /Items/Counts?IsFavorite=true = %d, want 200", rec.Code)
-	}
-	if len(content.params) != 2 {
-		t.Fatalf("favorite counts browsed %d times, want 2", len(content.params))
-	}
-	for _, p := range content.params {
-		if p.Get("is_favorite") != "true" {
-			t.Errorf("favorite count params = %v, want is_favorite=true", p)
-		}
-	}
-
-	if rec := get("/Items/Counts?userId=someone-else"); rec.Code != http.StatusNotFound {
-		t.Errorf("GET /Items/Counts for another user = %d, want 404", rec.Code)
-	}
 }

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 )
 
@@ -69,11 +70,13 @@ const MaxHeaderLen = maxIDLength + 8
 // returns the header's length. A size of UnknownSize means the element runs
 // to the end of its parent. A header cut off by the end of the data, or a
 // malformed one, reports io.ErrUnexpectedEOF; nothing at all at off reports
-// io.EOF. Any other read error is returned as is.
+// io.EOF. Any other read error is returned as is, and so is a failed read
+// that carries an end-of-file error inside an *fs.PathError: the data did
+// not end there, the read did.
 func ReadElementHeader(r io.ReaderAt, off int64) (id uint64, size int64, headerLen int64, err error) {
 	var buf [MaxHeaderLen]byte
 	n, err := r.ReadAt(buf[:], off)
-	if err != nil && !errors.Is(err, io.EOF) {
+	if err != nil && (!errors.Is(err, io.EOF) || errors.As(err, new(*fs.PathError))) {
 		return 0, 0, 0, err
 	}
 	if n == 0 {

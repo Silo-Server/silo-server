@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"math"
-	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -15,7 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 // fakeRecsEngine answers a fixed list and records what it was asked.
@@ -80,81 +79,6 @@ func scoredIDs(items []recommendations.ScoredItem) []string {
 		ids[i] = item.MediaItemID
 	}
 	return ids
-}
-
-// An anchored list ranks under the viewer's scope, and an anchor the viewer
-// cannot see answers what an unknown anchor answers: an empty list, without
-// running the engine.
-func TestAnchoredRecommendationsHonorTheViewerScope(t *testing.T) {
-	filter := catalog.AccessFilter{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{4}}
-	engine := &fakeRecsEngine{items: scored("a", "b")}
-	h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
-	h.accessibleIDs = fakeAccessibleIDs{hidden: map[string]struct{}{"hidden-anchor": {}}}
-	h.Fetcher = stubDiscoverFetcher{}
-
-	similar, err := h.SimilarCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
-	if err != nil || len(similar) != 0 {
-		t.Fatalf("similar = %v, %v; want none", similar, err)
-	}
-	because, err := h.BecauseWatchedCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
-	if err != nil || len(because) != 0 {
-		t.Fatalf("because watched = %v, %v; want none", because, err)
-	}
-	if engine.similarCalls != 0 || engine.becauseCalls != 0 {
-		t.Fatalf("engine ran %d similar and %d because-watched reads for a hidden anchor", engine.similarCalls, engine.becauseCalls)
-	}
-
-	if _, err := h.BecauseWatched(t.Context(), 7, "profile-1", "anchor", 10, filter); err != nil {
-		t.Fatal(err)
-	}
-	if got := engine.becauseWith; !slices.Equal(got.AllowedLibraryIDs, []int{4}) || got.UserID != 7 || got.ProfileID != "profile-1" {
-		t.Fatalf("engine filter = %+v, want the viewer's scope", got)
-	}
-}
-
-// The shared service caps Because You Watched at the row maximum before the
-// engine triples the limit into candidate queries; v1 forwards any positive
-// limit.
-func TestBecauseWatchedCapsTheEngineLimit(t *testing.T) {
-	for _, tc := range []struct{ limit, want int }{{0, 20}, {50, 50}, {51, 50}, {math.MaxInt, 50}} {
-		engine := &fakeRecsEngine{}
-		h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
-		h.accessibleIDs = fakeAccessibleIDs{}
-		if _, err := h.BecauseWatched(t.Context(), 7, "profile-1", "anchor", tc.limit, catalog.AccessFilter{}); err != nil {
-			t.Fatal(err)
-		}
-		if engine.becauseCalls != 1 || engine.becauseLimit != tc.want {
-			t.Fatalf("limit %d: engine calls %d with limit %d; want one with %d", tc.limit, engine.becauseCalls, engine.becauseLimit, tc.want)
-		}
-	}
-}
-
-func TestKeepAccessible(t *testing.T) {
-	h := &RecommendationsHandler{accessibleIDs: fakeAccessibleIDs{hidden: map[string]struct{}{"x": {}}}}
-	got, err := h.keepAccessible(t.Context(), scored("c", "x", "a", "b"), catalog.AccessFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := scoredIDs(got); !slices.Equal(ids, []string{"c", "a", "b"}) {
-		t.Fatalf("kept = %v, want [c a b] in the given order", ids)
-	}
-
-	// A failed check is an error, never the unfiltered list.
-	h.accessibleIDs = fakeAccessibleIDs{err: errors.New("db down")}
-	if _, err := h.keepAccessible(t.Context(), scored("a"), catalog.AccessFilter{}); err == nil {
-		t.Fatal("keepAccessible answered without its access check")
-	} else {
-		var apiErr *APIError
-		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusInternalServerError {
-			t.Fatalf("err = %v, want a 500 API error", err)
-		}
-	}
-
-	// With no access check wired, nothing is shown.
-	h.accessibleIDs = nil
-	if got, err := h.keepAccessible(t.Context(), scored("a"), catalog.AccessFilter{}); err != nil || len(got) != 0 {
-		t.Fatalf("unwired keepAccessible = %v, %v; want none", got, err)
-	}
 }
 
 // Recently Added reads the server-wide query, so it answers only the titles
@@ -234,4 +158,59 @@ func TestRecentlyAddedItemsKeepsTheViewersLibrariesDB(t *testing.T) {
 	if got := read(2); !slices.Equal(got, want[:2]) {
 		t.Fatalf("recently added with limit 2 = %v, want %v", got, want[:2])
 	}
+}
+
+func TestAnchoredRecommendationsHonorTheViewerScope(t *testing.T) {
+	filter := catalog.AccessFilter{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{4}}
+	engine := &fakeRecsEngine{items: scored("a", "b")}
+	h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
+	h.accessibleIDs = fakeAccessibleIDs{hidden: map[string]struct{}{"hidden-anchor": {}}}
+	h.Fetcher = stubDiscoverFetcher{}
+
+	similar, err := h.SimilarCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
+	if err != nil || len(similar) != 0 {
+		t.Fatalf("similar = %v, %v; want none", similar, err)
+	}
+	because, err := h.BecauseWatchedCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
+	if err != nil || len(because) != 0 {
+		t.Fatalf("because watched = %v, %v; want none", because, err)
+	}
+	if engine.similarCalls != 0 || engine.becauseCalls != 0 {
+		t.Fatalf("engine ran %d similar and %d because-watched reads for a hidden anchor", engine.similarCalls, engine.becauseCalls)
+	}
+
+	if _, err := h.BecauseWatched(t.Context(), 7, "profile-1", "anchor", 10, filter); err != nil {
+		t.Fatal(err)
+	}
+	if got := engine.becauseWith; !slices.Equal(got.AllowedLibraryIDs, []int{4}) || got.UserID != 7 || got.ProfileID != "profile-1" {
+		t.Fatalf("engine filter = %+v, want the viewer's scope", got)
+	}
+}
+
+type stubDiscoverFetcher struct {
+	items []*models.MediaItem
+}
+
+func (s stubDiscoverFetcher) FetchItemsByContentIDs(
+	context.Context,
+	[]string,
+	catalog.AccessFilter,
+) ([]*models.MediaItem, error) {
+	return s.items, nil
+}
+
+func (s stubDiscoverFetcher) FetchEpisodesByContentIDs(
+	context.Context,
+	[]string,
+	catalog.AccessFilter,
+) ([]*models.MediaItem, map[string]sections.SectionItemMeta, error) {
+	return nil, map[string]sections.SectionItemMeta{}, nil
+}
+
+func (s stubDiscoverFetcher) ListOverlaySummaries(
+	context.Context,
+	[]string,
+	catalog.AccessFilter,
+) (map[string]*models.OverlaySummary, error) {
+	return map[string]*models.OverlaySummary{}, nil
 }

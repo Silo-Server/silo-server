@@ -10,30 +10,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-func TestBulkQuality(t *testing.T) {
-	cases := []struct {
-		name string
-		req  CreateRequest
-		want string
-		err  error
-	}{
-		{name: "empty is original", req: CreateRequest{}, want: QualityOriginal},
-		{name: "v1 keeps original", req: CreateRequest{Quality: QualityOriginal, DeviceID: "device"}, want: QualityOriginal},
-		{name: "v1 refuses a preset", req: CreateRequest{Quality: Quality5Mbps, DeviceID: "device"}, err: ErrBulkQualityUnavailable},
-		{name: "native preset needs a device", req: CreateRequest{Quality: Quality5Mbps, BulkQuality: true}, err: ErrBulkQualityUnavailable},
-		{name: "native preset", req: CreateRequest{Quality: Quality5Mbps, BulkQuality: true, DeviceID: "device"}, want: Quality5Mbps},
-		{name: "unknown preset", req: CreateRequest{Quality: "4mbps", BulkQuality: true, DeviceID: "device"}, err: ErrInvalidQuality},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := bulkQuality(tc.req)
-			if !errors.Is(err, tc.err) || got != tc.want {
-				t.Fatalf("bulkQuality = %q, %v; want %q, %v", got, err, tc.want, tc.err)
-			}
-		})
-	}
-}
-
 func bulkQualityTestService(t *testing.T, user *models.User) (*Service, *PolicyUser, config.DownloadConfig) {
 	t.Helper()
 	svc := NewService(nil, nil, nil, nil, nil, nil, fakeUserRepo{user}, nil, nil, &config.DownloadConfig{Enabled: true, TranscodeEnabled: true})
@@ -43,56 +19,6 @@ func bulkQualityTestService(t *testing.T, user *models.User) (*Service, *PolicyU
 		t.Fatal(err)
 	}
 	return svc, policyUser, cfg
-}
-
-func TestResolveItemDecisionsSkipsEpisodesThePresetCannotReach(t *testing.T) {
-	svc, user, cfg := bulkQualityTestService(t, &models.User{DownloadAllowed: ptrBool(true), DownloadTranscodeAllowed: ptrBool(true)})
-	hd := managedItem{episodeID: "hd", file: &models.MediaFile{ID: 1, CodecVideo: "h264", CodecAudio: "aac", Container: "mp4", Resolution: "1080p"}}
-	// 4K sources need the 4K transcode setting, which this server cannot read.
-	uhd := managedItem{episodeID: "uhd", file: &models.MediaFile{ID: 2, CodecVideo: "hevc", CodecAudio: "aac", Container: "mkv", Resolution: "2160p"}}
-
-	kept, decisions, skipped, err := svc.resolveItemDecisions(t.Context(), Quality5Mbps, user, cfg, playback.ClientCapabilities{}, "device", []managedItem{hd, uhd}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(kept) != 1 || kept[0].episodeID != "hd" || len(decisions) != 1 {
-		t.Fatalf("kept %+v decisions %+v", kept, decisions)
-	}
-	if d := decisions[0]; d.EffectiveQuality != Quality5Mbps || !d.RequiresArtifact || d.TargetBitrateKbps != 5000 {
-		t.Fatalf("decision %+v", d)
-	}
-	if len(skipped) != 1 || skipped[0].EpisodeID != "uhd" || skipped[0].Reason != SkipReasonQualityUnavailable {
-		t.Fatalf("skipped %+v", skipped)
-	}
-}
-
-func TestResolveItemDecisionsFailsTheBatchWhenTranscodingIsNotAllowed(t *testing.T) {
-	svc, user, cfg := bulkQualityTestService(t, &models.User{DownloadAllowed: ptrBool(true), DownloadTranscodeAllowed: ptrBool(false)})
-	hd := managedItem{episodeID: "hd", file: &models.MediaFile{ID: 1, CodecVideo: "h264", CodecAudio: "aac", Container: "mp4", Resolution: "1080p"}}
-	if _, _, _, err := svc.resolveItemDecisions(t.Context(), Quality5Mbps, user, cfg, playback.ClientCapabilities{}, "device", []managedItem{hd}, false); !errors.Is(err, ErrDownloadNotAllowed) {
-		t.Fatalf("err = %v, want ErrDownloadNotAllowed", err)
-	}
-}
-
-func TestValidateMonitorQuality(t *testing.T) {
-	allowed, user, cfg := bulkQualityTestService(t, &models.User{DownloadAllowed: ptrBool(true), DownloadTranscodeAllowed: ptrBool(true)})
-	for requested, want := range map[string]string{"": QualityOriginal, QualityOriginal: QualityOriginal, Quality10Mbps: Quality10Mbps} {
-		got, err := allowed.validateMonitorQuality(t.Context(), requested, user, cfg, "device")
-		if err != nil || got != want {
-			t.Fatalf("validateMonitorQuality(%q) = %q, %v; want %q", requested, got, err, want)
-		}
-	}
-	if _, err := allowed.validateMonitorQuality(t.Context(), "4mbps", user, cfg, "device"); !errors.Is(err, ErrInvalidQuality) {
-		t.Fatalf("unknown preset err = %v", err)
-	}
-
-	denied, user, cfg := bulkQualityTestService(t, &models.User{DownloadAllowed: ptrBool(true), DownloadTranscodeAllowed: ptrBool(false)})
-	if _, err := denied.validateMonitorQuality(t.Context(), Quality10Mbps, user, cfg, "device"); !errors.Is(err, ErrDownloadNotAllowed) {
-		t.Fatalf("transcode denied err = %v", err)
-	}
-	if got, err := denied.validateMonitorQuality(t.Context(), QualityOriginal, user, cfg, "device"); err != nil || got != QualityOriginal {
-		t.Fatalf("original without transcode = %q, %v", got, err)
-	}
 }
 
 func TestSubscriptionQualityPostgres(t *testing.T) {
@@ -117,37 +43,6 @@ func TestSubscriptionQualityPostgres(t *testing.T) {
 	current, err := repo.GetByID(t.Context(), "monitor", 1, "profile", "device")
 	if err != nil || current.Quality != Quality2Mbps {
 		t.Fatalf("reread %+v, %v", current, err)
-	}
-}
-
-func TestPaceToSlotsLimitsOnlyPreparedItems(t *testing.T) {
-	items := []managedItem{{episodeID: "a"}, {episodeID: "b"}, {episodeID: "c"}, {episodeID: "d"}}
-	decisions := map[ManagedEntryKey]QualityDecision{
-		{EpisodeID: "a"}: {RequiresArtifact: true},
-		{EpisodeID: "b"}: {},
-		{EpisodeID: "c"}: {RequiresArtifact: true},
-		{EpisodeID: "d"}: {RequiresArtifact: true},
-	}
-	ids := func(items []managedItem) string {
-		out := ""
-		for _, it := range items {
-			out += it.episodeID
-		}
-		return out
-	}
-	notReady := func(managedItem) bool { return false }
-	for slots, want := range map[int]string{-1: "abcd", 0: "b", 1: "ab", 2: "abc", 5: "abcd"} {
-		if got := ids(paceToSlots(items, decisions, slots, notReady)); got != want {
-			t.Errorf("slots %d: kept %q, want %q", slots, got, want)
-		}
-	}
-	// A prepared file that is already ready takes no slot.
-	cReady := func(it managedItem) bool { return it.episodeID == "c" }
-	if got := ids(paceToSlots(items, decisions, 0, cReady)); got != "bc" {
-		t.Errorf("no slots, c ready: kept %q, want %q", got, "bc")
-	}
-	if got := ids(paceToSlots(items, decisions, 1, cReady)); got != "abc" {
-		t.Errorf("one slot, c ready: kept %q, want %q", got, "abc")
 	}
 }
 

@@ -30,6 +30,12 @@ export interface PictureColor {
  */
 export const IMPORT_COLOR_TAG = { primaries: "bt709", transfer: "iec61966-2-1" } as const;
 
+/**
+ * `IMPORT_COLOR_TAG` as ITU-T H.273 code points, for bitstreams whose own
+ * colour description a decoder prefers to the configured one (see hevc.ts).
+ */
+export const IMPORT_COLOR_CODE_POINTS = { primaries: 1, transfer: 13 } as const;
+
 /** What the presenter assumed before the stream's own description was read. */
 export const DEFAULT_PICTURE_COLOR: PictureColor = {
   primaries: "bt2020",

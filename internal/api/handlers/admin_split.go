@@ -413,14 +413,6 @@ func (h *AdminSplitHandler) resolveSplitTarget(
 	return target, nil
 }
 
-// deriveEpisodePairs maps moved files' current episode ids onto the target
-// series' deterministic episode ids by parsed season/episode number. Only
-// possible when the target id is provider-anchored; local targets get no
-// episode-level reattribution (state stays behind, reported to the operator).
-func deriveEpisodePairs(sourceItem *models.MediaItem, moved []splitFile, targetContentID string) []reattribute.IDPair {
-	return filesplit.DeriveEpisodePairs(sourceItem.Type, moved, targetContentID)
-}
-
 func (h *AdminSplitHandler) loadItemFiles(ctx context.Context, contentID string) ([]splitFile, error) {
 	rows, err := h.pool.Query(ctx, `
 		SELECT id, COALESCE(content_id, ''), media_folder_id, file_path,

@@ -24,10 +24,10 @@ import {
   SortableContext,
   arrayMove,
   sortableKeyboardCoordinates,
-  useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeSortable } from "@/hooks/useSortableList";
 import { Check, GripVertical, Loader2, Plus, Search, Undo2, X } from "lucide-react";
 
 import type { BrowseItem } from "@/api/types";
@@ -62,10 +62,13 @@ import {
   removedTitle,
 } from "@/lib/collections/copy";
 import type { CollectionScope } from "@/lib/collections/scope";
+import { joinList } from "@/lib/appLocale";
 import { cn } from "@/lib/utils";
 
 import { OrderBlock } from "../fields/OrderBlock";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
+import { isImeComposing } from "@/lib/imeComposition";
 
 const SEARCH_LIMIT = 12;
 const DEBOUNCE_MS = 250;
@@ -188,7 +191,7 @@ function TitleSearch({
   const debounced = useDebounce(query.trim(), DEBOUNCE_MS);
   const libraryIds = useMemo(() => libraries.map((library) => library.id), [libraries]);
   const scopeText =
-    libraries.length > 0 ? libraries.map((library) => library.name).join(", ") : allYourLibraries();
+    libraries.length > 0 ? joinList(libraries.map((library) => library.name)) : allYourLibraries();
 
   const results = useQuery({
     queryKey: [...catalogKeys.all, "collectionTitleSearch", libraryIds, debounced],
@@ -201,6 +204,7 @@ function TitleSearch({
   const active = showList ? found[Math.min(highlight, found.length - 1)] : undefined;
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       setOpen(true);
@@ -226,7 +230,7 @@ function TitleSearch({
 
   return (
     <div className="relative grid gap-2">
-      <div className="border-border bg-background/40 focus-within:ring-ring/50 flex h-11 items-center gap-2.5 rounded-xl border px-3 focus-within:ring-[3px]">
+      <div className="border-input bg-background/40 focus-within:ring-ring/50 flex h-11 items-center gap-2.5 rounded-xl border px-3 focus-within:ring-[3px]">
         <Search aria-hidden className="text-muted-foreground size-4 shrink-0" />
         <input
           role="combobox"
@@ -354,10 +358,11 @@ function TitleRow({
 }) {
   const t = useT();
   const label = row.info?.title || row.id;
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: row.id,
-    disabled: !canReorder,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id: row.id,
+      disabled: !canReorder,
+    });
   return (
     <li
       ref={setNodeRef}
@@ -381,7 +386,9 @@ function TitleRow({
       ) : (
         <span />
       )}
-      <span className="text-muted-foreground text-end text-[13px] tabular-nums">{index + 1}</span>
+      <span className="text-muted-foreground text-end text-[13px] tabular-nums">
+        {numberText(index + 1)}
+      </span>
       <Poster url={row.info?.posterUrl} />
       <span className="min-w-0">
         <span className="block truncate text-[14.5px] font-semibold">{label}</span>
@@ -692,9 +699,13 @@ export function ManualContentsPanel({
     });
   }
 
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
   const lastOver = useRef<UniqueIdentifier | null>(null);
   const announcements = useMemo<Announcements>(() => {

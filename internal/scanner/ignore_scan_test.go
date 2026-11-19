@@ -62,7 +62,7 @@ func TestScopedWalksInheritIgnoreRules(t *testing.T) {
 					}
 					got = scans[0].files
 				case "audiobook":
-					scans, err := collectAudiobookRootScans(t.Context(), 1, []string{scope}, []string{root}, true)
+					scans, err := collectAudiobookRootScans(t.Context(), 1, []string{scope}, []string{root}, true, "")
 					if err != nil || len(scans) != 1 || scans[0].failed() {
 						t.Fatalf("walk: %v, scans: %+v", err, scans)
 					}
@@ -94,7 +94,7 @@ func TestAudiobookIgnoredBrokenSymlinkDoesNotProtectCleanup(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "missing"), filepath.Join(root, "broken.mp3")); err != nil {
 		t.Fatal(err)
 	}
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
 	if err != nil || len(scans) != 1 || scans[0].failed() {
 		t.Fatalf("ignored link protected cleanup: %v, scans: %+v", err, scans)
 	}
@@ -138,7 +138,7 @@ func TestUnreadableIgnoreFileIsAWalkFailure(t *testing.T) {
 						}
 						got, failures = files, walkFailures
 					case "audiobook":
-						scans, err := collectAudiobookRootScans(t.Context(), 1, []string{walkRoot}, []string{root}, true)
+						scans, err := collectAudiobookRootScans(t.Context(), 1, []string{walkRoot}, []string{root}, true, "")
 						if err != nil || len(scans) != 1 {
 							t.Fatalf("walk: %v, scans: %+v", err, scans)
 						}

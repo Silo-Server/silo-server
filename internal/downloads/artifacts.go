@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 
 	"github.com/google/uuid"
@@ -96,12 +97,14 @@ type ArtifactNotifier func(ctx context.Context, d *Download)
 // jobs, drains them through a bounded worker pool with leased heartbeats, and
 // recovers stranded jobs on startup.
 type ArtifactManager struct {
-	repo                 *ArtifactRepository
-	downloads            *Repository
-	fileRepo             FileResolver
-	preparer             EncodePreparer
-	owner                string
-	liveCfg              func() *config.Config
+	repo      *ArtifactRepository
+	downloads *Repository
+	fileRepo  FileResolver
+	preparer  EncodePreparer
+	owner     string
+	liveCfg   func() *config.Config
+	// nodeKeys signs requests to transcode nodes; see SetNodeKeys.
+	nodeKeys             nodeauth.Keyring
 	settings             SettingsReader
 	notify               ArtifactNotifier
 	remoteRecoveryBudget time.Duration
@@ -1229,6 +1232,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 	m.mu.Unlock()
 	return playback.TranscodeOpts{
 		InputPath:                  file.FilePath,
+		MediaFileID:                file.ID,
 		SessionID:                  playback.DownloadPrepareLogSessionID(a.ID),
 		SourceVideoCodec:           sourceVideoCodec,
 		SourceVideoProfile:         sourceVideoProfile,

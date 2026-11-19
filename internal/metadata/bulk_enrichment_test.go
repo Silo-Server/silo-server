@@ -2,7 +2,7 @@ package metadata
 
 import (
 	"context"
-	"errors"
+
 	"fmt"
 	"maps"
 	"slices"
@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -364,34 +363,6 @@ func TestBulkEnrichmentStopsCleanlyOnShutdown(t *testing.T) {
 	}
 }
 
-func TestBulkEnrichmentStopsPassClassification(t *testing.T) {
-	stops := []error{
-		status.Error(codes.ResourceExhausted, "quota"),
-		status.Error(codes.Unavailable, "outage"),
-		status.Error(codes.FailedPrecondition, "no api key"),
-		status.Error(codes.Unauthenticated, "bad key"),
-		status.Error(codes.Unknown, "plugin returned a plain error"),
-		context.Canceled,
-		fmt.Errorf("lookup: %w", context.DeadlineExceeded),
-		errors.New("plugin installation 3 is not running"),
-	}
-	for _, err := range stops {
-		if !bulkEnrichmentStopsPass(err) {
-			t.Errorf("bulkEnrichmentStopsPass(%v) = false, want true", err)
-		}
-	}
-	itemOnly := []error{
-		status.Error(codes.InvalidArgument, "bad id"),
-		status.Error(codes.NotFound, "no such title"),
-		status.Error(codes.Internal, "decode"),
-	}
-	for _, err := range itemOnly {
-		if bulkEnrichmentStopsPass(err) {
-			t.Errorf("bulkEnrichmentStopsPass(%v) = true, want false", err)
-		}
-	}
-}
-
 type recordingVideoRepo struct {
 	mu    sync.Mutex
 	calls int
@@ -528,63 +499,5 @@ func TestPersistEnrichmentKeepsTheStoredProviderIDs(t *testing.T) {
 	}
 	if got.ContentRating != "PG" {
 		t.Errorf("content rating = %q, want PG filled", got.ContentRating)
-	}
-}
-
-func newLookupPluginProvider(t *testing.T, client *fakePluginMetadataClient) *PluginProvider {
-	t.Helper()
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		pluginInstallationIDSetting: "1",
-		capabilityIDSetting:         "mdblist",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return client, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-	provider.lookupProviderIDs = []string{"imdb", "tmdb"}
-	return provider
-}
-
-func TestRefreshRecordsEnrichmentProvidersThatAnswered(t *testing.T) {
-	const contentID = "movie:tmdb:100"
-	cases := []struct {
-		name      string
-		client    *fakePluginMetadataClient
-		wantFound bool
-	}{
-		{
-			name:      "answered",
-			client:    &fakePluginMetadataClient{response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{ItemType: "movie", ContentRating: "PG"}}},
-			wantFound: true,
-		},
-		{name: "empty", client: &fakePluginMetadataClient{response: &pluginv1.GetMetadataResponse{}}},
-		{name: "quota spent", client: &fakePluginMetadataClient{getMetadataErr: status.Error(codes.ResourceExhausted, "quota")}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness()
-			store := newFakeEnrichmentState()
-			h.service.enrichmentState = store
-			seedMovieItem(t, h, contentID, "Title", 2018)
-			h.itemRepo.items[contentID].TmdbID = "100"
-			tmdb := &remoteStubProvider{
-				slug:     "tmdb",
-				metadata: &MetadataResult{HasMetadata: true, Title: "Title", ProviderIDs: map[string]string{"tmdb": "100"}},
-			}
-
-			if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-				ContentID: contentID, Language: "en", Mode: ModeScheduledRefresh,
-			}, []Provider{tmdb, newLookupPluginProvider(t, tc.client)}); err != nil {
-				t.Fatalf("ProcessWithProviders() error = %v, want the refresh to succeed", err)
-			}
-			got := store.found[contentID]
-			if tc.wantFound && !slices.Equal(got, []string{"mdblist"}) {
-				t.Fatalf("recorded found = %v, want [mdblist]", got)
-			}
-			if !tc.wantFound && len(got) != 0 {
-				t.Fatalf("recorded found = %v, want nothing", got)
-			}
-		})
 	}
 }

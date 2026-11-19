@@ -640,8 +640,16 @@ func (r *LibraryItemRepository) reconcileMembershipsOnce(ctx context.Context, fo
 }
 
 // deleteOrphanedItemsAndImageDirs deletes the orphanIDs that still have no
-// library membership and returns the IDs it deleted, plus the artwork
-// directories that no surviving row references any more.
+// library membership and no present file, and returns the IDs it deleted,
+// plus the artwork directories that no surviving row references any more.
+//
+// A present file spares the item because scanners publish a new item in
+// separate statements: item, then file row, then membership. Between the last
+// two, a concurrent scan of the folder sees an item with a present file and
+// no membership; deleting it would fail the publishing scan and leave its file
+// row pointing at nothing. If that scan stopped instead, the next scan of the
+// file restores the membership. Items that are really gone (held, or under a
+// root that was unreachable) have only missing file rows.
 //
 // The directories are filtered after the DELETE, against the IDs it actually
 // removed. orphanIDs was read earlier in the transaction, and a concurrent scan
@@ -662,6 +670,12 @@ func deleteOrphanedItemsAndImageDirs(ctx context.Context, tx pgx.Tx, orphanIDs [
 			SELECT 1
 			FROM media_item_libraries mil
 			WHERE mil.content_id = mi.content_id
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files mf
+			WHERE mf.content_id = mi.content_id
+			  AND mf.missing_since IS NULL
 		  )
 		RETURNING mi.content_id
 	`, orphanIDs)

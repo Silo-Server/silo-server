@@ -17,23 +17,34 @@ import (
 // canonicalization is required on either side. No server URL, no absolute
 // artwork URLs, no library name.
 type genericWebhookBody struct {
-	Event      string                 `json:"event"`
-	DeliveryID string                 `json:"delivery_id"`
-	WebhookID  string                 `json:"webhook_id"`
-	Timestamp  string                 `json:"timestamp"`
-	Version    int                    `json:"version"`
-	Test       bool                   `json:"test"`
-	ProfileID  string                 `json:"profile_id"`
-	LibraryID  *int                   `json:"library_id,omitempty"`
-	Type       string                 `json:"type"`
-	Reasons    ReasonFlags            `json:"reason_flags"`
-	Series     *genericWebhookSeries  `json:"series,omitempty"`
-	Episode    *genericWebhookEpisode `json:"episode,omitempty"`
+	Event      string `json:"event"`
+	DeliveryID string `json:"delivery_id"`
+	WebhookID  string `json:"webhook_id"`
+	Timestamp  string `json:"timestamp"`
+	Version    int    `json:"version"`
+	Test       bool   `json:"test"`
+	ProfileID  string `json:"profile_id"`
+	LibraryID  *int   `json:"library_id,omitempty"`
+	Type       string `json:"type"`
+	// Reasons is {"next_up": bool}; Next Up is the only reason an episode
+	// notifies for.
+	Reasons ReasonFlags            `json:"reason_flags"`
+	Series  *genericWebhookSeries  `json:"series,omitempty"`
+	Episode *genericWebhookEpisode `json:"episode,omitempty"`
 	// Request is present for request.* deliveries. For request.fulfilled the
 	// catalog item is in Series (movies included — the field carries the
 	// matched item); approved/declined have no catalog item yet, so the
 	// request's own title rides here.
 	Request *genericWebhookRequest `json:"request,omitempty"`
+	// Watchlist is present for watchlist.available deliveries: the title the
+	// profile watchlisted. The arrived catalog item is in Series, movies
+	// included.
+	Watchlist *genericWebhookWatchlist `json:"watchlist,omitempty"`
+}
+
+type genericWebhookWatchlist struct {
+	TMDBID    int    `json:"tmdb_id,omitempty"`
+	MediaType string `json:"media_type"`
 }
 
 type genericWebhookSeries struct {
@@ -98,6 +109,10 @@ func BuildGenericWebhookPayload(row DeliveryRow, webhookID string, test bool) ([
 			Year:      flags.Year,
 			Reason:    flags.Reason,
 		}
+	case DeliveryTypeWatchlistAvailable:
+		var title TitleFlags
+		_ = json.Unmarshal(row.ReasonFlags, &title)
+		body.Watchlist = &genericWebhookWatchlist{TMDBID: title.TMDBID, MediaType: title.MediaType}
 	}
 	return json.Marshal(body)
 }

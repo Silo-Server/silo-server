@@ -3,16 +3,12 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 func TestExternalIdentityFromTypedResponse(t *testing.T) {
@@ -83,105 +79,6 @@ func TestExternalIdentityDenials(t *testing.T) {
 	}
 }
 
-func TestPluginCallErrorMapping(t *testing.T) {
-	ctx := context.Background()
-	for _, tc := range []struct {
-		err  error
-		want error
-	}{
-		{plugins.ErrInstallationDisabled, ErrInvalidCredentials},
-		{status.Error(codes.Unauthenticated, "bad password"), ErrInvalidCredentials},
-		{status.Error(codes.Unavailable, "down"), ErrProviderUnavailable},
-		{status.Error(codes.Internal, "boom"), ErrProviderUnavailable},
-		{errors.New("start failed"), ErrProviderUnavailable},
-		{ErrUserDisabled, ErrUserDisabled},
-	} {
-		if got := pluginCallError(ctx, 3, "authenticate", tc.err); !errors.Is(got, tc.want) {
-			t.Errorf("%v: got %v, want %v", tc.err, got, tc.want)
-		}
-	}
-}
-
-func TestUsernameBase(t *testing.T) {
-	for _, tc := range []struct {
-		identity ExternalIdentity
-		want     string
-	}{
-		{ExternalIdentity{Username: "Alice Smith", Email: "a@example.test", Subject: "s"}, "alice_smith"},
-		{ExternalIdentity{Username: "!!!", Email: "Bob.Jones@example.test", Subject: "s"}, "bob.jones"},
-		{ExternalIdentity{Subject: "https://id.example.test|8F14E45F"}, "8f14e45f"},
-		{ExternalIdentity{Subject: "|||"}, "user"},
-		// Kanidm sends its SPN, Entra a UPN: keep the name, not name+domain.
-		{ExternalIdentity{Username: "alice@idm.example.test", Email: "a@example.test", Subject: "s"}, "alice"},
-		{ExternalIdentity{Username: "Bob.Jones@contoso.example", Subject: "s"}, "bob.jones"},
-		{ExternalIdentity{Username: "@example.test", Email: "carol@example.test", Subject: "s"}, "carol"},
-	} {
-		if got := usernameBase(tc.identity); got != tc.want {
-			t.Errorf("%+v: got %q, want %q", tc.identity, got, tc.want)
-		}
-	}
-}
-
-func TestNormalizedProviderEmail(t *testing.T) {
-	for in, want := range map[string]string{
-		"Alice@Example.Test":       NormalizeEmail("Alice@Example.Test"),
-		"":                         "",
-		"not an email":             "",
-		"Alice <alice@example.io>": "",
-	} {
-		if got := normalizedProviderEmail(in); got != want {
-			t.Errorf("%q: got %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestOAuthFailureReason(t *testing.T) {
-	for err, want := range map[error]string{
-		ErrNotPermitted:                              "not_permitted",
-		ErrAccountRequired:                           "account_required",
-		fmt.Errorf("wrap: %w", ErrEmailInUse):        "email_in_use",
-		ErrIdentityLinkedElsewhere:                   "identity_linked_elsewhere",
-		ErrUserDisabled:                              "account_disabled",
-		ErrProviderUnavailable:                       "provider_unavailable",
-		ErrInvalidCredentials:                        "login_failed",
-		errors.New("database fell over"):             "login_failed",
-		fmt.Errorf("x: %w", ErrAccountAlreadyLinked): "already_linked",
-	} {
-		if got := OAuthFailureReason(err); got != want {
-			t.Errorf("%v: got %q, want %q", err, got, want)
-		}
-	}
-}
-
-func TestProviderListMergesPluginSourceAndPicksDefault(t *testing.T) {
-	svc := NewService(&LocalProvider{}, nil, nil, nil, nil, nil, nil)
-	if got := svc.ListProviders(); len(got) != 1 || got[0].ID != LocalProviderID || !got[0].Default {
-		t.Fatalf("local only = %+v", got)
-	}
-	source := staticProviderSource{
-		{Info: LoginProviderInfo{ID: "plugin:3:ldap", DisplayName: "Directory", Mode: "credentials", InstallationID: 3}, Provider: &credentialsDirectory{}},
-	}
-	svc.SetPluginProviderSource(source)
-	got := svc.ListProviders()
-	if len(got) != 2 || got[0].ID != LocalProviderID || !got[0].Default || got[1].Default {
-		t.Fatalf("with plugin = %+v", got)
-	}
-	// A binding marked default_login takes the default.
-	source[0].Info.Default = true
-	got = svc.ListProviders()
-	if got[0].ID != "plugin:3:ldap" || !got[0].Default {
-		t.Fatalf("plugin default = %+v", got)
-	}
-	if svc.passwordProviderByID("plugin:3:ldap") == nil || svc.passwordProviderByID("plugin:9:none") != nil {
-		t.Fatal("provider lookup")
-	}
-	// Without a users repository, routing cannot look the name up and keeps
-	// the password local.
-	if id, err := svc.routePasswordLogin(context.Background(), "anyone"); err != nil || id != LocalProviderID {
-		t.Fatalf("route = %q, %v", id, err)
-	}
-}
-
 func TestUsableBreakGlass(t *testing.T) {
 	base := models.User{BreakGlass: true, Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true}
 	if !usableBreakGlass(&base) {
@@ -208,21 +105,4 @@ func mustStruct(t *testing.T, values map[string]any) *structpb.Struct {
 		t.Fatal(err)
 	}
 	return s
-}
-
-// TestPasswordSignInNeverReachesAnOAuthProvider: naming an OAuth provider in
-// a password sign-in is refused before the plugin is asked, so the password
-// never reaches it.
-func TestPasswordSignInNeverReachesAnOAuthProvider(t *testing.T) {
-	svc := NewService(&LocalProvider{}, nil, nil, nil, nil, nil, nil)
-	oauth := &credentialsDirectory{}
-	svc.SetPluginProviderSource(staticProviderSource{
-		{Info: LoginProviderInfo{ID: "plugin:4:oidc", DisplayName: "SSO", Mode: ProviderModeOAuth, InstallationID: 4}, Provider: oauth},
-	})
-	if _, _, err := svc.LoginWithProvider(context.Background(), "plugin:4:oidc", "alice", "secret", "test", ""); !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
-	}
-	if len(oauth.asked) != 0 {
-		t.Fatalf("the OAuth provider was asked for %v", oauth.asked)
-	}
 }

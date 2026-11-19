@@ -227,7 +227,7 @@ func TestRelevanceRubricLeakagePostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, item := range []string{adult[0], finished[0], kids[12]} {
-			if _, err := f.pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5)`, peerID, peer, item); err != nil {
+			if _, err := f.pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 10)`, peerID, peer, item); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -456,7 +456,7 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, item := range []string{books[2], books[6], open} {
-			if _, err := f.pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5)`, peerID, peer, item); err != nil {
+			if _, err := f.pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 10)`, peerID, peer, item); err != nil {
 				t.Fatal(err)
 			}
 		}

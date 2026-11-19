@@ -17,7 +17,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -72,6 +74,9 @@ type Dependencies struct {
 	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
+	// StreamDeny is the shared playback deny marker store the relays to
+	// transcode nodes check. Nil denies nothing.
+	StreamDeny *playback.StreamDeny
 	// EventBus carries cluster events. The playback handler subscribes to
 	// proxies' requests to move a transcode off a node they cannot reach. Nil
 	// leaves proxy-egress transcodes without that failover.
@@ -165,8 +170,12 @@ type Dependencies struct {
 	PlaybackScopeResolver  ScopeResolver
 	NodePlanner            nodepool.SessionPlanner
 	JWTSecret              string
-	Recommender            recommendations.Recommender
-	RecWorker              *recommendations.Worker
+	// NodeKeys signs calls to transcode nodes; see nodeauth.Keyring.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants transcode nodes the sources they start on.
+	SourceGrants *nodesource.Grants
+	Recommender  recommendations.Recommender
+	RecWorker    *recommendations.Worker
 	// RecommendationReader serves /Movies/Recommendations from the cached
 	// rows the native API reads; nil answers an empty list.
 	RecommendationReader RecommendationRowReader
@@ -189,6 +198,10 @@ type Dependencies struct {
 	// KeptSubtitles reads embedded tracks from kept copies or through the
 	// file's index before the subtitle cache demuxes a source; nil demuxes.
 	KeptSubtitles playback.EmbeddedSubtitleSource
+	// AudioPreferences and SubtitlePreferences save the tracks Jellyfin
+	// clients play as the series' remembered tracks (optional).
+	AudioPreferences    AudioPreferenceWriter
+	SubtitlePreferences SubtitlePreferenceWriter
 	// SubtitlePlaySync aligns a subtitle the first time a client is served
 	// it, when it was never synced; nil leaves that to a request.
 	SubtitlePlaySync subtitles.PlaySyncer

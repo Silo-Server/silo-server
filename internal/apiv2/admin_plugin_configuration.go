@@ -65,7 +65,7 @@ type AdminPluginAuthBindingOutput struct {
 // AdminPluginTaskBindingWrite is the whole-row task binding assignment.
 type AdminPluginTaskBindingWrite struct {
 	Enabled bool            `json:"enabled"`
-	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"Plugin-defined trigger document; omitted stores an empty object"`
+	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). The task runs it unless the task has a saved schedule (a task-page edit, or a schedule an earlier server release saved from the binding trigger); an empty or unrunnable trigger leaves the manifest default_trigger, else one run at server start. Omitted stores an empty object"`
 }
 type AdminPluginTaskBindingInput struct {
 	ID           ID     `path:"id" pattern:"^[1-9][0-9]*$"`
@@ -108,6 +108,8 @@ func adminPluginMutationProblem(err error) error {
 	switch {
 	case errors.Is(err, plugins.ErrInstallationNotFound):
 		return NewProblem(TypeNotFound, "Plugin installation not found.")
+	case errors.Is(err, plugins.ErrInstallationChanged):
+		return NewProblem(TypeConflict, "Another install or update replaced this plugin while its package downloaded, so Silo didn't install it. Check the installed version and try again.")
 	case errors.Is(err, handlers.ErrPluginBuiltinInstallation):
 		return NewProblem(TypeConflict, "Built-in host providers cannot be modified.")
 	case errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled):

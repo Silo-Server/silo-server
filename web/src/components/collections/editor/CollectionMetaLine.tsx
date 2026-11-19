@@ -3,7 +3,7 @@ import { Fragment } from "react";
 import { MetaDot } from "@/components/calm/ListRow";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
-import { formatLocale } from "@/lib/appLocale";
+import { formatLocale, joinList } from "@/lib/appLocale";
 
 /** A sync state worth showing: a list that failed, or one syncing now. */
 export interface SyncAttention {
@@ -50,7 +50,7 @@ export function CollectionMetaLine({
   const parts = [counted, ...(typeof extra === "string" ? [extra] : (extra ?? []))].filter(
     (part): part is string => Boolean(part),
   );
-  const names = libraryNames && libraryNames.length > 0 ? libraryNames.join(", ") : null;
+  const names = libraryNames && libraryNames.length > 0 ? joinList(libraryNames) : null;
   return (
     <p className={cn("text-muted-foreground text-[14px]", className)}>
       {names ? <b className="text-foreground font-semibold">{names}</b> : null}

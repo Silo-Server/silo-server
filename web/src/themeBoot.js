@@ -41,8 +41,17 @@
     "data-text-weight",
     cached("silo-ui-text-weight") === "strong" ? "strong" : "default",
   );
+  // A stored choice wins; with none, follow the system's increased-contrast
+  // setting, as parseHighContrast does.
+  const highContrast = cached("silo-ui-high-contrast");
+  let prefersMore = false;
+  try {
+    prefersMore = matchMedia("(prefers-contrast: more)").matches;
+  } catch {
+    // No matchMedia: keep the default.
+  }
   root.setAttribute(
     "data-high-contrast",
-    cached("silo-ui-high-contrast") === "true" ? "true" : "false",
+    highContrast === "true" || (highContrast !== "false" && prefersMore) ? "true" : "false",
   );
 })();

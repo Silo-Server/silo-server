@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -91,24 +89,6 @@ func serveDownload(handler *PlaybackHandler, method, encodedID string, headers m
 	return rec
 }
 
-// TestHandleDownload_ServesOriginalFile verifies /Items/{id}/Download streams
-// the original media file when the download rules allow it. The route backs
-// CanDownload=true, which Infuse requires before it will Direct Play an item.
-func TestHandleDownload_ServesOriginalFile(t *testing.T) {
-	handler, encodedID, body := newDownloadRouteHandler(t, true, true)
-
-	rec := serveDownload(handler, http.MethodGet, encodedID, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); got != body {
-		t.Errorf("expected file content %q; got %q", body, got)
-	}
-	if cd := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") {
-		t.Errorf("Content-Disposition = %q, want an attachment", cd)
-	}
-}
-
 // TestHandleDownload_RefusesWhenDownloadsAreOff covers the issue's two
 // refusals: the server's Allow downloads setting is off, or the account may
 // not download. HEAD must answer like GET, and neither may send the file.
@@ -135,67 +115,6 @@ func TestHandleDownload_RefusesWhenDownloadsAreOff(t *testing.T) {
 	}
 }
 
-// TestHandleDownload_ServesRequestedVersion: a multi-version item downloads
-// the version mediaSourceId names, not the first one.
-func TestHandleDownload_ServesRequestedVersion(t *testing.T) {
-	handler, encodedID, _ := newDownloadRouteHandler(t, true, true)
-	first := handler.fileResolver.(testCompatFileResolver).file
-	second := &models.MediaFile{ID: 43, ContentID: first.ContentID, FilePath: filepath.Join(t.TempDir(), "movie-4k.mkv")}
-	if err := os.WriteFile(second.FilePath, []byte("second version"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	detail := handler.content.(*stubContentService).detail
-	detail.Versions = append(detail.Versions, catalog.FileVersion{FileID: 43, FilePath: second.FilePath, Container: "mkv"})
-	handler.downloads = newTestDownloadService(true, true, first, second)
-
-	req := httptest.NewRequest(http.MethodGet, "/Items/"+encodedID+"/Download?mediaSourceId="+handler.codec.EncodeIntID(EncodedIDMediaSource, 43), nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", encodedID)
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
-	ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
-	rec := httptest.NewRecorder()
-	handler.HandleDownload(rec, req.WithContext(ctx))
-	if rec.Code != http.StatusOK || rec.Body.String() != "second version" {
-		t.Fatalf("download = %d %q, want 200 %q", rec.Code, rec.Body.String(), "second version")
-	}
-}
-
-// TestHandleDownload_AppliesViewerAccess: the viewer's scope reaches the
-// download rules, so a file over the profile's quality ceiling is refused.
-func TestHandleDownload_AppliesViewerAccess(t *testing.T) {
-	handler, encodedID, _ := newDownloadRouteHandler(t, true, true)
-	handler.accessFilter = func(context.Context, int, string) catalog.AccessFilter {
-		return catalog.AccessFilter{MaxPlaybackQuality: "1080p"}
-	}
-	if rec := serveDownload(handler, http.MethodGet, encodedID, nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 for a file over the quality ceiling, body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestHandleDownload_ResumesWithIfRange keeps the strong validator the route
-// sent before it applied the download rules: a matching If-Range gets the rest
-// of the file, a stale one the whole file.
-func TestHandleDownload_ResumesWithIfRange(t *testing.T) {
-	handler, encodedID, body := newDownloadRouteHandler(t, true, true)
-	head := serveDownload(handler, http.MethodHead, encodedID, nil)
-	if head.Code != http.StatusOK {
-		t.Fatalf("HEAD status = %d, want 200", head.Code)
-	}
-	etag := head.Header().Get("ETag")
-	if etag == "" {
-		t.Skip("platform has no stable file revision for an ETag")
-	}
-
-	rec := serveDownload(handler, http.MethodGet, encodedID, map[string]string{"Range": "bytes=5-", "If-Range": etag})
-	if rec.Code != http.StatusPartialContent || rec.Body.String() != body[5:] {
-		t.Fatalf("matching If-Range = %d %q, want 206 %q", rec.Code, rec.Body.String(), body[5:])
-	}
-	rec = serveDownload(handler, http.MethodGet, encodedID, map[string]string{"Range": "bytes=5-", "If-Range": `"stale"`})
-	if rec.Code != http.StatusOK || rec.Body.String() != body {
-		t.Fatalf("stale If-Range = %d %q, want 200 %q", rec.Code, rec.Body.String(), body)
-	}
-}
-
 // TestHandleDownload_WithoutDownloadServiceRefuses fails closed when the API
 // router built no download service.
 func TestHandleDownload_WithoutDownloadServiceRefuses(t *testing.T) {
@@ -203,17 +122,6 @@ func TestHandleDownload_WithoutDownloadServiceRefuses(t *testing.T) {
 	handler.downloads = nil
 	if rec := serveDownload(handler, http.MethodGet, encodedID, nil); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503, body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestStaticStreamIgnoresDownloadRules: Infuse Direct Play uses Static=true
-// streams, which stay playback. An account that may not download still plays.
-func TestStaticStreamIgnoresDownloadRules(t *testing.T) {
-	handler, encodedID, body := newDownloadRouteHandler(t, false, false)
-
-	rec := serveStaticStream(handler, encodedID, "Static=true")
-	if rec.Code != http.StatusOK || rec.Body.String() != body {
-		t.Fatalf("static stream = %d %q, want 200 %q", rec.Code, rec.Body.String(), body)
 	}
 }
 

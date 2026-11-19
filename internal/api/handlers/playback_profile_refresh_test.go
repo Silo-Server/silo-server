@@ -67,7 +67,7 @@ func TestPlaybackProgressRefreshesTasteProfileOnlyOnCompletionAndStop(t *testing
 	} {
 		t.Run(name, func(t *testing.T) {
 			manager := playback.NewSessionManager(0, 0)
-			h := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+			h := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 			h.InstallationID = serviceInstallation
 			h.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
 			notifier := &countingSignalsNotifier{}

@@ -142,7 +142,26 @@ func changesAccessPolicy(target *models.User, input models.UpdateUserInput) bool
 		changesOverride(input.AudioTranscodeAllowed, target.AudioTranscodeAllowed) ||
 		changesOverride(input.DownloadAllowed, target.DownloadAllowed) ||
 		changesOverride(input.DownloadTranscodeAllowed, target.DownloadTranscodeAllowed) ||
-		changesOverride(input.RequestsAllowed, target.RequestsAllowed)
+		changesOverride(input.RequestsAllowed, target.RequestsAllowed) ||
+		changesPermissions(input.Permissions, target.Permissions)
+}
+
+// changesPermissions compares permission lists after normalization, so a
+// reordered or duplicated resend is not a change. A list that does not
+// normalize counts as a change; the update rejects it later anyway.
+func changesPermissions(input *[]string, current []string) bool {
+	if input == nil {
+		return false
+	}
+	next, err := NormalizePermissions(*input)
+	if err != nil {
+		return true
+	}
+	saved, err := NormalizePermissions(current)
+	if err != nil {
+		return true
+	}
+	return !slices.Equal(next, saved)
 }
 
 func changesOverride[T comparable](input models.Optional[T], current *T) bool {

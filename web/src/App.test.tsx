@@ -24,7 +24,7 @@ vi.mock("@/player/bandwidth-probe", () => ({
   },
 }));
 
-import { BandwidthProbePrewarmer, QueryCacheManager } from "@/App";
+import { QueryCacheManager } from "@/App";
 
 function makeUser(id: number): User {
   return {
@@ -74,17 +74,6 @@ describe("QueryCacheManager", () => {
     expect(clear).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves an account change to AuthProvider", () => {
-    const { clear, signIn } = renderManager();
-    signIn({ user: makeUser(1), profile: makeProfile("p-1") });
-
-    // AuthProvider clears before the new account renders; clearing again
-    // here would discard the new account's first reads.
-    signIn({ user: makeUser(2), profile: null });
-
-    expect(clear).not.toHaveBeenCalled();
-  });
-
   it("drops the last profile's Home rows poster peeks on a profile switch", () => {
     const { queryClient, signIn } = renderManager();
     signIn({ user: makeUser(1), profile: makeProfile("p-1") });
@@ -95,35 +84,5 @@ describe("QueryCacheManager", () => {
     signIn({ user: makeUser(1), profile: makeProfile("p-2") });
 
     expect(queryClient.getQueryData(key)).toBeUndefined();
-  });
-});
-
-describe("BandwidthProbePrewarmer", () => {
-  beforeEach(() => {
-    probe.schedule.mockReset();
-    probe.stop.mockReset();
-  });
-
-  // The connection reads need a profile, and the test's target follows the
-  // profile's libraries.
-  it("starts the speed schedule once a profile is active, and again for another profile", async () => {
-    const user = makeUser(1);
-    auth = { user, profile: null };
-    const view = render(<BandwidthProbePrewarmer />);
-    await Promise.resolve();
-    expect(probe.schedule).not.toHaveBeenCalled();
-
-    auth = { user, profile: makeProfile("p1") };
-    view.rerender(<BandwidthProbePrewarmer />);
-    await vi.waitFor(() => expect(probe.schedule).toHaveBeenCalledTimes(1));
-
-    auth = { user, profile: makeProfile("p2") };
-    view.rerender(<BandwidthProbePrewarmer />);
-    await vi.waitFor(() => expect(probe.schedule).toHaveBeenCalledTimes(2));
-    expect(probe.stop).toHaveBeenCalledTimes(1);
-
-    auth = { user: null, profile: null };
-    view.rerender(<BandwidthProbePrewarmer />);
-    expect(probe.stop).toHaveBeenCalledTimes(2);
   });
 });

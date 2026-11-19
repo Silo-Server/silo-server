@@ -23,10 +23,30 @@ type ratingsDocument struct {
 	Ratings []ratingEntry `json:"ratings"`
 }
 
+// ratingEntry is one rating. Backups carry Score (1 to 10); a backup written
+// before scores (a restore set before version 7, a profile export before
+// version 2) carries whole stars (1 to 5) as Rating instead.
 type ratingEntry struct {
 	Item    string    `json:"item"`
-	Rating  int       `json:"rating"`
+	Score   int       `json:"score,omitempty"`
+	Rating  int       `json:"rating,omitempty"`
 	RatedAt time.Time `json:"rated_at"`
+}
+
+// score answers the entry's rating as a score, converting legacy stars.
+func (e ratingEntry) score() int {
+	if e.Rating != 0 {
+		return ScoreFromStars(e.Rating)
+	}
+	return e.Score
+}
+
+// valid reports whether the entry carries exactly one rating in range.
+func (e ratingEntry) valid() bool {
+	if e.Rating != 0 {
+		return e.Score == 0 && e.Rating >= 1 && e.Rating <= MaxRatingScore/2
+	}
+	return e.Score >= 1 && e.Score <= MaxRatingScore
 }
 
 func (RatingsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
@@ -40,7 +60,7 @@ func (RatingsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.O
 	var items []string
 	for rows.Next() {
 		var e ratingEntry
-		if err := rows.Scan(&e.Item, &e.Rating, &e.RatedAt); err != nil {
+		if err := rows.Scan(&e.Item, &e.Score, &e.RatedAt); err != nil {
 			return userdata.Export{}, err
 		}
 		if !keep.Has(e.Item) {
@@ -67,7 +87,7 @@ func decodeRatings(data json.RawMessage) (ratingsDocument, userdata.Summary, err
 	sum := userdata.Summary{Count: len(doc.Ratings)}
 	seen := userdata.Distinct{}
 	for _, e := range doc.Ratings {
-		if !userdata.ValidContentID(e.Item) || e.Rating < 1 || e.Rating > 5 {
+		if !userdata.ValidContentID(e.Item) || !e.valid() {
 			return doc, sum, fmt.Errorf("rating of %q is not valid", e.Item)
 		}
 		if err := seen.Add("ratings", e.Item); err != nil {
@@ -105,7 +125,7 @@ func (RatingsBackupData) Import(ctx context.Context, tx pgx.Tx, target userdata.
 		if ratedAt.IsZero() {
 			ratedAt = target.Now
 		}
-		items, ratings, at = append(items, local), append(ratings, e.Rating), append(at, ratedAt)
+		items, ratings, at = append(items, local), append(ratings, e.score()), append(at, ratedAt)
 	}
 	if len(items) == 0 {
 		return res, nil

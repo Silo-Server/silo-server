@@ -59,8 +59,8 @@ type NodeHandler struct {
 	transcodePool     *nodepool.TranscodePool
 	lister            NodeListEnabled
 	eventBus          cache.EventBus
-	redisClient       *redis.Client // for reading session keys
-	jwtSecret         string        // signs calls to nodes (see nodeauth)
+	redisClient       *redis.Client    // for reading session keys
+	nodeKeys          nodeauth.Keyring // signs calls to nodes (see nodeauth)
 	// capabilities refreshes a node's stored inventory on demand; nil in a
 	// deployment with no health checker, where a re-probe still runs on the node
 	// and the stored row catches up on the next sweep.
@@ -78,6 +78,11 @@ type NodeHandler struct {
 	// snapshotted, because it is hot-reloadable. nil where nothing wired it, and
 	// then a node's own override is all this handler can price from.
 	clusterPlayback func() config.PlaybackConfig
+	// issueNodeKey backs IssueAdminNodeKey; see SetNodeKeyIssuance.
+	issueNodeKey NodeKeyIssuer
+	// nodeKeyRegistry is this server's credential registry, kept in step with
+	// node writes; see SetNodeKeyRegistry. nil where nothing wired it.
+	nodeKeyRegistry *nodepool.KeyRegistry
 }
 
 // SetClusterPlaybackPolicy wires the live cluster-wide acceleration policy,
@@ -122,7 +127,7 @@ func (h *NodeHandler) SetCapabilityRefresher(refresher NodeCapabilityRefresher) 
 }
 
 // NewNodeHandler creates a new NodeHandler.
-func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcodePool *nodepool.TranscodePool, lister NodeListEnabled, eventBus cache.EventBus, redisClient *redis.Client, jwtSecret string) *NodeHandler {
+func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcodePool *nodepool.TranscodePool, lister NodeListEnabled, eventBus cache.EventBus, redisClient *redis.Client, nodeKeys nodeauth.Keyring) *NodeHandler {
 	return &NodeHandler{
 		repo:          repo,
 		proxyPool:     proxyPool,
@@ -130,7 +135,7 @@ func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcod
 		lister:        lister,
 		eventBus:      eventBus,
 		redisClient:   redisClient,
-		jwtSecret:     jwtSecret,
+		nodeKeys:      nodeKeys,
 	}
 }
 
@@ -200,6 +205,35 @@ func nodePolicyTargetChanged(before, after *nodepool.Node) bool {
 		!sameOptionalString(before.HWDeviceOverride, after.HWDeviceOverride)
 }
 
+// transcodeNodeArtifactOverridesChanged reports whether an update changed a
+// transcode node's prepared-download storage overrides, which reach the node
+// in its configuration document. The directory applies when the node next
+// restarts; the size cap at once.
+func transcodeNodeArtifactOverridesChanged(before, after *nodepool.Node) bool {
+	if before == nil || after == nil || after.Type != nodepool.NodeTypeTranscode {
+		return false
+	}
+	return !sameOptionalString(before.DownloadArtifactDirOverride, after.DownloadArtifactDirOverride) ||
+		!sameOptionalInt64(before.DownloadArtifactMaxBytesOverride, after.DownloadArtifactMaxBytesOverride)
+}
+
+// transcodeNodeSourceAccessChanged reports whether an update changed how a
+// transcode node reads its sources. The node applies it to the jobs it starts
+// after its next configuration read.
+func transcodeNodeSourceAccessChanged(before, after *nodepool.Node) bool {
+	if before == nil || after == nil || after.Type != nodepool.NodeTypeTranscode {
+		return false
+	}
+	return before.SourceAccess != after.SourceAccess
+}
+
+func sameOptionalInt64(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // sameNodeURL compares two stored node URLs the way the pools and the database
 // fences do, so a trailing slash is not a repoint.
 func sameNodeURL(a, b string) bool {
@@ -214,15 +248,17 @@ func sameOptionalString(a, b *string) bool {
 }
 
 // reloadNodeConfig asks one node to re-read its configuration now, reporting
-// whether it confirmed.
+// whether it confirmed. A transcode node has no event bus: this signed push,
+// after an admin change to its row or a drain request, and its own 30-second
+// poll of the core are how it learns of either.
 //
 // It targets /admin/reload-config, never /admin/force-reload: the latter tears
 // down every live playback session on a transcode node, which is a reasonable
 // thing for an operator to ask for explicitly and an unacceptable side effect
 // of saving a policy edit that the UI says applies to new transcodes.
 //
-// Best effort by design: the override is already stored, and the node's own
-// watcher poll is the backstop, so a node that is unreachable or predates the
+// Best effort by design: the change is already stored, and the node's own
+// configuration poll is the backstop, so a node that is unreachable or predates the
 // route must not turn a successful update into a failed one. It is bounded
 // tightly for the same reason — this runs after the response is written, but
 // still on the request's goroutine and context. The caller uses the result to
@@ -237,12 +273,12 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	if err != nil {
 		return false
 	}
-	if nodeauth.Sign(req, node.URL, h.jwtSecret) != nil {
+	if nodeauth.SignWith(req, node.SignTarget(), node.URL, h.nodeKeys) != nil {
 		return false
 	}
-	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout}, req, "reload")
+	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout, CheckRedirect: nodepool.RefuseRedirects}, req, "reload")
 	if err != nil {
-		slog.WarnContext(ctx, "node did not reload after an acceleration override change; it will pick it up on its next config poll",
+		slog.WarnContext(ctx, "node did not reload after a change to it; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "error", logredact.SanitizeURLError(err))
 		return false
 	}
@@ -252,7 +288,7 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	// warning about a reload that in fact succeeded, and leaves room for the
 	// node's answer to gain a body later.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		slog.WarnContext(ctx, "node refused the reload after an acceleration override change; it will pick it up on its next config poll",
+		slog.WarnContext(ctx, "node refused the reload after a change to it; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "status", resp.StatusCode)
 		return false
 	}
@@ -260,8 +296,8 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 }
 
 // nodeConfigReloadTimeout bounds the post-update nudge. A config reload is a
-// database read on the node, not a probe, so this only has to cover a round
-// trip to a node that is up.
+// read of the node's configuration (from the core, for a transcode node), not
+// a probe, so this only has to cover a round trip to a node that is up.
 const nodeConfigReloadTimeout = 10 * time.Second
 
 // applyHealthToPools publishes one check's result to whichever pool holds the
@@ -401,7 +437,7 @@ type nodeReprobeResponse struct {
 // mirroring the force-reload client.
 func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nodeReprobeResponse, error) {
 	timeout := h.nodeReprobeTimeout(node)
-	client := &http.Client{Timeout: timeout}
+	client := &http.Client{Timeout: timeout, CheckRedirect: nodepool.RefuseRedirects}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -409,7 +445,7 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 	if err != nil {
 		return nodeReprobeResponse{}, err
 	}
-	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+	if err := nodeauth.SignWith(req, node.SignTarget(), node.URL, h.nodeKeys); err != nil {
 		return nodeReprobeResponse{}, err
 	}
 
@@ -467,8 +503,17 @@ const nodePostCommitTimeout = 15 * time.Second
 // column. Detaching from that cancellation, bounded, is what makes the write and
 // its publication one outcome instead of two.
 func (h *NodeHandler) reloadPools(ctx context.Context) {
+	if h.reloadLocalPools(ctx) {
+		h.publishPoolChanged(ctx)
+	}
+}
+
+// reloadLocalPools refreshes this server's proxy and transcode pools from the
+// database, detached from ctx's cancellation as reloadPools explains, and
+// reports whether both reads succeeded.
+func (h *NodeHandler) reloadLocalPools(ctx context.Context) bool {
 	if h.lister == nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodePostCommitTimeout)
 	defer cancel()
@@ -476,7 +521,7 @@ func (h *NodeHandler) reloadPools(ctx context.Context) {
 	transcodeNodes, tcErr := h.lister.ListEnabled(ctx, nodepool.NodeTypeTranscode)
 	if proxyErr != nil || tcErr != nil {
 		slog.WarnContext(ctx, "node pool reload failed", "component", "api", "proxy_err", proxyErr, "transcode_err", tcErr)
-		return
+		return false
 	}
 	if h.proxyPool != nil {
 		h.proxyPool.SetNodes(proxyNodes)
@@ -484,8 +529,20 @@ func (h *NodeHandler) reloadPools(ctx context.Context) {
 	if h.transcodePool != nil {
 		h.transcodePool.SetNodes(transcodeNodes)
 	}
+	return true
+}
 
-	if h.eventBus != nil {
-		_ = h.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodePoolChanged})
+// publishPoolChanged tells every replica and proxy to reload its pools and
+// node credentials, detached from ctx's cancellation like the reload. A
+// failure is logged; the others catch up on their periodic reload.
+func (h *NodeHandler) publishPoolChanged(ctx context.Context) {
+	if h.eventBus == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodePostCommitTimeout)
+	defer cancel()
+	if err := h.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodePoolChanged}); err != nil {
+		slog.WarnContext(ctx, "node pool change not published; other servers catch up on their periodic reload",
+			"component", "api", "error", err)
 	}
 }

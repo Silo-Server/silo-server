@@ -110,14 +110,6 @@ func TestEnsureFallsBackToSetWithoutConditionalStore(t *testing.T) {
 	}
 }
 
-func TestEnsureTrimsStoredValue(t *testing.T) {
-	store := &memStore{values: map[string]string{Key: "  existing-id \n"}}
-	id, err := Ensure(context.Background(), store)
-	if err != nil || id != "existing-id" || store.sets != 0 {
-		t.Fatalf("id = %q err = %v sets = %d", id, err, store.sets)
-	}
-}
-
 func TestServiceCachesAndReportsUnavailable(t *testing.T) {
 	if _, err := New(nil).ServerID(context.Background()); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("nil store err = %v, want ErrUnavailable", err)

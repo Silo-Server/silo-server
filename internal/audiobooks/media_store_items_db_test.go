@@ -144,7 +144,7 @@ func TestABSLibraryItemsFiltersAndSortDB(t *testing.T) {
 		{"not started", filter(abs.FilterProgress, abs.ProgressNotStarted), []string{charlie, delta}},
 		{"series by ID", filter(abs.FilterSeries, abs.SeriesID(series)), []string{alpha, bravo}},
 		{"no series", filter(abs.FilterSeries, abs.SentinelNoSeries), []string{charlie, delta}},
-		{"title desc", abs.ItemsQuery{Sort: "media.metadata.title", Desc: true}, []string{delta, charlie, bravo, alpha}},
+		{"title desc", abs.ItemsQuery{Sort: absSortTitle, Desc: true}, []string{delta, charlie, bravo, alpha}},
 		{"added desc", abs.ItemsQuery{Sort: "addedAt", Desc: true}, []string{alpha, bravo, charlie, delta}},
 		{"added asc", abs.ItemsQuery{Sort: "addedAt"}, []string{delta, charlie, bravo, alpha}},
 		{"published year", abs.ItemsQuery{Sort: "media.metadata.publishedYear"}, []string{bravo, alpha, charlie, delta}},

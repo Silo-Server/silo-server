@@ -36,6 +36,19 @@ const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 /** The scope a stale override can hide in, cleared on every save. */
 const DEVICE_SCOPE: SettingIdentity = { scope: "profile_device" };
 
+/**
+ * The setting for a reader that acts on it without asking, such as the player's
+ * credits countdown: null until the server answers, so a viewer who turned
+ * auto-play off is never advanced on the default. It shares the query below, so
+ * a save made through useAutoPlayNextSetting reaches it too. A failed read
+ * falls back to the contract default, as that hook does.
+ */
+export function useAutoPlayNextEnabled(options?: { enabled?: boolean }): boolean | null {
+  const query = useEffectiveSettings({ keys: [KEY], enabled: options?.enabled });
+  if (query.data === undefined && !query.isError) return null;
+  return (query.data?.[KEY]?.value ?? SETTING_DEFINITIONS[KEY].defaultValue) as boolean;
+}
+
 export function useAutoPlayNextSetting() {
   const query = useEffectiveSettings({ keys: [KEY] });
   const setValue = useSetSettingValue();

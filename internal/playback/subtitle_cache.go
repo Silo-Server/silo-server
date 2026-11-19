@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
@@ -150,7 +151,7 @@ func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opt
 		return err
 	}
 	opts.Writer = w
-	return extract(r.Context(), opts)
+	return admitted(extract)(r.Context(), opts)
 }
 
 func (c *SubtitleCache) serveCached(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, format string) bool {
@@ -343,16 +344,29 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	cachedPath, _, cached := c.cachedEntryPath(opts.InputPath, opts.TrackIndex)
+	warm := c.readSourced(extract, false)
 	// A window open to the end is most of the track: the cached .sup answers
 	// it at once, where the source would be read whole first.
 	if !cached || opts.DurationSeconds > 0 {
-		if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
+		served, err := c.serveWindowFromSource(r.Context(), w, opts, extract)
+		if served {
 			if !cached {
 				// As after a demuxed window: keep the track and cache its .sup
 				// for the windows to come.
-				c.WarmInBackground(opts, c.sourced(extract))
+				c.WarmInBackground(opts, warm)
 			}
 			return err
+		}
+		if errors.Is(err, errSlowWindowRead) || errors.Is(err, embeddedsub.ErrSlowReads) {
+			// Reading every cue of the track the same way would take far
+			// longer, or already gave way to slow reads, and its random
+			// reads would starve the playback stream reading the same
+			// file; the demux reads it in order. A kept track whose local
+			// copy was slow to fetch is kept again this way, as every warm
+			// did before the index.
+			warm = func(ctx context.Context, opts StreamExtractOpts) error {
+				return c.demuxAndKeep(ctx, opts, extract)
+			}
 		}
 	}
 	if cached {
@@ -364,7 +378,15 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 			opts = windowFromCachedSup(opts, firstCue)
 		}
 	} else {
-		c.WarmInBackground(opts, c.sourced(extract))
+		c.WarmInBackground(opts, warm)
+		// The window demuxes the source; a refusal must come before the
+		// status goes out to answer busy. The warm, in its own warm slot,
+		// goes on either way, so the next window can read the cached .sup.
+		release, err := admitDemux()
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 
 	w.WriteHeader(http.StatusOK)

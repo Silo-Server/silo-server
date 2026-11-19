@@ -22,6 +22,15 @@ its own card. This note records the invariants; the wire contract is in
   collected. TMDB returns a collection's
   parts in no reliable order, so the sync sorts them by release date, with
   undated (announced) parts last.
+- One row serves every library. It is fetched in the metadata language of
+  the first enabled library with box sets on, in library order, that holds
+  at least its box set minimum of the collection's movies (failing that, the
+  first that holds one), and `language` records which. TMDB leaves the
+  overview (and possibly the name) empty where its translation lacks it;
+  those come from its answer in `metadata.fallback_language`, as item
+  metadata does, and stay empty when that is the original language. When
+  that answer fails, the fetch fails and the stored row is left as it was.
+  TMDB picks the poster for the language itself.
 - The stored name is TMDB's. Reads show it through `catalog.BoxSetTitle`
   ("… Collection" becomes "… Box Set"). Search matches the name without that
   suffix (`boxSetStemSQL`, the same rule in SQL; change the two together),
@@ -34,9 +43,10 @@ its own card. This note records the invariants; the wire contract is in
 The `sync_movie_box_sets` task (`internal/boxsets`) is the only code that calls
 TMDB for box sets; the box set reads use stored rows only. It looks up
 movies of box set libraries that were never looked up, were rematched, or were
-last looked up 30 days ago, then fetches collections that are new or were
-fetched 7 days ago, then caches collection artwork still served from TMDB
-through the item image cacher, under the same `metadata.cache_images` switch
+last looked up 30 days ago, then fetches collections that are new, were
+fetched 7 days ago, or were fetched in another language than the one they
+are now due in (a library changed its metadata language), then caches
+collection artwork still served from TMDB through the item image cacher, under the same `metadata.cache_images` switch
 as item artwork. It runs at startup, hourly, when a library turns box sets
 on, and 20 seconds after the node that matched a movie publishes its catalog
 change. A run stops after 25 failed TMDB calls; the next run resumes.

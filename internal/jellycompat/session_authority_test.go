@@ -109,7 +109,7 @@ func TestPersistentAuthRefusesDeletedOrUnavailableAuthority(t *testing.T) {
 					path = "/socket"
 				default:
 					router := chi.NewRouter()
-					router.With(PlaybackSessionAuth(replica, playback, nil)).Get("/Videos/{id}/stream", refuseHandler)
+					router.With(PlaybackSessionAuth(replica, playback, nil, addressGrantSettings(true))).Get("/Videos/{id}/stream", refuseHandler)
 					handler = clientip.Middleware(clientip.NewResolver(nil))(router)
 					path = "/Videos/item-fixture/stream"
 					switch surface {

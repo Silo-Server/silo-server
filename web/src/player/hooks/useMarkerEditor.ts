@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t, type MessageKey } from "@/i18n";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2 } from "../player-v2";
@@ -14,6 +14,18 @@ export const MARKER_LABEL_KEYS: Record<MarkerKind, MessageKey> = {
   recap: "web.markers.kind.recap",
   credits: "web.markers.kind.credits",
   preview: "web.markers.kind.preview",
+};
+
+/**
+ * Solid accent per kind, shared by the seek bar's hover dot and the marker
+ * editor panel. Every client uses this palette (TheIntroDB's segment colours,
+ * the Tailwind 400 shades); the seek bar tints use the same hues.
+ */
+export const MARKER_DOT_COLORS: Record<MarkerKind, string> = {
+  intro: "bg-blue-400",
+  recap: "bg-orange-400",
+  credits: "bg-purple-400",
+  preview: "bg-cyan-400",
 };
 
 // Initial span (seconds) given to a freshly created marker before the user
@@ -72,8 +84,13 @@ interface UseMarkerEditorParams {
   canEdit?: boolean;
   /** The current saved markers (from props); snapshotted into the draft on begin. */
   markers: MarkerDraft;
-  /** Notifies the host of the saved draft so it can patch local state immediately. */
-  onSaved?: (draft: MarkerDraft) => void;
+  /**
+   * Notifies the host of the kinds this save wrote so it can patch local state
+   * immediately. Kinds the save left out are absent: the draft's copy of them is
+   * the snapshot from when editing began, which another session may have
+   * changed since.
+   */
+  onSaved?: (saved: Partial<MarkerDraft>) => void;
 }
 
 /**
@@ -99,11 +116,32 @@ export function useMarkerEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const originalRef = useRef<MarkerDraft>(EMPTY_DRAFT);
+  const [draftFileId, setDraftFileId] = useState(fileId);
+
+  // A draft belongs to the file it was opened on. A version switch keeps the
+  // player mounted and hands us another file, so close the draft rather than
+  // let Save write it to a file the edits were never made on.
+  if (draftFileId !== fileId) {
+    setDraftFileId(fileId);
+    setEditing(false);
+    setError(null);
+  }
+
+  // Each opening of the panel, so a save that resolves after the panel was
+  // closed and opened again leaves the new opening's draft alone (#4108).
+  const openingRef = useRef(0);
+
+  // The file playing now, for a save that resolves after a version switch.
+  const currentFileIdRef = useRef(fileId);
+  useEffect(() => {
+    currentFileIdRef.current = fileId;
+  }, [fileId]);
 
   const canEdit = canEditParam && fileId != null && duration > 0;
 
   const begin = useCallback(() => {
     const snapshot = normalizeDraft(markers);
+    openingRef.current += 1;
     originalRef.current = snapshot;
     setDraft(snapshot);
     setActiveKind(MARKER_KINDS.find((kind) => snapshot[kind] != null) ?? "intro");
@@ -112,6 +150,7 @@ export function useMarkerEditor({
   }, [markers]);
 
   const cancel = useCallback(() => {
+    openingRef.current += 1;
     setEditing(false);
     setError(null);
   }, []);
@@ -167,9 +206,9 @@ export function useMarkerEditor({
   const dirty = MARKER_KINDS.some((kind) => !rangesEqual(draft[kind], originalRef.current[kind]));
 
   const save = useCallback(async () => {
-    if (fileId == null || !canEdit) return;
+    if (!editing || fileId == null || !canEdit) return;
     const original = originalRef.current;
-    const body: Record<string, { start: number; end: number } | null> = {};
+    const body: Partial<MarkerDraft> = {};
     for (const kind of MARKER_KINDS) {
       if (rangesEqual(draft[kind], original[kind])) continue;
       const range = draft[kind];
@@ -179,6 +218,11 @@ export function useMarkerEditor({
       setEditing(false);
       return;
     }
+    const opening = openingRef.current;
+    // Whether the panel still shows the draft this save sent: the same file,
+    // and not closed or opened again since.
+    const stillThisDraft = () =>
+      currentFileIdRef.current === fileId && openingRef.current === opening;
     setSaving(true);
     setError(null);
     try {
@@ -187,20 +231,50 @@ export function useMarkerEditor({
         body: markerUpdateToV2(body),
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
+      // Show the failure even on a panel reopened on this file since, so the
+      // user learns the earlier edits didn't save. After a version switch the
+      // error would land on another file's panel, so only log it.
+      if (currentFileIdRef.current === fileId) {
+        setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
+      } else {
+        console.error("Marker save failed after a version switch:", e);
+      }
       return;
     } finally {
       setSaving(false);
     }
-    originalRef.current = draft;
-    setDraft(draft);
-    setEditing(false);
+    // A version switch, or closing and reopening the panel, during the request
+    // closed this draft, and the editor may since hold a newer one. Leave that
+    // one's edits alone.
+    if (stillThisDraft()) {
+      originalRef.current = draft;
+      setDraft(draft);
+      setEditing(false);
+    } else if (currentFileIdRef.current === fileId) {
+      // Reopened on the same file: its "before" values were read while this
+      // save was in flight. The saved kinds are its baseline now, and a kind
+      // it hasn't touched shows the saved value, so its dirty state and its
+      // next save compare against what the server holds.
+      const before = originalRef.current;
+      const saved = { ...before };
+      for (const kind of MARKER_KINDS) {
+        if (kind in body) saved[kind] = draft[kind];
+      }
+      originalRef.current = saved;
+      setDraft((current) => {
+        const next = { ...current };
+        for (const kind of MARKER_KINDS) {
+          if (kind in body && rangesEqual(current[kind], before[kind])) next[kind] = draft[kind];
+        }
+        return next;
+      });
+    }
     try {
-      onSaved?.(draft);
+      onSaved?.(body);
     } catch (e) {
       console.error("Marker save callback failed:", e);
     }
-  }, [canEdit, config, draft, fileId, onSaved]);
+  }, [canEdit, config, draft, editing, fileId, onSaved]);
 
   return {
     editing,

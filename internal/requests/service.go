@@ -2670,7 +2670,14 @@ func (s *Service) planSubmission(ctx context.Context, req Request, actor Viewer,
 	if certain {
 		for _, t := range existing {
 			if t.Status == StatusFailed && !slices.Contains(allowed, t.Quality) {
-				if err := s.store.DeleteTarget(ctx, t.ID); err != nil && !errors.Is(err, ErrNotFound) {
+				err := s.store.DeleteTarget(ctx, req.ID, t.ID, claimLease(req))
+				if errors.Is(err, ErrInvalidState) {
+					// This attempt outlived its claim: a newer claim plans the
+					// request now, so leave its targets and status alone (#4184).
+					current, getErr := s.store.GetRequest(ctx, req.ID)
+					return submissionPlan{}, current, getErr
+				}
+				if err != nil && !errors.Is(err, ErrNotFound) {
 					return submissionPlan{}, nil, err
 				}
 			}
@@ -2683,8 +2690,9 @@ func (s *Service) planSubmission(ctx context.Context, req Request, actor Viewer,
 	}
 	if len(plan.want) == 0 {
 		// Nothing left to send: let the remaining targets decide the status so
-		// the request does not sit in approved.
-		updated, err := s.store.RecomputeStatus(ctx, req.ID, actor)
+		// the request does not sit in approved. A request no longer approved,
+		// or claimed again since this attempt, is left as it is.
+		updated, err := s.store.RecomputeStatus(ctx, req.ID, claimLease(req), actor)
 		if errors.Is(err, ErrInvalidState) {
 			updated, err = s.store.GetRequest(ctx, req.ID)
 		}

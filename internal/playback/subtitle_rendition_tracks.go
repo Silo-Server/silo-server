@@ -20,6 +20,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // On-demand subtitle renditions list every embedded text track of the source
@@ -76,9 +77,14 @@ type SubtitleRenditionSource struct {
 func (v SubtitleRenditionSource) IsZero() bool { return v == SubtitleRenditionSource{} }
 
 // matches reports whether idx describes version v; an unrecorded version
-// takes any.
+// takes any. The modification time compares at microseconds, the catalog's
+// precision, like every check across hosts: the API server records the
+// version from its own stat, and the executor, a transcode node, may see the
+// file through another mount, or through the core's relay, with another
+// sub-microsecond time.
 func (v SubtitleRenditionSource) matches(idx *embeddedsub.Index) bool {
-	return v.IsZero() || idx.Size == v.Size && idx.ModTime.UnixNano() == v.ModTimeUnixNano
+	return v.IsZero() || idx.Size == v.Size &&
+		models.NormalizeFileModifiedAt(idx.ModTime).Equal(models.NormalizeFileModifiedAt(time.Unix(0, v.ModTimeUnixNano)))
 }
 
 // SubtitleRenditionTrackQueryParam names the on-demand track, by container

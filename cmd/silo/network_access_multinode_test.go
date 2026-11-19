@@ -242,7 +242,14 @@ func TestNetworkAccessProxyReportsOriginTheAPIStores(t *testing.T) {
 	})
 
 	// --- API fan-out --------------------------------------------------------
-	nodeHandler := handlers.NewNodeHandler(nodeRepo, nil, nil, nodeRepo, bus, nil, jwtSecret)
+	// The API signs its calls to the proxy through the node credential
+	// registry, which hands the shared secret only to a URL registered as a
+	// proxy.
+	nodeKeys := nodepool.NewKeyRegistry(nodeRepo, cipher)
+	if err := nodeKeys.Refresh(ctx); err != nil {
+		t.Fatalf("load node credentials: %v", err)
+	}
+	nodeHandler := handlers.NewNodeHandler(nodeRepo, nil, nil, nodeRepo, bus, nil, nodeKeys.Keyring(func() string { return jwtSecret }))
 	apiService.SetNetworkAccessNodes(nodeHandler)
 
 	waitFor(t, "proxy resident running", 60*time.Second, func() bool {

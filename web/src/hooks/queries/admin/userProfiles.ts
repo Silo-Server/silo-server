@@ -115,6 +115,10 @@ export function useDeleteAdminUserProfile(userId: number) {
   const client = useQueryClient();
   const context = captureProfileRequestContext();
   return useMutation({
+    // Sent even offline, so it fails at once. The confirm dialog closes on
+    // click, so a delete held until reconnect would remove the profile and its
+    // watch history later, with nothing on screen saying one is pending.
+    networkMode: "always",
     retry: false,
     mutationFn: async (profileId: string) => {
       const authority = context ?? captureAdminUserAuthority();

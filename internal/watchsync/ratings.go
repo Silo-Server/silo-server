@@ -14,9 +14,8 @@ import (
 )
 
 // This file syncs a profile's movie and series ratings with a provider. Silo
-// stores 1 to 5 stars; providers use integers from 1 to 10. Every decision is
-// made in stars, so a remote change inside one star (7 to 8) is not a change,
-// and Silo never overwrites a remote 7 with the 8 its 4 stars map to.
+// stores scores from 1 to 10 and providers exchange integers from 1 to 10, so
+// every value syncs exactly, with no conversion.
 //
 // Each item is a three-way merge of the local rating, the remote rating, and
 // the last rating both sides agreed on (watch_provider_rating_items). Whichever
@@ -62,18 +61,6 @@ func (s *Service) WithRatingStore(store ratingStore) *Service {
 	return s
 }
 
-// starsFromProviderRating converts a provider rating (1 to 10) to stars,
-// rounding half up: 1-2 is 1 star, 3-4 is 2 stars, and 9-10 is 5 stars.
-func starsFromProviderRating(rating int) int {
-	rating = min(max(rating, 1), 10)
-	return (rating + 1) / 2
-}
-
-// providerRatingFromStars converts stars to the provider scale.
-func providerRatingFromStars(stars int) int {
-	return stars * 2
-}
-
 type ratingAction uint8
 
 const (
@@ -83,7 +70,7 @@ const (
 	ratingImport
 )
 
-// decideRating merges one item. local, remote and base are stars, with 0 for
+// decideRating merges one item. local, remote and base are scores, with 0 for
 // unrated; base is the last agreed rating. A zero remoteAt is unknown.
 func decideRating(local, remote, base int, localAt, remoteAt time.Time) ratingAction {
 	switch {
@@ -129,7 +116,7 @@ type ratingItem struct {
 
 // observedLocal is the local rating this sync read, for compare-and-set writes.
 func (item *ratingItem) observedLocal() catalog.ObservedRating {
-	return catalog.ObservedRating{Rating: item.local, RatedAt: item.localAt}
+	return catalog.ObservedRating{Score: item.local, RatedAt: item.localAt}
 }
 
 // providerKey is the key recorded for an item and sent with its writes: the
@@ -490,7 +477,7 @@ func (s *Service) loadRatingItems(ctx context.Context, conn Connection, onlyIDs 
 			warnings = append(warnings, "rated item has no provider ids: "+rating.MediaItemID)
 			continue
 		}
-		items[rating.MediaItemID] = &ratingItem{identity: identity, local: rating.Rating, localAt: rating.RatedAt}
+		items[rating.MediaItemID] = &ratingItem{identity: identity, local: rating.Score, localAt: rating.RatedAt}
 	}
 	for i := range states {
 		state := states[i]
@@ -640,7 +627,7 @@ func (s *Service) resolveRemoteRatings(ctx context.Context, items map[string]*ra
 		if item.observed && !match.row.RatedAt.After(item.remoteAt) {
 			continue
 		}
-		item.remote = starsFromProviderRating(match.row.Rating)
+		item.remote = match.row.Rating
 		item.remoteAt = match.row.RatedAt
 		item.observed = true
 		item.remoteKey = strings.TrimSpace(match.row.ProviderItemKey)
@@ -751,19 +738,19 @@ func (s *Service) reconcileRatings(
 	var deletes []string
 	var sets []*ratingItem
 	var removals []*ratingItem
-	agree := func(item *ratingItem, stars int, seen bool) {
+	agree := func(item *ratingItem, score int, seen bool) {
 		switch {
-		case stars == 0 && item.stored != nil:
+		case score == 0 && item.stored != nil:
 			deletes = append(deletes, item.identity.MediaItemID)
-		case stars == 0:
-		case item.stored == nil || item.stored.SyncedRating != stars || item.stored.RemoteSeen != seen:
+		case score == 0:
+		case item.stored == nil || item.stored.SyncedRating != score || item.stored.RemoteSeen != seen:
 			upserts = append(upserts, RatingSyncState{
 				ConnectionID:      conn.ID,
 				ProviderAccountID: conn.ProviderAccountID,
 				MediaItemID:       item.identity.MediaItemID,
 				Kind:              item.identity.Kind,
 				ProviderItemKey:   item.providerKey(),
-				SyncedRating:      stars,
+				SyncedRating:      score,
 				RemoteSeen:        seen,
 			})
 		}
@@ -920,7 +907,7 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 		for _, item := range batch {
 			payload = append(payload, LocalRating{
 				LocalFavorite: item.sendIdentity(),
-				Rating:        providerRatingFromStars(item.local),
+				Rating:        item.local,
 				RatedAt:       item.localAt,
 			})
 		}
@@ -940,11 +927,11 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 			if err != nil {
 				return sent, warnings, err
 			}
-			if current == nil || current.Rating != item.local {
+			if current == nil || current.Score != item.local {
 				changed := *item
 				changed.local, changed.localAt = 0, time.Time{}
 				if current != nil {
-					changed.local, changed.localAt = current.Rating, current.RatedAt
+					changed.local, changed.localAt = current.Score, current.RatedAt
 				}
 				if changed.local > 0 {
 					changedSets = append(changedSets, &changed)
@@ -995,7 +982,7 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 				}
 				if current != nil {
 					changed := *item
-					changed.local, changed.localAt = current.Rating, current.RatedAt
+					changed.local, changed.localAt = current.Score, current.RatedAt
 					changedSets = append(changedSets, &changed)
 					lastRemoved = append(lastRemoved, identity.MediaItemID)
 				}

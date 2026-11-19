@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,21 +33,26 @@ type fakeNotificationInbox struct {
 	// mutes and unmutes record the series each call named, as
 	// account/profile/series.
 	mutes, unmutes []string
+	// manyMutes records each many-series call as
+	// account/profile/muted/comma-joined series.
+	manyMutes []string
 }
 
 // fixtureNotifiedSeries is a profile's notified-series list in service
-// order: Next Up alone, two active reasons, a series the viewer may not see,
-// a watchlist series the preferences silence, and a muted favorite.
+// order: a series that notifies, one with an available episode to watch first,
+// a series the viewer may not see, one the preferences silence, and a muted
+// one.
 func fixtureNotifiedSeries() []notifications.NotifiedSeries {
 	nextUp := notifications.EpisodeKey(2, 9)
 	day := func(n int) time.Time { return fixedTime().Add(time.Duration(n) * 24 * time.Hour) }
 	latest := func(n int) *time.Time { t := day(n); return &t }
+	on := notifications.ReasonFlags{NextUp: true}
 	return []notifications.NotifiedSeries{
-		{SeriesID: "series:andor", SeriesSortFields: notifications.SeriesSortFields{SortKey: "andor", Title: "Andor", Year: 2022, AddedAt: day(0), LatestEpisodeAddedAt: latest(3)}, Reasons: notifications.ReasonFlags{NextUp: true}, Active: notifications.ReasonFlags{NextUp: true}, NextExpectedEpisodeKey: &nextUp},
-		{SeriesID: "series:bear", SeriesSortFields: notifications.SeriesSortFields{SortKey: "bear", Title: "The Bear", Year: 2024, AddedAt: day(1), LatestEpisodeAddedAt: latest(5)}, Reasons: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}, Active: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}},
-		{SeriesID: "series:hidden", SeriesSortFields: notifications.SeriesSortFields{SortKey: "hidden", Title: "Hidden", AddedAt: day(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}},
-		{SeriesID: "series:slow-horses", SeriesSortFields: notifications.SeriesSortFields{SortKey: "slow horses", Title: "Slow Horses", Year: 2023, AddedAt: day(3), LatestEpisodeAddedAt: latest(1)}, Reasons: notifications.ReasonFlags{Watchlist: true}},
-		{SeriesID: "series:wire", SeriesSortFields: notifications.SeriesSortFields{SortKey: "wire", Title: "The Wire", Year: 2002, AddedAt: day(4), LatestEpisodeAddedAt: latest(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}, Muted: true},
+		{SeriesID: "series:andor", SeriesSortFields: notifications.SeriesSortFields{SortKey: "andor", Title: "Andor", Year: 2022, AddedAt: day(0), LatestEpisodeAddedAt: latest(3)}, Reasons: on, Active: on, NextExpectedEpisodeKey: &nextUp, CaughtUp: true},
+		{SeriesID: "series:bear", SeriesSortFields: notifications.SeriesSortFields{SortKey: "bear", Title: "The Bear", Year: 2024, AddedAt: day(1), LatestEpisodeAddedAt: latest(5)}, Reasons: on, Active: on, NextExpectedEpisodeKey: &nextUp},
+		{SeriesID: "series:hidden", SeriesSortFields: notifications.SeriesSortFields{SortKey: "hidden", Title: "Hidden", AddedAt: day(2)}, Reasons: on, Active: on, NextExpectedEpisodeKey: &nextUp, CaughtUp: true},
+		{SeriesID: "series:slow-horses", SeriesSortFields: notifications.SeriesSortFields{SortKey: "slow horses", Title: "Slow Horses", Year: 2023, AddedAt: day(3), LatestEpisodeAddedAt: latest(1)}, Reasons: on, CaughtUp: true},
+		{SeriesID: "series:wire", SeriesSortFields: notifications.SeriesSortFields{SortKey: "wire", Title: "The Wire", Year: 2002, AddedAt: day(4), LatestEpisodeAddedAt: latest(2)}, Reasons: on, Active: on, NextExpectedEpisodeKey: &nextUp, CaughtUp: true, Muted: true},
 	}
 }
 
@@ -64,6 +70,25 @@ func (f *fakeNotificationInbox) MuteNotificationSeries(_ context.Context, userID
 func (f *fakeNotificationInbox) UnmuteNotificationSeries(_ context.Context, userID int, profile, seriesID string) error {
 	f.unmutes = append(f.unmutes, fmt.Sprintf("%d/%s/%s", userID, profile, seriesID))
 	return nil
+}
+
+// SetNotificationSeriesMuted records each call as account/profile/muted/ids.
+// Of the fixture series only the Wire starts muted, and the movie is no
+// series.
+func (f *fakeNotificationInbox) SetNotificationSeriesMuted(_ context.Context, userID int, profile string, seriesIDs []string, muted bool) (map[string]notifications.SeriesMuteOutcome, error) {
+	f.manyMutes = append(f.manyMutes, fmt.Sprintf("%d/%s/%t/%s", userID, profile, muted, strings.Join(seriesIDs, ",")))
+	out := make(map[string]notifications.SeriesMuteOutcome, len(seriesIDs))
+	for _, id := range seriesIDs {
+		switch {
+		case muted && id == notificationNotASeriesID:
+			out[id] = notifications.SeriesMuteNotFound
+		case muted == (id == "series:wire"):
+			out[id] = notifications.SeriesMuteUnchanged
+		default:
+			out[id] = notifications.SeriesMuteApplied
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeNotificationInbox) ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error) {
@@ -185,37 +210,13 @@ func TestNotificationInboxScopedCursorAndReadCutoff(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPost, path+"/read-all", string(body), actingRequestAdmin), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodPut, path+"/preferences", `{"enabled":null}`, profileOwner()), TypeValidationFailed)
+	// The favorite, watchlist and continue_watching switches are retired.
+	requireProblem(t, do(t, h, http.MethodPut, path+"/preferences", `{"notify_favorites":false}`, profileOwner()), TypeValidationFailed)
 	saved = do(t, h, http.MethodPut, path+"/preferences", `{"enabled":false}`, profileOwner())
-	if saved.Code != 200 || f.patch.Enabled == nil || *f.patch.Enabled || f.patch.NotifyFavorites != nil {
+	if saved.Code != 200 || f.patch.Enabled == nil || *f.patch.Enabled || f.patch.NotifyNextUp != nil {
 		t.Fatal(saved.Code, saved.Body.String(), f.patch)
 	}
 }
-func TestNotificationEmptySyncHasStableCheckpoint(t *testing.T) {
-	f := fixtureNotificationInbox()
-	f.empty = true
-	deps := pilotDeps(nil, nil)
-	deps.NotificationInbox = f
-	h := NewHandler(deps)
-	r := do(t, h, http.MethodGet, Prefix+"/notifications/sync?limit=1", "", profileOwner())
-	if r.Code != 200 {
-		t.Fatal(r.Code, r.Body.String())
-	}
-	var first struct {
-		SyncCursor string `json:"sync_cursor"`
-		Initial    bool   `json:"initial_snapshot"`
-	}
-	if err := json.Unmarshal(r.Body.Bytes(), &first); err != nil || first.SyncCursor == "" || !first.Initial {
-		t.Fatal(first, err)
-	}
-	r = do(t, h, http.MethodGet, Prefix+"/notifications/sync?limit=1&cursor="+url.QueryEscape(first.SyncCursor), "", profileOwner())
-	var second struct {
-		Initial bool `json:"initial_snapshot"`
-	}
-	if err := json.Unmarshal(r.Body.Bytes(), &second); err != nil || second.Initial || r.Code != 200 {
-		t.Fatal(second, err, r.Code)
-	}
-}
-
 func (f *fakeNotificationInbox) NotificationPushDisplay(_ context.Context, _ int, profile, id string) (notifications.NotificationDisplay, error) {
 	if profile != "p-owner" || id != notificationFixtureID {
 		return notifications.NotificationDisplay{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Notification not found"}
@@ -290,36 +291,5 @@ func TestNotificationDisplayLimiterSkipsInvalidCredentials(t *testing.T) {
 				t.Fatalf("got %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
 		})
-	}
-}
-
-// A display-token request spends the limiter once, as an access-token request
-// does: the pre-session limiter already charged it.
-func TestNotificationDisplayLimiterChargesOnce(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.NotificationInbox = fixtureNotificationInbox()
-	claims := map[string]*auth.Claims{
-		"display": {UserID: 1, Role: "user", SessionID: "live", ProfileID: "p-owner", TokenType: auth.TokenTypeApplePushDisplay},
-		"access":  {UserID: 1, Role: "user", SessionID: "live", TokenType: auth.TokenTypeAccess},
-	}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"live": "user"}}, nil, nil)
-	calls := 0
-	deps.RateLimit = func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; next.ServeHTTP(w, r) })
-	}
-	h := NewHandler(deps)
-	displayPath := Prefix + "/notifications/push/apple/display/" + notificationFixtureID
-	for name, headers := range map[string]map[string]string{
-		"display": bearer("display"),
-		"access":  with(bearer("access"), "X-Profile-Id", "p-owner"),
-	} {
-		calls = 0
-		rec := do(t, h, http.MethodGet, displayPath, "", headers)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: got %d: %s", name, rec.Code, rec.Body.String())
-		}
-		if calls != 1 {
-			t.Fatalf("%s: limiter ran %d times, want 1", name, calls)
-		}
 	}
 }

@@ -111,13 +111,15 @@ export default function LibraryMetadataSettings() {
   // Restoring stages every worker value at once; the save bar still confirms
   // it. The button is only offered while something differs from the default,
   // so an untouched group never shows a control that would do nothing.
-  const workerOverrides = hasWorkerOverrides(form.getValue);
+  // A count the environment sets is not the admin's to restore.
+  const restorable = (key: string) => !form.envVar(key);
+  const workerOverrides = hasWorkerOverrides(form.getValue, restorable);
   const showRealtimeSwitch =
     form.getPersistedValue(REALTIME_MONITORING_KEY) === "false" ||
     form.isDirty(REALTIME_MONITORING_KEY);
   function restoreWorkerDefaults() {
     for (const [key, fallback] of Object.entries(WORKER_SETTING_DEFAULTS)) {
-      if (form.getValue(key) !== fallback) form.setValue(key, fallback);
+      if (restorable(key) && form.getValue(key) !== fallback) form.setValue(key, fallback);
     }
   }
 
@@ -244,6 +246,7 @@ export default function LibraryMetadataSettings() {
             value={form.getValue("scanner.workers")}
             onChange={(value) => form.setValue("scanner.workers", value)}
             restartRequired={restartKeys.has("scanner.workers")}
+            managedByEnv={form.envVar("scanner.workers")}
           />
           <SettingField
             label={t("web.admin.settings.libraryMetadata.scanning.matcherWorkers.label")}
@@ -254,6 +257,7 @@ export default function LibraryMetadataSettings() {
             value={form.getValue("matcher.workers")}
             onChange={(value) => form.setValue("matcher.workers", value)}
             restartRequired={restartKeys.has("matcher.workers")}
+            managedByEnv={form.envVar("matcher.workers")}
           />
           <SettingField
             label={t("web.admin.settings.libraryMetadata.scanning.imageWorkers.label")}

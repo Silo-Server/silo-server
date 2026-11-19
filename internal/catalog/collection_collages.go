@@ -44,7 +44,9 @@ const (
 	// A collage in use is touched at most this often, so reads rarely write.
 	collectionCollageTouchInterval = 24 * time.Hour
 	// A collage nobody has read for this long is retired the next time a
-	// collage of the same collection is built.
+	// collage of the same collection is built, and a smart collection's
+	// record for a viewer access nobody has refreshed for this long the next
+	// time the collection is refreshed.
 	collectionCollageUnusedAfter = 7 * 24 * time.Hour
 
 	collageBuildConcurrency = 2
@@ -359,6 +361,9 @@ type smartCollageStore interface {
 	// saveSmartCollage records variantKey, empty for none, as the collage the
 	// viewer access accessKey names sees for a smart collection's definition.
 	saveSmartCollage(ctx context.Context, collectionID, accessKey, definitionKey, variantKey string) error
+	// retireUnrefreshedSmartCollages deletes a smart collection's records
+	// last refreshed before cutoff.
+	retireUnrefreshedSmartCollages(ctx context.Context, collectionID string, cutoff time.Time) error
 }
 
 // smartCollage is the collage recorded for one smart collection and viewer
@@ -445,6 +450,12 @@ func (s smartCollageSet) refreshLater(c smartCollageCollection, accessKey string
 // When no match has a poster it records that there is none and succeeds: the
 // record holds off the next refresh until the refresh interval, so the build
 // queue keeps no retry marker for it.
+//
+// A read refreshes its record at least every refresh interval, so a record
+// left unrefreshed for collectionCollageUnusedAfter belongs to an access no
+// viewer reads with any more, such as one a profile's changed restrictions
+// replaced. The refresh retires those records of the collection; one still
+// needed is recorded again on its viewer's next read.
 func (s smartCollageSet) refresh(ctx context.Context, c smartCollageCollection, accessKey string) error {
 	sources, err := c.sources(ctx)
 	if err != nil {
@@ -457,7 +468,13 @@ func (s smartCollageSet) refresh(ctx context.Context, c smartCollageCollection, 
 		}
 		key = CollectionCollageKey(sources)
 	}
-	return s.records.saveSmartCollage(ctx, c.id, accessKey, c.definitionKey, key)
+	if err := s.records.saveSmartCollage(ctx, c.id, accessKey, c.definitionKey, key); err != nil {
+		return err
+	}
+	if err := s.records.retireUnrefreshedSmartCollages(ctx, c.id, time.Now().Add(-collectionCollageUnusedAfter)); err != nil {
+		slog.WarnContext(ctx, "collage: failed to retire unrefreshed smart collection collages", "component", "catalog", "collection_id", c.id, "error", err)
+	}
+	return nil
 }
 
 // firstPosters returns the posters of the first items that have one, at most

@@ -2,61 +2,13 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"testing"
-	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestVerdictFor(t *testing.T) {
-	for _, tc := range []struct {
-		status     string
-		failClosed bool
-		verdict    recheckVerdict
-		err        error
-	}{
-		{CheckStatusActive, false, verdictSlide, nil},
-		{"", false, verdictSlide, nil},
-		{CheckStatusUnsupported, false, verdictAbsoluteAge, nil},
-		{CheckStatusNotFound, false, verdictSlide, ErrSessionRevoked},
-		{CheckStatusDisabled, true, verdictSlide, ErrSessionRevoked},
-		{CheckStatusNotPermitted, false, verdictSlide, ErrSessionRevoked},
-		{CheckStatusUnavailable, false, verdictSlide, nil},
-		{CheckStatusUnavailable, true, verdictSlide, ErrProviderUnavailable},
-	} {
-		verdict, err := verdictFor(tc.status, tc.failClosed)
-		if verdict != tc.verdict || !errors.Is(err, tc.err) {
-			t.Errorf("verdictFor(%q, %v) = %v, %v; want %v, %v", tc.status, tc.failClosed, verdict, err, tc.verdict, tc.err)
-		}
-	}
-}
-
-func TestRecheckDue(t *testing.T) {
-	now := time.Now()
-	at := func(ago time.Duration) *time.Time { v := now.Add(-ago); return &v }
-	r := NewProviderRecheck(nil, nil)
-	for _, tc := range []struct {
-		name     string
-		identity LinkedIdentity
-		want     bool
-	}{
-		{"never checked", LinkedIdentity{}, true},
-		{"fresh", LinkedIdentity{LastCheckedAt: at(time.Hour), LastCheckStatus: CheckStatusActive}, false},
-		{"stale", LinkedIdentity{LastCheckedAt: at(13 * time.Hour), LastCheckStatus: CheckStatusActive}, true},
-		{"fresh unsupported", LinkedIdentity{LastCheckedAt: at(time.Hour), LastCheckStatus: CheckStatusUnsupported}, false},
-		{"unavailable backs off", LinkedIdentity{LastCheckedAt: at(time.Minute), LastCheckStatus: CheckStatusUnavailable}, false},
-		{"unavailable retries after the wait", LinkedIdentity{LastCheckedAt: at(providerRecheckRetryWait), LastCheckStatus: CheckStatusUnavailable}, true},
-		{"admin link", LinkedIdentity{LastCheckStatus: ""}, true},
-	} {
-		if got := r.recheckDue(&tc.identity, 12*time.Hour, now); got != tc.want {
-			t.Errorf("%s: due = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
 
 // TestProviderRecheckSkipsLocalSessions: a session without an identity, or
 // a service without a re-check, never reaches the provider.

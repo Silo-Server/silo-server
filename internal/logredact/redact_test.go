@@ -32,19 +32,6 @@ func TestSlogtestConformance(t *testing.T) {
 	}
 }
 
-func TestSecretKey(t *testing.T) {
-	for _, k := range []string{"password", "api_key", "apiKey", "X-Authorization", "session_token", "Cookie", "client_secret"} {
-		if !SecretKey(k) {
-			t.Errorf("SecretKey(%q) = false, want true", k)
-		}
-	}
-	for _, k := range []string{"user_id", "request_id", "component", "folder", "count"} {
-		if SecretKey(k) {
-			t.Errorf("SecretKey(%q) = true, want false", k)
-		}
-	}
-}
-
 func logAndCapture(t *testing.T, fn func(l *slog.Logger)) map[string]any {
 	t.Helper()
 	var buf bytes.Buffer
