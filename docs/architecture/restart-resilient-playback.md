@@ -888,9 +888,14 @@ working (`internal/jellycompat/transcode_failover.go`):
   the transport id rebuildable on that node, so a later move back to it works.
   The record naming the new node is written at commit, before this release
   starts. A release deletes no record, and a node never touches the recipe
-  store, so that record stays. A release that lands after a later move put the
-  transport back on the released node ends the rebuilt job there; the record
-  still names that node, so the next request rebuilds it.
+  store, so that record stays. The release names no start, so the node ends
+  the job it holds when the release arrives, or a rebuild that publishes while
+  the release waits for the transport's lifecycle lock (that rebuild resolved
+  before the move committed); a job a start publishes while it waits stays.
+  A release that arrives after a later move put the transport back on the
+  released node and its job was already running there (rebuilt, or the old
+  job reused) still ends that job; the record still names that node, so the
+  next request rebuilds it.
 - **Card binding.** The record binds the node it names by its row id, the one
   the core's resolve checks. A start writes the id of the node it started on,
   not the play's routing assignment, which is recorded only after the start

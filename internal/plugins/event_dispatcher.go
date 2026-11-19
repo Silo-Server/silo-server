@@ -308,7 +308,8 @@ func publicPayload(env events.Envelope) (*structpb.Struct, error) {
 
 // withStringIDs makes a catalog event's identifiers JSON strings, as the
 // catalog defines them. The host's payloads are shared with the events
-// socket, which carries numeric IDs as numbers, so the conversion happens
+// socket, which still carries some IDs as numbers (a scan's library_id, a
+// job's created_by_user_id), so the conversion happens
 // here: a top-level `id` or `*_id` field holding a number becomes its
 // decimal string, and zero, which no stored row has, becomes absent (a
 // server-queued job's created_by_user_id). A notification names only its

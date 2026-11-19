@@ -382,6 +382,11 @@ func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Po
 	}
 	if fill != nil {
 		fill(session)
+	} else if watch, ok := h.savedWatch(ctx, sessionID); ok {
+		// The shared row carries no measurement; the lifecycle row holds
+		// the one the play's last live copy saved. A reported play's fill
+		// credits its own listening instead.
+		session.Watch.Restore(watch)
 	}
 	if err := h.recordAdminStopHistory(ctx, session, reason); err != nil {
 		recordLifecycleActivity(ctx, pool, sessionID, now)

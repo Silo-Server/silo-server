@@ -314,8 +314,13 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 		}
 	}
 	items := make([]MediaRequest, 0, len(rows))
+	withhold := scopedAPIKey(ctx)
 	for _, r := range rows {
-		items = append(items, mediaRequestOf(r, v))
+		item := mediaRequestOf(r, v)
+		if withhold {
+			withholdRequestDeployment(&item)
+		}
+		items = append(items, item)
 	}
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }
