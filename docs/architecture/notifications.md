@@ -425,7 +425,8 @@ request. The delivery is `watchlist.available`, with the arrived item in
 `series_id` (as `request.fulfilled` names it) and the title's TMDB ID and
 media type (`movie` or `series`) in `reason_flags`. The partial unique index
 `notification_deliveries_account_profile_watchlist_key` keeps one per
-`(account, profile, item)`. Webhooks carry it under `notify_requests`; web
+`(account, profile, item)`. Webhooks and plugin destinations carry it under
+`notify_requests`; web
 push, mobile push, email and Discord messages carry it like any delivery.
 
 Arrival rides on release events, so it inherits their gaps: a library's silent
@@ -555,3 +556,218 @@ destination-side WAF/CDN blips intermittently 4xx valid webhooks. 429 honors
 `Retry-After` when present. Auto-disable posts a `webhook.auto_disabled`
 notice to the profile's inbox — a type that is itself excluded from webhook
 dispatch so a broken webhook cannot loop.
+
+Inbox retention keeps a delivery while one of its webhook or plugin
+destination attempts is still pending or retrying: deleting the delivery
+would cascade to the attempt and cancel a retry still on its schedule. It
+keeps it always while the attempt is claimed or scheduled (`retrying` with
+`next_retry_at` ahead), and otherwise only while the delivery is younger than
+the plugin attempt age cap (36 hours, `pluginAttemptMaxAge`), so a stranded
+attempt (webhooks turned off server-wide, for example) releases its row.
+
+## Plugin destinations
+
+A plugin's `notification_channel.v1` capability provides a channel that
+profiles add destinations on; see the SDK's `docs/notification-channel.md` for the plugin
+contract. The host keeps everything except the send: which deliveries a
+destination gets, the outbox, retries, failure counts and auto-disable. The
+code is `internal/notifications/plugin_destination_*.go`; the plugin runtime
+is reached through the `PluginChannelHost` interface, which `cmd/silo` wires
+to the plugin service, so neither package imports the other.
+
+- **Rows.** `notification_plugin_destinations` names a channel by `plugin_id`
+  and `capability_id`, which survive plugin upgrades and reinstalls. Settings
+  are one `enc:v1:` envelope bound to the row id
+  (`notification_plugin_destination:<id>:config`) holding
+  `{"settings": {...}, "write_only": [...]}`. Secret fields, classified by
+  `plugins.ConfigSchemaFieldSets` as for plugin configuration and by each
+  form key exactly as written (never trimmed), are never returned; a write
+  that leaves one blank keeps the stored value. `write_only` records which
+  keys were saved as secret, and they stay write-only (never returned,
+  listed in `secret_settings_set`) whatever a later manifest says, until the
+  owner replaces or clears them, so a plugin upgrade that drops a secret
+  marking can't expose a credential. Redaction of plugin text counts them as
+  secret too. Settings stored without a `write_only` array (a bare settings
+  object, or an envelope that names the record differently) don't say which
+  values were secret, so every value is write-only. The owner's next
+  settings save writes the record: a value it replaces is classified by the
+  schema then current, and every value it leaves alone stays write-only.
+  Only fields
+  the current schema classifies as public are returned, so a stored field a
+  plugin upgrade stopped declaring stays hidden. Names are unique per account
+  profile. Restoring a backup carries live destinations and webhooks back by
+  id in one upsert on the backup's own schema; the restored rows it will
+  update first move to a name no live row can hold (a space and the id), so
+  names swapped since the backup don't collide part way through.
+- **Flat forms.** A destination form is one object of scalar fields; the
+  SDK's `manifest.ValidateDestinationSchema` refuses anything else, and plugin
+  install and upgrade run it through `manifest.Validate`. One rule decides
+  which channels exist, for listing, connecting and queueing alike
+  (`plugins` `notificationChannelsOf`): a stored capability that doesn't
+  decode, whose form fails that check, or whose JSON Schema doesn't compile
+  is skipped, so a record from before the rule reads as not provided instead
+  of reaching every client. A save that meets a schema that doesn't compile
+  answers as for a channel not provided, never a retryable `503`. The API
+  sends clients `PluginChannel.FormFields`: one flat field list with each
+  field's control, value type, secret flag, default, select options and the
+  checks below, never the JSON Schema or the admin form descriptor.
+- **Settings checks.** Before the plugin's `ValidateDestination` sees them,
+  the host checks merged settings against the form's JSON Schema with the
+  SDK's `config.ValidateValue`, as for plugin configuration: declared fields
+  only, each of its declared scalar type, required fields present (a stored
+  secret left blank counts), `enum`, string `minLength`/`maxLength`/`pattern`
+  and numeric `minimum`/`maximum`. Each failing field is a `422` field error
+  under `body.settings.<field>`. Anything else is the plugin's to check.
+- **Installations.** A channel is named by plugin and capability ID, and
+  direct archive installs can leave two enabled installations of one plugin.
+  `plugins.NotificationChannels` lists each channel once, from the oldest
+  enabled installation that provides it, and `NotificationChannelClientFor`
+  calls that same installation, so settings are checked against the schema
+  the client was shown and sent to the plugin that declared it. A channel no
+  enabled installation provides is `ErrPluginChannelNotProvided`, which the
+  API answers with `422` on create and `409` on update: waiting won't fix
+  it. A plugin that provides the channel but fails to answer is
+  `ErrPluginChannelUnavailable` alone, a `503` with `Retry-After`. Listing,
+  connecting and queueing each read the enabled installations' capability
+  records and check each channel's schema again; the plugin service has an
+  installation cache but none for capabilities, and one would need its own
+  cross-server invalidation, so that cost stays per call.
+- **Revision.** `revision` guards the owner's edits and backs the ETag. Owner
+  edits and auto-disable bump it; recording a send's success or failure
+  doesn't, so a send finishing never turns an edit in progress into a `412`.
+  A send's success, failure count and disable apply only while the
+  destination is at the revision that was sent.
+- **Edits.** The plugin's `ValidateDestination` can take 10 seconds, so an
+  update runs it before opening the write transaction, against the revision
+  it read. The write then locks the row and applies only while the revision
+  is unchanged; otherwise it answers `412` and writes nothing. No row lock is
+  held across a plugin call. A settings edit on a server that can't decrypt
+  the stored settings (a wrong at-rest key) answers `409` and changes
+  nothing, since merging over nothing would drop the stored secrets. An edit
+  of name, `enabled` or the two switches neither reads nor rewrites the
+  settings, so it goes through on such a server. The edit's row lock is
+  `FOR NO KEY UPDATE`, which doesn't wait for a delivery's key-share lock.
+- **Create and deletion.** Profiles live in the user store, PostgreSQL or the
+  per-account SQLite store, so a create checks the profile through it, once
+  before the insert and again after the insert commits, deleting the new
+  destination if the profile is gone by then. A profile deletion that commits
+  after that second check purges the profile's destinations afterwards, this
+  one included. The insert key-share locks only the account row, the row an
+  account deletion locks before its cascade reaches the profile and its
+  destinations, so the two wait on each other instead of deadlocking. A
+  profile purge locks the profile's destinations, and its webhooks, in id
+  order before deleting them, the order an enqueue locks them.
+- **Enqueue.** Like webhooks, attempts are enqueued in the fanout
+  transaction, filtered by the destination's switch for the delivery
+  (`notify_next_up` for an episode, `notify_requests` for a watchlist
+  arrival) and a per-profile limit of 30 a minute, and in
+  `DispatchOperational` when `PluginDestinationFilter` selects them (request
+  updates use `notify_requests`). As for webhooks, the limit is counted in
+  memory on each API server, so a profile can get up to 30 a minute from each
+  server that fans out for it, and operational notices such as request
+  updates bypass it. The insert queues only for destinations that still
+  exist and key-share locks them, in id order, until the delivery commits, so a
+  destination deleted after it was listed drops its attempt instead of
+  aborting the delivery, inbox row and other channels included, on the
+  foreign key; webhooks enqueue the same way. All of a transaction's attempts
+  go in one `INSERT ... SELECT FROM unnest(...)` with four parameters, so a
+  fanout of any size stays under the protocol's parameter limit. A delivery
+  the insert's `RETURNING` names is marked (`InsertedDelivery.pluginAttempts`),
+  and only those reach the plugin destination dispatcher, so other deliveries
+  cost no claim query; the retry sweep picks up any missed hand-off.
+  Nothing is enqueued until the plugin runtime is wired,
+  or for a destination whose channel no enabled plugin provides: it lists as
+  unavailable and gets nothing until its plugin is back. Availability is the
+  channel listing's own rule (`plugins.ListNotificationChannels`), read
+  through the same transaction, so it is never stale and the transaction
+  holds no second pool connection.
+- **Send.** `plugin_destination_delivery_attempts` follows the webhook
+  outbox: a claim lease, a sweep for due retries and stranded pending rows,
+  and the webhook retry schedule. A claim holds at most 10 attempts and the
+  lease is 5 minutes. Reaching the plugin, starting it when needed, has 10
+  seconds (a slower cold start goes on without the attempt, which retries)
+  and the send 15, so a whole claim finishes inside the lease. Just before
+  the send RPC the server checks that its claim still holds with the send's
+  time left on it, and skips the send otherwise; then it reads the
+  destination again: one turned off or deleted meanwhile gets nothing (the
+  attempt closes as `failed`, with no failure counted), and one edited
+  meanwhile is sent its new settings. Finishing an attempt checks the lease
+  it was claimed with, so a server whose lease ran out never overwrites a
+  newer claim's result. The host renders the message with
+  `BuildNotificationDisplay`, makes its link absolute with the email link
+  base, adds a poster only under the Discord poster mode, and sends the
+  delivery itself in the public `notification.created` shape, with every
+  identifier a string (`events.Notification`).
+- **Outcomes.** A plugin's answer and the call's errors map as follows.
+  - Delivered (or an empty response): the attempt is `delivered` and the
+    failure streak resets.
+  - `RETRY`, and any error not listed below: a failed attempt that walks the
+    schedule, with `retry_after_seconds` (capped at 6 hours) as a minimum wait
+    that can push an attempt later than the schedule, never earlier. That
+    includes the send's own 15-second timeout, and a `DeadlineExceeded` or
+    `Canceled` status the plugin returned.
+  - `FAILED`: the message is dropped; the destination stays as it is.
+  - `DESTINATION_INVALID`: the message is dropped and the destination is
+    disabled at once.
+  - Plugin unavailable, meaning the host couldn't reach the plugin: no
+    enabled installation provides the channel, the client wasn't acquired
+    within its 10 seconds, the connection failed or closed (an error that
+    isn't a gRPC status), or the transport answered gRPC `Unavailable`. It
+    retries on the schedule; when the schedule runs out the message is
+    dropped and the destination is not disabled.
+  - Settings this server can't decrypt (a wrong at-rest key): retried, and on
+    exhaustion the message is dropped without disabling, so one misconfigured
+    server can't turn off every destination.
+  - Any other exhausted schedule drops the message, and disables the
+    destination only when it had no successful send (`last_success_at`) and
+    no owner edit (`updated_at`) since the message was queued, so one stuck
+    message, or one that failed before its owner fixed the settings, doesn't
+    turn off a destination that works; the attempt then reads `failed`, not
+    `auto_disabled`.
+  - Age cap: whatever its attempt count, an attempt whose delivery is older
+    than the schedule's span and half again (36 hours for its 24,
+    `pluginAttemptMaxAge`) is finished without a send, so `retrying` rows
+    can't pile up when the single retry sweep falls behind. Long
+    `retry_after_seconds` waits can reach the cap before the schedule runs
+    out, so the cap applies the exhausted schedule's rule: when the
+    attempt's last stored failure was an ordinary one and at least three
+    sends were made (`agedDisableMinAttempts`), the destination is disabled
+    if it stayed quiet since the message was queued. After a
+    plugin-unavailable or decrypt failure, or with fewer sends (the time
+    went to a server or sweep that wasn't running), it is not. The attempt
+    stores only its last failure's message, so those two kinds are told
+    apart by the host's fixed text for them, which is stored unmasked.
+- **Finishing.** The attempt's outcome, the failure count, the disable and
+  the `plugin_destination.auto_disabled` notice's inbox row commit in one
+  transaction, and the notice, which reaches no webhook or plugin
+  destination, reaches live clients after commit. Everything the notice
+  needs from outside that transaction (which channels the administrator has
+  on) is read before it begins, so it never waits for a second pool
+  connection.
+- **Plugin text.** Text a plugin writes (send results, refusals, errors)
+  goes through one function before it is stored, logged or returned. It is
+  made storable first: valid UTF-8 without NUL or other control characters
+  except newline and tab, at most 256 characters, so PostgreSQL can't refuse
+  it and resend a message forever. Then every value of the destination's
+  settings that the schema doesn't declare public is masked, which covers
+  secrets and stored fields the schema dropped, as written and, for values
+  of 8 bytes or more, in base64 (standard and URL alphabets, padded or not),
+  URL-escaped and hex form; then `logredact.SanitizeText` masks credential
+  assignments and URL userinfo.
+- **Retention.** Inbox retention keeps a delivery while a webhook or plugin
+  attempt of it can still run: always while the attempt is claimed or
+  scheduled (`retrying` with `next_retry_at` ahead, which covers a live
+  lease), and otherwise while the delivery is younger than the age cap.
+- **Multi-node.** Any API server may claim an attempt and calls its own
+  plugin process. When a server dies mid-send, its claimed attempts stay
+  hidden until their 5-minute lease runs out, then another server's sweep
+  sends them again; a message the dead server had already handed to its
+  plugin can then arrive twice. The request's `delivery_key` is the same on
+  every attempt so a plugin can deduplicate. Each server runs one sweep that
+  sends its claims one after another, so a slow plugin, up to 25 seconds an
+  attempt, delays other plugins' retries on that server; the webhook retry
+  worker behaves the same way.
+- **Network.** The host's webhook SSRF guard doesn't cover plugin requests.
+  A plugin must not let a destination's settings, which non-administrators
+  fill in, pick the host it connects to.
+
