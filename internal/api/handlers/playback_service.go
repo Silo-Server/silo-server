@@ -654,9 +654,10 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 		position = playback.PositionUnknown
 	}
 	session := h.attemptSessionV2(ctx, record, position, paused)
-	session.Watch = endWatch(ctx)
-	fromRemovedCopy := session.Watch.Measured
+	carried := endWatch(ctx)
+	session.Watch = carried
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	fromRemovedCopy := carried.Measured && session.Watch.Until.Equal(carried.Until)
 	if accepted != nil && (accepted.Sequence > record.LastSequence || !fromRemovedCopy) {
 		// The latest accepted sample: the stop's own, or, when the
 		// measurement was restored from the last save rather than handed

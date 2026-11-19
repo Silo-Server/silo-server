@@ -1655,10 +1655,10 @@ func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *play
 	if session.StartedAt.IsZero() {
 		session.StartedAt = time.Now()
 	}
-	if !session.Watch.Measured {
-		if watch, ok := h.savedWatch(ctx, session.ID); ok {
-			session.Watch.Restore(watch)
-		}
+	// The saved measurement wins over none, and over an older one carried by
+	// a copy that stopped receiving reports while another server measured on.
+	if watch, ok := h.savedWatch(ctx, session.ID); ok && (!session.Watch.Measured || watch.Until.After(session.Watch.Until)) {
+		session.Watch = watch
 	}
 }
 
