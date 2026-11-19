@@ -318,6 +318,9 @@ func (s *PluginDestinationService) Test(ctx context.Context, userID int, profile
 	row := sampleDeliveryRow(profileID)
 	row.UserID = userID
 	result := s.sender.send(ctx, host, d, row, nil)
+	if result.stopErr != nil {
+		return nil, result.stopErr
+	}
 	return &PluginDestinationTestResult{
 		OK:         result.outcome == pluginSendDelivered,
 		Message:    result.message,

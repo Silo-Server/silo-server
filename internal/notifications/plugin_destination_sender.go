@@ -74,6 +74,10 @@ type pluginSendResult struct {
 	// revision success and failure bookkeeping apply to. nil when no call
 	// was made.
 	sent *PluginDestination
+	// stopErr ends a test send before the call: the destination was deleted
+	// while its plugin was reached (ErrPluginDestinationNotFound), or it
+	// couldn't be read again.
+	stopErr error
 }
 
 // pluginSendResultOf maps a plugin's answer onto what the sender does
@@ -472,11 +476,14 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 		s.logSendError(ctx, d, nil, stored, err)
 		return result
 	}
+	var stop *pluginSendResult
 	if claimed != nil {
-		var stop *pluginSendResult
-		if d, stored, stop = s.recheckBeforeSend(ctx, *claimed, d, stored); stop != nil {
-			return *stop
-		}
+		d, stored, stop = s.recheckBeforeSend(ctx, *claimed, d, stored)
+	} else {
+		d, stored, stop = s.rereadBeforeTest(ctx, d, stored)
+	}
+	if stop != nil {
+		return *stop
 	}
 	config, err := structpb.NewStruct(stored.Values)
 	if err != nil {
@@ -519,6 +526,26 @@ func (s *pluginDestinationSender) recheckBeforeSend(ctx context.Context, claimed
 	}
 	if current == nil || !current.Enabled {
 		return d, stored, &pluginSendResult{skipped: true, sent: current}
+	}
+	if current.Revision == d.Revision {
+		return current, stored, nil
+	}
+	if stored, err = s.decryptConfig(current); err != nil {
+		return d, stored, &pluginSendResult{outcome: pluginSendRetry, message: "The stored settings can't be read on this server.", keepEnabled: true, sent: current}
+	}
+	return current, stored, nil
+}
+
+// rereadBeforeTest is recheckBeforeSend for a test message: the test goes
+// to the settings saved while the plugin was reached, and a destination
+// deleted meanwhile gets nothing.
+func (s *pluginDestinationSender) rereadBeforeTest(ctx context.Context, d *PluginDestination, stored pluginSettings) (*PluginDestination, pluginSettings, *pluginSendResult) {
+	current, err := s.repo.getByIDUnscoped(ctx, d.ID)
+	if err != nil {
+		return d, stored, &pluginSendResult{stopErr: err}
+	}
+	if current == nil {
+		return d, stored, &pluginSendResult{stopErr: ErrPluginDestinationNotFound}
 	}
 	if current.Revision == d.Revision {
 		return current, stored, nil

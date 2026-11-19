@@ -211,6 +211,27 @@ func TestPluginDestinationSendRereadsTheDestinationDB(t *testing.T) {
 	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); got.ConsecutiveFailures != 1 || got.Enabled {
 		t.Fatalf("after turning it off mid-start: %+v, want it off with no failure added", got)
 	}
+
+	// A test message reads the destination again too.
+	host.connecting = func() {
+		if _, err := service.UpdateGuarded(ctx, accountA, sharedID, d.ID, PluginDestinationInput{Settings: map[string]any{"token": "newer"}}, anyRevision); err != nil {
+			t.Errorf("edit while a test starts: %v", err)
+		}
+	}
+	if _, err := service.Test(ctx, accountA, sharedID, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.sent) != 2 || host.sent[1].GetConfig().AsMap()["token"] != "newer" {
+		t.Fatalf("test sent %v, want the settings saved while the plugin started", host.sent)
+	}
+	host.connecting = func() {
+		if err := service.DeleteGuarded(ctx, accountA, sharedID, d.ID, anyRevision); err != nil {
+			t.Errorf("delete while a test starts: %v", err)
+		}
+	}
+	if _, err := service.Test(ctx, accountA, sharedID, d.ID); !errors.Is(err, ErrPluginDestinationNotFound) || len(host.sent) != 2 {
+		t.Fatalf("test of a destination deleted mid-start = %v after %d sends, want ErrPluginDestinationNotFound and no send", err, len(host.sent))
+	}
 }
 
 // A plugin message PostgreSQL can't store as text would fail the finalize,
