@@ -95,36 +95,15 @@ func TestBrowseItemsWithEpisodeAndOtherTypesIncludesEpisodes(t *testing.T) {
 		{"&StartIndex=3&Limit=1&EnableTotalRecordCount=false", 0, []string{"ep-2"}, 0, []bool{false, true}, []episodePage{{1, 1}}},
 		{"&Limit=10", 1, []string{"movie-1"}, 5, []bool{true}, []episodePage{{0, 0}}},
 		{"&StartIndex=1&Limit=10", 1, []string{"movie-2", "ep-1", "ep-2", "ep-3"}, 5, []bool{true}, []episodePage{{0, 9}}},
+		{"&Limit=2000", 0, []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, 5, []bool{true}, []episodePage{{0, 998}}},
 	} {
 		t.Run(fmt.Sprintf("%s/cap=%d", tc.params, tc.pageCap), func(t *testing.T) {
-			codec := NewResourceIDCodec()
 			movies := &mixedBrowseMovies{pageCap: tc.pageCap}
-			episodes := &mixedBrowseEpisodes{all: []*models.Episode{
-				{ContentID: "ep-1", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 1, Title: "One"},
-				{ContentID: "ep-2", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 2, Title: "Two"},
-				{ContentID: "ep-3", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 3, Title: "Three"},
-			}}
-			h := &ItemsHandler{
-				catalogUserState: true,
-				content:          movies,
-				episodeRepo:      episodes,
-				itemRepo:         &fakeBatchItemRepo{items: map[string]*models.MediaItem{"series": {ContentID: "series", Type: "series", Title: "Series"}}},
-				codec:            codec,
-				mapper:           newMapper(codec, &config.Config{}),
-				userData:         &mockUserDataService{},
-				images:           NewImageCache(time.Hour, time.Now),
-			}
+			h, episodes := newMixedBrowseHandler(movies)
 
 			result := performItemsRequest(t, h, "/Items?IncludeItemTypes=Episode,Movie&Recursive=true"+tc.params)
 
-			var gotIDs []string
-			for _, item := range result.Items {
-				id, err := codec.DecodeStringID(EncodedIDItem, item.ID)
-				if err != nil {
-					t.Fatalf("item id %q: %v", item.ID, err)
-				}
-				gotIDs = append(gotIDs, id)
-			}
+			gotIDs := decodedItemIDs(t, h.codec, result)
 			if !slices.Equal(gotIDs, tc.wantIDs) || result.TotalRecordCount != tc.wantTotal {
 				t.Fatalf("items = %v total = %d, want %v total %d", gotIDs, result.TotalRecordCount, tc.wantIDs, tc.wantTotal)
 			}
@@ -143,4 +122,55 @@ func TestBrowseItemsWithEpisodeAndOtherTypesIncludesEpisodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A non-recursive browse lists a library's direct children, which are never
+// episodes, so a type list naming Episode, here the movie, series and episode
+// default of an ExcludeItemTypes-only filter, browses media_items alone.
+func TestNonRecursiveBrowseWithEpisodeTypeOmitsEpisodes(t *testing.T) {
+	movies := &mixedBrowseMovies{}
+	h, episodes := newMixedBrowseHandler(movies)
+
+	result := performItemsRequest(t, h, "/Items?ExcludeItemTypes=Season")
+
+	if gotIDs := decodedItemIDs(t, h.codec, result); !slices.Equal(gotIDs, []string{"movie-1", "movie-2"}) || result.TotalRecordCount != 2 {
+		t.Fatalf("items = %v total = %d, want [movie-1 movie-2] total 2", gotIDs, result.TotalRecordCount)
+	}
+	if len(episodes.pages) > 0 {
+		t.Fatalf("episode pages = %v, want none", episodes.pages)
+	}
+}
+
+// newMixedBrowseHandler serves movies' media_items browse and three episodes
+// of one series.
+func newMixedBrowseHandler(movies *mixedBrowseMovies) (*ItemsHandler, *mixedBrowseEpisodes) {
+	codec := NewResourceIDCodec()
+	episodes := &mixedBrowseEpisodes{all: []*models.Episode{
+		{ContentID: "ep-1", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 1, Title: "One"},
+		{ContentID: "ep-2", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 2, Title: "Two"},
+		{ContentID: "ep-3", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 3, Title: "Three"},
+	}}
+	return &ItemsHandler{
+		catalogUserState: true,
+		content:          movies,
+		episodeRepo:      episodes,
+		itemRepo:         &fakeBatchItemRepo{items: map[string]*models.MediaItem{"series": {ContentID: "series", Type: "series", Title: "Series"}}},
+		codec:            codec,
+		mapper:           newMapper(codec, &config.Config{}),
+		userData:         &mockUserDataService{},
+		images:           NewImageCache(time.Hour, time.Now),
+	}, episodes
+}
+
+func decodedItemIDs(t *testing.T, codec *ResourceIDCodec, result queryResultDTO) []string {
+	t.Helper()
+	var ids []string
+	for _, item := range result.Items {
+		id, err := codec.DecodeStringID(EncodedIDItem, item.ID)
+		if err != nil {
+			t.Fatalf("item id %q: %v", item.ID, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
 }

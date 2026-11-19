@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -2307,11 +2306,13 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 	return listItems, targets, total, true, nil
 }
 
-// mixedEpisodeBrowser returns the episode browse when query lists Episode
-// beside other types, such as IncludeItemTypes=Episode,Movie, and no Ids. The
-// media_items browse serves the other types but holds no episodes (#4257).
+// mixedEpisodeBrowser returns the episode browse when a recursive query lists
+// Episode beside other types, such as IncludeItemTypes=Episode,Movie, and no
+// Ids. The media_items browse serves the other types but holds no episodes
+// (#4257). A non-recursive browse lists a library's direct children, which are
+// never episodes; an ExcludeItemTypes-only filter also lists Episode.
 func (h *ItemsHandler) mixedEpisodeBrowser(query itemsQuery) (episodeBrowser, bool) {
-	if len(query.specificIDs) > 0 || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || (query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
+	if !query.recursive || len(query.specificIDs) > 0 || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
 		return nil, false
 	}
 	repo, ok := h.episodeRepo.(episodeBrowser)
@@ -2881,7 +2882,8 @@ func (h *ItemsHandler) appendEpisodePage(ctx context.Context, session *Session, 
 	if query.countOnly {
 		result.Items = nil
 	} else if !result.HasMore {
-		episodeLimit = max(query.limit-len(result.Items), 0)
+		// The page as a whole keeps the browse's 1,000-row cap.
+		episodeLimit = max(min(query.limit, compatBrowseMaxLimit)-len(result.Items), 0)
 	}
 	if episodeLimit == 0 && !query.enableTotalRecordCount {
 		result.Total = 0
@@ -2972,19 +2974,15 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, episodeContentIDsFromListItems(slices.DeleteFunc(slices.Clone(result.Items), func(item upstreamListItem) bool {
-		_, paged := mixedTargets[item.ContentID]
-		return paged
-	})), libraryIDPtr(query.parentLibraryID))
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-	if len(mixedTargets) > 0 {
-		if episodeTargets == nil {
-			episodeTargets = make(map[string]compatEpisodeTarget, len(mixedTargets))
+	// A mixed browse's media_items page holds no episodes, so its episode
+	// targets are the paged episodes' own.
+	episodeTargets := mixedTargets
+	if !mixed {
+		episodeTargets, err = h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, episodeContentIDsFromListItems(result.Items), libraryIDPtr(query.parentLibraryID))
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
 		}
-		maps.Copy(episodeTargets, mixedTargets)
 	}
 
 	// Encode library ID for the ParentId field on each item. A paged episode
