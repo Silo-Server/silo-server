@@ -345,6 +345,11 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		slog.ErrorContext(ctx, "updating library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update library")
 	}
+	// Publish before the read below: a failed read still answers 500, and a
+	// retry would find nothing left to change.
+	if req.Enabled != nil && *req.Enabled != oldFolder.Enabled {
+		h.publishLibraryEnabledChanged(ctx, id, *req.Enabled)
+	}
 	h.pokeRealtimeMonitor()
 	if req.affectsTrickplay() {
 		h.reconcileTrickplay()
@@ -355,9 +360,6 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	if err != nil {
 		slog.ErrorContext(ctx, "fetching updated library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch updated library")
-	}
-	if oldFolder.Enabled != folder.Enabled {
-		h.publishLibraryEnabledChanged(ctx, folder)
 	}
 	if folder.BoxSetsEnabled && (!oldFolder.BoxSetsEnabled || req.Paths != nil || req.Enabled != nil) {
 		h.syncBoxSets()
@@ -415,19 +417,19 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 
 // publishLibraryEnabledChanged tells catalog subscribers that turning the
 // library on or off changed which items the admin listing returns.
-func (h *LibraryHandler) publishLibraryEnabledChanged(ctx context.Context, folder *models.MediaFolder) {
+func (h *LibraryHandler) publishLibraryEnabledChanged(ctx context.Context, libraryID int, enabled bool) {
 	if h.RealtimeHub == nil {
 		return
 	}
 	reason := "library_disabled"
-	if folder.Enabled {
+	if enabled {
 		reason = "library_enabled"
 	}
 	if err := h.RealtimeHub.PublishCatalogLibraryChanged(ctx, notifications.LibraryChangeEvent{
-		LibraryID: folder.ID,
+		LibraryID: libraryID,
 		Reason:    reason,
 	}); err != nil {
-		slog.WarnContext(ctx, "publish library enabled change", "component", "api", "library_id", folder.ID, "error", err)
+		slog.WarnContext(ctx, "publish library enabled change", "component", "api", "library_id", libraryID, "error", err)
 	}
 }
 
