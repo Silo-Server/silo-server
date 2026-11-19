@@ -88,6 +88,11 @@ const ASS_TEXT_MAX_FAILURES = 4;
 // 4-deep terminal budget above, but a source that never recovers still
 // terminates instead of polling forever.
 const ASS_RETRYABLE_TEXT_MAX_FAILURES = 12;
+// Two consecutive retryable refusals with no committed script: the first is a
+// budget refusal whose retry the server promises to serve from the recovery
+// extraction, so a second one means that promise did not hold. Report the track
+// as stalled and keep retrying in the background.
+const ASS_RETRYABLE_TEXT_STALL_REPORT_FAILURES = 2;
 // The server's implicit window for a param-less subtitle request against a
 // cold large/unknown remote source: 600 s from just behind the session
 // position, flagged with the windowed headers. A param-less fallback that
@@ -320,7 +325,7 @@ export function useASSSubtitles(
   subtitleDelayMs: number,
   // "refreshing" is a reload of the track on screen for new timing: its
   // current events stay up meanwhile, so it is not announced as loading.
-  onLoadState?: (state: "idle" | "loading" | "refreshing" | "ready" | "error") => void,
+  onLoadState?: (state: "idle" | "loading" | "refreshing" | "ready" | "stalled" | "error") => void,
   // Fired when the server answers the subtitle fetch with
   // `subtitle_source_changed` (409): a virtual release rotated under this plan
   // and every URL for the active track is stale. The caller must refresh the
@@ -498,6 +503,11 @@ export function useASSSubtitles(
     // budget so a transient upstream flap does not spend the terminal budget
     // and wedge the mount on "Retrying…".
     let retryableTextFailures = 0;
+    // One report per stall episode: two consecutive retryable refusals with no
+    // committed script mean the server's recovery did not serve the retry, so
+    // the overlay stops claiming a load is in progress (the ladder keeps
+    // retrying in the background). Cleared by the next successful load.
+    let stalledReported = false;
     let busy = false;
     // One rate-limited param-less probe at a time, only while the loaded
     // script is a bounded window. A complete answer upgrades the script in
@@ -735,7 +745,9 @@ export function useASSSubtitles(
       wholeTrack: boolean,
     ): Promise<boolean> {
       if (!video || cancelled) return false;
-      onLoadStateRef.current?.("loading");
+      // A retry of an already-stalled track keeps the stalled card up until
+      // this attempt actually commits.
+      if (!stalledReported) onLoadStateRef.current?.("loading");
 
       // Lazy-load JASSUB module (only once).
       if (!jassubImportRef.current) {
@@ -903,6 +915,7 @@ export function useASSSubtitles(
         windowFailures = 0;
         textFailures = 0;
         retryableTextFailures = 0;
+        stalledReported = false;
         builtRef.current = {
           url: activeUrl!,
           revision: cueRevisionRef.current,
@@ -989,6 +1002,13 @@ export function useASSSubtitles(
             onLoadStateRef.current?.("error");
             terminal = true;
             return;
+          }
+          if (
+            retryableTextFailures >= ASS_RETRYABLE_TEXT_STALL_REPORT_FAILURES &&
+            !stalledReported
+          ) {
+            stalledReported = true;
+            onLoadStateRef.current?.("stalled");
           }
         } else {
           retryableTextFailures = 0;

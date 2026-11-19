@@ -254,6 +254,77 @@ describe("createSubtitleWindowFetcher", () => {
     }
   });
 
+  it("reports one stalled transition while a retryable ladder keeps retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      // A server that keeps answering the budget refusal: the first refusal is
+      // the documented "your retry will be served from the recovery
+      // extraction" answer, so a second one means that promise did not hold.
+      let status = 503;
+      const fetchMock = vi.fn(() =>
+        respond([], false, { status, headers: { "Retry-After": "2" } }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const stalled = vi.fn();
+      const { fetcher, events } = makeFetcher(() => 100, { onStalled: stalled });
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(events).toContain("failed"));
+      expect(stalled).not.toHaveBeenCalled();
+
+      // Second refusal: the overlay must stop claiming a load is in progress.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(stalled).toHaveBeenCalledTimes(1));
+
+      // The ladder keeps retrying in the background: only the terminal state is
+      // the caller's to show, and the stall notice does not repeat per attempt.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+      expect(stalled).toHaveBeenCalledTimes(1);
+
+      // A window that finally streams in clears the episode.
+      status = 200;
+      fetchMock.mockImplementation(() => respond(["c"]));
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => expect(events).toContain("committed"));
+      expect(fetcher.coverage().hasFetched).toBe(true);
+      fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still ends the track when the retryable ladder is spent", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const fetchMock = vi.fn(() => respond([], false, { status: 503 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const stalled = vi.fn();
+      const terminal = vi.fn();
+      // A two-attempt budget stands in for the production twelve: the terminal
+      // answer must still arrive, and it must arrive once.
+      const { fetcher, events } = makeFetcher(() => 100, {
+        onStalled: stalled,
+        onTerminal: terminal,
+        maxRetryableFailures: 2,
+      });
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(events).toContain("failed"));
+      expect(terminal).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() => expect(terminal).toHaveBeenCalledTimes(1));
+      expect(stalled).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(terminal).toHaveBeenCalledTimes(1);
+      fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("signals a source change once and never retries it", async () => {
     vi.useFakeTimers();
     try {

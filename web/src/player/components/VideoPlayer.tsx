@@ -7038,6 +7038,7 @@ export function VideoPlayer({
         activeSubtitleIndex !== null &&
         subtitleSyncNotice?.tone !== "progress" &&
         (subtitleLoadState === "loading" ||
+          subtitleLoadState === "stalled" ||
           subtitleLoadState === "error" ||
           subtitleLoadState === "unavailable") && (
           <div
@@ -7047,6 +7048,26 @@ export function VideoPlayer({
             <span className="flex items-center gap-3 rounded bg-black/75 px-3 py-2 text-sm text-white">
               {subtitleLoadState === "loading" ? (
                 "Loading subtitles…"
+              ) : subtitleLoadState === "stalled" ? (
+                <>
+                  {"Subtitles aren't loading. "}
+                  {/* The fetcher keeps retrying in the background; this is the
+                      viewer's way to ask now, or to stop waiting. */}
+                  <button
+                    type="button"
+                    onClick={() => setSubtitleRefreshRevision((revision) => revision + 1)}
+                    className="pointer-events-auto rounded bg-white/10 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSubtitleSelect(null)}
+                    className="pointer-events-auto rounded bg-white/10 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                  >
+                    Turn off
+                  </button>
+                </>
               ) : subtitleLoadState === "unavailable" ? (
                 <>
                   {"This subtitle is unavailable."}

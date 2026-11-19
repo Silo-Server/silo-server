@@ -105,7 +105,7 @@ function renderTracks(initial: {
   sourceGeneration?: number;
   refreshRevision?: number;
   onLoadState?: (
-    state: "idle" | "loading" | "refreshing" | "ready" | "error" | "unavailable",
+    state: "idle" | "loading" | "refreshing" | "ready" | "stalled" | "error" | "unavailable",
   ) => void;
   onSourceChanged?: () => void;
 }) {
@@ -750,6 +750,52 @@ describe("useSubtitleTracks", () => {
         await vi.advanceTimersByTimeAsync(0);
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports stalled after a repeated retryable refusal and recovers on the retry", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The production shape: a 4K text window answered
+    // subtitle_window_budget_exceeded with Retry-After, twice. The first refusal
+    // promises the retry is served from the recovery extraction; the second one
+    // proves it was not, so the overlay must stop claiming a load is in
+    // progress while the ladder keeps retrying.
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+    const states: string[] = [];
+    const { unmount } = renderTracks({
+      origin: 0,
+      durationRef: { current: 7200 },
+      onLoadState: (state) => states.push(state),
+    });
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(states).toContain("loading");
+      expect(states).not.toContain("stalled");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(states).toContain("stalled");
+      expect(states).not.toContain("error");
+
+      // A later attempt is served: the state returns to ready and the stall
+      // notice is not repeated.
+      fetchMock.mockResolvedValue(vttResponse("WEBVTT\n\n00:01:40.000 --> 00:01:44.000\nok\n\n"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(states).toContain("ready");
+      const stalledCount = states.filter((state) => state === "stalled").length;
+      expect(stalledCount).toBe(1);
     } finally {
       unmount();
       error.mockRestore();

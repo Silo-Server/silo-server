@@ -62,6 +62,12 @@ const FETCH_MAX_CONSECUTIVE_FAILURES = 4;
 // the same backoff loop on a separate, generous budget so a flap recovers
 // while a truly dead source still terminates instead of polling forever.
 const FETCH_MAX_RETRYABLE_FAILURES = 12;
+// After this many consecutive retryable refusals with no cue on screen the
+// mount reports `stalled` while it keeps retrying: the second refusal is the
+// one that disproves the server's promise that a budget refusal's retry is
+// served from the recovery extraction. See subtitleWindows.ts for the same
+// threshold on the windowed (bitmap) path.
+const RETRYABLE_STALL_REPORT_FAILURES = 2;
 // Coverage end for a whole-track (sidecar/downloaded) fetch when the media
 // duration is not known yet: large enough that no playhead can outrun it, so
 // the track never looks like it needs a windowed refetch.
@@ -275,7 +281,7 @@ export function useSubtitleTracks(
   // fetched before the first media metadata arrives.
   streamGeneration = 0,
   onLoadState?: (
-    state: "idle" | "loading" | "refreshing" | "ready" | "error" | "unavailable",
+    state: "idle" | "loading" | "refreshing" | "ready" | "stalled" | "error" | "unavailable",
   ) => void,
   // Fired when the server answers a window fetch with `subtitle_source_changed`
   // (409): a virtual release rotated under this plan, so every URL for the
@@ -567,6 +573,11 @@ export function useSubtitleTracks(
     // on the recovery work instead of asking again too early.
     let lastResponseRetryAfterMs = 0;
 
+    // True once this mount has told the player that the retryable ladder has
+    // stopped being a load worth waiting on. Cleared by the next committed
+    // window, so one stall episode reports once.
+    let stalledReported = false;
+
     // Clear the spent failure budget so a deliberate new window request (a
     // seek or a refresh rebuild) gets its own retries instead of inheriting
     // the previous mount's terminal state.
@@ -575,6 +586,7 @@ export function useSubtitleTracks(
       retryableFailures = 0;
       retryDelay = 0;
       lastFetchFailureAt = 0;
+      stalledReported = false;
     }
 
     // Reads the track's current active cues. The browser drives this through
@@ -685,7 +697,9 @@ export function useSubtitleTracks(
           coverageStart = seekStart ?? 0;
           windowEnd = seekStart ?? 0;
           atEOF = false;
-          onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
+          if (!stalledReported) {
+            onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
+          }
         }
         return;
       }
@@ -900,7 +914,16 @@ export function useSubtitleTracks(
                 // server kept refusing and no further retry is scheduled.
                 onLoadStateRef.current?.("error");
                 consecutiveFailures = FETCH_MAX_CONSECUTIVE_FAILURES;
-              } else if (!hasFetched) {
+              } else if (retryableFailures >= RETRYABLE_STALL_REPORT_FAILURES && !hasFetched) {
+                // The server's recovery contract did not hold: the retry that a
+                // budget refusal promises is meant to be served from the
+                // covering extraction, and it was refused too. Keep retrying in
+                // the background, but stop presenting this as a load in progress.
+                if (!stalledReported) {
+                  stalledReported = true;
+                  onLoadStateRef.current?.("stalled");
+                }
+              } else if (!hasFetched && !stalledReported) {
                 onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
               }
             } else {

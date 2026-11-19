@@ -59,6 +59,16 @@ export const SUBTITLE_FETCH_MAX_CONSECUTIVE_FAILURES = 4;
 // Transient failures are worth more attempts, but still bounded: a server that
 // keeps answering 503 must not keep a timeupdate loop fetching forever.
 export const SUBTITLE_FETCH_MAX_RETRYABLE_FAILURES = 12;
+// After this many consecutive retryable refusals with nothing on screen, the
+// track is reported stalled while the retry ladder keeps running in the
+// background. Two is the honest count for the server's recovery contract: the
+// first refusal answers `subtitle_window_budget_exceeded` and starts the
+// covering extraction, and the retry after it is meant to be a cache hit. A
+// second refusal means that promise did not hold, so the overlay must stop
+// claiming a load is in progress and offer the viewer a decision instead of
+// spinning through the remaining ten attempts (production: 26 s per attempt plus
+// Retry-After, so the ladder alone is a quarter of an hour).
+export const SUBTITLE_FETCH_STALL_REPORT_FAILURES = 2;
 // Statuses that describe a condition the same request may survive: a
 // timeout, a rate limit, or a gateway that could not reach the extractor.
 const RETRYABLE_WINDOW_STATUSES = new Set([408, 429, 502, 503, 504]);
@@ -315,6 +325,13 @@ export interface SubtitleWindowFetcherOptions {
    * rebuilds the fetcher.
    */
   onTerminal?: () => void;
+  /**
+   * Consecutive retryable refusals reached SUBTITLE_FETCH_STALL_REPORT_FAILURES
+   * with no window committed. The retry ladder keeps running; this reports that
+   * it has stopped being a load the viewer should keep waiting on, so the caller
+   * can offer a retry instead of an indefinite spinner.
+   */
+  onStalled?: () => void;
   /** Abort a window that delivers nothing for this long; defaults to 30 s. */
   stallTimeoutMs?: number;
   /** Consecutive non-retryable failures before giving up; defaults to 4. */
@@ -363,6 +380,9 @@ export function createSubtitleWindowFetcher(
   // retrying far longer than a 404 the same request can never survive.
   let hardFailures = 0;
   let retryableFailures = 0;
+  // Reported once per stall episode (cleared by a committed window), so the
+  // caller sees one "stalled" transition instead of one per refused retry.
+  let stalledReported = false;
   let terminal = false;
   let sourceChanged = false;
   let sourceChangedNotified = false;
@@ -499,6 +519,7 @@ export function createSubtitleWindowFetcher(
         lastFetchFailureAt = 0;
         hardFailures = 0;
         retryableFailures = 0;
+        stalledReported = false;
         // Commit coverage only after the whole window streamed in, and only the
         // range the response says it produced: a page answered from a partially
         // parsed artifact is shorter than requested, and its tail must stay
@@ -534,6 +555,16 @@ export function createSubtitleWindowFetcher(
         options.onWindowFailed(retryable);
         if (retryable) retryableFailures += 1;
         else hardFailures += 1;
+        if (
+          retryable &&
+          !stalledReported &&
+          retryableFailures >= SUBTITLE_FETCH_STALL_REPORT_FAILURES
+        ) {
+          // The retry ladder continues; this only stops the overlay from
+          // presenting a broken recovery as an in-progress load.
+          stalledReported = true;
+          options.onStalled?.();
+        }
         if (hardFailures >= maxConsecutiveFailures || retryableFailures >= maxRetryableFailures) {
           terminal = true;
           console.error(
