@@ -318,7 +318,7 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 	for _, r := range rows {
 		item := mediaRequestOf(r, v)
 		if withhold {
-			withholdRequestErrors(&item)
+			withholdRequestDeployment(&item)
 		}
 		items = append(items, item)
 	}

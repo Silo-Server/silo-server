@@ -266,6 +266,9 @@ reads withhold details from scoped keys:
 - `/admin/requests` omits `last_error` on each request and its targets, and
   `/admin/requests/{id}/events` omits each event's `message`. Both are free
   text that can name download servers, their addresses and routing rules.
+  `/admin/requests` also omits each target's `instance_name` and `route_name`,
+  the names the administrator gave a download server and a routing rule;
+  `integration_kind` still says what kind of server took the target.
 - Nodes are read through `/admin/nodes/summary`, which has no addresses, paths,
   overrides or capability documents. `/admin/nodes` stays outside the scope.
 

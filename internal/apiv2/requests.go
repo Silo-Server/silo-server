@@ -880,13 +880,16 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 	return out
 }
 
-// withholdRequestErrors drops the free-text failures from a request and its
-// targets for a scoped key: they can name download servers, their addresses
-// and routing rules, which the monitoring scope never reads.
-func withholdRequestErrors(r *MediaRequest) {
+// withholdRequestDeployment drops what names the admin's download setup from
+// a request and its targets for a scoped key: the free-text failures, which
+// can name download servers, their addresses and routing rules, and each
+// target's server name and routing-rule name. The monitoring scope never
+// reads that configuration; integration_kind still says what kind of server
+// took the target.
+func withholdRequestDeployment(r *MediaRequest) {
 	r.LastError = ""
 	for i := range r.Targets {
-		r.Targets[i].LastError = ""
+		r.Targets[i].LastError, r.Targets[i].InstanceName, r.Targets[i].RouteName = "", "", ""
 	}
 }
 

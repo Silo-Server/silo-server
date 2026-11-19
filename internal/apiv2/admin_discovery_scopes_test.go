@@ -105,7 +105,7 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 	requireProblem(t, do(t, h, "GET", Prefix+"/admin/nodes", "", bearer("sa_monitor")), TypePermissionDenied)
 	// Request failures stay out, and the configuration that names servers
 	// and routing rules is refused outright.
-	if body := do(t, h, "GET", Prefix+"/admin/requests", "", bearer("sa_monitor")).Body.String(); strings.Contains(body, "last_error") || strings.Contains(body, "radarr.lan") || !strings.Contains(body, `"id":"r-1"`) {
+	if body := do(t, h, "GET", Prefix+"/admin/requests", "", bearer("sa_monitor")).Body.String(); strings.Contains(body, "last_error") || strings.Contains(body, "radarr.lan") || strings.Contains(body, "instance_name") || strings.Contains(body, "route_name") || !strings.Contains(body, `"id":"r-1"`) {
 		t.Fatal("monitor request list", body)
 	}
 	for _, path := range []string{"/admin/request-integrations", "/admin/request-settings", "/admin/request-routes"} {

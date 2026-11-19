@@ -641,7 +641,8 @@ request's state and `outcome_reason`, and each target's quality, status and
 `download`. An admin sees every field, on those operations and on the
 `/api/v2/admin/requests` operations, except that an API key with scopes (the
 `admin:monitor:read` monitoring scope) reads the admin request list without
-any `last_error` and the request events without their `message`.
+any `last_error`, target `instance_name` or target `route_name`, and the
+request events without their `message`.
 
 On these profile routes, "admin" means the acting admin
 (`apimw.ActingAdmin`, see [api-contract.md](api-contract.md)): an admin account
