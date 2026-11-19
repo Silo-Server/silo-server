@@ -55,7 +55,7 @@ function isEntry(value: unknown): value is AdminPlaybackHistoryEntry {
     positiveInteger.test(entry.media_file_id) &&
     typeof entry.started_at === "string" &&
     typeof entry.ended_at === "string" &&
-    typeof entry.watched_seconds === "number" &&
+    typeof entry.end_position_seconds === "number" &&
     (entry.duration_seconds === null || typeof entry.duration_seconds === "number") &&
     typeof entry.completed === "boolean" &&
     (entry.played_seconds === null || typeof entry.played_seconds === "number")
@@ -79,7 +79,7 @@ export function adminPlaybackHistoryItemFromV2(
     play_method: entry.play_method,
     started_at: entry.started_at,
     ended_at: entry.ended_at,
-    watched_seconds: entry.watched_seconds,
+    end_position_seconds: entry.end_position_seconds,
     duration_seconds: entry.duration_seconds,
     completed: entry.completed,
     played_seconds: entry.played_seconds,

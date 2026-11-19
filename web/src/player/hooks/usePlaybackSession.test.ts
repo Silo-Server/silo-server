@@ -71,7 +71,7 @@ const playerConfig: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
   getProfileId: () => "profile-1",
-  getDeviceId: () => "test-device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "test-device" }),
   getProfileToken: () => null,
 };
 
@@ -834,6 +834,7 @@ describe("usePlaybackSession output capability changes", () => {
     const { result, unmount } = renderSession();
     await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
     act(() => {
+      result.current.reportFirstFrame();
       result.current.updatePlaybackState(300, true);
       result.current.updatePlaybackState(321, false);
     });
@@ -2732,6 +2733,32 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     }
     expect(result.current.connectionStatus).toBe("lost");
     expect(harness.replanBodies).toHaveLength(RECONNECT_MAX_ATTEMPTS + 1);
+
+    unmount();
+  });
+
+  it("plays the recovery of a reconnected transport that failed before its first frame", async () => {
+    const harness = reconnectHarness({ replan: () => jsonResponse(playable("session-1")) });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(40, true));
+    act(() => result.current.updatePlaybackState(40, false));
+    await advance(RECONNECT_BASE_DELAY_MS);
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(result.current.shouldAutoPlay).toBe(true);
+
+    // The reconnected transport reports the still-paused element while it
+    // loads, then fails before its first frame (a route this browser rejects).
+    act(() => result.current.updatePlaybackState(40, false));
+    act(() => result.current.recoverFromFailure({ classification: "decoder_error" }, 40));
+    await advance(0);
+
+    expect(harness.replanBodies.map((body) => body.operation)).toEqual([
+      "track_change",
+      "failure_recovery",
+    ]);
+    expect(result.current.planRevision).toBe(3);
+    expect(result.current.shouldAutoPlay).toBe(true);
 
     unmount();
   });

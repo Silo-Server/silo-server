@@ -134,7 +134,7 @@ func TestFinishedJellyfinPlayIsRecordedOnce(t *testing.T) {
 
 	assertOneCompletedPlay(t, store)
 	assertStillWatched(t, store)
-	if len(admin.history) == 0 || admin.history[0].WatchedSeconds != 3500 || !admin.history[0].Completed {
+	if len(admin.history) == 0 || admin.history[0].EndPositionSeconds != 3500 || !admin.history[0].Completed {
 		t.Fatalf("admin history = %+v, want the finished play first, at 3500 and completed", admin.history)
 	}
 }
@@ -337,7 +337,7 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
 			SessionID: "resumed-" + suffix, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
 			StartedAt: started.Format(time.RFC3339Nano), EndedAt: ended.Format(time.RFC3339Nano),
-			WatchedSeconds: position, Completed: completed, Watch: watch,
+			EndPositionSeconds: position, Completed: completed, Watch: watch,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +381,7 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
 			SessionID: rebuilt, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
 			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(to).Format(time.RFC3339Nano),
-			WatchedSeconds: played, Watch: playback.WatchTime{Measured: true, PlayedSeconds: played, Since: started.Add(from), Until: started.Add(to)},
+			EndPositionSeconds: played, Watch: playback.WatchTime{Measured: true, PlayedSeconds: played, Since: started.Add(from), Until: started.Add(to)},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -431,7 +431,7 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 		}
 		entry.UserID, entry.ProfileID, entry.PlayMethod = account, "p-1", "direct_play"
 		entry.StartedAt, entry.EndedAt = started.Format(time.RFC3339Nano), started.Add(ended).Format(time.RFC3339Nano)
-		entry.WatchedSeconds = position
+		entry.EndPositionSeconds = position
 		if err := store.RecordHistory(ctx, entry); err != nil {
 			t.Fatal(err)
 		}
@@ -504,8 +504,8 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 			t.Errorf("%s = %s, want %s", check.field, check.got, check.want)
 		}
 	}
-	if !got.EndedAt.Equal(started.Add(12*time.Minute)) || got.WatchedSeconds != 700 {
-		t.Errorf("ended_at %v watched %v, want the furthest finalization", got.EndedAt, got.WatchedSeconds)
+	if !got.EndedAt.Equal(started.Add(12*time.Minute)) || got.EndPositionSeconds != 700 {
+		t.Errorf("ended_at %v watched %v, want the furthest finalization", got.EndedAt, got.EndPositionSeconds)
 	}
 
 	rows = list(started.Add(time.Hour), started.Add(2*time.Hour))
@@ -616,8 +616,8 @@ func TestEveryEndRecordsTheAdminLog(t *testing.T) {
 				t.Fatalf("admin history = %+v, want one row", admin.history)
 			}
 			row := admin.history[0]
-			if row.EndReason != tc.wantReason || row.WatchedSeconds != 1800 {
-				t.Fatalf("admin row = reason %q at %v, want %q at 1800", row.EndReason, row.WatchedSeconds, tc.wantReason)
+			if row.EndReason != tc.wantReason || row.EndPositionSeconds != 1800 {
+				t.Fatalf("admin row = reason %q at %v, want %q at 1800", row.EndReason, row.EndPositionSeconds, tc.wantReason)
 			}
 			if tc.wantClient != "" && (row.ClientName != tc.wantClient || row.DeviceID != "browser-1" || row.StartedAt != started.Format(time.RFC3339Nano)) {
 				t.Fatalf("admin row = client %q device %q started %s, want the live row's", row.ClientName, row.DeviceID, row.StartedAt)
@@ -745,7 +745,7 @@ func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
 			if len(admin.history) != tc.wantRows {
 				t.Fatalf("admin history = %+v, want %d rows", admin.history, tc.wantRows)
 			}
-			if tc.wantRows == 1 && (admin.history[0].WatchedSeconds != 1500 || admin.history[0].UserID != live.UserID) {
+			if tc.wantRows == 1 && (admin.history[0].EndPositionSeconds != 1500 || admin.history[0].UserID != live.UserID) {
 				t.Fatalf("row = %+v, want the live row's account and position", admin.history[0])
 			}
 		})
@@ -755,7 +755,7 @@ func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
 	admin := &liveRowAdminStore{live: &live}
 	replica := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile())
 	replica.mgr.FinishDetached(context.Background(), playback.Session{ID: live.ID, UserID: live.UserID, ProfileID: live.ProfileID, MediaFileID: 42, Position: 600, StartedAt: live.StartedAt})
-	if len(admin.history) != 1 || admin.history[0].ClientName != "Jellyfin Web" || admin.history[0].DeviceID != "browser-1" || admin.history[0].WatchedSeconds != 600 {
+	if len(admin.history) != 1 || admin.history[0].ClientName != "Jellyfin Web" || admin.history[0].DeviceID != "browser-1" || admin.history[0].EndPositionSeconds != 600 {
 		t.Fatalf("admin history = %+v, want the live row's client and device at the reported 600", admin.history)
 	}
 }
@@ -776,7 +776,7 @@ func TestEndRecordsAPlayWhoseFileLeftTheCatalog(t *testing.T) {
 	session := compatFinishSession()
 	session.IsJellyfinCompat, session.Position = false, 900
 	h.recordAdminStopHistory(context.Background(), &session, PlaybackEndExpired)
-	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndExpired || admin.history[0].MediaItemID != "" || admin.history[0].DurationSeconds != nil || admin.history[0].WatchedSeconds != 900 {
+	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndExpired || admin.history[0].MediaItemID != "" || admin.history[0].DurationSeconds != nil || admin.history[0].EndPositionSeconds != 900 {
 		t.Fatalf("admin history = %+v, want one expired row without an item or duration", admin.history)
 	}
 }
@@ -825,7 +825,7 @@ func TestStaleJellyfinCopyKeepsAnotherReplicasEnd(t *testing.T) {
 	newerCopy := newer.holdCopy(t, session, 3500)
 	older.handler.expireSessionCopy(context.Background(), olderCopy)
 	newer.handler.expireSessionCopy(context.Background(), newerCopy)
-	if len(admin.history) != 2 || admin.history[1].WatchedSeconds != 3500 {
+	if len(admin.history) != 2 || admin.history[1].EndPositionSeconds != 3500 {
 		t.Fatalf("admin history = %+v, want the newer copy's 3500 recorded after the older expiry", admin.history)
 	}
 }

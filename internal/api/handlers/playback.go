@@ -386,6 +386,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		h.maybeStartThrottler(ctx, ts)
 	}
 	h.tm.RestoreReconstructedClient = h.restoreReconstructedClient
+	h.tm.RestoreReconstructedWatch = h.restoreReconstructedWatch
 	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
 		// ffmpeg crash — tear the session down; a client holding a valid stream
 		// token can reconstruct it on the next request.
@@ -1226,24 +1227,24 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 	}
 
 	entry := &AdminPlaybackHistoryEntry{
-		SessionID:       session.ID,
-		UserID:          session.UserID,
-		ProfileID:       session.ProfileID,
-		ProfileName:     profileName,
-		MediaItemID:     targetID,
-		MediaFileID:     requestedMediaFileID(session),
-		PlayMethod:      string(semanticPlayMethod(session)),
-		StartedAt:       session.StartedAt.UTC().Format(time.RFC3339Nano),
-		EndedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		WatchedSeconds:  session.Position,
-		DurationSeconds: durationPtr,
-		Completed:       completed,
-		ClientIP:        session.ClientIP,
-		Watch:           session.Watch,
-		DeviceID:        session.DeviceID,
-		DevicePlatform:  session.DevicePlatform,
-		ClientName:      session.ClientName,
-		ClientVersion:   session.ClientVersion,
+		SessionID:          session.ID,
+		UserID:             session.UserID,
+		ProfileID:          session.ProfileID,
+		ProfileName:        profileName,
+		MediaItemID:        targetID,
+		MediaFileID:        requestedMediaFileID(session),
+		PlayMethod:         string(semanticPlayMethod(session)),
+		StartedAt:          session.StartedAt.UTC().Format(time.RFC3339Nano),
+		EndedAt:            time.Now().UTC().Format(time.RFC3339Nano),
+		EndPositionSeconds: session.Position,
+		DurationSeconds:    durationPtr,
+		Completed:          completed,
+		ClientIP:           session.ClientIP,
+		Watch:              session.Watch,
+		DeviceID:           session.DeviceID,
+		DevicePlatform:     session.DevicePlatform,
+		ClientName:         session.ClientName,
+		ClientVersion:      session.ClientVersion,
 	}
 	// The decisions the live admin row showed for the transport the play
 	// ended on.
@@ -1544,7 +1545,7 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 		return
 	}
 	if !claim.ownEnd(expiredStopID(session.ID)) {
-		h.FinishOtherEnd(ctx, claim, session.ID)
+		h.FinishOtherEnd(withEndWatch(ctx, session), claim, session.ID)
 		h.closeTranscodeForSession(session)
 		return
 	}
@@ -1595,9 +1596,15 @@ func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *pl
 		reason = PlaybackEndStopped
 	}
 	if playback.IsDetachedFinish(ctx) {
+		reported := session.Position >= 0
 		h.fillDetachedSession(ctx, session, time.Time{})
 		if session.UserID == 0 {
 			return // nothing left that says whose play it was
+		}
+		if reported {
+			// The end's own report (a Jellyfin Stopped report, or the
+			// sample an abort settled on) reached no copy that measures.
+			observeEndSample(session, time.Now())
 		}
 	}
 	h.recordStopHistory(ctx, session, reason)
@@ -1648,6 +1655,86 @@ func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *play
 	if session.StartedAt.IsZero() {
 		session.StartedAt = time.Now()
 	}
+	// The saved measurement wins over none, and over an older one carried by
+	// a copy that stopped receiving reports while another server measured on.
+	if watch, ok := h.savedWatch(ctx, session.ID); ok && (!session.Watch.Measured || watch.Until.After(session.Watch.Until)) {
+		session.Watch = watch
+	}
+}
+
+// sessionWatchReader reads the watch-time measurement a session's server
+// saved on its lifecycle row (PGPlaybackAdminStore.SessionWatch).
+type sessionWatchReader interface {
+	SessionWatch(ctx context.Context, sessionID string) (playback.WatchTime, bool, error)
+}
+
+// savedWatch is the measurement the play's last live copy saved. A session
+// rebuilt after a restart, or recorded on a server that never held it,
+// carries on from it rather than ending unmeasured.
+func (h *PlaybackHandler) savedWatch(ctx context.Context, sessionID string) (playback.WatchTime, bool) {
+	reader, ok := h.AdminStore.(sessionWatchReader)
+	if !ok {
+		return playback.WatchTime{}, false
+	}
+	return readSavedWatch(ctx, reader, sessionID)
+}
+
+func readSavedWatch(ctx context.Context, reader sessionWatchReader, sessionID string) (playback.WatchTime, bool) {
+	watch, found, err := reader.SessionWatch(ctx, sessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to read a session's saved watch time", "component", "api",
+			"session", sessionID, "playback_session_id", sessionID, "error", err)
+		return playback.WatchTime{}, false
+	}
+	return watch, found
+}
+
+// restoreReconstructedWatch is savedWatch for a session rebuilt from a stream
+// token, bounded like restoreReconstructedClient.
+func (h *PlaybackHandler) restoreReconstructedWatch(ctx context.Context, sessionID string) (playback.WatchTime, bool) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconstructedClientTimeout)
+	defer cancel()
+	return h.savedWatch(ctx, sessionID)
+}
+
+// ReconstructedWatchRestorer is restoreReconstructedWatch for a transcode
+// manager this handler does not own, such as jellycompat's, which rebuilds
+// the same native sessions after a restart.
+func ReconstructedWatchRestorer(store *PGPlaybackAdminStore) func(context.Context, string) (playback.WatchTime, bool) {
+	return func(ctx context.Context, sessionID string) (playback.WatchTime, bool) {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconstructedClientTimeout)
+		defer cancel()
+		return readSavedWatch(ctx, store, sessionID)
+	}
+}
+
+// observeEndSample measures the final sample an end recorded from outside
+// the live copy: the copy, if any, never saw it. A sample from before the
+// measurement's latest one is left out.
+func observeEndSample(session *playback.Session, now time.Time) {
+	if session.Watch.Measured && !now.After(session.Watch.Until) {
+		return
+	}
+	session.Watch.Observe(session.Position, session.IsPaused, now)
+}
+
+type endWatchKey struct{}
+
+// withEndWatch carries the measurement of the live copy an end removed
+// before it writes the play's history from the attempt row (an
+// administrator stop the player confirmed, an abort or an expiry that
+// finishes an earlier stop), so that history is measured like the copy's.
+func withEndWatch(ctx context.Context, session *playback.Session) context.Context {
+	if session == nil || !session.Watch.Measured {
+		return ctx
+	}
+	return context.WithValue(ctx, endWatchKey{}, session.Watch)
+}
+
+// endWatch is the measurement withEndWatch carried, or none.
+func endWatch(ctx context.Context) playback.WatchTime {
+	watch, _ := ctx.Value(endWatchKey{}).(playback.WatchTime)
+	return watch
 }
 
 func fillEmptySessionFacts(session, live *playback.Session) {

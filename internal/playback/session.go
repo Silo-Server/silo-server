@@ -1188,6 +1188,7 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 // committed the plan it is about to return. Admission sets the window too, but
 // preparing the transport can take long enough to eat into it before the
 // client has even received the plan. Ordinary stream-state updates leave it.
+// It also starts the session's watch-time measurement.
 func (m *SessionManager) MarkPlanCommitted(sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1198,6 +1199,13 @@ func (m *SessionManager) MarkPlanCommitted(sessionID string) error {
 	}
 	m.touchSessionLocked(s)
 	s.PlanCommittedAt = s.LastActivityAt
+	// The start position is the play's first watch sample, taken now that
+	// its transport is ready: time spent preparing it was not viewing, and
+	// measuring from admission would let a seek in the player's first report
+	// pass as play. No report can precede this; the attempt the client
+	// reports against is saved after it.
+	s.Watch = WatchTime{}
+	s.Watch.Observe(s.Position, s.IsPaused, s.PlanCommittedAt)
 	return nil
 }
 

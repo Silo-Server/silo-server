@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { v2Problem } from "@/api/v2/problems.test-support";
+import { SettingWriteOfflineError } from "@/hooks/queries/settingWriteOffline";
 import {
   libraryPageStateWriteRetryDelay,
   shouldRetryLibraryPageStateWrite,
@@ -144,6 +145,31 @@ describe("useLibraryPageStatePreference", () => {
       libraries: {
         "3": { search: "tab=collections" },
         "7": { search: "tab=library&sort=year" },
+        "9": { search: "tab=collections" },
+      },
+    });
+  });
+
+  // The offline write never reached the server, so carrying it into the next
+  // whole-document save would replace a view another tab saved meanwhile.
+  it("drops a write refused offline before advancing the queue", async () => {
+    mocks.mutateAsync
+      .mockRejectedValueOnce(new SettingWriteOfflineError())
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useLibraryPageStatePreference());
+
+    await act(async () => {
+      const offline = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+      await offline.catch(() => undefined);
+    });
+    await act(async () => {
+      await result.current.saveLibrarySearch(9, "tab=collections");
+    });
+
+    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
+      version: 1,
+      libraries: {
+        "3": { search: "tab=collections" },
         "9": { search: "tab=collections" },
       },
     });
@@ -615,5 +641,10 @@ describe("useLibraryPageStatePreference", () => {
         2_000,
       ),
     ).toBeNull();
+  });
+
+  // A retry after reconnect could replace a view another tab saved meanwhile.
+  it("does not retry a write refused offline", () => {
+    expect(libraryPageStateWriteRetryDelay(new SettingWriteOfflineError(), 2_000)).toBeNull();
   });
 });

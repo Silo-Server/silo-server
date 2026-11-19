@@ -48,7 +48,7 @@ func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
 	}
 	adminNode := evt.NewHub("admin-node", bus)
 	h, _ := socketTestHandler()
-	h.Events = NewEventsHandler(hub, nil, nil, nil, nil, nil, nil)
+	h.Events = NewEventsHandler(hub, nil, nil, nil, nil, nil)
 	_, readFrame := dialEventsSocketV2(t, h, "user", "?channels=user_settings")
 	readFrame("hello")
 	readFrame("subscribed")

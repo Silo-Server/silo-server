@@ -374,7 +374,6 @@ export function buildWatchPageProps({
   // enum whenever the connected server advertises it.
   const introSkipMode: IntroSkipMode = currentProfile?.auto_skip_intro ? "always" : "ask";
   const autoSkipRecap = currentProfile?.auto_skip_recap ?? false;
-  const autoPlayNextPreview = currentProfile?.auto_play_next_preview ?? false;
   // Watched items store position 0, so any nonzero position is a live resume
   // point — including a rewatch in flight (played stays true).
   const initialPosition = request.restart ? 0 : (item.user_data?.position_seconds ?? 0);
@@ -431,7 +430,6 @@ export function buildWatchPageProps({
     recap,
     preview,
     autoSkipRecap,
-    autoPlayNextPreview,
     seriesContext: item.series_id
       ? {
           seriesId: item.series_id,

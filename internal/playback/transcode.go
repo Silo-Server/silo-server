@@ -1968,8 +1968,9 @@ func appendAACEncodeFilterArgs(args []string, sourceChannels int, targetCodec st
 // appendAudioArgs adds audio codec arguments. Supports "copy" for passthrough,
 // plus opus / aac / eac3 / ac3 as re-encode targets. EAC3 and AC3 are useful
 // when we must transcode video but want to preserve surround channels for an
-// HDMI receiver — both are legal in HLS fMP4 (not MPEG-TS; ensure the HLS
-// packager is fMP4 when emitting these).
+// HDMI receiver. HLS carries both in fMP4 and in MPEG-TS segments; the
+// surround bitstream conversion (audio_to_eac3 / audio_to_ac3) packages them
+// as the client's other copy remuxes are packaged.
 func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 	// Case-insensitive so the switch agrees with TranscodesAudio for any
 	// client-supplied spelling.
@@ -1983,13 +1984,19 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-c:a", "copy")
 	case "opus":
 		args = append(args, "-c:a", "libopus", "-b:a", "192k", "-ac", "2")
-	case "eac3":
-		// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
-		// count so we preserve surround when possible.
-		args = append(args, "-c:a", "eac3", "-b:a", "384k")
-	case "ac3":
-		// Legacy Dolby Digital; universal AVR support.
-		args = append(args, "-c:a", "ac3", "-b:a", "448k")
+	case audioCodecEAC3, audioCodecAC3:
+		if opts.TargetAudioChannels == surroundBitstreamChannelsV3 {
+			// The frozen audio_to_eac3 / audio_to_ac3 recipe the v3 planner
+			// promises: 48 kHz 5.1 at 640 kbps.
+			args = append(args, surroundBitstreamAudioArgsV3(codec)...)
+		} else if codec == audioCodecEAC3 {
+			// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
+			// count so we preserve surround when possible.
+			args = append(args, "-c:a", "eac3", "-b:a", "384k")
+		} else {
+			// Legacy Dolby Digital; universal AVR support.
+			args = append(args, "-c:a", "ac3", "-b:a", "448k")
+		}
 	default:
 		channels, bitrateKbps := ResolveAACOutputV3(opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
 		args = append(args, "-c:a", "aac", "-b:a", strconv.Itoa(bitrateKbps)+"k", "-ac", strconv.Itoa(channels))

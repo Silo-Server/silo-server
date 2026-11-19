@@ -85,6 +85,9 @@ type LifecycleStart struct {
 	// LiveRow is the session's playback_sessions_sync row as a sync would
 	// write it now (worker.SessionSyncRowJSON).
 	LiveRow json.RawMessage
+	// Watch is the session's watch-time measurement so far; nil when it has
+	// none yet.
+	Watch json.RawMessage
 }
 
 // playbackLifecycleStore is the admin store's side of session lifecycle.
@@ -123,13 +126,13 @@ func (s *PGPlaybackAdminStore) StartLifecycle(ctx context.Context, start Lifecyc
 		)
 		INSERT INTO playback_session_lifecycle
 			(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id,
-			 progress_persistence_disabled, started_at, start_facts, updated_at)
+			 progress_persistence_disabled, started_at, start_facts, watch, updated_at)
 		VALUES ($1, $2, CASE WHEN (SELECT paused FROM accepted) THEN 'paused' ELSE 'playing' END,
-			nextval('playback_session_lifecycle_seq'), $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
+			nextval('playback_session_lifecycle_seq'), $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, NOW())
 		ON CONFLICT (session_id) DO NOTHING
 		RETURNING seq, updated_at, state`,
 		start.SessionID, start.Frontend, start.UserID, start.ProfileID, start.MediaFileID,
-		start.RequestedMediaFileID, start.PersistenceDisabled, start.StartedAt, string(facts)).Scan(&t.Seq, &t.At, &t.State)
+		start.RequestedMediaFileID, start.PersistenceDisabled, start.StartedAt, string(facts), nullableJSON(start.Watch)).Scan(&t.Seq, &t.At, &t.State)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return LifecycleTransition{}, false, nil
 	}
@@ -274,6 +277,7 @@ func (h *PlaybackHandler) SessionStarted(ctx context.Context, session *playback.
 		SessionID: session.ID, Frontend: frontend, UserID: session.UserID, ProfileID: session.ProfileID,
 		MediaFileID: session.MediaFileID, RequestedMediaFileID: requestedMediaFileID(session),
 		PersistenceDisabled: session.DisableProgressPersistence, StartedAt: session.StartedAt, LiveRow: row,
+		Watch: playback.WatchTimeJSON(session.Watch),
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record a session start", "component", "api", "session", session.ID, "error", err)

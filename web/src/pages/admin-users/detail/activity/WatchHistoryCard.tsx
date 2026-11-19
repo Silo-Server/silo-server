@@ -76,7 +76,7 @@ function playRow(t: Translate, play: AdminUserPlay): HistoryRow {
     code: play.series_title ? episode : "",
     profile: play.profile_name || play.profile_id,
     method: play.play_method,
-    watched: watchedFraction(play.watched_seconds, play.duration_seconds, play.completed),
+    watched: watchedFraction(play.end_position_seconds, play.duration_seconds, play.completed),
     endedAt: play.ended_at,
   };
 }
