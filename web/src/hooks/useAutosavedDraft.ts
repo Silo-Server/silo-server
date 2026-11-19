@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 type Save<T> = (next: T) => Promise<unknown>;
 
@@ -65,7 +65,10 @@ export function useAutosavedDraft<T extends object>(initial: T) {
   });
   const [view, setView] = useState({ value: initial, saving: false });
 
-  useEffect(() => {
+  // Layout cleanup runs inside the commit that removes the editor, so a save
+  // settling before passive effects flush (a transition unmount) can't start
+  // the queued one.
+  useLayoutEffect(() => {
     const m = machine.current;
     return () => {
       m.queued = null;

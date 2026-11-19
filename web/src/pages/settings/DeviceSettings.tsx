@@ -589,6 +589,9 @@ function DeviceDetail({
                 key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
                 value: next,
                 identity,
+                // The panel shows its own draft, so the next queued save
+                // needn't wait for the settings reads to refetch.
+                refreshInBackground: true,
               });
             } catch (error) {
               toast.error(v2ErrorText(error, t("web.settings.device.saveFailed")));
