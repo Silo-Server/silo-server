@@ -678,6 +678,11 @@ func (s *MetadataService) SetImageResolver(r interface {
 // Provider chains are determined by admin configuration and change rarely, so
 // caching avoids repeated DB queries when processing batches of files.
 func (s *MetadataService) resolveChainCached(ctx context.Context, folderID int, contentLevel string) ([]Provider, error) {
+	if folderID <= 0 {
+		if folderIDs := itemChainScopeFolders(ctx); len(folderIDs) > 0 {
+			return s.resolveLibrariesChain(ctx, folderIDs, contentLevel)
+		}
+	}
 	key := fmt.Sprintf("%d:%s", folderID, contentLevel)
 
 	s.chainCacheMu.RLock()
@@ -733,6 +738,10 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 	}
 
 	folderID := parseProcessFolderID(req.FolderID)
+	ctx, err = s.withItemChainScope(ctx, req.ContentID, folderID)
+	if err != nil {
+		return nil, err
+	}
 	languages, err := s.resolveProcessLanguages(ctx, req, folderID)
 	if err != nil {
 		return nil, err
@@ -4726,6 +4735,10 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		return err
 	} else if ignored {
 		return ErrMetadataNotFound
+	}
+	ctx, err = s.withItemChainScope(ctx, seriesID, folderID)
+	if err != nil {
+		return err
 	}
 
 	languages, err := s.resolveProcessLanguages(ctx, ProcessRequest{
