@@ -363,6 +363,9 @@ func TestAttachedUpstreamReplacedBeforeServing(t *testing.T) {
 	if !errors.Is(err, errUpstreamReplaced) {
 		t.Fatalf("result = %v, want errUpstreamReplaced instead of serving under %+v", err, updated)
 	}
+	if !slices.Contains(manager.stopCalls, "upstream-started") {
+		t.Fatalf("stopped sessions = %v, want this request's session stopped", manager.stopCalls)
+	}
 }
 
 // TestChildHLSRequestForAnotherVersionKeepsThePlay covers a late child
@@ -418,13 +421,30 @@ func TestBoundRequestsNeverReplaceTheUpstream(t *testing.T) {
 	secondVersion := testCompatVersion()
 	secondVersion.FileID = 43
 	second := testCompatSource(codec, secondVersion)
+	compatSession := &Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}
+	// The HLS playlists, master and child, ensure the upstream through the
+	// transcode manifest; a report's revive ensures it directly.
+	viaManifest := func(h *PlaybackHandler, source PlaybackMediaSource, _ string) error {
+		_, err := h.ensureTranscodeManifestWithToneMapMode(t.Context(), compatSession, "play-1", source, "")
+		return err
+	}
+	direct := func(h *PlaybackHandler, source PlaybackMediaSource, method string) error {
+		_, err := h.ensureBoundUpstreamPlayback(t.Context(), compatSession, "play-1", source, method)
+		return err
+	}
 	for _, tc := range []struct {
-		name   string
-		source PlaybackMediaSource
-		method string
+		name       string
+		ensure     func(*PlaybackHandler, PlaybackMediaSource, string) error
+		source     PlaybackMediaSource
+		method     string
+		reaped     bool
+		wantStarts int
 	}{
-		{name: "version the play left", source: first, method: "transcode"},
-		{name: "method the play left", source: second, method: "remux"},
+		{name: "playlist for the version the play left", ensure: viaManifest, source: first, method: "transcode"},
+		{name: "revive for the method the play left", ensure: direct, source: second, method: "remux"},
+		// A reaped upstream that can't be rebuilt is not a switch: the play
+		// goes on under a fresh session.
+		{name: "reaped upstream of the same version", ensure: direct, source: second, method: "transcode", reaped: true, wantStarts: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := NewPlaybackSessionStore(time.Hour, nil)
@@ -433,18 +453,21 @@ func TestBoundRequestsNeverReplaceTheUpstream(t *testing.T) {
 				UpstreamSessionID: "upstream-second", UpstreamPlayMethod: "transcode", UpstreamMediaFileID: second.FileID,
 				MediaSources: []PlaybackMediaSource{first, second},
 			})
-			manager := &testCompatSessionManager{sessions: map[string]*playback.Session{
-				"upstream-second": {ID: "upstream-second", UserID: 7, MediaFileID: second.FileID, PlayMethod: playback.PlayTranscode},
-			}}
+			manager := &testCompatSessionManager{sessions: map[string]*playback.Session{}}
+			if !tc.reaped {
+				manager.sessions["upstream-second"] = &playback.Session{ID: "upstream-second", UserID: 7, MediaFileID: second.FileID, PlayMethod: playback.PlayTranscode}
+			}
 			handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
 
-			_, err := handler.ensureBoundUpstreamPlayback(t.Context(),
-				&Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}, "play-1", tc.source, tc.method)
-			if !errors.Is(err, errUpstreamReplaced) {
+			err := tc.ensure(handler, tc.source, tc.method)
+			if tc.wantStarts == 0 && !errors.Is(err, errUpstreamReplaced) {
 				t.Fatalf("err = %v, want errUpstreamReplaced", err)
 			}
-			if len(manager.stopCalls) != 0 || manager.startCalls != 0 {
-				t.Fatalf("stops = %v, starts = %d; want the play's session left alone", manager.stopCalls, manager.startCalls)
+			if tc.wantStarts > 0 && err != nil {
+				t.Fatalf("err = %v, want the play resumed", err)
+			}
+			if len(manager.stopCalls) != 0 || manager.startCalls != tc.wantStarts {
+				t.Fatalf("stops = %v, starts = %d; want no stop and %d starts", manager.stopCalls, manager.startCalls, tc.wantStarts)
 			}
 		})
 	}
@@ -459,18 +482,16 @@ func TestChildHLSSourceFollowsTheStreamedVersion(t *testing.T) {
 	secondVersion.FileID = 43
 	second := testCompatSource(codec, secondVersion)
 	for _, tc := range []struct {
-		name          string
-		boundFileID   int
-		mediaSourceID string
-		wantFileID    int
+		name        string
+		boundFileID int
+		wantFileID  int
 	}{
 		{name: "bound version without an id", boundFileID: second.FileID, wantFileID: second.FileID},
-		{name: "named version", boundFileID: second.FileID, mediaSourceID: first.ID, wantFileID: first.FileID},
 		{name: "unrecorded file without an id", wantFileID: first.FileID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			play := &PlaybackSession{UpstreamMediaFileID: tc.boundFileID, MediaSources: []PlaybackMediaSource{first, second}}
-			if got := compatChildHLSSource(play, tc.mediaSourceID); got == nil || got.FileID != tc.wantFileID {
+			if got := compatChildHLSSource(play, ""); got == nil || got.FileID != tc.wantFileID {
 				t.Fatalf("source = %+v, want file %d", got, tc.wantFileID)
 			}
 		})

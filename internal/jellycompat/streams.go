@@ -3259,12 +3259,15 @@ func (h *PlaybackHandler) recordCompatProgressPersistence(playSessionID string, 
 	})
 }
 
-// ensureTranscodeManifest serves a child HLS playlist, which never replaces
-// the play's upstream: a playlist for a version the play left is refused.
 func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource) ([]byte, error) {
-	return h.ensureTranscodeManifestFor(ctx, compatSession, playSessionID, source, "", false)
+	return h.ensureTranscodeManifestWithToneMapMode(ctx, compatSession, playSessionID, source, "")
 }
 
+// ensureTranscodeManifestWithToneMapMode starts or serves the play's local
+// transcode. It never replaces the play's upstream: its callers, a child
+// playlist and the master manifest after its own switch, act on the stream
+// already opened, and one that a newer switch overtook gets
+// errUpstreamReplaced.
 func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 	ctx context.Context,
 	compatSession *Session,
@@ -3272,18 +3275,7 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 	source PlaybackMediaSource,
 	requiredToneMapMode tonemap.Mode,
 ) ([]byte, error) {
-	return h.ensureTranscodeManifestFor(ctx, compatSession, playSessionID, source, requiredToneMapMode, true)
-}
-
-func (h *PlaybackHandler) ensureTranscodeManifestFor(
-	ctx context.Context,
-	compatSession *Session,
-	playSessionID string,
-	source PlaybackMediaSource,
-	requiredToneMapMode tonemap.Mode,
-	mayReplace bool,
-) ([]byte, error) {
-	playSession, err := h.ensureUpstream(ctx, compatSession, playSessionID, source, "transcode", mayReplace)
+	playSession, err := h.ensureBoundUpstreamPlayback(ctx, compatSession, playSessionID, source, "transcode")
 	if err != nil {
 		return nil, err
 	}
