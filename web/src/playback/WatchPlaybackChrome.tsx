@@ -621,8 +621,11 @@ function WatchPlaybackHostContent() {
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
   // does not, or nobody knows yet. settingsCapabilitiesSupportKey collapses the
-  // last two into false, so the query's own state is what separates them.
-  const capabilitiesKnown = settingsCapabilities.isSuccess;
+  // last two into false, so whether any answer has arrived separates them. A
+  // failed background refetch keeps the last good answer as `data` under an
+  // error status; that answer still counts, or the settings read below would
+  // drop every revision-gated key mid-session.
+  const capabilitiesKnown = settingsCapabilities.data !== undefined;
   const supportsIntroSkipMode =
     capabilitiesKnown &&
     settingsCapabilitiesSupportKey(

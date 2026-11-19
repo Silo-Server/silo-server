@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -472,11 +472,12 @@ describe("EpisodeContent", () => {
       return requests;
     }
 
-    function renderWithTracks(versions = [makeFileVersion({ audio_tracks: tracks })]) {
+    function renderWithTracks(
+      versions = [makeFileVersion({ audio_tracks: tracks })],
+      client = new QueryClient({ defaultOptions: { mutations: { retry: false } } }),
+    ) {
       render(
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
-        >
+        <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={["/item/episode-1"]}>
             <EpisodeContent item={makeEpisodeItem({ versions })} />
           </MemoryRouter>
@@ -604,6 +605,36 @@ describe("EpisodeContent", () => {
           explicitAudioTrackIndex: 1,
         }),
       );
+    });
+
+    it("keeps a saved pick when a later pick fails while the detail still refetches", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+      // An open detail page: the save's invalidation refetches it, and that
+      // refetch never finishes here.
+      let detailFetches = 0;
+      const detail = new QueryObserver(client, {
+        queryKey: catalogKeys.itemDetail("episode-1"),
+        queryFn: () => (++detailFetches === 1 ? Promise.resolve({}) : new Promise(() => {})),
+      });
+      const unsubscribe = detail.subscribe(() => {});
+      await waitFor(() => expect(detail.getCurrentResult().isSuccess).toBe(true));
+      renderWithTracks(undefined, client);
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(detailFetches).toBe(2));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+      unsubscribe();
     });
 
     it("puts the selector back to the last saved choice when quick picks all fail", async () => {

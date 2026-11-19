@@ -96,9 +96,18 @@ runs:
       shell: bash
       run: make embed-stub
 
+    # Nothing compiles without libvips, so the wait only guards against an
+    # install that never reports back; apt times out and retries a stalled
+    # download itself. When the runner image has no cached packages, the
+    # install downloads about 150 packages, which a slow Ubuntu mirror stretches
+    # to several minutes.
     - name: Wait for libvips
       shell: bash
       run: |
-        timeout 60 sh -c 'until [ -s "$RUNNER_TEMP/libvips.status" ]; do sleep 1; done' || { cat "$RUNNER_TEMP/libvips.log"; exit 1; }
+        timeout 900 sh -c 'until [ -s "$RUNNER_TEMP/libvips.status" ]; do sleep 1; done' || {
+          echo "::error::The libvips install did not finish within 15 minutes."
+          cat "$RUNNER_TEMP/libvips.log"
+          exit 1
+        }
         cat "$RUNNER_TEMP/libvips.log"
         exit "$(cat "$RUNNER_TEMP/libvips.status")"

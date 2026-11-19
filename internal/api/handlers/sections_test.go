@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -63,4 +65,21 @@ func (r *countingSectionImageResolver) ResolveImageURLsWithExpiry(_ context.Cont
 		resolved[path] = catalog.ResolvedImageURL{URL: "resolved:" + path}
 	}
 	return resolved
+}
+
+// The default ebook and manga rows save with their media_scope, while the
+// legacy filter_type key keeps its narrower, case-insensitive set.
+func TestValidateSectionConfigBookMediaScopes(t *testing.T) {
+	for _, scope := range []string{"ebook", "manga"} {
+		config := json.RawMessage(`{"media_scope":"` + scope + `","match":"all","groups":[],"sort":{"field":"added_at","order":"desc"}}`)
+		if msg, ok := validateSectionConfig(sections.SectionRecentlyReleased, config); !ok {
+			t.Errorf("media_scope %s rejected: %s", scope, msg)
+		}
+	}
+	if msg, ok := validateSectionConfig(sections.SectionRecentlyReleased, json.RawMessage(`{"filter_type":"Movie"}`)); !ok {
+		t.Errorf("legacy filter_type Movie rejected: %s", msg)
+	}
+	if _, ok := validateSectionConfig(sections.SectionRecentlyReleased, json.RawMessage(`{"filter_type":"ebook"}`)); ok {
+		t.Error("legacy filter_type ebook accepted")
+	}
 }

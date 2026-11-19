@@ -25,6 +25,7 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestRecentlyReleasedOrdersByReleaseDate
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestBookMediaScopeRowsKeepTheirTypePostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
 ./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
@@ -362,6 +363,12 @@
 ./internal/taskmanager/tasks TestReconcileWaitsForADownloadRefreshPostgres
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
+
+# A plugin scheduled task's firing runs on one API server: of claims taken at
+# once one wins, a server whose timer fires seconds later (across an interval
+# slot boundary too) loses, and a startup firing runs once per cluster start.
+./internal/taskmanager/repository TestPgFiringClaimsRunEachFiringOnceDB
+./internal/taskmanager/repository TestPgFiringClaimsMeasureAStalledServerFromItsDueTimeDB
 
 # Autoscan event retention deletes old finished events in bounded batches and keeps recent and running ones.
 ./internal/autoscan TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB

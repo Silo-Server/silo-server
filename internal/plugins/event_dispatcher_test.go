@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/events"
@@ -123,14 +125,18 @@ func (s *memoryDeliveryStore) busy() bool {
 	return false
 }
 
-// dispatchBusEvent runs event through d the way the API server that
-// published it does, then delivers everything due and waits for it.
-func (d *EventDispatcher) dispatchBusEvent(ctx context.Context, event cache.Event) {
-	d.store(ctx, busEvent(event))
-	d.deliverDue(ctx)
+// catalogEnvelope is a catalog event as this server's hub hands it over.
+func catalogEnvelope(name, data string) events.Envelope {
+	return events.Envelope{Event: name, EventID: ulid.Make().String(), Data: json.RawMessage(data)}
 }
 
-// dispatchEnvelope is dispatchBusEvent for an envelope published on d's hub.
+// scanCompleted is a scan.completed event with a minimal payload.
+func scanCompleted() events.Envelope {
+	return catalogEnvelope("scan.completed", `{"id":"scan-1","library_id":7,"status":"completed"}`)
+}
+
+// dispatchEnvelope runs env through d the way the API server that published
+// it does, then delivers everything due and waits for it.
 func (d *EventDispatcher) dispatchEnvelope(ctx context.Context, env events.Envelope) {
 	d.store(ctx, hubEvent(env))
 	d.deliverDue(ctx)
@@ -225,6 +231,44 @@ func (r *fakeResolver) EventConsumerClient(_ context.Context, _ int, _ string) (
 	return r.client, nil
 }
 
+// newFixture starts a dispatcher with one installation subscribed to subs and
+// returns the bus its server publishes on, its hub, and the plugin's client.
+func newFixture(t *testing.T, subs []string, want int) (cache.EventBus, *events.Hub, *recordingClient) {
+	t.Helper()
+	bus := newFakeBus()
+	hub := events.NewHub("test-node", bus)
+	if err := hub.Start(context.Background()); err != nil {
+		t.Fatalf("hub start: %v", err)
+	}
+
+	subsAny := make([]any, 0, len(subs))
+	for _, s := range subs {
+		subsAny = append(subsAny, s)
+	}
+	store := &fakeInstallationStore{
+		installations: []*Installation{{ID: 1, PluginID: "test", Enabled: true}},
+		capabilities: map[int][]*Capability{
+			1: {{
+				InstallationID: 1,
+				Type:           "event_consumer.v1",
+				ID:             "watcher",
+				Metadata:       map[string]any{"subscriptions": subsAny},
+			}},
+		},
+	}
+	client := &recordingClient{done: make(chan struct{}), want: want}
+	ctx, cancel := context.WithCancel(context.Background())
+	d := NewEventDispatcher(bus, hub, store, &fakeResolver{client: client}, newMemoryDeliveryStore(), 4)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("start dispatcher: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		d.Stop()
+	})
+	return bus, hub, client
+}
+
 func waitFor(t *testing.T, c *recordingClient) {
 	t.Helper()
 	c.mu.Lock()
@@ -241,5 +285,37 @@ func waitFor(t *testing.T, c *recordingClient) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for events; got %d, want %d", len(c.get()), c.want)
+	}
+}
+
+// A catalog event reaches plugins in its public shape: fields the host adds
+// for its own clients are dropped, IDs are strings, and a notification names
+// its account, since profile IDs repeat across accounts.
+func TestDispatcher_NotificationReachesConsumerInItsPublicShape(t *testing.T) {
+	_, hub, client := newFixture(t, []string{"notification.created"}, 1)
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Channel:   events.ChannelNotifications,
+		Event:     "notification.created",
+		Data:      json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","library_id":3,"series_title":"Severance","poster_thumbhash":"abc","read_at":null,"reason_flags":{"next_up":true,"favorite":true},"created_at":"2026-11-04T10:00:00Z"}`),
+		UserID:    7,
+		ProfileID: "p1",
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	waitFor(t, client)
+	payload := client.get()[0].GetPayload().AsMap()
+	if payload["user_id"] != "7" || payload["profile_id"] != "p1" || payload["library_id"] != "3" || payload["series_title"] != "Severance" {
+		t.Fatalf("payload = %v, want the account, profile, library and title, IDs as strings", payload)
+	}
+	for _, internal := range []string{"poster_thumbhash", "read_at"} {
+		if _, leaked := payload[internal]; leaked {
+			t.Errorf("payload carries %q, which isn't in the event catalog: %v", internal, payload)
+		}
+	} // A nested object is allowlisted too.
+	flags, _ := payload["reason_flags"].(map[string]any)
+	if _, leaked := flags["favorite"]; flags["next_up"] != true || leaked {
+		t.Errorf("reason_flags = %v, want only the catalog's fields", flags)
 	}
 }
