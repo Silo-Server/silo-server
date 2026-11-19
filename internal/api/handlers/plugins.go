@@ -142,6 +142,10 @@ type PluginInstallationView struct {
 	// Signature is the release signature check recorded at install, exposed
 	// by v2 as `signature`. The frozen v1 bridge does not carry it.
 	Signature plugins.Signature `json:"-"`
+	// ConnectionCheckSupported reports whether the config test endpoint has
+	// a check to run for this plugin, exposed by v2 as
+	// `connection_check_supported`. The frozen v1 bridge does not carry it.
+	ConnectionCheckSupported bool `json:"-"`
 }
 
 // PluginRuntimeView is one installation's process state. Resident marks a
@@ -913,6 +917,8 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		Runtime:            runtime,
 		UpdateFailure:      installation.UpdateFailure,
 		Signature:          installation.Signature,
+
+		ConnectionCheckSupported: plugins.SupportsConnectionCheck(manifest),
 	}, nil
 }
 

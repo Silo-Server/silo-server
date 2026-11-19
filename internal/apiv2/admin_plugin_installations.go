@@ -259,6 +259,8 @@ type AdminPluginInstallation struct {
 	Runtime            AdminPluginRuntime        `json:"runtime"`
 	CreatedAt          Instant                   `json:"created_at"`
 	UpdatedAt          Instant                   `json:"updated_at"`
+
+	ConnectionCheckSupported bool `json:"connection_check_supported" doc:"True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported."`
 }
 
 type AdminPluginCatalogInput struct {
@@ -425,6 +427,7 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 		out.UpdateFailure = &AdminPluginUpdateFailure{Version: f.Version, Reason: f.Reason, FailedAt: NewInstant(f.FailedAt)}
 	}
 	out.Signature = adminPluginSignatureOf(v.Signature)
+	out.ConnectionCheckSupported = v.ConnectionCheckSupported
 	for _, c := range v.GlobalConfigs {
 		out.GlobalConfigs = append(out.GlobalConfigs, AdminPluginConfigValue{Key: c.Key, Value: NonNilMap(PluginJSONValue(c.Value)), ConfiguredSecrets: NonNil(c.ConfiguredSecrets)})
 	}

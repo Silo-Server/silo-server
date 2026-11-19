@@ -3746,6 +3746,12 @@ A metadata provider is checked with a movie search; a marker provider is asked f
 account statistics, which need the staged credentials.
 A completed failed check, including a plugin without connection-check support, is a 200
 result with `success` false and the message; only transport or store failures are problems.
+Each installation's `connection_check_supported` says whether the check contacts the
+provider: true for a marker provider and for a metadata provider that serves movies, since
+the probe is a movie search. A metadata provider without movie priority, such as a
+series-only one, reports false; its check succeeds without contacting anything. Clients
+offer the check only when the field is true. A marker provider without account statistics
+can still answer that checks are not supported, since only running it tells.
 The probe launches a process and may call a billed provider, so it is non-retryable: the
 web hook disables mutation retries and authentication replay and reports an uncertain
 result to the operator instead of resubmitting.
