@@ -17,12 +17,14 @@
  *
  * At a page seek (`endWarmHead()`) the source records the reads Mediabunny waits for, and cuts
  * each queued read to the bytes those reads wait for. When a new read then finds every read worker
- * running, each older run (one that serves only reads from before the latest seek) is cut to the
- * bytes its reads wait for, and its ranges that hold none of them are cancelled. The older run that
- * owes the fewest bytes is retired, its unmet bytes go back on the queue, and the new read takes
- * its place. Runs for the latest seek take free slots first. Trimming alone is not enough: two owed
- * 5 MiB cluster reads still held a seek's first request 7.0 s. A read the replaced playback makes
- * after the seek still counts as new.
+ * running, each older run (one that started before the latest seek and has no read made after it
+ * pending) is cut to the bytes its reads wait for, and its ranges that hold none of them are
+ * cancelled. The older run that owes the fewest bytes is retired, its unmet bytes go back on the
+ * queue, and the new read takes its place. Runs for the latest seek take free slots first. Trimming
+ * alone is not enough: two owed 5 MiB cluster reads still held a seek's first request for 7.0 s at
+ * 512 KiB/s per range. A read the replaced playback makes after the seek still counts as new. A run
+ * that serves the new playback between its reads counts as older, so a later read can retire it and
+ * its read-ahead is fetched again; keeping it delayed the next new read instead.
  *
  * It subclasses `UrlSource` and overrides its private `_runWorker`, so
  * Mediabunny keeps its read orchestrator, its cache, its read workers and its

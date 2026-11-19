@@ -16,7 +16,8 @@
  *   - `workers`, which a retired worker leaves.
  *   - `queuedReads`, sorted by `hole.start` with no overlaps, and each entry's `hole`,
  *     `strictTarget`, `pendingSlices` and `age`.
- *   - `nextAge`, the age of the next queued read.
+ *   - `nextAge`, the orchestrator's one age counter for workers, cache entries and queued reads,
+ *     which a requeued read takes its age from.
  * - `ReadWorker`: `currentPos`, `targetPos`, `aborted`, and `pendingSlices`, whose entries are
  *   each read's identity, `start` and `bytes.length`.
  *
