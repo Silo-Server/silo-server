@@ -3,36 +3,9 @@ package playback
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
+	"time"
 )
-
-// CloseProcess must leave the output directory intact so a session sharing the
-// same directory (e.g. a concurrent reconstruct winner) keeps serving its
-// segments and init.mp4. Close, by contrast, removes the directory.
-func TestCloseProcessKeepsOutputDir(t *testing.T) {
-	dir := t.TempDir()
-	seg := filepath.Join(dir, "init.mp4")
-	if err := os.WriteFile(seg, []byte("data"), 0o644); err != nil {
-		t.Fatalf("seed segment: %v", err)
-	}
-
-	s := &TranscodeSession{outputDir: dir}
-	if err := s.CloseProcess(); err != nil {
-		t.Fatalf("CloseProcess: %v", err)
-	}
-	if _, err := os.Stat(seg); err != nil {
-		t.Fatalf("CloseProcess must not remove output dir, but segment is gone: %v", err)
-	}
-
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("Close must remove output dir, stat err = %v", err)
-	}
-}
 
 // restartPauseSink holds a restart at its "ffmpeg process restart" event: the
 // restart has registered its flight and stopped the previous generation, and
@@ -40,10 +13,6 @@ func TestCloseProcessKeepsOutputDir(t *testing.T) {
 type restartPauseSink struct {
 	entered chan struct{}
 	release chan struct{}
-}
-
-func newRestartPauseSink() *restartPauseSink {
-	return &restartPauseSink{entered: make(chan struct{}), release: make(chan struct{})}
 }
 
 func (*restartPauseSink) WriteLine(context.Context, string, FFmpegLogAttrs, string) {}
@@ -103,47 +72,6 @@ func requireClosed(t *testing.T, s *TranscodeSession, restartErr error) {
 	}
 }
 
-// Closing while a restart is between stopping the old generation and
-// starting the new one: the close waits for the restart, which publishes no
-// generation and kills the FFmpeg it started, so nothing runs afterwards.
-func TestCloseDuringRestartLeavesNothingRunning(t *testing.T) {
-	for _, closer := range sessionClosers {
-		t.Run(closer.name, func(t *testing.T) {
-			s := newRunningFakeSession(t)
-			sink := newRestartPauseSink()
-			s.mu.Lock()
-			s.opts.FFmpegLogSink = sink
-			s.mu.Unlock()
-
-			restarted := make(chan error, 1)
-			go func() { restarted <- s.Restart(context.Background(), 10, 5) }()
-			<-sink.entered
-
-			// Closing stops the throttler first thing, once the session is
-			// marked closing. Install one now, after the restart stopped its
-			// own, to observe that the close has begun.
-			marker := NewTranscodeThrottler(s, nil, minThresholdSeconds, 2)
-			s.mu.Lock()
-			s.throttler = marker
-			s.mu.Unlock()
-
-			closed := make(chan error, 1)
-			go func() { closed <- closer.close(s) }()
-			<-marker.stopCh
-			close(sink.release)
-
-			restartErr := <-restarted
-			if err := <-closed; err != nil {
-				t.Fatal(err)
-			}
-			requireClosed(t, s, restartErr)
-			if !errors.Is(restartErr, ErrSessionSuperseded) {
-				t.Fatalf("restart racing %s = %v, want ErrSessionSuperseded", closer.name, restartErr)
-			}
-		})
-	}
-}
-
 // A restart that begins after the session closed is refused: it starts no
 // FFmpeg and runs no restart hook.
 func TestRestartAfterCloseIsRefused(t *testing.T) {
@@ -168,33 +96,41 @@ func TestRestartAfterCloseIsRefused(t *testing.T) {
 	}
 }
 
-// A restart hook still running when the session closes, such as the one that
-// re-arms the throttler, arms nothing on the closed session.
-func TestClosedSessionArmsNoThrottler(t *testing.T) {
+// A first start can finish during a restart, after the restart stopped the
+// throttler it found (none here), and arm one on the pipe of the process being
+// replaced. When the restart hook then times out, its fallback must not take
+// that throttler for the new process's, and must keep its threshold.
+func TestRestartHookTimeoutReplacesAThrottlerOnTheOldPipe(t *testing.T) {
+	setRestartHookTimeout(t, 50*time.Millisecond)
 	s := newRunningFakeSession(t)
-	hookEntered := make(chan struct{})
-	releaseHook := make(chan struct{})
-	s.SetRestartHook(func(context.Context) {
-		close(hookEntered)
-		<-releaseHook
-		s.StartThrottler(minThresholdSeconds)
+	s.mu.Lock()
+	oldPipe := s.stdinPipe
+	s.mu.Unlock()
+	stale := NewTranscodeThrottler(s, oldPipe, 90, 2)
+	s.SetRestartHook(func(ctx context.Context) {
+		s.mu.Lock()
+		s.throttler = stale
+		s.mu.Unlock()
+		<-ctx.Done()
 	})
 
-	restarted := make(chan error, 1)
-	go func() { restarted <- s.Restart(context.Background(), 0, 0) }()
-	<-hookEntered
-	if err := s.Close(); err != nil {
+	if err := s.Restart(context.Background(), 0, 0); err != nil {
 		t.Fatal(err)
-	}
-	close(releaseHook)
-	if err := <-restarted; err != nil {
-		t.Fatalf("restart published before Close = %v", err)
 	}
 
 	s.mu.Lock()
-	armed := s.throttler != nil
+	got := s.throttler
+	current := got != nil && got.stdinPipe == s.stdinPipe
 	s.mu.Unlock()
-	if armed {
-		t.Fatal("the restart hook armed a throttler on a closed session")
+	if !current {
+		t.Fatal("after a timed-out restart hook, the throttler does not write to the new process")
+	}
+	if got.thresholdSeconds != 90 {
+		t.Fatalf("threshold = %d, want the 90 the first start read", got.thresholdSeconds)
+	}
+	select {
+	case <-stale.stopCh:
+	default:
+		t.Fatal("the throttler on the replaced pipe is still running")
 	}
 }

@@ -8,6 +8,7 @@ import type {
   ReprobeNodeResult,
   StreamNode,
   SystemResources,
+  UpdateNodeRequest,
 } from "@/api/types";
 import { t, type MessageKey } from "@/i18n";
 import { parseHWDeviceList } from "@/lib/hwDevices";
@@ -1176,7 +1177,10 @@ function describeProcessMemory(attribution: ResourceAttribution, heap: boolean):
   if (value == null) return mutedMetric(label, t("web.admin.nodes.process.unmeasured"));
   return {
     label,
-    value: formatFileSize(value, { iecUnits: true, fallback: "0 B" }),
+    value: formatFileSize(value, {
+      iecUnits: true,
+      fallback: t("web.common.format.size.bytes", { size: 0 }),
+    }),
     detail: heap
       ? t("web.admin.nodes.process.heapDetail")
       : t("web.admin.nodes.process.residentDetail"),
@@ -1632,7 +1636,10 @@ function formatUsedOfTotal(
   if (usedValue == null || totalValue == null || totalValue <= 0) {
     return null;
   }
-  const usedLabel = formatFileSize(toBytes(usedValue), { iecUnits: true, fallback: "0 B" });
+  const usedLabel = formatFileSize(toBytes(usedValue), {
+    iecUnits: true,
+    fallback: t("web.common.format.size.bytes", { size: 0 }),
+  });
   const totalLabel = formatFileSize(toBytes(totalValue), { iecUnits: true });
   return t("web.admin.nodes.resources.usedOfTotal", { used: usedLabel, total: totalLabel });
 }
@@ -1648,15 +1655,15 @@ export function formatBitsPerSecond(bps: number | null | undefined): string | nu
     return null;
   }
   if (value >= 1e9) {
-    return `${formatDecimal(value / 1e9, 1)} Gbps`;
+    return t("web.common.format.bitrate.gbps", { rate: formatDecimal(value / 1e9, 1) });
   }
   if (value >= 1e6) {
-    return `${formatDecimal(value / 1e6, 1)} Mbps`;
+    return t("web.common.format.bitrate.mbps", { rate: formatDecimal(value / 1e6, 1) });
   }
   if (value >= 1e3) {
-    return `${Math.round(value / 1e3)} kbps`;
+    return t("web.common.format.bitrate.kbps", { rate: String(Math.round(value / 1e3)) });
   }
-  return `${Math.round(value)} bps`;
+  return t("web.common.format.bitrate.bps", { rate: String(Math.round(value)) });
 }
 
 function mebibytesToBytes(value: number): number {
@@ -1677,4 +1684,38 @@ function finiteNumber(value: number | null | undefined): number | null {
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+/**
+ * Puts the stored value back into every field of an edit the node declares
+ * from its own environment (`env_managed`). The server refuses a change to
+ * such a field and accepts one that restates it, so a full-form save sends
+ * the stored values for them, whatever the form state holds. Only keys the
+ * body already carries are restated, so a field the form leaves out for this
+ * node type stays out.
+ */
+export function restoreEnvManagedFields(
+  body: UpdateNodeRequest,
+  node: StreamNode,
+): UpdateNodeRequest {
+  const locked = new Set(node.env_managed ?? []);
+  const out: UpdateNodeRequest = { ...body };
+  const restate = <K extends keyof UpdateNodeRequest>(key: K, value: UpdateNodeRequest[K]) => {
+    if (locked.has(key) && key in out) out[key] = value;
+  };
+  restate("name", node.name);
+  restate("url", node.url);
+  restate("public_url", node.public_url ?? null);
+  restate("group", node.group ?? "");
+  restate("max_jobs", node.max_jobs ?? 0);
+  restate("max_bandwidth_kbps", node.max_bandwidth_kbps ?? 0);
+  restate("hw_accel_override", node.hw_accel_override ?? null);
+  restate("hw_device_override", node.hw_device_override ?? null);
+  restate("download_artifact_dir_override", node.download_artifact_dir_override ?? null);
+  restate(
+    "download_artifact_max_bytes_override",
+    node.download_artifact_max_bytes_override ?? null,
+  );
+  if (node.source_access) restate("source_access", node.source_access);
+  return out;
 }

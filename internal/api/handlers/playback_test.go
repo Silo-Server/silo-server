@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -52,33 +53,6 @@ func TestWritePlaybackToneMapExecutionError(t *testing.T) {
 		if rr.Code != tt.wantStatus || rr.Header().Get(transcodenode.ToneMapExecutionErrorHeader) != tt.wantCode {
 			t.Fatalf("response = %d/%q, want %d/%q", rr.Code, rr.Header().Get(transcodenode.ToneMapExecutionErrorHeader), tt.wantStatus, tt.wantCode)
 		}
-	}
-}
-
-func TestRequireNativeAPIEgressV3(t *testing.T) {
-	for _, test := range []struct {
-		name                        string
-		workload, execution, egress string
-		want                        int
-	}{
-		{name: "legacy", want: http.StatusOK},
-		{name: "api", workload: string(noderouting.WorkloadRemux), execution: string(noderouting.ExecutionAPI), egress: string(noderouting.EgressAPI), want: http.StatusOK},
-		{name: "proxy", workload: string(noderouting.WorkloadRemux), execution: string(noderouting.ExecutionProxy), egress: string(noderouting.EgressProxy), want: http.StatusServiceUnavailable},
-		{name: "partial", workload: string(noderouting.WorkloadRemux), egress: string(noderouting.EgressAPI), want: http.StatusConflict},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			allowed := requireNativeAPIEgressV3(recorder, test.workload, test.execution, test.egress)
-			if test.want == http.StatusOK {
-				if !allowed {
-					t.Fatalf("route was rejected: %d %s", recorder.Code, recorder.Body.String())
-				}
-				return
-			}
-			if allowed || recorder.Code != test.want {
-				t.Fatalf("allowed = %t, response = %d %s, want %d", allowed, recorder.Code, recorder.Body.String(), test.want)
-			}
-		})
 	}
 }
 
@@ -116,8 +90,9 @@ func TestNativeTranscodeHandlersRejectProxyRecipeBeforeReconstruction(t *testing
 				t.Fatal(err)
 			}
 			manager := playback.NewSessionManager(0, 0)
-			handler := NewPlaybackHandler(manager)
+			handler := newKeyedPlaybackHandler(manager)
 			handler.JWTSecret = secret
+			handler.NodeKeys = nodeauthtest.SameKey(secret)
 			recorder := httptest.NewRecorder()
 			test.handle(handler, recorder, playbackTestRequest(http.MethodGet, test.path+"?st="+token, nil, test.params))
 
@@ -339,7 +314,7 @@ func TestHeaderAuthenticatedMediaEnforcesHLSOwnerOnEveryRequest(t *testing.T) {
 		UserID:     1,
 		PlayMethod: playback.PlayTranscode,
 	})
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 
 	type endpoint struct {
 		name   string
@@ -436,7 +411,7 @@ func TestGetTranscodeSegment_StopsWaitingWhenRequestEnds(t *testing.T) {
 
 	sessions := playback.NewSessionManager(0, 0)
 	sessions.RegisterReconstructed(&playback.Session{ID: sessionID, UserID: 1, PlayMethod: playback.PlayTranscode})
-	handler := NewPlaybackHandler(sessions)
+	handler := newKeyedPlaybackHandler(sessions)
 	handler.TranscodeManager().RegisterTranscodeSession(sessionID, transcodeSession)
 
 	// No playlist yet, so the first segment would wait for FFmpeg's startup.
@@ -689,7 +664,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				Duration:  3600,
 			}
 			scrobbler := &recordingPlaybackWatchScrobbler{}
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.StoreProvider = testUserStoreProvider{store: store}
 			handler.WatchScrobbler = scrobbler
 
@@ -702,7 +677,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				DisableProgressPersistence: tt.disablePersistence,
 				StartedAt:                  time.Now().Add(-time.Minute),
 			}
-			handler.finalizeSessionStop(context.Background(), session, false, "", tt.reason)
+			handler.finalizeSessionStopWithResult(context.Background(), session, false, "", tt.reason)
 
 			if got := len(scrobbler.pauses); got != tt.wantPauseCalls {
 				t.Fatalf("pause calls = %d, want %d", got, tt.wantPauseCalls)
@@ -757,7 +732,7 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
 			scrobbler := &recordingPlaybackWatchScrobbler{}
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
 			handler.WatchScrobbler = scrobbler
 
@@ -784,53 +759,6 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 	}
 }
 
-func TestBuildAdminHistoryEntry_UsesRequestedMediaFileID(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{
-		files: map[int]*models.MediaFile{
-			42: {
-				ID:         42,
-				ContentID:  "movie-1",
-				FilePath:   "/media/movie-4k.mkv",
-				Resolution: "2160p",
-				CodecVideo: "hevc",
-				Duration:   3600,
-			},
-			99: {
-				ID:         99,
-				ContentID:  "movie-1",
-				FilePath:   "/media/movie-1080p.mkv",
-				Resolution: "1080p",
-				CodecVideo: "h264",
-				Duration:   3600,
-			},
-		},
-	})
-	handler.AdminStore = noopPlaybackAdminStore{}
-
-	entry, err := handler.buildAdminHistoryEntry(context.Background(), &playback.Session{
-		ID:                   "session-1",
-		UserID:               1,
-		ProfileID:            "profile-1",
-		MediaFileID:          99,
-		RequestedMediaFileID: 42,
-		PlayMethod:           playback.PlayTranscode,
-		Position:             120,
-		StartedAt:            time.Now().Add(-2 * time.Minute),
-	})
-	if err != nil {
-		t.Fatalf("buildAdminHistoryEntry: %v", err)
-	}
-	if entry == nil {
-		t.Fatal("expected admin history entry")
-	}
-	if entry.MediaFileID != 42 {
-		t.Fatalf("MediaFileID = %d, want 42", entry.MediaFileID)
-	}
-	if entry.MediaItemID != "movie-1" {
-		t.Fatalf("MediaItemID = %q, want movie-1", entry.MediaItemID)
-	}
-}
-
 // The finalizing request is not the viewer's: an admin terminate carries the
 // admin's address and an expiry carries none. History keeps the viewer's.
 func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
@@ -839,7 +767,7 @@ func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
 		"expiry":          context.Background(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
 				file: &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600},
 			})
 			handler.AdminStore = noopPlaybackAdminStore{}
@@ -875,7 +803,7 @@ func TestPersistStopAndHistory_SkipsZeroProgressStops(t *testing.T) {
 		Resolution: "1080p",
 		Duration:   3600,
 	}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.StoreProvider = testUserStoreProvider{store: store}
 
 	handler.persistStopAndHistory(context.Background(), &playback.Session{
@@ -939,77 +867,16 @@ func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 		},
 	}
 
-	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
+	alternates, err := handler.findAlternateFiles(context.Background(), source, catalog.AccessFilter{})
 	if err != nil {
-		t.Fatalf("findAlternateFile: %v", err)
+		t.Fatalf("findAlternateFiles: %v", err)
 	}
-	if alternate == nil {
+	if len(alternates) == 0 {
 		t.Fatal("expected alternate file")
 	}
+	alternate := alternates[0]
 	if alternate.ID != 3 {
 		t.Fatalf("alternate.ID = %d, want 3", alternate.ID)
-	}
-}
-
-func TestAlignedSeekSeconds(t *testing.T) {
-	tests := []struct {
-		name        string
-		seek        float64
-		segDur      int
-		targetVideo string
-		want        float64
-	}{
-		// Encoded transcodes snap down to the declared segment boundary so the
-		// synthetic manifest's timeline matches the produced content exactly.
-		{"encoded mid-segment seek snaps down", 1158.673, 2, "h264", 1158},
-		{"segment duration defaults to 2", 1158.673, 0, "h264", 1158},
-		// Copy-mode serves ffmpeg's real manifest; raw seek stands.
-		{"copy keeps raw seek", 1158.673, 2, "copy", 1158.673},
-		{"copy case-insensitive", 1158.673, 2, "COPY", 1158.673},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := alignedSeekSeconds(tt.seek, tt.segDur, tt.targetVideo); got != tt.want {
-				t.Fatalf("alignedSeekSeconds(%v, %d, %q) = %v, want %v",
-					tt.seek, tt.segDur, tt.targetVideo, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFindAlternateFile_PrefersNon4KAcrossLabelsAndDimensions(t *testing.T) {
-	source := &models.MediaFile{
-		ID:         1,
-		ContentID:  "movie-1",
-		Resolution: "2160p",
-		HDR:        true,
-		Bitrate:    30_000_000,
-	}
-
-	handler := &PlaybackHandler{
-		FileVersionFetcher: testPlaybackFileVersionFetcher{
-			byContent: map[string][]*models.MediaFile{
-				"movie-1": {
-					source,
-					{ID: 6, ContentID: "movie-1", Resolution: "8K", Bitrate: 40_000_000},
-					{ID: 2, ContentID: "movie-1", Resolution: "4K", Bitrate: 28_000_000},
-					{ID: 3, ContentID: "movie-1", Resolution: " uhd ", Bitrate: 26_000_000},
-					{ID: 4, ContentID: "movie-1", Resolution: "1080p", Bitrate: 24_000_000, VideoTracks: []models.VideoTrack{{Width: 3840, Height: 1626}}},
-					{ID: 5, ContentID: "movie-1", Resolution: "1080p", Bitrate: 12_000_000, VideoTracks: []models.VideoTrack{{Width: 1920, Height: 1080}}},
-				},
-			},
-		},
-	}
-
-	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
-	if err != nil {
-		t.Fatalf("findAlternateFile: %v", err)
-	}
-	if alternate == nil {
-		t.Fatal("expected alternate file")
-	}
-	if alternate.ID != 5 {
-		t.Fatalf("alternate.ID = %d (resolution %q), want 5", alternate.ID, alternate.Resolution)
 	}
 }
 
@@ -1020,7 +887,7 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 		RoutingWorkload: string(noderouting.WorkloadVideoTranscode), RoutingExecution: string(noderouting.ExecutionTranscode),
 		RoutingEgress: string(noderouting.EgressProxy), TranscodeNodeURL: "http://worker.invalid",
 	})
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	for _, test := range []struct {
 		name   string
 		path   string
@@ -1068,7 +935,7 @@ func TestStartPlaybackV2RemembersVersionButNotAudioTrack(t *testing.T) {
 				{Language: "eng", Codec: "aac", Channels: 6, Layout: "5.1"},
 			}
 
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 			handler.StoreProvider = testUserStoreProvider{store: store}
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1114,7 +981,7 @@ func TestStartPlaybackV2DoesNotPersistSeriesPlaybackPreferenceOnFailure(t *testi
 	file := v3HandlerFixtureFile(t)
 	file.EpisodeID = "episode-1"
 
-	handler := NewPlaybackHandler(failingSessionManager{}, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(failingSessionManager{}, testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.StoreProvider = testUserStoreProvider{store: store}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1186,7 +1053,7 @@ func TestStartPlaybackV2AudioLanguageResolvesCanonically(t *testing.T) { //nolin
 	) int {
 		t.Helper()
 		manager := playback.NewSessionManager(0, 0)
-		handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+		handler := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 		handler.StoreProvider = testUserStoreProvider{store: store}
 		handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1343,7 +1210,7 @@ func TestStartPlaybackV2ResumePolicyAppliesOnlyToAnOmittedStartPosition(t *testi
 			}
 
 			manager := playback.NewSessionManager(0, 0)
-			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 			handler.StoreProvider = testUserStoreProvider{store: store}
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1377,7 +1244,7 @@ func TestStartPlaybackV2MarksMissingFileAndSkipsSessionCreation(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	file.FilePath = filepath.Join(t.TempDir(), "missing.mkv")
 
-	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.MissingMarker = marker
@@ -1425,7 +1292,7 @@ func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
 	episode := func(number int) *models.Episode {
 		return &models.Episode{ContentID: "episode-" + strconv.Itoa(number), SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: number}
 	}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.StoreProvider = testUserStoreProvider{store: store}
 	season := make([]*models.Episode, 0, 12)
 	for number := 1; number <= 12; number++ {

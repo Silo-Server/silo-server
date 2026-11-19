@@ -695,7 +695,7 @@ func rankUpcomingCandidates(
 		if _, watched := watchedSet[candidate.DisplayID]; watched {
 			continue
 		}
-		if rating, rated := lowRatings[candidate.DisplayID]; rated && rating <= recommendations.DislikedRatingMax {
+		if rating, rated := lowRatings[candidate.DisplayID]; rated && rating <= recommendations.DislikedScoreMax {
 			continue
 		}
 

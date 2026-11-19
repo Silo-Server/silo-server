@@ -312,6 +312,10 @@ export function useDeleteProfileAvatar() {
 export function useDeleteProfile() {
   const queryClient = useQueryClient();
   return useMutation({
+    // Sent even offline, so it fails at once. The confirm dialog closes on
+    // click, so a delete held until reconnect would remove the profile and its
+    // watch history later, with nothing on screen saying one is pending.
+    networkMode: "always",
     mutationFn: (id: string) => v2("DELETE /api/v2/profiles/{id}", { path: { id } }),
     onSuccess: () => {
       toast.success(t("web.common.toast.profiles.deleted"));

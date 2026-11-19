@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
+import { v2ErrorText } from "@/api/v2/request";
 import type { UserDevice } from "@/api/types";
 import { useT } from "@/i18n";
 import { PageHeader } from "@/components/page/PageHeader";
@@ -39,6 +40,7 @@ import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/imeComposition";
 
 /**
  * "Your devices" — see and change how Silo behaves on each device you watch on.
@@ -440,11 +442,7 @@ function DeviceDetail({
                   {
                     onSuccess: () => toast.success(t("web.settings.device.resetDone")),
                     onError: (error) =>
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : t("web.settings.device.resetFailed"),
-                      ),
+                      toast.error(v2ErrorText(error, t("web.settings.device.resetFailed"))),
                   },
                 );
               }}
@@ -468,11 +466,7 @@ function DeviceDetail({
                   {
                     onSuccess: () => toast.success(t("web.settings.device.forgotten")),
                     onError: (error) =>
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : t("web.settings.device.forgetFailed"),
-                      ),
+                      toast.error(v2ErrorText(error, t("web.settings.device.forgetFailed"))),
                   },
                 );
               }}
@@ -544,9 +538,7 @@ function DeviceDetail({
               { key, value, identity },
               {
                 onError: (error) =>
-                  toast.error(
-                    error instanceof Error ? error.message : t("web.settings.device.saveFailed"),
-                  ),
+                  toast.error(v2ErrorText(error, t("web.settings.device.saveFailed"))),
               },
             )
           }
@@ -555,11 +547,7 @@ function DeviceDetail({
               { key, identity },
               {
                 onError: (error) =>
-                  toast.error(
-                    error instanceof Error
-                      ? error.message
-                      : t("web.settings.device.settingResetFailed"),
-                  ),
+                  toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
               },
             )
           }
@@ -580,9 +568,7 @@ function DeviceDetail({
             { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, value: next, identity },
             {
               onError: (error) =>
-                toast.error(
-                  error instanceof Error ? error.message : t("web.settings.device.saveFailed"),
-                ),
+                toast.error(v2ErrorText(error, t("web.settings.device.saveFailed"))),
             },
           );
         }}
@@ -593,11 +579,7 @@ function DeviceDetail({
             { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
             {
               onError: (error) =>
-                toast.error(
-                  error instanceof Error
-                    ? error.message
-                    : t("web.settings.device.settingResetFailed"),
-                ),
+                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
             },
           );
           setAppearanceOpen(false);
@@ -660,10 +642,7 @@ function DeviceNameEditor({
           );
           onDone();
         },
-        onError: (error) =>
-          toast.error(
-            error instanceof Error ? error.message : t("web.settings.device.renameFailed"),
-          ),
+        onError: (error) => toast.error(v2ErrorText(error, t("web.settings.device.renameFailed"))),
       },
     );
   };
@@ -686,7 +665,7 @@ function DeviceNameEditor({
         onChange={(event) => setValue(Array.from(event.target.value).slice(0, 120).join(""))}
         onKeyDown={(event) => {
           // Closing mid-save would drop the result, error included.
-          if (event.key === "Escape" && !rename.isPending) onDone();
+          if (event.key === "Escape" && !rename.isPending && !isImeComposing(event)) onDone();
         }}
         className="h-11 sm:h-8 sm:max-w-xs"
       />

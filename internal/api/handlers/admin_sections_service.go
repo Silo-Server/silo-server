@@ -37,6 +37,8 @@ type AdminSectionPreviewResult struct {
 	Items      []*models.MediaItem
 	TotalCount int
 	PosterURLs map[string]string
+	// Collections are a row of collections' cards.
+	Collections []sections.CollectionCard
 }
 type adminSectionRevisionKey struct{}
 
@@ -102,12 +104,12 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 		Position:    req.Position,
 		SectionType: sections.SectionType(req.SectionType),
 		Title:       req.Title,
-		Featured:    req.Featured,
+		Featured:    req.Featured && sections.CanBeHero(sections.SectionType(req.SectionType)),
 		ItemLimit:   req.ItemLimit,
 		Config:      req.Config,
 		Enabled:     req.Enabled,
-		WebOnly:     req.Featured && req.WebOnly,
 	}
+	sec.WebOnly = sec.Featured && req.WebOnly
 	if sec.Scope == "" {
 		sec.Scope = adminSectionScopeHome
 	}
@@ -215,6 +217,10 @@ func (h *SectionBulkHandler) BulkCreateAdminSections(ctx context.Context, req Ad
 	if err := rec.Validate(req.Config); err != nil {
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
+	if err := sections.ValidateAdminCollectionPosters(sections.SectionType(req.SectionType), req.Config); err != nil {
+		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
+	}
+	req.Featured = req.Featured && sections.CanBeHero(sections.SectionType(req.SectionType))
 
 	itemLimit := req.ItemLimit
 	if itemLimit <= 0 {
@@ -264,7 +270,7 @@ func (h *SectionHandler) PreviewAdminSection(ctx context.Context, req AdminSecti
 	if err != nil {
 		return AdminSectionPreviewResult{}, err
 	}
-	return AdminSectionPreviewResult{Items: preview.Items, TotalCount: preview.TotalCount, PosterURLs: h.previewPosterURLs(ctx, preview.Items)}, nil
+	return AdminSectionPreviewResult{Items: preview.Items, TotalCount: preview.TotalCount, PosterURLs: h.previewPosterURLs(ctx, preview.Items), Collections: preview.collections}, nil
 }
 
 // previewPosterURLs presigns each item's poster at the variant a live row
@@ -342,7 +348,7 @@ func (h *SectionHandler) previewAdminSection(ctx context.Context, req AdminSecti
 	if items == nil {
 		items = []*models.MediaItem{}
 	}
-	return previewResponse{Items: items, TotalCount: result.TotalCount}, nil
+	return previewResponse{Items: items, TotalCount: result.TotalCount, collections: result.Collections}, nil
 }
 
 func (h *SectionHandler) BulkCreateAdminSections(ctx context.Context, req AdminSectionBulkCreate) (AdminSectionBulkResult, error) {
@@ -450,6 +456,7 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		if req.Featured != nil {
 			existing.Featured = *req.Featured
 		}
+		existing.Featured = existing.Featured && sections.CanBeHero(existing.SectionType)
 		if req.ItemLimit != nil {
 			existing.ItemLimit = *req.ItemLimit
 		}

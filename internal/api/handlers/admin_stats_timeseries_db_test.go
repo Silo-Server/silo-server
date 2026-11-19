@@ -162,3 +162,47 @@ func TestQueryAdminTimeseriesSplitsEgressBySourceDB(t *testing.T) {
 		t.Fatalf("egress bytes = %d, want %d", series.EgressBytes, want)
 	}
 }
+
+// TestQueryAdminTimeseriesSplitsStreamsByPeakMinuteDB: a display bucket wider
+// than a minute peaks each method column on its own, so those can come from
+// different minutes and add up to more than the point's streams. The
+// streams_by_method split instead comes whole from the minute the total
+// peaked, so a stacked chart's bands meet the total line.
+func TestQueryAdminTimeseriesSplitsStreamsByPeakMinuteDB(t *testing.T) {
+	pool := timeseriesTestPool(t)
+	ctx := t.Context()
+
+	var bin time.Time
+	if err := pool.QueryRow(ctx, `SELECT date_bin('5 minutes', now() - interval '30 minutes', 'epoch')`).Scan(&bin); err != nil {
+		t.Fatal(err)
+	}
+	sample := func(at time.Time, total, direct, remux, transcode int64) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO dashboard_metric_samples (bucket, source, streams_total, streams_direct, streams_remux, streams_transcode, egress_kbps)
+			VALUES ($1, 'shared', $2, $3, $4, $5, 0)
+		`, at, total, direct, remux, transcode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Transcodes peak in the first minute, the total in the second; the third
+	// ties the second and loses to it as the later minute.
+	sample(bin, 5, 1, 0, 4)
+	sample(bin.Add(time.Minute), 7, 6, 1, 0)
+	sample(bin.Add(2*time.Minute), 7, 0, 0, 7)
+
+	series, err := queryAdminTimeseries(ctx, pool, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(series.Points) != 1 {
+		t.Fatalf("points = %+v, want one bucket", series.Points)
+	}
+	got := series.Points[0]
+	if got.Streams != 7 || got.Direct != 6 || got.Remux != 1 || got.Transcode != 7 {
+		t.Fatalf("peaks = %+v, want streams 7, direct 6, remux 1, transcode 7", got)
+	}
+	if want := (StreamsByMethod{Direct: 6, Remux: 1}); got.StreamsByMethod != want {
+		t.Fatalf("streams by method = %+v, want %+v", got.StreamsByMethod, want)
+	}
+}

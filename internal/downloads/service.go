@@ -24,9 +24,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -516,8 +518,8 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		return nil, ErrProfileRequired
 	}
 
-	// Resolve any existing managed entry first: replacing one doesn't add a
-	// row, so it stays quota-exempt and needs no quota lock.
+	// Resolve any existing managed entry first: replacing one updates it in
+	// place instead of creating a download.
 	var existing *Download
 	if managed {
 		ex, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
@@ -534,13 +536,46 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		}
 	}
 	if existing != nil {
-		artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
+		// Capability discovery can probe remote nodes, so it runs before the
+		// quota lock.
+		target, err := s.artifacts.resolveToneMapTarget(ctx, file, decision.PrepareTarget)
 		if err != nil {
 			return nil, err
 		}
-		status, size := artifactRowStatus(artifact, file)
-		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-		d, err := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+		var d *Download
+		err = s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+			// Another request may have replaced the entry while this one
+			// waited. Check the guard against the entry as it is now, before
+			// anything is counted or an encode is queued.
+			current, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
+			if err := checkManagedCreateRevision(current, req.ExpectedRevision, req.ExpectedDownloadID); err != nil {
+				return err
+			}
+			if current == nil {
+				return ErrNotFound
+			}
+			// A replacement whose prepared file is not ready leaves the entry
+			// preparing, whatever its status is now, so it takes a concurrent
+			// slot and the entry is left out of the active count, as on a
+			// season page. It creates no download, so the period quota does
+			// not apply.
+			if !s.artifacts.readyArtifact(ctx, file, decision.DeliveryFormat, target) {
+				if err := s.limiter.CheckCounts(ctx, userID, 1, 0, current.ID); err != nil {
+					return err
+				}
+			}
+			artifact, err := s.artifacts.ensureResolved(ctx, file, decision.DeliveryFormat, target)
+			if err != nil {
+				return err
+			}
+			status, size := artifactRowStatus(artifact, file)
+			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
+			d, err = s.reuseOrReplaceManaged(ctx, current, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+			return err
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -550,10 +585,11 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	resolvedTarget := decision.PrepareTarget
 	toneMapPreResolved := preparedTargetRequiresToneMap(file, resolvedTarget)
 	if toneMapPreResolved {
-		// A quick, non-authoritative quota check avoids expensive capability work
-		// for requests that are already over quota. The check is repeated under the
-		// advisory lock below to retain the concurrency guarantee.
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// A quick, non-authoritative period check avoids expensive capability
+		// work for requests that are already over quota. Whether the entry
+		// takes a concurrent slot depends on the resolved target, so that is
+		// checked under the advisory lock below.
+		if err := s.limiter.CheckCounts(ctx, userID, 0, 1); err != nil {
 			return nil, err
 		}
 		var err error
@@ -569,7 +605,14 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
 	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// The new entry takes a concurrent slot only when it starts
+		// preparing; one whose prepared file is already ready registers
+		// ready and counts only toward the period quota.
+		activating := 1
+		if s.artifacts.readyArtifact(ctx, file, decision.DeliveryFormat, resolvedTarget) {
+			activating = 0
+		}
+		if err := s.limiter.CheckCounts(ctx, userID, activating, 1); err != nil {
 			return err
 		}
 		var artifact *Artifact
@@ -1017,16 +1060,43 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 				activating++
 			}
 		}
+		// Another request may have replaced an entry while this one waited.
+		// Check each guard against the entry as it is now, before anything
+		// is counted or an encode is queued, and replace that row.
+		preparedKeys := make([]ManagedEntryKey, len(prepared))
+		for k, r := range prepared {
+			preparedKeys[k] = keys[r.i]
+		}
+		current, err := s.repo.GetManagedEntriesByKeys(ctx, userID, req.ProfileID, req.DeviceID, preparedKeys)
+		if err != nil {
+			return err
+		}
+		for k, r := range prepared {
+			cur := current[keys[r.i]]
+			if err := checkManagedCreateRevision(cur, r.expected, r.expectedID); err != nil {
+				return err
+			}
+			if cur == nil {
+				return ErrNotFound
+			}
+			prepared[k].existing = cur
+		}
+		// A replacement whose prepared file is not ready leaves its entry
+		// preparing, whatever the entry's status is now. Count it as activating
+		// and leave the entry out of the active count, so a conversion that
+		// finishes meanwhile, which takes no lock, cannot hide its slot. A
+		// replacement to a ready file registers ready and takes no slot.
+		var startsPreparing []string
 		for _, r := range prepared {
 			d := decisions[r.i]
-			ready := s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget)
-			if replacementAddsActive(r.existing, ready) {
+			if !s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget) {
 				activating++
+				startsPreparing = append(startsPreparing, r.existing.ID)
 			}
 		}
 		// A replacement updates its entry in place: it can become active but
 		// creates no download, so only new entries count toward the period.
-		if err := s.limiter.CheckCounts(ctx, userID, activating, len(newIdx)); err != nil {
+		if err := s.limiter.CheckCounts(ctx, userID, activating, len(newIdx), startsPreparing...); err != nil {
 			return err
 		}
 		for _, r := range prepared {
@@ -1191,18 +1261,6 @@ func reusableManagedStatus(status string) bool {
 	}
 }
 
-// replacementAddsActive reports whether replacing existing with a prepared
-// entry adds an active download: existing is not already active, and the
-// target's prepared file is not ready, so the entry would start preparing. A
-// ready target, or one existing already holds, registers ready.
-func replacementAddsActive(existing *Download, targetReady bool) bool {
-	switch existing.Status {
-	case StatusQueued, StatusDownloading, StatusPreparing:
-		return false
-	}
-	return !targetReady
-}
-
 func sameManagedTarget(a, b *Download) bool {
 	return a.MediaFileID == b.MediaFileID &&
 		a.Format == b.Format &&
@@ -1228,6 +1286,15 @@ func (s *Service) List(ctx context.Context, userID int, profileID, deviceID stri
 		return nil, err
 	}
 	return s.accessibleRows(ctx, rows, filter)
+}
+
+// CheckDownloadAllowed reports whether userID may download originals now,
+// before any file is chosen: ErrFeatureDisabled or ErrDownloadNotAllowed when
+// not. It is the check ResolveDirectFile starts with, for surfaces that
+// advertise or hand out downloads without serving one themselves.
+func (s *Service) CheckDownloadAllowed(ctx context.Context, userID int) error {
+	_, _, err := s.downloadConfigForUser(ctx, userID, "")
+	return err
 }
 
 // ServeDirect validates permissions and serves a file directly for browser
@@ -1317,9 +1384,12 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	if dl.Status == StatusPreparing {
 		return fmt.Errorf("download is preparing: %w", ErrDownloadNotActive)
 	}
+	// A HEAD probe sends no bytes, so it leaves the row alone: it neither
+	// starts a transfer nor renews or fails one.
+	probe := r.Method == http.MethodHead
 	// Atomically transition queued → downloading for original rows. Artifact
 	// (remux/transcode) rows are already ready by the time bytes are served.
-	if dl.Format == FormatOriginal && dl.Status == StatusQueued {
+	if dl.Format == FormatOriginal && dl.Status == StatusQueued && !probe {
 		if err := s.repo.TransitionStatus(ctx, dl.ID, StatusQueued, StatusDownloading, 0, nil); err != nil {
 			if errors.Is(err, ErrStatusConflict) {
 				return fmt.Errorf("download already in progress: %w", ErrDownloadNotActive)
@@ -1327,9 +1397,21 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 			slog.WarnContext(ctx, "failed to transition download to downloading", "component", "downloads", "download_id", dl.ID, "error", err)
 		}
 	}
+	if dl.Format == FormatOriginal && dl.Status == StatusDownloading && !probe {
+		if err := s.continueTransfer(ctx, dl.ID); err != nil {
+			return err
+		}
+	}
 
-	if err := s.serveDownloadBytes(ctx, w, r, dl, userID, filter); err != nil {
-		if dl.Format == FormatOriginal {
+	stopRenewing := func() {}
+	if !probe {
+		stopRenewing = s.renewTransferLease(ctx, dl)
+	}
+	response := &observedDownloadResponse{ResponseWriter: w}
+	err = s.serveDownloadBytes(ctx, response, r, dl, userID, filter)
+	stopRenewing()
+	if err != nil {
+		if dl.Format == FormatOriginal && !probe {
 			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			updateErr := s.repo.TransitionStatus(failureCtx, dl.ID, StatusDownloading, StatusFailed, 0, nil)
 			cancel()
@@ -1339,12 +1421,70 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		}
 		return err
 	}
+	// A HEAD, a partial range or a bodyless answer (304, 416) proves nothing
+	// was downloaded; the row stays as it is until a response delivers the
+	// whole file.
+	if !response.deliveredWholeFile(r) {
+		return nil
+	}
 
+	// The client may hang up as soon as it has the last byte; the file was
+	// still delivered, so the row is finalized after the request ends.
+	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	now := time.Now()
-	if err := s.repo.UpdateStatus(ctx, dl.ID, StatusCompleted, dl.FileSize, &now); err != nil {
+	if err := s.repo.UpdateStatus(completionCtx, dl.ID, StatusCompleted, dl.FileSize, &now); err != nil {
 		slog.ErrorContext(ctx, "failed to mark download as completed", "component", "downloads", "download_id", dl.ID, "error", err)
 	}
 	return nil
+}
+
+// continueTransfer admits another request for an account-level row that is
+// already transferring only while its lease holds. Renewing the lease is the
+// check, so two requests racing on a lapsed row both see it lapse. A transfer
+// whose lease lapsed died with the process serving it; like a transfer that
+// stops in-process, it fails and isn't served again, and the client starts a
+// new download, which the concurrent limit admits.
+func (s *Service) continueTransfer(ctx context.Context, id string) error {
+	live, err := s.repo.RenewTransferLease(ctx, id)
+	if err != nil || live {
+		return err
+	}
+	if _, err := s.repo.FailLapsedTransfer(ctx, id); err != nil {
+		return err
+	}
+	return fmt.Errorf("download transfer is no longer active: %w", ErrDownloadNotActive)
+}
+
+// renewTransferLease keeps an account-level original row's concurrent slot
+// while this process serves its bytes (see transferLease), and returns the
+// function that stops renewing. A transfer that dies with the process stops
+// renewing with it, so its slot frees on every node without a startup reset.
+func (s *Service) renewTransferLease(ctx context.Context, dl *Download) (stop func()) {
+	if dl.Format != FormatOriginal {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(transferLeaseRenewal)
+		defer ticker.Stop()
+		for {
+			if _, err := s.repo.RenewTransferLease(ctx, dl.ID); err != nil && ctx.Err() == nil {
+				slog.WarnContext(ctx, "failed to renew download transfer lease", "component", "downloads", "download_id", dl.ID, "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // ResolveManagedFile authorizes a managed entry on (user, profile, device),
@@ -1704,6 +1844,25 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// deliveredWholeFile reports whether a GET's response carried the entire file:
+// a complete 200 body, or a 206 whose single range spans every byte.
+func (w *observedDownloadResponse) deliveredWholeFile(r *http.Request) bool {
+	if r.Method != http.MethodGet || w.err != nil {
+		return false
+	}
+	switch w.status {
+	case http.StatusOK:
+		return w.expected < 0 || w.written == w.expected
+	case http.StatusPartialContent:
+		var first, last, size int64
+		if _, err := fmt.Sscanf(w.Header().Get("Content-Range"), "bytes %d-%d/%d", &first, &last, &size); err != nil {
+			return false
+		}
+		return first == 0 && last == size-1 && w.written == size
+	}
+	return false
+}
+
 // attachmentDisposition names the saved file in the header form proxy nodes
 // use. A non-ASCII name goes out in the RFC 2231 filename* form rather than
 // as raw UTF-8 in filename, which clients may misread.
@@ -1718,21 +1877,31 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	if target.OriginArtifactID == "" {
 		return s.serveLocalFile(ctx, w, r, target.Path, s.AttachmentName(ctx, target), userID)
 	}
-	secret := ""
-	if s.artifacts != nil && s.artifacts.liveCfg != nil {
-		if cfg := s.artifacts.liveCfg(); cfg != nil {
-			secret = strings.TrimSpace(cfg.Auth.JWTSecret)
-		}
+	var keys nodeauth.Keyring
+	if s.artifacts != nil {
+		keys = s.artifacts.nodeKeys
 	}
-	if secret == "" {
+	if keys == nil {
 		return errors.New("remote artifact credentials unavailable")
 	}
 	client := downloadprepare.HTTPPreparer{}
-	resp, err := client.Open(ctx, target.OriginNodeURL, secret, target.OriginArtifactID, r.Method, r.Header)
+	resp, err := client.Open(ctx, target.OriginNodeURL, keys, target.OriginArtifactID, r.Method, r.Header)
 	if err != nil {
+		if transcodeproxy.NodeUnsignable(err) {
+			// The node that holds the artifact has no key, or is no longer
+			// registered at its URL: it is unavailable, not this server.
+			transcodeproxy.WarnNodeUnsignable(ctx, "downloads", target.OriginNodeURL, err)
+			return fmt.Errorf("%w: %w", ErrAssetUnavailable, err)
+		}
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		// The client authenticated with this server; the node refused this
+		// server's signature.
+		transcodeproxy.WarnNodeRefusedRelay(ctx, "downloads", target.OriginNodeURL, resp.StatusCode, keys)
+		return fmt.Errorf("%w: remote artifact node refused the relay", ErrAssetUnavailable)
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		artifact := &Artifact{
 			ID:               target.ArtifactID,

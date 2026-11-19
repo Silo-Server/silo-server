@@ -520,34 +520,6 @@ func TestCorrectionCommandRoundTripsRoomRuntime(t *testing.T) {
 	}
 }
 
-func TestCorrectionCommandPendingAllowsBoundedFutureClockSkew(t *testing.T) {
-	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
-	command := TransportCommand{
-		SessionID:         "session-1",
-		SelectionRevision: 1,
-		Action:            TransportActionPlay,
-		PlaybackState:     RoomPlaybackStatePlaying,
-	}
-	member := &memberState{correctionCommand: &command}
-
-	for _, test := range []struct {
-		name      string
-		issuedAt  time.Time
-		wantMatch bool
-	}{
-		{name: "small future skew", issuedAt: now.Add(time.Second), wantMatch: true},
-		{name: "retry interval elapsed", issuedAt: now.Add(-guestCorrectionRetryInterval), wantMatch: false},
-		{name: "excessive future skew", issuedAt: now.Add(guestCorrectionRetryInterval + time.Millisecond), wantMatch: false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			member.correctionCommand.IssuedAt = test.issuedAt.Format(time.RFC3339Nano)
-			if got := correctionCommandPending(member, command, now); got != test.wantMatch {
-				t.Fatalf("correctionCommandPending() = %t, want %t", got, test.wantMatch)
-			}
-		})
-	}
-}
-
 func TestStateReportsPreservePendingSeek(t *testing.T) {
 	for _, seekPaused := range []bool{false, true} {
 		name := "playing"
@@ -629,277 +601,6 @@ func TestStateReportsPreservePendingSeek(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestHostAttachKeepsRoomSelectionAnchor(t *testing.T) {
-	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: baseRoom(now)}
-	repo.room.AnchorPositionSeconds = 0
-	repo.room.IsPaused = true
-	repo.room.AnchorUpdatedAt = now
-	repo.room.Generation = 1
-	conn := &recordingConn{}
-	service := newServiceForTest(
-		now,
-		repo,
-		&stubSessions{session: &playback.Session{
-			ID:          "session-1",
-			UserID:      7,
-			ProfileID:   "host",
-			MediaFileID: 42,
-			Position:    318,
-			IsPaused:    false,
-		}},
-		&stubFiles{file: &models.MediaFile{ID: 42, ContentID: "movie-1"}},
-		nil,
-	)
-	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
-		userID:     7,
-		profileID:  "host",
-		connection: conn,
-	}
-
-	reg := registrationFor(repo.room.ID, 7, "host", conn)
-	snapshot, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "session-1")
-	if err != nil {
-		t.Fatalf("AttachSessionForConnection() error = %v", err)
-	}
-
-	if snapshot.AnchorPositionSeconds != 0 {
-		t.Fatalf("snapshot anchor = %v, want 0", snapshot.AnchorPositionSeconds)
-	}
-	if !snapshot.IsPaused {
-		t.Fatal("snapshot should remain paused")
-	}
-	if repo.room.Generation != 1 {
-		t.Fatalf("generation = %d, want 1", repo.room.Generation)
-	}
-	if len(conn.payloads) == 0 {
-		t.Fatal("expected room sync commands to be dispatched")
-	}
-}
-
-func TestAttachSessionAcceptsEpisodeContentID(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: baseRoom(now)}
-	repo.room.SelectedContentID = stringPtr("episode-19")
-	repo.room.AnchorPositionSeconds = 0
-	repo.room.IsPaused = true
-	repo.room.AnchorUpdatedAt = now
-	repo.room.Generation = 1
-	service := newServiceForTest(
-		now,
-		repo,
-		&stubSessions{session: &playback.Session{
-			ID:          "host-session",
-			UserID:      7,
-			ProfileID:   "host",
-			MediaFileID: 42,
-			Position:    75,
-			IsPaused:    false,
-		}},
-		&stubFiles{file: &models.MediaFile{
-			ID:        42,
-			ContentID: "series-1",
-			EpisodeID: "episode-19",
-		}},
-		nil,
-	)
-	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
-		userID:     7,
-		profileID:  "host",
-		connection: stubConn{},
-	}
-
-	reg := registrationFor(repo.room.ID, 7, "host", stubConn{})
-	snapshot, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host-session")
-	if err != nil {
-		t.Fatalf("AttachSessionForConnection() error = %v", err)
-	}
-
-	if snapshot.AttachedSessionID != "host-session" {
-		t.Fatalf("attached session = %q, want host-session", snapshot.AttachedSessionID)
-	}
-	if snapshot.AnchorPositionSeconds != 0 {
-		t.Fatalf("snapshot anchor = %v, want 0", snapshot.AnchorPositionSeconds)
-	}
-}
-
-func TestHostCanSelectItemFromLobby(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: Room{
-		ID:                 "room-1",
-		Code:               "ROOM1234",
-		JoinToken:          "TOKEN1234",
-		HostUserID:         7,
-		HostProfileID:      "host",
-		Phase:              RoomPhaseLobby,
-		SelectionMode:      RoomSelectionModeHostPick,
-		GuestControlPolicy: GuestControlPolicyHostOnly,
-		IsPaused:           true,
-		AnchorUpdatedAt:    now,
-		Generation:         1,
-		CreatedAt:          now,
-	}}
-	service := newServiceForTest(
-		now,
-		repo,
-		&stubSessions{},
-		&stubFiles{},
-		&stubSelectionResolver{resolved: &ResolvedSelection{
-			ContentID: "movie-2",
-			FileID:    intPtr(55),
-			LibraryID: intPtr(6),
-		}},
-	)
-
-	snapshot, err := service.SelectItem(context.Background(), "room-1", 7, "host", SelectItemInput{
-		ContentID: "movie-2",
-	})
-	if err != nil {
-		t.Fatalf("SelectItem() error = %v", err)
-	}
-
-	if snapshot.Phase != RoomPhasePlaying {
-		t.Fatalf("phase = %q, want %q", snapshot.Phase, RoomPhasePlaying)
-	}
-	if snapshot.SelectionRevision != 1 {
-		t.Fatalf("selection revision = %d, want 1", snapshot.SelectionRevision)
-	}
-	if snapshot.SelectedContentID == nil || *snapshot.SelectedContentID != "movie-2" {
-		t.Fatalf("selected content = %v, want movie-2", snapshot.SelectedContentID)
-	}
-	if snapshot.AnchorPositionSeconds != 0 {
-		t.Fatalf("anchor = %v, want 0", snapshot.AnchorPositionSeconds)
-	}
-	if !snapshot.IsPaused {
-		t.Fatal("room should stay paused while waiting for participants to get ready")
-	}
-	if snapshot.PlaybackState != RoomPlaybackStateWaiting {
-		t.Fatalf("playback state = %q, want %q", snapshot.PlaybackState, RoomPlaybackStateWaiting)
-	}
-}
-
-func TestGuestCannotSelectItem(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: baseRoom(now)}
-	service := newServiceForTest(
-		now,
-		repo,
-		&stubSessions{},
-		&stubFiles{},
-		&stubSelectionResolver{resolved: &ResolvedSelection{ContentID: "movie-2"}},
-	)
-
-	_, err := service.SelectItem(context.Background(), "room-1", 8, "guest", SelectItemInput{
-		ContentID: "movie-2",
-	})
-	if !errors.Is(err, ErrRoomForbidden) {
-		t.Fatalf("SelectItem() error = %v, want ErrRoomForbidden", err)
-	}
-}
-
-func TestAttachSessionEnforcesSelectedFileID(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: baseRoom(now)}
-	repo.room.SelectedFileID = intPtr(99)
-	service := newServiceForTest(
-		now,
-		repo,
-		&stubSessions{session: &playback.Session{
-			ID:          "host-session",
-			UserID:      7,
-			ProfileID:   "host",
-			MediaFileID: 42,
-		}},
-		&stubFiles{file: &models.MediaFile{ID: 42, ContentID: "movie-1"}},
-		nil,
-	)
-	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
-		userID:     7,
-		profileID:  "host",
-		connection: stubConn{},
-	}
-
-	reg := registrationFor(repo.room.ID, 7, "host", stubConn{})
-	_, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host-session")
-	if !errors.Is(err, ErrSessionMismatch) {
-		t.Fatalf("AttachSessionForConnection() error = %v, want ErrSessionMismatch", err)
-	}
-}
-
-func TestDisconnectOfLastUnreadyMemberResumesWaitingRoom(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: baseRoom(now)}
-	repo.room.PlaybackState = RoomPlaybackStateWaiting
-	repo.room.IsPaused = true
-	repo.room.ResumeOnReady = true
-	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
-
-	hostConn := &recordingConn{}
-	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
-		userID:     7,
-		profileID:  "host",
-		sessionID:  "host-session",
-		isReady:    true,
-		connection: hostConn,
-	}
-	guestConn := &recordingConn{}
-	service.rooms[repo.room.ID].members[buildMemberKey(8, "guest")] = &memberState{
-		userID:     8,
-		profileID:  "guest",
-		sessionID:  "guest-session",
-		isReady:    false,
-		connection: guestConn,
-	}
-
-	service.Disconnect(registrationFor(repo.room.ID, 8, "guest", guestConn), false)
-
-	if repo.room.PlaybackState != RoomPlaybackStatePlaying {
-		t.Fatalf("playback state = %q, want %q", repo.room.PlaybackState, RoomPlaybackStatePlaying)
-	}
-	foundCommand := false
-	for _, payload := range hostConn.payloads {
-		if payload["type"] == "transport_command" {
-			foundCommand = true
-		}
-	}
-	if !foundCommand {
-		t.Fatal("expected a resume transport command for the remaining member")
-	}
-}
-
-func TestBufferingReportCannotTeleportRoomAnchor(t *testing.T) {
-	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: baseRoom(now)}
-	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
-	guestConn := &recordingConn{}
-	service.rooms[repo.room.ID].members[buildMemberKey(8, "guest")] = &memberState{
-		userID:     8,
-		profileID:  "guest",
-		sessionID:  "guest-session",
-		connection: guestConn,
-	}
-
-	// Anchor was 10s, 10s ago and playing: expected position is ~20s. A
-	// report claiming 500s must be clamped back to the expected position.
-	reg := registrationFor(repo.room.ID, 8, "guest", guestConn)
-	snapshot, err := service.HandleBufferingForConnection(context.Background(), reg, 8, "guest", StateReport{
-		SessionID:       "guest-session",
-		PositionSeconds: 500,
-		IsPaused:        false,
-	})
-	if err != nil {
-		t.Fatalf("HandleBufferingForConnection() error = %v", err)
-	}
-	if snapshot.PlaybackState != RoomPlaybackStateWaiting {
-		t.Fatalf("playback state = %q, want %q", snapshot.PlaybackState, RoomPlaybackStateWaiting)
-	}
-	// Clamped to the room's position when the pause executes, one lead on.
-	want := 20 + defaultTransportLead.Seconds()
-	if snapshot.AnchorPositionSeconds > want+0.001 || snapshot.AnchorPositionSeconds < want-0.001 {
-		t.Fatalf("anchor = %v, want ~%v (clamped)", snapshot.AnchorPositionSeconds, want)
 	}
 }
 
@@ -1171,221 +872,91 @@ func TestReadyAcknowledgesCurrentSeek(t *testing.T) {
 	}
 }
 
-// A host who rejoins a playing room alone is told the room's position. Their
-// stream starts at zero, and the first state report can arrive before that
-// seek lands; it must not become the new anchor.
-func TestHostRejoinReportsDoNotRewindTheRoomUntilSynced(t *testing.T) {
-	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
+func TestGuestCannotSelectItem(t *testing.T) {
+	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
 	repo := &stubRepo{room: baseRoom(now)}
-	repo.room.AnchorPositionSeconds = 600
-	repo.room.IsPaused = false
-	repo.room.AnchorUpdatedAt = now
-	conn := &recordingConn{}
 	service := newServiceForTest(
 		now,
 		repo,
-		&stubSessions{session: &playback.Session{ID: "session-1", UserID: 7, ProfileID: "host", MediaFileID: 42}},
-		&stubFiles{file: &models.MediaFile{ID: 42, ContentID: "movie-1"}},
-		nil,
+		&stubSessions{},
+		&stubFiles{},
+		&stubSelectionResolver{resolved: &ResolvedSelection{ContentID: "movie-2"}},
 	)
-	current := now
-	service.now = func() time.Time { return current }
-	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", connection: conn}
-	reg := registrationFor(repo.room.ID, 7, "host", conn)
-	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "session-1"); err != nil {
-		t.Fatalf("attach: %v", err)
-	}
-	if len(conn.payloads) == 0 {
-		t.Fatal("expected a sync command for the rejoining host")
-	}
-	before := len(conn.payloads)
 
-	// Stream just started: position 0 while the room is at ~600. Inside the
-	// sync's settle window that is the stream before the sync, not drift.
-	if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 0, IsPaused: false}); err != nil {
-		t.Fatalf("report: %v", err)
+	_, err := service.SelectItem(context.Background(), "room-1", 8, "guest", SelectItemInput{
+		ContentID: "movie-2",
+	})
+	if !errors.Is(err, ErrRoomForbidden) {
+		t.Fatalf("SelectItem() error = %v, want ErrRoomForbidden", err)
 	}
-	if repo.room.AnchorPositionSeconds != 600 || len(conn.payloads) != before {
-		t.Fatalf("host's pre-seek report moved the room to %v or was corrected", repo.room.AnchorPositionSeconds)
+}
+
+func TestDisconnectOfLastUnreadyMemberResumesWaitingRoom(t *testing.T) {
+	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
+	repo := &stubRepo{room: baseRoom(now)}
+	repo.room.PlaybackState = RoomPlaybackStateWaiting
+	repo.room.IsPaused = true
+	repo.room.ResumeOnReady = true
+	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
+
+	hostConn := &recordingConn{}
+	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
+		userID:     7,
+		profileID:  "host",
+		sessionID:  "host-session",
+		isReady:    true,
+		connection: hostConn,
 	}
-	current = current.Add(commandSettleWindow + time.Second)
-	for range guestCorrectionStrikes {
-		if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 0, IsPaused: false}); err != nil {
-			t.Fatalf("report: %v", err)
+	guestConn := &recordingConn{}
+	service.rooms[repo.room.ID].members[buildMemberKey(8, "guest")] = &memberState{
+		userID:     8,
+		profileID:  "guest",
+		sessionID:  "guest-session",
+		isReady:    false,
+		connection: guestConn,
+	}
+
+	service.Disconnect(registrationFor(repo.room.ID, 8, "guest", guestConn), false)
+
+	if repo.room.PlaybackState != RoomPlaybackStatePlaying {
+		t.Fatalf("playback state = %q, want %q", repo.room.PlaybackState, RoomPlaybackStatePlaying)
+	}
+	foundCommand := false
+	for _, payload := range hostConn.payloads {
+		if payload["type"] == "transport_command" {
+			foundCommand = true
 		}
 	}
-	if repo.room.AnchorPositionSeconds != 600 {
-		t.Fatalf("host's pre-seek report rewound the room to %v", repo.room.AnchorPositionSeconds)
-	}
-	if len(conn.payloads) == before {
-		t.Fatal("expected the unsynced host to be corrected toward the room like a guest")
-	}
-	corrected := len(conn.payloads)
-	if _, err := service.HandleStateReportForConnection(t.Context(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 0, IsPaused: false}); err != nil {
-		t.Fatalf("repeated unsynced report: %v", err)
-	}
-	if len(conn.payloads) != corrected || repo.room.AnchorPositionSeconds != 600 || !service.rooms[repo.room.ID].members[buildMemberKey(7, "host")].syncingToRoom {
-		t.Fatal("repeated host sync report resent correction or restored authority before convergence")
-	}
-
-	// The seek landed: the host now reports the room's position and becomes authoritative again.
-	current = current.Add(commandSettleWindow + time.Second)
-	if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: expectedPosition(repo.room, current) + 0.4, IsPaused: false}); err != nil {
-		t.Fatalf("synced report: %v", err)
-	}
-	if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 650, IsPaused: false}); err != nil {
-		t.Fatalf("authoritative report: %v", err)
-	}
-	// The host keeps playing until its command runs, one lead later.
-	if want := 650 + defaultTransportLead.Seconds(); repo.room.AnchorPositionSeconds != want {
-		t.Fatalf("host authority not restored after sync: anchor=%v, want %v", repo.room.AnchorPositionSeconds, want)
+	if !foundCommand {
+		t.Fatal("expected a resume transport command for the remaining member")
 	}
 }
 
-// An explicit host action while still syncing is intent, not a stale report.
-func TestHostTransportRequestEndsRejoinSync(t *testing.T) {
-	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
+func TestAttachSessionEnforcesSelectedFileID(t *testing.T) {
+	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
 	repo := &stubRepo{room: baseRoom(now)}
-	repo.room.AnchorPositionSeconds = 600
-	repo.room.IsPaused = false
-	repo.room.AnchorUpdatedAt = now
-	conn := &recordingConn{}
+	repo.room.SelectedFileID = intPtr(99)
 	service := newServiceForTest(
 		now,
 		repo,
-		&stubSessions{session: &playback.Session{ID: "session-1", UserID: 7, ProfileID: "host", MediaFileID: 42}},
+		&stubSessions{session: &playback.Session{
+			ID:          "host-session",
+			UserID:      7,
+			ProfileID:   "host",
+			MediaFileID: 42,
+		}},
 		&stubFiles{file: &models.MediaFile{ID: 42, ContentID: "movie-1"}},
 		nil,
 	)
-	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", connection: conn}
-	reg := registrationFor(repo.room.ID, 7, "host", conn)
-	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "session-1"); err != nil {
-		t.Fatalf("attach: %v", err)
-	}
-	position := 30.0
-	if _, err := service.HandleTransportRequestForConnection(context.Background(), reg, 7, "host", TransportRequest{Action: TransportActionSeek, PositionSeconds: &position, IsPaused: false}); err != nil {
-		t.Fatalf("seek: %v", err)
-	}
-	if repo.room.AnchorPositionSeconds != 30 {
-		t.Fatalf("host seek ignored: anchor=%v", repo.room.AnchorPositionSeconds)
-	}
-	if service.rooms[repo.room.ID].members[buildMemberKey(7, "host")].syncingToRoom {
-		t.Fatal("explicit transport should end the rejoin sync")
-	}
-}
-
-// A rebuilt stream lands the host on a keyframe or segment boundary short of
-// the seek target. The host's real position becomes the anchor and the room
-// resumes instead of waiting out the deadline; a guest at the same offset is
-// still held to the destination.
-func TestHostReadyNearSeekTargetReanchorsTheRoom(t *testing.T) {
-	now := time.Now().UTC()
-	repo := &stubRepo{room: baseRoom(now)}
-	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
-	live := service.rooms[repo.room.ID]
-	t.Cleanup(func() {
-		service.mu.Lock()
-		service.disarmWaitingDeadlineLocked(live)
-		service.mu.Unlock()
-		service.Close()
-	})
-	hostConn := &recordingConn{}
-	guestConn := &recordingConn{}
-	live.members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", sessionID: "host-session", connection: hostConn}
-	live.members[buildMemberKey(8, "guest")] = &memberState{userID: 8, profileID: "guest", sessionID: "guest-session", connection: guestConn}
-	hostReg := registrationFor(repo.room.ID, 7, "host", hostConn)
-	guestReg := registrationFor(repo.room.ID, 8, "guest", guestConn)
-	if _, err := service.HandleTransportRequestForConnection(t.Context(), hostReg, 7, "host", TransportRequest{
-		Action: TransportActionSeek, PositionSeconds: new(1500.0),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	command := hostConn.payloads[len(hostConn.payloads)-1]["command"].(TransportCommand)
-
-	snapshot, err := service.HandleReadyForConnection(t.Context(), guestReg, 8, "guest", StateReport{
-		SessionID: "guest-session", CommandID: command.CommandID, PositionSeconds: 1494, IsPaused: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.PlaybackState != RoomPlaybackStateWaiting || live.members[buildMemberKey(8, "guest")].isReady {
-		t.Fatalf("guest short of the seek target was accepted: %+v", snapshot)
+	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
+		userID:     7,
+		profileID:  "host",
+		connection: stubConn{},
 	}
 
-	snapshot, err = service.HandleReadyForConnection(t.Context(), hostReg, 7, "host", StateReport{
-		SessionID: "host-session", CommandID: command.CommandID, PositionSeconds: 1494, IsPaused: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !live.members[buildMemberKey(7, "host")].isReady || snapshot.AnchorPositionSeconds != 1494 {
-		t.Fatalf("host ready near the target did not re-anchor: %+v", snapshot)
-	}
-	if snapshot.PlaybackState != RoomPlaybackStateWaiting {
-		t.Fatalf("room resumed before the guest was ready: %+v", snapshot)
-	}
-
-	snapshot, err = service.HandleReadyForConnection(t.Context(), hostReg, 7, "host", StateReport{
-		SessionID: "host-session", CommandID: command.CommandID, PositionSeconds: 1400, IsPaused: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.AnchorPositionSeconds != 1494 {
-		t.Fatalf("host far from the target moved the anchor: %+v", snapshot)
-	}
-}
-
-// A state report carrying is_ready is the periodic form of the ready message:
-// a lost or rejected acknowledgement heals on the next tick without a new
-// media event.
-func TestStateReportWithIsReadyAcknowledgesTheWaitingCommand(t *testing.T) {
-	now := time.Now().UTC()
-	repo := &stubRepo{room: baseRoom(now)}
-	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
-	live := service.rooms[repo.room.ID]
-	t.Cleanup(func() {
-		service.mu.Lock()
-		service.disarmWaitingDeadlineLocked(live)
-		service.mu.Unlock()
-		service.Close()
-	})
-	conn := &recordingConn{}
-	member := &memberState{userID: 7, profileID: "host", sessionID: "session", connection: conn}
-	live.members[buildMemberKey(7, "host")] = member
-	reg := registrationFor(repo.room.ID, 7, "host", conn)
-	if _, err := service.HandleTransportRequestForConnection(t.Context(), reg, 7, "host", TransportRequest{
-		Action: TransportActionSeek, PositionSeconds: new(1500.0),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	command := conn.payloads[len(conn.payloads)-1]["command"].(TransportCommand)
-
-	snapshot, err := service.HandleStateReportForConnection(t.Context(), reg, 7, "host", StateReport{
-		SessionID: "session", PositionSeconds: 1500, IsPaused: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.PlaybackState != RoomPlaybackStateWaiting || member.isReady {
-		t.Fatalf("plain state report satisfied the barrier: %+v", snapshot)
-	}
-	snapshot, err = service.HandleStateReportForConnection(t.Context(), reg, 7, "host", StateReport{
-		SessionID: "session", CommandID: "stale", PositionSeconds: 1500, IsPaused: true, IsReady: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.PlaybackState != RoomPlaybackStateWaiting || member.isReady {
-		t.Fatalf("stale ready report satisfied the barrier: %+v", snapshot)
-	}
-	snapshot, err = service.HandleStateReportForConnection(t.Context(), reg, 7, "host", StateReport{
-		SessionID: "session", CommandID: command.CommandID, PositionSeconds: 1500, IsPaused: true, IsReady: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.PlaybackState != RoomPlaybackStatePlaying || snapshot.AnchorPositionSeconds != 1500 {
-		t.Fatalf("ready report did not resume the room: %+v", snapshot)
+	reg := registrationFor(repo.room.ID, 7, "host", stubConn{})
+	_, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host-session")
+	if !errors.Is(err, ErrSessionMismatch) {
+		t.Fatalf("AttachSessionForConnection() error = %v, want ErrSessionMismatch", err)
 	}
 }

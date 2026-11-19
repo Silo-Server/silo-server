@@ -727,7 +727,7 @@ func TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres(t *testing.T) {
 	}
 	ratedMovie := seedTitle(t, pool, prefix+"movie-88", "movie", lib, "rating_imdb = 8.8")
 	other := seedTitle(t, pool, prefix+"movie-80", "movie", lib, "rating_imdb = 8.0")
-	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES ($1, $2, $3, 5), ($1, $2, $4, 4)`, userID, profile, episode, ratedMovie); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES ($1, $2, $3, 10), ($1, $2, $4, 8)`, userID, profile, episode, ratedMovie); err != nil {
 		t.Fatal(err)
 	}
 
@@ -766,7 +766,7 @@ func TestCachedRowsLeaveOutASeriesRatedThroughAnEpisodePostgres(t *testing.T) {
 	if err := repo.UpsertRecommendationCache(ctx, userID, profile, RecTypeForYouMain, "", []ScoredItem{{MediaItemID: series, Score: 2}, {MediaItemID: other, Score: 1}}, expires); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES ($1, $2, $3, 5)`, userID, profile, episode); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES ($1, $2, $3, 10)`, userID, profile, episode); err != nil {
 		t.Fatal(err)
 	}
 

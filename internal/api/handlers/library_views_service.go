@@ -29,6 +29,12 @@ type SectionViewer struct {
 	// ImageWidths are per-slot target widths overriding ImageSize; only the
 	// native v2 API carries them.
 	ImageWidths imagesize.Widths
+	// IncludeCardAvailability runs the season/series presence lookup for
+	// poster badges. Only /api/v2 sets it, and only for a profile that draws
+	// the availability badge (access.Scope.CardAvailability): Availability is
+	// json:"-" on the frozen v1 card shape, and nobody else shows the counts,
+	// so neither pays for the aggregation.
+	IncludeCardAvailability bool
 	// Web is true when the caller declared the web client family
 	// (X-Silo-Client-Family: web). Only the web app receives a hero row an
 	// admin kept off the apps (sections.ForClient).
@@ -234,7 +240,7 @@ func (h *SectionHandler) librarySections(ctx context.Context, libraryID int, vie
 	} else {
 		withItems = dropEmptySections(withItems)
 	}
-	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
+	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork(), viewer.IncludeCardAvailability), nil
 }
 
 // LibrarySectionItems answers one section of the library with its items, or
@@ -271,7 +277,7 @@ func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int,
 			}
 			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
-		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.Artwork())
+		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.Artwork(), viewer.IncludeCardAvailability)
 		if len(resp.Sections) == 0 {
 			return resolvedSectionResponse{
 				ID:          withItems.ID,

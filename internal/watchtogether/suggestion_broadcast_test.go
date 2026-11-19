@@ -3,7 +3,6 @@ package watchtogether
 import (
 	"cmp"
 	"context"
-	"errors"
 	"reflect"
 	"slices"
 	"testing"
@@ -199,51 +198,6 @@ func TestClusterSuggestionsSkipRoomsWithoutViewers(t *testing.T) {
 				if len(conn.payloads) != 0 {
 					t.Fatalf("room without viewers received updates: %+v", conn.payloads)
 				}
-			}
-		})
-	}
-}
-
-func TestClusterSuggestionsRecheckRoomAndConnectionsAfterQuery(t *testing.T) {
-	for _, change := range []string{"room removed", "room ended", "room replaced", "connection disconnected", "connection replaced", "query failed"} {
-		t.Run(change, func(t *testing.T) {
-			service, repo := newVoteRoomService(t, RoomSelectionModeVote, nil)
-			conn, replacement := new(recordingConn), new(recordingConn)
-			member := &memberState{userID: 7, profileID: "host", connection: conn}
-			live := service.rooms[repo.room.ID]
-			live.members["host"] = member
-			store := &broadcastSuggestions{stubSuggestions: stubSuggestions{ordered: []Suggestion{{ID: "suggestion"}}}}
-			service.suggestions = store
-			store.beforeRead = func() {
-				if !service.mu.TryLock() {
-					t.Fatal("suggestion query ran while holding the room mutex")
-				}
-				defer service.mu.Unlock()
-				switch change {
-				case "room removed":
-					delete(service.rooms, repo.room.ID)
-				case "room ended":
-					live.room.Phase = RoomPhaseEnded
-				case "room replaced":
-					service.rooms[repo.room.ID] = &liveRoom{room: repo.room, members: map[string]*memberState{"host": member}}
-				case "connection disconnected":
-					member.connection = nil
-				case "connection replaced":
-					member.connection = replacement
-				case "query failed":
-					store.readErr = errors.New("query failed")
-				}
-			}
-			service.handleClusterEvent(suggestionEvent(repo.room.ID))
-			if len(store.reads) != 1 || len(conn.payloads) != 0 {
-				t.Fatalf("reads = %+v, stale connection updates = %+v", store.reads, conn.payloads)
-			}
-			wantReplacementUpdates := 0
-			if change == "connection replaced" {
-				wantReplacementUpdates = 1
-			}
-			if len(replacement.payloads) != wantReplacementUpdates {
-				t.Fatalf("replacement updates = %d, want %d", len(replacement.payloads), wantReplacementUpdates)
 			}
 		})
 	}

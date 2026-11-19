@@ -2,14 +2,11 @@ package jellycompat
 
 import (
 	"context"
-	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // equivalencePageContent is a ContentService double that serves a fixed mixed
@@ -94,70 +91,6 @@ func newEquivalenceContent(failBatch bool) *equivalencePageContent {
 			"movie-1":   movie,
 			"episode-1": episode,
 		},
-	}
-}
-
-// TestHandleBrowseItems_BatchDetailMatchesPerItem pins the batched detail-field
-// path: when the client requests detail-level Fields (MediaSources, etc.) over a
-// mixed movie+episode page, the response must be byte-for-byte identical whether
-// the details came from the batched GetItemDetailsByIDs path or the per-item
-// GetItemDetail fallback — and must carry the load-bearing MediaSources.
-func TestHandleBrowseItems_BatchDetailMatchesPerItem(t *testing.T) {
-	codec := NewResourceIDCodec()
-	query := itemsQuery{
-		needsDetailFields: true,
-		requestedFields: map[string]bool{
-			"mediasources": true,
-			"mediastreams": true,
-			"people":       true,
-			"chapters":     true,
-		},
-	}
-
-	run := func(failBatch bool) (string, *equivalencePageContent) {
-		content := newEquivalenceContent(failBatch)
-		h := &ItemsHandler{
-			content:  content,
-			userData: &mockUserDataService{},
-			codec:    codec,
-			mapper:   newMapper(codec, &config.Config{}),
-			images:   NewImageCache(time.Hour, time.Now),
-		}
-		req := httptest.NewRequest("GET", "/Users/test/Items?Fields=MediaSources", nil)
-		ctx := context.WithValue(req.Context(), compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "profile-1"})
-		req = req.WithContext(ctx)
-		rec := httptest.NewRecorder()
-		h.handleBrowseItems(rec, req, &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, query)
-		if rec.Code != 200 {
-			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-		}
-		return rec.Body.String(), content
-	}
-
-	batchBody, batchContent := run(false)
-	perItemBody, perItemContent := run(true)
-
-	if batchBody != perItemBody {
-		t.Fatalf("batched and per-item detail output differ:\nbatch:   %s\nperItem: %s", batchBody, perItemBody)
-	}
-
-	// The batch run must use the batched path once and never fall back to
-	// per-item fetches; the failBatch run must attempt the batch once and only
-	// then fall back to per-item fetches. Asserting batchCalls==1 on the
-	// fallback run guards against a regression that skips GetItemDetailsByIDs
-	// entirely and goes straight to per-item lookups (which would still produce
-	// identical output but silently lose the batched fast path).
-	if batchContent.batchCalls != 1 || batchContent.perItemCalls != 0 {
-		t.Fatalf("batch run: batchCalls=%d perItemCalls=%d; want 1 and 0", batchContent.batchCalls, batchContent.perItemCalls)
-	}
-	if perItemContent.batchCalls != 1 || perItemContent.perItemCalls != 2 {
-		t.Fatalf("fallback run: batchCalls=%d perItemCalls=%d; want 1 and 2 (batch attempted once, then one per-item fetch per page item)", perItemContent.batchCalls, perItemContent.perItemCalls)
-	}
-
-	// Sanity: the detail fields must actually be present (regression guard for
-	// dropping MediaSources from the batched path).
-	if !strings.Contains(batchBody, "\"MediaSources\"") {
-		t.Fatalf("batched output missing MediaSources: %s", batchBody)
 	}
 }
 

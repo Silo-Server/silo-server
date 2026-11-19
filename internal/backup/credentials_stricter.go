@@ -154,7 +154,7 @@ var stricterFlags = func() []stricterFlag {
 				describe: fmt.Sprintf(`format('access group %%s kept without %s', t.name)`, what)})
 	}
 	// A profile that turned a notification off keeps it off.
-	for _, column := range []string{columnEnabled, "notify_favorites", "notify_watchlist", "notify_continue_watching", "notify_next_up"} {
+	for _, column := range []string{columnEnabled, "notify_next_up"} {
 		flags = append(flags, stricterFlag{table: "notification_preferences", column: column, stricter: false,
 			id: `t.user_id::text || ':' || t.profile_id`, key: noKey, scope: everyRow,
 			describe: fmt.Sprintf(`format('notifications of profile %%s kept off (%s)', t.profile_id)`, column)})
@@ -238,10 +238,7 @@ var restoredFlagColumns = map[string]string{
 	"page_sections.enabled":                                   whyShown,
 	"page_sections.featured":                                  whyShown,
 	"page_sections.web_only":                                  whyShown,
-	"profile_series_interest.continue_watching":               whyDerived,
-	"profile_series_interest.favorite":                        whyDerived,
 	"profile_series_interest.next_up_candidate":               whyDerived,
-	"profile_series_interest.watchlist":                       whyDerived,
 	"request_routes.is_fallback":                              whyRouting,
 	"request_routes.skip_uhd":                                 whyRouting,
 	"request_routing.id":                                      whyKey,

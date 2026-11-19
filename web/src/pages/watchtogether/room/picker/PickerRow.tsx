@@ -1,7 +1,9 @@
 import { useId, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { ChevronRight } from "lucide-react";
 import MediaCarousel from "@/components/MediaCarousel";
 import { codeNumber, useT, type Translate } from "@/i18n";
+
 import { decodeThumbhash } from "@/lib/thumbhash";
 import type { PickerEntry } from "@/api/v2/watchTogetherPicker";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
@@ -42,7 +44,7 @@ export function PosterTile({
   const t = useT();
   const [loaded, setLoaded] = useState(false);
   const memberDescriptionId = useId();
-  const memberNames = who?.map((member) => member.display_name).join(", ");
+  const memberNames = who ? joinList(who.map((member) => member.display_name)) : undefined;
   const thumbhash = card.poster_thumbhash ? decodeThumbhash(card.poster_thumbhash) : "";
   const tile = (
     <button

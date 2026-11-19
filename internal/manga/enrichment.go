@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -550,6 +551,8 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 			Owner:               owner,
 			ItemType:            mangaContentType(),
 			ContentID:           item.ContentID,
+			NoAuthor:            strings.TrimSpace(item.Author) == "",
+			NoAuthorTitle:       mangaIdentityTitle(item.Title),
 		})
 		if admitErr != nil {
 			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))
@@ -1051,6 +1054,22 @@ func buildMangaSearchQuery(item enrichmentItemRow) (metadata.SearchQuery, map[st
 		ProviderIDs: accumulatedIDs,
 		Language:    item.Language,
 	}, accumulatedIDs
+}
+
+// mangaTrailingTagRE matches one trailing (...) or [...] group.
+var mangaTrailingTagRE = regexp.MustCompile(`\s*[\(\[][^\)\]]*[\)\]]\s*$`)
+
+// mangaIdentityTitle is a series title without trailing release tags, which
+// the scanner strips from folder names only in parentheses: "Naruto
+// [Digital]" names the work "Naruto". A title made only of tags is kept.
+func mangaIdentityTitle(title string) string {
+	for {
+		stripped := mangaTrailingTagRE.ReplaceAllString(title, "")
+		if stripped == title || strings.TrimSpace(stripped) == "" {
+			return title
+		}
+		title = stripped
+	}
 }
 
 func buildMangaMetadataRequest(providerIDs map[string]string, language string) metadata.MetadataRequest {

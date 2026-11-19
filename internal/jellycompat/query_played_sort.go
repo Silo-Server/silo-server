@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	// sortKeySortName and sortKeyDatePlayed are lowercased Jellyfin SortBy
-	// keys, as selectedSortKey returns them.
-	sortKeySortName   = "sortname"
-	sortKeyDatePlayed = "dateplayed"
+	// sortKeySortName, sortKeyDatePlayed and sortKeyCriticRating are
+	// lowercased Jellyfin SortBy keys, as selectedSortKey returns them.
+	sortKeySortName     = "sortname"
+	sortKeyDatePlayed   = "dateplayed"
+	sortKeyCriticRating = "criticrating"
 	// sortOrderAscending is the browse order mapSortOrder returns for
 	// SortOrder=Ascending.
 	sortOrderAscending = "asc"
@@ -19,10 +20,11 @@ const (
 
 // selectedSortKey returns the SortBy key parseSort selects, lowercased, or ""
 // when no key maps. DatePlayed and DateCreated map to the same browse sort, so
-// callers that must tell them apart read the key itself.
-func selectedSortKey(sortBy string) string {
+// callers that must tell them apart read the key itself. CriticRating counts
+// only while criticShown.
+func selectedSortKey(sortBy string, criticShown bool) string {
 	for _, key := range strings.Split(sortBy, ",") {
-		if _, ok := sortKey(key); ok {
+		if _, ok := requestSortKey(key, criticShown); ok {
 			return strings.ToLower(strings.TrimSpace(key))
 		}
 	}

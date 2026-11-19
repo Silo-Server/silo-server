@@ -253,3 +253,35 @@ it("keeps a link invitation usable when the address already has an account", asy
   expect(posts()).toHaveLength(2);
   expect(auth.completeLogin).not.toHaveBeenCalled();
 });
+
+// None of these refusals creates an account or spends the invitation, so the
+// page says why and keeps Create account available (#4161).
+it.each([
+  { status: 429, type: "rate_limited", message: /Too many requests from this network/ },
+  { status: 501, type: "capability_unsupported", message: /cannot create the profile required/ },
+  { status: 409, type: "conflict", message: /An account already uses this email address/ },
+  { status: 422, type: "validation_failed", message: /Password must not exceed 72 bytes/ },
+])("lets the invitee retry after a $status $type refusal", async ({ status, type, message }) => {
+  submit = async () =>
+    problemResponse(status, type, { detail: "Password must not exceed 72 bytes." });
+  mount();
+  await fill();
+  send();
+  await screen.findByText(message);
+  expect(screen.queryByText(/We could not confirm the result/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Create account" })).not.toBeDisabled();
+
+  submit = async () => json(accepted, 201);
+  send();
+  await screen.findByText("Household setup");
+  expect(posts()).toHaveLength(2);
+});
+
+it("still treats a server error as an unconfirmed result", async () => {
+  submit = async () => problem(500);
+  mount();
+  await fill();
+  send();
+  await screen.findByText(/We could not confirm the result/);
+  expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+});

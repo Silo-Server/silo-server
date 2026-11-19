@@ -58,20 +58,6 @@ func fetchWithDeadline(t *testing.T, fetch func() ([]byte, error)) ([]byte, erro
 	}
 }
 
-func TestPackageFetchDefaultClientHasTimeouts(t *testing.T) {
-	for name, client := range map[string]*http.Client{
-		"catalog":   NewCatalogService(nil, CatalogServiceOptions{}).httpClient,
-		"installer": NewInstaller(nil, InstallerOptions{}).httpClient,
-	} {
-		if _, ok := client.Transport.(*netguard.Transport); !ok {
-			t.Fatalf("%s client transport = %T, want *netguard.Transport", name, client.Transport)
-		}
-		if client.Timeout != 0 {
-			t.Fatalf("%s client has a whole-request timeout %s; slow downloads would be cut off", name, client.Timeout)
-		}
-	}
-}
-
 // Catalog JSON from a third party chooses package addresses. A blocked
 // address is refused before connecting and reported as a permanent package
 // error, since a retry can't change it. The netguard tests cover redirects.

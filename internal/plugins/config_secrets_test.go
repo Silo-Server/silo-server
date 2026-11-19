@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -79,5 +80,20 @@ func TestGlobalConfigFieldSetsIncludesSecretsDeclaredByDependentSchemas(t *testi
 		[][]string{{"credentials"}},
 	) {
 		t.Fatalf("secret paths = %#v, want credentials", got)
+	}
+}
+
+// A form key is classified as written: a stored value sits under the exact
+// key, so a trimmed copy marked secret would leave the real one public.
+func TestConfigSchemaFieldSetsKeepsExactFormKeys(t *testing.T) {
+	public, secrets := ConfigSchemaFieldSets(&pluginv1.ConfigSchema{
+		JsonSchema: `{"type":"object","properties":{"token ":{"type":"string"},"topic":{"type":"string"}}}`,
+		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
+			{Key: "token ", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_PASSWORD},
+			{Key: "topic"},
+		}},
+	})
+	if !slices.Equal(public, []string{"topic"}) || !slices.Equal(secrets, []string{"token "}) {
+		t.Fatalf("public %q, secrets %q; want the untrimmed key secret", public, secrets)
 	}
 }

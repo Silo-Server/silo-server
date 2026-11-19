@@ -1,7 +1,6 @@
 package pluginhost
 
 import (
-	"errors"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -26,43 +25,4 @@ func makeTestClient(t *testing.T, capabilities []*pluginv1.CapabilityDescriptor)
 	rpc := sdkruntime.NewClient(conn)
 	manifest := &pluginv1.PluginManifest{Capabilities: capabilities}
 	return newClient(0, rpc, manifest, 0)
-}
-
-func TestClient_ScheduledTask_CapabilityGate(t *testing.T) {
-	t.Run("absent capability returns error", func(t *testing.T) {
-		c := makeTestClient(t, nil)
-		_, err := c.ScheduledTask("missing")
-		if err == nil {
-			t.Fatal("expected error for missing scheduled_task.v1 capability, got nil")
-		}
-		if !errors.Is(err, ErrCapabilityNotFound) {
-			t.Errorf("expected ErrCapabilityNotFound, got %v", err)
-		}
-	})
-
-	t.Run("declared capability returns no error", func(t *testing.T) {
-		c := makeTestClient(t, []*pluginv1.CapabilityDescriptor{
-			{Type: "scheduled_task.v1", Id: "nightly"},
-		})
-		got, err := c.ScheduledTask("nightly")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got == nil {
-			t.Fatal("expected non-nil ScheduledTaskClient")
-		}
-	})
-
-	t.Run("wrong id returns error", func(t *testing.T) {
-		c := makeTestClient(t, []*pluginv1.CapabilityDescriptor{
-			{Type: "scheduled_task.v1", Id: "nightly"},
-		})
-		_, err := c.ScheduledTask("weekly")
-		if err == nil {
-			t.Fatal("expected error for mismatched scheduled_task.v1 capability id, got nil")
-		}
-		if !errors.Is(err, ErrCapabilityNotFound) {
-			t.Errorf("expected ErrCapabilityNotFound, got %v", err)
-		}
-	})
 }

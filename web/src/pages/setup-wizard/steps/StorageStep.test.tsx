@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StorageStep } from "./StorageStep";
 
@@ -10,15 +10,26 @@ vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => formMock(...args),
 }));
 vi.mock("../WizardContext", () => ({ useWizardContext: () => wizardMock() }));
-const serverStatusMock = vi.fn(() => ({
-  data: { artwork_storage: { backend: "local", locked: false, status_known: true } } as unknown,
-  isPending: false,
-  isError: false,
-}));
+type ServerStatusResult = {
+  data: unknown;
+  isPending: boolean;
+  isError: boolean;
+  refetch?: () => void;
+};
+const serverStatusMock = vi.fn<() => ServerStatusResult>();
+const fetchStatusMock = vi.fn();
 vi.mock("@/hooks/queries/admin/settings", () => ({
   useAdminServerStatus: () => serverStatusMock(),
+  fetchAdminServerStatus: () => fetchStatusMock(),
   useCheckAdminSettingsConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
+const restartMock = vi.fn();
+vi.mock("@/hooks/queries/admin/serverRestart", () => ({
+  useRequestServerRestart: () => ({ mutateAsync: restartMock, isPending: false }),
+}));
+
+const BOOT = "2026-11-17T10:00:00Z";
+const REBOOT = "2026-11-17T10:00:20Z";
 
 class ResizeObserverStub {
   observe() {}
@@ -33,8 +44,12 @@ window.HTMLElement.prototype.scrollIntoView ??= () => {};
 function setup({
   dirtyKeys = [],
   saved = {},
-  managedByEnv = [],
-}: { dirtyKeys?: string[]; saved?: Record<string, string>; managedByEnv?: string[] } = {}) {
+  managedByEnv = {},
+}: {
+  dirtyKeys?: string[];
+  saved?: Record<string, string>;
+  managedByEnv?: Record<string, string>;
+} = {}) {
   const values: Record<string, string> = { ...saved };
   const markDone = vi.fn();
   const setSummary = vi.fn();
@@ -51,7 +66,8 @@ function setup({
     getPersistedValue: (key: string) => saved[key] ?? "",
     setValue,
     sensitiveConfigured: [],
-    sensitiveManagedByEnv: managedByEnv,
+    sensitiveManagedByEnv: Object.keys(managedByEnv),
+    envVar: (key: string) => managedByEnv[key],
     dirtyCount: 1,
     isSaving: false,
     save,
@@ -63,10 +79,13 @@ function setup({
 describe("StorageStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchStatusMock.mockResolvedValue({ started_at: BOOT, restart_required: false });
+    restartMock.mockResolvedValue({ status: "restart_requested" });
     serverStatusMock.mockReturnValue({
       data: { artwork_storage: { backend: "local", locked: false, status_known: true } },
       isPending: false,
       isError: false,
+      refetch: vi.fn(),
     });
   });
 
@@ -230,12 +249,16 @@ describe("StorageStep", () => {
   });
 
   it("shows the environment-managed Redis database number read-only and keeps the check available", async () => {
-    setup({ saved: { "redis.db": "3" }, managedByEnv: ["redis.url", "redis.db"] });
+    setup({
+      saved: { "redis.db": "3" },
+      managedByEnv: { "redis.url": "REDIS_URL", "redis.db": "REDIS_URL" },
+    });
     render(<StorageStep />);
     await userEvent.click(screen.getByRole("button", { name: "View" }));
     expect(screen.getByLabelText("Database number")).toHaveValue(3);
     expect(screen.getByLabelText("Database number")).toBeDisabled();
     expect(screen.getByLabelText("Connection URL")).toBeDisabled();
+    expect(screen.getAllByText("Set by REDIS_URL in the server’s environment.")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Check connection" })).toBeEnabled();
   });
 
@@ -250,6 +273,21 @@ describe("StorageStep", () => {
     expect(buildConnectionCheckRequest).toHaveBeenCalledWith(["redis.url", "redis.db"]);
   });
 
+  it.each([
+    ["public", 1],
+    ["private", 2],
+  ])("stages the %s bucket region and checks the connection with it", async (scope, toggle) => {
+    const { setValue, buildConnectionCheckRequest } = setup();
+    render(<StorageStep />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Set up" })[toggle]!);
+    fireEvent.change(screen.getByLabelText("Region"), { target: { value: "eu-central-1" } });
+    expect(setValue).toHaveBeenCalledWith(`s3.${scope}_region`, "eu-central-1");
+    expect(formMock.mock.calls[0]?.[0].keys).toContain(`s3.${scope}_region`);
+    expect(buildConnectionCheckRequest).toHaveBeenCalledWith(
+      expect.arrayContaining([`s3.${scope}_region`, `s3.${scope}_path_style`]),
+    );
+  });
+
   it("shows the Redis database number in use and stages it with a new URL", async () => {
     // No redis.db is saved: the server reports the 3 in the saved URL.
     const { setValue } = setup({ saved: { "redis.db": "3" } });
@@ -262,7 +300,7 @@ describe("StorageStep", () => {
     });
 
     expect(setValue).toHaveBeenCalledWith("redis.url", "redis://new.example.invalid:6379/7");
-    expect(setValue).toHaveBeenCalledWith("redis.db", "3");
+    expect(setValue).toHaveBeenCalledWith("redis.db", "3", { stage: true });
   });
 
   it("keeps the Redis database number through a URL that is emptied and typed again", async () => {
@@ -275,7 +313,156 @@ describe("StorageStep", () => {
     }
 
     expect(setValue).not.toHaveBeenCalledWith("redis.db", "");
-    expect(setValue).toHaveBeenLastCalledWith("redis.db", "3");
+    expect(setValue).toHaveBeenLastCalledWith("redis.db", "3", { stage: true });
     expect(screen.getByLabelText("Database number")).toHaveValue(3);
+  });
+
+  describe("applying storage that needs a restart", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const pendingStorage = {
+      started_at: BOOT,
+      restart_required: true,
+      restart_required_reasons: ["setting:s3.public_bucket"],
+    };
+
+    it("restarts Silo and continues once the new process answers", async () => {
+      fetchStatusMock
+        .mockResolvedValueOnce(pendingStorage)
+        .mockResolvedValueOnce(pendingStorage)
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValue({ started_at: REBOOT, restart_required: false });
+      const { markDone, save } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+
+      await waitFor(() => expect(restartMock).toHaveBeenCalledOnce());
+      expect(save).toHaveBeenCalledOnce();
+      expect(screen.getByText("Applying storage settings")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
+      // An edit made now could not be saved before the step moves on.
+      expect(screen.getByLabelText("Local storage path")).toBeDisabled();
+      expect(screen.getByRole("switch", { name: "Keep provider artwork" })).toBeDisabled();
+      expect(markDone).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+    });
+
+    it("applies a storage change saved before a reload", async () => {
+      fetchStatusMock
+        .mockResolvedValueOnce(pendingStorage)
+        .mockResolvedValue({ started_at: REBOOT, restart_required: false });
+      const { markDone, save } = setup();
+      formMock.mockReturnValue({ ...formMock(), dirtyCount: 0 });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+      expect(save).not.toHaveBeenCalled();
+      expect(restartMock).toHaveBeenCalledOnce();
+    });
+
+    it("keeps polling while the restart request has not answered", async () => {
+      fetchStatusMock
+        .mockResolvedValueOnce(pendingStorage)
+        .mockResolvedValue({ started_at: REBOOT, restart_required: false });
+      restartMock.mockReturnValue(new Promise(() => {}));
+      const { markDone } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+    });
+
+    it("keeps the storage choice locked while Silo restarts", async () => {
+      fetchStatusMock.mockResolvedValue(pendingStorage);
+      const { setValue } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+      await waitFor(() => expect(restartMock).toHaveBeenCalledOnce());
+      // Radix opens its select on pointerdown, which a disabled fieldset does not stop.
+      await userEvent.click(screen.getByRole("combobox", { name: "Storage" }));
+      const s3 = screen.queryByRole("option", { name: "S3" });
+      if (s3) await userEvent.click(s3);
+
+      expect(setValue).not.toHaveBeenCalledWith("artwork.storage_backend", "s3");
+    });
+
+    it("applies a pending storage change when the admin skips", async () => {
+      fetchStatusMock
+        .mockResolvedValueOnce(pendingStorage)
+        .mockResolvedValue({ started_at: REBOOT, restart_required: false });
+      const { markDone, save } = setup();
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+      expect(restartMock).toHaveBeenCalledOnce();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("does not finish the step after it unmounts mid-restart", async () => {
+      let back = false;
+      fetchStatusMock.mockImplementation(async () =>
+        back ? { started_at: REBOOT, restart_required: false } : pendingStorage,
+      );
+      const { markDone } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      const { unmount } = render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+      await waitFor(() => expect(restartMock).toHaveBeenCalledOnce());
+      // The poll is waiting on its timer when the admin leaves the step.
+      back = true;
+      unmount();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(markDone).not.toHaveBeenCalled();
+    });
+
+    it("continues without a restart when only other settings wait for one", async () => {
+      fetchStatusMock.mockResolvedValue({
+        started_at: BOOT,
+        restart_required: true,
+        restart_required_reasons: ["setting:playback.hw_accel"],
+      });
+      const { markDone } = setup({ dirtyKeys: ["metadata.cache_images"] });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+      expect(restartMock).not.toHaveBeenCalled();
+    });
+
+    it("asks for a manual restart when Silo does not come back, and continues once it does", async () => {
+      let back = false;
+      fetchStatusMock.mockImplementation(async () =>
+        back ? { started_at: REBOOT, restart_required: false } : pendingStorage,
+      );
+      restartMock.mockRejectedValue(new Error("restart unavailable"));
+      const { markDone } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Silo hasn’t restarted yet");
+      expect(markDone).not.toHaveBeenCalled();
+
+      back = true;
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+    });
   });
 });

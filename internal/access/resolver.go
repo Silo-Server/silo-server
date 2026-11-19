@@ -123,6 +123,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.NextUpMode = preferences.NextUpMode
 		scope.NextUpNewReleasesFirst = preferences.NextUpNewReleasesFirst
 		scope.HideWatchedItemsOnHome = preferences.HideWatchedItemsOnHome
+		scope.CardAvailability = preferences.CardAvailability
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = ProfileLibraries(effective.LibraryIDs, profile)
 		verified, pinSkipped, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {

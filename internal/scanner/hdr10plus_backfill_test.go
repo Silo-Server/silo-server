@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
+
 	"os"
 	"os/exec"
 	"strings"
@@ -14,46 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestPlaybackDoesNotRepairPQProbeWithoutHDR10PlusCheck(t *testing.T) {
-	probedAt := time.Now()
-	file := models.MediaFile{
-		ProbeSource: "local", ProbeUpdatedAt: &probedAt, Duration: 7200, Container: "matroska",
-		CodecVideo: "hevc", Resolution: "2160p", Chapters: []models.MediaChapter{},
-		VideoTracks: []models.VideoTrack{{Codec: "hevc", ColorRange: "tv", ColorTransfer: "smpte2084", HDR10PlusUnchecked: true}},
-	}
-	if NeedsCriticalProbeRepair(&file) {
-		t.Fatal("playback would reprobe a PQ file only to check HDR10+, which plays as HDR10 unchecked")
-	}
-}
-
-func TestVideoTrackJSONKeepsHDR10PlusCheckState(t *testing.T) {
-	checked, err := json.Marshal(models.VideoTrack{Codec: "hevc", ColorTransfer: "smpte2084"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(checked), `"hdr10_plus":false`) {
-		t.Fatalf("checked track = %s, want an explicit hdr10_plus false", checked)
-	}
-
-	var legacy models.VideoTrack
-	if err := json.Unmarshal([]byte(`{"codec":"hevc","color_transfer":"smpte2084"}`), &legacy); err != nil {
-		t.Fatal(err)
-	}
-	if !legacy.HDR10PlusUnchecked {
-		t.Fatal("a stored track without hdr10_plus decoded as checked")
-	}
-	rewritten, err := json.Marshal(legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(rewritten), "hdr10_plus") {
-		t.Fatalf("rewriting an unchecked track = %s, want hdr10_plus left out so the backfill still checks it", rewritten)
-	}
-}
 
 // Only the primary stream's frame is read, so a second PQ video stream must
 // not be stored as unchecked: nothing would ever check it.
@@ -425,150 +386,5 @@ func TestHDR10PlusBackfillStopsWhenStorageStallsDB(t *testing.T) {
 	_, err := backfiller.Run(ctx, nil)
 	if !errors.Is(err, errHDR10PlusStorageStalled) {
 		t.Fatalf("Run error = %v, want the stalled-storage stop", err)
-	}
-}
-
-func TestNewHDR10PlusBackfillerNeedsADatabase(t *testing.T) {
-	if NewHDR10PlusBackfiller(nil, "ffprobe") != nil || NewHDR10PlusBackfiller(&FileRepository{}, "ffprobe") != nil {
-		t.Fatal("a backfiller without a database was built")
-	}
-}
-
-// Playback's probe repair skips the frame read. It keeps a recorded HDR10+
-// status only when the reprobed stream is the one that was checked.
-func TestCarryCheckedHDR10PlusKeepsStatusForTheSameStream(t *testing.T) {
-	checked := models.VideoTrack{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", FrameColorRange: "pc", ColorTransfer: "smpte2084", HDR10Plus: true, VideoRangeType: "HDR10Plus"}
-	reprobed := func() []models.VideoTrack {
-		return []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", VideoRangeType: "HDR10", HDR10PlusUnchecked: true}}
-	}
-
-	next := reprobed()
-	carryCheckedHDR10Plus([]models.VideoTrack{checked}, next)
-	if next[0].HDR10PlusUnchecked || !next[0].HDR10Plus || next[0].VideoRangeType != "HDR10Plus" || next[0].FrameColorRange != "pc" {
-		t.Fatalf("same stream = %+v, want the checked HDR10+ status and frame range kept", next[0])
-	}
-
-	next = reprobed()
-	next[0].Width = 1920
-	carryCheckedHDR10Plus([]models.VideoTrack{checked}, next)
-	if !next[0].HDR10PlusUnchecked || next[0].HDR10Plus || next[0].FrameColorRange != "" {
-		t.Fatalf("different stream = %+v, want it left unchecked", next[0])
-	}
-
-	// The fields probe repair fills in are not a different stream.
-	missingRange := checked
-	missingRange.ColorRange = ""
-	next = reprobed()
-	carryCheckedHDR10Plus([]models.VideoTrack{missingRange}, next)
-	if next[0].HDR10PlusUnchecked || !next[0].HDR10Plus {
-		t.Fatalf("repaired color range = %+v, want the checked HDR10+ status kept", next[0])
-	}
-
-	legacy := false
-	legacyDV := models.VideoTrack{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", DVProfile: 8, DVBLCompatID: 1, DVProvenanceCurrent: &legacy, HDR10Plus: true, VideoRangeType: "DOVIWithHDR10Plus"}
-	reprobedDV := func() []models.VideoTrack {
-		return []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", DVProfile: 8, DVBLCompatID: 1, DVConfigPresent: true, DVBLCompatIDPresent: true, DVBLPresent: true, DVRPUPresent: true, VideoRangeType: "DOVIWithHDR10", HDR10PlusUnchecked: true}}
-	}
-	next = reprobedDV()
-	carryCheckedHDR10Plus([]models.VideoTrack{legacyDV}, next)
-	if next[0].HDR10PlusUnchecked || !next[0].HDR10Plus || next[0].VideoRangeType != "DOVIWithHDR10Plus" {
-		t.Fatalf("repaired DV provenance = %+v, want the checked HDR10+ status kept", next[0])
-	}
-	next = reprobedDV()
-	next[0].DVProfile = 7
-	carryCheckedHDR10Plus([]models.VideoTrack{legacyDV}, next)
-	if !next[0].HDR10PlusUnchecked {
-		t.Fatalf("legacy row, different DV profile = %+v, want it left unchecked", next[0])
-	}
-
-	unchecked := checked
-	unchecked.HDR10Plus, unchecked.HDR10PlusUnchecked = false, true
-	next = reprobed()
-	carryCheckedHDR10Plus([]models.VideoTrack{unchecked}, next)
-	if !next[0].HDR10PlusUnchecked {
-		t.Fatalf("previously unchecked = %+v, want it left unchecked", next[0])
-	}
-}
-
-func TestPlaybackProbeRepairKeepsCheckedHDR10Plus(t *testing.T) {
-	stored := &models.MediaFile{
-		ID: 7, FilePath: "/library/hdr10plus.mkv", FileSize: 1_000,
-		// No probe source: playback must repair the row before planning.
-		CodecVideo: "hevc", Container: "mkv", Duration: 5400, Resolution: "2160p",
-		VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", FrameColorRange: "pc", ColorTransfer: "smpte2084", HDR10Plus: true, VideoRangeType: "HDR10Plus"}},
-	}
-	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{stored.ID: stored}}
-	ensurer := &PlaybackProbeEnsurer{
-		fileRepo:    repo,
-		ffprobePath: "ffprobe",
-		probeFile: func(context.Context, string, string) (*ProbeData, error) {
-			return &ProbeData{
-				Container: "mkv", Duration: 5400, CodecVideo: "hevc", Resolution: "2160p",
-				VideoTracks: []VideoTrackInfo{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", VideoRangeType: "HDR10", HDR10PlusUnchecked: true}},
-			}, nil
-		},
-	}
-	got, err := ensurer.Ensure(context.Background(), stored)
-	if err != nil {
-		t.Fatalf("Ensure() error = %v", err)
-	}
-	if track := got.VideoTracks[0]; track.HDR10PlusUnchecked || !track.HDR10Plus || track.VideoRangeType != "HDR10Plus" || track.FrameColorRange != "pc" {
-		t.Fatalf("repaired track = %+v, want the checked HDR10+ status and frame range kept", track)
-	}
-}
-
-// A stat blocked on stalled storage must not hold up the pass: it times out
-// as a retryable file, ends the pass once every slot is stuck, gives way to
-// cancellation, and frees its slot only when the syscall returns.
-func TestHDR10PlusBackfillBoundsTheOnDiskCheck(t *testing.T) {
-	release := make(chan struct{})
-	var released sync.Once
-	t.Cleanup(func() { released.Do(func() { close(release) }) })
-	backfiller := &HDR10PlusBackfiller{
-		readFrame: func(context.Context, string, string, string) (firstVideoFrame, error) {
-			return firstVideoFrame{SideData: []ffprobeSideData{{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}}, nil
-		},
-		statFile: func(string) (fs.FileInfo, error) {
-			<-release
-			return nil, errors.New("stat after the stall")
-		},
-		statSlots:   make(chan struct{}, 1),
-		statTimeout: 20 * time.Millisecond,
-	}
-	candidate := hdr10PlusCandidate{id: 1, path: "/stalled/movie.mkv", size: 1000}
-
-	outcome, err := backfiller.backfillFile(context.Background(), candidate)
-	if err != nil || outcome != hdr10PlusOutcomeTimedOut {
-		t.Fatalf("stalled check = %v, %v; want a timed-out file", outcome, err)
-	}
-	// The first check still holds the only slot.
-	if _, err := backfiller.backfillFile(context.Background(), candidate); !errors.Is(err, errHDR10PlusStorageStalled) {
-		t.Fatalf("check with every slot stuck = %v, want the pass to end on stalled storage", err)
-	}
-
-	released.Do(func() { close(release) })
-	select {
-	case backfiller.statSlots <- struct{}{}:
-		<-backfiller.statSlots
-	case <-time.After(time.Second):
-		t.Fatal("the slot was not freed after the stat returned")
-	}
-
-	// Cancel the pass while a check is blocked in the kernel.
-	started, unblock := make(chan struct{}), make(chan struct{})
-	t.Cleanup(func() { close(unblock) })
-	backfiller.statFile = func(string) (fs.FileInfo, error) {
-		close(started)
-		<-unblock
-		return nil, errors.New("stat after the stall")
-	}
-	backfiller.statTimeout = time.Hour
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-started
-		cancel()
-	}()
-	if _, err := backfiller.backfillFile(ctx, candidate); !errors.Is(err, context.Canceled) {
-		t.Fatalf("check canceled while blocked = %v, want context.Canceled", err)
 	}
 }

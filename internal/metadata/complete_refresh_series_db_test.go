@@ -85,20 +85,16 @@ func (r *recordedRefresh) ResetTargetForLibrary(context.Context, string, string,
 // worker and item refresh against Postgres.
 type seriesRefreshHarness struct {
 	pool      *pgxpool.Pool
-	files     *scanner.FileRepository
 	folders   *catalog.FolderRepository
-	ingest    *libraryingest.Executor
+	scan      *scanner.Scanner
+	worker    *metadata.MatchWorker
 	resolver  *adminjob.ItemRefreshResolver
 	refresh   *adminjob.ItemRefreshExecutor
 	refreshed *recordedRefresh
 }
 
-func newSeriesRefreshHarness(t *testing.T, providers ...metadata.Provider) *seriesRefreshHarness {
+func newSeriesRefreshHarness(t *testing.T, dsn string, providers ...metadata.Provider) *seriesRefreshHarness {
 	t.Helper()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
@@ -136,7 +132,7 @@ func newSeriesRefreshHarness(t *testing.T, providers ...metadata.Provider) *seri
 		seasons, episodes, ingest, scanqueue.NewRepository(pool), refreshed, nil, nil)
 	refresh.SetItemStatusReader(items)
 	return &seriesRefreshHarness{
-		pool: pool, files: files, folders: folders, ingest: ingest,
+		pool: pool, folders: folders, scan: scan, worker: worker,
 		resolver:  adminjob.NewItemRefreshResolver(items, seasons, episodes, folders, files),
 		refresh:   refresh,
 		refreshed: refreshed,
@@ -171,13 +167,29 @@ func (h *seriesRefreshHarness) links(t *testing.T, folderID int) map[string][2]s
 // unchanged on disk, so without waiting out the TV queue's quiet window the
 // refresh ended with "no rebuilt content found in refresh scope" and left them
 // unlinked.
-//
-// It takes about 45 s: each of the scan and the three refreshes waits out the
-// real ~11 s TV queue settle window, which is the behavior under test.
 func TestCompleteRefreshRebuildsSeriesDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
 	nonce := time.Now().UnixNano() % 100_000_000
+	for i, target := range []struct{ name, idPattern string }{
+		{"series", "series-tvdb-%s"},
+		{"season", "season-tvdb-%s-1"},
+		{"episode", "episode-tvdb-%s-1-2"},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			// The fixtures are independent, so the real queue waits can overlap.
+			t.Parallel()
+			testCompleteRefreshSeriesTarget(t, dsn, nonce+int64(i), target.idPattern)
+		})
+	}
+}
+
+func testCompleteRefreshSeriesTarget(t *testing.T, dsn string, nonce int64, idPattern string) {
+	t.Helper()
 	show := &stubTVDB{tvdb: strconv.FormatInt(700_000_000+nonce, 10), title: "Refresh Show", year: 2020}
-	h := newSeriesRefreshHarness(t, show)
+	h := newSeriesRefreshHarness(t, dsn, show)
 	ctx := t.Context()
 
 	root := filepath.Join(t.TempDir(), "tv")
@@ -187,7 +199,7 @@ func TestCompleteRefreshRebuildsSeriesDB(t *testing.T) {
 	}
 	for n := 1; n <= 2; n++ {
 		path := filepath.Join(seasonDir, fmt.Sprintf("Refresh Show (2020) - S01E%02d.mkv", n))
-		if err := os.WriteFile(path, []byte(fmt.Sprintf("video %d", n)), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("video %d-%d", nonce, n)), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -217,27 +229,32 @@ func TestCompleteRefreshRebuildsSeriesDB(t *testing.T) {
 			}
 		}
 	}
-	if _, err := h.ingest.IngestFolder(ctx, folder); err != nil {
-		t.Fatalf("ingest: %v", err)
+	if _, err := h.scan.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan fixture: %v", err)
 	}
-	wantLinked("after the library scan")
+	// Make the initial scan's jobs claimable. The refresh itself queues new
+	// work and must still wait for it to become claimable.
+	if _, err := h.pool.Exec(ctx, `
+		UPDATE series_root_match_queue SET available_at = NOW()
+		WHERE media_folder_id = $1 AND observed_root_path = $2`, folder.ID, filepath.Dir(seasonDir)); err != nil {
+		t.Fatalf("make fixture match jobs claimable: %v", err)
+	}
+	if _, err := h.worker.ProcessAllByFolderAndPathPrefix(ctx, folder.ID, root, time.Time{}); err != nil {
+		t.Fatalf("match fixture: %v", err)
+	}
+	wantLinked("before complete refresh")
 
-	for _, target := range []struct{ name, contentID string }{
-		{"series", seriesID},
-		{"season", "season-tvdb-" + show.tvdb + "-1"},
-		{"episode", "episode-tvdb-" + show.tvdb + "-1-2"},
-	} {
-		req, err := h.resolver.ResolveWithMode(ctx, target.contentID, adminjob.ItemRefreshModeComplete)
-		if err != nil {
-			t.Fatalf("resolve the %s for a complete refresh: %v", target.name, err)
-		}
-		result, err := h.refresh.Execute(ctx, *req, nil)
-		if err != nil {
-			t.Fatalf("complete refresh of the %s: %v", target.name, err)
-		}
-		if result.DetailContentID != target.contentID || h.refreshed.contentID != target.contentID {
-			t.Errorf("complete refresh of the %s rebuilt %q and refreshed %q, want %q", target.name, result.DetailContentID, h.refreshed.contentID, target.contentID)
-		}
-		wantLinked("after a complete refresh of the " + target.name)
+	targetID := fmt.Sprintf(idPattern, show.tvdb)
+	req, err := h.resolver.ResolveWithMode(ctx, targetID, adminjob.ItemRefreshModeComplete)
+	if err != nil {
+		t.Fatalf("resolve for complete refresh: %v", err)
 	}
+	result, err := h.refresh.Execute(ctx, *req, nil)
+	if err != nil {
+		t.Fatalf("complete refresh: %v", err)
+	}
+	if result.DetailContentID != targetID || h.refreshed.contentID != targetID {
+		t.Errorf("complete refresh rebuilt %q and refreshed %q, want %q", result.DetailContentID, h.refreshed.contentID, targetID)
+	}
+	wantLinked("after complete refresh")
 }

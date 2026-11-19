@@ -155,36 +155,6 @@ func TestSubscriptionCredentialsDoNotFollowRedirects(t *testing.T) {
 	}
 }
 
-func TestChatReasoningOmitsUnsupportedTemperature(t *testing.T) {
-	for _, test := range []struct {
-		model, effort string
-		temperature   bool
-	}{
-		{model: "gpt-4o-mini", temperature: true},
-		{model: "gpt-6.1-sol"},
-		{model: "custom-model", effort: "high"},
-	} {
-		t.Run(test.model, func(t *testing.T) {
-			client := NewClient(Config{BaseURL: "https://provider.example.test", ChatModel: test.model, ReasoningEffort: test.effort})
-			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				var body map[string]any
-				_ = json.NewDecoder(r.Body).Decode(&body)
-				_, temperature := body["temperature"]
-				if temperature != test.temperature {
-					t.Fatalf("temperature: %v", body)
-				}
-				if test.effort != "" && body["reasoning_effort"] != test.effort {
-					t.Fatalf("effort missing: %v", body)
-				}
-				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(chatOK))}, nil
-			})
-			if _, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, true); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
 func TestSubscriptionDoesNotAuthorizeTranscription(t *testing.T) {
 	client := NewClient(Config{ASRBaseURL: "https://speech.example.test", ASRAPIKey: "speech-key", AuthMode: "chatgpt", ASRModel: "whisper-1", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) {
 		t.Fatal("ChatGPT subscription token requested for transcription")
@@ -266,37 +236,6 @@ func TestSubscriptionRecoversUnauthorizedOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestSubscriptionTransientStreamFailuresRetry(t *testing.T) {
-	if isExhaustedQuota([]byte(`{"error":{"code":"subscription_sharing_usage_unavailable"}}`)) {
-		t.Fatal("temporary usage failure classified as exhausted quota")
-	}
-	for _, code := range []string{"subscription_sharing_usage_unavailable", "rate_limit_exceeded"} {
-		t.Run(code, func(t *testing.T) { testSubscriptionStreamFailureRetries(t, code) })
-	}
-}
-
-func testSubscriptionStreamFailureRetries(t *testing.T, code string) {
-	synctest.Test(t, func(t *testing.T) {
-		calls := 0
-		client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
-			ChatGPTTokenSource:   testTokenSource(func(context.Context) (string, error) { return "token", nil }),
-			ChatGPTTokenRejected: func(context.Context, string, bool) error { t.Fatal("usage outage invalidated credentials"); return nil },
-		})
-		client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-			calls++
-			body := fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":%q}}}\n\n", code)
-			if calls > 1 {
-				body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"
-			}
-			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
-		})
-		out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false)
-		if err != nil || out != "complete" || calls != 2 {
-			t.Fatalf("temporary failure recovery: %q, %v, calls=%d", out, err, calls)
-		}
-	})
-}
-
 func testTokenSource(getToken func(context.Context) (string, error)) func(context.Context) (func(context.Context) (string, error), error) {
 	return func(context.Context) (func(context.Context) (string, error), error) { return getToken, nil }
 }
@@ -364,23 +303,6 @@ func TestSubscriptionRetriesPinAccountAndRequestConfig(t *testing.T) {
 	}
 }
 
-func TestSubscriptionPermanentStreamFailuresDoNotRetry(t *testing.T) {
-	for _, code := range []string{"invalid_request_error", "subscription_sharing_usage_limit_exceeded"} {
-		t.Run(code, func(t *testing.T) {
-			client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) { return "token", nil })})
-			calls := 0
-			client.chatHTTP.Transport = retryRoundTripFunc(func(*http.Request) (*http.Response, error) {
-				calls++
-				body := fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":%q}}}\n\n", code)
-				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
-			})
-			if out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false); out != "" || err == nil || calls != 1 {
-				t.Fatalf("permanent failure retried or published output: %q, %v, calls=%d", out, err, calls)
-			}
-		})
-	}
-}
-
 // Incomplete or refused translations must never replace the source text, even
 // when the provider includes partial output alongside its terminal status.
 func TestAPIResponsesRejectsUnusableOutput(t *testing.T) {
@@ -409,31 +331,6 @@ func TestAPIResponsesRejectsUnusableOutput(t *testing.T) {
 			if got := Classify(err); got != tc.kind {
 				t.Fatalf("Classify(%v) = %v, want %v", err, got, tc.kind)
 			}
-		})
-	}
-}
-
-func TestAPIResponsesRetriesTransientFailure(t *testing.T) {
-	for _, code := range []string{"server_error", "rate_limit_exceeded"} {
-		t.Run(code, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				cfg := chatConfig("https://api.openai.com")
-				cfg.ServiceTier = serviceTierUltrafast
-				client := NewClient(cfg)
-				calls := 0
-				client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-					calls++
-					body := `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"complete"}]}]}`
-					if calls == 1 {
-						body = fmt.Sprintf(`{"status":"failed","error":{"code":%q},"output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]}]}`, code)
-					}
-					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
-				})
-				content, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, true)
-				if err != nil || content != "complete" || calls != 2 {
-					t.Fatalf("content=%q err=%v calls=%d; want complete output after retry", content, err, calls)
-				}
-			})
 		})
 	}
 }

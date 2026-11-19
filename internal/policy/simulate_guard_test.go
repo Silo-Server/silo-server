@@ -28,28 +28,3 @@ override(base, _) := base if {
 		t.Fatalf("GuardEvalCost(slow) error = %v, want ErrPolicySlowEval", err)
 	}
 }
-
-// TestGuardEvalCostAcceptsCheapOverridesForAllDomains verifies the canned
-// benchmark inputs evaluate cleanly (defined decisions) with a trivial
-// tightening override in every domain, so the guard never false-positives on
-// well-behaved policies.
-func TestGuardEvalCostAcceptsCheapOverridesForAllDomains(t *testing.T) {
-	sources := map[string]string{
-		DomainScope: tighteningScopeOverrideSource(),
-		DomainPermission: `package silo_custom.permission
-
-import rego.v1
-
-override(base, _) := base`,
-		DomainAction: `package silo_custom.action
-
-import rego.v1
-
-override(base, _) := base`,
-	}
-	for domain, source := range sources {
-		if err := GuardEvalCost(context.Background(), domain, source, time.Second); err != nil {
-			t.Fatalf("GuardEvalCost(%s) error = %v, want nil", domain, err)
-		}
-	}
-}

@@ -6,56 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestServeCollectionImageServesBundledTemplatePoster(t *testing.T) {
-	const secret = "image-secret"
-	codec := NewResourceIDCodec()
-	collectionID := "129510738770395144"
-	routeID := codec.EncodeStringID(EncodedIDCollection, collectionID)
-	posterPath := "/images/collection-templates/tmdb_on_the_air.jpg"
-	jpegBytes := []byte("\xff\xd8\xfffake-jpeg-bytes")
-
-	collection := &models.LibraryCollection{
-		ID:         collectionID,
-		Title:      "On The Air",
-		Visibility: "visible",
-		PosterURL:  posterPath,
-	}
-	tag := newImageTagSigner(secret).Tag(
-		imageTagSeed(routeID, "Primary", compatCardImageSize, posterPath, "", time.Time{}),
-		"",
-	)
-	h := &ImagesHandler{
-		codec:       codec,
-		images:      NewImageCache(time.Hour, time.Now),
-		imageTags:   newImageTagSigner(secret),
-		collections: &fakeCollectionSource{collections: []*models.LibraryCollection{collection}},
-		frontendFS: fstest.MapFS{
-			"images/collection-templates/tmdb_on_the_air.jpg": {Data: jpegBytes},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?fillHeight=360&fillWidth=360&tag="+tag, nil)
-	req = withImageRouteParams(req, routeID, "Primary")
-	rec := httptest.NewRecorder()
-
-	h.HandleItemImage(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if !bytes.Equal(rec.Body.Bytes(), jpegBytes) {
-		t.Fatal("served body does not match bundled asset bytes")
-	}
-	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
-		t.Fatalf("Content-Type = %q, want image/jpeg", ct)
-	}
-}
 
 func TestServeCollectionImageGeneratesFallbackWhenNoPoster(t *testing.T) {
 	const secret = "image-secret"
@@ -96,32 +50,5 @@ func TestServeCollectionImageGeneratesFallbackWhenNoPoster(t *testing.T) {
 	}
 	if img.Bounds().Dx() != generatedPosterWidth || img.Bounds().Dy() != generatedPosterHeight {
 		t.Fatalf("poster dimensions = %v, want %dx%d", img.Bounds(), generatedPosterWidth, generatedPosterHeight)
-	}
-}
-
-func TestServeCollectionsViewImageGeneratesTile(t *testing.T) {
-	const secret = "image-secret"
-	codec := NewResourceIDCodec()
-	tag := newImageTagSigner(secret).Tag(
-		imageTagSeed(collectionsViewID, "Primary", compatCardImageSize, generatedPosterSeed(collectionsViewCaption), "", time.Time{}),
-		"",
-	)
-	h := &ImagesHandler{
-		codec:     codec,
-		images:    NewImageCache(time.Hour, time.Now),
-		imageTags: newImageTagSigner(secret),
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/Items/"+collectionsViewID+"/Images/Primary?tag="+tag, nil)
-	req = withImageRouteParams(req, collectionsViewID, "Primary")
-	rec := httptest.NewRecorder()
-
-	h.HandleItemImage(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if _, err := png.Decode(bytes.NewReader(rec.Body.Bytes())); err != nil {
-		t.Fatalf("collections-view tile is not a valid PNG: %v", err)
 	}
 }

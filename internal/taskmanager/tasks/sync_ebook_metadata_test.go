@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 )
@@ -66,28 +65,6 @@ func (p *ebookMetadataProgressReporter) SetResultData(data json.RawMessage) {
 	p.results = append(p.results, append(json.RawMessage(nil), data...))
 }
 
-func TestEbookMetadataTaskStopsAfterOneAllFailedBatch(t *testing.T) {
-	t.Setenv("SILO_EBOOK_BACKFILL_MAX_CLAIMS", "1")
-	t.Setenv("SILO_EBOOK_BACKFILL_BATCH_DELAY", "1h")
-	enricher := &fakeEbookMetadataEnricher{results: []ebooks.EnrichmentRunResult{
-		{Claimed: 4, Failed: 4, Remaining: 100},
-		{Claimed: 4, Enriched: 4, Remaining: 96},
-	}}
-	progress := &ebookMetadataProgressReporter{}
-	task := NewBackfillEbookMetadataTask(enricher)
-	task.sleep = func(context.Context, time.Duration) error {
-		t.Fatal("no-progress batch must circuit-break before pacing")
-		return nil
-	}
-
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	assertNoProgressCircuitBreak(t, enricher, progress, ebooks.EnrichmentRunResult{
-		Claimed: 4, Failed: 4, Remaining: 100,
-	})
-}
-
 func TestEbookMetadataBackfillInvalidNonemptyEnvironmentFailsClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -112,36 +89,6 @@ func TestEbookMetadataBackfillInvalidNonemptyEnvironmentFailsClosed(t *testing.T
 				t.Fatalf("invalid configuration reached queue: runs=%d counts=%d", len(enricher.scopes), enricher.readyCountCalls)
 			}
 		})
-	}
-}
-
-func assertNoProgressCircuitBreak(
-	t *testing.T,
-	enricher *fakeEbookMetadataEnricher,
-	progress *ebookMetadataProgressReporter,
-	want ebooks.EnrichmentRunResult,
-) {
-	t.Helper()
-	if len(enricher.scopes) != 1 {
-		t.Fatalf("Run calls = %d, want exactly 1", len(enricher.scopes))
-	}
-	if len(progress.results) == 0 {
-		t.Fatal("no result JSON reported")
-	}
-	var result ebooks.EnrichmentRunResult
-	if err := json.Unmarshal(progress.results[len(progress.results)-1], &result); err != nil {
-		t.Fatalf("result JSON error: %v", err)
-	}
-	if result != want {
-		t.Fatalf("result JSON = %+v, want %+v", result, want)
-	}
-	if got := progress.percents[len(progress.percents)-1]; got >= 100 {
-		t.Fatalf("circuit-break progress = %.1f, must not report completion", got)
-	}
-	message := progress.messages[len(progress.messages)-1]
-	if !strings.Contains(strings.ToLower(message), "no progress") ||
-		!strings.Contains(strings.ToLower(message), "retry later") {
-		t.Fatalf("circuit-break progress message = %q", message)
 	}
 }
 

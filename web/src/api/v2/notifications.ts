@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   captureAdminAuthority,
   adminAuthorityScope,
@@ -17,7 +18,7 @@ function notification(
 ): AppNotification {
   const libraryID = row.library_id === undefined ? undefined : Number(row.library_id);
   if (libraryID !== undefined && (!Number.isSafeInteger(libraryID) || libraryID <= 0))
-    throw new Error("Unsupported library ID in notification.");
+    throw new Error(t("web.common.errors.notificationLibraryIdUnsupported"));
   const reasonFlags: NotificationReasonFlags = {};
   const value = row.reason_flags;
   if (value && typeof value === "object") {
@@ -60,7 +61,7 @@ export async function listNotifications(
     typeof body.read_cutoff !== "string" ||
     !body.read_cutoff
   )
-    throw new Error("Invalid notification page. Reload notifications.");
+    throw new Error(t("web.common.errors.notificationPageInvalid"));
   return {
     notifications: body.items.map(notification),
     next_cursor: body.page.has_more ? body.page.next_cursor : undefined,
@@ -68,12 +69,11 @@ export async function listNotifications(
   };
 }
 export type NotifiedSeries = V2Result<"GET /api/v2/notifications/series">["items"][number];
-export type NotifiedSeriesStatus = "active" | "inactive";
+export type NotifiedSeriesStatus = NonNullable<NotifiedSeriesQuery["status"]>;
 type NotifiedSeriesQuery = NonNullable<V2Query<"GET /api/v2/notifications/series">>;
-/** The search, reason filter, and sort the Series view applies to both lists. */
+/** The search and sort the Series view applies to both lists. */
 export type NotifiedSeriesOptions = {
   q?: string;
-  reason?: NotifiedSeriesQuery["reason"];
   sort?: NotifiedSeriesQuery["sort"];
 };
 export async function listNotificationSeries(
@@ -90,7 +90,6 @@ export async function listNotificationSeries(
       cursor,
       image_size: "small",
       q: options.q || undefined,
-      reason: options.reason,
       sort: options.sort,
     },
     profileContext,
@@ -105,7 +104,7 @@ export async function listNotificationSeries(
         !body.page.next_cursor ||
         body.page.next_cursor === cursor))
   )
-    throw new Error("Invalid series page. Reload notifications.");
+    throw new Error(t("web.common.errors.notificationSeriesPageInvalid"));
   return {
     series: body.items,
     next_cursor: body.page.has_more ? body.page.next_cursor : undefined,
@@ -125,6 +124,33 @@ export async function setNotificationSeriesMuted(
     { path: { series_id: seriesId }, profileContext, retryAuthentication: false },
   );
   requireNotificationAuthority(profileContext);
+}
+/** The most series one many-series mute or unmute request names. */
+const SERIES_MUTE_BATCH = 500;
+export type NotificationSeriesMuteResult =
+  V2Result<"POST /api/v2/notifications/series/mute">["results"][number];
+/** Mutes (or unmutes) many series, in requests of up to 500, and answers
+ * every series' outcome in request order. */
+export async function setManyNotificationSeriesMuted(
+  seriesIds: string[],
+  muted: boolean,
+  profileContext = captureNotificationAuthority(),
+): Promise<NotificationSeriesMuteResult[]> {
+  const results: NotificationSeriesMuteResult[] = [];
+  for (let start = 0; start < seriesIds.length; start += SERIES_MUTE_BATCH) {
+    requireNotificationAuthority(profileContext);
+    const body = await v2(
+      muted ? "POST /api/v2/notifications/series/mute" : "POST /api/v2/notifications/series/unmute",
+      {
+        body: { series_ids: seriesIds.slice(start, start + SERIES_MUTE_BATCH) },
+        profileContext,
+        retryAuthentication: false,
+      },
+    );
+    results.push(...body.results);
+  }
+  requireNotificationAuthority(profileContext);
+  return results;
 }
 export async function unreadNotificationCount(profileContext = captureNotificationAuthority()) {
   requireNotificationAuthority(profileContext);
@@ -152,9 +178,6 @@ export async function updateNotificationPreferences(
   const body = await v2("PUT /api/v2/notifications/preferences", {
     body: {
       enabled: input.enabled,
-      notify_favorites: input.notify_favorites,
-      notify_watchlist: input.notify_watchlist,
-      notify_continue_watching: input.notify_continue_watching,
       notify_next_up: input.notify_next_up,
     },
     profileContext,
@@ -180,7 +203,7 @@ export async function markAllNotificationsRead(
   profileContext = captureNotificationAuthority(),
 ) {
   requireNotificationAuthority(profileContext);
-  if (!through) throw new Error("Reload notifications before marking them read.");
+  if (!through) throw new Error(t("web.common.errors.notificationsReloadBeforeMarkingRead"));
   await v2("POST /api/v2/notifications/read-all", {
     body: { through },
     profileContext,

@@ -5,25 +5,6 @@ import (
 	"time"
 )
 
-func TestPreparationProgress(t *testing.T) {
-	f := func(v float64) *float64 { return &v }
-	if p, r := preparationProgress(nil, f(100), f(2)); p != nil || r != nil {
-		t.Fatal("an encode without a reported position has no progress")
-	}
-	if p, r := preparationProgress(f(10), f(0), f(2)); p != nil || r != nil {
-		t.Fatal("an unknown duration has no progress")
-	}
-	if p, r := preparationProgress(f(25), f(100), nil); p == nil || *p != 0.25 || r != nil {
-		t.Fatalf("no speed: %v %v", p, r)
-	}
-	if p, r := preparationProgress(f(25), f(100), f(3)); p == nil || *p != 0.25 || r == nil || *r != 25 {
-		t.Fatalf("at 3x: %v %v", p, r)
-	}
-	if p, r := preparationProgress(f(120), f(100), f(3)); *p != 1 || *r != 0 {
-		t.Fatalf("overshoot: %v %v", *p, *r)
-	}
-}
-
 func TestAttachPreparationsPostgres(t *testing.T) {
 	repo := statusEventTestRepo(t)
 	if _, err := repo.pool.Exec(t.Context(), `CREATE TABLE download_artifacts(

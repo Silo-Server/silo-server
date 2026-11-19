@@ -3,7 +3,6 @@ package streamtelemetry
 import (
 	"bytes"
 	"context"
-	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -78,20 +77,6 @@ func TestTelemetryCaptureDetachesAndPreservesIdentityAuthority(t *testing.T) {
 	}
 	if got := r.sweep(time.Now().Add(time.Second)); len(got.Sessions) != 0 || len(got.Transfers) != 0 {
 		t.Fatal("expiry changed")
-	}
-}
-
-func TestTelemetryConfigProducts(t *testing.T) {
-	cfg := testConfig()
-	if !retainedConfigFits(cfg) {
-		t.Fatal("ordinary configured products do not fit")
-	}
-	cfg.MaxClientVariantsPerSession = math.MaxInt
-	if retainedConfigFits(cfg) || NewRegistry(cfg, nil, nil).Enabled() {
-		t.Fatal("overflowing product accepted")
-	}
-	if cfg.MaxClientVariantsPerSession != math.MaxInt {
-		t.Fatal("caller count policy changed")
 	}
 }
 

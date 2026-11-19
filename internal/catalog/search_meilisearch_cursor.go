@@ -193,33 +193,56 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 	if err != nil {
 		return nil, err
 	}
-	request, fallback := p.buildMeilisearchSearchRequest(ctx, req)
-	if compatibility == catalogSearchIndexKeywordOnly {
-		request = p.buildMeilisearchKeywordSearchRequest(req)
-		fallback = "search index rebuild required; using Meilisearch keyword search"
-	}
+	request, fallback := p.buildIndexSearchRequest(ctx, req, state, compatibility == catalogSearchIndexKeywordOnly)
 	request.Offset, request.Limit = 0, window
-	var response meilisearchSearchResponse
-	// Hybrid searches always federate: see buildFederatedSearchRequest.
-	if request.Hybrid != nil && !p.isFederationUnsupported() {
-		response, err = p.client.FederatedSearch(ctx, p.buildFederatedSearchRequest(state.ActiveIndexUID, req, request, 0, window))
-		if err != nil && isMeilisearchFederationUnsupported(err) {
-			p.markFederationUnsupported()
+	var ids []string
+	semanticUsed := false
+	if request.Hybrid != nil {
+		merged, hybridErr := p.hybridSearch(ctx, state.ActiveIndexUID, req, request, window)
+		if hybridErr == nil {
+			ids, semanticUsed = merged.IDs, merged.SemanticRanked > 0
+		} else {
+			p.warnHybridFallback(ctx, hybridErr)
 			request.Hybrid, request.Vector = nil, nil
-			fallback = "Meilisearch federation unsupported; using keyword search"
-			response, err = p.client.Search(ctx, state.ActiveIndexUID, request)
+			fallback = "Meilisearch hybrid search failed; using keyword search"
 		}
-	} else {
-		if request.Hybrid != nil {
-			request.Hybrid, request.Vector = nil, nil
-			fallback = "Meilisearch federation unsupported; using keyword search"
-		}
-		response, err = p.client.Search(ctx, state.ActiveIndexUID, request)
 	}
-	if err != nil && request.Hybrid != nil {
-		request.Hybrid, request.Vector = nil, nil
-		fallback = "Meilisearch hybrid search failed; using keyword search"
-		response, err = p.client.Search(ctx, state.ActiveIndexUID, request)
+	if request.Hybrid == nil {
+		ids, err = p.keywordRankingWindow(ctx, state.ActiveIndexUID, request, window)
+		if err != nil {
+			return nil, err
+		}
+	}
+	ids, err = p.filterRankingWindow(ctx, req, ids)
+	if err != nil {
+		return nil, err
+	}
+	// A hybrid search whose meaning half matched nothing above the floor
+	// ranked by keyword alone, so it reports keyword without a fallback.
+	mode := searchModeKeyword
+	if semanticUsed {
+		mode = searchModeHybrid
+	}
+	return &searchRankingSession{Scope: searchScopeDigest(req), Config: config, IDs: ids,
+		Mode: mode, SemanticUsed: semanticUsed, FallbackReason: fallback,
+		WindowLimit: window, ExpiresAt: time.Now().UTC().Add(searchSessionTTL)}, nil
+}
+
+// keywordRankingWindow returns the content IDs of a keyword search's ranking
+// window: the keyword and people queries combined (keywordRanking), or, while
+// no people query is sent, the one keyword query cut to the hits that match
+// as well as its first (keywordSearch). A failure falls back to PostgreSQL
+// and trips the circuit when Meilisearch itself is at fault.
+func (p *MeilisearchSearchProvider) keywordRankingWindow(ctx context.Context, indexUID string, request meilisearchSearchRequest, window int) ([]string, error) {
+	var ids []string
+	var fetched int
+	var err error
+	if _, withPeople := peopleSearchRequest(request); withPeople {
+		ids, fetched, err = p.keywordRanking(ctx, indexUID, request, window)
+	} else {
+		var page meilisearchKeywordPage
+		page, err = p.keywordSearch(ctx, indexUID, request, nil)
+		ids, fetched = meilisearchHitIDs(page.Kept), page.Fetched
 	}
 	if err != nil {
 		if p.shouldTripCircuit(err) {
@@ -227,33 +250,10 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 		}
 		return nil, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
 	}
-	ids := make([]string, 0, len(response.Hits))
-	seen := make(map[string]struct{}, len(response.Hits))
-	for _, hit := range response.Hits {
-		id := strings.TrimSpace(hit.ContentID)
-		if id == "" {
-			continue
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	if len(response.Hits) > window {
+	if fetched > window {
 		return nil, ErrSearchWindowUnsupported
 	}
-	ids, err = p.filterRankingWindow(ctx, req, ids)
-	if err != nil {
-		return nil, err
-	}
-	mode := searchModeKeyword
-	if request.Hybrid != nil {
-		mode = searchModeHybrid
-	}
-	return &searchRankingSession{Scope: searchScopeDigest(req), Config: config, IDs: ids,
-		Mode: mode, SemanticUsed: request.Hybrid != nil, FallbackReason: fallback,
-		WindowLimit: window, ExpiresAt: time.Now().UTC().Add(searchSessionTTL)}, nil
+	return ids, nil
 }
 
 // The source is the provider's bounded ranking window, never the full catalog.

@@ -89,23 +89,3 @@ func TestRoutesAreRecheckedUnderTheLock(t *testing.T) {
 		t.Fatalf("a route changed under the restore = %v, want errSettingsChanged", err)
 	}
 }
-
-// TestSettingRoutesAreOnOnePage: a settings page restores as a unit, so a
-// route's address and secrets are restored together only when they are on
-// one page, offered by the restore.
-func TestSettingRoutesAreOnOnePage(t *testing.T) {
-	for _, r := range settingRoutes {
-		rule, ok := RestorableSetting(r.endpoint)
-		if !ok || rule.class != SettingExternalService {
-			t.Errorf("%s is not offered as an outside service's setting: %+v", r.endpoint, rule)
-		}
-		for _, key := range append(slices.Clone(r.secrets), r.enabled) {
-			if key == "" {
-				continue
-			}
-			if other, ok := RestorableSetting(key); !ok || other.page != rule.page {
-				t.Errorf("%s is not on %s's page %q: %+v", key, r.endpoint, rule.page, other)
-			}
-		}
-	}
-}

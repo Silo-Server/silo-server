@@ -21,7 +21,7 @@ type RedisDraft = Pick<
 export function stageRedisUrl(draft: RedisDraft, url: string) {
   draft.setValue("redis.url", url);
   const shown = draft.getValue("redis.db");
-  if (shown !== "") draft.setValue("redis.db", shown);
+  if (shown !== "") draft.setValue("redis.db", shown, { stage: true });
 }
 
 /**

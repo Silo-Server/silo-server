@@ -25,7 +25,7 @@ env:
   # commit. Built from source below rather than downloaded: a released binary
   # refuses to run against a Go version newer than the one it was built with,
   # and go.mod tracks Go closely enough that this repo is regularly ahead.
-  GOLANGCI_LINT_VERSION: v2.12.2
+  GOLANGCI_LINT_VERSION: v2.15.0
 
 # The default token is read-write. Only the cache prune job writes, and only
 # to the Actions cache; every other job keeps a read-only token, which is one

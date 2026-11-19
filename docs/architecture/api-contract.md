@@ -739,7 +739,7 @@ does for the Apple display token. The link authorizes the start of a request; a 
 began in time may run longer.
 
 The playback delivery routes (`getPlaybackMedia`, `getPlaybackManifest`, `getPlaybackSegment`,
-`getPlaybackSubtitle` and their HEAD forms) accept the plan's signed stream reference `st` the
+`getPlaybackSubtitle` and the HEAD forms of the media, manifest and subtitle routes) accept the plan's signed stream reference `st` the
 same way, for a receiver such as a Google Cast device that is handed only the plan URL. A request
 with an `Authorization` header or a `token` parameter takes the account path unchanged. Without
 either, a valid `st` that names a playback session (not a download, theme song or bandwidth
@@ -1182,6 +1182,16 @@ contract is:
   `Content-Type: application/json` on every branch. Revision (2026-09-15, with local artwork
   storage): storage outages no longer remove a node from rotation, because the API keeps
   answering and artwork routes fail on their own; `degraded` is additive to the frozen shape.
+  Dependency checks run concurrently with a shared one-second request budget, so a hung
+  dependency produces an answer instead of a request that never completes. A Postgres timeout,
+  including a wait for a free pool connection, returns `503`; a storage timeout reports
+  `degraded` when Postgres is healthy. Artwork probes remain shared and cached for 30 seconds;
+  a request stops waiting at its deadline without canceling the shared probe or starting
+  another while it is still running. While a refresh is still running, a request reports the
+  previous artwork result until the refresh's five-second timeout, then reports failure at once
+  without waiting out its deadline, until the stuck probe returns. Before the first artwork
+  probe finishes there is no previous result, so a request that reaches its deadline first
+  reports `artwork: false`; with Postgres healthy that answer is `200` with `degraded`.
   Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
   answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
   while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the
@@ -1332,7 +1342,8 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 `{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
-the entry existed. The four favorites and watchlist mutations are `natural_idempotent`: each
+the entry existed. A rating, and an item's `user_rating`, run from 1 to 10, which clients show as
+five stars with half stars (7 is three and a half). The four favorites and watchlist mutations are `natural_idempotent`: each
 store add and remove reports whether it inserted or deleted the row, and the shared seam
 sends the provider list event, the recommendation refresh, and the user-state event only for a
 change, so a repeated add or remove answers `204` and notifies nobody. The notices run detached
@@ -1548,7 +1559,9 @@ and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` 
 `listHomeSections` and `listLibrarySections` answer only rows that have items for the viewer: a row
 whose titles all sit outside the viewer's library access or rating limits, an off-season seasonal
 row, a row whose fetch failed, and a row whose recipe avoids duplicates and whose items all appeared
-in earlier rows are left out, so no client has to hide an empty row itself. The rule applies to the
+in earlier rows are left out, so no client has to hide an empty row itself. A row of collections
+(`collection_posters`) has no items: it counts as having something to show while its `collections`
+holds a card (see [Rows of collections](../catalog-api.md#rows-of-collections)). The rule applies to the
 rows each request resolves, so a web-only hero row or a different `item_limit` can still change
 which rows a client gets. The layout still lists every resolved row, because it is built before any row is fetched. `getHomeSectionItems` answers an
 empty row asked for by ID, and answers a row the duplicate filter emptied with its items, because

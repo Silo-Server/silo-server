@@ -73,7 +73,7 @@ func (h *PlaybackHandler) HandleAttachment(w http.ResponseWriter, r *http.Reques
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), source.FileID)
 	if err != nil {
-		writeError(w, 404, "NotFound", "Media file not found")
+		writeCompatFileLookupError(w, r, source.FileID, err)
 		return
 	}
 	attachCompatStream(r.Context(), session, negotiated, source.FileID)

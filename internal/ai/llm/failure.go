@@ -20,6 +20,12 @@ func (e *unusableError) Is(target error) bool { return target == ErrUnusableResp
 
 func unusable(message string) error { return &unusableError{message: message} }
 
+// ErrTimedSegmentsUnsupported marks a transcription model that cannot return
+// the timed segments subtitles are built from: it rejects verbose_json or
+// timestamp granularities (OpenAI's gpt-transcribe), or answers with text
+// only. Retrying or another audio file cannot fix it; only another model can.
+var ErrTimedSegmentsUnsupported = errors.New("transcription model does not return timed segments")
+
 // FailureKind groups AI endpoint failures by what a person can do about
 // them. Callers map a kind to copy for their own audience; Error() text of
 // these errors carries provider-controlled details and must not be shown.

@@ -40,6 +40,10 @@ type SearchIndexState struct {
 	LastSyncAt           *time.Time
 	LastProcessedEventID int64
 	UpdatedAt            time.Time
+	// SettingsFingerprint is catalogSearchMeilisearchSettingsFingerprint as of
+	// the last rebuild or in-place settings update of the active index; empty
+	// when unknown, which the sync task treats as different.
+	SettingsFingerprint string
 }
 
 type SearchIndexEventRepository struct {
@@ -501,7 +505,8 @@ func (r *SearchIndexEventRepository) GetState(ctx context.Context, provider stri
 	}
 	err := r.pool.QueryRow(ctx, `
 		SELECT provider, active_index_uid, schema_version, document_count,
-		       last_rebuild_at, last_sync_at, last_processed_event_id, updated_at
+		       last_rebuild_at, last_sync_at, last_processed_event_id, updated_at,
+		       COALESCE(settings_fingerprint, '')
 		FROM catalog_search_index_state
 		WHERE provider = $1
 	`, provider).Scan(
@@ -513,6 +518,7 @@ func (r *SearchIndexEventRepository) GetState(ctx context.Context, provider stri
 		&state.LastSyncAt,
 		&state.LastProcessedEventID,
 		&state.UpdatedAt,
+		&state.SettingsFingerprint,
 	)
 	if errors.Is(err, pgx.ErrNoRows) || isSearchIndexSchemaUnavailable(err) {
 		return state, nil
@@ -520,25 +526,47 @@ func (r *SearchIndexEventRepository) GetState(ctx context.Context, provider stri
 	return state, err
 }
 
-func (r *SearchIndexEventRepository) UpdateStateAfterRebuild(ctx context.Context, provider, activeIndexUID string, schemaVersion, documentCount int, lastProcessedEventID int64) error {
+func (r *SearchIndexEventRepository) UpdateStateAfterRebuild(ctx context.Context, provider, activeIndexUID string, schemaVersion int, settingsFingerprint string, documentCount int, lastProcessedEventID int64) error {
 	if r == nil || r.pool == nil {
 		return nil
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO catalog_search_index_state (
 			provider, active_index_uid, schema_version, document_count,
-			last_rebuild_at, last_sync_at, last_processed_event_id, updated_at
+			last_rebuild_at, last_sync_at, last_processed_event_id, updated_at,
+			settings_fingerprint
 		)
-		VALUES ($1, $2, $3, $4, NOW(), NOW(), $5, NOW())
+		VALUES ($1, $2, $3, $4, NOW(), NOW(), $5, NOW(), $6)
 		ON CONFLICT (provider) DO UPDATE SET
 			active_index_uid = EXCLUDED.active_index_uid,
 			schema_version = EXCLUDED.schema_version,
+			settings_fingerprint = EXCLUDED.settings_fingerprint,
 			document_count = EXCLUDED.document_count,
 			last_rebuild_at = EXCLUDED.last_rebuild_at,
 			last_sync_at = EXCLUDED.last_sync_at,
 			last_processed_event_id = GREATEST(catalog_search_index_state.last_processed_event_id, EXCLUDED.last_processed_event_id),
 			updated_at = NOW()
-	`, provider, activeIndexUID, schemaVersion, documentCount, lastProcessedEventID)
+	`, provider, activeIndexUID, schemaVersion, documentCount, lastProcessedEventID, settingsFingerprint)
+	if isSearchIndexSchemaUnavailable(err) {
+		return nil
+	}
+	return err
+}
+
+// UpdateSettingsFingerprint records that activeIndexUID now has the index
+// settings settingsFingerprint identifies. It changes nothing when another
+// index has become active since.
+func (r *SearchIndexEventRepository) UpdateSettingsFingerprint(ctx context.Context, provider, activeIndexUID, settingsFingerprint string) error {
+	if r == nil || r.pool == nil {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE catalog_search_index_state
+		SET settings_fingerprint = $3,
+		    updated_at = NOW()
+		WHERE provider = $1
+		  AND active_index_uid = $2
+	`, provider, activeIndexUID, settingsFingerprint)
 	if isSearchIndexSchemaUnavailable(err) {
 		return nil
 	}

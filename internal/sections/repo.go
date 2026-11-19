@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -285,7 +286,7 @@ func (r *Repository) CountLibraryCollectionReferences(ctx context.Context, colle
 	if collectionID == "" {
 		return 0, nil
 	}
-	query := "SELECT COUNT(*) FROM page_sections WHERE config->>'library_collection_id' = $1"
+	query := "SELECT COUNT(*) FROM page_sections WHERE " + catalog.SectionConfigReferencesCollection("config", "$1")
 	args := []any{collectionID}
 	if excludeSectionID != "" {
 		query += " AND id <> $2"
@@ -326,7 +327,7 @@ func (r *Repository) ListLibraryCollectionReferences(ctx context.Context, collec
 			(SELECT COUNT(*) FROM page_sections p
 			 WHERE p.scope = s.scope AND p.library_id IS NOT DISTINCT FROM s.library_id)
 		FROM page_sections s
-		WHERE s.config->>'library_collection_id' = $1
+		WHERE `+catalog.SectionConfigReferencesCollection("s.config", "$1")+`
 		ORDER BY s.scope <> 'home', s.library_id, s.position, s.id`, collectionID)
 	if err != nil {
 		return nil, fmt.Errorf("listing library collection section references: %w", err)
@@ -360,9 +361,10 @@ func (r *Repository) CountLibraryCollectionReferencesByID(ctx context.Context, c
 		return out, nil
 	}
 	rows, err := r.query(ctx).Query(ctx, `
-		SELECT config->>'library_collection_id', COUNT(*) FILTER (WHERE scope = 'home' AND enabled), COUNT(*)
-		FROM page_sections
-		WHERE config->>'library_collection_id' = ANY($1::text[])
+		SELECT ref.id, COUNT(*) FILTER (WHERE s.scope = 'home' AND s.enabled), COUNT(*)
+		FROM page_sections s
+		CROSS JOIN LATERAL `+catalog.SectionConfigCollectionIDs("s.config")+` ref
+		WHERE ref.id = ANY($1::text[])
 		GROUP BY 1`, collectionIDs)
 	if err != nil {
 		return nil, fmt.Errorf("counting library collection section references: %w", err)

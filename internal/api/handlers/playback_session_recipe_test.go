@@ -7,9 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 
 	"github.com/go-chi/chi/v5"
 
@@ -36,7 +40,7 @@ type headerAuthRestartFixtureV3 struct {
 
 // restart is the API process after a restart: nothing in memory.
 func (f headerAuthRestartFixtureV3) restart() *PlaybackHandler {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	f.configure(handler)
 	return handler
 }
@@ -127,7 +131,7 @@ func TestSessionRecipeRetentionOnStop(t *testing.T) {
 			manager := playback.NewSessionManager(0, 0)
 			manager.RegisterReconstructed(&playback.Session{ID: "session-recipe-stop", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayTranscode, RequireMediaAuthorization: true,
 				TranscodeNodeURL: test.nodeURL, TranscodeTransportID: "session-recipe-stop-transport"})
-			handler := NewPlaybackHandler(manager)
+			handler := newKeyedPlaybackHandler(manager)
 			recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
 				"session-recipe-stop": {SessionID: "session-recipe-stop", UserID: 1, PlanID: "plan:current", RequireMediaAuthorization: true},
 			}}
@@ -168,7 +172,7 @@ func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.Sta
 		return node
 	}
 	first, second := newNode(), newNode()
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: first.URL, Enabled: true, Healthy: true},
 		{ID: 2, URL: second.URL, Enabled: true, Healthy: true},
@@ -186,6 +190,7 @@ func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.Sta
 	f.configure = func(handler *PlaybackHandler) {
 		handler.fileResolver = testPlaybackFileResolver{file: file}
 		handler.JWTSecret = "test-secret"
+		handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true", "allow_4k_transcode": "true"}}
 		handler.ItemAccess = allowAllPlaybackItemAccess{}
 		handler.PlaybackConfig = playbackTestConfig(ffmpeg, transcodeDir)
@@ -199,7 +204,7 @@ func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.Sta
 			{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
 		})
 	}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	f.configure(handler)
 
 	start := v3HandlerStartRequest()
@@ -306,6 +311,17 @@ func TestHeaderAuthenticatedTranscodeRecoversAfterAnAPIRestart(t *testing.T) {
 			if body := rr.Body.String(); body != "served-by "+f.startedOn {
 				t.Fatalf("manifest body = %q, want the relay from the node the transcode runs on", body)
 			}
+			// The card is written while the transport is prepared, before the
+			// started plan reaches the session; it must still carry that plan's
+			// reasons, so the admin views keep them after the restart.
+			stored := f.recipes.cards[f.started.SessionID].AdaptationReasons
+			rebuilt, err := restarted.sessionMgr.GetSession(f.started.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(stored) == 0 || !slices.Equal(rebuilt.AdaptationReasons, stored) {
+				t.Fatalf("adaptation reasons: card %v, rebuilt session %v; want the started plan's on both", stored, rebuilt.AdaptationReasons)
+			}
 			rr = httptest.NewRecorder()
 			restarted.HandleGetTranscodeSegment(rr, transcodeServeRequestV3(owner(), f.started.SessionID, "seg_00004.ts"))
 			if rr.Code != http.StatusOK {
@@ -373,8 +389,9 @@ func TestHeaderAuthenticatedDirectStreamRecoversAfterAnAPIRestart(t *testing.T) 
 	file := v3HandlerFixtureFile(t)
 	attempts := playback.NewMemoryPlanStoreV3()
 	recipes := &recordingRecipeCardStoreV3{}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.PlanStoreV3 = attempts
@@ -391,7 +408,7 @@ func TestHeaderAuthenticatedDirectStreamRecoversAfterAnAPIRestart(t *testing.T) 
 	}
 
 	manager := playback.NewSessionManager(0, 0)
-	restarted := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	restarted := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 	stream := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
 	stream.TM = restarted.TranscodeManager()
 	stream.PlanStoreV3 = attempts

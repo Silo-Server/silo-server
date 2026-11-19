@@ -184,6 +184,7 @@ func TestListAdminCatalogItemsDB(t *testing.T) {
 		{AdminCatalogItemFilter{ContentIDs: fx.every}, 2},
 		{AdminCatalogItemFilter{ContentIDs: []string{fx.movieA}}, 2},
 		{AdminCatalogItemFilter{ContentIDs: fx.every, People: true}, 3},
+		{AdminCatalogItemFilter{ContentIDs: fx.every, FilePaths: true}, 2},
 	} {
 		tracer.selects.Store(0)
 		page, err := repo.ListAdminCatalogItems(t.Context(), c.filter, "", 50)
@@ -192,6 +193,14 @@ func TestListAdminCatalogItemsDB(t *testing.T) {
 		}
 		if n := tracer.selects.Load(); n != c.want {
 			t.Fatalf("a page of %+v ran %d statements, want %d", c.filter, n, c.want)
+		}
+		if c.filter.FilePaths {
+			p := strings.TrimSuffix(fx.movieA, "-movie-a")
+			ep, movie := page.Items[0], page.Items[1]
+			got := []string{movie.Versions[0].FilePath, movie.Versions[1].FilePath, ep.Versions[0].FilePath}
+			if want := []string{"/" + p + "/a-2160.mkv", "/" + p + "/a-1080.mp4", "/" + p + "/s01e01.mkv"}; !slices.Equal(got, want) {
+				t.Fatalf("file paths = %v, want %v", got, want)
+			}
 		}
 		if c.filter.People {
 			movie := page.Items[1]

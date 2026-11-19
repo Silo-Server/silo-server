@@ -41,7 +41,11 @@ stays pending and shows as `failed` in each sweep's `result`.
 `lock_conflict` is empty unless the stored embedding lock rejects the
 embedding endpoint or model this server runs with (including running with no
 embedding provider chosen), or records a vector size Silo cannot store. It is
-then a sentence for the administrator that never quotes a base URL. The
+then a sentence for the administrator that never quotes a base URL.
+`lock_conflict_key` and `lock_conflict_args` come with it: the sentence's
+translation catalog key and the values of its placeholders, which the web shows
+in a non-English interface, as connection check results carry `message_key`
+and `message_args`. Both are absent when `lock_conflict` is empty. The
 embedding provider and model take effect after a restart, so a saved but not
 yet applied change does not show here; the embedding connection check reports
 it instead. A new key for the provider applies without a restart. `cache_refreshed_at` is when the newest cached

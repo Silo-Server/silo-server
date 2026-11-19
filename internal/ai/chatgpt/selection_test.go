@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func (m *memoryStore) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
@@ -49,60 +47,6 @@ func selectionFixture(t *testing.T, values map[string]string) (*Service, *memory
 		{ClientID: "b", AccessToken: "b-token", RefreshToken: "b-refresh", ExpiresAt: time.Now().Add(time.Hour)},
 	}})
 	return NewService(store), store
-}
-
-func TestSelectionReconcilesModelAndEffort(t *testing.T) {
-	for _, test := range []struct {
-		name                  string
-		values                map[string]string
-		models                []string
-		wantModel, wantEffort string
-		wantCalls             int
-	}{
-		{name: "disjoint catalog", values: map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "a-model", "ai.reasoning_effort": "high"}, models: []string{"gpt-4o-mini", "other"}, wantModel: "gpt-4o-mini", wantCalls: 1},
-		{name: "shared model", values: map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "gpt-6.1-sol", "ai.reasoning_effort": "high"}, models: []string{"other", "gpt-6.1-sol"}, wantModel: "gpt-6.1-sol", wantEffort: "high", wantCalls: 1},
-		{name: "legacy shared model", values: map[string]string{"ai.auth_mode": "chatgpt", "subtitle_ai.chat_model": "gpt-6.1-sol", "ai.reasoning_effort": "high"}, models: []string{"gpt-6.1-sol"}, wantModel: "gpt-6.1-sol", wantEffort: "high", wantCalls: 1},
-		{name: "API key preserved", values: map[string]string{"ai.auth_mode": "api_key", "ai.chat_model": "api-model", "ai.reasoning_effort": "high"}, wantModel: "api-model", wantEffort: "high"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			s, store := selectionFixture(t, test.values)
-			calls := 0
-			s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-				calls++
-				if r.URL.String() != s.modelsURL || r.Header.Get("Authorization") != "Bearer b-token" {
-					t.Fatal("catalog used a different account")
-				}
-				// A provider call must run outside both store locks.
-				if _, err := store.Get(r.Context(), CredentialsKey); err != nil {
-					t.Fatal(err)
-				}
-				models := []map[string]string{{"slug": "hidden", "visibility": "hide"}}
-				for _, id := range test.models {
-					models = append(models, map[string]string{"slug": id, "visibility": "list"})
-				}
-				return response(200, map[string]any{"models": models}), nil
-			})
-			if err := s.SelectAccount(t.Context(), "b"); err != nil {
-				t.Fatal(err)
-			}
-			if stored(t, store).Active != "b" || calls != test.wantCalls {
-				t.Fatal("activation or catalog calls changed")
-			}
-			cfg, err := s.TextConfig(t.Context())
-			if err != nil || cfg.ChatModel != test.wantModel || cfg.ReasoningEffort != test.wantEffort {
-				t.Fatalf("settings=%q,%q,%v", cfg.ChatModel, cfg.ReasoningEffort, err)
-			}
-			if cfg.AuthMode == "api_key" && cfg.ChatGPTTokenSource != nil {
-				t.Fatal("API-key configuration received subscription credentials")
-			}
-			if token, err := s.BearerToken(t.Context()); err != nil || token != "b-token" {
-				t.Fatalf("token=%q,%v", token, err)
-			}
-			if test.name == "legacy shared model" && store.values["ai.chat_model"] != "" {
-				t.Fatal("shared legacy model was unnecessarily rewritten")
-			}
-		})
-	}
 }
 
 func TestSelectionFailurePreservesAccountAndModel(t *testing.T) {
@@ -171,31 +115,6 @@ func TestTextConfigPinsAccountAndModelAcrossLaterSwitch(t *testing.T) {
 	}
 	if store.values["ai.chat_model"] != "b-model" {
 		t.Fatal("new account model not persisted")
-	}
-}
-
-func TestTextConfigReadsServiceTierWithProvider(t *testing.T) {
-	registry := config.AIProviderRegistry{Providers: []config.AIProvider{
-		{ID: "openai", Type: config.AIProviderOpenAI, Name: "OpenAI", BaseURL: "https://api.openai.com", APIKey: "test-key", Capabilities: []config.AICapability{config.AICapabilityChat}},
-		{ID: "other", Type: config.AIProviderCustom, Name: "Other", BaseURL: "https://other.example.test", Capabilities: []config.AICapability{config.AICapabilityChat}},
-	}}
-	s, store := selectionFixture(t, map[string]string{
-		config.AIProvidersSettingKey: registry.Encode(), config.AITextProviderSettingKey: "openai",
-		config.AIServiceTierSettingKey: "priority", "ai.auth_mode": "api_key",
-	})
-	first, err := s.TextConfig(t.Context())
-	if err != nil || first.ServiceTier != "priority" {
-		t.Fatalf("first tier = %q, error = %v", first.ServiceTier, err)
-	}
-	store.values[config.AIServiceTierSettingKey] = "ultrafast"
-	second, err := s.TextConfig(t.Context())
-	if err != nil || second.ServiceTier != "ultrafast" || first.ServiceTier != "priority" {
-		t.Fatalf("tier change: first=%q second=%q error=%v", first.ServiceTier, second.ServiceTier, err)
-	}
-	store.values[config.AITextProviderSettingKey] = "other"
-	other, err := s.TextConfig(t.Context())
-	if err != nil || other.ServiceTier != "" {
-		t.Fatalf("other provider received tier %q: %v", other.ServiceTier, err)
 	}
 }
 

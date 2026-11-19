@@ -1,5 +1,6 @@
 import type { AccessGroup } from "@/api/types";
 import { t } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
 import { PLAYBACK_QUALITY_OPTIONS, playbackQualityPresetFromValue } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
@@ -75,11 +76,11 @@ function allowed(value: boolean) {
 function libraries(ids: number[] | null, names: ReadonlyMap<number, string>) {
   if (ids === null) return t("web.admin.access.groups.card.allLibraries");
   if (ids.length === 0) return t("web.admin.access.groups.changes.noLibraries");
-  return ids
-    .map(
+  return joinList(
+    ids.map(
       (id) => names.get(id) ?? t("web.admin.access.groups.changes.libraryId", { id: String(id) }),
-    )
-    .join(", ");
+    ),
+  );
 }
 
 // Names the group editor shows for the assignable permissions.
@@ -93,7 +94,7 @@ function permissionLabel(value: string) {
 function permissions(values: string[] | null) {
   if (values === null) return t("web.admin.access.groups.changes.allPermissions");
   if (values.length === 0) return t("web.admin.access.groups.changes.noPermissions");
-  return values.map(permissionLabel).sort().join(", ");
+  return joinList(values.map(permissionLabel).sort());
 }
 
 function quality(value: string) {

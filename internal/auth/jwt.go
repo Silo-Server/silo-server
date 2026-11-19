@@ -35,6 +35,9 @@ type Claims struct {
 	// JWT sessions and unscoped keys. Never serialized into issued JWTs —
 	// it only exists on claims built for API-key requests.
 	APIKeyScopes []string `json:"-"`
+	// APIKeyProfileID is the household profile the authenticating API key is
+	// bound to; empty for JWT sessions and account keys. Never serialized.
+	APIKeyProfileID string `json:"-"`
 	// FileID is the one media file a direct-download link token authorizes;
 	// zero on every other token type.
 	FileID int `json:"file_id,omitempty"`

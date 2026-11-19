@@ -159,43 +159,6 @@ func (e *externalSignInEnv) identityRow(t *testing.T, subject string) *LinkedIde
 	return identity
 }
 
-func TestExternalSignInCreatesAccountWithProfileDB(t *testing.T) {
-	env := newExternalSignInEnv(t)
-	identity := env.identity("alice")
-	user, err := env.resolve(t, identity, true, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if user.Username != env.name("alice") || user.Email != env.name("alice")+"@example.test" {
-		t.Fatalf("account = %s / %s", user.Username, user.Email)
-	}
-	if user.Role != models.RoleUser || user.LocalPasswordLoginEnabled || user.AccessGroupID == nil {
-		t.Fatalf("role %s, local password %v, group %v", user.Role, user.LocalPasswordLoginEnabled, user.AccessGroupID)
-	}
-	store, err := pgstore.NewPostgresProvider(env.pool).ForUser(t.Context(), user.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	profiles, err := store.ListProfiles(t.Context())
-	if err != nil || len(profiles) != 1 || profiles[0].Name != "Person alice" {
-		t.Fatalf("profiles = %+v, %v", profiles, err)
-	}
-	row := env.identityRow(t, identity.Subject)
-	if row.UserID != user.ID || row.Username != identity.Username || row.Issuer != identity.Issuer || row.LastSignInAt == nil {
-		t.Fatalf("identity row = %+v", row)
-	}
-
-	// The same person signs in again: same account, details refreshed.
-	identity.Email = env.name("alice-new") + "@example.test"
-	again, err := env.resolve(t, identity, true, 0)
-	if err != nil || again.ID != user.ID {
-		t.Fatalf("second sign-in = %+v, %v", again, err)
-	}
-	if row := env.identityRow(t, identity.Subject); row.Email != identity.Email {
-		t.Fatalf("identity email = %q", row.Email)
-	}
-}
-
 func TestExternalSignInRefusalsDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 

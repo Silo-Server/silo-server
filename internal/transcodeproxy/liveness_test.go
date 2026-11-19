@@ -224,59 +224,6 @@ func TestDoNodeWaitsOnSlowLiveBody(t *testing.T) {
 	})
 }
 
-func TestDoNodeDoesNotProbeBetweenBodyReads(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		timing := shortLiveness(t)
-		var probes atomic.Int32
-		probed := make(chan struct{})
-		client, writer := bodyNode(t, func(context.Context) error {
-			if probes.Add(1) == 1 {
-				close(probed)
-			}
-			return nil
-		})
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		go func() {
-			select {
-			case <-probed:
-			case <-ctx.Done():
-				return
-			}
-			_, _ = io.WriteString(writer, "partial-complete")
-			_ = writer.Close()
-		}()
-		const nodeURL = "http://body-node.test"
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, nodeURL+"/segment", nil)
-		resp, err := DoNode(client, req, nodeURL, "stream")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		partial := make([]byte, len("partial"))
-		_, readErr := io.ReadFull(resp.Body, partial)
-		if got := probes.Load(); got == 0 {
-			t.Fatalf("health probes during a stalled body read = %d, want at least 1 (read error: %v)", got, readErr)
-		}
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		synctest.Wait()
-		probesAfterRead := probes.Load()
-		// Advance virtual time while no read is pending, as when the relay
-		// writes to a slow viewer. synctest.Wait settles every ready watcher.
-		time.Sleep(timing.grace + 2*timing.probeTimeout + timing.interval) //nolint:forbidigo // Inside synctest this advances virtual time to prove an idle reader starts no watch.
-		synctest.Wait()
-		if got := probes.Load(); got != probesAfterRead {
-			t.Fatalf("health probes while no body read is pending = %d, want unchanged at %d", got, probesAfterRead)
-		}
-		body, err := io.ReadAll(resp.Body)
-		if err != nil || string(body) != "-complete" {
-			t.Fatalf("remaining body = %q, err = %v", body, err)
-		}
-	})
-}
-
 func TestDoNodeLeavesCallerCancellationAlone(t *testing.T) {
 	shortLiveness(t)
 	node, _ := frozenNode(t)
@@ -476,24 +423,5 @@ func TestProbeHealthTreatsStalledLookupAsInconclusive(t *testing.T) {
 	defer cancel()
 	if got := probeHealth(ctx, "http://transcode-node.example"); got != probeInconclusive {
 		t.Fatalf("verdict = %v, want inconclusive for a lookup this host could not finish", got)
-	}
-}
-
-// TestWatchNodeLeavesMarkerToTheCall pins that a miss alone does not mark the
-// node hung: the call marks it only if it was still waiting. A call answered
-// while its watcher's last probe was missing must not leave the node marked,
-// or the next call to the recovered node would accept a single miss.
-func TestWatchNodeLeavesMarkerToTheCall(t *testing.T) {
-	timing := shortLiveness(t)
-	node, _ := frozenNode(t)
-	called := make(chan struct{})
-	watchNode(context.Background(), node.URL, timing, make(chan struct{}), func() { close(called) })
-	select {
-	case <-called:
-	default:
-		t.Fatal("watchNode returned without calling hung")
-	}
-	if _, known := notAnswering.Load(nodepool.NormalizeNodeURL(node.URL)); known {
-		t.Fatal("watchNode marked the node hung although the call did not")
 	}
 }

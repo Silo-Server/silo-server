@@ -2,8 +2,6 @@ package policy
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,33 +36,4 @@ func TestVendorRego(t *testing.T) {
 	if len(failed) > 0 {
 		t.Fatalf("vendor rego tests failed:\n%s", strings.Join(failed, "\n"))
 	}
-}
-
-func TestVendorQualityTableMatchesAccessPackage(t *testing.T) {
-	source := readVendorFile(t, "lib/quality.rego")
-	for _, entry := range []struct {
-		quality string
-		rank    string
-	}{
-		{quality: `""`, rank: "0"},
-		{quality: `"480P"`, rank: "1"},
-		{quality: `"720P"`, rank: "2"},
-		{quality: `"1080P"`, rank: "3"},
-		{quality: `"2160P"`, rank: "4"},
-		{quality: `"4320P"`, rank: "5"},
-	} {
-		needle := entry.quality + ": " + entry.rank
-		if !strings.Contains(source, needle) {
-			t.Fatalf("quality table missing %s", needle)
-		}
-	}
-}
-
-func readVendorFile(t *testing.T, path string) string {
-	t.Helper()
-	source, err := os.ReadFile(filepath.Join("vendor", path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(source)
 }

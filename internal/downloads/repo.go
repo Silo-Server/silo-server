@@ -152,14 +152,36 @@ func (r *Repository) PruneEphemeralOlderThan(ctx context.Context, cutoff time.Ti
 	return tag.RowsAffected(), nil
 }
 
-// CountActiveByUser returns the number of active downloads for a user.
-// 'preparing' counts: an artifact-backed row holds encode work in flight, so
-// it must consume the concurrent quota like a live transfer does.
-func (r *Repository) CountActiveByUser(ctx context.Context, userID int) (int, error) {
+// An account-level transfer is served by one API process, which renews its
+// row when serving starts and every transferLeaseRenewal after that
+// (Service.ServeFile). A row that has gone unrenewed for transferLease belongs
+// to a process that died mid-transfer: it no longer holds a concurrent slot,
+// and a later request fails it instead of serving it. The lease spans several
+// renewals so a slow database write doesn't drop a live transfer.
+const (
+	transferLeaseRenewal = time.Minute
+	transferLease        = 5 * transferLeaseRenewal
+)
+
+// concurrentSlotPredicate matches the download rows that count toward an
+// account's concurrent limit: an entry whose file is being prepared, and an
+// account-level row that is queued or transferring, whose transitions the
+// server makes itself (a transferring row only while its transfer lease
+// holds; $3 is transferLease in seconds). A device entry is downloading
+// because its device said so, and nothing ends that report when the transfer
+// fails, is paused, or the app is removed, so it holds no slot.
+const concurrentSlotPredicate = `(status = 'preparing' OR (device_id IS NULL AND (status = 'queued'
+	OR (status = 'downloading' AND updated_at >= now() - make_interval(secs => $3)))))`
+
+// CountActiveByUser returns how many of a user's downloads hold a slot of the
+// concurrent limit, leaving out the downloads named in except.
+func (r *Repository) CountActiveByUser(ctx context.Context, userID int, except ...string) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading', 'preparing')`,
-		userID,
+		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND `+concurrentSlotPredicate+`
+		   AND id <> ALL($2::text[])`,
+		userID, append([]string{}, except...), // never nil: a NULL array would match no row
+		transferLease.Seconds(),
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting active downloads: %w", err)
@@ -194,6 +216,38 @@ func (r *Repository) UpdateStatus(ctx context.Context, id, status string, bytesS
 		return ErrNotFound
 	}
 	return nil
+}
+
+// RenewTransferLease marks an account-level row's transfer as still running
+// and reports whether it did. It renews only a 'downloading' row whose lease
+// still holds; a lapsed or finished transfer is left as it is.
+func (r *Repository) RenewTransferLease(ctx context.Context, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE downloads SET updated_at = now()
+		 WHERE id = $1 AND device_id IS NULL AND status = 'downloading'
+		   AND updated_at >= now() - make_interval(secs => $2)`,
+		id, transferLease.Seconds(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("renewing download transfer lease: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// FailLapsedTransfer marks an account-level row 'failed' when its transfer
+// lease has lapsed, and reports whether it did. A live transfer's row is left
+// alone.
+func (r *Repository) FailLapsedTransfer(ctx context.Context, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE downloads SET status = 'failed', updated_at = now()
+		 WHERE id = $1 AND device_id IS NULL AND status = 'downloading'
+		   AND updated_at < now() - make_interval(secs => $2)`,
+		id, transferLease.Seconds(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("failing lapsed download transfer: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // TransitionStatus atomically transitions a download from expectedStatus to newStatus.

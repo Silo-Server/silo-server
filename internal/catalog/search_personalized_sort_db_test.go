@@ -96,3 +96,72 @@ func TestCatalogSearchSortsByProfilePlaysDB(t *testing.T) {
 		t.Fatalf("search sorted by plays = %v, want %v", got, want)
 	}
 }
+
+// TestCatalogQuerySortsDateViewedUnwatchedLastDB checks that a library sorted
+// by date viewed lists never-watched titles after the watched ones in both
+// directions, and that cursor pages cross from watched to unwatched titles
+// without dropping or repeating one.
+func TestCatalogQuerySortsDateViewedUnwatchedLastDB(t *testing.T) {
+	pool := newBatchEquivTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("date-viewed-%d", time.Now().UnixNano())
+	id := func(name string) string { return prefix + "-" + name }
+
+	var library, userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, prefix).Scan(&library); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, prefix).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	profile := id("profile")
+	t.Cleanup(func() {
+		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+		batchEquivExec(t, pool, `DELETE FROM users WHERE id = $1`, userID)
+		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+	batchEquivExec(t, pool, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'viewer')`, profile, userID)
+	for _, movie := range []string{"a", "b", "c", "d"} {
+		batchEquivExec(t, pool, `INSERT INTO media_items (content_id, type, title, genres, year) VALUES ($1, 'movie', $2, '{}', 2000)`, id(movie), "Movie "+movie)
+		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id(movie), library)
+	}
+	// b was watched before a, against title order. a's view is a completed
+	// progress row, and d's unfinished one leaves it unwatched.
+	batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES ($1, $2, $3, $4, NOW() - INTERVAL '2 hours', TRUE)`,
+		id("play-b"), userID, profile, id("b"))
+	batchEquivExec(t, pool, `INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at) VALUES ($1, $2, $3, 5400, 5400, TRUE, NOW() - INTERVAL '1 hour'), ($1, $2, $4, 600, 5400, FALSE, NOW())`,
+		userID, profile, id("a"), id("d"))
+
+	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool)).
+		WithUserStoreProvider(postgresCatalogStateProvider{})
+	viewer := AccessFilter{AllowedLibraryIDs: []int{library}, UserID: userID, ProfileID: profile}
+	for order, want := range map[string][]string{
+		"asc":  {id("b"), id("a"), id("c"), id("d")},
+		"desc": {id("a"), id("b"), id("c"), id("d")},
+	} {
+		var got []string
+		var after *QueryCursor
+		for page := 0; page <= len(want); page++ {
+			result, err := resolver.Resolve(ctx, CatalogRequest{
+				Source:       CatalogSourceQuery,
+				Query:        QueryDefinition{LibraryIDs: []int{library}, Sort: QuerySort{Field: "date_viewed", Order: order}},
+				Limit:        1,
+				CursorPaging: true,
+				After:        after,
+			}, viewer)
+			if err != nil {
+				t.Fatalf("%s page %d: %v", order, page, err)
+			}
+			for _, item := range result.Items {
+				got = append(got, item.ContentID)
+			}
+			if result.Next == nil {
+				break
+			}
+			after = result.Next
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("date viewed %s = %v, want %v", order, got, want)
+		}
+	}
+}

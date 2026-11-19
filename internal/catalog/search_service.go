@@ -12,9 +12,16 @@ type CatalogSearchService struct {
 	settings CatalogSearchSettings
 	provider CatalogSearchProvider
 	meili    *MeilisearchSearchProvider
-	state    *SearchIndexEventRepository
+	state    catalogSearchStatusStateStore
 	itemRepo *ItemRepository
 	coverage *semanticCoverageTracker
+}
+
+// catalogSearchStatusStateStore is the index state Status reports;
+// *SearchIndexEventRepository implements it.
+type catalogSearchStatusStateStore interface {
+	meilisearchIndexStateStore
+	DeadLetterCount(ctx context.Context, provider string) (int, error)
 }
 
 // WithSearchSessionStore supplies shared continuation storage to the v2
@@ -51,8 +58,11 @@ func NewCatalogSearchServiceFromSettings(
 	service := &CatalogSearchService{
 		settings: settings,
 		provider: fallback,
-		state:    stateRepo,
 		itemRepo: itemRepo,
+	}
+	// A nil *SearchIndexEventRepository must leave the interface nil.
+	if stateRepo != nil {
+		service.state = stateRepo
 	}
 	if settings.Provider != SearchProviderMeilisearch {
 		return service
@@ -261,6 +271,25 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 		} else {
 			status.Semantic = CatalogSearchSemanticStatus{Ready: false, DisabledReason: "semantic search disabled"}
 		}
+		// The probe also runs for a keyword-only index, which already needs a
+		// rebuild but still serves searches, so a missing one is reported too.
+		if s.meili != nil && (!status.Index.RebuildRequired || status.ActiveProvider == SearchProviderMeilisearch) {
+			status.Semantic.Capability = s.meili.SemanticCapability(ctx)
+			// The capability probe is the status read's only request to the
+			// active index. When Meilisearch says that index does not exist
+			// (its data was lost or replaced), Postgres state alone would
+			// still describe a current index; searches fall back to Postgres
+			// and the sync task rebuilds it.
+			if missing := status.Semantic.Capability.missingIndexUID; missing != "" && missing == status.Index.ActiveIndexUID {
+				status.ActiveProvider = SearchProviderPostgres
+				status.Degraded = true
+				status.Index.RebuildRequired = true
+				status.Index.DocumentCount = 0
+				if status.Meilisearch.Healthy {
+					status.DegradedReason = "Meilisearch index is missing; using Postgres search until it is rebuilt"
+				}
+			}
+		}
 		if status.Index.RebuildRequired {
 			status.Semantic.Ready = false
 			status.Semantic.DisabledReason = "search index rebuild required"
@@ -268,8 +297,6 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 				OK:     false,
 				Reason: "search index rebuild required",
 			}
-		} else if s.meili != nil {
-			status.Semantic.Capability = s.meili.SemanticCapability(ctx)
 		}
 	}
 	return status

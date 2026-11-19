@@ -142,30 +142,35 @@ func observe(next http.Handler) http.Handler {
 		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
-		status := sw.status
-		if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
-			// The client went away, and its server error is recorded as
-			// abandoned, as the activity log records it as 499. The error is
-			// still written: net/http also cancels the context of a client
-			// that only half-closed, and an unwritten response would reach
-			// that client as an empty 200.
-			status = 0
-		}
-		if span.IsRecording() {
-			span.SetAttributes(attribute.String("operation", o.operationID), attribute.String("error.type", o.errorCode))
-			if status != 0 {
-				span.SetAttributes(attribute.Int("http.response.status_code", status))
-			} else if sw.hijacked {
-				span.SetAttributes(attribute.String("http.response.outcome", "hijacked"))
-			} else {
-				span.SetAttributes(attribute.String("http.response.outcome", "abandoned"))
+		httpstream.Serve(next, sw, r, func(aborted bool) {
+			status := sw.status
+			if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
+				// The client went away, and its server error is recorded as
+				// abandoned, as the activity log records it as 499. The error is
+				// still written: net/http also cancels the context of a client
+				// that only half-closed, and an unwritten response would reach
+				// that client as an empty 200.
+				status = 0
 			}
-			if status >= 500 {
-				span.SetStatus(codes.Error, "server_error")
+			if span.IsRecording() {
+				span.SetAttributes(attribute.String("operation", o.operationID), attribute.String("error.type", o.errorCode))
+				if status != 0 {
+					span.SetAttributes(attribute.Int("http.response.status_code", status))
+				}
+				switch {
+				case aborted:
+					span.SetAttributes(attribute.String("http.response.outcome", "aborted"))
+					span.SetStatus(codes.Error, "aborted")
+				case status == 0 && sw.hijacked:
+					span.SetAttributes(attribute.String("http.response.outcome", "hijacked"))
+				case status == 0:
+					span.SetAttributes(attribute.String("http.response.outcome", "abandoned"))
+				case status >= 500:
+					span.SetStatus(codes.Error, "server_error")
+				}
 			}
-		}
-		report(r, o, status, sw.hijacked, sw.bytes, time.Since(start))
+			report(r, o, status, aborted, sw.hijacked, sw.bytes, time.Since(start))
+		})
 	})
 }
 
@@ -239,12 +244,16 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return conn, rw, err
 }
 
-func report(r *http.Request, o *observation, status int, hijacked bool, bodyBytes int64, elapsed time.Duration) {
+func report(r *http.Request, o *observation, status int, aborted, hijacked bool, bodyBytes int64, elapsed time.Duration) {
 	name, version := o.clientName, o.clientVersion
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
 	class := statusClass(status)
-	if status == 0 && hijacked {
+	switch {
+	case aborted:
+		// The handler broke the response after sending its status.
+		class = "aborted"
+	case status == 0 && hijacked:
 		class = "hijacked"
 	}
 	requestsTotal.WithLabelValues(major, o.operationID, method, class, o.errorCode, o.authClass, telemetry.ClientLabel(name)).Inc()

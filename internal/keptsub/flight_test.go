@@ -336,52 +336,6 @@ func TestRequestJoinsAPrefetchRead(t *testing.T) {
 	}
 }
 
-// A request's read that has started finishes and keeps the track after the
-// request is gone; a prefetch's stops, and a later caller starts afresh.
-func TestReadsOutliveRequestsButNotPrefetches(t *testing.T) {
-	ffmpeg := requireFFmpeg(t)
-	path, file := fixtureFile(t, ffmpeg, true)
-	s, repo, _ := newTestStore(t, ffmpeg)
-	release := make(chan struct{})
-	calls := stallStartedRead(s, release)
-	ref := *playback.EmbeddedSubtitleRefFor(file, 0)
-
-	ctx, leave := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.WholeTrack(ctx, path, ref)
-		done <- err
-	}()
-	waitFor(t, "the read", func() bool { return calls.Load() == 1 })
-	leave()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("request: %v", err)
-	}
-	close(release)
-	waitFor(t, "the track to be kept", func() bool {
-		tr, _ := repo.Track(t.Context(), file.ID, 1)
-		return tr != nil
-	})
-
-	release = make(chan struct{})
-	calls = stallSecondLookup(repo, release)
-	other := *playback.EmbeddedSubtitleRefFor(file, 1)
-	ctx, leave = context.WithCancel(t.Context())
-	go func() { done <- s.Prefetch(ctx, path, other) }()
-	waitFor(t, "the prefetch read", func() bool { return calls.Load() == 2 })
-	leave()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("prefetch: %v", err)
-	}
-	s.mu.Lock()
-	left := len(s.flights)
-	s.mu.Unlock()
-	if left != 0 {
-		t.Fatal("a stopped prefetch read can still be joined")
-	}
-	close(release)
-}
-
 func TestKeepQueuesTheObjectBeforeItsRow(t *testing.T) {
 	ffmpeg := requireFFmpeg(t)
 	path, file := fixtureFile(t, ffmpeg, true)

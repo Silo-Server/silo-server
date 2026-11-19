@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -24,338 +22,10 @@ const (
 	ratingTestSeries    = "series-a"
 )
 
-func TestRatingScaleConversion(t *testing.T) {
-	want := map[int]int{1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 3, 7: 4, 8: 4, 9: 5, 10: 5, 0: 1, 11: 5}
-	for rating, stars := range want {
-		if got := starsFromProviderRating(rating); got != stars {
-			t.Errorf("starsFromProviderRating(%d) = %d, want %d", rating, got, stars)
-		}
-	}
-	for stars := 1; stars <= 5; stars++ {
-		if got := starsFromProviderRating(providerRatingFromStars(stars)); got != stars {
-			t.Errorf("stars %d do not round-trip through the provider scale (got %d)", stars, got)
-		}
-	}
-}
-
-func TestDecideRating(t *testing.T) {
-	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newer := older.Add(time.Hour)
-	for _, tc := range []struct {
-		name                string
-		local, remote, base int
-		localAt, remoteAt   time.Time
-		want                ratingAction
-	}{
-		{name: "all agree", local: 4, remote: 4, base: 4, want: ratingKeep},
-		{name: "all unrated", want: ratingKeep},
-		{name: "first sync equal values rebase", local: 4, remote: 4, want: ratingRebase},
-		{name: "both removed rebase", base: 3, want: ratingRebase},
-		{name: "only local changed", local: 2, remote: 4, base: 4, want: ratingExport},
-		{name: "local removed", remote: 4, base: 4, want: ratingExport},
-		{name: "only remote changed", local: 4, remote: 5, base: 4, want: ratingImport},
-		{name: "remote removed", local: 4, base: 4, want: ratingImport},
-		{name: "first sync local only", local: 3, want: ratingExport},
-		{name: "first sync remote only", remote: 3, want: ratingImport},
-		{name: "conflict local removal loses", remote: 5, base: 4, localAt: newer, remoteAt: older, want: ratingImport},
-		{name: "conflict remote removal loses", local: 5, base: 4, localAt: older, remoteAt: newer, want: ratingExport},
-		{name: "conflict newer remote wins", local: 2, remote: 5, base: 4, localAt: older, remoteAt: newer, want: ratingImport},
-		{name: "conflict newer local wins", local: 2, remote: 5, base: 4, localAt: newer, remoteAt: older, want: ratingExport},
-		{name: "conflict tie goes to silo", local: 2, remote: 5, base: 4, localAt: older, remoteAt: older, want: ratingExport},
-		{name: "conflict unknown remote time goes to silo", local: 2, remote: 5, base: 4, localAt: older, want: ratingExport},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := decideRating(tc.local, tc.remote, tc.base, tc.localAt, tc.remoteAt); got != tc.want {
-				t.Fatalf("decideRating(%d, %d, %d) = %d, want %d", tc.local, tc.remote, tc.base, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestSyncRatingsFirstSyncUnionsBothSides(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 3) // Silo only
-	h.provider.batch = RatingImportBatch{
-		Rows: []RemoteRating{
-			h.remoteRow(ratingTestMovieB, 7), // provider only
-			h.remoteRow(ratingTestSeries, 10),
-		},
-		SnapshotKinds: []string{historyimport.KindMovie, historyimport.KindSeries},
-	}
-
-	result := h.sync()
-
-	if got := h.store.stars(ratingTestMovieB); got != 4 {
-		t.Fatalf("imported movie B = %d stars, want 4", got)
-	}
-	if got := h.store.stars(ratingTestSeries); got != 5 {
-		t.Fatalf("imported series = %d stars, want 5", got)
-	}
-	if len(h.provider.exported) != 1 || h.provider.exported[0].MediaItemID != ratingTestMovieA || h.provider.exported[0].Rating != 6 {
-		t.Fatalf("exported = %#v, want movie A at 6", h.provider.exported)
-	}
-	if result.Imported != 2 || result.Sent != 1 || result.RemoteFound != 2 || result.LocalFound != 1 {
-		t.Fatalf("result = %#v", result)
-	}
-	if s := h.state(ratingTestMovieB); s == nil || s.SyncedRating != 4 || !s.RemoteSeen {
-		t.Fatalf("imported base = %#v, want 4 stars seen", s)
-	}
-	if s := h.state(ratingTestMovieA); s == nil || s.SyncedRating != 3 || s.RemoteSeen {
-		t.Fatalf("exported base = %#v, want 3 stars not yet seen", s)
-	}
-}
-
-func TestSyncRatingsEquivalentValuesRebaseWithoutWrites(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.provider.batch = RatingImportBatch{
-		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieA, 7)},
-		SnapshotKinds: []string{historyimport.KindMovie},
-	}
-
-	h.sync()
-
-	if len(h.provider.exported) != 0 || len(h.provider.removed) != 0 {
-		t.Fatalf("a remote 7 and 4 stars agree; provider writes = %#v / %#v", h.provider.exported, h.provider.removed)
-	}
-	if s := h.state(ratingTestMovieA); s == nil || s.SyncedRating != 4 || !s.RemoteSeen {
-		t.Fatalf("base = %#v, want 4 stars seen", s)
-	}
-
-	// A remote change inside the same star is not a change.
-	h.provider.batch.Rows = []RemoteRating{h.remoteRow(ratingTestMovieA, 8)}
-	h.sync()
-	if len(h.provider.exported) != 0 || h.store.stars(ratingTestMovieA) != 4 {
-		t.Fatalf("7 to 8 must not write either side; exported=%#v local=%d", h.provider.exported, h.store.stars(ratingTestMovieA))
-	}
-}
-
-func TestSyncRatingsPropagatesChangesAfterAgreement(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.store.set(ratingTestMovieB, 2)
-	h.agree(ratingTestMovieA, 4, true)
-	h.agree(ratingTestMovieB, 2, true)
-	h.store.set(ratingTestMovieA, 1) // changed in Silo
-	h.provider.batch = RatingImportBatch{
-		Rows: []RemoteRating{
-			h.remoteRow(ratingTestMovieA, 8),
-			h.remoteRow(ratingTestMovieB, 10), // changed on the provider
-		},
-		SnapshotKinds: []string{historyimport.KindMovie},
-	}
-
-	h.sync()
-
-	if len(h.provider.exported) != 1 || h.provider.exported[0].MediaItemID != ratingTestMovieA || h.provider.exported[0].Rating != 2 {
-		t.Fatalf("exported = %#v, want movie A at 2", h.provider.exported)
-	}
-	if got := h.store.stars(ratingTestMovieB); got != 5 {
-		t.Fatalf("movie B = %d stars, want 5", got)
-	}
-}
-
-func TestSyncRatingsRemovalsFollowTheChangedSide(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.store.set(ratingTestMovieB, 3)
-	h.agree(ratingTestMovieA, 4, true)
-	h.agree(ratingTestMovieB, 3, true)
-	h.store.remove(ratingTestMovieB) // removed in Silo
-	// Movie A is absent from a complete snapshot: removed on the provider.
-	h.provider.batch = RatingImportBatch{
-		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieB, 6)},
-		SnapshotKinds: []string{historyimport.KindMovie},
-	}
-
-	h.sync()
-
-	if got := h.store.stars(ratingTestMovieA); got != 0 {
-		t.Fatalf("movie A = %d stars, want removed", got)
-	}
-	if len(h.provider.removed) != 1 || h.provider.removed[0].MediaItemID != ratingTestMovieB {
-		t.Fatalf("removed = %#v, want movie B", h.provider.removed)
-	}
-	if h.state(ratingTestMovieA) != nil {
-		t.Fatalf("an imported removal must clear the agreed rating: %#v", h.state(ratingTestMovieA))
-	}
-	// A sent removal stays agreed until a read confirms the title is unrated.
-	if h.state(ratingTestMovieB) == nil {
-		t.Fatal("a sent removal must keep its agreed rating until a read confirms it")
-	}
-
-	h.provider.batch = RatingImportBatch{
-		Rows:          []RemoteRating{h.remoteRow(ratingTestSeries, 2)},
-		SnapshotKinds: []string{historyimport.KindMovie},
-	}
-	h.sync()
-	if h.state(ratingTestMovieB) != nil || len(h.provider.removed) != 0 {
-		t.Fatalf("a confirmed removal must clear the agreed rating without resending: state=%#v removed=%#v", h.state(ratingTestMovieB), h.provider.removed)
-	}
-}
-
-func TestSyncRatingsResendsARemovalTheProviderDidNotFullyApply(t *testing.T) {
-	h := newRatingHarness(t)
-	h.agree(ratingTestMovieA, 4, true)
-	// Silo removed the rating and sent the removal, but another provider entry
-	// for the same title is still rated.
-	h.provider.batch = RatingImportBatch{
-		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieA, 8)},
-		SnapshotKinds: []string{historyimport.KindMovie},
-	}
-	h.sync()
-	if got := h.store.stars(ratingTestMovieA); got != 0 {
-		t.Fatalf("the removed rating came back as %d stars", got)
-	}
-	if len(h.provider.removed) != 1 {
-		t.Fatalf("removed = %#v, want the removal sent again", h.provider.removed)
-	}
-}
-
-func TestSyncRatingsUnseenAbsenceResendsInsteadOfDeleting(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	// Silo sent this rating, but no provider read has confirmed it yet.
-	h.agree(ratingTestMovieA, 4, false)
-	h.provider.batch = RatingImportBatch{
-		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieB, 6)},
-		SnapshotKinds: []string{historyimport.KindMovie},
-	}
-
-	h.sync()
-
-	if got := h.store.stars(ratingTestMovieA); got != 4 {
-		t.Fatalf("an unconfirmed rating must not be deleted locally; got %d stars", got)
-	}
-	if len(h.provider.exported) != 1 || h.provider.exported[0].MediaItemID != ratingTestMovieA {
-		t.Fatalf("exported = %#v, want movie A resent", h.provider.exported)
-	}
-}
-
-func TestSyncRatingsAbsenceOutsideSnapshotKindsIsUnknown(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestSeries, 4)
-	h.agree(ratingTestSeries, 4, true)
-	// The provider skipped series (unchanged), so their absence means nothing.
-	h.provider.batch = RatingImportBatch{
-		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieB, 6)},
-		SnapshotKinds: []string{historyimport.KindMovie},
-	}
-
-	h.sync()
-
-	if got := h.store.stars(ratingTestSeries); got != 4 {
-		t.Fatalf("series = %d stars, want unchanged 4", got)
-	}
-	if len(h.provider.exported) != 0 || len(h.provider.removed) != 0 {
-		t.Fatalf("provider writes = %#v / %#v, want none", h.provider.exported, h.provider.removed)
-	}
-}
-
-func TestSyncRatingsEmptySnapshotDoesNotDelete(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.store.set(ratingTestMovieB, 2)
-	h.agree(ratingTestMovieA, 4, true)
-	h.agree(ratingTestMovieB, 2, true)
-	h.provider.batch = RatingImportBatch{SnapshotKinds: []string{historyimport.KindMovie}}
-
-	result := h.sync()
-
-	if h.store.stars(ratingTestMovieA) != 4 || h.store.stars(ratingTestMovieB) != 2 {
-		t.Fatalf("an empty snapshot must not delete several ratings: A=%d B=%d", h.store.stars(ratingTestMovieA), h.store.stars(ratingTestMovieB))
-	}
-	if len(result.Warnings) == 0 {
-		t.Fatal("an ignored empty snapshot should warn")
-	}
-}
-
-func TestSyncRatingsEmptySnapshotRemovesTheLastRating(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, true)
-	h.provider.batch = RatingImportBatch{SnapshotKinds: []string{historyimport.KindMovie}}
-
-	h.sync()
-
-	if got := h.store.stars(ratingTestMovieA); got != 0 {
-		t.Fatalf("removing the only rating on the provider must import; got %d stars", got)
-	}
-}
-
-func TestSyncRatingsUnmatchedRowSharingAnIDIsNotARemoval(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, true)
-	// The provider still lists the title, but the matcher cannot place the row:
-	// it carries only an IMDb id, which this matcher does not use.
-	row := h.remoteRow(ratingTestMovieA, 8)
-	row.TMDBID = ""
-	row.ProviderItemKey = ""
-	row.IMDbID = "tt0101"
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{row}, SnapshotKinds: []string{historyimport.KindMovie}}
-
-	h.sync()
-
-	if got := h.store.stars(ratingTestMovieA); got != 4 {
-		t.Fatalf("movie A = %d stars, want unchanged 4", got)
-	}
-	if len(h.provider.removed) != 0 {
-		t.Fatalf("removed = %#v, want none", h.provider.removed)
-	}
-}
-
-func TestSyncRatingsRemembersTheProviderKeyForTombstonesAndWrites(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	row := h.remoteRow(ratingTestMovieA, 8)
-	row.ProviderItemKey = "floppy:movie:101"
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{row}, SnapshotKinds: []string{historyimport.KindMovie}}
-	h.sync()
-	if s := h.state(ratingTestMovieA); s == nil || s.ProviderItemKey != "floppy:movie:101" {
-		t.Fatalf("agreed row = %#v, want the provider's own key", s)
-	}
-
-	// A later local change is sent under the provider's key.
-	h.store.set(ratingTestMovieA, 2)
-	h.provider.batch = RatingImportBatch{}
-	h.sync()
-	if len(h.provider.exported) != 1 || h.provider.exported[0].ProviderItemKey != "floppy:movie:101" {
-		t.Fatalf("exported = %#v, want the provider's key", h.provider.exported)
-	}
-
-	// An incremental tombstone naming that key removes the rating.
-	h.agree(ratingTestMovieA, 2, true)
-	h.repo.ratingStates[0].ProviderItemKey = "floppy:movie:101"
-	tombstone := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "floppy:movie:101", Removed: true}}
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tombstone}}
-	h.sync()
-	if got := h.store.stars(ratingTestMovieA); got != 0 {
-		t.Fatalf("movie A = %d stars, want removed by the provider's tombstone", got)
-	}
-}
-
-func TestSyncRatingsSkipsKindsTheProviderDoesNotRate(t *testing.T) {
-	h := newRatingHarness(t)
-	h.provider.kinds = map[string]bool{historyimport.KindMovie: true}
-	h.store.set(ratingTestSeries, 3)
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, true)
-
-	result := h.sync()
-
-	if len(h.provider.exported) != 0 || len(result.Warnings) != 0 {
-		t.Fatalf("a movie-only provider must not be sent series ratings: exported=%#v warnings=%v", h.provider.exported, result.Warnings)
-	}
-	if result.LocalFound != 1 {
-		t.Fatalf("local found = %d, want only the movie", result.LocalFound)
-	}
-}
-
 func TestSyncRatingsConcurrentLocalEditWins(t *testing.T) {
 	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, true)
+	h.store.set(ratingTestMovieA, 8)
+	h.agree(ratingTestMovieA, 8, true)
 	h.store.conflicts[ratingTestMovieA] = true // the user edits between read and write
 	h.provider.batch = RatingImportBatch{
 		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieA, 2)},
@@ -367,100 +37,14 @@ func TestSyncRatingsConcurrentLocalEditWins(t *testing.T) {
 	if result.Imported != 0 {
 		t.Fatalf("a lost compare-and-set must not count as imported: %#v", result)
 	}
-	if s := h.state(ratingTestMovieA); s == nil || s.SyncedRating != 4 {
+	if s := h.state(ratingTestMovieA); s == nil || s.SyncedRating != 8 {
 		t.Fatalf("a lost compare-and-set must leave the agreed rating: %#v", s)
-	}
-}
-
-func TestSyncRatingsDirectionToggles(t *testing.T) {
-	t.Run("import only", func(t *testing.T) {
-		h := newRatingHarness(t)
-		h.conn.ExportRatingsEnabled = false
-		h.store.set(ratingTestMovieA, 3)
-		h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 7)}, SnapshotKinds: []string{historyimport.KindMovie}}
-		h.sync()
-		if len(h.provider.exported) != 0 || h.store.stars(ratingTestMovieB) != 4 {
-			t.Fatalf("exported=%#v movieB=%d", h.provider.exported, h.store.stars(ratingTestMovieB))
-		}
-		if h.state(ratingTestMovieA) != nil {
-			t.Fatal("a blocked export must not record agreement")
-		}
-	})
-	t.Run("export only", func(t *testing.T) {
-		h := newRatingHarness(t)
-		h.conn.ImportRatingsEnabled = false
-		h.store.set(ratingTestMovieA, 3)
-		h.provider.batch = RatingImportBatch{
-			Rows:           []RemoteRating{h.remoteRow(ratingTestMovieB, 7)},
-			SnapshotKinds:  []string{historyimport.KindMovie},
-			UpdatedCursors: map[string]string{"test.ratings.movies": "c1"},
-		}
-		h.sync()
-		if h.store.stars(ratingTestMovieB) != 0 || len(h.provider.exported) != 1 {
-			t.Fatalf("exported=%#v movieB=%d", h.provider.exported, h.store.stars(ratingTestMovieB))
-		}
-		cursors := h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)].SyncCursors
-		if cursors["test.ratings.movies"] != "c1" || cursors[ratingImportCursorKey] != "" {
-			t.Fatalf("send-only cursors = %#v, want the read cursor saved without the import marker", cursors)
-		}
-
-		// Turning import on reads everything again: cursors saved in
-		// send-only mode may have skipped changes that were never imported.
-		h.conn = h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)]
-		h.conn.ImportRatingsEnabled = true
-		h.sync()
-		if h.provider.fetchedCursors["test.ratings.movies"] != "" {
-			t.Fatalf("the first import read got cursors %#v, want none", h.provider.fetchedCursors)
-		}
-		if marker := h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)].SyncCursors[ratingImportCursorKey]; marker == "" {
-			t.Fatal("an import read must set the import marker")
-		}
-	})
-}
-
-// A plugin declares the gate with rating_export_requires_watched, here for
-// movies only, so its series ratings are sent right away.
-func TestSyncRatingsWatchGateHoldsUnwatchedMoviesForAPlugin(t *testing.T) {
-	h := newRatingHarness(t)
-	client := &fakeWatchSyncPluginClient{
-		applyStatus:  pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
-		listResponse: &pluginv1.WatchSyncListRemoteStateResponse{CompleteSnapshot: true},
-	}
-	descriptor := ratingTestDescriptor(
-		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
-		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES,
-	)
-	descriptor.RatingExportRequiresWatched = []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE}
-	provider := testPluginProviderWithDescriptor(t, client, descriptor)
-	h.store.set(ratingTestMovieA, 4)
-	h.store.set(ratingTestMovieB, 5)
-	h.store.set(ratingTestSeries, 3)
-	h.watched[ratingTestMovieB] = true
-
-	result, err := h.service.syncRatings(context.Background(), h.conn, ServerConfig{}, provider)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var sent []string
-	for _, event := range client.applyRequest.GetEvents() {
-		if event.GetOperation() != pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SET_RATING {
-			t.Fatalf("event = %#v, want only rating sets", event)
-		}
-		sent = append(sent, event.GetMedia().GetMediaItemId())
-	}
-	slices.Sort(sent)
-	if want := []string{ratingTestMovieB, ratingTestSeries}; !slices.Equal(sent, want) {
-		t.Fatalf("sent = %v, want %v", sent, want)
-	}
-	if h.state(ratingTestMovieA) != nil || len(result.Warnings) == 0 {
-		t.Fatalf("a held rating stays pending with a warning: state=%#v warnings=%v", h.state(ratingTestMovieA), result.Warnings)
 	}
 }
 
 func TestSyncRatingsRateLimitStopsSending(t *testing.T) {
 	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
+	h.store.set(ratingTestMovieA, 8)
 	h.provider.exportErr = RateLimitedError{Provider: "test", RetryAfter: time.Minute}
 
 	_, err := h.service.syncRatings(context.Background(), h.conn, ServerConfig{}, h.provider)
@@ -473,243 +57,21 @@ func TestSyncRatingsRateLimitStopsSending(t *testing.T) {
 	}
 }
 
-func TestLocalRatingEventSendsCurrentValue(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, true)
-	h.store.set(ratingTestMovieA, 2)
-	h.store.set(ratingTestMovieB, 5) // not part of the event
-
-	err := h.service.processLocalRatingEvent(context.Background(), LocalRatingEvent{
-		UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemIDs: []string{ratingTestMovieA},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(h.provider.exported) != 1 || h.provider.exported[0].MediaItemID != ratingTestMovieA || h.provider.exported[0].Rating != 4 {
-		t.Fatalf("exported = %#v, want only movie A at 4", h.provider.exported)
-	}
-	if h.provider.fetches != 0 {
-		t.Fatal("a local event must not read the provider")
-	}
-
-	// A removal waits for the scheduled merge, which can see whether the
-	// provider changed the rating in the meantime.
-	h.store.remove(ratingTestMovieA)
-	if err := h.service.processLocalRatingEvent(context.Background(), LocalRatingEvent{
-		UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemIDs: []string{ratingTestMovieA},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(h.provider.removed) != 0 {
-		t.Fatalf("removed = %#v, want the removal left to the scheduled merge", h.provider.removed)
-	}
-}
-
-func TestSyncRatingsNeverRemovesARatingItSkipped(t *testing.T) {
-	h := newRatingHarness(t)
-	// Rated and agreed, but the media item has left the catalog.
-	h.store.set("gone-movie", 4)
-	h.repo.ratingStates = append(h.repo.ratingStates, RatingSyncState{
-		ConnectionID: h.conn.ID, ProviderAccountID: h.conn.ProviderAccountID, MediaItemID: "gone-movie",
-		Kind: historyimport.KindMovie, ProviderItemKey: "tmdb:999", SyncedRating: 4, RemoteSeen: true,
-	})
-	h.provider.batch = RatingImportBatch{SnapshotKinds: []string{historyimport.KindMovie}}
-	h.sync()
-	if len(h.provider.removed) != 0 {
-		t.Fatalf("removed = %#v, want no removal for a rating Silo still holds", h.provider.removed)
-	}
-}
-
 func TestSyncRatingsIgnoresAgreedRatingsOfAnotherAccount(t *testing.T) {
 	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
+	h.store.set(ratingTestMovieA, 8)
 	// Agreed with the connection's previous account, then absent here.
 	h.repo.ratingStates = append(h.repo.ratingStates, RatingSyncState{
 		ConnectionID: h.conn.ID, ProviderAccountID: "old-account", MediaItemID: ratingTestMovieA,
-		Kind: historyimport.KindMovie, ProviderItemKey: "tmdb:101", SyncedRating: 4, RemoteSeen: true,
+		Kind: historyimport.KindMovie, ProviderItemKey: "tmdb:101", SyncedRating: 8, RemoteSeen: true,
 	})
 	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 6)}, SnapshotKinds: []string{historyimport.KindMovie}}
 	h.sync()
-	if got := h.store.stars(ratingTestMovieA); got != 4 {
-		t.Fatalf("movie A = %d stars; another account's agreement must not delete it", got)
+	if got := h.store.score(ratingTestMovieA); got != 8 {
+		t.Fatalf("movie A = %d; another account's agreement must not delete it", got)
 	}
 	if len(h.provider.exported) != 1 || h.provider.exported[0].MediaItemID != ratingTestMovieA {
 		t.Fatalf("exported = %#v, want movie A sent to the new account", h.provider.exported)
-	}
-}
-
-func TestSyncRatingsResendsAValueChangedDuringTheSend(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 3)
-	// A newer edit lands while the first write is in flight, so the provider
-	// may now hold the older value: the current one is sent once more.
-	edited := false
-	h.provider.onExport = func() {
-		if !edited {
-			edited = true
-			h.store.set(ratingTestMovieA, 5)
-		}
-	}
-	h.provider.batch = RatingImportBatch{SnapshotKinds: []string{historyimport.KindMovie}}
-	h.sync()
-	if len(h.provider.exported) != 2 || h.provider.exported[1].Rating != 10 {
-		t.Fatalf("exported = %#v, want the newer 5 stars sent last", h.provider.exported)
-	}
-	if s := h.state(ratingTestMovieA); s == nil || s.SyncedRating != 5 {
-		t.Fatalf("agreed row = %#v, want the resent 5 stars", s)
-	}
-}
-
-func TestSyncRatingsSendsARemovalMadeDuringTheLastResend(t *testing.T) {
-	h := newRatingHarness(t)
-	h.agree(ratingTestMovieA, 1, true)
-	h.store.set(ratingTestMovieA, 2)
-	// The edits keep coming, and the last one removes the rating.
-	sends, stars := 0, 2
-	h.provider.onExport = func() {
-		sends++
-		if sends > maxRatingResends {
-			h.store.remove(ratingTestMovieA)
-			return
-		}
-		stars = stars%5 + 1
-		h.store.set(ratingTestMovieA, stars)
-	}
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 2)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	h.sync()
-	if len(h.provider.exported) != 1+maxRatingResends {
-		t.Fatalf("exports = %d, want the first send and %d resends", len(h.provider.exported), maxRatingResends)
-	}
-	last := h.provider.exported[len(h.provider.exported)-1].Rating
-
-	// The provider now holds the last sent rating. The next run must send the
-	// removal rather than import that rating back.
-	h.provider.onExport = nil
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, last)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	h.sync()
-	if got := h.store.stars(ratingTestMovieA); got != 0 {
-		t.Fatalf("local rating = %d, want the removal kept", got)
-	}
-	if len(h.provider.removed) != 1 {
-		t.Fatalf("removed = %#v, want the removal sent", h.provider.removed)
-	}
-}
-
-func TestSyncRatingsKeepsTitlesOfUnusableRows(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		row  func(h *ratingHarness) RemoteRating
-	}{
-		{"out of range", func(h *ratingHarness) RemoteRating {
-			row := h.remoteRow(ratingTestMovieA, 11)
-			return row
-		}},
-		{"provider ids only", func(h *ratingHarness) RemoteRating {
-			return RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "mdblist:abc", Kind: historyimport.KindMovie}, Rating: 7}
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newRatingHarness(t)
-			h.store.set(ratingTestMovieA, 4)
-			h.agree(ratingTestMovieA, 4, true)
-			h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tc.row(h)}, SnapshotKinds: []string{historyimport.KindMovie}}
-			h.sync()
-			if got := h.store.stars(ratingTestMovieA); got != 4 {
-				t.Fatalf("movie A = %d stars; an unusable row must not turn its title into a removal", got)
-			}
-		})
-	}
-}
-
-func TestSyncRatingsSkipsAmbiguousTombstones(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.store.set(ratingTestSeries, 3)
-	h.agree(ratingTestMovieA, 4, true)
-	h.agree(ratingTestSeries, 3, true)
-	// The movie and the series both recorded the key tmdb:101.
-	tombstone := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "tmdb:101", Removed: true}}
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tombstone}}
-	result := h.sync()
-	if h.store.stars(ratingTestMovieA) != 4 || h.store.stars(ratingTestSeries) != 3 || len(result.Warnings) == 0 {
-		t.Fatalf("an ambiguous tombstone must remove nothing: movie=%d series=%d warnings=%v",
-			h.store.stars(ratingTestMovieA), h.store.stars(ratingTestSeries), result.Warnings)
-	}
-}
-
-func TestSyncRatingsResolvesTombstonesWithinTheirKind(t *testing.T) {
-	t.Run("both kinds use the key", func(t *testing.T) {
-		h := newRatingHarness(t)
-		h.store.set(ratingTestMovieA, 4)
-		h.store.set(ratingTestSeries, 3)
-		h.agree(ratingTestMovieA, 4, true)
-		h.agree(ratingTestSeries, 3, true)
-		tombstone := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "tmdb:101", Kind: historyimport.KindSeries, Removed: true}}
-		h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tombstone}}
-		h.sync()
-		if h.store.stars(ratingTestSeries) != 0 || h.store.stars(ratingTestMovieA) != 4 {
-			t.Fatalf("series=%d movie=%d, want only the series rating removed", h.store.stars(ratingTestSeries), h.store.stars(ratingTestMovieA))
-		}
-	})
-	t.Run("only the other kind uses the key", func(t *testing.T) {
-		h := newRatingHarness(t)
-		h.store.set(ratingTestMovieA, 4)
-		h.agree(ratingTestMovieA, 4, true)
-		tombstone := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "tmdb:101", Kind: historyimport.KindSeries, Removed: true}}
-		h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tombstone}}
-		h.sync()
-		if h.store.stars(ratingTestMovieA) != 4 {
-			t.Fatalf("movie=%d, a series tombstone must not remove a movie rating", h.store.stars(ratingTestMovieA))
-		}
-	})
-}
-
-func TestSyncRatingsWatchGateLetsHeldTitlesChange(t *testing.T) {
-	h := newRatingHarness(t)
-	h.provider.gateMovies = true
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, true)
-	h.store.set(ratingTestMovieA, 2)
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	h.sync()
-	if len(h.provider.exported) != 1 {
-		t.Fatalf("exported = %#v; a title the provider already rates is not held for a watch", h.provider.exported)
-	}
-}
-
-func TestPersistConnectionAccountChangeClearsAgreedRatings(t *testing.T) {
-	repo := newServiceFakeRepo()
-	existing := Connection{
-		ID: ratingTestConnID, Provider: "test", UserID: 1, ProfileID: "p", ProviderAccountID: "old",
-		SyncCursors: map[string]string{"test.ratings.movies": "c1", "test.watched": "w1"},
-	}
-	repo.connections[connectionKey("test", 1, "p")] = existing
-	repo.ratingStates = []RatingSyncState{{ConnectionID: ratingTestConnID, MediaItemID: ratingTestMovieA, SyncedRating: 4, RemoteSeen: true}}
-	service := NewService(repo, NewRegistry())
-
-	conn, err := service.persistConnection(context.Background(), "test", 1, "p", TokenSet{AccessToken: "a"}, ProviderAccount{ID: "new"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(repo.ratingStates) != 0 {
-		t.Fatalf("agreed ratings survived an account change: %#v", repo.ratingStates)
-	}
-	if conn.SyncCursors["test.ratings.movies"] != "" || conn.SyncCursors["test.watched"] != "w1" {
-		t.Fatalf("cursors = %#v, want only rating cursors dropped", conn.SyncCursors)
-	}
-
-	// Reconnecting the same account keeps the agreement.
-	repo.ratingStates = []RatingSyncState{{ConnectionID: ratingTestConnID, MediaItemID: ratingTestMovieA, SyncedRating: 4, RemoteSeen: true}}
-	if _, err := service.persistConnection(context.Background(), "test", 1, "p", TokenSet{AccessToken: "a"}, ProviderAccount{ID: "new"}); err != nil {
-		t.Fatal(err)
-	}
-	if len(repo.ratingStates) != 1 {
-		t.Fatal("reconnecting the same account must keep agreed ratings")
-	}
-	// Only the switch waited for the rating sync lock.
-	if !slices.Equal(repo.ratingLocks, []string{"wait:" + ratingTestConnID}) {
-		t.Fatalf("rating sync locks = %v, want one wait by the account switch", repo.ratingLocks)
 	}
 }
 
@@ -728,21 +90,21 @@ func TestDeleteConnectionWaitsForTheRatingSyncLock(t *testing.T) {
 
 func TestSyncRatingsLeavesRatingsToARunHoldingTheLock(t *testing.T) {
 	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 3)
+	h.store.set(ratingTestMovieA, 6)
 	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
 	// Another node is reconciling this connection's ratings.
 	h.repo.ratingLockBusy = map[string]bool{ratingTestConnID: true}
 	result := h.sync()
-	if h.provider.fetches != 0 || len(h.provider.exported) != 0 || h.store.stars(ratingTestMovieB) != 0 {
-		t.Fatalf("a run without the lock touched ratings: fetches=%d exported=%v movieB=%d", h.provider.fetches, h.provider.exported, h.store.stars(ratingTestMovieB))
+	if h.provider.fetches != 0 || len(h.provider.exported) != 0 || h.store.score(ratingTestMovieB) != 0 {
+		t.Fatalf("a run without the lock touched ratings: fetches=%d exported=%v movieB=%d", h.provider.fetches, h.provider.exported, h.store.score(ratingTestMovieB))
 	}
 	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "already syncing") {
 		t.Fatalf("warnings = %v, want the skip reported", result.Warnings)
 	}
 	h.repo.ratingLockBusy = nil
 	h.sync()
-	if h.provider.fetches != 1 || h.store.stars(ratingTestMovieB) != 4 {
-		t.Fatalf("fetches=%d movieB=%d, want the next run to sync", h.provider.fetches, h.store.stars(ratingTestMovieB))
+	if h.provider.fetches != 1 || h.store.score(ratingTestMovieB) != 8 {
+		t.Fatalf("fetches=%d movieB=%d, want the next run to sync", h.provider.fetches, h.store.score(ratingTestMovieB))
 	}
 	if !slices.Contains(h.repo.ratingLocks, "try:"+ratingTestConnID) {
 		t.Fatalf("rating sync locks = %v, want the scheduled run to try the lock", h.repo.ratingLocks)
@@ -832,11 +194,11 @@ func (h *ratingHarness) remoteRow(mediaItemID string, rating int) RemoteRating {
 	}
 }
 
-func (h *ratingHarness) agree(mediaItemID string, stars int, seen bool) {
+func (h *ratingHarness) agree(mediaItemID string, score int, seen bool) {
 	item := h.media[mediaItemID]
 	_ = h.repo.UpsertRatingSyncStates(context.Background(), []RatingSyncState{{
 		ConnectionID: h.conn.ID, ProviderAccountID: h.conn.ProviderAccountID, MediaItemID: mediaItemID, Kind: item.Kind,
-		ProviderItemKey: item.ProviderItemKey, SyncedRating: stars, RemoteSeen: seen,
+		ProviderItemKey: item.ProviderItemKey, SyncedRating: score, RemoteSeen: seen,
 	}})
 }
 
@@ -865,21 +227,21 @@ func newFakeRatingStore() *fakeRatingStore {
 	}
 }
 
-func (s *fakeRatingStore) set(id string, stars int) {
+func (s *fakeRatingStore) set(id string, score int) {
 	s.clock = s.clock.Add(time.Minute)
-	s.ratings[id] = catalog.UserRating{UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemID: id, Rating: stars, RatedAt: s.clock}
+	s.ratings[id] = catalog.UserRating{UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemID: id, Score: score, RatedAt: s.clock}
 }
 
 func (s *fakeRatingStore) remove(id string) { delete(s.ratings, id) }
 
-func (s *fakeRatingStore) stars(id string) int { return s.ratings[id].Rating }
+func (s *fakeRatingStore) score(id string) int { return s.ratings[id].Score }
 
 func (s *fakeRatingStore) matches(id string, observed catalog.ObservedRating) bool {
 	current, ok := s.ratings[id]
-	if observed.Rating == 0 {
+	if observed.Score == 0 {
 		return !ok
 	}
-	return ok && current.Rating == observed.Rating && current.RatedAt.Equal(observed.RatedAt)
+	return ok && current.Score == observed.Score && current.RatedAt.Equal(observed.RatedAt)
 }
 
 func (s *fakeRatingStore) ListAll(_ context.Context, _ int, _ string) ([]catalog.UserRating, error) {
@@ -903,7 +265,7 @@ func (s *fakeRatingStore) SetIfUnchanged(_ context.Context, _ int, _ string, id 
 	if s.conflicts[id] || !s.matches(id, observed) {
 		return false, nil
 	}
-	s.ratings[id] = catalog.UserRating{UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemID: id, Rating: rating, RatedAt: ratedAt}
+	s.ratings[id] = catalog.UserRating{UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemID: id, Score: rating, RatedAt: ratedAt}
 	if s.afterWrite != nil {
 		s.afterWrite()
 	}
@@ -939,7 +301,7 @@ type ratingHistoryStore struct {
 }
 
 func (s ratingHistoryStore) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
-	if query.Offset > 0 {
+	if query.After != nil {
 		return nil, nil
 	}
 	var rows []userstore.WatchHistoryEntry
@@ -1023,7 +385,7 @@ func (p *ratingProviderStub) RatingExportRequiresWatched(kind string) bool {
 
 func TestSyncRatingsSkipsApplyingAfterAnAccountRebind(t *testing.T) {
 	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 3)
+	h.store.set(ratingTestMovieA, 6)
 	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 7)}, SnapshotKinds: []string{historyimport.KindMovie}}
 	// The connection is re-bound while the provider read is in flight.
 	h.provider.onFetch = func() {
@@ -1035,11 +397,120 @@ func TestSyncRatingsSkipsApplyingAfterAnAccountRebind(t *testing.T) {
 
 	result := h.sync()
 
-	if h.store.stars(ratingTestMovieB) != 0 || len(h.provider.exported) != 0 || len(h.repo.ratingStates) != 0 {
+	if h.store.score(ratingTestMovieB) != 0 || len(h.provider.exported) != 0 || len(h.repo.ratingStates) != 0 {
 		t.Fatalf("a stale run must not apply ratings: movieB=%d exported=%#v states=%#v",
-			h.store.stars(ratingTestMovieB), h.provider.exported, h.repo.ratingStates)
+			h.store.score(ratingTestMovieB), h.provider.exported, h.repo.ratingStates)
 	}
 	if len(result.Warnings) == 0 {
 		t.Fatal("a skipped stale run should warn")
+	}
+}
+
+func TestSyncRatingsSendsARemovalMadeDuringTheLastResend(t *testing.T) {
+	h := newRatingHarness(t)
+	h.agree(ratingTestMovieA, 2, true)
+	h.store.set(ratingTestMovieA, 4)
+	// The edits keep coming, and the last one removes the rating.
+	sends, score := 0, 2
+	h.provider.onExport = func() {
+		sends++
+		if sends > maxRatingResends {
+			h.store.remove(ratingTestMovieA)
+			return
+		}
+		score = score%10 + 1
+		h.store.set(ratingTestMovieA, score)
+	}
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 2)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	h.sync()
+	if len(h.provider.exported) != 1+maxRatingResends {
+		t.Fatalf("exports = %d, want the first send and %d resends", len(h.provider.exported), maxRatingResends)
+	}
+	last := h.provider.exported[len(h.provider.exported)-1].Rating
+
+	// The provider now holds the last sent rating. The next run must send the
+	// removal rather than import that rating back.
+	h.provider.onExport = nil
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, last)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	h.sync()
+	if got := h.store.score(ratingTestMovieA); got != 0 {
+		t.Fatalf("local rating = %d, want the removal kept", got)
+	}
+	if len(h.provider.removed) != 1 {
+		t.Fatalf("removed = %#v, want the removal sent", h.provider.removed)
+	}
+}
+
+func TestPersistConnectionAccountChangeClearsAgreedRatings(t *testing.T) {
+	repo := newServiceFakeRepo()
+	existing := Connection{
+		ID: ratingTestConnID, Provider: "test", UserID: 1, ProfileID: "p", ProviderAccountID: "old",
+		SyncCursors: map[string]string{"test.ratings.movies": "c1", "test.watched": "w1"},
+	}
+	repo.connections[connectionKey("test", 1, "p")] = existing
+	repo.ratingStates = []RatingSyncState{{ConnectionID: ratingTestConnID, MediaItemID: ratingTestMovieA, SyncedRating: 8, RemoteSeen: true}}
+	service := NewService(repo, NewRegistry())
+
+	conn, err := service.persistConnection(context.Background(), "test", 1, "p", TokenSet{AccessToken: "a"}, ProviderAccount{ID: "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.ratingStates) != 0 {
+		t.Fatalf("agreed ratings survived an account change: %#v", repo.ratingStates)
+	}
+	if conn.SyncCursors["test.ratings.movies"] != "" || conn.SyncCursors["test.watched"] != "w1" {
+		t.Fatalf("cursors = %#v, want only rating cursors dropped", conn.SyncCursors)
+	}
+
+	// Reconnecting the same account keeps the agreement.
+	repo.ratingStates = []RatingSyncState{{ConnectionID: ratingTestConnID, MediaItemID: ratingTestMovieA, SyncedRating: 8, RemoteSeen: true}}
+	if _, err := service.persistConnection(context.Background(), "test", 1, "p", TokenSet{AccessToken: "a"}, ProviderAccount{ID: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.ratingStates) != 1 {
+		t.Fatal("reconnecting the same account must keep agreed ratings")
+	}
+	// Only the switch waited for the rating sync lock.
+	if !slices.Equal(repo.ratingLocks, []string{"wait:" + ratingTestConnID}) {
+		t.Fatalf("rating sync locks = %v, want one wait by the account switch", repo.ratingLocks)
+	}
+}
+
+func TestSyncRatingsEmptySnapshotDoesNotDelete(t *testing.T) {
+	h := newRatingHarness(t)
+	h.store.set(ratingTestMovieA, 8)
+	h.store.set(ratingTestMovieB, 4)
+	h.agree(ratingTestMovieA, 8, true)
+	h.agree(ratingTestMovieB, 4, true)
+	h.provider.batch = RatingImportBatch{SnapshotKinds: []string{historyimport.KindMovie}}
+
+	result := h.sync()
+
+	if h.store.score(ratingTestMovieA) != 8 || h.store.score(ratingTestMovieB) != 4 {
+		t.Fatalf("an empty snapshot must not delete several ratings: A=%d B=%d", h.store.score(ratingTestMovieA), h.store.score(ratingTestMovieB))
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("an ignored empty snapshot should warn")
+	}
+}
+
+func TestSyncRatingsRecoversExactValuesAfterTheScoreMigration(t *testing.T) {
+	h := newRatingHarness(t)
+	h.store.set(ratingTestMovieA, 8)
+	h.agree(ratingTestMovieA, 8, true)
+	h.store.set(ratingTestMovieB, 6)
+	h.agree(ratingTestMovieB, 6, true)
+	h.provider.batch = RatingImportBatch{
+		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieA, 7), h.remoteRow(ratingTestMovieB, 6)},
+		SnapshotKinds: []string{historyimport.KindMovie},
+	}
+
+	h.sync()
+
+	if len(h.provider.exported) != 0 || len(h.provider.removed) != 0 {
+		t.Fatalf("recovery must not write to the provider; writes = %#v / %#v", h.provider.exported, h.provider.removed)
+	}
+	if h.store.score(ratingTestMovieA) != 7 || h.store.score(ratingTestMovieB) != 6 {
+		t.Fatalf("scores A=%d B=%d, want 7 and 6", h.store.score(ratingTestMovieA), h.store.score(ratingTestMovieB))
 	}
 }

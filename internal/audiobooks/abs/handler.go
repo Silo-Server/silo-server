@@ -48,9 +48,17 @@ type MediaStore interface {
 	GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error)
 	// ListAudiobooks returns a page of audiobooks. When libraryID is non-zero
 	// it filters to items in that media_folder; 0 means all audiobook items.
-	// filter optionally pushes an authors/series/narrators predicate into the
-	// query (Filter{} for none) so per-author syncs avoid a full-library scan.
-	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, filter Filter) ([]*models.MediaItem, int, error)
+	// q carries the ABS filter and sort, applied in SQL (ItemsQuery{} for
+	// none). limit <= 0 returns every match.
+	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q ItemsQuery) ([]*models.MediaItem, int, error)
+	// StreamAudiobooks lists every match like ListAudiobooks with limit 0,
+	// reporting the total to onTotal first and then handing the books to
+	// emit in order, a batch at a time.
+	StreamAudiobooks(ctx context.Context, libraryID int64, access catalog.AccessFilter, q ItemsQuery, onTotal func(int) error, emit func([]*models.MediaItem) error) error
+	// ListAudiobooksCollapsed is ListAudiobooks with each series folded into
+	// its first book in the requested order (ABS collapseseries=1); total
+	// counts the folded entries.
+	ListAudiobooksCollapsed(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q ItemsQuery) ([]CollapsedAudiobook, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
 	ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]AudiobookLibrary, error)
@@ -75,6 +83,11 @@ type MediaStore interface {
 	// audiobook_series) in the library plus the total series count. limit<=0
 	// returns all.
 	ListLibrarySeries(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter) ([]SeriesSummary, int, error)
+	// SearchLibraryAuthors and SearchLibrarySeries return up to limit authors
+	// or series in the library whose name contains term, prefix matches first,
+	// counting only books the viewer may see.
+	SearchLibraryAuthors(ctx context.Context, libraryID int64, term string, limit int, access catalog.AccessFilter) ([]AuthorSummary, error)
+	SearchLibrarySeries(ctx context.Context, libraryID int64, term string, limit int, access catalog.AccessFilter) ([]SeriesSummary, error)
 	// GetAuthorByID returns the author with the given people.id plus
 	// their audiobook list, sorted by title. Returns ErrNotFound when
 	// no people row matches.
@@ -84,6 +97,12 @@ type MediaStore interface {
 	// by series_index ASC (NULLS LAST), title fallback. Returns
 	// ErrNotFound when no rows match.
 	GetSeriesByName(ctx context.Context, seriesName string, access catalog.AccessFilter) (Series, error)
+	// AudiobookPosterPath returns the stored poster path of an audiobook, or
+	// ErrNotFound when no audiobook has contentID.
+	AudiobookPosterPath(ctx context.Context, contentID string) (string, error)
+	// AuthorPhotoPath returns the stored photo path of a person who authored
+	// at least one audiobook, or ErrNotFound for anyone else.
+	AuthorPhotoPath(ctx context.Context, authorID string) (string, error)
 }
 
 // AuthorSummary is an aggregated author entry for /libraries/{id}/authors.
@@ -127,9 +146,20 @@ type Author struct {
 	Books      []*models.MediaItem
 }
 
+// SeriesID is the ABS ID of the series a book names: the name lowercased,
+// LOWER(series_name) in SQL. Series have no table of their own; a series is
+// every audiobook_series row whose name matches case-insensitively, so the
+// list, the detail, the series filter, and collapseseries all group and look
+// up by this key, and lookups also accept the name itself in any case. The
+// store reads the key from the database (AudiobookSeriesMembership.Key);
+// this Go form is the fallback for an item hydrated without it.
+func SeriesID(name string) string {
+	return strings.ToLower(name)
+}
+
 // Series is the detail-shape series with books ordered by series_index.
 type Series struct {
-	ID    string // lowercased series_name
+	ID    string // SeriesID of Name
 	Name  string // canonical series_name
 	Books []*models.MediaItem
 }
@@ -267,6 +297,18 @@ type Recommender interface {
 	Similar(ctx context.Context, contentID string, limit int) ([]string, error)
 }
 
+// Downloads applies Silo's download rules to ABS downloads: the server's Allow
+// downloads setting, the account's download permission, and the policy engine.
+// The /download route is served through ServeDirect, so the download bandwidth
+// limits apply there too; RSS feeds only check their owner with
+// CheckDownloadAllowed, and their files are served without those limits.
+// *downloads.Service satisfies it, as it does jellycompat.DownloadServer.
+type Downloads interface {
+	// CheckDownloadAllowed returns nil when the account may download now.
+	CheckDownloadAllowed(ctx context.Context, userID int) error
+	ServeDirect(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fileID int, format string, filter catalog.AccessFilter) error
+}
+
 // ---------------------------------------------------------------------------
 // Config provider
 // ---------------------------------------------------------------------------
@@ -362,12 +404,20 @@ type Handler struct {
 	// native API process. Must be set before Mount: Mount is what registers the
 	// wrapped handlers, so a later call would have no effect.
 	telemetry *streamtelemetry.Registry
+	// downloads is the router's download service, built after this handler.
+	// Nil refuses every download.
+	downloads Downloads
 }
 
 // SetStreamTelemetry wires local stream observation. A nil registry is a
 // complete no-op. Call before Mount.
 func (h *Handler) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	h.telemetry = registry
+}
+
+// SetDownloads wires the download service. Call before serving requests.
+func (h *Handler) SetDownloads(d Downloads) {
+	h.downloads = d
 }
 
 // SkipMediaCompression reports whether an ABS media route must retain the

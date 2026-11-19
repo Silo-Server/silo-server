@@ -50,9 +50,6 @@ type Webhook struct {
 	URLHost                 string
 	SigningSecretCiphertext *string
 	Enabled                 bool
-	NotifyFavorites         bool
-	NotifyWatchlist         bool
-	NotifyContinueWatching  bool
 	NotifyNextUp            bool
 	NotifyRequests          bool
 	ConsecutiveFailures     int
@@ -65,15 +62,14 @@ type Webhook struct {
 	UpdatedAt               time.Time
 }
 
-// MatchesReasons reports whether at least one of the delivery's matched
-// reasons passes this webhook's per-reason filter. Per-webhook flags narrow
-// what fires for a destination; they can never re-enable a reason the profile
-// disabled globally (those deliveries are never created).
+// MatchesReasons reports whether the delivery's matched reasons pass this
+// webhook's per-reason filter: Next Up, the only reason, with notify_next_up
+// on. Per-webhook flags narrow what fires for a destination; they can never
+// re-enable a reason the profile disabled globally (those deliveries are never
+// created). A delivery from before Next Up was the only reason that matched
+// only a retired reason does not pass.
 func (w Webhook) MatchesReasons(flags ReasonFlags) bool {
-	return (flags.Favorite && w.NotifyFavorites) ||
-		(flags.Watchlist && w.NotifyWatchlist) ||
-		(flags.ContinueWatching && w.NotifyContinueWatching) ||
-		(flags.NextUp && w.NotifyNextUp)
+	return flags.NextUp && w.NotifyNextUp
 }
 
 // DeliveryAttempt is one row of a per-target dispatch outbox / retry log.
@@ -93,7 +89,8 @@ type DeliveryAttempt struct {
 
 // parseReasonFlags decodes a delivery's reason_flags JSONB for
 // episode.available rows. Operational types carry different shapes and decode
-// to the zero value.
+// to the zero value, and the favorite, watchlist and continue_watching keys of
+// rows written before Next Up was the only reason are ignored.
 func parseReasonFlags(raw []byte) ReasonFlags {
 	var flags ReasonFlags
 	if len(raw) > 0 {
@@ -102,21 +99,10 @@ func parseReasonFlags(raw []byte) ReasonFlags {
 	return flags
 }
 
-// reasonLabelList renders matched reasons as display labels, in stable
-// precedence order.
+// reasonLabelList renders matched reasons as display labels.
 func reasonLabelList(flags ReasonFlags) []string {
-	labels := make([]string, 0, 4)
-	if flags.Favorite {
-		labels = append(labels, "Favorited")
-	}
-	if flags.Watchlist {
-		labels = append(labels, "Watchlisted")
-	}
-	if flags.ContinueWatching {
-		labels = append(labels, "Continue Watching")
-	}
 	if flags.NextUp {
-		labels = append(labels, "Next Up")
+		return []string{"Next Up"}
 	}
-	return labels
+	return []string{}
 }

@@ -439,9 +439,19 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 // recommendableMediaTypes, newest first. Completions of deleted items and of
 // other types, such as a finished audiobook, are skipped, so they never
 // become anchors.
+//
+// When the store keeps progress in the Postgres tables this is one query,
+// as for readWatchedItemIDSet: walking the store there re-sorts the whole
+// history for every page, and a profile whose latest completions are many
+// episodes of few series reads every page before it finds limit titles.
+// Every caller takes the same path, so the reads and the worker choose
+// anchors from the same list.
 func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
+	}
+	if !s.storeIsSeparate() {
+		return s.repo.GetRecentCompletedItemIDs(ctx, userID, profileID, limit)
 	}
 
 	store, ok, err := s.storeForUser(ctx, userID)
@@ -520,32 +530,48 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 // Because You Watched anchors on the profile's latest completions.
 const (
 	// BecauseYouWatchedAnchors is how many anchors a profile's Because You
-	// Watched rows are built and read for.
+	// Watched rows are read for, and how many each library gets built.
 	BecauseYouWatchedAnchors = 3
-	// anchorCandidateLimit is how many of the latest completions the anchors
-	// are chosen from, so disliked ones can be passed over.
-	anchorCandidateLimit = 10
+	// recentAnchorLimit is how many of the latest completions the anchors
+	// of a read that limits no library are chosen from, so disliked ones can
+	// be passed over.
+	recentAnchorLimit = 10
+	// anchorCandidateLimit is how many of the latest completions a read
+	// limited to some libraries, and the worker, choose anchors from, so a
+	// library keeps anchors while the profile watches another library.
+	anchorCandidateLimit = 50
 )
 
-// itemRatingReader reads a profile's star ratings of the given items, keyed
-// by item. *catalog.RatingsRepo implements it.
+// itemRatingReader reads a profile's ratings (scores, 1 to 10) of the given
+// items, keyed by item. *catalog.RatingsRepo implements it.
 type itemRatingReader interface {
 	ListForItems(ctx context.Context, userID int, profileID string, itemIDs []string) (map[string]int, error)
 }
 
 // anchorItemIDs returns up to n Because You Watched anchors for the profile:
-// its most recently completed titles of recommendableMediaTypes still in the
-// catalog, newest first, of the latest anchorCandidateLimit, leaving out
-// those it marked Not interested or rated DislikedRatingMax or lower. A row
-// headed "Because You Watched" a title the profile disliked contradicts its
-// taste. With no ratings reader rated titles stay. The worker, the Reader and Watch
-// Tonight all choose anchors here, since a read can only use an anchor whose
-// row the worker cached.
+// the first n of its anchorCandidates among the latest recentAnchorLimit
+// completions. They are the first n of the worker's deeper candidates too.
 func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, n int) ([]string, error) {
 	if n <= 0 {
 		return []string{}, nil
 	}
-	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, max(n, anchorCandidateLimit))
+	candidates, err := anchorCandidates(ctx, signals, ratings, userID, profileID, max(n, recentAnchorLimit))
+	if err != nil {
+		return nil, err
+	}
+	return candidates[:min(n, len(candidates))], nil
+}
+
+// anchorCandidates returns the titles Because You Watched rows may anchor on:
+// the profile's most recently completed titles of recommendableMediaTypes
+// still in the catalog, newest first, of the latest limit, leaving out those
+// it marked Not interested or rated DislikedScoreMax or lower. A row headed
+// "Because You Watched" a title the profile disliked contradicts its taste.
+// With no ratings reader rated titles stay. The
+// worker, the Reader and Watch Tonight all choose anchors from these, since a
+// read can only use an anchor whose row the worker cached.
+func anchorCandidates(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, limit int) ([]string, error) {
+	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -570,14 +596,45 @@ func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatin
 		}
 		liked := make([]string, 0, len(recent))
 		for _, id := range recent {
-			if rating, ok := rated[id]; ok && rating <= DislikedRatingMax {
+			if rating, ok := rated[id]; ok && rating <= DislikedScoreMax {
 				continue
 			}
 			liked = append(liked, id)
 		}
 		recent = liked
 	}
-	return recent[:min(n, len(recent))], nil
+	return recent, nil
+}
+
+// libraryAnchorItemIDs returns the candidates, newest first as given, that
+// are among the first n overall or among the first n of a library they are
+// in (libraries maps a candidate to its libraries). A candidate in one of
+// disabled is hidden from every read, so it takes no library's place. The
+// worker builds rows for these, so a section scoped to any set of libraries
+// finds a row for each of its first n anchors: a title among the first n in a
+// scope is among the first n of its own library in that scope.
+func libraryAnchorItemIDs(candidates []string, libraries map[string][]int, disabled []int, n int) []string {
+	perLibrary := make(map[int]int)
+	anchors := make([]string, 0, min(n, len(candidates)))
+	for i, id := range candidates {
+		keep := i < n
+		if slices.ContainsFunc(libraries[id], func(library int) bool { return slices.Contains(disabled, library) }) {
+			if keep {
+				anchors = append(anchors, id)
+			}
+			continue
+		}
+		for _, library := range libraries[id] {
+			if perLibrary[library] < n {
+				keep = true
+			}
+			perLibrary[library]++
+		}
+		if keep {
+			anchors = append(anchors, id)
+		}
+	}
+	return anchors
 }
 
 func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) error {
@@ -647,7 +704,16 @@ func recentDistinctCompletedRows(rows []WatchProgressRow, limit int) []WatchProg
 	return result
 }
 
+// RewatchCounts returns the items the profile completed at least twice, in
+// media item ID order, counting every visible completed play in its history.
+// When the history lives in the Postgres tables, GetRewatchCounts groups and
+// filters the plays in SQL; a separate store groups them in one read and the
+// single plays are dropped here.
 func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error) {
+	if !s.storeIsSeparate() {
+		return s.repo.GetRewatchCounts(ctx, userID, profileID)
+	}
+
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -656,47 +722,21 @@ func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID 
 		return s.repo.GetRewatchCounts(ctx, userID, profileID)
 	}
 
-	counts := make(map[string]*RewatchCount)
-	offset := 0
-	for {
-		history, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-			ProfileID: profileID,
-			Limit:     signalPageSize,
-			Offset:    offset,
+	items, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{ProfileID: profileID})
+	if err != nil {
+		return nil, fmt.Errorf("list completed history items from store: %w", err)
+	}
+	var result []RewatchCount
+	for _, item := range items {
+		if item.PlayCount < 2 {
+			continue
+		}
+		result = append(result, RewatchCount{
+			MediaItemID:   item.MediaItemID,
+			Count:         item.PlayCount,
+			LastWatchedAt: parseSignalTime(item.WatchedAt, time.Time{}),
 		})
-		if err != nil {
-			return nil, fmt.Errorf("list completed history from store: %w", err)
-		}
-		for _, entry := range history {
-			if !entry.Completed {
-				continue
-			}
-			rc := counts[entry.MediaItemID]
-			if rc == nil {
-				rc = &RewatchCount{MediaItemID: entry.MediaItemID}
-				counts[entry.MediaItemID] = rc
-			}
-			rc.Count++
-			watchedAt := parseSignalTime(entry.WatchedAt, time.Time{})
-			if watchedAt.After(rc.LastWatchedAt) {
-				rc.LastWatchedAt = watchedAt
-			}
-		}
-		if len(history) < signalPageSize {
-			break
-		}
-		offset += len(history)
 	}
-
-	result := make([]RewatchCount, 0, len(counts))
-	for _, rc := range counts {
-		if rc.Count >= 2 {
-			result = append(result, *rc)
-		}
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].MediaItemID < result[j].MediaItemID
-	})
 	return result, nil
 }
 

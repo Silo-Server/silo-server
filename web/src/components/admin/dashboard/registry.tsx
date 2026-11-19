@@ -211,6 +211,7 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     maxRows: 5,
     defaultRows: 3,
     ranges: SAMPLED_RANGES,
+    views: { allowed: ["lines", "stacked", "total"], default: "lines" },
     Component: ConcurrentStreamsWidget,
   }),
   defineDashboardWidget({

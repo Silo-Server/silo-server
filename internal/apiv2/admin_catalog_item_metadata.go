@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
@@ -13,6 +14,7 @@ import (
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/providerid"
 )
 
 type AdminItemMetadataService interface {
@@ -43,9 +45,9 @@ type AdminItemMetadataUpdate struct {
 	RatingTMDB       *float64  `json:"rating_tmdb,omitempty" nullable:"true" doc:"Null clears it, along with any TMDB score a metadata plugin stored"`
 	RatingRTCritic   *int      `json:"rating_rt_critic,omitempty" nullable:"true" doc:"Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored"`
 	RatingRTAudience *int      `json:"rating_rt_audience,omitempty" nullable:"true" doc:"Null clears it, along with any Rotten Tomatoes audience score a metadata plugin stored"`
-	ImdbID           *string   `json:"imdb_id,omitempty" nullable:"true"`
-	TmdbID           *string   `json:"tmdb_id,omitempty" nullable:"true"`
-	TvdbID           *string   `json:"tvdb_id,omitempty" nullable:"true"`
+	ImdbID           *string   `json:"imdb_id,omitempty" nullable:"true" doc:"IMDb title ID, stored trimmed and in lowercase; an empty string clears it"`
+	TmdbID           *string   `json:"tmdb_id,omitempty" nullable:"true" doc:"TMDB ID, stored trimmed and without a TMDB URL slug (550-fight-club saves as 550); an empty string clears it"`
+	TvdbID           *string   `json:"tvdb_id,omitempty" nullable:"true" doc:"TheTVDB ID, stored trimmed; an empty string clears it"`
 	SeasonNumber     *int      `json:"season_number,omitempty" nullable:"true"`
 	EpisodeNumber    *int      `json:"episode_number,omitempty" nullable:"true"`
 	LockedFields     *[]int    `json:"locked_fields,omitempty" nullable:"true"`
@@ -91,7 +93,7 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	if reg.deps.AdminItemMetadata == nil {
 		return nil, unavailable("item metadata")
 	}
-	if problem := rejectMalformedMetadataDates(in.Body); problem != nil {
+	if problem := rejectMalformedMetadata(&in.Body); problem != nil {
 		return nil, problem
 	}
 	detail, err := reg.deps.AdminItemMetadata.UpdateCatalogItemMetadata(ctx, in.ID, handlers.UpdateItemMetadataRequest(in.Body), clearedItemMetadataFields(in.RawBody))
@@ -112,12 +114,18 @@ const (
 	memberAirDate      = "air_date"
 )
 
-// rejectMalformedMetadataDates refuses a date member that is not a
-// YYYY-MM-DD calendar date. The repositories write these members as text, so
-// PostgreSQL would otherwise fail the write (release_date and air_date, a
-// 500) or store the value as given (first_air_date and last_air_date). Null
-// decodes to nil and clears the date.
-func rejectMalformedMetadataDates(body AdminItemMetadataUpdate) *Problem {
+// rejectMalformedMetadata refuses a date member that is not a YYYY-MM-DD
+// calendar date, and a provider ID member that is not an ID of its provider.
+// The repositories write these members as text, so PostgreSQL would otherwise
+// fail the write (release_date and air_date, a 500) or store the value as
+// given. Null decodes to nil and clears the date.
+//
+// It first normalizes each provider ID in the body: trimmed, an IMDb ID in
+// lowercase, and a TMDB ID without the slug a TMDB URL carries. Lookups
+// compare these IDs exactly, so a padded or slugged value would miss the item,
+// and a refresh drops a value that fails these checks and restores the
+// item's previous ID. An empty ID stays an edit that clears it.
+func rejectMalformedMetadata(body *AdminItemMetadataUpdate) *Problem {
 	var errs []ProblemError
 	for _, date := range []struct {
 		member string
@@ -134,6 +142,29 @@ func rejectMalformedMetadataDates(body AdminItemMetadataUpdate) *Problem {
 		// PostgreSQL's date type has no year 0.
 		if parsed, err := time.Parse(time.DateOnly, *date.value); err != nil || parsed.Year() < 1 {
 			errs = append(errs, ProblemError{Location: locationBody + "." + date.member, Code: codeInvalid, Detail: "expected a calendar date, YYYY-MM-DD"})
+		}
+	}
+	for _, id := range []struct {
+		member    string
+		value     **string
+		normalize func(string) string
+		valid     func(string) bool
+		detail    string
+	}{
+		{"imdb_id", &body.ImdbID, strings.ToLower, providerid.IsIMDbID, "expected an IMDb ID, such as tt0137523"},
+		{"tmdb_id", &body.TmdbID, catalogsvc.NormalizeTMDBID, providerid.IsPositiveDecimal, "expected a TMDB ID, such as 550"},
+		{"tvdb_id", &body.TvdbID, nil, providerid.IsPositiveDecimal, "expected a TheTVDB ID, such as 81189"},
+	} {
+		if *id.value == nil {
+			continue
+		}
+		value := strings.TrimSpace(**id.value)
+		if id.normalize != nil {
+			value = id.normalize(value)
+		}
+		*id.value = &value
+		if value != "" && !id.valid(value) {
+			errs = append(errs, ProblemError{Location: locationBody + "." + id.member, Code: codeInvalid, Detail: id.detail})
 		}
 	}
 	if len(errs) == 0 {

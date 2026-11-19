@@ -80,6 +80,26 @@ function ods(pts: number, id: number, width: number, height: number, rle: number
   ]);
 }
 
+/** Pushes an object with zero-filled RLE data in protocol-sized fragments. */
+function pushLargeObject(parser: PGSStreamParser, pts: number, id: number, bytes: number) {
+  const fragmentBytes = 65_000;
+  const length = bytes + 4;
+  for (let offset = 0; offset < bytes; offset += fragmentBytes) {
+    const payload = Math.min(fragmentBytes, bytes - offset);
+    const first = offset === 0;
+    const flags = (first ? 0x80 : 0) | (offset + payload === bytes ? 0x40 : 0);
+    const body = [...u16(id), 0, flags];
+    if (first) {
+      body.push((length >> 16) & 0xff, ...u16(length), ...u16(4096), ...u16(2));
+    }
+    const header = segment(0x15, pts, body);
+    const fragment = new Uint8Array(header.length + payload);
+    fragment.set(header);
+    fragment.set(u16(body.length + payload), 11);
+    parser.push(fragment);
+  }
+}
+
 const end = (pts: number) => segment(0x80, pts, []);
 
 // Two lines of a 4x2 object: "1 1 2 2" then "0 0 0 1".
@@ -203,39 +223,12 @@ describe("PGSStreamParser", () => {
   });
 
   it("drops objects past 16 MiB of object data in one epoch", () => {
-    // An object of `bytes` RLE bytes, split into segments of at most 65,000.
-    const bigObject = (pts: number, id: number, bytes: number): number[] => {
-      const out: number[] = [];
-      const data = new Array<number>(bytes).fill(0);
-      for (let offset = 0; offset < bytes; offset += 65_000) {
-        const piece = data.slice(offset, offset + 65_000);
-        const first = offset === 0;
-        const last = offset + 65_000 >= bytes;
-        const flags = (first ? 0x80 : 0) | (last ? 0x40 : 0);
-        const length = bytes + 4;
-        const header = first
-          ? [
-              ...u16(id),
-              0,
-              flags,
-              (length >> 16) & 0xff,
-              (length >> 8) & 0xff,
-              length & 0xff,
-              ...u16(4096),
-              ...u16(2),
-            ]
-          : [...u16(id), 0, flags];
-        out.push(...segment(0x15, pts, [...header, ...piece]));
-      }
-      return out;
-    };
     const parser = new PGSStreamParser();
+    parser.push(new Uint8Array([...pcs(1), ...pds(1, 0, [WHITE])]));
+    pushLargeObject(parser, 1, 0, 9_000_000);
+    pushLargeObject(parser, 1, 1, 9_000_000);
     const compositions = parser.push(
       new Uint8Array([
-        ...pcs(1),
-        ...pds(1, 0, [WHITE]),
-        ...bigObject(1, 0, 9_000_000),
-        ...bigObject(1, 1, 9_000_000),
         ...end(1),
         ...pcs(2, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] }),
         ...end(2),
@@ -323,57 +316,13 @@ describe("PGSStreamParser", () => {
   it("keeps at most 32 MiB of object data in one window's screens", () => {
     // Redefining one object keeps it inside the epoch budget, but each screen
     // still holds the definition it showed.
-    // Built as byte buffers: spreading 36 MB through number arrays is slow
-    // enough to time out on a busy CI runner.
     const parser = new PGSStreamParser();
-    const bytes = 9_000_000;
-    const redefine = (pts: number) => {
-      const out: Uint8Array[] = [
-        new Uint8Array(pcs(pts, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] })),
-      ];
-      for (let offset = 0; offset < bytes; offset += 65_000) {
-        const first = offset === 0;
-        const flags = (first ? 0x80 : 0) | (offset + 65_000 >= bytes ? 0x40 : 0);
-        const length = bytes + 4;
-        const header = first
-          ? [
-              ...u16(0),
-              0,
-              flags,
-              (length >> 16) & 0xff,
-              (length >> 8) & 0xff,
-              length & 0xff,
-              ...u16(4096),
-              ...u16(2),
-            ]
-          : [...u16(0), 0, flags];
-        // The segment header carries the full body size; the zero-filled
-        // tail of the buffer is the object data.
-        const payload = Math.min(65_000, bytes - offset);
-        const head = segment(0x15, pts, header);
-        head[11] = ((header.length + payload) >> 8) & 0xff;
-        head[12] = (header.length + payload) & 0xff;
-        const fragment = new Uint8Array(head.length + payload);
-        fragment.set(head);
-        out.push(fragment);
-      }
-      out.push(new Uint8Array(end(pts)));
-      return out;
-    };
-    const chunks = [
-      new Uint8Array([...pcs(1, { objects: [] }), ...pds(1, 0, [WHITE]), ...end(1)]),
-      ...redefine(2),
-      ...redefine(3),
-      ...redefine(4),
-      ...redefine(5),
-    ];
-    const stream = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
-    let position = 0;
-    for (const chunk of chunks) {
-      stream.set(chunk, position);
-      position += chunk.byteLength;
+    const compositions = parser.push(new Uint8Array([...pcs(1), ...pds(1, 0, [WHITE]), ...end(1)]));
+    for (let pts = 2; pts <= 5; pts++) {
+      parser.push(new Uint8Array(pcs(pts, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] })));
+      pushLargeObject(parser, pts, 0, 9_000_000);
+      compositions.push(...parser.push(new Uint8Array(end(pts))));
     }
-    const compositions = parser.push(stream);
     // Three 9 MB screens fit; the fourth would pass 32 MiB.
     expect(compositions.map((c) => c.start)).toEqual([1, 2, 3, 4]);
   });

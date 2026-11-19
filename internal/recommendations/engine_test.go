@@ -7,18 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
-)
-
-// Compile-time assertions that *Engine satisfies both catalog provider
-// interfaces it will be injected as. CatalogSearchQueryVectorizer is the
-// existing query-embedding hook; CatalogSemanticModelProvider is added in this
-// task and wired in Task 4.
-var (
-	_ catalog.CatalogSearchQueryVectorizer = (*Engine)(nil)
-	_ catalog.CatalogSemanticModelProvider = (*Engine)(nil)
 )
 
 // newEngineTestPool mirrors internal/catalog/display_query_filter_test.go: it

@@ -19,6 +19,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -76,7 +77,7 @@ func main() {
 		fail(fmt.Errorf("go list -m: %w", err))
 	}
 
-	args := goTestArgs(pins)
+	args := goTestArgs(pins, *shared)
 	env := os.Environ()
 	template := os.Getenv("SILO_TEST_DATABASE_URL")
 	run := ""
@@ -196,15 +197,24 @@ func parseList(data string) ([]pin, error) {
 
 // goTestArgs runs exactly the pinned tests, uncached: the test cache cannot
 // see the database the results depend on.
-func goTestArgs(pins []pin) []string {
+func goTestArgs(pins []pin, shared bool) []string {
 	var names, dirs []string
+	pinCounts := make(map[string]int)
 	for _, p := range pins {
 		if !slices.Contains(names, p.test) {
 			names = append(names, p.test)
 		}
-		if !slices.Contains(dirs, p.dir) {
+		if pinCounts[p.dir] == 0 {
 			dirs = append(dirs, p.dir)
 		}
+		pinCounts[p.dir]++
+	}
+	// Give packages with many pins an early slot on their isolated databases.
+	// A caller using a shared database can still specify package order.
+	if !shared {
+		slices.SortStableFunc(dirs, func(a, b string) int {
+			return cmp.Compare(pinCounts[b], pinCounts[a])
+		})
 	}
 	return append([]string{"test", "-count=1", "-json", "-run", "^(" + strings.Join(names, "|") + ")$"}, dirs...)
 }

@@ -13,7 +13,7 @@ export interface BoxSetDetail extends BoxSetSummary {
 
 // Box set reads live under the catalog keys, so every invalidation that
 // refreshes catalog cards (watched state, a refresh, a scan) refreshes them too.
-export const boxSetKeys = {
+const boxSetKeys = {
   all: [...catalogKeys.all, "box-sets"] as const,
   search: (q: string, libraryId?: string) =>
     [...boxSetKeys.all, "search", q, libraryId ?? ""] as const,

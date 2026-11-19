@@ -206,6 +206,28 @@ func (c *Cacher) CacheExtraStill(ctx context.Context, data []byte, extraID strin
 	return res.OriginalPath, res.Thumbhash, nil
 }
 
+// moviesContentType is the key segment of movie artwork.
+const moviesContentType = "movies"
+
+// CacheFramePoster stores a poster taken from a movie's own video under the
+// item's local keys, "local/movies/{contentID}/{hash}/poster/...", where local
+// sidecar posters and uploads go, with the same poster variants. The hash of
+// the bytes gives each frame its own key.
+func (c *Cacher) CacheFramePoster(ctx context.Context, data []byte, contentID string) (storedPath string, thumbhash string, err error) {
+	digest := sha256.Sum256(data)
+	res, err := c.CacheBytes(ctx, data, CacheRequest{
+		ProviderID:       "local",
+		ContentType:      moviesContentType,
+		ContentID:        contentID,
+		ImageType:        metadata.ImagePoster,
+		KeyDiscriminator: hex.EncodeToString(digest[:4]),
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return res.OriginalPath, res.Thumbhash, nil
+}
+
 // validateCacheRequest checks the required identity fields and the
 // episode/season invariant shared by Cache and CacheBytes. Keeping it in one
 // place prevents the season/episode guard from drifting between the two paths:
