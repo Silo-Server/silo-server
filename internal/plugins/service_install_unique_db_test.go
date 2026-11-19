@@ -117,7 +117,6 @@ func newArchiveLinkFixture(t *testing.T) *archiveLinkFixture {
 		ch := make(chan struct{})
 		f.started[version], held[version] = make(chan struct{}), ch
 		f.release[version] = sync.OnceFunc(func() { close(ch) })
-		t.Cleanup(f.release[version])
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		version := r.URL.Path[1 : len(r.URL.Path)-len(".zip")]
@@ -127,7 +126,14 @@ func newArchiveLinkFixture(t *testing.T) *archiveLinkFixture {
 		}
 		_, _ = w.Write(f.archives[version])
 	}))
-	t.Cleanup(f.server.Close)
+	// Close waits for handlers, so a download a failed test left held is
+	// released first.
+	t.Cleanup(func() {
+		for _, release := range f.release {
+			release()
+		}
+		f.server.Close()
+	})
 	events := []string{}
 	f.installer = NewInstaller(f.store, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: f.server.Client()})
 	f.service = &Service{installations: f.store, installer: f.installer, host: &fakeServiceHost{events: &events}}

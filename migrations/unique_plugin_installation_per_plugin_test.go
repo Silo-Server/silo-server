@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The duplicate cleanup keeps a break-glass account's local credentials, as a
-// provider refusal does, and moves a deleted duplicate's marker provider
-// settings to the kept installation.
+// The duplicate cleanup keeps a break-glass account's local sessions and API
+// keys, as a provider refusal does, and moves a deleted duplicate's marker
+// provider settings to the kept installation.
 func TestUniquePluginInstallationCleanupPostgres(t *testing.T) {
 	const migration = "20261118203050_unique_plugin_installation_per_plugin"
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -82,6 +82,10 @@ VALUES ($1, $2, $3, now() + interval '1 day')`, fmt.Sprintf("%s-%d", id, suffix)
 	session("breakglass-local", breakGlass, nil)
 	apiKey(regular)
 	apiKey(breakGlass)
+	// An Audiobookshelf token does not record the login it was minted from,
+	// so it may have come from the deleted identity.
+	absToken := scalar(`INSERT INTO abs_sessions (user_id, token_hash, device_id) VALUES ($1, $2, 'd') RETURNING id`,
+		breakGlass, fmt.Sprintf("abs-%d", suffix))
 	migrationExec(t, tx, fmt.Sprintf(`INSERT INTO marker_provider_config (provider, fetch_priority, contribute_enabled)
 VALUES ('plugin:%d:markers', 7, false)`, dropped))
 
@@ -114,6 +118,9 @@ VALUES ('plugin:%d:markers', 7, false)`, dropped))
 	}
 	if n := keys(breakGlass); n != 1 {
 		t.Errorf("break-glass account has %d API keys, want 1", n)
+	}
+	if n := scalar(`SELECT count(*) FROM abs_sessions WHERE id = $1 AND revoked_at IS NULL`, absToken); n != 0 {
+		t.Error("break-glass account kept an Audiobookshelf token that may come from the deleted identity")
 	}
 	var priority int64
 	var contribute bool

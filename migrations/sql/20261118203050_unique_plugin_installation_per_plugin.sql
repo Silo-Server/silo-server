@@ -88,8 +88,8 @@ BEGIN
     -- checks with it, so its sign-ins are all revoked, as a password reset
     -- revokes an account (revokeAccountSessions), and its API keys are deleted,
     -- as a provider refusal deletes them: it signs in again. A break-glass
-    -- account keeps its local credentials, as under a provider refusal: only
-    -- what it opened through a deleted identity ends.
+    -- account keeps its local sessions and API keys, as under a provider
+    -- refusal: only what may have come through a deleted identity ends.
     CREATE TEMP TABLE displaced_plugin_auth_identities ON COMMIT DROP AS
     SELECT a.id, a.user_id
     FROM plugin_auth_identities a
@@ -122,10 +122,10 @@ BEGIN
            OR impersonator_user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass)
            OR identity_id IN (SELECT id FROM displaced_plugin_auth_identities))
       AND revoked_at IS NULL;
+    -- Audiobookshelf tokens and Jellyfin-compatible sessions do not record the
+    -- identity they came from, so every one a displaced account holds ends.
     UPDATE abs_sessions SET revoked_at = now()
-    WHERE user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass) AND revoked_at IS NULL;
-    -- A Jellyfin-compatible session does not record the identity it signed in
-    -- through, so every one a displaced account holds ends.
+    WHERE user_id IN (SELECT user_id FROM displaced_plugin_auth_users) AND revoked_at IS NULL;
     DELETE FROM jellycompat_sessions WHERE streamapp_user_id IN (SELECT user_id FROM displaced_plugin_auth_users);
     DELETE FROM api_keys WHERE user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass);
 
