@@ -840,6 +840,10 @@
 # replaces it, and a second create for the same plugin is refused.
 ./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
 
+# Cleaning up duplicate installations keeps a break-glass account's local
+# credentials and moves a deleted duplicate's marker provider settings.
+./migrations TestUniquePluginInstallationCleanupPostgres
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset

@@ -9,7 +9,8 @@
 -- then one an admin configured (settings or a sign-in binding), then one with
 -- a stored package, then an enabled one, then the oldest. Request connections
 -- move to the kept row, which also takes library chain placements, task
--- bindings and saved task schedules it lacks. A stored package does not move
+-- bindings, saved task schedules and marker provider settings it lacks. A
+-- stored package does not move
 -- (the same version can be a different build), nor do sign-in identities (see
 -- below). The others are deleted with their settings, sign-in bindings,
 -- remaining chain entries and state (ON DELETE CASCADE): settings are
@@ -86,11 +87,18 @@ BEGIN
     -- Every account linked through a deleted duplicate loses that provider's
     -- checks with it, so its sign-ins are all revoked, as a password reset
     -- revokes an account (revokeAccountSessions), and its API keys are deleted,
-    -- as a provider refusal deletes them: it signs in again.
-    CREATE TEMP TABLE displaced_plugin_auth_users ON COMMIT DROP AS
-    SELECT DISTINCT a.user_id
+    -- as a provider refusal deletes them: it signs in again. A break-glass
+    -- account keeps its local credentials, as under a provider refusal: only
+    -- what it opened through a deleted identity ends.
+    CREATE TEMP TABLE displaced_plugin_auth_identities ON COMMIT DROP AS
+    SELECT a.id, a.user_id
     FROM plugin_auth_identities a
     JOIN ranked_plugin_installations dup ON dup.id = a.plugin_installation_id AND dup.rank > 1;
+
+    CREATE TEMP TABLE displaced_plugin_auth_users ON COMMIT DROP AS
+    SELECT DISTINCT d.user_id, u.break_glass
+    FROM displaced_plugin_auth_identities d
+    JOIN users u ON u.id = d.user_id;
 
     -- The accounts are locked (again, for one linked since the lock above)
     -- before anything is revoked, as every sign-out locks the account first: an
@@ -106,15 +114,20 @@ BEGIN
     -- request, so a collection in progress commits its session first and the
     -- revocation that follows sees it, and a later one finds the request denied.
     UPDATE device_login_requests SET status = 'denied', updated_at = now()
-    WHERE approved_by_user_id IN (SELECT user_id FROM displaced_plugin_auth_users) AND status = 'approved';
+    WHERE (approved_by_user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass)
+           OR approved_identity_id IN (SELECT id FROM displaced_plugin_auth_identities))
+      AND status = 'approved';
     UPDATE auth_sessions SET revoked_at = now()
-    WHERE (user_id IN (SELECT user_id FROM displaced_plugin_auth_users)
-           OR impersonator_user_id IN (SELECT user_id FROM displaced_plugin_auth_users))
+    WHERE (user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass)
+           OR impersonator_user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass)
+           OR identity_id IN (SELECT id FROM displaced_plugin_auth_identities))
       AND revoked_at IS NULL;
     UPDATE abs_sessions SET revoked_at = now()
-    WHERE user_id IN (SELECT user_id FROM displaced_plugin_auth_users) AND revoked_at IS NULL;
+    WHERE user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass) AND revoked_at IS NULL;
+    -- A Jellyfin-compatible session does not record the identity it signed in
+    -- through, so every one a displaced account holds ends.
     DELETE FROM jellycompat_sessions WHERE streamapp_user_id IN (SELECT user_id FROM displaced_plugin_auth_users);
-    DELETE FROM api_keys WHERE user_id IN (SELECT user_id FROM displaced_plugin_auth_users);
+    DELETE FROM api_keys WHERE user_id IN (SELECT user_id FROM displaced_plugin_auth_users WHERE NOT break_glass);
 
     -- Library chain placements and scheduled-task bindings the kept row lacks are
     -- taken from the best-ranked duplicate that has them.
@@ -156,6 +169,27 @@ BEGIN
 
     UPDATE task_schedules s SET task_key = m.new_key FROM moved_task_schedules m WHERE s.task_key = m.old_key;
     UPDATE task_triggers t SET task_key = m.new_key FROM moved_task_schedules m WHERE t.task_key = m.old_key;
+
+    -- A marker provider's settings (fetch, priority, sharing) are keyed the same
+    -- way (markers.PluginProviderID); a row the kept row lacks moves to it, so
+    -- an admin's choice, such as sharing turned off, survives. The lock holds
+    -- the seeding of a provider's row until this commits.
+    LOCK TABLE marker_provider_config IN EXCLUSIVE MODE;
+    UPDATE marker_provider_config m SET provider = moved.new_key, updated_at = now()
+    FROM (
+        SELECT DISTINCT ON (new_key) old_key, new_key
+        FROM (
+            SELECT c.provider AS old_key,
+                   'plugin:' || kept.id || ':' || substr(c.provider, length('plugin:' || dup.id || ':') + 1) AS new_key,
+                   dup.rank
+            FROM marker_provider_config c
+            JOIN ranked_plugin_installations dup ON dup.rank > 1 AND c.provider LIKE 'plugin:' || dup.id || ':%'
+            JOIN ranked_plugin_installations kept ON kept.plugin_id = dup.plugin_id AND kept.rank = 1
+        ) candidates
+        WHERE NOT EXISTS (SELECT 1 FROM marker_provider_config k WHERE k.provider = candidates.new_key)
+        ORDER BY new_key, rank
+    ) moved
+    WHERE m.provider = moved.old_key;
 
     DELETE FROM plugin_installations pi
     USING ranked_plugin_installations dup
