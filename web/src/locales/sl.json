@@ -287,6 +287,12 @@
       "value": "Ta e-poštni naslov je že v uporabi."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "To je že v uporabi."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -327,6 +333,12 @@
     {
       "type": 0,
       "value": "Zahteve ni bilo mogoče prebrati."
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v okolju vozlišča. Spremenite ga tam in znova zaženite vozlišče."
     }
   ],
   "error.field.out_of_range": [
@@ -1259,6 +1271,18 @@
     {
       "type": 0,
       "value": "Priljubljene serije"
+    }
+  ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Priporočeni filmi za vas"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Priporočene serije za vas"
     }
   ],
   "home.section.discoverStudios": [
@@ -59907,6 +59931,12 @@
       "value": ", zato izbirnik naprav zanj ne velja. Če pustite prazno, se podeduje nastavitev naprav za celotno gručo, ki mora biti tudi sama identiteta CUDA, da jo NVENC lahko uporabi – nastavite jo tukaj, kadar je gruča nastavljena s potmi upodabljanja."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v okolju tega vozlišča. Spremenite ga tam in znova zaženite vozlišče."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -64638,6 +64668,170 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Dosežena je bila omejitev za en zagon; naslednji zagon bo nadaljeval."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Poiskani naslovi: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Vdelano: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Zahteve TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Izklopljeno. Zagoni samo počistijo stare naslove."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjena vrstica"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjeni vrstici"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjene vrstice"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustvarjenih vrstic"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslov za priporočanje"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslova za priporočanje"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslovi za priporočanje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naslovov za priporočanje"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Nič ni bilo vdelano: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -64716,6 +64910,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Priporočila za Odkrivanje"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -65036,6 +65236,12 @@
       "value": "Ni bilo mogoče zagnati vložitev"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Zagon priporočil za Odkrivanje ni uspel"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -65154,6 +65360,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Vdelave so ponastavljene. Izbrisano: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ". Počiščeno: "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -65204,6 +65448,122 @@
             {
               "type": 0,
               "value": " vložitev"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelava za Odkrivanje"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelavi za Odkrivanje"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelave za Odkrivanje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vdelav za Odkrivanje"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstica za Odkrivanje"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstici za Odkrivanje"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstice za Odkrivanje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vrstic za Odkrivanje"
             }
           ]
         }
@@ -66494,6 +66854,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Priporočene serije za vsakega gledalca"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Priporočeni filmi za vsakega gledalca"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -66542,6 +66926,18 @@
     {
       "type": 0,
       "value": "Kartice TV-mrež, vsaka odpre serije svoje mreže."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Priporočila"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Naslovi, ki jih še ni v knjižnici, izbrani za vsakega gledalca glede na to, kar gleda."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -66968,6 +67364,12 @@
     {
       "type": 0,
       "value": "Izberite regijo, v kateri so pretočne storitve."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Ostane prazno, dokler priporočila za Odkrivanje niso vklopljena v Skrbništvo → Priporočila."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -68602,6 +69004,12 @@
     {
       "type": 0,
       "value": "Predogled seznama v živo"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Predogled vaših priporočil"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -72696,6 +73104,20 @@
       "value": "Nalaganje nastavitev …"
     }
   ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Nastavljeno s spremenljivko "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " v okolju strežnika."
+    }
+  ],
   "web.admin.settings.fields.passwordConfigured": [
     {
       "type": 0,
@@ -72830,12 +73252,6 @@
     {
       "type": 0,
       "value": "Zaupanja vredni posredniški strežniki"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Upravlja SILO_TRUSTED_PROXIES."
     }
   ],
   "web.admin.settings.general.title": [
@@ -79098,6 +79514,36 @@
       "value": "Preklop na drug model zahteva ponastavitev vdelav, kar izbriše vse vdelave. Drug ponudnik, ki ponuja isti model, začne veljati po ponovnem zagonu."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Omogoči priporočila za Odkrivanje"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "V Odkrivanje med zahtevami doda osebne vrstice z naslovi, ki jih še ni v knjižnici. Uporablja ponudnika vdelav in TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Največje število naslovov za priporočanje"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Koliko naslovov, ki jih ni v knjižnici, strežnik hrani za priporočanje. Vsak se poišče v storitvi TMDB in vdela. Vdelava je običajno poceni, vendar je višje število glede na ponudnika vdelav lahko dražje ali počasnejše in porabi več prostora za shranjevanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Priporočila za Odkrivanje"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -79126,6 +79572,12 @@
     {
       "type": 0,
       "value": "Cron za vdelave"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron priporočil za Odkrivanje"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -79170,12 +79622,6 @@
       "value": "Uporabi Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Nastavljeno z REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -79192,12 +79638,6 @@
     {
       "type": 0,
       "value": "URL povezave"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Vrednost podaja REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -84194,20 +84634,6 @@
     {
       "type": 0,
       "value": "Dnevnik strežnika"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Upravlja spremenljivka "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -132312,13 +132738,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Zbirke in pravila"
+      "value": "Zbirke in pametne vrstice"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Vaše zbirke ali vrstice, sestavljene iz pravil"
+      "value": "Vaše zbirke ali pametne vrstice, sestavljene iz pravil"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -132432,7 +132858,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Sestavite vrstico iz pravil, kot sta žanr in desetletje."
+      "value": "Kot pametna zbirka, vendar samo vrstica. Naslove izbere s pravili, kot sta žanr in desetletje."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -132642,7 +133068,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Naslovi, ki ustrezajo pravilom"
+      "value": "Pametna vrstica"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -138849,6 +139275,12 @@
       "value": " d"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "Cilj obvestil je prenehal delovati"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -139015,6 +139447,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "Odprite nastavitve obvestil, da to odpravite."
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -139361,6 +139799,12 @@
     {
       "type": 0,
       "value": "Naslov z vašega seznama za ogled je zdaj na voljo"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "Webhook je prenehal delovati"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -147031,6 +147475,34 @@
       "value": " na svoj seznam za ogled"
     }
   ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Ker ste gledali: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Ker ste gledali: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -154317,6 +154789,330 @@
       "value": "Ne zanima me"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "Dodaj cilj"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "Dodaj"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "Dodaj cilj obvestil"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "Cilj „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“ je dodan"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Počisti shranjeno skrivnost"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "Ustvarjanje cilja že poteka."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "Obvestila se ne bodo več pošiljala na ta cilj. Tega ni mogoče razveljaviti."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Cilja ni bilo mogoče izbrisati"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "Cilj je izbrisan"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "Pošiljajte obvestila tega profila v storitve, ki jih podpirajo vtičniki vašega strežnika."
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "Izberite, kam naj se pošiljajo obvestila tega profila."
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "Ciljev še ni."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Obdrži shranjeno skrivnost"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "Vrsta"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "Zadnja napaka: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "Zadnja napaka "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "Zadnja napaka "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": vtičnik ni mogel poslati sporočila"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "Zadnja napaka: vtičnik ni mogel poslati sporočila"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosežena je omejitev "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cilja"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosežena je omejitev "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ciljev"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosežena je omejitev "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ciljev"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosežena je omejitev "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ciljev"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "Pred brisanjem tega cilja znova naložite seznam ciljev."
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "Pred urejanjem tega cilja znova naložite seznam ciljev."
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "Cilja ni bilo mogoče shraniti"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "Skrivna polja, ki jih pustite prazna, obdržijo shranjene vrednosti."
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "Preizkusno sporočilo se že pošilja."
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Preizkus je poslan"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Preizkus ni uspel"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Preizkus je poslan: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Preizkus ni uspel: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "Drugi cilji"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "Ni na voljo"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "Vtičnik, ki zagotavlja ta cilj, je izklopljen ali odstranjen, zato se nič ne pošilja."
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "Posodobitev ni uspela"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -155297,6 +156093,12 @@
     {
       "type": 0,
       "value": "URL webhooka je obvezen"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Brez povezave ste, zato ta sprememba ni bila shranjena"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -162849,12 +163651,6 @@
       "value": "Zaupanja vredni posredniški strežniki"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Nastavljeno s spremenljivko okolja SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -163105,12 +163901,6 @@
     {
       "type": 0,
       "value": "Številka baze podatkov"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Nastavljeno z REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

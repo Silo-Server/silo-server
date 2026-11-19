@@ -2845,9 +2845,16 @@ func buildRecentlyReleasedQuery(s ResolvedSection, libraryID *int, libraryIDs []
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
+	// The row's See All page orders by exactly these terms (both paging paths),
+	// so the row is always its first page. Titles with no date come last. A
+	// movie-only row sorts by the movie release date alone, as See All does.
+	releaseDate := catalog.ReleaseDateSortSQL("mi")
+	if cfgFilters.FilterType == mediaScopeMovie {
+		releaseDate = "mi.release_date"
+	}
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s %s ORDER BY mi.year DESC, mi.created_at DESC LIMIT $%d`,
-		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, argIdx,
+		`SELECT %s FROM %s %s ORDER BY %s DESC NULLS LAST, mi.content_id ASC LIMIT $%d`,
+		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, releaseDate, argIdx,
 	)
 	args = append(args, s.ItemLimit)
 	return query, args

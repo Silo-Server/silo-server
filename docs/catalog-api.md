@@ -529,6 +529,13 @@ no starting file (for example, when the viewer may access only a later part). `p
 keeps its own order: a variant comes before another when its lowest file ID is lower.
 Audiobook and ebook versions keep their part and file order.
 
+Clients choose the edition a detail page opens on in the same way. A picked edition
+wins, then `user_data.last_edition_key`, then the edition holding
+`user_data.last_file_id`. With no history, the edition is chosen by name before
+quality: an unnamed or standard edition first, then a theatrical one, then any other.
+Only editions in the first of those groups present are compared on quality (a file
+within the quality cap, then higher resolution, then HDR), and ties keep server order.
+
 ## Device-scoped playback answers
 
 `getCatalogItem` and `listCatalogItemVersions` accept the optional

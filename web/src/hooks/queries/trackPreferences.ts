@@ -71,7 +71,11 @@ export function useSetAudioPreference() {
           profileContext,
         }),
       ),
-    onSuccess: () => invalidateItemDetails(queryClient),
+    // Not awaited: the write has landed, and a caller waiting on mutateAsync
+    // to learn that should not also wait for these refetches.
+    onSuccess: () => {
+      void invalidateItemDetails(queryClient);
+    },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : t("web.player.tracks.saveAudioFailed"));
     },
@@ -94,7 +98,10 @@ export function useDeleteAudioPreference() {
           profileContext,
         }),
       ),
-    onSuccess: () => invalidateItemDetails(queryClient),
+    // Not awaited, as in useSetAudioPreference.
+    onSuccess: () => {
+      void invalidateItemDetails(queryClient);
+    },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : t("web.player.tracks.resetAudioFailed"));
     },

@@ -287,6 +287,12 @@
       "value": "Αυτή η διεύθυνση email χρησιμοποιείται ήδη."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Αυτή η τιμή χρησιμοποιείται ήδη."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -327,6 +333,12 @@
     {
       "type": 0,
       "value": "Δεν ήταν δυνατή η ανάγνωση του αιτήματος."
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ορίζεται από το περιβάλλον του κόμβου. Αλλάξτε το εκεί και επανεκκινήστε τον κόμβο."
     }
   ],
   "error.field.out_of_range": [
@@ -1259,6 +1271,18 @@
     {
       "type": 0,
       "value": "Δημοφιλείς σειρές"
+    }
+  ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Προτεινόμενες ταινίες για εσάς"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Προτεινόμενες σειρές για εσάς"
     }
   ],
   "home.section.discoverStudios": [
@@ -48806,6 +48830,12 @@
       "value": ", οπότε η επιλογή συσκευής δεν ισχύει γι’ αυτό. Αν μείνει κενό, χρησιμοποιείται η ρύθμιση συσκευών για όλο το σύμπλεγμα, η οποία πρέπει επίσης να είναι ταυτότητα CUDA για να τη χρησιμοποιήσει το NVENC – ορίστε μία εδώ όταν το σύμπλεγμα έχει ρυθμιστεί με διαδρομές απόδοσης."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ορίζεται από το περιβάλλον αυτού του κόμβου. Αλλάξτε το εκεί και επανεκκινήστε τον κόμβο."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53023,6 +53053,122 @@
       "value": "Μοντέλο"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Συμπληρώθηκε το όριο μίας εκτέλεσης. Η επόμενη εκτέλεση συνεχίζει από εκεί."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Τίτλοι που αναζητήθηκαν: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Ενσωματώσεις: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Αιτήματα στο TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Ανενεργό. Οι εκτελέσεις μόνο εκκαθαρίζουν παλιούς τίτλους."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δημιουργημένη γραμμή"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δημιουργημένες γραμμές"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλος για προτάσεις"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλοι για προτάσεις"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Δεν δημιουργήθηκαν ενσωματώσεις: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -53077,6 +53223,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Προτάσεις Ανακάλυψης"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53333,6 +53485,12 @@
       "value": "Αποτυχία εκκίνησης των ενσωματώσεων"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Αποτυχία εκκίνησης των προτάσεων Ανακάλυψης"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53451,6 +53609,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Επαναφορά ενσωματώσεων: διαγράφηκαν "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " και "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " και εκκαθαρίστηκαν "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53477,6 +53673,74 @@
             {
               "type": 0,
               "value": " ενσωματώσεις"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ενσωμάτωση Ανακάλυψης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ενσωματώσεις Ανακάλυψης"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " γραμμή Ανακάλυψης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " γραμμές Ανακάλυψης"
             }
           ]
         }
@@ -54327,6 +54591,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Προτεινόμενες σειρές για κάθε θεατή"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Προτεινόμενες ταινίες για κάθε θεατή"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54375,6 +54663,18 @@
     {
       "type": 0,
       "value": "Κάρτες δικτύων που ανοίγουν τις σειρές κάθε δικτύου."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Προτάσεις"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Τίτλοι που δεν υπάρχουν ακόμα στη βιβλιοθήκη, επιλεγμένοι για κάθε θεατή με βάση ό,τι παρακολουθεί."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54673,6 +54973,12 @@
     {
       "type": 0,
       "value": "Επιλέξτε την περιοχή των υπηρεσιών ροής."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Παραμένει κενή μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -56083,6 +56389,12 @@
     {
       "type": 0,
       "value": "Ζωντανή προεπισκόπηση της λίστας"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Προεπισκόπηση των δικών σας προτάσεων"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -59849,6 +60161,20 @@
       "value": "Φόρτωση ρυθμίσεων"
     }
   ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Ορίζεται από τη μεταβλητή "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " στο περιβάλλον του διακομιστή."
+    }
+  ],
   "web.admin.settings.fields.passwordConfigured": [
     {
       "type": 0,
@@ -59983,12 +60309,6 @@
     {
       "type": 0,
       "value": "Αξιόπιστα proxy"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Ελέγχεται από τη μεταβλητή SILO_TRUSTED_PROXIES."
     }
   ],
   "web.admin.settings.general.title": [
@@ -65987,6 +66307,36 @@
       "value": "Η αλλαγή σε άλλο μοντέλο απαιτεί επαναφορά των ενσωματώσεων, η οποία τις διαγράφει όλες. Ένας άλλος πάροχος που εξυπηρετεί το ίδιο μοντέλο εφαρμόζεται μετά από επανεκκίνηση."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Ενεργοποίηση προτάσεων Ανακάλυψης"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Προσθέτει προσωπικές γραμμές στην καρτέλα «Ανακάλυψη» των Αιτημάτων με τίτλους που δεν υπάρχουν ακόμα στη βιβλιοθήκη. Χρησιμοποιεί τον πάροχο ενσωματώσεων και το TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Μέγιστος αριθμός τίτλων για προτάσεις"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Πόσους τίτλους που δεν υπάρχουν στη βιβλιοθήκη διατηρεί ο διακομιστής για να κάνει προτάσεις. Για τον καθένα γίνεται αναζήτηση στο TMDB και δημιουργείται ενσωμάτωση. Η ενσωμάτωση είναι συνήθως φθηνή, αλλά ένας μεγαλύτερος αριθμός μπορεί να κοστίσει περισσότερο ή να διαρκέσει περισσότερο, ανάλογα με τον πάροχο ενσωματώσεων, και χρησιμοποιεί περισσότερο χώρο αποθήκευσης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Προτάσεις Ανακάλυψης"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -66015,6 +66365,12 @@
     {
       "type": 0,
       "value": "Cron ενσωματώσεων"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron προτάσεων Ανακάλυψης"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -66059,12 +66415,6 @@
       "value": "Χρήση Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Ορίζεται από τη μεταβλητή REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -66081,12 +66431,6 @@
     {
       "type": 0,
       "value": "URL σύνδεσης"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Η τιμή παρέχεται από τη μεταβλητή REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70981,20 +71325,6 @@
     {
       "type": 0,
       "value": "Αρχείο καταγραφής διακομιστή"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Η τιμή ορίζεται από τη μεταβλητή "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -111392,7 +111722,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά βαθμολογία, από την υψηλότερη"
+              "value": "πρώτα η υψηλότερη βαθμολογία"
             }
           ]
         },
@@ -111400,7 +111730,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά ημερομηνία κυκλοφορίας, από τη νεότερη"
+              "value": "πρώτα οι νεότερες κυκλοφορίες"
             }
           ]
         },
@@ -111408,7 +111738,7 @@
           "value": [
             {
               "type": 0,
-              "value": "κατά αναπαραγωγές, από τις περισσότερες"
+              "value": "πρώτα οι περισσότερες αναπαραγωγές"
             }
           ]
         },
@@ -112340,13 +112670,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Συλλογές και κανόνες"
+      "value": "Συλλογές και έξυπνες γραμμές"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Οι συλλογές σας ή γραμμές με βάση κανόνες"
+      "value": "Οι συλλογές σας ή έξυπνες γραμμές που δημιουργούνται από κανόνες"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112460,7 +112790,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Δημιουργία γραμμής από κανόνες, όπως είδος και δεκαετία."
+      "value": "Σαν μια έξυπνη συλλογή, αλλά μόνο ως γραμμή. Επιλέξτε τίτλους με κανόνες, όπως είδος και δεκαετία."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112670,7 +113000,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Τίτλοι που ταιριάζουν σε κανόνες"
+      "value": "Έξυπνη γραμμή"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -118365,6 +118695,12 @@
       "value": " ημ."
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "Ένας προορισμός ειδοποιήσεων σταμάτησε να λειτουργεί"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -118507,6 +118843,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "Ανοίξτε τις ρυθμίσεις ειδοποιήσεων για να το διορθώσετε."
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -118805,6 +119147,12 @@
     {
       "type": 0,
       "value": "Ένας τίτλος από τη λίστα παρακολούθησής σας είναι πλέον διαθέσιμος"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "Ένα webhook σταμάτησε να λειτουργεί"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -125645,6 +125993,34 @@
       "value": " στη λίστα παρακολούθησής σας"
     }
   ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Επειδή παρακολουθήσατε: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Επειδή παρακολουθήσατε: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " και "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -132095,6 +132471,298 @@
       "value": "Δεν με ενδιαφέρει"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "Προσθήκη προορισμού"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "Προσθήκη"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "Προσθήκη προορισμού ειδοποιήσεων"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "Ο προορισμός «"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "» προστέθηκε"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Εκκαθάριση αποθηκευμένου μυστικού"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "Η δημιουργία του προορισμού βρίσκεται ήδη σε εξέλιξη."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "Οι ειδοποιήσεις θα σταματήσουν να αποστέλλονται σε αυτόν τον προορισμό. Αυτή η ενέργεια δεν μπορεί να αναιρεθεί."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Αποτυχία διαγραφής προορισμού"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "Ο προορισμός διαγράφηκε"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "Αποστολή των ειδοποιήσεων αυτού του προφίλ σε υπηρεσίες που υποστηρίζουν τα πρόσθετα του διακομιστή σας."
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "Επιλέξτε πού θα αποστέλλονται οι ειδοποιήσεις αυτού του προφίλ."
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν ακόμη προορισμοί."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Διατήρηση αποθηκευμένου μυστικού"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "Είδος"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "Τελευταία αποτυχία: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "Τελευταία αποτυχία "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "Τελευταία αποτυχία "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": δεν ήταν δυνατή η αποστολή από το πρόσθετο"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "Τελευταία αποτυχία: δεν ήταν δυνατή η αποστολή από το πρόσθετο"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Συμπληρώθηκε το όριο του "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " προορισμού"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Συμπληρώθηκε το όριο των "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " προορισμών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "Ανανεώστε τη λίστα προορισμών πριν διαγράψετε αυτόν τον προορισμό."
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "Ανανεώστε τη λίστα προορισμών πριν επεξεργαστείτε αυτόν τον προορισμό."
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η αποθήκευση του προορισμού"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "Τα μυστικά πεδία που αφήνετε κενά διατηρούν τις αποθηκευμένες τιμές τους."
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "Ένα δοκιμαστικό μήνυμα αποστέλλεται ήδη."
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Το δοκιμαστικό μήνυμα στάλθηκε"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Η δοκιμή απέτυχε"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Το δοκιμαστικό μήνυμα στάλθηκε: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Η δοκιμή απέτυχε: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "Άλλοι προορισμοί"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "Μη διαθέσιμος"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "Το πρόσθετο που παρέχει αυτόν τον προορισμό είναι απενεργοποιημένο ή έχει αφαιρεθεί, οπότε δεν αποστέλλεται τίποτα."
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "Αποτυχία ενημέρωσης"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -133043,6 +133711,12 @@
     {
       "type": 0,
       "value": "Απαιτείται URL webhook"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Είστε εκτός σύνδεσης, οπότε αυτή η αλλαγή δεν αποθηκεύτηκε"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -140049,12 +140723,6 @@
       "value": "Αξιόπιστα proxy"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Ορίζεται από τη μεταβλητή περιβάλλοντος SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -140305,12 +140973,6 @@
     {
       "type": 0,
       "value": "Αριθμός βάσης δεδομένων"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Ορίζεται από το REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

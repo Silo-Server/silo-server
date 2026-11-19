@@ -712,6 +712,13 @@ func normalizeLibraryIDs(ids []int) []int {
 	return normalized
 }
 
+// ReleaseDateSortSQL is the value the Release Date sort orders by for the
+// media_items row aliased as alias: the release date, or a series' premiere
+// when it has none. NULL when the item has neither.
+func ReleaseDateSortSQL(alias string) string {
+	return queryColumnSQL(alias, querySortDefs["release_date"].columnSQL)
+}
+
 func queryColumnSQL(alias string, raw string) string {
 	switch strings.Count(raw, "%s") {
 	case 0:

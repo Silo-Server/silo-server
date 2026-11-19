@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -27,6 +28,7 @@ const (
 	PathResolve       = "/api/internal/nodes/self/resolve"
 	PathRevokeRecipes = "/api/internal/nodes/self/revoke-recipes"
 	PathSourcesOpen   = "/api/internal/nodes/self/sources/open"
+	PathRegistration  = "/api/internal/nodes/self/registration"
 )
 
 // Request headers of the node routes: the conditional header a node's
@@ -155,6 +157,67 @@ func (b *NodeConfigBody) ApplyTo(cfg *config.Config) {
 	cfg.Playback.SubtitleSyncNodeCapacity = b.Subtitles.SyncNodeCapacity
 	cfg.Download.ArtifactDir = b.Download.ArtifactDir
 	cfg.Download.ArtifactMaxBytes = b.Download.ArtifactMaxBytes
+}
+
+// Registration is the configuration a transcode node declares from its
+// environment, sent at startup before its first configuration read and again
+// every nodeconfig.DeclarationRefreshInterval while it runs. An
+// absent field is not declared and stays the administrator's; the core writes
+// the declared ones to the node's row and locks exactly those against
+// administrator edits, so an empty registration unlocks every field. Values
+// follow the admin node update body: 0 for max_jobs is unlimited, 0 for
+// download_artifact_max_bytes_override is no budget.
+type Registration struct {
+	Name                             *string `json:"name,omitempty"`
+	URL                              *string `json:"url,omitempty"`
+	Group                            *string `json:"group,omitempty"`
+	MaxJobs                          *int    `json:"max_jobs,omitempty"`
+	SourceAccess                     *string `json:"source_access,omitempty" enum:"local,core"`
+	HWAccelOverride                  *string `json:"hw_accel_override,omitempty" enum:"auto,qsv,vaapi,nvenc,none"`
+	HWDeviceOverride                 *string `json:"hw_device_override,omitempty"`
+	DownloadArtifactDirOverride      *string `json:"download_artifact_dir_override,omitempty"`
+	DownloadArtifactMaxBytesOverride *int64  `json:"download_artifact_max_bytes_override,omitempty"`
+}
+
+// RegistrationFrom is the registration that declares input's fields.
+func RegistrationFrom(input nodepool.UpdateNodeInput) Registration {
+	return Registration{Name: input.Name, URL: input.URL, Group: input.Group, MaxJobs: input.MaxJobs,
+		SourceAccess: input.SourceAccess, HWAccelOverride: input.HWAccelOverride, HWDeviceOverride: input.HWDeviceOverride,
+		DownloadArtifactDirOverride: input.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: input.DownloadArtifactMaxBytesOverride}
+}
+
+// Input is the row update the registration declares.
+func (r Registration) Input() nodepool.UpdateNodeInput {
+	return nodepool.UpdateNodeInput{Name: r.Name, URL: r.URL, Group: r.Group, MaxJobs: r.MaxJobs,
+		SourceAccess: r.SourceAccess, HWAccelOverride: r.HWAccelOverride, HWDeviceOverride: r.HWDeviceOverride,
+		DownloadArtifactDirOverride: r.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: r.DownloadArtifactMaxBytesOverride}
+}
+
+// RegistrationResult is the core's answer to an accepted registration: the
+// node's row identity after it, the fields now locked as the node's, and
+// whether the registration changed the row or its locks (a core that
+// predates the field never sets it).
+type RegistrationResult struct {
+	Node       NodeIdentity `json:"node"`
+	EnvManaged []string     `json:"env_managed"`
+	Changed    bool         `json:"changed,omitempty"`
+}
+
+// Reasons a registration is refused, in the body of a 409 or 422.
+const (
+	// RegistrationInvalid (422): a declared value the core does not accept,
+	// or a field a transcode node cannot declare.
+	RegistrationInvalid = "invalid"
+	// RegistrationURLTaken (409): another node already has the declared URL.
+	RegistrationURLTaken = "url_taken"
+)
+
+// RegistrationRefusal is the JSON body of a refused registration. Field names
+// the declared field it is about.
+type RegistrationRefusal struct {
+	Reason string `json:"reason"`
+	Field  string `json:"field"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // Report is what a transcode node posts every ReportInterval: everything it

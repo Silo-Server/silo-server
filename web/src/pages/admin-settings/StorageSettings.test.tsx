@@ -137,6 +137,7 @@ function mockForm(overrides: FormOverrides = {}) {
     restartRequired: false,
     sensitiveConfigured: [],
     sensitiveManagedByEnv: [],
+    envVar: () => undefined,
     sensitiveStatusReady: true,
     sensitiveStatusError: false,
     buildConnectionCheckRequest: vi.fn(),

@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -117,4 +118,57 @@ func unseenScanPresence(existing []scanPresence, walkedPaths []string) []scanPre
 		}
 	}
 	return unseen
+}
+
+// scopedScanKey marks a scan of part of a library: a subtree or one file.
+type scopedScanKey struct{}
+
+// withScopedScan marks ctx as a scoped scan unless fullScan is set.
+func withScopedScan(ctx context.Context, fullScan bool) context.Context {
+	if fullScan {
+		return ctx
+	}
+	return context.WithValue(ctx, scopedScanKey{}, true)
+}
+
+// confirmUnchangedFiles is called before a scan skips the unchanged files of
+// a book at paths. A full scan may be running beside a scoped scan, and its
+// walk can have missed a book that was removed and then put back with its old
+// size and modification time. Skipping writes nothing, so that scan would
+// still mark the book missing. A scoped scan therefore records that it saw
+// the rows present (ConfirmPresent), which leaves them to it
+// (ListScanPresenceWrittenBefore, MarkMissingWrittenBefore). A full scan
+// writes nothing: only one runs per library on a server, and touching every
+// unchanged row would add a write per book to each library scan. A scoped
+// scan pays one small write per unchanged book it skips.
+//
+// It reports false when the book must not be skipped: a row was marked
+// missing or moved since the caller read it, so the book is indexed again. A
+// failed write is logged and also reports false.
+func (s *Scanner) confirmUnchangedFiles(ctx context.Context, folderID int, paths []string) bool {
+	if scoped, _ := ctx.Value(scopedScanKey{}).(bool); !scoped || s.fileRepo == nil {
+		return true
+	}
+	ok, err := s.fileRepo.ConfirmPresent(ctx, folderID, paths)
+	if err != nil {
+		slog.WarnContext(ctx, "scanner: confirming unchanged files failed, indexing them again", "component", "scanner",
+			"folder_id", folderID, "files", len(paths), "error", err)
+		return false
+	}
+	return ok
+}
+
+// ConfirmPresent records that a scan saw the files at paths on disk by
+// updating their rows' updated_at, and reports whether every path still had
+// a present row in the folder. A row marked missing is left as it is.
+func (r *FileRepository) ConfirmPresent(ctx context.Context, folderID int, paths []string) (bool, error) {
+	if len(paths) == 0 {
+		return true, nil
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE media_files SET updated_at = NOW()
+		WHERE media_folder_id = $1 AND file_path = ANY($2) AND missing_since IS NULL`, folderID, paths)
+	if err != nil {
+		return false, fmt.Errorf("confirming present files: %w", err)
+	}
+	return tag.RowsAffected() == int64(len(paths)), nil
 }

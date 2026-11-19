@@ -2,6 +2,8 @@ package apiv2
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"net/http"
 	"testing"
@@ -92,5 +94,20 @@ func TestAdminPluginCatalogWildcardPreservesExclusionDuringRace(t *testing.T) {
 				t.Fatal(response.Code, response.Body.String(), f)
 			}
 		})
+	}
+}
+
+// A plugin install, update or upload that lost a race to another install of
+// the same plugin is a conflict the admin can retry, not a server error.
+func TestAdminPluginReplacedDuringDownloadIsAConflict(t *testing.T) {
+	err := fmt.Errorf("update plugin %q to %s: %w", "test.plugin", "2.0.0", plugins.ErrInstallationChanged)
+	for name, problem := range map[string]error{
+		"install or update": adminPluginLifecycleProblem(err),
+		"upload":            adminPluginUploadProblem(err),
+	} {
+		var p *Problem
+		if !errors.As(problem, &p) || p.Status != http.StatusConflict || p.Type != TypeConflict.URI() {
+			t.Fatalf("%s: problem = %+v, want 409 conflict", name, problem)
+		}
 	}
 }

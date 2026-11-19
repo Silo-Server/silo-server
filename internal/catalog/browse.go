@@ -1616,7 +1616,8 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 			return fmt.Sprintf("ORDER BY mi.release_date %s%s, mi.content_id ASC", direction, nullsClause), nil
 		}
 		return fmt.Sprintf(
-			"ORDER BY COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), '')) %s%s, mi.content_id ASC",
+			"ORDER BY %s %s%s, mi.content_id ASC",
+			premiereDateKeyExpr,
 			direction,
 			nullsClause,
 		), nil
@@ -1724,7 +1725,7 @@ const sortTitleKeyExpr = "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.ti
 
 // premiereDateKeyExpr is the release_date order key; first_air_date is text, so
 // both sides compare as ISO dates.
-const premiereDateKeyExpr = "COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), ''))"
+var premiereDateKeyExpr = ReleaseDateSortSQL("mi")
 
 func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, args *[]any, argIdx *int) {
 	add := func(sql string, value any) {

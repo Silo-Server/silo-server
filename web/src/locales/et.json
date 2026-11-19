@@ -287,6 +287,12 @@
       "value": "See e-posti aadress on juba kasutusel."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "See on juba kasutusel."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -327,6 +333,12 @@
     {
       "type": 0,
       "value": "Päringut ei õnnestunud lugeda."
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Selle määrab sõlme keskkond. Muutke seda seal ja taaskäivitage sõlm."
     }
   ],
   "error.field.out_of_range": [
@@ -1259,6 +1271,18 @@
     {
       "type": 0,
       "value": "Populaarsed sarjad"
+    }
+  ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Teile soovitatud filmid"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Teile soovitatud sarjad"
     }
   ],
   "home.section.discoverStudios": [
@@ -49066,6 +49090,12 @@
       "value": " järgi, seega seadmevalija sellele ei kehti. Kui jätate selle tühjaks, päritakse kogu klastri seadmeseadistus, mis peab NVENC-i jaoks ise olema CUDA identiteet – määrake see siin, kui klaster on seadistatud renderdusteedega."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Selle määrab selle sõlme keskkond. Muutke seda seal ja taaskäivitage sõlm."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -53271,6 +53301,122 @@
       "value": "Mudel"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Ühe käivituse piirang sai täis; järgmine käivitus jätkab."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Otsitud pealkirjad: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Manustatud: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB päringud: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Väljas. Käivitused ainult eemaldavad vanu pealkirju."
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " loodud rida"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " loodud rida"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pealkiri soovitamiseks"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pealkirja soovitamiseks"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Midagi ei manustatud: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -53325,6 +53471,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Vahelehe „Avasta“ soovitused"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53581,6 +53733,12 @@
       "value": "Manustuste käivitamine ebaõnnestus"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Vahelehe „Avasta“ soovituste käivitamine ebaõnnestus"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53699,6 +53857,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Manustused lähtestati: kustutati "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " ja "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " ning tühjendati "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53725,6 +53921,74 @@
             {
               "type": 0,
               "value": " manustust"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vahelehe „Avasta“ manustus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vahelehe „Avasta“ manustust"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vahelehe „Avasta“ rida"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vahelehe „Avasta“ rida"
             }
           ]
         }
@@ -54567,6 +54831,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Soovitatud sarjad igale vaatajale"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Soovitatud filmid igale vaatajale"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54615,6 +54903,18 @@
     {
       "type": 0,
       "value": "Telekanalite kaardid, millest igaüks avab selle kanali sarjad."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Soovitused"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Pealkirjad, mida meediakogus veel pole, valitud igale vaatajale tema vaatamiste põhjal."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54929,6 +55229,12 @@
     {
       "type": 0,
       "value": "Valige piirkond, kus voogedastusteenused on saadaval."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Jääb tühjaks, kuni vahelehe „Avasta“ soovitused lülitatakse sisse menüüs „Haldus → Soovitused“."
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -56339,6 +56645,12 @@
     {
       "type": 0,
       "value": "Loendi reaalajas eelvaade"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Teie enda soovituste eelvaade"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -60165,6 +60477,20 @@
       "value": "Seadete laadimine…"
     }
   ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Selle määrab serveri keskkonnas muutuja "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.settings.fields.passwordConfigured": [
     {
       "type": 0,
@@ -60299,12 +60625,6 @@
     {
       "type": 0,
       "value": "Usaldusväärsed puhverserverid"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Seda haldab muutuja SILO_TRUSTED_PROXIES."
     }
   ],
   "web.admin.settings.general.title": [
@@ -66307,6 +66627,36 @@
       "value": "Teisele mudelile üleminekuks tuleb vektoresitused lähtestada, mis kustutab need kõik. Teine teenusepakkuja, mis pakub sama mudelit, rakendub pärast taaskäivitust."
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Luba vahelehe „Avasta“ soovitused"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Lisab vahelehele „Avasta“ isiklikud read pealkirjadega, mida meediakogus veel pole. Kasutab manustuste teenusepakkujat ja TMDB-d."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Maksimaalne pealkirjade arv soovitamiseks"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Mitu meediakogust puuduvat pealkirja server soovitamiseks hoiab. Iga pealkiri otsitakse TMDB-st ja manustatakse. Manustamine on tavaliselt odav, kuid suurem arv võib olenevalt teie manustuste teenusepakkujast maksta rohkem või võtta kauem aega ning kasutab rohkem salvestusruumi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Vahelehe „Avasta“ soovitused"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -66335,6 +66685,12 @@
     {
       "type": 0,
       "value": "Vektoresituste cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Vahelehe „Avasta“ soovituste cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -66379,12 +66735,6 @@
       "value": "Kasuta Redist"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Määratud muutujaga REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -66401,12 +66751,6 @@
     {
       "type": 0,
       "value": "Ühenduse URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Väärtus pärineb muutujast REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -71317,20 +71661,6 @@
     {
       "type": 0,
       "value": "Serveri logi"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Haldab keskkonnamuutuja "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -111632,7 +111962,7 @@
           "value": [
             {
               "type": 0,
-              "value": "uusimad ilmumised eespool"
+              "value": "uusima ilmumiskuupäevaga eespool"
             }
           ]
         },
@@ -112588,13 +112918,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Kollektsioonid ja reeglid"
+      "value": "Kollektsioonid ja nutikad read"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Teie kollektsioonid või reeglitest koostatud read"
+      "value": "Teie kollektsioonid või reeglitest koostatud nutikad read"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -112708,7 +113038,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Koostage rida reeglitest, näiteks žanri ja kümnendi järgi."
+      "value": "Nagu nutikas kollektsioon, kuid ainult rida. Valige pealkirjad reeglitega, näiteks žanri ja kümnendi järgi."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112918,7 +113248,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Reeglitele vastavad pealkirjad"
+      "value": "Nutikas rida"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -118641,6 +118971,12 @@
       "value": " p tagasi"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "Üks teavituste sihtkoht lakkas töötamast"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -118783,6 +119119,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "Selle parandamiseks avage teavituste seaded."
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -119073,6 +119415,12 @@
     {
       "type": 0,
       "value": "Teie vaatamisloendis olev pealkiri on nüüd saadaval"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "Üks webhook lakkas töötamast"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -125913,6 +126261,34 @@
       "value": " oma vaatamisloendisse"
     }
   ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "Kuna vaatasite pealkirja "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "Kuna vaatasite pealkirju "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ja "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -132367,6 +132743,298 @@
       "value": "Ei huvita"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "Lisa sihtkoht"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "Lisa"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "Lisa teavituste sihtkoht"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "Sihtkoht „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“ on lisatud"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Eemalda salvestatud saladus"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "Sihtkoha lisamine on juba pooleli."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "Teavitusi sellesse sihtkohta enam ei saadeta. Seda ei saa tagasi võtta."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Sihtkoha kustutamine ebaõnnestus"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "Sihtkoht on kustutatud"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "Saatke selle profiili teavitused teenustesse, mida teie serveri pistikprogrammid toetavad."
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "Valige, kuhu selle profiili teavitused saadetakse."
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "Sihtkohti veel pole."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Säilita salvestatud saladus"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "Tüüp"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "Viimane tõrge: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "Viimane tõrge "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "Viimane tõrge "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": pistikprogramm ei saanud teavitust saata"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "Viimane tõrge: pistikprogramm ei saanud teavitust saata"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Saavutatud on piirang: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sihtkoht"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Saavutatud on piirang: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sihtkohta"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "Enne selle sihtkoha kustutamist laadige sihtkohtade loend uuesti."
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "Enne selle sihtkoha muutmist laadige sihtkohtade loend uuesti."
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "Sihtkohta ei õnnestunud salvestada"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "Salajased väljad, mille jätate tühjaks, säilitavad oma salvestatud väärtused."
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "Testsõnumit juba saadetakse."
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test on saadetud"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test ebaõnnestus"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test on saadetud: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test ebaõnnestus: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "Muud sihtkohad"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "Pole saadaval"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "Seda sihtkohta pakkuv pistikprogramm on välja lülitatud või eemaldatud, seega midagi ei saadeta."
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "Muutmine ebaõnnestus"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -133315,6 +133983,12 @@
     {
       "type": 0,
       "value": "Webhooki URL on kohustuslik"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Olete võrguühenduseta, seega seda muudatust ei salvestatud"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -140333,12 +141007,6 @@
       "value": "Usaldusväärsed puhverserverid"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Määratud keskkonnamuutujaga SILO_TRUSTED_PROXIES."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -140589,12 +141257,6 @@
     {
       "type": 0,
       "value": "Andmebaasi number"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Määratud muutujaga REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

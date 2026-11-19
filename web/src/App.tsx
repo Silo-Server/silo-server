@@ -34,6 +34,7 @@ import { requestAdminMessages, useT } from "@/i18n";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { RouteLoading } from "@/components/RouteLoading";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
@@ -846,10 +847,14 @@ function AdminRealtimeEventChannels() {
   useEventChannel("scans");
   useEventChannel("settings");
   useEventChannel("download_preparations");
+  // A background helper on every page: if its chunk fails to load, go without
+  // it rather than take the page down.
   return (
-    <Suspense fallback={null}>
-      <AdminDownloadPreparationsRefresh />
-    </Suspense>
+    <LocalErrorBoundary>
+      <Suspense fallback={null}>
+        <AdminDownloadPreparationsRefresh />
+      </Suspense>
+    </LocalErrorBoundary>
   );
 }
 

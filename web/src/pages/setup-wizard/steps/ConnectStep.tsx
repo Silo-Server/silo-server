@@ -49,6 +49,7 @@ export function ConnectStep() {
           description={t("web.setup.connect.enableDescription")}
           value={jellyfinEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("jellyfin_compat.enabled", v)}
+          managedByEnv={form.envVar("jellyfin_compat.enabled")}
         />
         {jellyfinEnabled ? (
           <SettingField
@@ -58,6 +59,7 @@ export function ConnectStep() {
             hint="http://your-server:8096"
             value={form.getValue("jellyfin_compat.public_url")}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
+            managedByEnv={form.envVar("jellyfin_compat.public_url")}
           />
         ) : null}
       </StepSection>

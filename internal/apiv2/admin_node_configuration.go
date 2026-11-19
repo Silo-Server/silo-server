@@ -88,6 +88,14 @@ func adminNodeConfigurationProblem(err error) error {
 	if p, ok := errors.AsType[*Problem](err); ok {
 		return p
 	}
+	if locked, ok := errors.AsType[*nodepool.EnvManagedFieldsError](err); ok {
+		p := NewProblem(TypeValidationFailed, validationSummary)
+		for _, field := range locked.Fields {
+			p.Errors = append(p.Errors, ProblemError{Location: locationBody + "." + field, Code: codeManagedByEnvironment, Detail: "Set by the node's environment. Change it there and restart the node."})
+		}
+		p.promoteSoleFieldDetail()
+		return p
+	}
 	if errors.Is(err, nodepool.ErrNodeConfigurationConflict) {
 		return NewProblem(TypeConflict, "Node URL already has a different configuration.")
 	}
@@ -126,7 +134,7 @@ func registerAdminNodeConfiguration(reg *Registry) {
 		node, err := reg.deps.AdminNodeConfiguration.CreateAdminNode(ctx, nodepool.CreateNodeInput{Name: b.Name, Type: b.Type, URL: b.URL, PublicURL: b.PublicURL, Group: b.Group, MaxJobs: b.MaxJobs, MaxBandwidthKbps: b.MaxBandwidthKbps, SourceAccess: b.SourceAccess})
 		return adminNodeConfigurationOutput(ctx, node, err)
 	})
-	update := Operation{Operation: humaOp("PUT", Prefix+"/admin/nodes/{id}", "updateAdminNode", "admin-nodes", "Update stored node configuration under the original If-Match revision. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	update := Operation{Operation: humaOp("PUT", Prefix+"/admin/nodes/{id}", "updateAdminNode", "admin-nodes", "Update stored node configuration under the original If-Match revision. A field named in the node's env_managed is set by the node's environment: a change to it is 422 validation_failed with field code managed_by_environment at body.<field>, and restating its current value is accepted. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	update.Errors = append(update.Errors, http.StatusConflict)
 	Register(reg, update, func(ctx context.Context, in *AdminNodeUpdateInput) (*AdminNodeConfigurationOutput, error) {
 		id, err := adminNodeCommandID(&AdminNodeCommandInput{ID: in.ID})

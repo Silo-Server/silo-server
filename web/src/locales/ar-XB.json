@@ -287,6 +287,12 @@
       "value": "\u200F\u202EThat email address is already in use.\u202C"
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis is already in use.\u202C"
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -327,6 +333,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EThe request couldn’t be read.\u202C"
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by the node’s environment. Change it there and restart the node.\u202C"
     }
   ],
   "error.field.out_of_range": [
@@ -1259,6 +1271,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EPopular Series\u202C"
+    }
+  ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecommended movies for you\u202C"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecommended series for you\u202C"
     }
   ],
   "home.section.discoverStudios": [
@@ -51406,6 +51430,12 @@
       "value": "\u202E render path, so the device picker does not apply to it. Leaving this empty inherits the cluster-wide device setting, which must itself be a CUDA identity for NVENC to use it — set one here when the cluster is configured with render paths.\u202C"
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by this node’s environment. Change it there and restart the node.\u202C"
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -55811,6 +55841,138 @@
       "value": "\u200F\u202EModel\u202C"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReached the limit for one run; the next run continues.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitles looked up: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": "\u202E · Embedded: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": "\u202E · TMDB requests: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOff. Runs only clear out old titles.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E row built\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E rows built\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E title to recommend from\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E titles to recommend from\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENothing embedded: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -55873,6 +56035,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDiscover Recommendations\u202C"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -56157,6 +56325,12 @@
       "value": "\u200F\u202EFailed to trigger embeddings\u202C"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to trigger Discover recommendations\u202C"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -56275,6 +56449,44 @@
       "value": "\u202E.\u202C"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmbeddings reset: deleted \u202C"
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": "\u202E and \u202C"
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, and cleared \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -56309,6 +56521,90 @@
             {
               "type": 0,
               "value": "\u202E embeddings\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E Discover embedding\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E Discover embeddings\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E Discover row\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E Discover rows\u202C"
             }
           ]
         }
@@ -57187,6 +57483,34 @@
       "value": "\u202E:\u202C"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ERecommended series for each viewer\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ERecommended movies for each viewer\u202C"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 0,
@@ -57239,6 +57563,18 @@
     {
       "type": 0,
       "value": "\u200F\u202ENetwork cards, each opening the network's series.\u202C"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecommendations\u202C"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitles that aren't in the library yet, picked for each viewer from what they watch.\u202C"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -57553,6 +57889,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EChoose the region the streaming services are in.\u202C"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStays empty until Discover recommendations are turned on in Admin → Recommendations.\u202C"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -59003,6 +59345,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ELive preview of the list\u202C"
+    }
+  ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPreview of your own recommendations\u202C"
     }
   ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
@@ -62901,6 +63249,20 @@
       "value": "\u200F\u202ELoading settings\u202C"
     }
   ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "\u202E in the server’s environment.\u202C"
+    }
+  ],
   "web.admin.settings.fields.passwordConfigured": [
     {
       "type": 0,
@@ -63039,12 +63401,6 @@
     {
       "type": 0,
       "value": "\u200F\u202ETrusted proxies\u202C"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManaged by SILO_TRUSTED_PROXIES.\u202C"
     }
   ],
   "web.admin.settings.general.title": [
@@ -69167,6 +69523,36 @@
       "value": "\u200F\u202ESwitching to another model requires resetting embeddings, which deletes them all. Another provider serving the same model applies after a restart.\u202C"
     }
   ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnable Discover Recommendations\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdds personal rows to Requests Discover with titles that aren't in the library yet. Uses the embedding provider and TMDB.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMaximum Titles to Recommend From\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHow many titles that aren't in the library the server keeps to recommend from. Each one is looked up on TMDB and embedded. Embedding is usually cheap, but a higher number can cost more or take longer depending on your embedding provider, and uses more storage.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDiscover Recommendations\u202C"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -69195,6 +69581,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EEmbeddings Cron\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDiscover Recommendations Cron\u202C"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -69239,12 +69631,6 @@
       "value": "\u200F\u202EUse Redis\u202C"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by REDIS_URL\u202C"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -69261,12 +69647,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EConnection URL\u202C"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EValue supplied by REDIS_URL\u202C"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -74401,20 +74781,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EServer log\u202C"
-    }
-  ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManaged by \u202C"
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "\u202E.\u202C"
     }
   ],
   "web.admin.settings.search.meili.apiKey.hint": [
@@ -117424,13 +117790,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "\u200F\u202ECollections & rules\u202C"
+      "value": "\u200F\u202ECollections & smart rows\u202C"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "\u200F\u202EYour collections, or rows built from rules\u202C"
+      "value": "\u200F\u202EYour collections, or smart rows built from rules\u202C"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -117544,7 +117910,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "\u200F\u202EBuild a row from rules, like genre and decade.\u202C"
+      "value": "\u200F\u202ELike a smart collection, but only a row. Pick titles with rules like genre and decade.\u202C"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -117754,7 +118120,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "\u200F\u202ETitles matching rules\u202C"
+      "value": "\u200F\u202ESmart row\u202C"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -123689,6 +124055,12 @@
       "value": "\u202Ed ago\u202C"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA notification destination stopped working\u202C"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -123851,6 +124223,12 @@
     {
       "type": 0,
       "value": "\u202E)\u202C"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen notification settings to fix it.\u202C"
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -124165,6 +124543,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EA title on your watchlist is now available\u202C"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA webhook stopped working\u202C"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -131277,6 +131661,34 @@
       "value": "\u202E to your watchlist\u202C"
     }
   ],
+  "web.requests.card.becauseYouWatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBecause you watched \u202C"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.becauseYouWatchedTwo": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBecause you watched \u202C"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "\u202E and \u202C"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.card.label": [
     {
       "type": 0,
@@ -137919,6 +138331,306 @@
       "value": "\u200F\u202ENot interested\u202C"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd destination\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd a notification destination\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E\"\u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E\" added\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear saved secret\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDestination creation is already in progress.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENotifications will stop going to this destination. This cannot be undone.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to delete destination\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDestination deleted\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESend this profile's notifications to services your server's plugins support.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChoose where this profile's notifications go.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo destinations yet.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKeep saved secret\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKind\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure \u202C"
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "\u202E: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure \u202C"
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "\u202E: the plugin couldn't send\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast failure: the plugin couldn't send\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ELimit of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E destination reached\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ELimit of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E destinations reached\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload the destination list before deleting this destination.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload the destination list before editing this destination.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe destination couldn't be saved\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESecret fields you leave blank keep their saved values.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA test message is already being sent.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest sent\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest failed\u202C"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest sent: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202ETest failed: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther destinations\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnavailable\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe plugin that provides this destination is turned off or removed, so nothing is sent.\u202C"
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to update\u202C"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -138883,6 +139595,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EA webhook URL is required\u202C"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYou're offline, so this change wasn't saved\u202C"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -146097,12 +146815,6 @@
       "value": "\u200F\u202ETrusted proxies\u202C"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by SILO_TRUSTED_PROXIES in the environment.\u202C"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -146353,12 +147065,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EDatabase number\u202C"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESet by REDIS_URL\u202C"
     }
   ],
   "web.setup.storage.redisDescription": [

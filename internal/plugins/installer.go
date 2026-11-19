@@ -148,7 +148,8 @@ func (i *Installer) InstallBinary(ctx context.Context, req InstallBinaryRequest)
 
 // PreparedReplacement is a downloaded package that passed the checks an
 // installer runs before it writes anything. Apply replaces the installation
-// it was prepared for.
+// it was prepared for, and returns ErrInstallationChanged without writing
+// when another install or update replaced that installation's package first.
 type PreparedReplacement struct {
 	apply func(ctx context.Context) (*InstallResult, error)
 }
@@ -156,6 +157,22 @@ type PreparedReplacement struct {
 // Apply replaces the installation with the prepared package.
 func (p *PreparedReplacement) Apply(ctx context.Context) (*InstallResult, error) {
 	return p.apply(ctx)
+}
+
+// checkUnchanged refuses a replacement prepared against existing when the
+// installation now holds another package, as when an admin's install finished
+// while an automatic update downloaded. Callers run it before stopping the
+// plugin so the newer release keeps running; Apply refuses a change that
+// lands after it.
+func checkUnchanged(ctx context.Context, getByID func(context.Context, int) (*Installation, error), existing *Installation) error {
+	current, err := getByID(ctx, existing.ID)
+	if err != nil {
+		return err
+	}
+	if current.InstallPath != existing.InstallPath {
+		return ErrInstallationChanged
+	}
+	return nil
 }
 
 // PrepareCatalogReplacement downloads and checks target's package as a
@@ -373,10 +390,6 @@ func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplace
 		return nil, fmt.Errorf("write plugin manifest %q: %w", manifestPath, err)
 	}
 
-	if err := i.installations.SaveArchive(ctx, existing.ID, manifestBytes, checksum, archiveBytes); err != nil {
-		return nil, fmt.Errorf("persist replacement plugin archive: %w", err)
-	}
-
 	version := manifest.GetVersion()
 	availableVersion := ""
 	signature := r.signature
@@ -388,6 +401,8 @@ func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplace
 		SetRepository:    true,
 		RepositoryID:     repositoryID,
 		Signature:        &signature,
+		Archive:          &ArchiveInput{ManifestJSON: manifestBytes, Checksum: checksum, Bytes: archiveBytes},
+		IfInstallPath:    &existing.InstallPath,
 	}); err != nil {
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
@@ -496,10 +511,6 @@ func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveRepla
 	binaryPath := filepath.Join(installDir, "plugin")
 	manifestPath := filepath.Join(installDir, "manifest.json")
 
-	if err := i.installations.SaveArchive(ctx, existing.ID, manifestBytes, manifest.GetChecksum(), data); err != nil {
-		return nil, fmt.Errorf("persist replacement plugin archive: %w", err)
-	}
-
 	if err := extractArchiveFiles(reader, installDir); err != nil {
 		return nil, err
 	}
@@ -516,6 +527,8 @@ func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveRepla
 		SetRepository:    true,
 		RepositoryID:     repositoryID,
 		Signature:        &unsigned,
+		Archive:          &ArchiveInput{ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: data},
+		IfInstallPath:    &existing.InstallPath,
 	}); err != nil {
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
@@ -880,6 +893,9 @@ func checkCatalogIdentity(manifest *pluginv1.PluginManifest, pluginID, version s
 // archives of existing installations are opened with openPluginArchive.
 func openInstallArchive(data []byte, req InstallArchiveRequest) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
 	reader, manifestBytes, manifest, err := openPluginArchive(data)
+	if invalid, ok := errors.AsType[*invalidManifestError](err); ok {
+		return nil, nil, nil, packageError(err, "The plugin's manifest is invalid: %s", invalid.err)
+	}
 	if err != nil {
 		return nil, nil, nil, packageError(err, "The plugin archive couldn't be read.")
 	}

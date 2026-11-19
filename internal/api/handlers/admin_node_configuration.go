@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -14,6 +15,9 @@ type AdminNodeConfigurationStore interface {
 	// Update returns the committed row and the locked pre-image it replaced.
 	Update(context.Context, int, nodepool.UpdateNodeInput, func(int64) error) (node, previous *nodepool.Node, err error)
 	Delete(context.Context, int, func(int64) error) error
+	// Declare applies a node's own declaration and returns the committed row
+	// and the pre-image it replaced.
+	Declare(context.Context, int, nodepool.UpdateNodeInput) (node, previous *nodepool.Node, err error)
 }
 
 func (h *NodeHandler) SetConfigurationStore(store AdminNodeConfigurationStore) {
@@ -60,11 +64,40 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 		return nil, err
 	}
 	h.nodesChanged(ctx, id)
-	// Same post-commit work as HandleUpdateNode: when the URL or an acceleration
-	// override moved, nudge the worker to re-read its row and drop this server's
-	// cached capabilities before the pool publishes the new policy. Off the
-	// request goroutine; the response is the committed row and never waits on
-	// or reflects the worker's answer.
+	h.afterNodeConfigured(ctx, previous, node, true)
+	return node, nil
+}
+
+// DeclareNode applies the configuration a transcode node declares from its
+// environment (PUT /api/internal/nodes/self/registration), at startup and
+// again every minute while it runs, then does what an administrator update
+// does after a change. An unchanged declaration commits no configuration
+// revision, so it publishes nothing and reloads nothing. It does not ask the
+// node to reload: the node runs with what it declares and reads the rest at
+// its next poll. changed reports a declaration that changed the row or its
+// locks.
+func (h *NodeHandler) DeclareNode(ctx context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, bool, error) {
+	if h.configuration == nil {
+		return nil, false, ErrAdminNodesUnavailable
+	}
+	node, previous, err := h.configuration.Declare(ctx, id, input)
+	if err != nil {
+		return nil, false, err
+	}
+	configured := node.AdminRevision != previous.AdminRevision
+	if configured {
+		h.nodesChanged(ctx, id)
+		h.afterNodeConfigured(ctx, previous, node, false)
+	}
+	return node, configured || !slices.Equal(node.EnvManaged, previous.EnvManaged), nil
+}
+
+// afterNodeConfigured is the post-commit work of a configuration change, off
+// the request goroutine: when the URL or an acceleration override moved, nudge
+// the worker to re-read its row (when reloadWorker) and drop this server's
+// cached capabilities before the pool publishes the new policy. The response
+// is the committed row and never waits on or reflects the worker's answer.
+func (h *NodeHandler) afterNodeConfigured(ctx context.Context, previous, node *nodepool.Node, reloadWorker bool) {
 	policyChanged := nodePolicyTargetChanged(previous, node)
 	// A transcode node takes its artifact storage and its source access from
 	// the core too, so a change to either is pushed the same way; neither
@@ -73,7 +106,7 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 		transcodeNodeSourceAccessChanged(previous, node)
 	detached := context.WithoutCancel(ctx)
 	go func() {
-		if configChanged && !h.reloadNodeConfig(detached, node) && policyChanged {
+		if reloadWorker && configChanged && !h.reloadNodeConfig(detached, node) && policyChanged {
 			slog.WarnContext(detached, "node has not adopted its new acceleration policy yet; transcodes dispatched to it may fail until its next config poll",
 				"component", "api", "node_id", node.ID, "name", node.Name)
 		}
@@ -84,7 +117,6 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 			h.afterNodeUpdate()
 		}
 	}()
-	return node, nil
 }
 func (h *NodeHandler) DeleteAdminNode(ctx context.Context, id int, guard func(int64) error) error {
 	if h.configuration == nil {
