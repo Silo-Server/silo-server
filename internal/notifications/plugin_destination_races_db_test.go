@@ -342,3 +342,24 @@ func TestPluginDestinationPurgeWaitsForADeliveryDB(t *testing.T) {
 		t.Fatalf("after the purge: %d destinations, %d attempts; want none", destinations, attempts)
 	}
 }
+
+// A profile at its limit answers a taken name as a taken name, the error
+// the owner can fix in place.
+func TestPluginDestinationTakenNameAtTheLimitDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	_, sender := newTestPluginDestinationService(t, pool, &scriptedChannelHost{})
+	d := PluginDestination{ID: "first", UserID: accountA, ProfileID: sharedID, PluginID: "example.ntfy",
+		CapabilityID: "ntfy", Name: "Phone", ConfigCiphertext: "x", Enabled: true}
+	if err := sender.repo.InsertWithLimit(ctx, d, 1); err != nil {
+		t.Fatal(err)
+	}
+	d.ID = "second"
+	if err := sender.repo.InsertWithLimit(ctx, d, 1); !errors.Is(err, ErrPluginDestinationNameTaken) {
+		t.Fatalf("taken name at the limit = %v, want ErrPluginDestinationNameTaken", err)
+	}
+	d.Name = "Tablet"
+	if err := sender.repo.InsertWithLimit(ctx, d, 1); !errors.Is(err, ErrPluginDestinationLimit) {
+		t.Fatalf("new name at the limit = %v, want ErrPluginDestinationLimit", err)
+	}
+}

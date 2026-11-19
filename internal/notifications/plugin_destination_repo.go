@@ -118,11 +118,17 @@ func (r *PluginDestinationRepository) InsertWithLimit(ctx context.Context, d Plu
 		d.UserID, d.ProfileID); err != nil {
 		return fmt.Errorf("lock plugin destination quota: %w", err)
 	}
+	// A taken name is checked before the limit, so a full profile still
+	// answers a duplicate name as one.
 	var count int
+	var nameTaken bool
 	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM notification_plugin_destinations WHERE user_id = $1 AND profile_id = $2`,
-		d.UserID, d.ProfileID).Scan(&count); err != nil {
+		`SELECT count(*), coalesce(bool_or(name = $3), false) FROM notification_plugin_destinations WHERE user_id = $1 AND profile_id = $2`,
+		d.UserID, d.ProfileID, d.Name).Scan(&count, &nameTaken); err != nil {
 		return fmt.Errorf("count plugin destinations: %w", err)
+	}
+	if nameTaken {
+		return fmt.Errorf("%w: %w", ErrPluginDestinationInvalid, ErrPluginDestinationNameTaken)
 	}
 	if count >= maxPerProfile {
 		return ErrPluginDestinationLimit
