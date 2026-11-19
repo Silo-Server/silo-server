@@ -69,3 +69,8 @@ func (r *ImageCacheJobRepository) EnqueueItemPosterCache(ctx context.Context, co
 	_, err = r.EnqueueBatch(ctx, []EnqueueImageCacheJobInput{in})
 	return err
 }
+
+// IsRemoteImageSourcePath reports whether path is a provider's artwork: an
+// http(s) URL or a plugin path, not a local source (file://, nfo+…) that only
+// the image-cache job reads.
+func IsRemoteImageSourcePath(path string) bool { return isRemoteImageSourcePath(path) }

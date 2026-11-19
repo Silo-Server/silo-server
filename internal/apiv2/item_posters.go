@@ -66,7 +66,7 @@ func registerItemPosters(reg *Registry) {
 	}
 	op.Responses = map[string]*huma.Response{
 		"200": {Description: "Poster bytes of art not cached yet", Content: map[string]*huma.MediaType{"image/*": {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
-		"302": {Description: "Redirect to the cached poster's signed URL"},
+		"302": {Description: "Redirect to the cached poster's signed URL", Headers: map[string]*huma.Header{"Location": {Schema: &huma.Schema{Type: huma.TypeString, Format: "uri-reference"}}}},
 		"404": {Description: "Link invalid or expired, item gone, no poster, or the provider refused or failed"},
 		"503": {Description: "Poster fetches are busy or not configured; retry after Retry-After"},
 	}
@@ -106,6 +106,10 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// A provider URL, or a plugin path its plugin resolves to one. Local
 	// sources (file://, nfo+…) are only ever read by the image-cache job.
+	if !metadata.IsRemoteImageSourcePath(posterPath) {
+		notFound()
+		return
+	}
 	remote := posterPath
 	if !isHTTPURL(remote) {
 		remote = h.posters.Presign(r.Context(), posterPath)

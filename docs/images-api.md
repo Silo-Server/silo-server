@@ -215,6 +215,55 @@ so regenerated artwork becomes visible without waiting for signature expiry.
 Cold resolver caches read the same durable records and never rediscover image
 availability through network probes.
 
+## Artwork that is not cached yet
+
+A metadata provider's artwork URL stays on an item until its image-cache job
+stores a copy, and stays for good when caching fails or `metadata.cache_images`
+is off. Until then the regular catalog reads (`/api/v2/catalog/...`, home
+sections, collections, `GET /api/v2/watch/{id}`) return that URL as stored, for
+example an `https://image.tmdb.org/...` address, or the URL a metadata plugin
+resolves its path to. The width ladder above does not apply to it: the server
+passes the URL through and the client loads it from the provider's host. A
+client that cannot reach a provider shows its placeholder until the art is
+cached.
+
+### Admin poster URLs
+
+The admin reads a monitoring tool uses follow a stricter rule: `poster_url` on
+`GET /api/v2/admin/sessions` rows, on the rows embedded in
+`session.started`, `session.paused` and `session.resumed` events, and on
+`GET /api/v2/admin/catalog/items` items is always a URL this server issued, and
+absent only when the title has no poster. An episode carries its series'
+poster. `GET /api/v2/admin/catalog/capabilities` reports `item_posters: true`
+when the server applies this rule.
+
+- Cached art resolves to its card-size stored object, like any catalog read:
+  a signed `/api/v2/artwork/...` route or the artwork store's direct URL.
+- Art that is not cached yet resolves to a signed link to
+  `GET /api/v2/item-posters/{content_id}` (`getItemPoster`). The link signs the
+  item's content ID and an expiry, never a URL. Each request looks up the
+  item's current poster: cached art answers `302` to its stored URL; art that is
+  still remote is downloaded through the server and answered `200` with its
+  bytes, and the item's image-cache job is queued.
+
+URLs may be root-relative; resolve them against the server's base URL. The link
+needs no credentials and expires with the artwork lifetime
+(`s3.metadata_presign_expiry`), changing at most every 15 minutes, so read a
+fresh one from a later page or session row. It keeps working after the art is
+cached, answering with the redirect from then on.
+
+`getItemPoster` answers `404` for an invalid or expired link, an item that is
+gone or has no poster, and a download that failed or was refused; the answer
+does not say which. It answers `503` with `Retry-After` when the server's poster
+downloads are busy. The download follows the image cache's rules
+([outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork)):
+public addresses only, redirect hops included, the image cache's size limit, and
+only JPEG, PNG, WebP or GIF bytes, typed by their content rather than the
+provider's header. Concurrent requests for one item share one download, and a
+server runs at most four at once. Proxied bytes carry
+`Cache-Control: private, max-age=300`; the redirect is `no-store`, since its
+target is a signed URL with its own lifetime.
+
 ## Season selectors without artwork
 
 `GET /api/v2/catalog/series/{id}/seasons?include_artwork=false` (`listSeriesSeasons`)

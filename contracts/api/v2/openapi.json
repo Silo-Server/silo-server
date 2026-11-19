@@ -5710,6 +5710,10 @@
             "description": "refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers",
             "type": "boolean"
           },
+          "item_posters": {
+            "description": "listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -5733,6 +5737,7 @@
           "item_metadata",
           "item_metadata_reset",
           "item_file_paths",
+          "item_posters",
           "revision",
           "state",
           "allowed"
@@ -5877,6 +5882,11 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "poster_url": {
+            "description": "Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent only when there is no poster. The URL expires; read it again from a later page or session row",
+            "format": "uri-reference",
+            "type": "string"
           },
           "rating_imdb": {
             "description": "Stored IMDb rating of a movie or series on IMDb's 0-10 scale",
@@ -16029,6 +16039,7 @@
             "type": "number"
           },
           "poster_url": {
+            "description": "Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent only when there is no poster",
             "format": "uri-reference",
             "type": "string"
           },
@@ -183153,6 +183164,78 @@
           "link": "https://siloserver.org/docs/api/"
         },
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/item-posters/{content_id}": {
+      "get": {
+        "operationId": "getItemPoster",
+        "parameters": [
+          {
+            "description": "Content ID of the movie or series whose poster the link names.",
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exp",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sig",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Poster bytes of art not cached yet"
+          },
+          "302": {
+            "description": "Redirect to the cached poster's signed URL",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Link invalid or expired, item gone, no poster, or the provider refused or failed"
+          },
+          "503": {
+            "description": "Poster fetches are busy or not configured; retry after Retry-After"
+          }
+        },
+        "summary": "Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art redirects to its stored object; art not cached yet is fetched from its provider through the server and queued for caching.",
+        "tags": [
+          "artwork"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "artwork-image",
+        "x-silo-raw-reason": "Poster bytes and redirects bypass JSON encoding.",
         "x-silo-service-backed": true
       }
     },
