@@ -244,6 +244,15 @@ describe("AdminPluginDetail", () => {
     expect(screen.getByText("A restore withheld plugin authority.")).toBeInTheDocument();
   });
 
+  it("lets the admin retry a failed provisioning lookup for a missing installation", () => {
+    installationsQuery = query([]);
+    provisioningQuery = query<PluginProvisionStatus[]>(undefined, { isError: true });
+    renderPage("silo.auth.oidc");
+    expect(screen.getByText("Couldn’t load plugin provisioning status.")).toBeInTheDocument();
+    screen.getByRole("button", { name: "Try again" }).click();
+    expect(provisioningQuery.refetch).toHaveBeenCalledOnce();
+  });
+
   it("asks for missing required settings, but not for optional ones", () => {
     const { unmount } = renderPage();
     expect(screen.getByText("Finish setting up MDBList Ratings.")).toBeInTheDocument();

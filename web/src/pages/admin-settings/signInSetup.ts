@@ -236,7 +236,10 @@ export function fieldChanged(
     const typed = draft.values[field.key];
     return (typeof typed === "string" && typed !== "") || draft.clearSecrets.includes(field.key);
   }
-  return draft.values[field.key] !== savedFormValues(entry)[field.key];
+  return (
+    Object.hasOwn(draft.values, field.key) &&
+    draft.values[field.key] !== savedFormValues(entry)[field.key]
+  );
 }
 
 /** How many fields of a draft differ from what is saved. */

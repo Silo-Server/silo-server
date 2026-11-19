@@ -110,7 +110,8 @@ export default function AdminPluginDetail() {
   const selectedRepository = searchParams.get("repository");
   const selectedVersion = searchParams.get("version");
   const installationsQuery = useAdminPluginInstallations();
-  const provisioning = useAdminPluginProvisioningStatus().data?.find(
+  const provisioningQuery = useAdminPluginProvisioningStatus();
+  const provisioning = provisioningQuery.data?.find(
     (record) => record.plugin_id === pluginId && record.state !== "applied",
   );
   // The service keeps one installation per plugin ID (install replaces in place).
@@ -165,7 +166,7 @@ export default function AdminPluginDetail() {
     );
   }
 
-  if (catalogQuery.isLoading) return <PageLoading />;
+  if (catalogQuery.isLoading || provisioningQuery.isLoading) return <PageLoading />;
 
   if (catalogQuery.isError) {
     return (
@@ -174,6 +175,19 @@ export default function AdminPluginDetail() {
         description={t("web.admin.plugins.detail.catalogErrorDescription")}
         onRetry={() => void catalogQuery.refetch()}
         retrying={catalogQuery.isFetching}
+      >
+        <AllPluginsLink />
+      </PageUnavailable>
+    );
+  }
+
+  if (provisioningQuery.isError) {
+    return (
+      <PageUnavailable
+        title={t("web.admin.plugins.provisioning.title")}
+        description={t("web.admin.plugins.provisioning.loadError")}
+        onRetry={() => void provisioningQuery.refetch()}
+        retrying={provisioningQuery.isFetching}
       >
         <AllPluginsLink />
       </PageUnavailable>
