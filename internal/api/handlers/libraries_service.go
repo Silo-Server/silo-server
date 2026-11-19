@@ -415,7 +415,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	return h.toLibraryResponseWithPoster(ctx, folder), nil
 }
 
-// publishLibraryEnabledChanged tells catalog subscribers that turning the
+// publishLibraryEnabledChanged tells administrator catalog subscribers that turning the
 // library on or off changed which items the admin listing returns.
 func (h *LibraryHandler) publishLibraryEnabledChanged(ctx context.Context, libraryID int, enabled bool) {
 	if h.RealtimeHub == nil {
@@ -428,6 +428,8 @@ func (h *LibraryHandler) publishLibraryEnabledChanged(ctx context.Context, libra
 	if err := h.RealtimeHub.PublishCatalogLibraryChanged(ctx, notifications.LibraryChangeEvent{
 		LibraryID: libraryID,
 		Reason:    reason,
+		// The listing this tells mirrors to re-read is administrator-only.
+		AdminOnly: true,
 	}); err != nil {
 		slog.WarnContext(ctx, "publish library enabled change", "component", "api", "library_id", libraryID, "error", err)
 	}

@@ -45,7 +45,13 @@ func TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB(t *testing.T) {
 		for {
 			select {
 			case env := <-envelopes:
-				if env.Event != string(notifications.TypeCatalogLibraryChanged) {
+				if env.Event != string(notifications.TypeCatalogLibraryChanged) && env.Event != string(notifications.TypeLibraryChanged) {
+					continue
+				}
+				if !env.AdminOnly {
+					t.Errorf("%s reached non-administrators", env.Event)
+				}
+				if env.Event == string(notifications.TypeLibraryChanged) {
 					continue
 				}
 				var data struct {
