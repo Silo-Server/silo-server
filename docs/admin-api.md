@@ -2422,8 +2422,10 @@ requires an acting administrator; the mutations are refused in demo mode.
 
 `GET /api/v2/admin/downloads/storage/capabilities` reports `available`, the realtime
 channel (`download_preparations`), `devices` and `revocation` when device copies
-can be listed and revoked, and `client_ip` when download rows carry
-`created_client_ip` and `last_client_ip`.
+can be listed and revoked, `client_ip` when download rows carry
+`created_client_ip` and `last_client_ip`, and `change_events` when the admin-only
+`downloads` realtime channel carries `download.changed` (see
+[download changes](realtime-api.md#download-changes)).
 
 `GET /api/v2/admin/downloads/storage` returns one entry per location, the server
 first and then transcode nodes by name, plus the settings that govern them
