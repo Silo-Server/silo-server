@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -305,8 +306,12 @@ type PersonDetailResult struct {
 
 // MetadataResult carries structured metadata from a single provider.
 type MetadataResult struct {
-	HasMetadata          bool
-	ProviderIDs          map[string]string
+	HasMetadata bool
+	ProviderIDs map[string]string
+	// WorkClaims are the work ids of an audiobook or ebook, kept out of
+	// ProviderIDs (bookid.SplitWorkIDs): one entry per GetMetadata answer
+	// merged in, which catalog.ApplyWorkClaimsTx writes with the item.
+	WorkClaims           []bookid.WorkClaims
 	Title                string
 	OriginalTitle        string
 	SortTitle            string

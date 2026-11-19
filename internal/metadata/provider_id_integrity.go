@@ -760,6 +760,14 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			WHERE content_id = $1
 			  AND provider NOT IN (SELECT provider FROM media_item_provider_ids WHERE content_id = $2)`},
 	{"drop source provider ids", `DELETE FROM media_item_provider_ids WHERE content_id = $1`},
+	// Work id claims are not unique across items; move those for works the
+	// canonical item claims nothing for, as with provider IDs.
+	{"merge work ids", `
+			UPDATE media_item_work_ids
+			SET content_id = $2, updated_at = NOW()
+			WHERE content_id = $1
+			  AND provider NOT IN (SELECT provider FROM media_item_work_ids WHERE content_id = $2)`},
+	{"drop source work ids", `DELETE FROM media_item_work_ids WHERE content_id = $1`},
 	{"merge legacy provider columns", `
 			UPDATE media_items dest
 			SET imdb_id = COALESCE(NULLIF(dest.imdb_id, ''), src.imdb_id),

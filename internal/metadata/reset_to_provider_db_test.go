@@ -3,11 +3,15 @@ package metadata
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -232,5 +236,64 @@ func TestResetToProvider_DoesNotFollowARebind(t *testing.T) {
 	}
 	if got.Tagline != "Curated tagline" || got.Overview != "Curated overview" || !slices.Equal(got.LockedFields, locks) {
 		t.Errorf("tagline %q overview %q locks %v, want the item's own edits and lock kept", got.Tagline, got.Overview, got.LockedFields)
+	}
+}
+
+// An ebook's refresh through the metadata service stores the work id its
+// provider's answer claims, beside a claim another source made; Reset to
+// Provider clears every claim before writing the answer's own.
+func TestEbookRefreshStoresWorkClaimsDB(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	f := newIdentifyLockFixture(pool)
+	ctx := t.Context()
+	suffix := strconv.FormatInt(time.Now().UnixNano()%1_000_000_000, 10)
+	ebookID, isbn, work := "ebook-work-svc-"+suffix, "9791"+fmt.Sprintf("%09s", suffix), "OL"+suffix+"W"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, ebookID)
+	})
+	if err := f.items.Upsert(ctx, &models.MediaItem{ContentID: ebookID, Type: "ebook", Title: "Book", SortTitle: "book", Status: "matched"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.providerIDs.ReplaceByContentID(ctx, ebookID, map[string]string{"isbn": isbn}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_item_work_ids (content_id, provider, provider_id, evidence, source) VALUES ($1, 'hardcover', '7', 'unknown', 'other')`, ebookID); err != nil {
+		t.Fatal(err)
+	}
+	remote := &remoteStubProvider{slug: "books-metadata", metadata: &MetadataResult{
+		HasMetadata: true, Title: "Book", ProviderIDs: map[string]string{"isbn": isbn},
+		WorkClaims: []bookid.WorkClaims{{Source: "books-metadata", Claims: []bookid.WorkClaim{
+			{Provider: bookid.KeyOpenLibraryWork, ProviderID: work, Evidence: bookid.EvidenceISBN},
+		}}},
+	}}
+	claims := func() []string {
+		t.Helper()
+		rows, err := pool.Query(ctx, `
+			SELECT provider || '=' || provider_id || '/' || evidence || '/' || source
+			FROM media_item_work_ids WHERE content_id = $1 ORDER BY 1`, ebookID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	for _, reset := range []bool{false, true} {
+		if _, err := f.service.ProcessWithProviders(ctx, ProcessRequest{
+			ContentID: ebookID, Language: "en", Mode: ModeManualRefresh, resetToProvider: reset,
+		}, []Provider{remote}); err != nil {
+			t.Fatalf("refresh (reset %v): %v", reset, err)
+		}
+		want := []string{"hardcover=7/unknown/other", "openlibrary_work=" + work + "/isbn/books-metadata"}
+		if reset {
+			want = want[1:]
+		}
+		if got := claims(); !slices.Equal(got, want) {
+			t.Fatalf("work ids after the refresh (reset %v) = %q, want %q", reset, got, want)
+		}
 	}
 }

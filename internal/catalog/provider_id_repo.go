@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -406,7 +407,10 @@ func (r *ProviderIDRepository) ReplaceByContentIDTx(
 	if itemType == "" {
 		return fmt.Errorf("item_type is required")
 	}
-	entries := normalizeDurableProviderIDs(providerIDs)
+	// A book's work-level keys are claims (media_item_work_ids), never durable
+	// IDs; the table's CHECK rejects them.
+	editionIDs, _ := bookid.SplitWorkIDs(itemType, providerIDs)
+	entries := normalizeDurableProviderIDs(editionIDs)
 
 	// Preserve providers Replace does not manage (see excludedProviderIDs):
 	// query-only inputs and the scanner's manga_series identity anchor.

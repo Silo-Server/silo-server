@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -205,7 +206,9 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 		return nil, err
 	}
 
-	providerIDs, err := structFromStringMap(query.ProviderIDs)
+	// Work-level keys of a book item are never sent to a plugin.
+	queryIDs, _ := bookid.SplitWorkIDs(query.ContentType, query.ProviderIDs)
+	providerIDs, err := structFromStringMap(queryIDs)
 	if err != nil {
 		return nil, fmt.Errorf("encode provider ids for plugin search: %w", err)
 	}
@@ -231,6 +234,8 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 
 	results := make([]SearchResult, 0, len(response.GetResults()))
 	for _, result := range response.GetResults() {
+		// A search result carries no work claims; only GetMetadata does.
+		ids, _ := bookid.SplitWorkIDs(query.ContentType, mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()))
 		results = append(results, SearchResult{
 			Name:             result.GetTitle(),
 			OriginalTitle:    result.GetOriginalTitle(),
@@ -239,7 +244,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 			TitleIsFallback:  result.GetTitleIsFallback(),
 			OriginalLanguage: result.GetOriginalLanguage(),
 			Year:             int(result.GetYear()),
-			ProviderIDs:      mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()),
+			ProviderIDs:      ids,
 			ImageURL:         p.remoteArtwork(ctx, result.GetImageUrl()),
 			Overview:         result.GetOverview(),
 			Provider:         p.Slug(),
@@ -254,6 +259,8 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 // second case ProviderId is empty and the plugin reads the IDs it needs from
 // ProviderIds.
 func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (*MetadataResult, error) {
+	// Work-level keys of a book item are never sent to a plugin.
+	req.ProviderIDs, _ = bookid.SplitWorkIDs(req.ContentType, req.ProviderIDs)
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" && !p.hasLookupProviderID(req.ProviderIDs) {
 		return nil, nil
@@ -288,9 +295,14 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		advisoryAge, advisorySource = 0, ""
 	}
 
+	resultIDs, workClaims := splitPluginWorkClaims(p.capabilityID, req.ContentType,
+		mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()),
+		response.GetItem().GetMetadata())
+
 	return &MetadataResult{
 		HasMetadata:          true,
-		ProviderIDs:          mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()),
+		ProviderIDs:          resultIDs,
+		WorkClaims:           workClaims,
 		Title:                response.GetItem().GetTitle(),
 		OriginalTitle:        response.GetItem().GetOriginalTitle(),
 		TitleAliases:         titleAliasesFromPlugin(response.GetItem().GetTitleAliases(), p.Slug()),

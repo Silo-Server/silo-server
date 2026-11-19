@@ -170,8 +170,8 @@ enricher (`internal/audiobooks/enrichment_refresh.go`).
   match; when no provider returns them the book keeps its match and fields
   and the job fails. An unmatched book is matched as one sweep item would be.
   An ignored book is left alone.
-- `reset` mode clears the match (`Enricher.ResetMatchTx`): provider IDs,
-  author and narrator credits, the fields a match owns, artwork a provider
+- `reset` mode clears the match (`Enricher.ResetMatchTx`): provider IDs, work
+  ids, author and narrator credits, the fields a match owns, artwork a provider
   supplied, the field locks, and the enrichment state. It does so inside the
   scanner transaction that writes the book's re-read tags
   (`scanner.WithAudiobookTagRereadReset`), after the files were read, so a
@@ -219,6 +219,32 @@ could not be fetched.
 
 The sweep never claims a book whose match an admin ignored
 (`match_ignored_at`).
+
+## Work ids
+
+This section applies to ebooks as well. A work id (`bookid.KeyOpenLibraryWork`,
+`bookid.KeyHardcover`) names the book an edition belongs to, so every edition
+of one book holds the same value. For audiobook and ebook items these keys
+never live in `media_item_provider_ids`, where a value names one item of a
+type: the table's `media_item_provider_ids_book_work_ids_check` rejects them,
+and `ReplaceByContentIDTx` drops them. They live in `media_item_work_ids`, one
+claim per item and key, which many items may share.
+
+`PluginProvider` takes them out of a book's provider IDs at the boundary and
+never sends them to a plugin. A `GetMetadata` answer becomes
+`MetadataResult.WorkClaims`, with each id's evidence from the plugin's
+`work_evidence` and the catalogs its `work_lookup_failed` names; a search
+result carries none. `catalog.ApplyWorkClaimsTx` writes them in the
+transaction that writes the item's provider IDs, from the audiobook enricher,
+the ebook enricher, and the metadata service. An answer replaces the claims of
+the capability that gave it: keys it holds are upserted, and its other keys are
+deleted unless the catalog behind them could not be asked. Claims from other
+capabilities stay. A reset clears every claim; an item merge moves the
+source's claims for keys the target lacks.
+
+Literary work linking scores a shared work id at 0.90 (link source
+`external_id`), below a shared edition id and a shared series, and above an
+author conflict. The evidence is shown in the candidate, not scored.
 
 ## Unmatched audiobooks and `status`
 
