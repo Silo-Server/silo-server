@@ -147,37 +147,38 @@ func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx
 	return out, rows.Err()
 }
 
-// EnqueuePushAttempts inserts pending APNs relay attempts in the fanout transaction.
+// EnqueuePushAttempts inserts pending push relay attempts in the fanout
+// transaction. A device removed after the caller listed it, at sign-out for
+// one, gets no attempt instead of aborting the delivery transaction on the
+// foreign key. Like enqueueAttemptsForLiveTargets, it key-share locks the
+// devices that still exist, in id order, until the transaction ends.
 func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.Tx, attempts []PushDeliveryAttempt) error {
 	if len(attempts) == 0 {
 		return nil
 	}
-	var sb strings.Builder
-	sb.WriteString(`
+	n := len(attempts)
+	ids, devices := make([]string, n), make([]string, n)
+	deliveries := make([]*string, n)
+	triggers, providers, platforms := make([]string, n), make([]string, n), make([]string, n)
+	for i, attempt := range attempts {
+		ids[i], deliveries[i], devices[i] = attempt.ID, attempt.NotificationDeliveryID, attempt.PushDeviceID
+		triggers[i] = defaultString(attempt.TriggerType, PushTriggerDelivery)
+		providers[i] = defaultString(attempt.Provider, PushProviderSiloRelay)
+		platforms[i] = defaultString(attempt.Platform, PushPlatformApple)
+	}
+	if _, err := tx.Exec(ctx, `WITH live AS (
+			SELECT d.id FROM push_devices d WHERE d.id = ANY($3::text[])
+			ORDER BY d.id
+			FOR KEY SHARE
+		)
 		INSERT INTO push_delivery_attempts
 			(id, notification_delivery_id, push_device_id, trigger_type, provider, platform, attempt_number, outcome)
-		VALUES `)
-	args := make([]any, 0, len(attempts)*8)
-	for i, attempt := range attempts {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		base := len(args)
-		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8))
-		args = append(args,
-			attempt.ID,
-			attempt.NotificationDeliveryID,
-			attempt.PushDeviceID,
-			defaultString(attempt.TriggerType, PushTriggerDelivery),
-			defaultString(attempt.Provider, PushProviderSiloRelay),
-			defaultString(attempt.Platform, PushPlatformApple),
-			0,
-			PushOutcomePending,
-		)
-	}
-	sb.WriteString(" ON CONFLICT DO NOTHING")
-	if _, err := tx.Exec(ctx, sb.String(), args...); err != nil {
+		SELECT a.id, a.delivery_id, live.id, a.trigger_type, a.provider, a.platform, 0, $7
+		FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+			AS a(id, delivery_id, device_id, trigger_type, provider, platform)
+		JOIN live ON live.id = a.device_id
+		ON CONFLICT DO NOTHING`,
+		ids, deliveries, devices, triggers, providers, platforms, PushOutcomePending); err != nil {
 		return fmt.Errorf("enqueue push attempts: %w", err)
 	}
 	return nil

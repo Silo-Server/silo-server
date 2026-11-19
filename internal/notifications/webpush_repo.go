@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -222,11 +221,10 @@ func (r *WebPushRepository) deleteGone(ctx context.Context, id string) error {
 	return err
 }
 
-// DeleteAllForProfile removes a deleted account profile's subscriptions.
+// DeleteAllForProfile removes a deleted account profile's subscriptions
+// (see deleteProfileTargetsInOrder for the locking).
 func (r *WebPushRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM web_push_subscriptions WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
-	return err
+	return deleteProfileTargetsInOrder(ctx, r.pool, "web_push_subscriptions", userID, profileID)
 }
 
 // DeleteEndedLoginSubscriptions removes the subscriptions, keys included, of
@@ -282,30 +280,13 @@ func (r *WebPushRepository) RecordFailure(ctx context.Context, id string, httpSt
 
 // --- Attempt outbox (mirrors webhook_delivery_attempts semantics) ---
 
-// EnqueueAttempts inserts `pending` outbox rows inside the fanout transaction.
+// EnqueueAttempts inserts `pending` outbox rows inside the fanout
+// transaction. A subscription removed after the caller listed it gets no
+// attempt instead of aborting the delivery transaction on the foreign key
+// (see PluginDestinationRepository.EnqueueAttempts).
 func (r *WebPushRepository) EnqueueAttempts(ctx context.Context, tx pgx.Tx, attempts []DeliveryAttempt) error {
-	if len(attempts) == 0 {
-		return nil
-	}
-	var sb strings.Builder
-	sb.WriteString(`
-		INSERT INTO web_push_delivery_attempts
-			(id, notification_delivery_id, subscription_id, attempt_number, outcome)
-		VALUES `)
-	args := make([]any, 0, len(attempts)*5)
-	for i, attempt := range attempts {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		base := len(args)
-		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5))
-		args = append(args, attempt.ID, attempt.NotificationDeliveryID, attempt.TargetID, 0, WebhookOutcomePending)
-	}
-	sb.WriteString(" ON CONFLICT DO NOTHING")
-	if _, err := tx.Exec(ctx, sb.String(), args...); err != nil {
-		return fmt.Errorf("enqueue web push attempts: %w", err)
-	}
-	return nil
+	_, err := enqueueAttemptsForLiveTargets(ctx, tx, "web_push_delivery_attempts", "subscription_id", "web_push_subscriptions", attempts)
+	return err
 }
 
 const webPushAttemptReturning = `
