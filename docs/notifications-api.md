@@ -684,7 +684,9 @@ keys a schema allows only through `additionalProperties`, which it could
 neither return nor keep secret. It checks each value against the form's
 JSON Schema: its declared scalar type (an object or array is refused),
 required fields, `enum`, string length and `pattern`, and numeric bounds.
-Each failing setting answers `422` with a field error at
+An `integer` setting is also limited to 2^53-1 (9007199254740991) in
+magnitude, the largest integer a JSON number carries exactly on its way to
+the plugin, and a larger one answers `out_of_range`. Each failing setting answers `422` with a field error at
 `body.settings.<field>` (`unknown_field`, `required`, `invalid_type`,
 `invalid_enum`, `out_of_range` or `invalid`). It then calls the plugin's
 `ValidateDestination`. A refusal answers `422` with the plugin's
