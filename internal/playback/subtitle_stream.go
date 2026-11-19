@@ -121,6 +121,14 @@ type StreamExtractOpts struct {
 	// has no such cadence and stays on the request-path budget. Explicit
 	// windowed requests leave this false.
 	DetachedRelayDemux bool
+	// WaitingRelayDemux marks this extract as the recovery a refused request is
+	// waiting on: the covering extraction started after a window budget refusal,
+	// and the fill a refused bitmap page waits for. Such a read draws from the
+	// per-source recovery budget (its own reserved slot) and waits for it
+	// instead of being shed, so a background fill or a client window cannot
+	// starve the read that makes the client's retry cheap. It wins over
+	// DetachedRelayDemux when both are set.
+	WaitingRelayDemux bool
 	// FreshSourceRetry marks a caller's bounded retry after it replaced
 	// InputPath with a newly resolved URL for the same cache identity. The
 	// per-identity extraction backoff exists to stop repeated client retries

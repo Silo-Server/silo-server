@@ -72,7 +72,13 @@ func (c *SubtitleCache) PrefetchWindowsInBackground(opts StreamExtractOpts, wind
 	if len(windows) > subtitlePrefetchMaxWindows {
 		windows = windows[:subtitlePrefetchMaxWindows]
 	}
-	if relayDemuxDetachedBlocked(opts.InputPath, subtitleWarmRequestShedQuietWindow) {
+	// A prefetch a refused request is waiting on is not opportunistic: it is the
+	// extraction that makes the client's retry a cache hit instead of another
+	// full relay read. It therefore skips the opportunistic shedding gates and
+	// admits through the reserved recovery budget; the shed it used to take here
+	// is what left production retries paying the same 26 s read again.
+	recovery := opts.WaitingRelayDemux
+	if !recovery && relayDemuxDetachedBlocked(opts.InputPath, subtitleWarmRequestShedQuietWindow) {
 		slog.Debug("subtitle window prefetch skipped: request-path admission is shedding",
 			"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
 		close(done)
@@ -113,7 +119,7 @@ func (c *SubtitleCache) PrefetchWindowsInBackground(opts StreamExtractOpts, wind
 			if window.DurationSeconds <= 0 {
 				continue
 			}
-			if relayDemuxDetachedBlocked(opts.InputPath, subtitleWarmRequestShedQuietWindow) {
+			if !recovery && relayDemuxDetachedBlocked(opts.InputPath, subtitleWarmRequestShedQuietWindow) {
 				slog.Debug("subtitle window prefetch stopped: request-path admission is shedding",
 					"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
 				return
@@ -144,10 +150,17 @@ func (c *SubtitleCache) PrefetchWindowsInBackground(opts StreamExtractOpts, wind
 			if _, err := c.ServeExtractWithResult(&subtitlePrefetchWriter{header: make(http.Header)}, req, windowOpts, extract); err != nil {
 				// One failure ends the kick: a rekey, a shed detached slot, or
 				// an upstream failure all mean the next window miss is a better
-				// trigger than another demux here.
-				slog.Debug("subtitle window prefetch stopped",
+				// trigger than another demux here. A recovery kick is the one
+				// case a viewer is waiting on, so its failure warns instead of
+				// staying at debug: the retry will pay the full read again.
+				level := slog.LevelDebug
+				if recovery {
+					level = slog.LevelWarn
+				}
+				slog.Log(context.Background(), level, "subtitle window prefetch stopped",
 					"input", opts.InputPath, "track", opts.TrackIndex, "format", format,
 					"start", window.StartSeconds, "duration", window.DurationSeconds,
+					"recovery", recovery,
 					"request_id", requestID, "error", err)
 				return
 			}

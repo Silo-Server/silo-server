@@ -2460,7 +2460,7 @@ func (c *SubtitleCache) WarmInBackground(opts StreamExtractOpts, extract SUPExtr
 		// re-attempts it. Queueing would make it contend with the window a
 		// client is waiting on, which is exactly the pileup that made warm
 		// demuxes (and their layout probes) time out.
-		warmCtx, releaseRelayDemux, demuxErr := acquireRelayDemuxRead(detachedRelayDemux(ctx), opts.InputPath)
+		warmCtx, releaseRelayDemux, demuxErr := acquireRelayDemuxRead(warmRelayDemuxContext(ctx, opts), opts.InputPath)
 		if demuxErr != nil {
 			fill.Discard()
 			slog.DebugContext(ctx, "subtitle cache warm skipped: relay source saturated",
@@ -2579,7 +2579,7 @@ func (c *SubtitleCache) WarmTrackInBackgroundWithin(opts StreamExtractOpts, extr
 		close(done)
 		return done
 	}
-	if relayDemuxRequestPathShedding(opts.InputPath, subtitleWarmRequestShedQuietWindow) {
+	if relayDemuxRequestPathShedding(opts.InputPath, subtitleWarmRequestShedQuietWindow) && !opts.WaitingRelayDemux {
 		slog.Debug("subtitle cache warm skipped: request-path admission is shedding",
 			"input", opts.InputPath, "track", opts.TrackIndex, "format", format)
 		close(done)
@@ -2750,7 +2750,7 @@ func (c *SubtitleCache) warmFillLoop(deadlineCtx context.Context, st *subtitleWa
 		// already waiting at the pipe's limit. Drop the opportunistic full-track
 		// read; the next windowed miss re-attempts it once the source stops
 		// shedding.
-		if relayDemuxRequestPathShedding(st.opts.InputPath, subtitleWarmRequestShedQuietWindow) {
+		if relayDemuxRequestPathShedding(st.opts.InputPath, subtitleWarmRequestShedQuietWindow) && !st.opts.WaitingRelayDemux {
 			st.fill.Discard()
 			slog.DebugContext(deadlineCtx, "subtitle cache warm skipped: request-path admission is shedding",
 				"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
@@ -2777,7 +2777,7 @@ func (c *SubtitleCache) warmFillLoop(deadlineCtx context.Context, st *subtitleWa
 			}
 			continue
 		}
-		warmCtx, releaseRelayDemux, demuxErr := acquireRelayDemuxRead(detachedRelayDemux(ctx), st.opts.InputPath)
+		warmCtx, releaseRelayDemux, demuxErr := acquireRelayDemuxRead(warmRelayDemuxContext(ctx, st.opts), st.opts.InputPath)
 		ctx = warmCtx
 		var err error
 		if demuxErr == nil {

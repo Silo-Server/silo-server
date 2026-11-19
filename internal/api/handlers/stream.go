@@ -4895,6 +4895,12 @@ func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models
 		// read.
 		warmOpts := opts
 		warmOpts.PinnedTextArtifact = nil
+		// A recovery read is not opportunistic background work: the covering
+		// extraction after a budget breach and the fill a refused bitmap page is
+		// waiting for are both reads the viewer's next request depends on, so
+		// they draw from the reserved recovery budget instead of being shed
+		// behind a fill or a window that already holds the relay pipe.
+		warmOpts.WaitingRelayDemux = breach || pageWaiting
 		seed := inherited
 
 		// A budget breach is recovered by warming the range the retry will ask
