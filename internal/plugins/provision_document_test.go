@@ -161,12 +161,12 @@ func TestProvisionDocumentHostIntegersAndPluginNumbers(t *testing.T) {
 		{"0.1", true},
 	} {
 		field := map[string]any{"limits": []any{json.Number(tc.input)}}
-		_, err := mergeProvisionConfig(manifest, key, map[string]any{}, field)
+		err := validateProvisionConfig(manifest, key, field, field)
 		if (err == nil) != tc.ok {
 			t.Fatalf("runtime representation of %s: %v", tc.input, err)
 		}
 		if err != nil {
-			refusal := invalidProvisionConfig("silo.auth.oidc", key, err).Error()
+			refusal := invalidProvisionConfig("silo.auth.oidc", key, err, true).Error()
 			if !strings.Contains(refusal, "connection.limits[0]") || strings.Contains(refusal, tc.input) {
 				t.Fatalf("expected only the affected path in %q", refusal)
 			}

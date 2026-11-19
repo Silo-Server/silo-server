@@ -2,7 +2,9 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -216,6 +218,156 @@ func assertProvisionPreflightRetriesStaleArchive(t *testing.T, ctx context.Conte
 	}
 }
 
+func TestProvisionWriterReleasesHeldFieldsDB(t *testing.T) {
+	ctx := t.Context()
+	writer, installation := newConfigProvisionWriter(t, ProvisionPlugin{
+		Version:     "1.2.3",
+		Config:      map[string]map[string]any{"connection": {"label": "saved", "region": "existing"}},
+		AuthBinding: &ProvisionAuthBinding{CapabilityID: "login", Enabled: new(true)},
+	})
+	if err := writer.StartOffline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	writer.Close()
+	if err := writer.installations.Update(ctx, installation.ID, UpdateInstallationInput{Enabled: new(false)}); err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := writer.installations.GetByID(ctx, installation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.document.Plugins[tmdbID] = ProvisionPlugin{
+		Version: "2.0.0",
+		Config:  map[string]map[string]any{"connection": {"label": "changed", "v2_only": "new"}},
+	}
+	if err := writer.StartOffline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertConfigProvisionStatus(t, writer, "held", "An administrator disabled this installation.")
+	owned, err := writer.installations.GetProvisionOwnership(ctx, installation.ID)
+	if err != nil || !owned.Managed || owned.VersionPin != disabled.Version ||
+		len(owned.BindingFields) != 0 || !slices.Equal(owned.ConfigFields["connection"], []string{"label"}) {
+		t.Fatalf("ownership while held: %+v, %v", owned, err)
+	}
+	current, err := writer.installations.GetByID(ctx, installation.ID)
+	if err != nil || current.Enabled || current.Version != disabled.Version || current.RuntimeGeneration != disabled.RuntimeGeneration {
+		t.Fatalf("disabled installation after applying v2 declaration: %+v, %v", current, err)
+	}
+	rows, err := writer.configs.ListGlobalConfigs(ctx, installation.ID)
+	if err != nil || len(rows) != 1 || !SameConfig(rows[0].Value, map[string]any{"label": "saved", "region": "existing"}) {
+		t.Fatalf("config after applying v2 declaration: %+v, %v", rows, err)
+	}
+	binding, err := writer.configs.GetAuthBinding(ctx, installation.ID, "login")
+	if err != nil || !binding.Enabled {
+		t.Fatalf("saved sign-in binding: %+v, %v", binding, err)
+	}
+	binding.Enabled = false
+	if err := writer.configs.UpsertAuthBinding(ctx, *binding); err != nil {
+		t.Fatalf("edit released sign-in binding on disabled installation: %v", err)
+	}
+}
+
+func TestProvisionWriterRefusesInvalidSavedConfigDB(t *testing.T) {
+	ctx := t.Context()
+	desired := ProvisionPlugin{Config: map[string]map[string]any{"connection": {"label": "after"}}}
+	writer, installation := newConfigProvisionWriter(t, desired)
+	const key = "connection"
+	stored := map[string]any{"label": "before", "region": true}
+	if err := writer.configs.PutGlobalConfig(ctx, installation.ID, key, stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.StartOffline(ctx); err != nil {
+		t.Fatalf("saved value blocked API startup: %v", err)
+	}
+	assertConfigProvisionStatus(t, writer, "refused", "config.connection.region does not satisfy the plugin configuration schema.")
+	writer.Close()
+
+	desired.Config[key]["label"] = true
+	err := writer.StartOffline(ctx)
+	if refusal, ok := errors.AsType[*provisionRefusalError](err); !ok || !refusal.local ||
+		refusal.detail != "config.connection.label does not satisfy the plugin configuration schema." {
+		t.Fatalf("invalid declared field should block API startup: %v", err)
+	}
+	writer.Close()
+	rows, err := writer.configs.ListGlobalConfigs(ctx, installation.ID)
+	if err != nil || len(rows) != 1 || !SameConfig(rows[0].Value, stored) {
+		t.Fatalf("failed declaration wrote config: %+v, %v", rows, err)
+	}
+
+	stored["region"] = "repaired"
+	if err := writer.configs.PutGlobalConfig(ctx, installation.ID, key, stored); err != nil {
+		t.Fatal(err)
+	}
+	desired.Config[key]["label"] = "after"
+	if err := writer.StartOffline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertConfigProvisionStatus(t, writer, "applied", "")
+	stored["label"] = "after"
+	rows, err = writer.configs.ListGlobalConfigs(ctx, installation.ID)
+	if err != nil || len(rows) != 1 || !SameConfig(rows[0].Value, stored) {
+		t.Fatalf("declaration lost repaired settings: %+v, %v", rows, err)
+	}
+}
+
+func TestProvisionWriterPreservesPrivateNumbersDB(t *testing.T) {
+	ctx := t.Context()
+	writer, installation := newConfigProvisionWriter(t, ProvisionPlugin{
+		Config: map[string]map[string]any{"connection": {"label": "after"}},
+	})
+	counter := json.Number("9007199254740993")
+	stored := map[string]any{"label": "before", "cursor": counter}
+	if err := writer.configs.PutGlobalConfig(ctx, installation.ID, "connection", stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.StartOffline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertConfigProvisionStatus(t, writer, "applied", "")
+	rows, err := writer.configs.ListGlobalConfigs(ctx, installation.ID)
+	if err != nil || len(rows) != 1 || rows[0].Value["label"] != "after" || rows[0].Value["cursor"] != counter {
+		t.Fatalf("config after updating label: %+v, %v", rows, err)
+	}
+}
+
+func newConfigProvisionWriter(t *testing.T, desired ProvisionPlugin) (*ProvisionWriter, *Installation) {
+	t.Helper()
+	ctx := t.Context()
+	pool := builtinGuardTestPool(t)
+	repositories := NewRepositoryStore(pool)
+	if _, err := repositories.ReconcileManaged(ctx); err != nil {
+		t.Fatal(err)
+	}
+	catalog := NewCatalogService(repositories, CatalogServiceOptions{})
+	repo, err := catalog.OfficialRepository(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher := instanceStateTestCipher(t)
+	installations := NewInstallationStore(pool, cipher)
+	installation := seedTrustedProvisionInstallation(t, pool, installations, repo.ID, tmdbID)
+	installer := NewInstaller(installations, InstallerOptions{BaseDir: t.TempDir()})
+	configs := NewRuntimeConfigStore(pool, cipher)
+	doc := &ProvisionDocument{APIVersion: 1, Plugins: map[string]ProvisionPlugin{tmdbID: desired}}
+	writer := NewProvisionWriter(pool, repositories, installations, installer, catalog, configs, nil, doc, nil)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM plugin_provision_status WHERE plugin_id = $1`, tmdbID); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Cleanup(writer.Close)
+	return writer, installation
+}
+
+func assertConfigProvisionStatus(t *testing.T, writer *ProvisionWriter, wantState, wantDetail string) {
+	t.Helper()
+	var state, detail string
+	err := writer.pool.QueryRow(t.Context(), `SELECT state, detail FROM plugin_provision_status WHERE plugin_id = $1`, tmdbID).Scan(&state, &detail)
+	if err != nil || state != wantState || detail != wantDetail {
+		t.Fatalf("declaration state %q, detail %q, error %v, want %q and %q", state, detail, err, wantState, wantDetail)
+	}
+}
+
 func seedTrustedProvisionInstallation(t *testing.T, pool *pgxpool.Pool, store *InstallationStore, repository int, pluginID string) *Installation {
 	t.Helper()
 	source, ok := officialPluginRepository(pluginID)
@@ -229,7 +381,7 @@ func seedTrustedProvisionInstallation(t *testing.T, pool *pgxpool.Pool, store *I
 		Id: "login", Type: "auth_provider.v1", DisplayName: "Test Login", AuthModes: []string{"oauth2"},
 	}}
 	manifest.GlobalConfigSchema = []*pluginv1.ConfigSchema{{
-		Key: "connection", JsonSchema: `{"type":"object","properties":{"label":{"type":"string"}},"additionalProperties":false}`,
+		Key: "connection", JsonSchema: `{"type":"object","properties":{"label":{"type":"string"},"region":{"type":"string"}},"additionalProperties":false}`,
 	}}
 	manifestJSON, err := protojson.Marshal(manifest)
 	if err != nil {

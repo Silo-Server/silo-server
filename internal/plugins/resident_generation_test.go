@@ -2,9 +2,11 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -12,6 +14,106 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
+
+func TestResidentRestartCanCancelWhileReconcileIsInProgress(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := &Service{installations: newFakeServiceInstallationStore()}
+		supervisor := newResidentSupervisor(service, ResidentOptions{MaxFailures: 1})
+		supervisor.entries[5] = &residentEntry{id: 5, state: ResidentRunning}
+		supervisor.reconcileMu.Lock()
+		defer supervisor.reconcileMu.Unlock()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		done := make(chan error, 1)
+		go func() {
+			done <- supervisor.Restart(ctx, 5)
+		}()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Restart returned %v, want deadline exceeded", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("restart waited for reconciliation after its deadline")
+		}
+		if state, tracked := supervisor.State(5); !running(state, tracked) {
+			t.Fatalf("canceled restart changed the resident state: %+v", state)
+		}
+	})
+}
+
+func TestResidentFailedReplacementKeepsPreviouslyRegisteredClient(t *testing.T) {
+	manifest := testPluginManifest(t, "silo.vpn", "1.0.0")
+	manifest.Capabilities = append(manifest.Capabilities, &pluginv1.CapabilityDescriptor{
+		Type: capability.NetworkAccessProvider, Id: "vpn", DisplayName: "VPN",
+		NetworkAccessProvider: &pluginv1.NetworkAccessProviderDescriptor{Provider: "vpn"},
+	})
+	store := installedPluginStore(t, 7, manifest)
+	old := &fakePluginClient{manifest: manifest}
+	host := &countingHerdHost{startResult: old}
+	service := &Service{installations: store, host: host}
+	ctx := t.Context()
+	if _, err := service.Start(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	service.resident = newResidentSupervisor(service, ResidentOptions{})
+	service.resident.entries[7] = &residentEntry{id: 7, state: ResidentRunning}
+
+	host.startErr = errors.New("bind process host identity")
+	if _, err := service.Start(ctx, 7); !errors.Is(err, host.startErr) {
+		t.Fatalf("replacement failure = %v, want the host identity bind error", err)
+	}
+	if client, err := service.ensureClient(ctx, 7); err != nil || client != old {
+		t.Fatalf("resident client after failed replacement = %v, %v", client, err)
+	}
+}
+
+// A real resident is required to observe the ingress token revoked by Stop.
+func TestResidentReplacementRevokesOldIngressWhenTheRowReadFails(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{MaxFailures: 1})
+	reader := &unavailableResidentRowStore{serviceInstallationStore: f.store}
+	f.service.installations = reader
+	ctx := t.Context()
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "old resident running", running)
+	if _, ok := f.broker.IngressToken(5); !ok {
+		t.Fatal("old resident had no ingress token")
+	}
+
+	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Restart: true}); err != nil {
+		t.Fatal(err)
+	}
+	reader.unavailable.Store(true)
+	f.service.reconcileLifecycle(ctx, false)
+	waitState(t, f.service, 5, "replacement failed", func(state RuntimeState, tracked bool) bool {
+		return tracked && state.State == ResidentFailed
+	})
+	if _, ok := f.broker.IngressToken(5); ok || f.host.Running(5) {
+		t.Fatal("superseded resident was still serving after the replacement read failed")
+	}
+
+	reader.unavailable.Store(false)
+	if err := f.service.RestartInstallation(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, f.service, 5, "replacement running after administrator restart", running)
+	if _, ok := f.broker.IngressToken(5); !ok {
+		t.Fatal("replacement did not receive an ingress token")
+	}
+}
+
+type unavailableResidentRowStore struct {
+	serviceInstallationStore
+	unavailable atomic.Bool
+}
+
+func (s *unavailableResidentRowStore) GetByID(ctx context.Context, id int) (*Installation, error) {
+	if s.unavailable.Load() {
+		return nil, errors.New("installation row temporarily unavailable")
+	}
+	return s.serviceInstallationStore.GetByID(ctx, id)
+}
 
 // seqFakeHost is a Host whose first Start assigns its start sequence and then
 // parks until the test releases it, without registering the client. That is

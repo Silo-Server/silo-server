@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -107,15 +108,19 @@ func (s *InstallationStore) guardReplacementCredentials(ctx context.Context, tx 
 	if err != nil {
 		return err
 	}
-	if len(oldManifestJSON) == 0 && installation.Signature.State != SignatureStateVerified {
-		// Legacy packages may only have a local manifest. A verified
-		// installation carries its previous manifest in the stored archive.
-		return nil
-	}
 
-	previous, err := LoadManifestBytes(oldManifestJSON)
-	if err != nil || previous.GetPluginId() != installation.PluginID || previous.GetVersion() != installation.Version {
-		return packageError(err, "Silo could not verify how the saved settings for this plugin must be redacted.")
+	var previous *pluginv1.PluginManifest
+	if len(oldManifestJSON) != 0 {
+		previous, err = LoadManifestBytes(oldManifestJSON)
+		if err != nil || previous.GetPluginId() != installation.PluginID || previous.GetVersion() != installation.Version {
+			return packageError(err, "Silo could not verify how the saved settings for this plugin must be redacted.")
+		}
+	} else if installation.Signature.State != SignatureStateVerified {
+		// Legacy installations can have only the manifest beside the installed binary.
+		previous = matchingInstalledManifest(InstalledManifestPath(installation.InstallPath), installation)
+	}
+	if previous == nil {
+		return s.guardReplacementWithoutManifest(ctx, tx, installation.ID)
 	}
 	for _, schema := range previous.GetGlobalConfigSchema() {
 		key := schema.GetKey()
@@ -132,4 +137,30 @@ func (s *InstallationStore) guardReplacementCredentials(ctx context.Context, tx 
 		}
 	}
 	return nil
+}
+
+// Without the old manifest, every populated saved setting might be a credential.
+func (s *InstallationStore) guardReplacementWithoutManifest(ctx context.Context, tx pgx.Tx, installationID int) error {
+	rows, err := tx.Query(ctx, `SELECT config_key, config_value FROM plugin_runtime_configs WHERE plugin_installation_id = $1`, installationID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var raw []byte
+		if err := rows.Scan(&key, &raw); err != nil {
+			return err
+		}
+		config, err := decodeRuntimeConfigValue(s.cipher, installationID, key, raw)
+		if err != nil {
+			return err
+		}
+		for value := range maps.Values(config) {
+			if populatedCredential(value) {
+				return packageError(nil, "Silo could not verify how the saved settings for this plugin must be redacted.")
+			}
+		}
+	}
+	return rows.Err()
 }

@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -94,6 +96,11 @@ func TestResolveHistoricalOfficialPlugin(t *testing.T) {
 	_, err := svc.resolveOfficialInstall(t.Context(), repository, provisionTestPluginID, provisionTestOld)
 	requirePackageError(t, err, "release metadata is invalid")
 
+	old.Manifest.Capabilities = []*pluginv1.CapabilityDescriptor{nil}
+	putProvisionAsset(t, assets, officialDescriptorURL(provisionTestOld), old)
+	_, err = svc.resolveOfficialInstall(t.Context(), repository, provisionTestPluginID, provisionTestOld)
+	requirePackageError(t, err, "capability at index 0 is null")
+
 	index.Withdrawals = []CatalogWithdrawal{{PluginID: provisionTestPluginID, Version: provisionTestOld}}
 	putProvisionAsset(t, assets, DefaultRepositoryURL, index)
 	delete(assets, officialDescriptorURL(provisionTestOld))
@@ -115,6 +122,14 @@ func TestProvisionStagingSweepPreservesLivePackage(t *testing.T) {
 	if err := abandoned.owner.Close(); err != nil {
 		t.Fatal(err)
 	}
+	publishing := filepath.Join(filepath.Dir(active.dir), provisionStagePrefix+"publishing")
+	if err := os.Mkdir(publishing, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(publishing, old, old); err != nil {
+		t.Fatal(err)
+	}
 	if err := installer.CleanupProvisionStaging(); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +139,74 @@ func TestProvisionStagingSweepPreservesLivePackage(t *testing.T) {
 	if _, err := os.Stat(abandoned.dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("abandoned stage still exists: %v", err)
 	}
+	if _, err := os.Stat(publishing); err != nil {
+		t.Fatalf("stage without a published owner removed: %v", err)
+	}
+}
+
+func TestAutoUpdateClearsWithdrawnNoticeDB(t *testing.T) {
+	ctx := t.Context()
+	pool := builtinGuardTestPool(t)
+	repositories := NewRepositoryStore(pool)
+	if _, err := repositories.ReconcileManaged(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assets := provisionCatalogAssets{}
+	catalog := NewCatalogService(repositories, CatalogServiceOptions{
+		HTTPClient: &http.Client{Transport: assets}, CurrentOS: "linux", CurrentArch: "amd64",
+	})
+	repository, err := catalog.OfficialRepository(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := seedResidentQueryInstallation(t, pool, true)
+	store := NewInstallationStore(pool)
+	current, err := store.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notice := provisionTestCurrent
+	if err := store.Update(ctx, id, UpdateInstallationInput{
+		SetRepository: true, RepositoryID: &repository.ID, UpdatePolicy: new("notify"), AvailableVersion: &notice,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var notifications int
+	updater := NewAutoUpdateService(repositories, store, catalog, nil, nil, func(context.Context) { notifications++ })
+	checkNotice := func(wantVersion string, wantNotifications int) {
+		t.Helper()
+		summary, err := updater.Check(ctx, AutoUpdateOptions{})
+		if err != nil || summary.FailedOperations != 0 {
+			t.Fatalf("checking for updates returned %+v, %v", summary, err)
+		}
+		installation, err := store.GetByID(ctx, id)
+		if err != nil || installation.AvailableVersion == nil || *installation.AvailableVersion != wantVersion {
+			t.Fatalf("want saved update notice %q, got %+v, %v", wantVersion, installation, err)
+		}
+		if notifications != wantNotifications {
+			t.Fatalf("want %d lifecycle notifications, got %d", wantNotifications, notifications)
+		}
+	}
+
+	checkNotice(notice, 0) // Catalog unavailable.
+	pkg := fixtureOfficialPackage(notice, strings.Repeat("a", 64))
+	pkg.Manifest.PluginId = current.PluginID
+	putProvisionAsset(t, assets, DefaultRepositoryURL, RepositoryIndex{
+		Plugins:     []CatalogPackage{pkg},
+		Withdrawals: []CatalogWithdrawal{{PluginID: current.PluginID, Version: notice}},
+	})
+	checkNotice("", 1) // Withdrawals also apply to versions still listed.
+
+	newNotice := "1.0.0"
+	if err := store.Update(ctx, id, UpdateInstallationInput{AvailableVersion: &newNotice}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, id, UpdateInstallationInput{
+		AvailableVersion: new(""), ifAvailableVersion: &notice, IfVersion: &current.Version, IfInstallPath: &current.InstallPath,
+	}); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("clearing the old notice after a concurrent check returned %v", err)
+	}
+	checkNotice(newNotice, 1)
 }
 
 func newProvisionCommitFixture(t *testing.T, pool *pgxpool.Pool) (*CatalogService, *Installer) {
@@ -253,6 +336,25 @@ func TestProvisionPackageCommitAndRollbackDB(t *testing.T) {
 	manifest, err := cache.Ensure(ctx, replaced)
 	if err != nil || manifest.GetVersion() != provisionTestCurrent {
 		t.Fatalf("cold cache rehydration = %v, %v", manifest, err)
+	}
+
+	checkStaleProvisionPackage(t, catalog, installer, existing, replaced)
+}
+
+func checkStaleProvisionPackage(t *testing.T, catalog *CatalogService, installer *Installer, existing, replaced *Installation) {
+	t.Helper()
+	ctx := t.Context()
+	// A package prepared from a snapshot taken before the replacement must be retried.
+	request := ProvisionPackageRequest{PluginID: provisionTestPluginID, Existing: existing, Offline: true}
+	if _, err := catalog.PrepareProvisionPackage(ctx, installer, request); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("offline reuse from a stale installation returned %v, want ErrInstallationChanged", err)
+	}
+	if _, err := installer.store.pool.Exec(ctx, `DELETE FROM plugin_archives WHERE plugin_installation_id = $1`, replaced.ID); err != nil {
+		t.Fatal(err)
+	}
+	request.Existing = replaced
+	if _, err := catalog.PrepareProvisionPackage(ctx, installer, request); !errors.Is(err, ErrProvisionPackageUntrusted) {
+		t.Fatalf("offline reuse with the current archive missing returned %v, want ErrProvisionPackageUntrusted", err)
 	}
 }
 

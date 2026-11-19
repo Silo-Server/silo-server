@@ -35,8 +35,9 @@ type RestoreConfig struct {
 
 // RestoreConfigProblem is a configuration value a restore did not write.
 type RestoreConfigProblem struct {
-	Key    string
-	Reason string
+	Key     string
+	Reason  string
+	Managed bool // A deployment-owned field kept its current value.
 }
 
 // RestoreInstallationResult says what RestoreInstallation did.
@@ -168,13 +169,10 @@ func (s *Service) RestoreInstallation(ctx context.Context, tx pgx.Tx, in Restore
 				result.Rejected = append(result.Rejected, RestoreConfigProblem{Key: c.Key, Reason: "the managed config entry cannot be read"})
 				continue
 			}
-			if err := requireUnchangedOwnedConfig(c.Key, fields, have, value); err != nil {
-				result.Rejected = append(result.Rejected, RestoreConfigProblem{Key: c.Key, Reason: err.Error()})
+			value, err = MergeRestoreConfig(c.Key, fields, have, value)
+			if err != nil {
+				result.Rejected = append(result.Rejected, RestoreConfigProblem{Key: c.Key, Reason: err.Error(), Managed: true})
 			}
-			merged := make(map[string]any, len(have)+len(value))
-			maps.Copy(merged, have)
-			maps.Copy(merged, value)
-			value = preserveOwnedConfig(fields, have, merged)
 			if have == nil && len(value) == 0 {
 				continue
 			}
@@ -200,6 +198,19 @@ func (s *Service) RestoreInstallation(ctx context.Context, tx pgx.Tx, in Restore
 		}
 	}
 	return result, after, nil
+}
+
+// MergeRestoreConfig returns the configuration a selective restore can write.
+// If a field belongs to the deployment, the returned value preserves that
+// field and the error identifies a difference the restore will skip.
+func MergeRestoreConfig(key string, owned []string, current, backup map[string]any) (map[string]any, error) {
+	if len(owned) == 0 {
+		return backup, nil
+	}
+	merged := make(map[string]any, len(current)+len(backup))
+	maps.Copy(merged, current)
+	maps.Copy(merged, backup)
+	return preserveOwnedConfig(owned, current, merged), requireUnchangedOwnedConfig(key, owned, current, backup)
 }
 
 // storedConfigs reads an installation's configuration in tx, decrypted.

@@ -117,6 +117,7 @@ type ctxCaptureHost struct {
 	mu          sync.Mutex
 	current     map[int]pluginClient
 	startResult pluginClient
+	startErr    error
 	entered     chan struct{}
 	proceed     chan struct{}
 	sawCancel   bool
@@ -140,6 +141,9 @@ func (h *ctxCaptureHost) Start(ctx context.Context, req pluginhost.StartRequest)
 		h.mu.Unlock()
 		return nil, ctx.Err()
 	case <-h.proceed:
+	}
+	if h.startErr != nil {
+		return nil, h.startErr
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()

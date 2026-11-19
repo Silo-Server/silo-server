@@ -49,6 +49,15 @@ type CatalogWithdrawal struct {
 	Version  string `json:"version"`
 }
 
+type catalogSnapshot struct {
+	entries     []CatalogEntry
+	withdrawals map[int][]CatalogWithdrawal
+}
+
+func (s catalogSnapshot) withdrawn(repositoryID int, pluginID, version string) bool {
+	return slices.Contains(s.withdrawals[repositoryID], CatalogWithdrawal{PluginID: pluginID, Version: version})
+}
+
 func (i *RepositoryIndex) withdrawn(pluginID, version string) bool {
 	return slices.Contains(i.Withdrawals, CatalogWithdrawal{PluginID: pluginID, Version: version})
 }
@@ -180,11 +189,17 @@ func NewCatalogService(repositories *RepositoryStore, opts CatalogServiceOptions
 }
 
 func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
+	snapshot, err := s.fetchSnapshot(ctx)
+	return snapshot.entries, err
+}
+
+func (s *CatalogService) fetchSnapshot(ctx context.Context) (catalogSnapshot, error) {
 	repositories, err := s.repositories.List(ctx)
 	if err != nil {
-		return nil, err
+		return catalogSnapshot{}, err
 	}
 
+	snapshot := catalogSnapshot{withdrawals: make(map[int][]CatalogWithdrawal)}
 	catalogByVersion := make(map[string]CatalogEntry)
 	for _, repository := range repositories {
 		if !repository.Enabled {
@@ -203,11 +218,14 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 
 		now := time.Now().UTC()
 		if err := s.repositories.Update(ctx, repository.ID, UpdateRepositoryInput{LastFetchedAt: &now}); err != nil {
-			return nil, err
+			return catalogSnapshot{}, err
+		}
+		if isManagedOfficialRepository(repository) {
+			snapshot.withdrawals[repository.ID] = index.Withdrawals
 		}
 
 		for _, pkg := range index.Plugins {
-			if isManagedOfficialRepository(repository) && index.withdrawn(manifestPluginID(pkg.Manifest), manifestVersion(pkg.Manifest)) {
+			if snapshot.withdrawn(repository.ID, manifestPluginID(pkg.Manifest), manifestVersion(pkg.Manifest)) {
 				continue
 			}
 			entry, ok, err := s.catalogEntryFromPackage(repository, pkg)
@@ -252,7 +270,8 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 		}
 	})
 
-	return entries, nil
+	snapshot.entries = entries
+	return snapshot, nil
 }
 
 func (s *CatalogService) ResolveInstall(ctx context.Context, req InstallCatalogRequest) (*ResolvedCatalogInstall, error) {

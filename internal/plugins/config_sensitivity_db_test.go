@@ -1,11 +1,92 @@
 package plugins
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
+
+func TestLegacyReplacementPreservesCredentialProtectionDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := t.Context()
+	cipher := instanceStateTestCipher(t)
+	store := NewInstallationStore(pool, cipher)
+	configs := NewRuntimeConfigStore(pool, cipher)
+	const credential = "synthetic-credential-value"
+	const privateSchema = `{"type":"object","properties":{"token":{"type":"string","writeOnly":true}}}`
+	const publicSchema = `{"type":"object","properties":{"token":{"type":"string"}}}`
+	for _, tc := range []struct {
+		name, refusal string
+		localManifest bool
+		saved         map[string]any
+		nextSchema    string
+	}{
+		{name: "old credential loses protection", localManifest: true, saved: map[string]any{"token": credential}, nextSchema: publicSchema, refusal: `saved credential at "token"`},
+		{name: "old credential keeps protection", localManifest: true, saved: map[string]any{"token": credential}, nextSchema: privateSchema},
+		{name: "old manifest missing", saved: map[string]any{"token": credential}, nextSchema: publicSchema, refusal: "could not verify how the saved settings"},
+		{name: "old manifest missing after settings cleared", saved: map[string]any{}, nextSchema: publicSchema},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := seedResidentQueryInstallation(t, pool, true)
+			installation, err := store.GetByID(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.localManifest {
+				path := filepath.Join(t.TempDir(), "plugin")
+				previous := packageErrorTestManifest(installation.PluginID, installation.Version)
+				previous.GlobalConfigSchema = []*pluginv1.ConfigSchema{{Key: "app", JsonSchema: privateSchema}}
+				data, err := protojson.Marshal(previous)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(InstalledManifestPath(path), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Update(ctx, id, UpdateInstallationInput{InstallPath: &path}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := configs.PutGlobalConfig(ctx, id, "app", tc.saved); err != nil {
+				t.Fatal(err)
+			}
+			candidate := packageErrorTestManifest(installation.PluginID, "1.0.0")
+			candidate.GlobalConfigSchema = []*pluginv1.ConfigSchema{{Key: "app", JsonSchema: tc.nextSchema}}
+			binary := []byte("replacement fixture")
+			candidate.Checksum = sha256Hex(binary)
+			data, err := protojson.Marshal(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			archive, err := buildBinaryPluginArchive(data, binary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = store.Update(ctx, id, UpdateInstallationInput{
+				Version: &candidate.Version,
+				Archive: &ArchiveInput{ManifestJSON: data, Checksum: candidate.Checksum, Bytes: archive},
+			})
+			wantVersion := candidate.Version
+			if tc.refusal != "" {
+				requirePackageError(t, err, tc.refusal)
+				if strings.Contains(err.Error(), credential) {
+					t.Fatal("refusal includes the saved credential")
+				}
+				wantVersion = installation.Version
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			current, err := store.GetByID(ctx, id)
+			if err != nil || current.Version != wantVersion {
+				t.Fatalf("expected installation version %s, got %+v, %v", wantVersion, current, err)
+			}
+		})
+	}
+}
 
 func TestProvisionedReplacementProtectsNestedCredentialDB(t *testing.T) {
 	pool := builtinGuardTestPool(t)

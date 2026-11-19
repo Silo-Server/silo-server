@@ -111,7 +111,7 @@ func (p *PreparedProvisionPackage) checkInstalled(ctx context.Context, store *In
 		return nil, ErrProvisionPackageUntrusted
 	}
 
-	archive, err := store.GetArchive(ctx, existing.ID)
+	archive, err := store.archiveForRelease(ctx, existing)
 	if errors.Is(err, ErrArchiveNotFound) {
 		return nil, ErrProvisionPackageUntrusted
 	}
@@ -148,9 +148,6 @@ func (p *PreparedProvisionPackage) stageBinary(ctx context.Context, binary *down
 	archiveBytes, err := buildBinaryPluginArchive(binary.manifestJSON, binary.data)
 	if err != nil {
 		return fmt.Errorf("package plugin archive: %w", err)
-	}
-	if _, _, _, err := openPluginArchive(archiveBytes); err != nil {
-		return packageError(err, "Silo couldn't store the verified plugin package.")
 	}
 	versionRoot, err := pluginVersionRoot(p.root, binary.manifest.GetPluginId(), binary.manifest.GetVersion())
 	if err != nil {
@@ -363,10 +360,8 @@ func (i *Installer) CleanupProvisionStaging() error {
 		dir := filepath.Join(parent, entry.Name())
 		owner, err := os.OpenInRoot(parent, filepath.Join(entry.Name(), provisionStageOwner))
 		if errors.Is(err, os.ErrNotExist) {
-			// Leave a grace period for a process creating its owner file.
-			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > time.Hour {
-				cleanupErr = errors.Join(cleanupErr, os.RemoveAll(dir))
-			}
+			// A creator may still be publishing the owner file. It writes
+			// the package only after that file is in place and locked.
 			continue
 		}
 		if err != nil {

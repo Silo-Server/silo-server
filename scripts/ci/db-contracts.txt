@@ -851,6 +851,7 @@
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.
 ./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
+./internal/plugins TestInstallationStoreRetiresFilesAfterCommittedDeleteDB
 ./internal/plugins TestArchiveCacheRejectsSupersededSameVersionDB
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
 
@@ -862,12 +863,15 @@
 # A refused automatic plugin update stays on its installation until it is
 # cleared or the installed version changes.
 ./internal/plugins TestInstallationStoreUpdateFailureDB
+./internal/plugins TestLifecyclePollRecoversMissedEnablementCycleDB
 
 # Provisioned settings remain protected when runtime and admin writes share
 # an entry, and release puts its settings back under ordinary admin control.
 ./internal/plugins TestProvisionOwnershipGuardsDB
+./internal/plugins TestProvisionedReplacementValidatesOwnedCallbackDB
 ./internal/plugins TestProvisionedReplacementValidatesStoredConfigDB
 ./internal/plugins TestProvisionedReplacementProtectsNestedCredentialDB
+./internal/plugins TestLegacyReplacementPreservesCredentialProtectionDB
 ./internal/plugins TestReenableRejectsIneligibleStableBindingDB
 
 # Updating an installed plugin from its catalog stops the running plugin only
@@ -882,6 +886,7 @@
 # replaces it, and a second create for the same plugin is refused.
 ./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
 ./internal/plugins TestProvisionPackageCommitAndRollbackDB
+./internal/plugins TestAutoUpdateClearsWithdrawnNoticeDB
 
 # Cleaning up duplicate installations keeps a break-glass account's local
 # credentials and moves a deleted duplicate's marker provider settings.
@@ -1306,6 +1311,7 @@
 ./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
 ./internal/backup TestEveryTableIsClassifiedDB
 ./internal/backup TestSelectiveRestoreDB
+./internal/backup TestSelectivePluginRestorePreviewsOwnedConfigDB
 ./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
 ./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
@@ -1471,5 +1477,8 @@
 ./internal/plugins TestProvisionWriterAtomicOfflineDB
 ./internal/plugins TestProvisionWriterMetadataPlacementRecoveryDB
 ./internal/plugins TestProvisionWriterOrphanedSessionDB
+./internal/plugins TestProvisionWriterPreservesPrivateNumbersDB
+./internal/plugins TestProvisionWriterRefusesInvalidSavedConfigDB
+./internal/plugins TestProvisionWriterReleasesHeldFieldsDB
 ./internal/plugins TestProvisionWriterRestartsAfterRestoreHoldDB
 ./internal/plugins TestAutomaticInstallHonorsRestoreHoldDB

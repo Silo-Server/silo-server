@@ -290,8 +290,8 @@ type fakeAutoUpdateCatalog struct {
 	resolveRequests []InstallCatalogRequest
 }
 
-func (f *fakeAutoUpdateCatalog) Fetch(context.Context) ([]CatalogEntry, error) {
-	return f.entries, nil
+func (f *fakeAutoUpdateCatalog) fetchSnapshot(context.Context) (catalogSnapshot, error) {
+	return catalogSnapshot{entries: f.entries}, nil
 }
 
 func (f *fakeAutoUpdateCatalog) ResolveInstall(_ context.Context, request InstallCatalogRequest) (*ResolvedCatalogInstall, error) {

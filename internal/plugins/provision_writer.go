@@ -175,9 +175,6 @@ func (w *ProvisionWriter) StartOffline(ctx context.Context) error {
 		return nil
 	}
 	w.placementPending = w.placeMetadata != nil
-	if err := w.installer.CleanupProvisionStaging(); err != nil {
-		slog.WarnContext(ctx, "could not clear abandoned plugin staging files", "component", "plugins")
-	}
 	w.retry, err = w.apply(ctx, true)
 	if errors.Is(err, errProvisionAuthorityLost) || w.conn.IsClosed() {
 		w.loseAuthority()
@@ -278,9 +275,10 @@ func (w *ProvisionWriter) applyOnline(ctx context.Context) {
 }
 
 func (w *ProvisionWriter) tryPlacement(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, provisionDBTimeout)
-	defer cancel()
 	changed, err := w.finishPlacement(ctx)
+	if changed && w.service != nil {
+		w.service.OnLifecycleChange(ctx)
+	}
 	if errors.Is(err, errProvisionAuthorityLost) || w.conn.IsClosed() {
 		w.loseAuthority()
 		return
@@ -290,46 +288,58 @@ func (w *ProvisionWriter) tryPlacement(ctx context.Context) {
 		return
 	}
 	w.placementPending = false
-	if changed && w.service != nil {
-		w.service.OnLifecycleChange(ctx)
-	}
 }
 
-// finishPlacement adds defaults and acknowledges the queued operation in the
-// same transaction. A crash before that commit leaves both for the next writer,
-// while a later administrator's chain edit will never replay completed work.
 func (w *ProvisionWriter) finishPlacement(ctx context.Context) (bool, error) {
+	readCtx, cancel := context.WithTimeout(ctx, provisionDBTimeout)
+	rows, err := w.conn.Query(readCtx, `SELECT plugin_installation_id FROM plugin_provision_placement ORDER BY plugin_installation_id`)
+	if err != nil {
+		cancel()
+		return false, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	cancel()
+	if err != nil {
+		return false, err
+	}
 	changed := false
-	err := pgx.BeginFunc(ctx, w.conn, func(tx pgx.Tx) error {
+	var failures error
+	for _, id := range ids {
+		err := w.placeInstallation(ctx, id)
+		switch {
+		case err == nil:
+			changed = true
+		case errors.Is(err, ErrInstallationNotFound):
+			// Deleting the installation cascades to the queue.
+		case ctx.Err() != nil || w.conn.IsClosed() || errors.Is(err, errProvisionAuthorityLost):
+			return changed, err
+		default:
+			failures = errors.Join(failures, err)
+		}
+	}
+	return changed, failures
+}
+
+// Commit defaults and acknowledge one installation together. A failed or slow
+// placement stays queued without rolling back completed work for other plugins.
+func (w *ProvisionWriter) placeInstallation(ctx context.Context, id int) error {
+	ctx, cancel := context.WithTimeout(ctx, provisionDBTimeout)
+	defer cancel()
+	return pgx.BeginFunc(ctx, w.conn, func(tx pgx.Tx) error {
 		if err := verifyProvisionAuthority(ctx, tx); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT plugin_installation_id FROM plugin_provision_placement ORDER BY plugin_installation_id`)
-		if err != nil {
+		if err := lockPluginInstallation(ctx, tx, id); err != nil {
 			return err
 		}
-		ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
-		if err != nil {
+		if err := w.placeMetadata(ctx, tx, id); err != nil {
 			return err
 		}
-		for _, id := range ids {
-			if err := lockPluginInstallation(ctx, tx, id); err != nil {
-				if errors.Is(err, ErrInstallationNotFound) {
-					continue
-				}
-				return err
-			}
-			if err := w.placeMetadata(ctx, tx, id); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `DELETE FROM plugin_provision_placement WHERE plugin_installation_id = $1`, id); err != nil {
-				return err
-			}
-			changed = true
+		if _, err := tx.Exec(ctx, `DELETE FROM plugin_provision_placement WHERE plugin_installation_id = $1`, id); err != nil {
+			return err
 		}
 		return verifyProvisionAuthority(ctx, tx)
 	})
-	return changed, err
 }
 
 func (w *ProvisionWriter) checkAuthority(ctx context.Context) error {

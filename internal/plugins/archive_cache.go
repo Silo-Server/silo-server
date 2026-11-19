@@ -31,7 +31,7 @@ type archiveStore interface {
 type ArchiveCache struct {
 	// mu protects rehydration and pruning from concurrent status and
 	// reconcile calls, including cache-hit validation during extraction, and
-	// guards verified.
+	// guards verified and retirement state.
 	mu sync.Mutex
 	// loads shares one archive read among concurrent loads of an
 	// installation from archives; mu is never held across one.
@@ -47,7 +47,8 @@ type ArchiveCache struct {
 	verified map[int]verifiedBinary
 	// A read of the archive may finish after this host retired its release.
 	// Keep the path retired so that read cannot bring the files back.
-	retired map[string]struct{}
+	retired            map[string]struct{}
+	pendingRetirements map[string]*Installation
 	// newHash, when set, replaces sha256.New for checking an installed
 	// binary against its manifest checksum. Tests use it to count the bytes a
 	// read hashes.
@@ -451,7 +452,35 @@ func (c *ArchiveCache) retire(previous, current *Installation) error {
 	if c.verified[previous.ID].path == binaryPath {
 		delete(c.verified, previous.ID)
 	}
-	return errors.Join(os.RemoveAll(filepath.Dir(binaryPath)), removeInstallationFiles(c.root, previous))
+	return c.cleanRetired(binaryPath, previous)
+}
+
+// cleanRetired keeps the information needed to retry a filesystem error even
+// after the database row has moved on. Callers hold c.mu.
+func (c *ArchiveCache) cleanRetired(binaryPath string, installation *Installation) error {
+	err := errors.Join(os.RemoveAll(filepath.Dir(binaryPath)), removeInstallationFiles(c.root, installation))
+	if err == nil {
+		delete(c.pendingRetirements, binaryPath)
+	} else {
+		if c.pendingRetirements == nil {
+			c.pendingRetirements = make(map[string]*Installation)
+		}
+		c.pendingRetirements[binaryPath] = installation
+	}
+	return err
+}
+
+func (c *ArchiveCache) retryRetirements(ctx context.Context) {
+	if c == nil || c.root == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for binaryPath, installation := range c.pendingRetirements {
+		if err := c.cleanRetired(binaryPath, installation); err != nil {
+			slog.WarnContext(ctx, "remove retired plugin release from cache", "component", "plugins", "installation_id", installation.ID, "error", err)
+		}
+	}
 }
 
 // recoverLegacyBinaryArchive rebuilds a legacy archive (a raw binary

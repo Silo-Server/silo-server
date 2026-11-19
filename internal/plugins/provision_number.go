@@ -55,8 +55,9 @@ func checkProvisionNumbers(path string, value any) error {
 }
 
 func validateProvisionConfig(manifest *pluginv1.PluginManifest, key string, merged, fields map[string]any) error {
-	if err := checkProvisionNumbers("", merged); err != nil {
+	projection := globalConfigValidationProjection(manifest, key, merged, fields)
+	if err := ValidateGlobalConfigValue(manifest, key, projection); err != nil {
 		return err
 	}
-	return validateMergedGlobalConfig(manifest, key, merged, fields)
+	return checkProvisionNumbers("", projection)
 }

@@ -1959,6 +1959,9 @@ func main() {
 			BaseDir:    pluginCacheDir,
 			Signatures: pluginSignatures,
 		})
+		if err := installer.CleanupProvisionStaging(); err != nil {
+			slog.WarnContext(appCtx, "could not clear abandoned plugin staging files", "component", "plugins", "error", err)
+		}
 
 		libSource := pluginLibrarySource{groups: accessGroupStore}
 		if deps.FolderRepo != nil {
@@ -2281,18 +2284,9 @@ func main() {
 
 		imageResolver := metadata.NewPluginImageResolver()
 		if pluginService != nil && pluginInstallationStore != nil {
-			// Lifecycle events may arrive while the initial committed state
-			// is loading. Each refresh reads the state once it owns the lock.
-			var reloadImageResolversMu sync.Mutex
-			reloadImageResolvers := func(ctx context.Context) {
-				reloadImageResolversMu.Lock()
-				defer reloadImageResolversMu.Unlock()
-				if err := reloadPluginImageResolvers(ctx, pluginInstallationStore, imageResolver, pluginService); err != nil {
-					slog.WarnContext(ctx, "failed to reload plugin image resolvers", "component", "app", "error", err)
-				}
-			}
-			pluginService.AddLifecycleHook(reloadImageResolvers)
-			reloadImageResolvers(appCtx)
+			pluginService.AddRetryableLifecycleHook(appCtx, "image resolvers", func(ctx context.Context) error {
+				return reloadPluginImageResolvers(ctx, pluginInstallationStore, imageResolver, pluginService)
+			})
 		}
 		if deps.Blobs.Assets != nil {
 			imageResolver.SetArtworkResolver(deps.ArtworkResolver)

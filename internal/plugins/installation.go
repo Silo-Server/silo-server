@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -152,6 +153,8 @@ type UpdateInstallationInput struct {
 	// refusal record so it can't land on a newer version.
 	IfVersion     *string
 	IfInstallPath *string
+	// Clearing an update notice guards the notice read from this release.
+	ifAvailableVersion *string
 }
 
 // ArchiveInput is a package for the installation's plugin_archives row.
@@ -162,9 +165,9 @@ type ArchiveInput struct {
 }
 
 type InstallationStore struct {
-	cacheRoot string
-	pool      installationDB
-	cipher    *secret.Cipher
+	archiveCache *ArchiveCache
+	pool         installationDB
+	cipher       *secret.Cipher
 }
 
 // installationDB is a pool or a caller's transaction: Begin on a
@@ -451,8 +454,7 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 	if installation.IsBuiltin() {
 		return ErrBuiltinInstallationImmutable
 	}
-	if (input.IfVersion != nil && *input.IfVersion != installation.Version) ||
-		(input.IfInstallPath != nil && *input.IfInstallPath != installation.InstallPath) {
+	if !input.matches(installation) {
 		return ErrInstallationChanged
 	}
 
@@ -462,6 +464,11 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 		}
 	}
 
+	// Peers can miss both sides of a disable/enable cycle. Advance the runtime
+	// even if the final enabled value matches what their last poll read.
+	if input.Enabled != nil && *input.Enabled != installation.Enabled {
+		input.Restart = true
+	}
 	setClauses, args := installationUpdateClauses(input)
 
 	// A guarded write always runs the row update, so the guard also holds
@@ -494,6 +501,12 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 		return fmt.Errorf("commit update installation transaction: %w", err)
 	}
 	return nil
+}
+
+func (input UpdateInstallationInput) matches(installation *Installation) bool {
+	return (input.IfVersion == nil || *input.IfVersion == installation.Version) &&
+		(input.IfInstallPath == nil || *input.IfInstallPath == installation.InstallPath) &&
+		(input.ifAvailableVersion == nil || (installation.AvailableVersion != nil && *input.ifAvailableVersion == *installation.AvailableVersion))
 }
 
 func installationUpdateClauses(input UpdateInstallationInput) ([]string, []any) {
@@ -759,8 +772,8 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 	}
 
 	if _, inTx := s.pool.(pgx.Tx); !inTx {
-		if err := removeInstallationFiles(s.cacheRoot, installation); err != nil {
-			return fmt.Errorf("removing plugin installation files: %w", err)
+		if err := s.archiveCache.retire(installation, nil); err != nil {
+			slog.WarnContext(ctx, "remove uninstalled plugin files", "component", "plugins", "installation_id", id, "error", err)
 		}
 	}
 

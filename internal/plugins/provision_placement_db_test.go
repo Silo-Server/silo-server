@@ -110,8 +110,15 @@ func TestProvisionWriterMetadataPlacementRecoveryDB(t *testing.T) {
 	}
 	assertPlacement(true, false)
 
-	// Applying placement and acknowledging it use the same transaction.
+	// A later failure keeps that placement queued without replaying another
+	// plugin whose chain was already in place.
+	if _, err := pool.Exec(ctx, `INSERT INTO plugin_provision_placement (plugin_installation_id) VALUES ($1)`, anchorID); err != nil {
+		t.Fatal(err)
+	}
 	retryWriter := NewProvisionWriter(pool, repos, installations, installer, catalog, configs, nil, doc, func(ctx context.Context, tx pgx.Tx, id int) error {
+		if id == anchorID {
+			return nil
+		}
 		if err := place(ctx, tx, id); err != nil {
 			return err
 		}
@@ -122,6 +129,10 @@ func TestProvisionWriterMetadataPlacementRecoveryDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPlacement(true, false)
+	var anchorQueued bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_provision_placement WHERE plugin_installation_id=$1)`, anchorID).Scan(&anchorQueued); err != nil || anchorQueued {
+		t.Fatalf("completed placement still queued = %v, error = %v", anchorQueued, err)
+	}
 	retryWriter.placeMetadata = place
 	retryWriter.tryPlacement(ctx)
 	assertPlacement(false, true)

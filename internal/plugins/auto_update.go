@@ -117,7 +117,7 @@ type autoUpdateInstallationStore interface {
 }
 
 type autoUpdateCatalog interface {
-	Fetch(ctx context.Context) ([]CatalogEntry, error)
+	fetchSnapshot(ctx context.Context) (catalogSnapshot, error)
 	ResolveInstall(ctx context.Context, req InstallCatalogRequest) (*ResolvedCatalogInstall, error)
 }
 
@@ -223,10 +223,11 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		summary.RepositoriesSeeded += seeded
 	}
 
-	entries, err := s.catalog.Fetch(ctx)
+	snapshot, err := s.catalog.fetchSnapshot(ctx)
 	if err != nil {
 		return summary, err
 	}
+	entries := snapshot.entries
 	summary.CatalogEntries = len(entries)
 
 	installed, err := s.installations.List(ctx)
@@ -244,6 +245,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 	}
 
 	latestByRepositoryPlugin := latestCatalogEntriesByRepository(entries)
+	clearedNotice := false
 	for _, existing := range installed {
 		if existing == nil {
 			continue
@@ -270,6 +272,22 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		// rejection are the other layers.
 		if existing.IsBuiltin() {
 			continue
+		}
+		if version := existing.AvailableVersion; version != nil && snapshot.withdrawn(*existing.RepositoryID, existing.PluginID, *version) {
+			err := s.installations.Update(ctx, existing.ID, UpdateInstallationInput{
+				automatic:          true,
+				AvailableVersion:   new(""),
+				ifAvailableVersion: version,
+				IfVersion:          &existing.Version,
+				IfInstallPath:      &existing.InstallPath,
+			})
+			switch {
+			case err == nil:
+				clearedNotice = true
+			case isVersionManaged(err), errors.Is(err, ErrInstallationChanged), errors.Is(err, ErrInstallationNotFound), errors.Is(err, errProvisionRestoreHeld):
+			default:
+				summary.recordFailuref("clear withdrawn update notice for %s: %v", existing.PluginID, err)
+			}
 		}
 		entry, ok := latestByRepositoryPlugin[repositoryPluginKey{
 			RepositoryID: *existing.RepositoryID,
@@ -330,7 +348,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 	// as plugins.Service invalidate their installation cache; otherwise stale
 	// rows (old InstallPath/Version) would make later plugin RPCs fail against a
 	// re-extracted, newer archive.
-	if summary.DefaultPluginsInstalled > 0 || summary.UpdatesApplied > 0 || summary.UpdatesAvailable > 0 {
+	if clearedNotice || summary.DefaultPluginsInstalled > 0 || summary.UpdatesApplied > 0 || summary.UpdatesAvailable > 0 {
 		s.notifyChanged(ctx)
 	}
 

@@ -550,7 +550,9 @@ func TestResidentRestartReturnsWhenCallerCancels(t *testing.T) {
 	store := newFakeServiceInstallationStore(&Installation{ID: 5, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: path, Enabled: true, Kind: KindPlugin})
 	service := &Service{host: host, installations: store}
 	service.resident = newResidentSupervisor(service, ResidentOptions{})
-	service.resident.entries[5] = &residentEntry{id: 5, state: ResidentRunning, runtime: runtimeOf(store.byID[5])}
+	service.resident.entries[5] = &residentEntry{
+		id: 5, state: ResidentRunning, desired: residentRuntime{installation: runtimeOf(store.byID[5])},
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)

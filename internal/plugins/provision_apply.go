@@ -13,6 +13,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/jackc/pgx/v5"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 type preparedProvision struct {
@@ -191,8 +192,8 @@ func (w *ProvisionWriter) prepare(ctx context.Context, offline bool) ([]prepared
 		entry := &staged[len(staged)-1]
 		if err := w.preflightValues(ctx, entry); err != nil {
 			if _, refusal := errors.AsType[*provisionRefusalError](err); refusal && item.held && version != desired.Version && desired.Version != "" {
-				// Desired fields may belong to the eventual version. Keep the
-				// saved values and ownership until that version can apply.
+				// Desired fields may belong to the eventual version. Defer
+				// writing values until that version can apply.
 				entry.skip = true
 				continue
 			}
@@ -340,6 +341,9 @@ func (w *ProvisionWriter) applyItem(ctx context.Context, tx pgx.Tx, item prepare
 		if current.Enabled || current.Version != item.installed.Version || current.InstallPath != item.installed.InstallPath {
 			return provisionedItem{}, ErrInstallationChanged
 		}
+		if err := releaseOmittedProvisionOwnership(ctx, tx, current.ID, item.desired); err != nil {
+			return provisionedItem{}, err
+		}
 		return provisionedItem{status: disabledProvisionStatus(item.pluginID, current.Version)}, nil
 	}
 	installation, err := item.pkg.Persist(ctx, w.installations, tx)
@@ -409,19 +413,13 @@ func advanceProvisionRuntime(ctx context.Context, tx pgx.Tx, id int) error {
 }
 
 func (w *ProvisionWriter) applyValues(ctx context.Context, tx pgx.Tx, item preparedProvision, installation *Installation, changes map[string]map[string]any) (bool, error) {
-	owned := ProvisionOwnership{
-		Managed: true, VersionPin: item.desired.Version,
-		ConfigFields: make(map[string][]string), BindingFields: make(map[string][]string),
-	}
-	for key, fields := range item.config {
-		owned.ConfigFields[key] = slices.Sorted(maps.Keys(fields))
-	}
+	owned := declaredProvisionOwnership(item.desired)
 	for _, key := range slices.Sorted(maps.Keys(changes)) {
 		if err := upsertGlobalConfig(ctx, tx, w.configs.cipher, installation.ID, key, changes[key]); err != nil {
 			return false, err
 		}
 	}
-	if err := PutProvisionOwnership(ctx, tx, installation.ID, ownedWithBinding(owned, item.desired.AuthBinding)); err != nil {
+	if err := PutProvisionOwnership(ctx, tx, installation.ID, owned); err != nil {
 		return false, err
 	}
 	if owned.VersionPin != "" && (installation.AvailableVersion != nil || installation.UpdateFailure != nil) {
@@ -458,9 +456,10 @@ func (w *ProvisionWriter) planConfigValues(ctx context.Context, q provisionConfi
 				return nil, err
 			}
 		}
-		next, err := mergeProvisionConfig(item.pkg.Manifest, key, existing, item.config[key])
-		if err != nil {
-			return nil, invalidProvisionConfig(item.pluginID, key, err)
+		fields := item.config[key]
+		next := mergeProvisionConfig(item.pkg.Manifest, key, existing, fields)
+		if err := item.validateConfigChange(key, existing, next, fields); err != nil {
+			return nil, err
 		}
 		if err := item.protectSavedConfig(key, existing, next); err != nil {
 			return nil, err
@@ -510,7 +509,7 @@ func (w *ProvisionWriter) validateRetainedConfig(ctx context.Context, q provisio
 
 		if HasGlobalConfigSchema(item.pkg.Manifest, entry.Key) {
 			if err := validateProvisionConfig(item.pkg.Manifest, entry.Key, current, nil); err != nil {
-				return invalidProvisionConfig(item.pluginID, entry.Key, err)
+				return invalidProvisionConfig(item.pluginID, entry.Key, err, false)
 			}
 		}
 	}
@@ -544,10 +543,64 @@ func (w *ProvisionWriter) decodeConfig(id int, key, pluginID string, raw []byte)
 	return config, nil
 }
 
-func invalidProvisionConfig(pluginID, key string, err error) error {
+func (item preparedProvision) validateConfigChange(key string, existing, next, fields map[string]any) error {
+	if err := checkProvisionNumbers("", fields); err != nil {
+		return invalidProvisionConfig(item.pluginID, key, err, true)
+	}
+	err := validateProvisionConfig(item.pkg.Manifest, key, next, fields)
+	if err == nil {
+		return nil
+	}
+	local := item.installed == nil
+	if validation, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
+		if violation := declaredSchemaViolation(validation, fields); violation != nil {
+			return invalidProvisionConfig(item.pluginID, key, violation, true)
+		}
+		// For constraints on the whole entry, a previously valid projection
+		// makes the declaration the source of the new failure.
+		local = local || validateMergedGlobalConfig(item.pkg.Manifest, key, existing, nil) == nil
+	}
+	return invalidProvisionConfig(item.pluginID, key, err, local)
+}
+
+func declaredSchemaViolation(failure *jsonschema.ValidationError, fields map[string]any) *jsonschema.ValidationError {
+	if len(failure.InstanceLocation) > 0 {
+		if _, supplied := fields[failure.InstanceLocation[0]]; supplied {
+			return failure
+		}
+		return nil
+	}
+	supplied := func(field string) bool {
+		_, ok := fields[field]
+		return ok
+	}
+	switch constraint := failure.ErrorKind.(type) {
+	case *kind.Required:
+		if slices.ContainsFunc(constraint.Missing, supplied) {
+			return failure
+		}
+	case *kind.AnyOf, *kind.OneOf:
+		// A branch can fail on saved values even when it accepts the
+		// declaration. Attribute the error only if every branch rejects it.
+		if len(failure.Causes) > 0 && !slices.ContainsFunc(failure.Causes, func(cause *jsonschema.ValidationError) bool {
+			return declaredSchemaViolation(cause, fields) == nil
+		}) {
+			return failure
+		}
+	default:
+		for _, cause := range failure.Causes {
+			if violation := declaredSchemaViolation(cause, fields); violation != nil {
+				return violation
+			}
+		}
+	}
+	return nil
+}
+
+func invalidProvisionConfig(pluginID, key string, err error, local bool) error {
 	path := "config." + key
 	if number, ok := errors.AsType[*provisionNumberError](err); ok {
-		return &provisionRefusalError{pluginID: pluginID, detail: path + number.path + " contains a number the plugin runtime cannot represent.", local: true}
+		return &provisionRefusalError{pluginID: pluginID, detail: path + number.path + " contains a number the plugin runtime cannot represent.", local: local}
 	}
 	if validation, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
 		for len(validation.InstanceLocation) == 0 && len(validation.Causes) > 0 {
@@ -557,10 +610,10 @@ func invalidProvisionConfig(pluginID, key string, err error) error {
 			path += "." + strings.Join(validation.InstanceLocation, ".")
 		}
 	}
-	return &provisionRefusalError{pluginID: pluginID, detail: path + " does not satisfy the plugin configuration schema.", local: true}
+	return &provisionRefusalError{pluginID: pluginID, detail: path + " does not satisfy the plugin configuration schema.", local: local}
 }
 
-func mergeProvisionConfig(manifest *pluginv1.PluginManifest, key string, existing, fields map[string]any) (map[string]any, error) {
+func mergeProvisionConfig(manifest *pluginv1.PluginManifest, key string, existing, fields map[string]any) map[string]any {
 	next := maps.Clone(existing)
 	maps.Copy(next, fields)
 	public, _ := GlobalConfigFieldSets(manifest, key)
@@ -569,8 +622,5 @@ func mergeProvisionConfig(manifest *pluginv1.PluginManifest, key string, existin
 			delete(next, field)
 		}
 	}
-	if err := validateProvisionConfig(manifest, key, next, fields); err != nil {
-		return nil, err
-	}
-	return next, nil
+	return next
 }

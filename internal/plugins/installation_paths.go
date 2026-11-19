@@ -107,13 +107,14 @@ func removeInstallationFiles(root string, installation *Installation) error {
 		if matchingInstalledManifest(manifestPath, installation) == nil {
 			return nil
 		}
-		var errs []error
-		for _, file := range []string{path, manifestPath} {
-			if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
-				errs = append(errs, err)
-			}
+		// The manifest identifies the owner of the legacy path. Keep it
+		// until the binary is gone so failed cleanup can be retried safely.
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
-		return errors.Join(errs...)
+		if err := os.Remove(manifestPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	return nil
 }

@@ -1,10 +1,12 @@
 package plugins
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -113,25 +115,11 @@ func TestProvisionOwnershipGuardsDB(t *testing.T) {
 func TestProvisionedReplacementValidatesStoredConfigDB(t *testing.T) {
 	pool := builtinGuardTestPool(t)
 	ctx := t.Context()
-	id := seedResidentQueryInstallation(t, pool, true)
 	cipher := instanceStateTestCipher(t)
 	installations := NewInstallationStore(pool, cipher)
 	config := NewRuntimeConfigStore(pool, cipher)
-	installed, err := installations.GetByID(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var repositoryID int
-	err = pool.QueryRow(ctx, `INSERT INTO plugin_repositories (url, display_name) VALUES ($1, 'Provision test') RETURNING id`,
-		"https://plugins.example.test/"+installed.PluginID).Scan(&repositoryID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM plugin_repositories WHERE id = $1`, repositoryID) })
-	signature := Signature{State: SignatureStateVerified, SourceRepo: new("https://github.com/example/plugin")}
-	if err := installations.Update(ctx, id, UpdateInstallationInput{SetRepository: true, RepositoryID: &repositoryID, Signature: &signature}); err != nil {
-		t.Fatal(err)
-	}
+	installed := seedVerifiedReplacementInstallation(t, pool, installations)
+	id := installed.ID
 	previous := testPluginManifest(t, installed.PluginID, installed.Version)
 	previous.GlobalConfigSchema = []*pluginv1.ConfigSchema{{Key: "app",
 		JsonSchema: `{"type":"object","properties":{"secret":{"type":"string","writeOnly":true},"scopes":{"type":"string"}}}`}}
@@ -143,7 +131,7 @@ func TestProvisionedReplacementValidatesStoredConfigDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := config.PutGlobalConfig(ctx, id, "app", map[string]any{"secret": "saved", "scopes": "existing"}); err != nil {
+	if err := config.PutGlobalConfig(ctx, id, "app", map[string]any{"secret": "saved", "scopes": "existing", "cursor": "private"}); err != nil {
 		t.Fatal(err)
 	}
 	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
@@ -170,7 +158,7 @@ func TestProvisionedReplacementValidatesStoredConfigDB(t *testing.T) {
 		}
 		return installations.Update(ctx, id, UpdateInstallationInput{
 			IfVersion: &installed.Version, Version: new(updatedVersion), SetRepository: true,
-			RepositoryID: &repositoryID, Signature: &signature,
+			RepositoryID: installed.RepositoryID, Signature: &installed.Signature,
 			Archive: &ArchiveInput{ManifestJSON: manifestJSON, Checksum: manifest.Checksum, Bytes: []byte("test package")},
 		})
 	}
@@ -181,7 +169,7 @@ func TestProvisionedReplacementValidatesStoredConfigDB(t *testing.T) {
 		}
 	}
 
-	err = update(`{"type":"object","properties":{"secret":{"type":"string","writeOnly":true},"scopes":{"type":"array"}}}`)
+	err = update(`{"type":"object","properties":{"secret":{"type":"string","writeOnly":true},"scopes":{"type":"array"}},"additionalProperties":false}`)
 	if managed, ok := errors.AsType[*ManagedByEnvironmentError](err); !ok || managed.Field != "config.app" {
 		t.Fatalf("incompatible unowned field in managed entry: got %v, want managed config rejection", err)
 	}
@@ -189,7 +177,7 @@ func TestProvisionedReplacementValidatesStoredConfigDB(t *testing.T) {
 	if err != nil || got.Version != installed.Version {
 		t.Fatalf("refused update changed version: %+v, error %v", got, err)
 	}
-	if err := update(`{"type":"object","properties":{"secret":{"type":"string","writeOnly":true},"scopes":{"type":"string"}}}`); err != nil {
+	if err := update(`{"type":"object","properties":{"secret":{"type":"string","writeOnly":true},"scopes":{"type":"string"}},"additionalProperties":false}`); err != nil {
 		t.Fatalf("compatible update: %v", err)
 	}
 	got, err = installations.GetByID(ctx, id)
@@ -198,8 +186,8 @@ func TestProvisionedReplacementValidatesStoredConfigDB(t *testing.T) {
 	}
 
 	configs, err := config.ListGlobalConfigs(ctx, id)
-	if err != nil || len(configs) != 1 {
-		t.Fatalf("list saved configs: %d rows, error %v", len(configs), err)
+	if err != nil || len(configs) != 1 || configs[0].Value["cursor"] != "private" {
+		t.Fatalf("private state after update: %v, %v", configs, err)
 	}
 	validated := false
 	changed, err := config.compareAndSwapGlobalConfig(ctx, id, "app", configs[0].Value, &configs[0].UpdatedAt,
@@ -208,6 +196,96 @@ func TestProvisionedReplacementValidatesStoredConfigDB(t *testing.T) {
 		t.Fatalf("stale package config write: changed %t, validated %t, error %v", changed, validated, err)
 	}
 
+}
+
+func TestProvisionedReplacementValidatesOwnedCallbackDB(t *testing.T) {
+	ctx := t.Context()
+	pool := builtinGuardTestPool(t)
+	installations := NewInstallationStore(pool)
+	configs := NewRuntimeConfigStore(pool)
+	installed := seedVerifiedReplacementInstallation(t, pool, installations)
+	const capabilityID = "login"
+	update := func(version, mode string) error {
+		t.Helper()
+		manifest := testPluginManifest(t, installed.PluginID, version)
+		manifest.Capabilities = []*pluginv1.CapabilityDescriptor{{
+			Id: capabilityID, Type: "auth_provider.v1", DisplayName: "Test Login", AuthModes: []string{mode},
+		}}
+		manifestJSON, err := protojson.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		caps, err := CapabilityRecordsFromManifest(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return installations.Update(ctx, installed.ID, UpdateInstallationInput{
+			IfVersion: &installed.Version, Version: new(version), SetRepository: true,
+			RepositoryID: installed.RepositoryID, Signature: &installed.Signature, Capabilities: caps,
+			Archive: &ArchiveInput{ManifestJSON: manifestJSON, Checksum: manifest.Checksum, Bytes: []byte("test package")},
+		})
+	}
+	if err := update(installed.Version, "oauth2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{
+		InstallationID: installed.ID, CapabilityID: capabilityID, Enabled: true, CallbackMode: AuthCallbackInstallation,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setOwnedFields := func(fields ...string) {
+		t.Helper()
+		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			if err := lockPluginInstallation(ctx, tx, installed.ID); err != nil {
+				return err
+			}
+			return PutProvisionOwnership(ctx, tx, installed.ID, ProvisionOwnership{
+				Managed: true, BindingFields: map[string][]string{capabilityID: fields},
+			})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	setOwnedFields("callback_mode", "enabled")
+	err := update("1.0.0", "password")
+	if managed, ok := errors.AsType[*ManagedByEnvironmentError](err); !ok || managed.Field != "auth_binding.callback_mode" {
+		t.Fatalf("replacement changed the authentication mode of an owned OAuth callback: %v", err)
+	}
+	setOwnedFields("enabled")
+	if err := update("1.0.0", "password"); err != nil {
+		t.Fatalf("replacement refused the default callback mode for a password binding: %v", err)
+	}
+}
+
+func seedVerifiedReplacementInstallation(t *testing.T, pool *pgxpool.Pool, installations *InstallationStore) *Installation {
+	t.Helper()
+	ctx := t.Context()
+	id := seedResidentQueryInstallation(t, pool, true)
+	installed, err := installations.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var repositoryID int
+	err = pool.QueryRow(ctx, `INSERT INTO plugin_repositories (url, display_name) VALUES ($1, 'Provision test') RETURNING id`,
+		"https://plugins.example.test/"+installed.PluginID).Scan(&repositoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM plugin_repositories WHERE id = $1`, repositoryID); err != nil {
+			t.Errorf("delete test repository %d: %v", repositoryID, err)
+		}
+	})
+	signature := Signature{State: SignatureStateVerified, SourceRepo: new("https://github.com/example/plugin")}
+	if err := installations.Update(ctx, id, UpdateInstallationInput{SetRepository: true, RepositoryID: &repositoryID, Signature: &signature}); err != nil {
+		t.Fatal(err)
+	}
+	installed, err = installations.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return installed
 }
 
 func TestReenableRejectsIneligibleStableBindingDB(t *testing.T) {

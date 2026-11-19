@@ -89,13 +89,13 @@ type Service struct {
 	testConfigSeq  atomic.Int64
 	dispatcher     *EventDispatcher
 	lifecycleMu    sync.RWMutex
-	lifecycleHooks []func(context.Context)
+	lifecycleHooks []func(context.Context, bool)
 	launchGroup    singleflight.Group
 	// Serialize operations on a process, including configuration and the
 	// supervisor's acceptance of a launch. Distinct installations can
 	// still launch independently.
 	runtimeLocksMu sync.Mutex
-	runtimeLocks   map[int]*sync.Mutex
+	runtimeLocks   map[int]runtimeMutex
 	running        runningInstallations
 	resident       *ResidentSupervisor
 	// lazyStartFailures records failed launches of non-resident plugins for
@@ -138,7 +138,11 @@ func (s *Service) SetEventDispatcher(d *EventDispatcher) {
 	defer s.lifecycleMu.Unlock()
 	s.dispatcher = d
 	if d != nil {
-		s.lifecycleHooks = slices.Insert(s.lifecycleHooks, 0, func(context.Context) { d.invalidateIndex() })
+		s.lifecycleHooks = slices.Insert(s.lifecycleHooks, 0, func(_ context.Context, changed bool) {
+			if changed {
+				d.invalidateIndex()
+			}
+		})
 	}
 }
 
@@ -148,14 +152,48 @@ func (s *Service) AddLifecycleHook(hook func(context.Context)) {
 	if s == nil || hook == nil {
 		return
 	}
+	s.addLifecycleHook(func(ctx context.Context, changed bool) {
+		if changed {
+			hook(ctx)
+		}
+	})
+}
+
+// AddRetryableLifecycleHook runs and registers a refresh that keeps its last
+// good state on error. A failed refresh is retried on later lifecycle polls,
+// including polls that see no installation changes.
+func (s *Service) AddRetryableLifecycleHook(ctx context.Context, name string, hook func(context.Context) error) {
+	if s == nil || hook == nil {
+		return
+	}
+	var mu sync.Mutex
+	pending := true
+	refresh := func(ctx context.Context, changed bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !changed && !pending {
+			return
+		}
+		pending = true
+		if err := hook(ctx); err != nil {
+			slog.WarnContext(ctx, "plugin lifecycle refresh failed", "component", "plugins", "hook", name, "error", err)
+			return
+		}
+		pending = false
+	}
+	s.addLifecycleHook(refresh)
+	runLifecycleHook(ctx, refresh, false)
+}
+
+func (s *Service) addLifecycleHook(hook func(context.Context, bool)) {
 	s.lifecycleMu.Lock()
 	s.lifecycleHooks = append(s.lifecycleHooks, hook)
 	s.lifecycleMu.Unlock()
 }
 
 // OnLifecycleChange is invoked by API handlers and the installer after every
-// plugin lifecycle mutation. Hooks should be best-effort and log their own
-// errors so plugin admin operations are not failed by secondary cache refreshes.
+// plugin lifecycle mutation. Secondary cache refreshes run on a best-effort
+// basis so a refresh failure does not fail a committed admin operation.
 func (s *Service) OnLifecycleChange(ctx context.Context) {
 	if s == nil {
 		return
@@ -164,27 +202,29 @@ func (s *Service) OnLifecycleChange(ctx context.Context) {
 		s.InvalidateInstallationCache()
 	}
 	s.publishPluginsChanged(ctx, PluginsChangedEvent{})
-	s.runLifecycleHooks(ctx)
+	s.runLifecycleHooks(ctx, true)
 }
 
-func (s *Service) runLifecycleHooks(ctx context.Context) {
+func (s *Service) runLifecycleHooks(ctx context.Context, changed bool) {
 	s.lifecycleMu.RLock()
 	hooks := slices.Clone(s.lifecycleHooks)
 	s.lifecycleMu.RUnlock()
 	for _, hook := range hooks {
-		func(hook func(context.Context)) {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					slog.ErrorContext(ctx,
-						"plugin lifecycle hook panicked; continuing", "component", "plugins",
-						"panic", recovered,
-						"stack", string(debug.Stack()),
-					)
-				}
-			}()
-			hook(ctx)
-		}(hook)
+		runLifecycleHook(ctx, hook, changed)
 	}
+}
+
+func runLifecycleHook(ctx context.Context, hook func(context.Context, bool), changed bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.ErrorContext(ctx,
+				"plugin lifecycle hook panicked; continuing", "component", "plugins",
+				"panic", recovered,
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
+	hook(ctx, changed)
 }
 
 func NewService(
@@ -199,8 +239,9 @@ func NewService(
 	if installer != nil {
 		cacheDir = installer.baseDir
 	}
+	archiveCache := NewArchiveCacheAt(installations, cacheDir)
 	if installations != nil {
-		installations.cacheRoot = cacheDir
+		installations.archiveCache = archiveCache
 	}
 	svc := &Service{
 		repositories:  repositories,
@@ -208,7 +249,7 @@ func NewService(
 		configs:       configs,
 		catalog:       catalog,
 		installer:     installer,
-		archiveCache:  NewArchiveCacheAt(installations, cacheDir),
+		archiveCache:  archiveCache,
 		host:          host,
 	}
 	// Resident plugins (network access providers) are reconciled after every
@@ -691,7 +732,6 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 	if err != nil {
 		return nil, err
 	}
-	s.running.delete(installationID)
 	client, err = s.host.Start(ctx, pluginhost.StartRequest{
 		InstallationID: installation.ID,
 		BinaryPath:     binaryPath,
@@ -703,8 +743,14 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 		StopWhenIdle: !isResidentManifest(manifest),
 	})
 	if err != nil || client == nil {
+		// Binding this host's identity can fail before Host.Start retires the
+		// previous process. Keep its record while it is still registered.
+		if _, clientErr := s.host.Client(installationID); errors.Is(clientErr, pluginhost.ErrClientNotFound) {
+			s.running.delete(installationID)
+		}
 		return client, err
 	}
+	s.running.delete(installationID)
 	if err := s.checkStartRuntime(ctx, installationID, runtime); err != nil {
 		return nil, errors.Join(err, s.stopRuntime(installationID))
 	}
@@ -724,15 +770,35 @@ func (s *Service) checkStartRuntime(ctx context.Context, id int, expected instal
 	return nil
 }
 
-func (s *Service) runtimeLock(id int) *sync.Mutex {
+// runtimeMutex serializes runtime work and lets callers with a deadline give
+// up while the operation holding the lock continues.
+type runtimeMutex chan struct{}
+
+func (l runtimeMutex) Lock()   { l <- struct{}{} }
+func (l runtimeMutex) Unlock() { <-l }
+
+func (l runtimeMutex) lockContext(ctx context.Context) error {
+	select {
+	case l <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			l.Unlock()
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Service) runtimeLock(id int) runtimeMutex {
 	s.runtimeLocksMu.Lock()
 	defer s.runtimeLocksMu.Unlock()
 	lock := s.runtimeLocks[id]
 	if lock == nil {
 		if s.runtimeLocks == nil {
-			s.runtimeLocks = make(map[int]*sync.Mutex)
+			s.runtimeLocks = make(map[int]runtimeMutex)
 		}
-		lock = new(sync.Mutex)
+		lock = make(runtimeMutex, 1)
 		s.runtimeLocks[id] = lock
 	}
 	return lock
@@ -1036,21 +1102,8 @@ func (s *Service) ManifestForInstallation(
 // ensureClient returns a running client for an RPC. Tracked residents may
 // only use the process the supervisor owns; RPCs cannot launch or replace it.
 func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginClient, error) {
-	if state, tracked := s.resident.State(installationID); tracked {
-		if state.State != ResidentRunning {
-			return nil, fmt.Errorf("%w: resident plugin installation %d is %s", pluginhost.ErrPluginUnhealthy, installationID, state.State)
-		}
-		lock := s.runtimeLock(installationID)
-		lock.Lock()
-		defer lock.Unlock()
-		installation, err := s.loadInstallation(ctx, installationID, true)
-		if err != nil {
-			return nil, err
-		}
-		if state, tracked = s.resident.State(installationID); !tracked || state.State != ResidentRunning || !s.runtimeMatches(installation) {
-			return nil, fmt.Errorf("%w: resident plugin installation %d is changing", pluginhost.ErrPluginUnhealthy, installationID)
-		}
-		return s.host.Client(installationID)
+	if _, tracked := s.resident.State(installationID); tracked {
+		return s.residentClient(ctx, installationID)
 	}
 	v, err, _ := s.launchGroup.Do(strconv.Itoa(installationID), func() (any, error) {
 		// Isolate the shared launch from the leader caller's cancellation: other
@@ -1077,6 +1130,29 @@ func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginC
 		return nil, fmt.Errorf("%w: plugin installation %d started without a client", pluginhost.ErrPluginUnhealthy, installationID)
 	}
 	return client, nil
+}
+
+func (s *Service) residentClient(ctx context.Context, installationID int) (pluginClient, error) {
+	state, tracked := s.resident.State(installationID)
+	if !tracked {
+		return nil, ErrNotResident
+	}
+	if state.State != ResidentRunning {
+		return nil, fmt.Errorf("%w: resident plugin installation %d is %s", pluginhost.ErrPluginUnhealthy, installationID, state.State)
+	}
+	lock := s.runtimeLock(installationID)
+	if err := lock.lockContext(ctx); err != nil {
+		return nil, err
+	}
+	defer lock.Unlock()
+	installation, err := s.loadInstallation(ctx, installationID, true)
+	if err != nil {
+		return nil, err
+	}
+	if state, tracked = s.resident.State(installationID); !tracked || state.State != ResidentRunning || !s.runtimeMatches(installation) {
+		return nil, fmt.Errorf("%w: resident plugin installation %d is changing", pluginhost.ErrPluginUnhealthy, installationID)
+	}
+	return s.host.Client(installationID)
 }
 
 func (s *Service) doEnsureClient(ctx context.Context, installationID int) (pluginClient, error) {

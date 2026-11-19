@@ -1984,9 +1984,10 @@ that holds a bearer secret or a public capability, each one way:
   writes a fresh deployment-wide hold to `server_settings` before the
   restored database takes over. A current destination hold also gets
   a fresh ID. The declarative writer checks the hold at startup and in
-  its commit transaction. `silo plugins restore-hold` shows the ID.
-  `silo plugins acknowledge-restore <hold-id>` removes it only if the ID
-  still matches. The command uses the destination's `DATABASE_URL`.
+  its commit transaction. A writer that observes a hold stays held for the
+  lifetime of that process. Acknowledgment clears only the matching hold ID.
+  The [user manual](https://siloserver.org/docs/restore#resume-plugin-provisioning-after-a-restore)
+  covers recovery.
 - Custom access policies only tighten decisions, so a newer one lost to
   the backup would widen access: their documents and versions
   (`liveTables`) are taken from the live server as one unit, with the

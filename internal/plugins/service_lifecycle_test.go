@@ -33,6 +33,49 @@ func TestServiceLifecycleChangeContinuesAfterHookPanic(t *testing.T) {
 	}
 }
 
+func TestLifecyclePollRetriesOnlyFailedRefresh(t *testing.T) {
+	ctx := t.Context()
+	store := newFakeServiceInstallationStore(&Installation{ID: 7, Enabled: true})
+	service := &Service{installations: store}
+	var refreshes, otherCalls int
+	loadedGeneration := int64(-1)
+	fail := false
+	service.AddRetryableLifecycleHook(ctx, "test registry", func(ctx context.Context) error {
+		refreshes++
+		if fail {
+			return errors.New("capabilities temporarily unavailable")
+		}
+		row, err := store.GetByID(ctx, 7)
+		if err != nil {
+			return err
+		}
+		loadedGeneration = row.RuntimeGeneration
+		return nil
+	})
+	service.AddLifecycleHook(func(context.Context) { otherCalls++ })
+	service.reconcileLifecycle(ctx, false)
+
+	fail = true
+	if err := store.Update(ctx, 7, UpdateInstallationInput{Restart: true}); err != nil {
+		t.Fatal(err)
+	}
+	service.reconcileLifecycle(ctx, false)
+	if loadedGeneration != 0 {
+		t.Fatalf("failed refresh replaced the previous generation: %d", loadedGeneration)
+	}
+
+	fail = false
+	service.reconcileLifecycle(ctx, false)
+	if loadedGeneration != 1 || otherCalls != 2 {
+		t.Fatalf("retry on unchanged state: loaded generation = %d, other hook calls = %d", loadedGeneration, otherCalls)
+	}
+	afterRetry := refreshes
+	service.reconcileLifecycle(ctx, false)
+	if refreshes != afterRetry || otherCalls != 2 {
+		t.Fatal("unchanged poll refreshed the registry again")
+	}
+}
+
 func TestLifecycleFollowerRebindsLazyAuthAfterMissedEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

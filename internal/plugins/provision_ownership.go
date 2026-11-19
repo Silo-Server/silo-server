@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/jackc/pgx/v5"
@@ -97,6 +98,46 @@ func lockPluginInstallation(ctx context.Context, tx pgx.Tx, installationID int) 
 		return fmt.Errorf("locking plugin installation: %w", err)
 	}
 	return nil
+}
+
+func declaredProvisionOwnership(desired ProvisionPlugin) ProvisionOwnership {
+	owned := ProvisionOwnership{
+		Managed: true, VersionPin: desired.Version,
+		ConfigFields: make(map[string][]string), BindingFields: make(map[string][]string),
+	}
+	for key, fields := range desired.Config {
+		owned.ConfigFields[key] = slices.Sorted(maps.Keys(fields))
+	}
+	return ownedWithBinding(owned, desired.AuthBinding)
+}
+
+// Release omitted ownership while a disabled installation waits for its
+// desired release. Fields and pins we have yet to apply stay unclaimed.
+func releaseOmittedProvisionOwnership(ctx context.Context, tx pgx.Tx, installationID int, desired ProvisionPlugin) error {
+	current, err := LoadProvisionOwnership(ctx, tx, installationID)
+	if err != nil || !current.Managed {
+		return err
+	}
+	wanted := declaredProvisionOwnership(desired)
+	if wanted.VersionPin == "" {
+		current.VersionPin = ""
+	}
+	retainProvisionFields(current.ConfigFields, wanted.ConfigFields)
+	retainProvisionFields(current.BindingFields, wanted.BindingFields)
+	return PutProvisionOwnership(ctx, tx, installationID, current)
+}
+
+func retainProvisionFields(current, wanted map[string][]string) {
+	for key, fields := range current {
+		retained := slices.DeleteFunc(fields, func(field string) bool {
+			return !slices.Contains(wanted[key], field)
+		})
+		if len(retained) == 0 {
+			delete(current, key)
+			continue
+		}
+		current[key] = retained
+	}
 }
 
 func preserveOwnedConfig(fields []string, stored, proposed map[string]any) map[string]any {
@@ -196,11 +237,11 @@ func (s *InstallationStore) validateManagedReplacement(ctx context.Context, tx p
 		if err != nil {
 			return err
 		}
-		if err := ValidateGlobalConfigValue(manifest, key, globalConfigValidationProjection(manifest, key, current, current)); err != nil {
+		if err := validateMergedGlobalConfig(manifest, key, current, nil); err != nil {
 			return &ManagedByEnvironmentError{Field: "config." + key}
 		}
 	}
-	for capabilityID := range ownership.BindingFields {
+	for capabilityID, fields := range ownership.BindingFields {
 		capability := authProviderCapability(manifest, capabilityID)
 		if capability == nil {
 			return &ManagedByEnvironmentError{Field: "auth_binding." + capabilityID}
@@ -211,7 +252,9 @@ func (s *InstallationStore) validateManagedReplacement(ctx context.Context, tx p
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if callbackMode == AuthCallbackStable && ValidateAuthCallbackMode(callbackMode, capability.GetAuthModes()) != nil {
+		ownsCallback := slices.Contains(fields, "callback_mode") || slices.Contains(fields, "callback")
+		if (callbackMode == AuthCallbackStable || ownsCallback) &&
+			ValidateAuthCallbackMode(callbackMode, capability.GetAuthModes()) != nil {
 			return &ManagedByEnvironmentError{Field: "auth_binding.callback_mode"}
 		}
 	}

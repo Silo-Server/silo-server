@@ -282,10 +282,11 @@ func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input U
 	if input.InstallPath != nil {
 		installation.InstallPath = *input.InstallPath
 	}
+	enablementChanged := input.Enabled != nil && *input.Enabled != installation.Enabled
 	if input.Enabled != nil {
 		installation.Enabled = *input.Enabled
 	}
-	if input.Restart {
+	if input.Restart || enablementChanged {
 		installation.RuntimeGeneration++
 	}
 	return nil

@@ -122,7 +122,7 @@ func parseProvisionDocument(data []byte, allowYAML bool) (*ProvisionDocument, er
 		// A malformed JSON document beginning with an object can still be a
 		// YAML flow mapping. The YAML reader checks duplicates independently.
 		var err error
-		data, err = provisionYAMLToJSON(data)
+		data, err = provisionYAMLToJSON(data, maxProvisionBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -175,18 +175,18 @@ func parseProvisionDocument(data []byte, allowYAML bool) (*ProvisionDocument, er
 	return &document, nil
 }
 
-func provisionYAMLToJSON(data []byte) ([]byte, error) {
+func provisionYAMLToJSON(data []byte, limit int) ([]byte, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	var root yaml.Node
 	if err := decoder.Decode(&root); err != nil {
 		return nil, errors.New("invalid provisioning YAML: check syntax and duplicate keys")
 	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+	if err := decoder.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("plugin provisioning expects one YAML document")
 	}
 	// yaml.v3 decodes floating point scalars into float64. Check the spelling
 	// before that conversion so a lossy value cannot pass the JSON checks.
-	if err := checkProvisionYAMLNumbers(&root); err != nil {
+	if _, err := provisionYAMLSize(&root, make(map[*yaml.Node]int), limit); err != nil {
 		return nil, err
 	}
 	var document any
@@ -196,14 +196,28 @@ func provisionYAMLToJSON(data []byte) ([]byte, error) {
 	if !provisionJSONValue(document) {
 		return nil, errors.New("plugin provisioning requires JSON-compatible YAML with string mapping keys")
 	}
-	encoded, err := jsonv2.Marshal(document, jsonv2.WithMarshalers(provisionYAMLFloat))
-	if err != nil {
+	encoded := provisionJSONBuffer{limit: limit}
+	if err := jsonv2.MarshalWrite(&encoded, document, jsonv2.WithMarshalers(provisionYAMLFloat)); err != nil {
+		if errors.Is(err, errProvisionExpandedSize) {
+			return nil, errProvisionExpandedSize
+		}
 		return nil, errors.New("plugin provisioning requires finite JSON numbers and UTF-8 strings")
 	}
-	if len(encoded) > maxProvisionBytes {
-		return nil, errors.New("expanded plugin declaration exceeds 1 MiB")
+	return encoded.Bytes(), nil
+}
+
+var errProvisionExpandedSize = errors.New("expanded plugin declaration exceeds 1 MiB")
+
+type provisionJSONBuffer struct {
+	bytes.Buffer
+	limit int
+}
+
+func (b *provisionJSONBuffer) Write(p []byte) (int, error) {
+	if len(p) > b.limit-b.Len() {
+		return 0, errProvisionExpandedSize
 	}
-	return encoded, nil
+	return b.Buffer.Write(p)
 }
 
 // The shortest decimal for an integral float can name a different integer
@@ -215,17 +229,52 @@ var provisionYAMLFloat = jsonv2.MarshalFunc(func(value float64) ([]byte, error) 
 	return json.Marshal(value)
 })
 
-func checkProvisionYAMLNumbers(node *yaml.Node) error {
+// Charge each alias for its target before yaml.v3 expands it. Only completed
+// anchors can be referenced, so an alias back to a parent is invalid.
+func provisionYAMLSize(node *yaml.Node, anchors map[*yaml.Node]int, limit int) (int, error) {
+	if node.Kind == yaml.AliasNode {
+		size, ok := anchors[node.Alias]
+		if !ok {
+			return 0, errors.New("recursive or unresolved YAML alias")
+		}
+		return size, nil
+	}
 	if node.Kind == yaml.ScalarNode && node.ShortTag() == "!!float" &&
 		!provisionNumberFitsRuntime(strings.ReplaceAll(node.Value, "_", "")) {
-		return fmt.Errorf("number cannot be represented by the plugin runtime at YAML line %d, column %d", node.Line, node.Column)
+		return 0, fmt.Errorf("number cannot be represented by the plugin runtime at YAML line %d, column %d", node.Line, node.Column)
 	}
-	for _, child := range node.Content {
-		if err := checkProvisionYAMLNumbers(child); err != nil {
-			return err
+	size := max(1, len(node.Value))
+	var keys map[string]struct{}
+	if node.Kind == yaml.MappingNode {
+		keys = make(map[string]struct{}, len(node.Content)/2)
+	}
+	for i, child := range node.Content {
+		n, err := provisionYAMLSize(child, anchors, limit)
+		if err != nil {
+			return 0, err
+		}
+		size += n
+		if size > limit {
+			return 0, errProvisionExpandedSize
+		}
+		if keys != nil && i%2 == 0 {
+			key := child
+			if key.Kind == yaml.AliasNode {
+				key = key.Alias
+			}
+			if key.Kind != yaml.ScalarNode || (key.ShortTag() != "!!str" && key.ShortTag() != "!!merge") {
+				return 0, errors.New("plugin provisioning requires string mapping keys")
+			}
+			if _, duplicate := keys[key.Value]; duplicate {
+				return 0, fmt.Errorf("duplicate YAML mapping key at line %d, column %d", child.Line, child.Column)
+			}
+			keys[key.Value] = struct{}{}
 		}
 	}
-	return nil
+	if node.Anchor != "" {
+		anchors[node] = size
+	}
+	return size, nil
 }
 
 func provisionJSONValue(value any) bool {

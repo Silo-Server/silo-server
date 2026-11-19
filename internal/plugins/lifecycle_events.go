@@ -17,8 +17,8 @@ import (
 // PluginsChangedEvent is the payload of cache.EventPluginsChanged. An empty
 // payload means "something about the installed set changed; reconcile".
 // Restart remains accepted from older API replicas. Current senders advance
-// plugin_installations.runtime_generation on admin config saves and restarts,
-// then send a plain reconcile event; the poll can recover missed events.
+// plugin_installations.runtime_generation on enablement changes, admin config
+// saves, and restarts, then send a plain event; the poll recovers missed events.
 type PluginsChangedEvent struct {
 	InstallationID int  `json:"installation_id,omitempty"`
 	Restart        bool `json:"restart,omitempty"`
@@ -172,13 +172,12 @@ func runtimeOf(installation *Installation) installationRuntime {
 
 func (s *Service) reconcileLifecycle(ctx context.Context, force bool) {
 	changed := s.reconcileInstallations(ctx)
-	if changed || force {
-		s.runLifecycleHooks(ctx)
-		return
+	if !changed && !force {
+		// The proxy host gate and identity can change independently of plugin
+		// rows. Reconcile also retries a resident whose manifest was unavailable.
+		s.resident.Reconcile(ctx)
 	}
-	// The proxy host gate and identity can change independently of plugin
-	// rows. Reconcile also retries a resident whose manifest was unavailable.
-	s.resident.Reconcile(ctx)
+	s.runLifecycleHooks(ctx, changed || force)
 }
 
 func (s *Service) reconcileInstallations(ctx context.Context) bool {
@@ -215,6 +214,7 @@ func (s *Service) reconcileInstallations(ctx context.Context) bool {
 			slog.WarnContext(ctx, "reconcile plugin process", "component", "plugins", "installation_id", id, "error", err)
 		}
 	}
+	s.archiveCache.retryRetirements(ctx)
 	if !changed {
 		return false
 	}
