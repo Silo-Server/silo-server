@@ -105,17 +105,20 @@ type playbackSessionRow struct {
 	EffectivePlayMethod      string `json:"effective_play_method,omitempty"`
 	// AdaptationReasons is native-only: the frozen v1 projection does not
 	// carry it.
-	AdaptationReasons        []string `json:"-"`
-	IsJellyfinClient         bool     `json:"is_jellyfin_client,omitempty"`
-	RoutingNetworkProvider   *string  `json:"-"`
-	RoutingWorkload          string   `json:"routing_workload,omitempty"`
-	RoutingExecution         string   `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID   *int     `json:"routing_execution_node_id,omitempty"`
-	RoutingExecutionNodeName string   `json:"routing_execution_node_name,omitempty"`
-	RoutingEgress            string   `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID      *int     `json:"routing_egress_node_id,omitempty"`
-	RoutingEgressNodeName    string   `json:"routing_egress_node_name,omitempty"`
-	CompatOrigin             bool     `json:"-"`
+	AdaptationReasons []string `json:"-"`
+	// Subtitle is native-only too: the subtitle the session's current plan
+	// delivers, nil when it shows none.
+	Subtitle                 *playback.SessionSubtitle `json:"-"`
+	IsJellyfinClient         bool                      `json:"is_jellyfin_client,omitempty"`
+	RoutingNetworkProvider   *string                   `json:"-"`
+	RoutingWorkload          string                    `json:"routing_workload,omitempty"`
+	RoutingExecution         string                    `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID   *int                      `json:"routing_execution_node_id,omitempty"`
+	RoutingExecutionNodeName string                    `json:"routing_execution_node_name,omitempty"`
+	RoutingEgress            string                    `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID      *int                      `json:"routing_egress_node_id,omitempty"`
+	RoutingEgressNodeName    string                    `json:"routing_egress_node_name,omitempty"`
+	CompatOrigin             bool                      `json:"-"`
 	// TimelineDuration is the length the position is measured against when
 	// that is more than the file, such as a whole multi-file audiobook. The
 	// row's own file_duration stays the file's duration; v2 reads
@@ -357,6 +360,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(s.device_id, ''),
 			COALESCE(s.device_platform, ''),
 			COALESCE(s.adaptation_reasons, '{}'),
+			s.subtitle,
 			` + lifecycleColumns + `
 		 FROM ` + source + ` s
 		 LEFT JOIN users u ON u.id = s.user_id
@@ -436,7 +440,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
-			&s.DeviceID, &s.DevicePlatform, &s.AdaptationReasons, &s.LifecycleSeq,
+			&s.DeviceID, &s.DevicePlatform, &s.AdaptationReasons, &s.Subtitle, &s.LifecycleSeq,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
