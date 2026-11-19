@@ -12,6 +12,7 @@ import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { useMarkerChangeGuard } from "../hooks/useMarkerChangeGuard";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
+import { resumeVersionForPlan } from "../utils/mediaTimeline";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
 import { VideoPlayer } from "./VideoPlayer";
@@ -24,17 +25,6 @@ import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomCon
 import { useTrackChoicePersistence } from "../hooks/useTrackChoicePersistence";
 import { toast } from "sonner";
 import { useT } from "@/i18n";
-
-function isStandaloneVersion(version: PlayerFileVersion): boolean {
-  return (
-    !version.presentation_kind &&
-    !version.presentation_group_key &&
-    !version.presentation_part_index &&
-    !version.presentation_part_total &&
-    !version.multi_episode_start &&
-    !version.multi_episode_end
-  );
-}
 
 function patchChapterThumbnail(
   versions: PlayerFileVersion[],
@@ -352,24 +342,12 @@ function WatchPagePlayer({
     () => playbackVersions.find((version) => version.file_id === session.mediaFileId),
     [playbackVersions, session.mediaFileId],
   );
-  const requestedPlaybackVersion = playbackVersions.find(
-    (version) => version.file_id === session.plan?.requested_media_file_id,
+  const resumeVersion = resumeVersionForPlan(
+    playbackVersions,
+    session.plan?.requested_media_file_id,
+    activePlaybackVersion,
+    session.versionPinned(),
   );
-  // Keep the source the viewer asked for when a named cut switched encodes.
-  // Parts and different cuts have their own resume timelines.
-  const resumeVersion =
-    !session.versionPinned() &&
-    requestedPlaybackVersion &&
-    activePlaybackVersion?.edition_key &&
-    requestedPlaybackVersion.edition_key === activePlaybackVersion.edition_key &&
-    isStandaloneVersion(requestedPlaybackVersion) &&
-    isStandaloneVersion(activePlaybackVersion) &&
-    requestedPlaybackVersion.duration > 0 &&
-    activePlaybackVersion.duration > 0 &&
-    Math.abs(requestedPlaybackVersion.duration - activePlaybackVersion.duration) <= 5 &&
-    requestedPlaybackVersion.file_id !== activePlaybackVersion.file_id
-      ? requestedPlaybackVersion
-      : undefined;
   const trickplayAvailable = activePlaybackVersion?.trickplay_available === true;
   const trickplayQuery = useWatchTrickplay(
     contentId,
