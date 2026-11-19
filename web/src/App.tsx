@@ -847,6 +847,7 @@ function AdminRealtimeEventChannels() {
   useEventChannel("scans");
   useEventChannel("settings");
   useEventChannel("download_preparations");
+  useEventChannel("downloads");
   // A background helper on every page: if its chunk fails to load, go without
   // it rather than take the page down.
   return (

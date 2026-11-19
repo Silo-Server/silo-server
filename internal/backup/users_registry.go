@@ -106,6 +106,7 @@ var excludedUserTables = map[string]string{
 	tableDownloads:                       excludedDownloads,
 	"user_downloads":                     excludedDownloads,
 	"download_subscriptions":             excludedDownloads,
+	"download_change_events":             excludedDownloads,
 	"download_storage_events":            excludedDownloads,
 	"playback_connections":               excludedPlayback,
 	"playback_route_events":              excludedPlaybackLogs,

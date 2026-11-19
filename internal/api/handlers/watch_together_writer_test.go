@@ -9,6 +9,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 )
 
@@ -174,6 +176,41 @@ func TestWatchTogetherReplacementClosesBlockedWriter(t *testing.T) {
 		case <-socket.closed:
 		default:
 			t.Fatal("blocked displaced socket remains open")
+		}
+	})
+}
+
+// closeSentSocket is a transport that has already sent its close frame, as
+// gorilla reports to every write after one.
+type closeSentSocket struct{ roomWriterSocket }
+
+func (*closeSentSocket) WriteMessage(int, []byte) error { return websocket.ErrCloseSent }
+
+// A frame queued after the close frame went out must not close the transport:
+// the v2 closer is still waiting for the peer's close reply on it.
+func TestWatchTogetherWriterLeavesTransportAfterCloseSent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		socket := &closeSentSocket{roomWriterSocket{closed: make(chan struct{})}}
+		conn := newWatchTogetherRoomConn(socket)
+		if err := conn.WriteJSON(map[string]string{"type": "snapshot"}); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		select {
+		case <-conn.done:
+		default:
+			t.Fatal("writer kept running after the close frame went out")
+		}
+		select {
+		case <-socket.closed:
+			t.Fatal("writer closed the transport during the close handshake")
+		default:
+		}
+		_ = conn.Close()
+		select {
+		case <-socket.closed:
+		default:
+			t.Fatal("Close did not close the transport")
 		}
 	})
 }

@@ -43,21 +43,22 @@ type AdminPlaybackHistoryPageKey struct {
 // AdminPlaybackHistoryRow is one finalized playback attempt as an
 // administrator sees it.
 type AdminPlaybackHistoryRow struct {
-	SessionID       string
-	UserID          int
-	Username        string
-	ProfileID       string
-	ProfileName     string
-	MediaItemID     string
-	MediaFileID     int
-	MediaTitle      string
-	MediaType       string
-	PlayMethod      string
-	StartedAt       time.Time
-	EndedAt         time.Time
-	WatchedSeconds  float64
-	DurationSeconds *float64
-	Completed       bool
+	SessionID   string
+	UserID      int
+	Username    string
+	ProfileID   string
+	ProfileName string
+	MediaItemID string
+	MediaFileID int
+	MediaTitle  string
+	MediaType   string
+	PlayMethod  string
+	StartedAt   time.Time
+	EndedAt     time.Time
+	// EndPositionSeconds is where the play ended (the watched_seconds column).
+	EndPositionSeconds float64
+	DurationSeconds    *float64
+	Completed          bool
 	// PlayedSeconds is the measured watch time (see playback.WatchTime); nil
 	// when the play has no measurement, which includes every row written
 	// before it was recorded. StartPositionSeconds, PausedSeconds and the
@@ -199,7 +200,7 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 		if err = rows.Scan(
 			&row.SessionID, &row.UserID, &row.Username, &row.ProfileID, &row.ProfileName,
 			&row.MediaItemID, &row.MediaFileID, &row.MediaTitle, &row.MediaType, &row.PlayMethod,
-			&row.StartedAt, &row.EndedAt, &row.WatchedSeconds, &row.DurationSeconds, &row.Completed,
+			&row.StartedAt, &row.EndedAt, &row.EndPositionSeconds, &row.DurationSeconds, &row.Completed,
 			&row.PlayedSeconds, &row.Measured, &row.StartPositionSeconds, &row.PausedSeconds,
 			&row.MeasuredSince, &row.MeasuredUntil, &row.ClientIP,
 			&row.DeviceID, &row.DevicePlatform, &row.ClientName, &row.ClientVersion,

@@ -2031,6 +2031,104 @@
       "value": "ऐप की भाषा"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "आखिर में"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " मिनट पहले"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " मिनट पहले"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " सेकंड पहले"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " सेकंड पहले"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "अगले एपिसोड दिखाना"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "बंद"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -52475,6 +52573,12 @@
       "value": "बंद। रन सिर्फ़ पुराने टाइटल हटाते हैं।"
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "सुझाव बनना बंद हो गया है। सर्वर के रीस्टार्ट होने तक स्टोर किए गए सुझाव डिस्कवर में दिखते रहेंगे।"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -94812,6 +94916,12 @@
       "value": "आपकी लाइब्रेरी"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "गिनती उपलब्ध नहीं है"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -96820,6 +96930,24 @@
       "value": "जोड़ें"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि टाइटल जोड़े जा सकते हैं या नहीं।"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "फिर से लोड करने की कोशिश करें"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "जाँच हो रही है कि टाइटल जोड़े जा सकते हैं या नहीं…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -96832,6 +96960,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "जब कलेक्शन का केवल कुछ हिस्सा लोड हुआ हो, तब यह सर्वर सुरक्षित रूप से टाइटल नहीं जोड़ सकता। टाइटल अब भी हटाए जा सकते हैं और कलेक्शन में बदलाव किया जा सकता है।"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "और टाइटल जोड़ने से पहले टाइटल फिर से लोड करें।"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -96848,6 +96988,12 @@
     {
       "type": 0,
       "value": " से कोई टाइटल जोड़ें"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "और टाइटल जोड़ने से पहले टाइटल लोड हो रहे हैं…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -105480,6 +105626,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "इन कलेक्शन में भी"
     }
   ],
   "web.detail.sections.cast": [
@@ -124669,42 +124821,6 @@
       "value": " को अपनी वॉचलिस्ट में जोड़ें"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "क्योंकि आपने "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " को देखा"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "क्योंकि आपने "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " और "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " को देखा"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -124763,6 +124879,34 @@
     {
       "type": 0,
       "value": " के लिए अनुरोध भेजा जा रहा है…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " की तरह"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " और "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " की तरह"
     }
   ],
   "web.requests.discoverSection.empty": [

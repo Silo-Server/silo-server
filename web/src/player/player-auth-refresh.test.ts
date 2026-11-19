@@ -50,7 +50,7 @@ it("shares one refresh between concurrent player and ordinary API requests", asy
     getAuthContext: getAuthContextVersion,
     getProfileId: () => "profile-original",
     getProfileToken,
-    getDeviceId: () => "test-device",
+    getDeviceHeaders: () => ({ "X-Silo-Device-Id": "test-device" }),
     refreshToken: refreshAuthentication,
   };
   const requests = Promise.all([

@@ -1651,6 +1651,12 @@ func main() {
 	// database spaces the drains out across the cluster.
 	if mode == "integrated" || mode == "api" {
 		go realtimeHub.RunItemChangePublisher(appCtx, catalog.NewItemChangeOutbox(pool))
+		// The download change outbox works the same way. The hub sends each
+		// event to every API server; V2Only keeps it from plugins.
+		go downloads.RunChangePublisher(appCtx, downloads.NewChangeOutbox(pool), func(ctx context.Context, change downloads.ChangeEvent) error {
+			return eventsHub.PublishJSON(ctx, evt.ChannelDownloads, downloads.ChangeEventName, change,
+				evt.PublishOptions{AdminOnly: true, V2Only: true, EventID: change.EventID()})
+		})
 	}
 
 	// Initialize node pools for integrated/api modes.
@@ -4148,6 +4154,7 @@ func main() {
 
 		// Wire direct dependencies when DB is available.
 		if deps.DB != nil {
+			compatDeps.RestoreReconstructedWatch = handlers.ReconstructedWatchRestorer(handlers.NewPGPlaybackAdminStore(deps.DB, nil))
 			browseRepo := catalog.NewBrowseRepository(deps.DB)
 			itemRepo := catalog.NewItemRepository(deps.DB)
 			seasonRepo := catalog.NewSeasonRepository(deps.DB)
@@ -4476,7 +4483,18 @@ func main() {
 		}
 	}
 
-	// 2b. Remove this node's heartbeat and sessions from shared state.
+	// 2b. Remove this node's heartbeat and sessions from shared state, after
+	// saving the sessions' watch time for whichever server rebuilds or stops
+	// them next.
+	if reconciler != nil {
+		// Its own deadline: a slow drain above must not leave this save
+		// with an expired context.
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := reconciler.SaveWatch(saveCtx); err != nil {
+			slog.Error("watch time save error", "error", err)
+		}
+		saveCancel()
+	}
 	if heartbeatWriter != nil {
 		if err := heartbeatWriter.CleanupSelf(shutdownCtx); err != nil {
 			slog.Error("heartbeat cleanup error", "error", err)

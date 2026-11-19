@@ -57,10 +57,10 @@ export function sendSubtitleChoiceRequest(
  * always held them.
  *
  * Only values the viewer actually chose become canonical rows. The keys come
- * from SERIES_SUBTITLE_SETTING_KEYS, the same list the item page's "Auto"
- * reset clears — profile_series outranks every other scope, so a row written
- * here that the reset does not know about would shadow every later choice with
- * nothing in the UI able to remove it.
+ * from SERIES_SUBTITLE_SETTING_KEYS, which the item page's "Auto" reset
+ * clears through the server's subtitle-prefs DELETE. profile_series outranks
+ * every other scope, so a row written here that the reset does not clear would
+ * shadow every later choice with nothing in the UI able to remove it.
  *
  * playback.show_forced_subtitles is deliberately not among them. The player
  * holds only the *resolved* value and has no control that edits it, so for a

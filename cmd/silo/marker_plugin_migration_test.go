@@ -364,6 +364,7 @@ func TestStopDefaultMarkerSharingInTxDB(t *testing.T) {
 		installation, err := installations.Create(ctx, plugins.CreateInstallationInput{
 			PluginID: "test.markers." + name + "." + suffix, Version: "1.0.0", InstallPath: t.TempDir(), Enabled: enabled,
 			Capabilities: []plugins.Capability{{Type: sdkcapability.MarkerProvider, ID: "markers", Metadata: metadata}},
+			Archive:      plugins.ArchiveInput{ManifestJSON: []byte("{}"), Checksum: "test", Bytes: []byte("archive")},
 		})
 		if err != nil {
 			t.Fatalf("install %s: %v", name, err)

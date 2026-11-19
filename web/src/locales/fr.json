@@ -2038,6 +2038,110 @@
       "value": "Langue de l’application"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "À la fin"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute avant la fin"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de minutes avant la fin"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes avant la fin"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seconde avant la fin"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de secondes avant la fin"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " secondes avant la fin"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Afficher Prochains épisodes"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Désactivé"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -58561,6 +58665,12 @@
       "value": "Désactivé. Les exécutions se limitent à retirer les anciens titres."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "La génération est arrêtée. Les recommandations enregistrées restent visibles dans Découvrir jusqu’au redémarrage du serveur."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -104067,6 +104177,12 @@
       "value": "vos bibliothèques"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Nombre indisponible"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -106067,6 +106183,24 @@
       "value": "Ajouter"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de vérifier si des titres peuvent être ajoutés."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Réessayer le chargement"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Vérification de la possibilité d’ajouter des titres…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -106085,6 +106219,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Ce serveur ne peut pas ajouter de titres en toute sécurité tant qu’une partie seulement de la collection est chargée. Vous pouvez toujours retirer des titres et modifier la collection."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Rechargez les titres avant d’en ajouter d’autres."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -106099,6 +106245,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Chargement des titres avant d’en ajouter d’autres…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -115538,6 +115690,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Également dans"
     }
   ],
   "web.detail.sections.cast": [
@@ -135945,34 +136103,6 @@
       "value": " à votre liste à voir"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Parce que vous avez regardé "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Parce que vous avez regardé "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " et "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136035,6 +136165,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Semblable à "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Semblable à "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " et "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [

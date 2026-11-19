@@ -526,8 +526,8 @@ function watchTime(row: AdminPlaybackHistoryItem) {
   if (row.played_seconds !== null) return { seconds: row.played_seconds, estimated: false };
   const elapsed = (Date.parse(row.ended_at) - Date.parse(row.started_at)) / 1000;
   const capped = Number.isFinite(elapsed)
-    ? Math.min(row.watched_seconds, Math.max(elapsed, 0))
-    : row.watched_seconds;
+    ? Math.min(row.end_position_seconds, Math.max(elapsed, 0))
+    : row.end_position_seconds;
   return { seconds: Math.max(capped, 0), estimated: true };
 }
 

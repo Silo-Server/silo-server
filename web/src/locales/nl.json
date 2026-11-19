@@ -2035,6 +2035,88 @@
       "value": "Apptaal"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Aan het einde"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuut voor het einde"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minuten voor het einde"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seconde voor het einde"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seconden voor het einde"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Volgende afleveringen tonen"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Uit"
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -52527,6 +52609,12 @@
       "value": "Uit. Runs ruimen alleen oude titels op."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Het genereren is gestopt. Opgeslagen aanbevelingen blijven zichtbaar in Ontdek totdat de server opnieuw wordt opgestart."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -94746,6 +94834,12 @@
       "value": "je bibliotheken"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Aantal niet beschikbaar"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -96668,6 +96762,24 @@
       "value": "Toevoegen"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Kan niet controleren of er titels kunnen worden toegevoegd."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Opnieuw laden"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Controleren of er titels kunnen worden toegevoegd…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -96686,6 +96798,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Deze server kan geen titels veilig toevoegen zolang maar een deel van de collectie is geladen. Je kunt nog wel titels verwijderen en de collectie bewerken."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Laad de titels opnieuw voordat je er meer toevoegt."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -96700,6 +96824,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Titels laden voordat je er meer toevoegt…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -105400,6 +105530,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Ook in"
     }
   ],
   "web.detail.sections.cast": [
@@ -124637,42 +124773,6 @@
       "value": " toevoegen aan je kijklijst"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Omdat je "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " hebt gekeken"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Omdat je "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " en "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": " hebt gekeken"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -124735,6 +124835,34 @@
     {
       "type": 0,
       "value": " wordt verzonden"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Vergelijkbaar met "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Vergelijkbaar met "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " en "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [

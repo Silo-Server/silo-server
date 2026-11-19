@@ -575,14 +575,6 @@ func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
 	}
 }
 
-func (h *AdminHandler) loadPlaybackSessions(ctx context.Context, r *http.Request) ([]playbackSessionRow, error) {
-	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
-	if err != nil {
-		return nil, err
-	}
-	return loader.Load(ctx, PlaybackSessionsQuery{})
-}
-
 // updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
 // the current account to compare against: any credential or enabled change
 // might sign the user out.

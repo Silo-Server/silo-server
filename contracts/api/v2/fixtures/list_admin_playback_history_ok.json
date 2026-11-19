@@ -13,7 +13,7 @@
       "play_method": "direct_play",
       "started_at": "2026-01-02T02:04:05.678Z",
       "ended_at": "2026-01-02T03:04:05.678Z",
-      "watched_seconds": 3600,
+      "end_position_seconds": 3600,
       "duration_seconds": 5400.5,
       "completed": true,
       "played_seconds": 120,
