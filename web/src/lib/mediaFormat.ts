@@ -120,6 +120,22 @@ export function audioTrackLabel(track: AudioTrackFormat): string {
   return track.codec ? mapAudioLabel(track.codec, audioTrackAtmosEvidence(track)) : "";
 }
 
+// Words that only restate an audio format: codec short names, the long names
+// FFprobe reports ("ATSC A/52B (AC-3, E-AC-3)", "AAC (Advanced Audio
+// Coding)"), and layouts. The scanner stores FFprobe's long name as a track's
+// title when the stream has no title tag (#4568).
+const FORMAT_ONLY_TITLE =
+  /^(?:[\s()·.,/-]|atsc|a\/52[ab]?|dca|dts(?:-hd)?|ma|coherent|acoustics|ac-?3|e-?ac-?3|truehd|atmos|aac|advanced|audio|coding|codec|interactive|flac|free|lossless|alac|apple|opus|vorbis|mp3|mpeg|layer|pcm|signed|unsigned|little-endian|big-endian|\d+-bit|dolby|digital|plus|surround|stereo|mono|[257]\.[01]|\d)+$/i;
+
+/**
+ * Whether a track title only names its audio format, as a title FFprobe's
+ * codec name filled in does. A display shows the language instead.
+ */
+export function titleOnlyNamesAudioFormat(title?: string): boolean {
+  const value = title?.trim();
+  return Boolean(value) && FORMAT_ONLY_TITLE.test(value ?? "");
+}
+
 interface FormatFileSizeOptions {
   fallback?: string;
   /** Use IEC unit labels (GiB/MiB/KiB) instead of GB/MB/KB. Math is 1024-based either way. */

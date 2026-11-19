@@ -1,7 +1,7 @@
 import type { AdminSession } from "@/api/types";
 import { codeNumber, englishText, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
-import { formatCodecLabel } from "@/lib/mediaFormat";
+import { formatCodecLabel, titleOnlyNamesAudioFormat } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
 import { formatClock } from "@/pages/adminDownloadPreparationPresentation";
 
@@ -525,7 +525,12 @@ export function formatDeliveredVideoSummary(session: AdminSession): string {
 }
 
 export function formatAudioSummary(session: AdminSession): string {
-  const lead = session.source_audio_title?.trim() || session.source_audio_language?.trim();
+  const title = session.source_audio_title?.trim();
+  // A title that only names the format (FFprobe's codec name, stored when the
+  // stream has no title tag) repeats the format below; the language leads then.
+  const lead =
+    (title && !titleOnlyNamesAudioFormat(title) ? title : "") ||
+    session.source_audio_language?.trim();
   const format = [
     formatCodec(session.source_audio_codec),
     formatChannelLayout(session.source_audio_channels),
