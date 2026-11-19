@@ -1,6 +1,7 @@
 import type { AdminSession } from "@/api/types";
 import { codeNumber, englishText, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
+import { formatLanguage } from "@/lib/languageNames";
 import { formatCodecLabel, titleOnlyNamesAudioFormat } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
 import { formatClock } from "@/pages/adminDownloadPreparationPresentation";
@@ -530,7 +531,7 @@ export function formatAudioSummary(session: AdminSession): string {
   // stream has no title tag) repeats the format below; the language leads then.
   const lead =
     (title && !titleOnlyNamesAudioFormat(title) ? title : "") ||
-    session.source_audio_language?.trim();
+    formatLanguage(session.source_audio_language ?? "");
   const format = [
     formatCodec(session.source_audio_codec),
     formatChannelLayout(session.source_audio_channels),
