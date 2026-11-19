@@ -37,7 +37,7 @@ export function useSetRating(itemId: string) {
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      rollBackRating(queryClient, context?.previous ?? []);
+      rollBackRating(queryClient, itemId, context?.previous ?? []);
       toast.error(t("web.common.toast.ratings.updateFailed"));
     },
     onSettled: () => {
@@ -67,7 +67,7 @@ export function useDeleteRating(itemId: string) {
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      rollBackRating(queryClient, context?.previous ?? []);
+      rollBackRating(queryClient, itemId, context?.previous ?? []);
       toast.error(t("web.common.toast.ratings.updateFailed"));
     },
     onSettled: () => {
@@ -76,21 +76,19 @@ export function useDeleteRating(itemId: string) {
   });
 }
 
-// Revert only the rating. Restoring the whole snapshot would discard a detail
-// refetched while the write was in flight, such as another device's metadata
-// save. Writing marks a detail fresh, so one already marked stale is marked
-// stale again: the rating refresh leaves the current detail alone.
+// Revert only the rating, as the watched toggle does. Restoring the whole
+// snapshot would discard a detail refetched while the write was in flight,
+// such as another device's metadata save. updateCatalogItemDetail keeps a
+// detail invalidated meanwhile owing its refetch.
 function rollBackRating(
   queryClient: QueryClient,
+  itemId: string,
   previous: Array<[QueryKey, ItemDetail | undefined]>,
 ) {
-  for (const [queryKey, snapshot] of previous) {
-    if (!snapshot) continue;
-    const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-    const wasInvalidated = query?.state.isInvalidated;
-    queryClient.setQueryData<ItemDetail>(queryKey, (detail) =>
-      detail ? { ...detail, user_rating: snapshot.user_rating } : detail,
-    );
-    if (wasInvalidated) query?.invalidate();
-  }
+  const snapshot = previous.find(([, detail]) => detail)?.[1];
+  if (!snapshot) return;
+  updateCatalogItemDetail(queryClient, itemId, (detail) => ({
+    ...detail,
+    user_rating: snapshot.user_rating,
+  }));
 }
