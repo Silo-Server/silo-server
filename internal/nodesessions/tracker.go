@@ -76,6 +76,10 @@ type trackedSession struct {
 	// request delivered media. The last release then lingers, whichever
 	// request it belongs to.
 	delivered bool
+	// plain is set when a plain Hold joined the session: it moved to another
+	// transport, so its last release ends it and no direct-play request's
+	// delivery makes it linger.
+	plain bool
 }
 
 // NewTracker creates a session tracker for the given node.
@@ -210,6 +214,7 @@ func (tr *Tracker) hold(ctx context.Context, info SessionInfo, lingering bool) *
 	entry.holds++
 	entry.record = data
 	if !lingering {
+		entry.plain = true
 		if _, lingers := tr.lingering[info.SessionID]; lingers {
 			delete(tr.lingering, info.SessionID)
 			delete(tr.touched, info.SessionID)
@@ -246,6 +251,9 @@ func (tr *Tracker) release(ctx context.Context, sessionID string, entry *tracked
 		return
 	}
 	delete(tr.sessions, sessionID)
+	if entry.plain {
+		lingering = false
+	}
 	if lingering && entry.delivered {
 		tr.touched[sessionID] = time.Now()
 		tr.lingering[sessionID] = entry.record

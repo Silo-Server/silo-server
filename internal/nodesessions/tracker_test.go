@@ -155,6 +155,16 @@ func TestHoldLingeringCountsOnlyDeliveredRequests(t *testing.T) {
 	if got := tracker.ActiveCount(); got != 0 || redisStub.exists(key) {
 		t.Fatalf("after a remux that followed a lingering direct play ended: ActiveCount = %d, record exists = %t, want 0 and none", got, redisStub.exists(key))
 	}
+
+	// The remux can also start while a direct-play range is still open, and
+	// end before it. That range's release is then the last, and must not make
+	// the finished remux linger.
+	straggler := tracker.HoldLingering(ctx, info)
+	tracker.Hold(ctx, SessionInfo{SessionID: info.SessionID, Type: "remux"})(ctx)
+	straggler(ctx, true)
+	if got := tracker.ActiveCount(); got != 0 || redisStub.exists(key) {
+		t.Fatalf("after a direct-play range outlived a remux on the same session: ActiveCount = %d, record exists = %t, want 0 and none", got, redisStub.exists(key))
+	}
 }
 
 // An authoritative Remove ends the session; a hold taken before it must not
