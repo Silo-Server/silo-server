@@ -7,7 +7,7 @@ import {
   isCapturedProfileAuthorityActive,
   StaleApiRequestContextError,
 } from "@/api/client";
-import { v2 } from "@/api/v2/request";
+import { readableErrorText, v2 } from "@/api/v2/request";
 import {
   SERIES_SUBTITLE_SETTING_KEYS,
   seriesSubtitleSettingIdentity,
@@ -213,9 +213,7 @@ export function useDeleteSubtitlePreference() {
         queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
       ]),
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.subtitles.resetPreferenceFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.common.toast.subtitles.resetPreferenceFailed")));
     },
   });
 }
@@ -266,9 +264,7 @@ export function useSetSubtitlePreference() {
       ),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.subtitles.savePreferenceFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.common.toast.subtitles.savePreferenceFailed")));
     },
   });
 }
@@ -288,9 +284,7 @@ export function useDownloadSubtitle() {
     },
     onError: (err) => {
       if (!(err instanceof StaleApiRequestContextError))
-        toast.error(
-          err instanceof Error ? err.message : t("web.common.toast.subtitles.downloadFailed"),
-        );
+        toast.error(readableErrorText(err, t("web.common.toast.subtitles.downloadFailed")));
     },
   });
 }
@@ -310,9 +304,7 @@ export function useUploadSubtitle() {
     },
     onError: (err) => {
       if (!(err instanceof StaleApiRequestContextError))
-        toast.error(
-          err instanceof Error ? err.message : t("web.common.toast.subtitles.uploadFailed"),
-        );
+        toast.error(readableErrorText(err, t("web.common.toast.subtitles.uploadFailed")));
     },
   });
 }
