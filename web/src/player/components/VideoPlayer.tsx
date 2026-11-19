@@ -1136,20 +1136,27 @@ export function VideoPlayer({
   // the plan revision it was made on. The replanned stream starts there
   // instead of where the replan was asked for. A later seek replaces it; a
   // replan that settles without a new stream drops it, unless the stream
-  // playing never took it (`carried`), which then asks for a stream there.
+  // playing never took it (`carriedFrom`), which then asks for a stream there.
   const replanSeekRef = useRef<{
     sessionId: string;
     revision: number;
     seconds: number;
-    carried?: boolean;
+    // Where the stream that never took the seek started.
+    carriedFrom?: number;
   } | null>(null);
   useEffect(() => {
     const replanSeek = replanSeekRef.current;
     if (replanning || replanSeek?.revision !== planRevision) return;
     replanSeekRef.current = null;
-    if (replanSeek.carried && replanSeek.sessionId === sessionIdRef.current) {
-      reanchorAtRef.current(replanSeek.seconds);
-    }
+    const from = replanSeek.carriedFrom;
+    const video = videoRef.current;
+    if (from === undefined || !video || replanSeek.sessionId !== sessionIdRef.current) return;
+    // A stream that started before the seek and has played up to it took it.
+    const position = toMediaTime(video.currentTime, timelineOffsetRef.current);
+    const reached =
+      resolvePendingSeekTime(position, replanSeek.seconds).pendingSeekTime === null ||
+      (replanSeek.seconds >= from && position >= replanSeek.seconds);
+    if (!reached) reanchorAtRef.current(replanSeek.seconds);
   }, [planRevision, replanning]);
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
@@ -2869,6 +2876,8 @@ export function VideoPlayer({
       const planStart = toMediaTime(effectiveInitialPosition, planTimelineOffsetRef.current);
       if (canSeekAnywhereRef.current) {
         if (!pendingSeekIsHeld()) rememberPendingSeek(replanTarget);
+      } else if (resolvePendingSeekTime(planStart, replanTarget).pendingSeekTime === null) {
+        // The plan's start already settles the seek.
       } else if (replanningRef.current) {
         // Another change is already in flight; the stream it brings takes the
         // seek instead of this one.
@@ -2876,12 +2885,11 @@ export function VideoPlayer({
           sessionId: sessionIdRef.current,
           revision: planRevision,
           seconds: replanTarget,
-          carried: true,
+          carriedFrom: planStart,
         };
-      } else if (resolvePendingSeekTime(planStart, replanTarget).pendingSeekTime !== null) {
-        // This stream starts where the replan was asked for, too far from the
-        // seek to settle it, and cannot seek anywhere: ask for one anchored at
-        // the seek.
+      } else {
+        // This stream starts where the replan was asked for and cannot seek
+        // anywhere: ask for one anchored at the seek.
         reanchorAtRef.current(replanTarget);
       }
     }
