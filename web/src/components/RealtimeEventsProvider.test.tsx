@@ -26,6 +26,8 @@ import { invalidateCatalogState } from "./realtimeCatalogInvalidation";
 import {
   buildEventsUrl,
   EVENTS_ACCESS_CHANGED_CLOSE_CODE,
+  EVENTS_AUTHORITY_UNAVAILABLE_CLOSE_CODE,
+  EVENTS_CREDENTIAL_INVALID_CLOSE_CODE,
   HIDDEN_EVENTS_SOCKET_GRACE_MS,
   RealtimeEventsProvider,
 } from "./RealtimeEventsProvider";
@@ -1325,6 +1327,27 @@ describe("RealtimeEventsProvider", () => {
 
       await act(async () => {
         vi.advanceTimersByTime(999);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
+    it.each([
+      ["credential_invalid", EVENTS_CREDENTIAL_INVALID_CLOSE_CODE, 30_000, 1],
+      ["authority_unavailable", EVENTS_AUTHORITY_UNAVAILABLE_CLOSE_CODE, 5_000, 0],
+    ])("waits before reconnecting after %s", async (_, code, delay, refreshes) => {
+      await renderWithAccessData();
+
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose(code);
+      });
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(refreshes);
+
+      await act(async () => {
+        vi.advanceTimersByTime(delay - 1);
       });
       expect(FakeWebSocket.instances).toHaveLength(1);
       await act(async () => {

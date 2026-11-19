@@ -136,6 +136,19 @@ function isRequestNotification(notification: Pick<AppNotification, "type">) {
 export const EVENTS_ACCESS_CHANGED_CLOSE_CODE = 4001;
 
 /**
+ * Close code for a login session, account or profile that is gone or
+ * disabled. Reconnecting with it cannot succeed: refresh the account (which
+ * signs out a revoked session) and wait before trying again.
+ */
+export const EVENTS_CREDENTIAL_INVALID_CLOSE_CODE = 4002;
+
+/** Close code for a server that could not recheck the credential: back off. */
+export const EVENTS_AUTHORITY_UNAVAILABLE_CLOSE_CODE = 4004;
+
+const CREDENTIAL_INVALID_RECONNECT_DELAY_MS = 30_000;
+const AUTHORITY_UNAVAILABLE_RECONNECT_DELAY_MS = 5_000;
+
+/**
  * How long the events socket stays open after the page is hidden. Its frames
  * keep the cache current meanwhile, so a quick tab switch costs no requests. A
  * longer absence closes the socket, and the return refetches active queries
@@ -1155,6 +1168,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           handleAccessChanged();
         } else if (!closedByEffect) {
           droppedSinceCatchUpRef.current = true;
+        }
+        if (!closedByEffect && event.code === EVENTS_CREDENTIAL_INVALID_CLOSE_CODE) {
+          // A revoked session fails the refresh and signs out, which ends
+          // this effect; the long delay keeps a lingering one from looping.
+          void refreshAccount().catch(() => {});
+          nextReconnectDelayRef.current = CREDENTIAL_INVALID_RECONNECT_DELAY_MS;
+        } else if (!closedByEffect && event.code === EVENTS_AUTHORITY_UNAVAILABLE_CLOSE_CODE) {
+          nextReconnectDelayRef.current = AUTHORITY_UNAVAILABLE_RECONNECT_DELAY_MS;
         }
         if (
           event.code !== EVENTS_ACCESS_CHANGED_CLOSE_CODE &&

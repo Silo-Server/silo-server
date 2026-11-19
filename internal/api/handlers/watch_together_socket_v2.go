@@ -113,7 +113,7 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	validated, claims, err := h.Validate(r.Context(), credential.Session)
 	if err != nil {
-		http.Error(w, "room authority expired", http.StatusUnauthorized)
+		refuseSocketHandshake(w, err, "room authority expired")
 		return
 	}
 	if _, err = h.Room.Service.GetRoom(validated, roomID); err != nil {
@@ -126,8 +126,8 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 			deadline = limit
 		}
 	}
-	ctx, cancel := context.WithDeadline(validated, deadline)
-	defer cancel()
+	ctx, cancel := socketLifetime(validated, deadline)
+	defer cancel(nil)
 	upgrader := websocket.Upgrader{Subprotocols: []string{watchtogether.RoomSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
 	}}
@@ -135,34 +135,19 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return
 	}
-	defer func() { _ = conn.Close() }()
-	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	closer := newSocketCloser(conn)
+	defer func() { closer.close(context.Cause(ctx)) }()
+	stopClose := closer.closeWhenDone(ctx)
 	defer stopClose()
-	go func() {
-		interval := h.checkInterval
-		if interval <= 0 {
-			interval = eventsSessionCheckInterval
+	// A failed room read names no close code, so it ends the connection
+	// without a close frame.
+	go recheckSocketAuthority(ctx, cancel, h.checkInterval, func(checkCtx context.Context) error {
+		if _, _, err := h.Validate(checkCtx, credential.Session); err != nil {
+			return err
 		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-				_, _, err := h.Validate(checkCtx, credential.Session)
-				if err == nil {
-					_, err = h.Room.Service.GetRoom(checkCtx, roomID)
-				}
-				stop()
-				if err != nil {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
+		_, err := h.Room.Service.GetRoom(checkCtx, roomID)
+		return err
+	})
 	h.Room.serveRoomConnection(ctx, conn, roomID, claims.UserID, credential.Session.ProfileID)
 }
 
