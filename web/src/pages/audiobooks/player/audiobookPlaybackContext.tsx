@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import {
   getAccessToken,
   getAuthContextVersion,
-  getOrCreateDeviceId,
+  getDeviceHeaders,
   getProfileToken,
   refreshAuthentication,
 } from "@/api/client";
@@ -76,7 +76,7 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       getAccessToken: () => getAccessToken(),
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
-      getDeviceId: () => getOrCreateDeviceId(),
+      getDeviceHeaders,
       refreshToken: refreshAuthentication,
       getAuthContext: getAuthContextVersion,
     }),

@@ -232,7 +232,7 @@ const playerConfig: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
   getProfileId: () => "profile-1",
-  getDeviceId: () => "test-device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "test-device" }),
   getProfileToken: () => null,
 };
 
@@ -785,6 +785,221 @@ describe("VideoPlayer source timeline", () => {
         expect(onQualitySelect).toHaveBeenCalledWith("480p", 30, undefined, expect.any(Function));
       },
     );
+
+    it("keeps a seek on an original that loads after a refused quality change", async () => {
+      const { container, rerenderPlayer } = await seekBeforeMetadata();
+      rerenderPlayer({ plan: originalPlan, replanning: false, replanError: "Replan refused." });
+      const video = container.querySelector("video")!;
+
+      fireEvent.loadedMetadata(video);
+
+      expect(video.currentTime).toBe(30);
+    });
+
+    // A copy remux starts at the keyframe before where the change was asked for
+    // and reaches nothing outside what it has produced.
+    const remuxPlan = fixturePlanV3({
+      ...plan,
+      delivery: "server_remux_hls",
+      timeline: {
+        source_start_seconds: 120,
+        player_start_seconds: 0.5,
+        stream_origin_seconds: 119.5,
+        timeline_offset_seconds: 119.5,
+        can_seek_anywhere: false,
+        seek_restoration: "source_position",
+      },
+    });
+    const remuxStream = {
+      plan: remuxPlan,
+      planRevision: 2,
+      streamUrl: "/api/v1/stream/session-1?revision=2",
+    };
+
+    it("asks for a stream at the seek when the new stream cannot seek there", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+
+      rerenderPlayer({ ...remuxStream, replanning: false });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("asks for that stream once a change queued behind it settles without a stream", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      // The queued change is in flight when the remux lands, and is refused.
+      rerenderPlayer({ ...remuxStream, replanning: true });
+      await act(async () => Promise.resolve());
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replanError: "Replan refused." });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("asks for that stream when the queued change is refused before the stream loads", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { video, rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      // The remux's keyframe origin is the seek, and it starts 10 s later.
+      const originStream = {
+        ...remuxStream,
+        plan: fixturePlanV3({
+          ...remuxPlan,
+          timeline: {
+            ...remuxPlan.timeline,
+            source_start_seconds: 40,
+            player_start_seconds: 10,
+            stream_origin_seconds: 30,
+            timeline_offset_seconds: 30,
+          },
+        }),
+      };
+      rerenderPlayer({ ...originStream, replanning: true });
+      await act(async () => Promise.resolve());
+      // Not loaded yet: its clock reads the origin.
+      video.currentTime = 0;
+
+      rerenderPlayer({ ...originStream, replanning: false, replanError: "Replan refused." });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("waits for a version switch to settle before asking for that stream", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      rerenderPlayer({ ...remuxStream, replanning: true });
+      await act(async () => Promise.resolve());
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replacing: true });
+      await act(async () => Promise.resolve());
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replacing: false });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("starts the browser decoder that takes over the original at the seek", async () => {
+      engineRoute.chosen = true;
+      attachBrowserEngine.mockClear();
+      const browserEngine = {
+        containers: ["mkv"],
+        videoCodecs: ["h264"],
+        audioCodecs: ["aac"],
+        hdr: false,
+      };
+      try {
+        const { rerenderPlayer } = await seekDuringReplan({ browserEngine });
+        rerenderPlayer({
+          plan: originalPlan,
+          replanning: false,
+          planRevision: 2,
+          streamUrl: "/api/v1/stream/session-1?revision=2",
+        });
+
+        await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalledOnce());
+        expect(attachBrowserEngine.mock.calls[0]![0].source.startSeconds).toBe(30);
+      } finally {
+        engineRoute.chosen = false;
+      }
+    });
+
+    it("starts the stream at a later seek outside the window that a queued change took", async () => {
+      hlsJS.supported = true;
+      // The session folds the seek into the change queued behind the replan.
+      const onReanchorSeek = vi.fn(() => false);
+      const windowPlan = fixturePlanV3({
+        ...plan,
+        timeline: { ...plan.timeline, can_seek_anywhere: false },
+      });
+      const { container, rerenderPlayer } = renderPlayer({ plan: windowPlan, onReanchorSeek });
+      const video = container.querySelector("video")!;
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 100, end: () => 140 },
+      });
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      rerenderPlayer({ plan: windowPlan, replanning: true });
+
+      act(() => {
+        controls.current!.onSeek(130);
+      });
+      expect(video.currentTime).toBe(130);
+      fireEvent.seeked(video);
+      act(() => {
+        controls.current!.onSeek(30);
+      });
+      expect(onReanchorSeek).toHaveBeenCalledWith(30);
+      hlsJS.constructed.mockClear();
+
+      newStream(rerenderPlayer);
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed).toHaveBeenCalledWith(
+        expect.objectContaining({ startPosition: 30 }),
+      );
+    });
+
+    it("starts the stream at the room's last seek while a newer request is still held", async () => {
+      hlsJS.supported = true;
+      const base = roomConnection();
+      const connection = roomConnection({
+        room: { ...base.room!, self_role: "host", self_can_manage_room: true },
+      });
+      const { container, rerenderPlayer } = renderPlayer({
+        plan,
+        watchTogetherRoomId: "room-1",
+        watchTogetherConnection: connection,
+      });
+      const video = container.querySelector("video")!;
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      rerenderPlayer({ plan, replanning: true });
+      // The room runs a seek to 30 while the replan is in flight.
+      rerenderPlayer({
+        plan,
+        replanning: true,
+        watchTogetherConnection: {
+          ...connection,
+          transportCommand: roomPlayCommand({ action: "seek", position_seconds: 30 }),
+        },
+      });
+      await waitFor(() => expect(video.currentTime).toBeCloseTo(30, 1));
+      fireEvent.seeked(video);
+      // The host asks for 60, which the room has not run when the new stream
+      // lands.
+      act(() => {
+        controls.current!.onSeek(60);
+      });
+      expect(connection.sendRoomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "transport_request",
+          action: "seek",
+          position_seconds: 60,
+        }),
+      );
+      hlsJS.constructed.mockClear();
+
+      rerenderPlayer({
+        plan,
+        replanning: false,
+        planRevision: 2,
+        streamUrl: "/api/v1/stream/session-1?revision=2",
+        watchTogetherConnection: {
+          ...connection,
+          transportCommand: roomPlayCommand({ action: "seek", position_seconds: 30 }),
+        },
+      });
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed.mock.calls[0]![0].startPosition).toBeCloseTo(30, 1);
+    });
 
     it("forgets the seek when the replan settles without a new stream", async () => {
       hlsJS.supported = true;

@@ -120,9 +120,10 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 	// Monitoring reads only. Operations that carry paths, node addresses,
 	// storage keys, setting values or credentials stay off this list (item
 	// files, storage, settings, logs, API keys, audit, per-device setting
-	// values, node sessions), and node rows are read through their summary.
-	// Host resources and download preparations withhold paths and failure
-	// text from scoped keys in their handlers.
+	// values, node sessions, request integrations, settings and routes), and
+	// node rows are read through their summary. Host resources, download
+	// preparations and media requests withhold paths and failure text from
+	// scoped keys in their handlers.
 	auth.ScopeAdminMonitorRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/capabilities$`)},
@@ -148,6 +149,9 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/nodes/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/server/status$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/catalog/(items|capabilities)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests/(counts|capabilities)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests/[^/]+/events$`)},
 	},
 	// The catalog listing with file paths, which the listing handler gives
 	// only to unscoped callers and keys holding this scope.

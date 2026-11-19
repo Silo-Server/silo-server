@@ -15388,7 +15388,7 @@
             "type": "integer"
           },
           "reason": {
-            "description": "Free-form administrator reason shown to the player when supported",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           },
@@ -15609,6 +15609,11 @@
               "null"
             ]
           },
+          "end_position_seconds": {
+            "description": "Position the play ended at, in seconds: how far into the media it got, not how long it was watched. A play resumed partway through ends past its resume point; played_seconds is the watch time",
+            "format": "double",
+            "type": "number"
+          },
           "end_reason": {
             "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
             "enum": [
@@ -15652,7 +15657,7 @@
             "type": "boolean"
           },
           "measured_since": {
-            "description": "First progress report behind the measurement",
+            "description": "First sample behind the measurement: the start, once its stream was prepared, or the first progress report",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -15662,7 +15667,7 @@
             ]
           },
           "measured_until": {
-            "description": "Last progress report behind the measurement",
+            "description": "Last sample behind the measurement: the latest progress report, or the final position the stop carried",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -15692,7 +15697,7 @@
             "type": "string"
           },
           "paused_seconds": {
-            "description": "Seconds the play spent paused between progress reports",
+            "description": "Seconds the play spent paused between samples",
             "format": "double",
             "type": [
               "number",
@@ -15772,11 +15777,6 @@
               "string",
               "null"
             ]
-          },
-          "watched_seconds": {
-            "description": "Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time",
-            "format": "double",
-            "type": "number"
           }
         },
         "required": [
@@ -15792,7 +15792,7 @@
           "play_method",
           "started_at",
           "ended_at",
-          "watched_seconds",
+          "end_position_seconds",
           "duration_seconds",
           "completed",
           "played_seconds",
@@ -16400,7 +16400,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Free-form administrator reason shown to the player when supported",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           },
@@ -16497,7 +16497,7 @@
         "additionalProperties": false,
         "properties": {
           "reason": {
-            "description": "Free-form administrator reason shown to the player when supported",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           }
@@ -16508,7 +16508,7 @@
         "additionalProperties": false,
         "properties": {
           "already_revoked": {
-            "description": "The session was already terminated before this request; the call converged without dispatching another command",
+            "description": "The session's playback attempt record already showed an administrator's end before this request: an earlier terminate, a stop the player did not confirm, or a stop the player confirmed over the control socket before its own stop reached the server. The call converged: nothing was dispatched, delivery is none and client_notified is false. A session whose record shows the player's own stop, or that expired, is not found (404), as is any ended session once its record lapses, at least 24 hours after the play started",
             "type": "boolean"
           },
           "authority_revoked": {
@@ -16516,7 +16516,7 @@
             "type": "boolean"
           },
           "client_notified": {
-            "description": "A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open or the write failed",
+            "description": "A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open, the write failed, or nothing was sent because the session was already revoked",
             "type": "boolean"
           },
           "command_id": {
@@ -16524,7 +16524,7 @@
             "type": "string"
           },
           "delivery": {
-            "description": "dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)",
+            "description": "dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing was sent because the session was already revoked",
             "enum": [
               "dispatched",
               "unavailable",
@@ -17241,6 +17241,10 @@
             },
             "type": "array"
           },
+          "connection_check_supported": {
+            "description": "True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported.",
+            "type": "boolean"
+          },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -17380,7 +17384,8 @@
           "task_bindings",
           "runtime",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "connection_check_supported"
         ],
         "type": "object"
       },
@@ -19086,7 +19091,7 @@
             "type": "string"
           },
           "message": {
-            "description": "A reason or error that came with the event",
+            "description": "A reason or error that came with the event. Withheld from API keys with scopes",
             "examples": [
               "auto approved"
             ],
@@ -25162,6 +25167,7 @@
             "type": "string"
           },
           "watched_seconds": {
+            "description": "Seconds watched across the window's plays: each play's measured watch time (playback history played_seconds), excluding pauses, seeks and buffering. A play recorded before measurement existed counts its end position, capped at how long the play lasted",
             "format": "double",
             "minimum": 0,
             "type": "number"
@@ -40418,7 +40424,7 @@
             "type": "boolean"
           },
           "last_error": {
-            "description": "Admins only: why the last submission to a download server failed. It can name servers and routing rules",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: why the last submission to a download server failed. It can name servers and routing rules",
             "type": "string"
           },
           "library_content_id": {
@@ -50594,7 +50600,7 @@
             "type": "string"
           },
           "instance_name": {
-            "description": "Admins only: the download server's name",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: the download server's name",
             "type": "string"
           },
           "integration_id": {
@@ -50612,7 +50618,7 @@
             "type": "boolean"
           },
           "last_error": {
-            "description": "Admins only: why the download server failed this target",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: why the download server failed this target",
             "type": "string"
           },
           "quality": {
@@ -50630,7 +50636,7 @@
             "type": "string"
           },
           "route_name": {
-            "description": "Admins only: the routing rule that sent this target to its server, as named when it was sent",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: the routing rule that sent this target to its server, as named when it was sent",
             "type": "string"
           },
           "status": {
@@ -245296,9 +245302,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "On a release (fence=0), the start_id of the start being released; a job another start published under the ID is left running. Ignored on a fenced stop.",
+            "in": "query",
+            "name": "start_id",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
-        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. A release ends only the job it was sent for and answers 404 for another: with start_id, the HLS job that start published; without it, the HLS job running when the release arrived or a rebuild published while it waited for the lock, not a job a start published then. A fenced stop ends any job. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -252294,6 +252308,9 @@
             "type": "string"
           },
           "source_video_profile": {
+            "type": "string"
+          },
+          "start_id": {
             "type": "string"
           },
           "start_segment_number": {

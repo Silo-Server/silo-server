@@ -119,7 +119,7 @@ func TestReleaseKeepsTheRecipeAndAFailedDeleteStillStops(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := m.ReleaseRemoteTranscode(t.Context(), transport, node.URL); err != nil {
+	if err := m.ReleaseRemoteTranscode(t.Context(), transport, node.URL, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := store.Get(t.Context(), transport); !ok {

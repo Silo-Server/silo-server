@@ -19612,7 +19612,7 @@ export interface components {
        * @description Delivery acknowledgement deadline in milliseconds; bounded to 10000, default 3000. Ignored by message
        */
       deadline_ms?: number;
-      /** @description Free-form administrator reason shown to the player when supported */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
       /**
        * Format: int64
@@ -19699,6 +19699,11 @@ export interface components {
        */
       duration_seconds: number | null;
       /**
+       * Format: double
+       * @description Position the play ended at, in seconds: how far into the media it got, not how long it was watched. A play resumed partway through ends past its resume point; played_seconds is the watch time
+       */
+      end_position_seconds: number;
+      /**
        * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
        * @enum {string|null}
        */
@@ -19722,12 +19727,12 @@ export interface components {
       measured: boolean;
       /**
        * Format: date-time
-       * @description First progress report behind the measurement
+       * @description First sample behind the measurement: the start, once its stream was prepared, or the first progress report
        */
       measured_since: string | null;
       /**
        * Format: date-time
-       * @description Last progress report behind the measurement
+       * @description Last sample behind the measurement: the latest progress report, or the final position the stop carried
        */
       measured_until: string | null;
       /**
@@ -19743,7 +19748,7 @@ export interface components {
       media_type: string;
       /**
        * Format: double
-       * @description Seconds the play spent paused between progress reports
+       * @description Seconds the play spent paused between samples
        */
       paused_seconds: number | null;
       play_method: string;
@@ -19786,11 +19791,6 @@ export interface components {
        * @enum {string|null}
        */
       video_decision: "direct" | "remux" | "transcode" | null;
-      /**
-       * Format: double
-       * @description Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time
-       */
-      watched_seconds: number;
     };
     AdminPlaybackReliability: {
       /** Format: int64 */
@@ -20011,7 +20011,7 @@ export interface components {
       deadline_ms?: number;
       /** @description Text displayed on the player */
       message: string;
-      /** @description Free-form administrator reason shown to the player when supported */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
       /**
        * Format: int64
@@ -20045,20 +20045,20 @@ export interface components {
       items: components["schemas"]["AdminPlaybackSummaryItem"][];
     };
     AdminPlaybackTerminateInputBody: {
-      /** @description Free-form administrator reason shown to the player when supported */
+      /** @description Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate */
       reason?: string;
     };
     AdminPlaybackTerminateReceipt: {
-      /** @description The session was already terminated before this request; the call converged without dispatching another command */
+      /** @description The session's playback attempt record already showed an administrator's end before this request: an earlier terminate, a stop the player did not confirm, or a stop the player confirmed over the control socket before its own stop reached the server. The call converged: nothing was dispatched, delivery is none and client_notified is false. A session whose record shows the player's own stop, or that expired, is not found (404), as is any ended session once its record lapses, at least 24 hours after the play started */
       already_revoked: boolean;
       /** @description The session's playback authority is durably revoked: media tokens and progress writes for it are refused from now on. Buffered media already delivered may still play out */
       authority_revoked: boolean;
-      /** @description A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open or the write failed */
+      /** @description A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open, the write failed, or nothing was sent because the session was already revoked */
       client_notified: boolean;
       /** @description The dismissal command identity when one was issued */
       command_id?: string;
       /**
-       * @description dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)
+       * @description dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing was sent because the session was already revoked
        * @enum {string}
        */
       delivery: "dispatched" | "unavailable" | "failed" | "none";
@@ -20277,6 +20277,8 @@ export interface components {
       auth_bindings: components["schemas"]["AdminPluginAuthBinding"][];
       available_version?: string;
       capabilities: components["schemas"]["AdminPluginCapability"][];
+      /** @description True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported. */
+      connection_check_supported: boolean;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -21039,7 +21041,7 @@ export interface components {
        */
       id: string;
       /**
-       * @description A reason or error that came with the event
+       * @description A reason or error that came with the event. Withheld from API keys with scopes
        * @example auto approved
        */
       message?: string;
@@ -23303,7 +23305,10 @@ export interface components {
        * @description Start of the window: now minus days
        */
       since: string;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Seconds watched across the window's plays: each play's measured watch time (playback history played_seconds), excluding pauses, seeks and buffering. A play recorded before measurement existed counts its end position, capped at how long the play lasted
+       */
       watched_seconds: number;
     };
     AdminWatchProvider: {
@@ -29692,7 +29697,7 @@ export interface components {
        */
       integration_kind?: string;
       is_anime: boolean;
-      /** @description Admins only: why the last submission to a download server failed. It can name servers and routing rules */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: why the last submission to a download server failed. It can name servers and routing rules */
       last_error?: string;
       /** @description The catalog item once the media is in the library */
       library_content_id?: string;
@@ -34032,7 +34037,7 @@ export interface components {
        * @example 42
        */
       id: string;
-      /** @description Admins only: the download server's name */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: the download server's name */
       instance_name?: string;
       /** @description Admins only: the download server holding this target */
       integration_id?: string;
@@ -34042,7 +34047,7 @@ export interface components {
        */
       integration_kind?: string;
       is_anime: boolean;
-      /** @description Admins only: why the download server failed this target */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: why the download server failed this target */
       last_error?: string;
       /** @example 1080p */
       quality: string;
@@ -34051,7 +34056,7 @@ export interface components {
        * @example 1834729
        */
       request_id: string;
-      /** @description Admins only: the routing rule that sent this target to its server, as named when it was sent */
+      /** @description Admins only, and left out of the admin request list for API keys with scopes: the routing rule that sent this target to its server, as named when it was sent */
       route_name?: string;
       /** @example queued */
       status: string;

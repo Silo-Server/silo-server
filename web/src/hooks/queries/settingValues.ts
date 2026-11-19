@@ -557,6 +557,12 @@ export function useSetSettingValue() {
        * value. Ordinary callers should leave this enabled.
        */
       invalidateOnSettled?: boolean;
+      /**
+       * Refresh the reads without making the write wait for them. For an
+       * editor that shows its own draft and queues its next write behind this
+       * one, where a slow read would otherwise hold that write back.
+       */
+      refreshInBackground?: boolean;
     }) =>
       v2("PUT /api/v2/settings/values/{key}", {
         path: { key },
@@ -568,12 +574,14 @@ export function useSetSettingValue() {
       // Keep ordinary controls pending until their active effective-value
       // reads reconcile. Otherwise a rapid follow-up edit can spread a stale
       // object and silently undo the first field that was just saved.
-      return invalidateSettingValueQueries(qc, variables.identity, variables.key);
+      const refresh = invalidateSettingValueQueries(qc, variables.identity, variables.key);
+      return variables.refreshInBackground ? undefined : refresh;
     },
     onError: (error, variables) => {
       if (variables.invalidateOnSettled === false) return;
       if (shouldReconcileAfterMutationError(error)) {
-        return invalidateSettingValueQueries(qc, variables.identity, variables.key);
+        const refresh = invalidateSettingValueQueries(qc, variables.identity, variables.key);
+        return variables.refreshInBackground ? undefined : refresh;
       }
     },
   });

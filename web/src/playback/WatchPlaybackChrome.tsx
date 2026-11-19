@@ -28,7 +28,7 @@ import { isNotFoundProblem } from "@/api/v2/request";
 import {
   getAccessToken,
   getAuthContextVersion,
-  getOrCreateDeviceId,
+  getDeviceHeaders,
   getProfileToken,
   refreshAuthentication,
 } from "@/api/client";
@@ -745,7 +745,7 @@ function WatchPlaybackHostContent() {
       getAccessToken: () => getAccessToken(),
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
-      getDeviceId: () => getOrCreateDeviceId(),
+      getDeviceHeaders,
       refreshToken: refreshAuthentication,
       getAuthContext: getAuthContextVersion,
       // Leaving the player marks these surfaces stale at once (below), but the

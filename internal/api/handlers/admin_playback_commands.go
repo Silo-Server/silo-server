@@ -176,11 +176,12 @@ func validateAdminPlaybackCommand(in AdminPlaybackCommandInput) (json.RawMessage
 		if in.Message == "" {
 			return nil, ErrAdminPlaybackCommandInvalid
 		}
-		encoded, err := json.Marshal(map[string]string{displayMessageTitleKey: in.Title, displayMessageTextKey: in.Message})
-		if err != nil {
-			return nil, err
+		fields := map[string]string{displayMessageTextKey: in.Message}
+		if in.Title != "" {
+			// An untitled message carries no title key rather than an empty one.
+			fields[displayMessageTitleKey] = in.Title
 		}
-		payload = encoded
+		payload, _ = json.Marshal(fields) // a string map always encodes
 	default:
 		return nil, ErrAdminPlaybackCommandInvalid
 	}

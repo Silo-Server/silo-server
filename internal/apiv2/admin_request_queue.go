@@ -61,7 +61,7 @@ type AdminRequestEvent struct {
 	Type          string  `json:"type" doc:"What happened: created, approved, retried, submit_deferred, available_in_library, status_<status> or outcome_<outcome>; clients show unknown types as they are" example:"approved"`
 	ActorUserID   ID      `json:"actor_user_id,omitempty" doc:"The account that acted; absent for the server itself" example:"1"`
 	ActorUsername string  `json:"actor_username,omitempty" doc:"The acting account's username, while the account exists" example:"admin"`
-	Message       string  `json:"message,omitempty" doc:"A reason or error that came with the event" example:"auto approved"`
+	Message       string  `json:"message,omitempty" doc:"A reason or error that came with the event. Withheld from API keys with scopes" example:"auto approved"`
 	CreatedAt     Instant `json:"created_at"`
 }
 
@@ -113,8 +113,14 @@ func (reg *Registry) listAdminRequestEvents(ctx context.Context, in *MediaReques
 		return nil, requestProblem(err)
 	}
 	items := make([]AdminRequestEvent, 0, len(events))
+	// A scoped key (the monitoring scope) gets no event text: errors in it
+	// can name download servers, their addresses and routing rules.
+	withhold := scopedAPIKey(ctx)
 	for _, e := range events {
 		item := AdminRequestEvent{ID: IDFromInt(e.ID), Type: e.EventType, ActorUsername: e.ActorUsername, Message: e.Message, CreatedAt: NewInstant(e.CreatedAt)}
+		if withhold {
+			item.Message = ""
+		}
 		if e.ActorUserID != nil {
 			item.ActorUserID = IDFromInt(int64(*e.ActorUserID))
 		}
