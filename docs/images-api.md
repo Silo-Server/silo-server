@@ -254,18 +254,24 @@ needs no credentials and expires with the artwork lifetime
 fresh one from a later page or session row. It keeps working after the art is
 cached, answering with the redirect from then on.
 
-`getItemPoster` answers `404` for an invalid or expired link, an item that is
-gone or has no poster, and a download that failed or was refused; the answer
-does not say which. It answers `503` with `Retry-After` when the server's poster
-downloads or plugin poster lookups are busy. The download follows the image cache's rules
-([outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork)):
-public addresses only, redirect hops included, the image cache's size limit, and
-only JPEG, PNG, WebP or GIF bytes, typed by their content rather than the
-provider's header. Concurrent requests for one item share one download, and a
+`getItemPoster` has its own budget per client address. The default allows
+600 requests per minute with a burst of 400 so a dashboard can load a page of
+posters. Admins can adjust `auth_endpoints.item_poster` in the rate limit
+configuration. Requests over the poster or server-wide budget receive
+`429 rate_limited` with `Retry-After`. Busy downloads or plugin lookups return
+`503` with `Retry-After`.
+
+An invalid or expired link, a missing item or poster, and a refused or failed
+download all return `404`. Every download and redirect hop must reach a public
+address, including URLs under the artwork store's direct URL prefix. The
+server applies the image cache's size limit and checks the bytes for JPEG,
+PNG, WebP or GIF. See the [outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork).
+
+Concurrent requests for one item share one download, and a
 server runs at most four at once. A server remembers a finished download for
 five minutes and a failed one for 30 seconds, so repeating a link does not
 repeat the request to the provider. An image over 4 MiB is not served from a
-link and answers `404` until the image cache has stored it. The route has no per-address rate limit. Proxied bytes carry
+link and answers `404` until the image cache has stored it. Proxied bytes carry
 `Cache-Control: private, max-age=300`; the redirect is `no-store`, since its
 target is a signed URL with its own lifetime.
 

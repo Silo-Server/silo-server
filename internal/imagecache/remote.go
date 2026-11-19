@@ -184,12 +184,9 @@ func newRemoteFetcher(client *http.Client) *RemoteFetcher {
 }
 
 // Fetch downloads rawURL from public addresses only, or the local network
-// too when ctx carries netguard.WithPrivateAccess (artworkurl.FetchContext
-// decides that per URL). Requests sharing key while a download runs share its
-// result; key names the artwork (an item's content ID), so concurrent
-// requests for one item make one download. The download
-// runs detached from the first caller, so that caller leaving does not fail
-// the rest; each caller still stops waiting when its own context ends.
+// too when ctx carries netguard.WithPrivateAccess. Concurrent requests for the
+// same item and URL share a download. The download runs detached from the
+// first caller, and each caller stops waiting when its own context ends.
 func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteImage, error) {
 	id := key + "\x00" + rawURL
 	if result, ok := f.recent(id, time.Now()); ok {

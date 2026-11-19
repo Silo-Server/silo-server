@@ -6,6 +6,9 @@ import (
 )
 
 const (
+	// ItemPosterBucket budgets signed poster reads separately from ordinary API traffic.
+	ItemPosterBucket = "item_poster"
+
 	MaxBurst = 1<<31 - 1
 
 	// MaxRequestsPerWindow keeps the limiter's float-to-int conversions
@@ -105,6 +108,8 @@ func DefaultConfig() Config {
 			"device_start":    {RequestsPerMinute: 20, Burst: 10},
 			"device_lookup":   {RequestsPerMinute: 60, Burst: 20},
 			"device_poll":     {RequestsPerMinute: 120, Burst: 30},
+			// A dashboard can request several hundred posters when it opens.
+			ItemPosterBucket: {RequestsPerMinute: 600, Burst: 400},
 			// Invitation claim lookups and accepts: single-use tokens with
 			// 256-bit entropy, so this is anti-probe hygiene, not the guard.
 			"invitation": {RequestsPerMinute: 20, Burst: 10},

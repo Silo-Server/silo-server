@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,10 +15,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
-	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // ItemPosterSource reads an item's current poster and queues its caching
@@ -52,6 +53,8 @@ const (
 	// one per request. It stays well under the lifetime of a signed URL a
 	// plugin returns.
 	itemPosterResolveMemo = time.Minute
+	// itemPosterResolveTimeout bounds a plugin lookup that outlives its caller.
+	itemPosterResolveTimeout = 10 * time.Second
 	// itemPosterResolveMax bounds how many plugin answers are kept.
 	itemPosterResolveMax = 4096
 )
@@ -65,7 +68,6 @@ type itemPosterHandler struct {
 	posters  *artworkurl.ItemPosters
 	source   ItemPosterSource
 	fetcher  RemotePosterFetcher
-	store    blobstore.Store
 	enqueued posterEnqueueMemo
 	resolved posterResolveMemo
 }
@@ -192,11 +194,10 @@ func posterFetchLogError(err error) string {
 func registerItemPosters(reg *Registry) {
 	h := &itemPosterHandler{
 		posters: reg.deps.ItemPosters, source: reg.deps.ItemPosterSource, fetcher: reg.deps.RemotePosters,
-		store: reg.deps.ArtworkStore,
 	}
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/item-posters/{content_id}", "getItemPoster", "artwork",
 		"Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art redirects to its stored object; art not cached yet is fetched from its provider through the server and queued for caching."),
-		Class: ClassPublic, ServiceBacked: true}
+		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: ratelimit.ItemPosterBucket}
 	op.Parameters = []*huma.Param{
 		{Name: "content_id", In: paramInPath, Required: true, Description: "Content ID of the movie or series whose poster the link names.", Schema: &huma.Schema{Type: huma.TypeString}},
 		{Name: signedLinkExpiryParam, In: artworkParamQuery, Required: true, Schema: &huma.Schema{Type: artworkIntegerType, Format: playbackIntegerFormat}},
@@ -206,6 +207,11 @@ func registerItemPosters(reg *Registry) {
 		"200": {Description: "Poster bytes of art not cached yet", Content: map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
 		"302": {Description: "Redirect to the cached poster's signed URL", Headers: map[string]*huma.Header{"Location": {Schema: &huma.Schema{Type: huma.TypeString, Format: "uri-reference"}}}},
 		"404": {Description: "Link invalid or expired, item gone, no poster, or the provider refused or failed"},
+		"429": {
+			Description: "Poster request rate limit exceeded",
+			Headers:     map[string]*huma.Header{"Retry-After": {Description: "Seconds to wait before retrying.", Schema: &huma.Schema{Type: huma.TypeInteger}}},
+			Content:     map[string]*huma.MediaType{problemContentType: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[Problem](), true, "")}},
+		},
 		"503": {Description: "Poster fetches are busy or not configured; retry after Retry-After"},
 	}
 	RegisterRaw(reg, RawOperation{Operation: op, Protocol: "artwork-image", Reason: "Poster bytes and redirects bypass JSON encoding."}, h)
@@ -255,10 +261,8 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, unavailable("poster"))
 		return
 	}
-	// The artwork store's own direct URLs may sit on the local network;
-	// every other URL reaches public addresses only.
-	ctx := artworkurl.FetchContext(r.Context(), h.store, target)
-	image, err := h.fetcher.Fetch(ctx, contentID, target)
+	// A signed poster link authorizes downloads from public addresses only.
+	image, err := h.fetcher.Fetch(r.Context(), contentID, target)
 	switch {
 	case errors.Is(err, imagecache.ErrRemoteBusy):
 		writeProblem(w, r, NewProblem(TypeDependencyUnavailable, "Poster fetches are busy.").WithRetryAfter(5))
@@ -307,13 +311,11 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 	case full:
 		return "", false, false, errPosterResolveBusy
 	case !known:
-		resolved = h.posters.Presign(ctx, posterPath)
-		// A request that left mid-call gets an empty answer that says
-		// nothing about the plugin; keeping it would hide the poster from
-		// the requests that follow.
-		if ctx.Err() == nil {
-			h.resolved.put(posterPath, resolved, time.Now())
-		}
+		// Keep the plugin's answer for the next request even if this client leaves.
+		resolveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), itemPosterResolveTimeout)
+		defer cancel()
+		resolved = h.posters.Presign(resolveCtx, posterPath)
+		h.resolved.put(posterPath, resolved, time.Now())
 	}
 	switch {
 	// One leading slash is a path on this server; "//host/..." is another

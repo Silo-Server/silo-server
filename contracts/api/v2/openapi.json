@@ -183528,6 +183528,24 @@
           "404": {
             "description": "Link invalid or expired, item gone, no poster, or the provider refused or failed"
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Poster request rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Poster fetches are busy or not configured; retry after Retry-After"
           }

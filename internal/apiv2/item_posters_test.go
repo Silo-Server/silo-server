@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
@@ -35,9 +36,13 @@ func (s *posterSourceFake) EnqueueItemPosterCache(context.Context, string) error
 	return nil
 }
 
-type posterPresignFake struct{}
+type posterPresignFake struct{ calls int }
 
-func (posterPresignFake) PresignURL(_ context.Context, path, _ string) string {
+func (p *posterPresignFake) PresignURL(ctx context.Context, path, _ string) string {
+	p.calls++
+	if ctx.Err() != nil {
+		return ""
+	}
 	return "/api/v2/artwork/" + path + "?exp=1&sig=x"
 }
 
@@ -49,7 +54,7 @@ func (f *posterFetcherFake) Fetch(_ context.Context, _, rawURL string) (imagecac
 }
 
 func newPosterHandler(source ItemPosterSource, fetcher RemotePosterFetcher) (http.Handler, *artworkurl.ItemPosters) {
-	posters := artworkurl.NewItemPosters("test-secret", time.Hour, posterPresignFake{})
+	posters := artworkurl.NewItemPosters("test-secret", time.Hour, &posterPresignFake{})
 	return NewHandler(Dependencies{ItemPosters: posters, ItemPosterSource: source, RemotePosters: fetcher}), posters
 }
 
@@ -103,6 +108,7 @@ func TestItemPosterRefusesLocalNetworkPosterPaths(t *testing.T) {
 	defer local.Close()
 	port := local.URL[strings.LastIndex(local.URL, ":"):]
 	paths := map[string]string{
+		"store":     local.URL + "/artwork/poster.png",
 		"loopback":  local.URL + "/poster.png",
 		"localhost": "http://localhost" + port + "/poster.png",
 		"private":   "http://10.0.0.1" + port + "/poster.png",
@@ -110,7 +116,11 @@ func TestItemPosterRefusesLocalNetworkPosterPaths(t *testing.T) {
 		"file":      "file:///etc/passwd",
 	}
 	source := &posterSourceFake{paths: paths}
-	h, posters := newPosterHandler(source, imagecache.NewRemoteFetcher())
+	posters := artworkurl.NewItemPosters("test-secret", time.Hour, &posterPresignFake{})
+	h := NewHandler(Dependencies{
+		ItemPosters: posters, ItemPosterSource: source, RemotePosters: imagecache.NewRemoteFetcher(),
+		ArtworkStore: blobstoretest.NewDirect(local.URL + "/artwork"),
+	})
 	for id := range paths {
 		t.Run(id, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -169,7 +179,7 @@ func TestItemPosterServesCurrentPoster(t *testing.T) {
 // The admin poster rule: cached art keeps its stored URL, anything else is a
 // poster link, and only no poster at all is empty.
 func TestItemPostersURLRule(t *testing.T) {
-	posters := artworkurl.NewItemPosters("test-secret", time.Hour, posterPresignFake{})
+	posters := artworkurl.NewItemPosters("test-secret", time.Hour, &posterPresignFake{})
 	ctx := t.Context()
 	if got := posters.URL(ctx, "movie-a", "tmdb/movies/1/poster/original.r1.webp"); !strings.HasPrefix(got, "/api/v2/artwork/tmdb/movies/1/poster/w300.r1.webp") {
 		t.Fatalf("cached = %q", got)
@@ -203,6 +213,25 @@ func TestPosterResolveMemoBoundsPluginCalls(t *testing.T) {
 	}
 	if _, ok, full := memo.get("tmdb://poster/new", now.Add(itemPosterResolveMemo)); ok || full {
 		t.Fatalf("new path after expiry: ok=%v full=%v, want room", ok, full)
+	}
+}
+
+func TestItemPosterReusesPluginAnswerAfterDisconnect(t *testing.T) {
+	presigner := &posterPresignFake{}
+	posters := artworkurl.NewItemPosters("test-secret", time.Hour, presigner)
+	source := &posterSourceFake{paths: map[string]string{"movie-plugin": "tmdb://poster/1"}}
+	h := NewHandler(Dependencies{ItemPosters: posters, ItemPosterSource: source})
+	link := posters.Link("movie-plugin", time.Now())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(ctx, http.MethodGet, link, nil))
+	if presigner.calls != 1 {
+		t.Fatalf("canceled request made %d plugin calls, want 1", presigner.calls)
+	}
+	next := do(t, h, http.MethodGet, link, "", nil)
+	if next.Code != http.StatusFound || presigner.calls != 1 {
+		t.Fatalf("second request: status %d, location %q, plugin calls %d", next.Code, next.Header().Get("Location"), presigner.calls)
 	}
 }
 

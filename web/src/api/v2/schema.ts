@@ -119592,6 +119592,17 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Poster request rate limit exceeded */
+      429: {
+        headers: {
+          /** @description Seconds to wait before retrying. */
+          "Retry-After"?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Poster fetches are busy or not configured; retry after Retry-After */
       503: {
         headers: {

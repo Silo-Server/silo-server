@@ -127,12 +127,10 @@ download host and refuses redirects to another host.
 
 Catalog artwork is not always in Silo's own storage. A provider URL stays on
 the item until its image-cache job succeeds, and stays for good when caching
-fails, so an address the cache refused can still be served. Four places fetch
-catalog artwork themselves instead of handing the URL to the client: the
-jellycompat image proxy (Infuse, and requests with a proxy tag), offline
-download artwork, collection collages, and the admin poster route
-(`getItemPoster`, below). Each uses a netguard transport, and
-`artworkurl.FetchContext` decides the trust per URL:
+fails, so an address the cache refused can still be served. The jellycompat
+image proxy (Infuse and requests with a proxy tag), offline download artwork
+and collection collages use a netguard transport. For these three callers,
+`artworkurl.FetchContext` sets the policy for each URL.
 
 - A direct URL to the artwork store is trusted with the local network, where
   S3-compatible storage often runs. It must match the scheme, host, and path
@@ -148,21 +146,24 @@ HTTP. A provider URL under the artwork store's own prefix is trusted like a
 store URL. Trust carries across redirects, as for every netguard request, so
 the store is relied on not to redirect into the local network.
 
-The admin poster route needs no credentials, since a monitoring tool loads
-the `poster_url` admin reads return as an image. Its link signs only the
-item's content ID and an expiry (`artworkurl.ItemPosters`, its own signing
-domain), so a link holder cannot choose what the server requests: the route
-reads the item's current poster path and downloads only a provider URL or a
-plugin's resolved URL, never a local source. The download is the image-cache
-job's (`imagecache.RemoteFetcher` over the same `download`): Public only unless
-`FetchContext` trusts a store URL, checked on every dial and redirect, with the
-cache's size limit and timeout, and the bytes must sniff as JPEG, PNG, WebP or
-GIF. Concurrent requests for one item share one download, each server runs
-at most four, and a server remembers a finished download for five minutes and
-a failed one for 30 seconds, so a link cannot multiply requests to a provider. Every refusal
-answers the same `404`. A request also queues the item's image-cache job,
-through the ordinary upsert, so a failed job keeps its backoff, at most once per
-item per ten minutes on each server.
+The signed poster route (`getItemPoster`) serves links from admin reads and
+household session lists. A signature covers the item's content ID and expiry
+in a separate signing domain (`artworkurl.ItemPosters`). It authorizes the
+holder to read the item's current poster. Stored artwork keys redirect the
+client to the signed object.
+
+For provider URLs and URLs returned by a plugin, `imagecache.RemoteFetcher`
+downloads the poster through the image cache's guarded transport. Every dial
+and redirect must reach a Public address, even when the URL matches the
+artwork store's direct URL prefix. Downloads use the cache's size limit and
+timeout, and the bytes must sniff as JPEG, PNG, WebP or GIF. An address
+refusal returns the same `404` as a missing poster.
+
+Concurrent requests for one item and URL share a download. Each server runs
+at most four downloads at a time and remembers a success for five minutes
+and a failure for 30 seconds. A request can queue the item's image-cache
+job once per item per ten minutes on each server. The queue upsert preserves
+a failed job's backoff.
 
 ## Collection artwork
 
