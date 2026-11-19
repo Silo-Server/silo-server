@@ -73,6 +73,9 @@ type RemoteFetcher struct {
 	results   map[string]remoteResult
 	bytes     int
 	nextSweep time.Time
+	// firstExpiry is no later than the earliest expiry in results, so a full
+	// memory is scanned for room only once an entry can have expired.
+	firstExpiry time.Time
 }
 
 type remoteResult struct {
@@ -102,16 +105,24 @@ func (f *RemoteFetcher) admits(id string, now time.Time) bool {
 	if _, ok := f.results[id]; ok || len(f.results) < remoteResultsMax {
 		return true
 	}
+	if now.Before(f.firstExpiry) {
+		return false
+	}
 	f.dropExpired(now)
 	return len(f.results) < remoteResultsMax
 }
 
 // dropExpired removes expired outcomes. The caller holds f.mu.
 func (f *RemoteFetcher) dropExpired(now time.Time) {
+	f.firstExpiry = time.Time{}
 	for key, result := range f.results {
 		if !now.Before(result.until) {
 			f.bytes -= len(result.image.Data)
 			delete(f.results, key)
+			continue
+		}
+		if f.firstExpiry.IsZero() || result.until.Before(f.firstExpiry) {
+			f.firstExpiry = result.until
 		}
 	}
 	f.nextSweep = now.Add(remoteResultsSweep)
@@ -155,7 +166,11 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 		f.bytes -= len(f.results[victim].image.Data)
 		f.results[victim] = remoteResult{err: ErrRemoteBusy, until: soonest}
 	}
-	f.results[id] = remoteResult{image: image, err: err, until: now.Add(ttl)}
+	until := now.Add(ttl)
+	f.results[id] = remoteResult{image: image, err: err, until: until}
+	if len(f.results) == 1 || until.Before(f.firstExpiry) {
+		f.firstExpiry = until
+	}
 	f.bytes += len(image.Data)
 }
 

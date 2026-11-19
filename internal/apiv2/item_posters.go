@@ -239,7 +239,10 @@ func (h *itemPosterHandler) redirect(w http.ResponseWriter, r *http.Request, tar
 		writeProblem(w, r, unavailable("artwork storage"))
 		return
 	}
-	http.Redirect(w, r, target, http.StatusFound)
+	// target is the signed URL or rooted path this server resolved for the
+	// item's stored poster, so it needs none of http.Redirect's path handling.
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusFound)
 }
 
 // queueCache makes sure the item's poster has a cache job, at most once per
