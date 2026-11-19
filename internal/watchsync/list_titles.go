@@ -259,6 +259,9 @@ func (s *Service) trackListTitle(
 // it, as they don't hold each other's removals on export. A listing doesn't
 // come back while the item is on the list, so a title's removal holds it only
 // while the item isn't; on the list, the import tracks the item as before.
+// The item joining the watchlist after the title's removal is a re-add, which
+// supersedes that removal so it can't take the title off the provider, as a
+// listing dated after it does (#4286).
 func (s *Service) waitsForMatchedListRemoval(
 	ctx context.Context,
 	conn Connection,
@@ -277,16 +280,47 @@ func (s *Service) waitsForMatchedListRemoval(
 		return !isTitle || !waiting
 	})
 	if len(pending) > 0 {
-		listed, err := store.InWatchlist(ctx, conn.ProfileID, mediaItemID)
+		entry, err := store.GetWatchlistEntry(ctx, conn.ProfileID, mediaItemID)
 		if err != nil {
 			return false, err
 		}
-		if listed {
+		if entry != nil {
+			if err := s.supersedeTitleRemovalsBefore(ctx, conn, b, entry, pending, removalsPending); err != nil {
+				return false, err
+			}
 			pending = nil
 		}
 	}
 	// ids starts with the listing's provider key.
 	return s.waitsForListRemoval(ctx, conn, b, mediaItemID, pending, row, ids[0], removalsPending)
+}
+
+// supersedeTitleRemovalsBefore marks the pending title rows removed before
+// entry joined the watchlist as gone from the provider, so their removals
+// don't go out. Those rows can carry another provider key than the listing
+// (tmdb against imdb), which the export's key guard doesn't hold. A row
+// removed after the add, or an entry whose time can't be read, keeps its
+// removal.
+func (s *Service) supersedeTitleRemovalsBefore(
+	ctx context.Context,
+	conn Connection,
+	b listBinding,
+	entry *userstore.WatchlistEntry,
+	pending []string,
+	removalsPending map[string]time.Time,
+) error {
+	addedAt, parseErr := time.Parse(time.RFC3339, entry.AddedAt)
+	for _, id := range pending {
+		removedAt, ok := removalsPending[id]
+		if parseErr != nil || !ok || !addedAt.After(removedAt) {
+			continue
+		}
+		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, id, s.now()); err != nil {
+			return err
+		}
+		delete(removalsPending, id)
+	}
+	return nil
 }
 
 // waitsForListRemoval reports whether a listing the import would keep as id
