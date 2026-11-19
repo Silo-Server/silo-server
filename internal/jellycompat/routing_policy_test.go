@@ -408,6 +408,75 @@ func TestChildHLSRequestForAnotherVersionKeepsThePlay(t *testing.T) {
 	}
 }
 
+// TestBoundRequestsNeverReplaceTheUpstream covers requests that follow an
+// opened stream (a child playlist, a report's revive) racing a switch: one
+// that names the play method or version the play left is late, and must not
+// switch the play back.
+func TestBoundRequestsNeverReplaceTheUpstream(t *testing.T) {
+	codec := NewResourceIDCodec()
+	first := testCompatSource(codec, testCompatVersion())
+	secondVersion := testCompatVersion()
+	secondVersion.FileID = 43
+	second := testCompatSource(codec, secondVersion)
+	for _, tc := range []struct {
+		name   string
+		source PlaybackMediaSource
+		method string
+	}{
+		{name: "version the play left", source: first, method: "transcode"},
+		{name: "method the play left", source: second, method: "remux"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{
+				ID: "play-1", CompatToken: "compat-token", RouteItemID: "item-1",
+				UpstreamSessionID: "upstream-second", UpstreamPlayMethod: "transcode", UpstreamMediaFileID: second.FileID,
+				MediaSources: []PlaybackMediaSource{first, second},
+			})
+			manager := &testCompatSessionManager{sessions: map[string]*playback.Session{
+				"upstream-second": {ID: "upstream-second", UserID: 7, MediaFileID: second.FileID, PlayMethod: playback.PlayTranscode},
+			}}
+			handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
+
+			_, err := handler.ensureBoundUpstreamPlayback(t.Context(),
+				&Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}, "play-1", tc.source, tc.method)
+			if !errors.Is(err, errUpstreamReplaced) {
+				t.Fatalf("err = %v, want errUpstreamReplaced", err)
+			}
+			if len(manager.stopCalls) != 0 || manager.startCalls != 0 {
+				t.Fatalf("stops = %v, starts = %d; want the play's session left alone", manager.stopCalls, manager.startCalls)
+			}
+		})
+	}
+}
+
+// TestChildHLSSourceFollowsTheStreamedVersion covers child HLS requests
+// without a MediaSourceId on a play that lists several versions.
+func TestChildHLSSourceFollowsTheStreamedVersion(t *testing.T) {
+	codec := NewResourceIDCodec()
+	first := testCompatSource(codec, testCompatVersion())
+	secondVersion := testCompatVersion()
+	secondVersion.FileID = 43
+	second := testCompatSource(codec, secondVersion)
+	for _, tc := range []struct {
+		name          string
+		boundFileID   int
+		mediaSourceID string
+		wantFileID    int
+	}{
+		{name: "bound version without an id", boundFileID: second.FileID, wantFileID: second.FileID},
+		{name: "named version", boundFileID: second.FileID, mediaSourceID: first.ID, wantFileID: first.FileID},
+		{name: "unrecorded file without an id", wantFileID: first.FileID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			play := &PlaybackSession{UpstreamMediaFileID: tc.boundFileID, MediaSources: []PlaybackMediaSource{first, second}}
+			if got := compatChildHLSSource(play, tc.mediaSourceID); got == nil || got.FileID != tc.wantFileID {
+				t.Fatalf("source = %+v, want file %d", got, tc.wantFileID)
+			}
+		})
+	}
+}
+
 // TestMethodSwitchEndsTheReplacedSession covers the session a Jellyfin
 // method switch leaves behind: whether this replica held its copy or not,
 // the switch records it as replaced once the play has moved to the new

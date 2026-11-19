@@ -135,7 +135,7 @@ func compatChildHLSSource(playSession *PlaybackSession, mediaSourceID string) *P
 	if mediaSourceID != "" {
 		return findMediaSource(playSession, mediaSourceID)
 	}
-	if source := playedMediaSource(playSession, ""); source != nil {
+	if source := boundMediaSource(playSession); source != nil {
 		return source
 	}
 	return firstMediaSource(playSession)
@@ -2864,9 +2864,9 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	}
 	// A revive restores the version the play streams. A report naming another
 	// one is late or stale, and must not switch the play.
-	source := playedMediaSource(playSession, "")
+	source := boundMediaSource(playSession)
 	if source == nil {
-		source = playedMediaSource(playSession, mediaSourceID)
+		source = findMediaSource(playSession, mediaSourceID)
 	}
 	if source == nil {
 		source = firstMediaSource(playSession)
@@ -2874,7 +2874,7 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	if source == nil {
 		return nil
 	}
-	revived, err := h.ensureUpstreamPlayback(ctx, session, playSession.ID, *source, playSession.UpstreamPlayMethod)
+	revived, err := h.ensureBoundUpstreamPlayback(ctx, session, playSession.ID, *source, playSession.UpstreamPlayMethod)
 	if err != nil {
 		slog.WarnContext(ctx, "jellycompat upstream session revive failed", "component", "jellycompat",
 			"play_session_id", playSessionFingerprint(playSession.ID),
@@ -2931,7 +2931,30 @@ func fillReconstructedClientInfo(card *playback.RecipeCard, info playback.Client
 	}
 }
 
+// ensureUpstreamPlayback returns the play's upstream session for source and
+// method, starting one, or replacing one that streams another play method or
+// version. Only the routes a client opens to start or switch a stream call it.
 func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource, method string) (*PlaybackSession, error) {
+	return h.ensureUpstream(ctx, compatSession, playSessionID, source, method, true)
+}
+
+// ensureBoundUpstreamPlayback is ensureUpstreamPlayback for requests that
+// follow a stream already opened, such as a child HLS playlist or a progress
+// report: they never replace the play's upstream. One naming another play
+// method or version than the play now streams is late, and gets
+// errUpstreamReplaced.
+func (h *PlaybackHandler) ensureBoundUpstreamPlayback(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource, method string) (*PlaybackSession, error) {
+	return h.ensureUpstream(ctx, compatSession, playSessionID, source, method, false)
+}
+
+func (h *PlaybackHandler) ensureUpstream(
+	ctx context.Context,
+	compatSession *Session,
+	playSessionID string,
+	source PlaybackMediaSource,
+	method string,
+	mayReplace bool,
+) (*PlaybackSession, error) {
 	playSession, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
 		return nil, ErrSessionNotFound
@@ -2944,31 +2967,19 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		return nil, fmt.Errorf("session manager not available")
 	}
 	if upstreamReusable(playSession, source, method) {
-		if reused, done, err := h.reuseUpstream(ctx, compatSession, playSession, source, method); done {
-			return reused, err
+		if done, err := h.reuseUpstream(ctx, compatSession, playSession, source, method); err != nil {
+			return nil, err
+		} else if done {
+			return playSession, nil
 		}
+	} else if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod != "" && !mayReplace {
+		return nil, errUpstreamReplaced
 	}
 
 	// replaced is this replica's copy of the upstream session a switch of play
 	// method or media source retires. Its play ends once the switch has moved
 	// the play off it.
 	var replaced *playback.Session
-	var playMethod playback.PlayMethod
-	transcodeAudio := source.TranscodeAudio
-	switch method {
-	case "direct":
-		playMethod = playback.PlayDirect
-		transcodeAudio = false
-	case "remux":
-		playMethod = playback.PlayRemux
-	case "transcode":
-		playMethod = playback.PlayTranscode
-		transcodeAudio = false
-	default:
-		playMethod = playback.PlayDirect
-		transcodeAudio = false
-	}
-
 	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod != "" {
 		// Not reusable for this request: another play method or version.
 		replaced = h.retireUpstream(ctx, compatSession, playSession)
@@ -2985,23 +2996,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 	defer finishReplaced()
 
-	var session *playback.Session
-	var err error
-	if starter, ok := h.sessionMgr.(sessionStarterContext); ok {
-		session, err = starter.StartSessionWithContext(ctx, compatSession.StreamAppUserID, compatSession.ProfileID, source.FileID, playMethod, transcodeAudio)
-	} else {
-		session, err = h.sessionMgr.StartSession(compatSession.StreamAppUserID, compatSession.ProfileID, source.FileID, playMethod, transcodeAudio)
-	}
+	session, err := h.startCompatUpstream(ctx, compatSession, source, method)
 	if err != nil {
 		return nil, err
-	}
-	if source.StreamLocation != "" {
-		if setter, ok := h.sessionMgr.(interface{ SetStreamLocation(string, string) error }); ok {
-			if err := setter.SetStreamLocation(session.ID, source.StreamLocation); err != nil {
-				_ = h.sessionMgr.StopSession(session.ID)
-				return nil, err
-			}
-		}
 	}
 	_ = h.syncUpstreamAudioSelection(&PlaybackSession{
 		UpstreamSessionID:  session.ID,
@@ -3056,9 +3053,11 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		return nil, ErrSessionNotFound
 	}
 	if updated.UpstreamSessionID != "" && updated.UpstreamSessionID != session.ID {
-		// A concurrent switch replaced the session this request just attached
-		// and has stopped it; serving under the newer one would stream this
-		// request's file as another version's play.
+		// A concurrent switch replaced the session this request just attached;
+		// serving under the newer one would stream this request's file as
+		// another version's play. The switch stopped this session only if it
+		// ran on this replica.
+		_ = h.sessionMgr.StopSession(session.ID)
 		return nil, errUpstreamReplaced
 	}
 	h.syncSessionsNow(ctx, "compat_start")
@@ -3067,6 +3066,32 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 	h.sendCompatResumeStart(ctx, updated, session, &source)
 	return updated, nil
+}
+
+// startCompatUpstream starts a native session streaming source with method.
+func (h *PlaybackHandler) startCompatUpstream(ctx context.Context, compatSession *Session, source PlaybackMediaSource, method string) (*playback.Session, error) {
+	playMethod := compatPlayMethod(method)
+	// Only a remux transcodes audio on its own; a transcode encodes it anyway.
+	transcodeAudio := playMethod == playback.PlayRemux && source.TranscodeAudio
+	var session *playback.Session
+	var err error
+	if starter, ok := h.sessionMgr.(sessionStarterContext); ok {
+		session, err = starter.StartSessionWithContext(ctx, compatSession.StreamAppUserID, compatSession.ProfileID, source.FileID, playMethod, transcodeAudio)
+	} else {
+		session, err = h.sessionMgr.StartSession(compatSession.StreamAppUserID, compatSession.ProfileID, source.FileID, playMethod, transcodeAudio)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if source.StreamLocation != "" {
+		if setter, ok := h.sessionMgr.(interface{ SetStreamLocation(string, string) error }); ok {
+			if err := setter.SetStreamLocation(session.ID, source.StreamLocation); err != nil {
+				_ = h.sessionMgr.StopSession(session.ID)
+				return nil, err
+			}
+		}
+	}
+	return session, nil
 }
 
 // reuseUpstream serves a request from the upstream session the play already
@@ -3079,26 +3104,24 @@ func (h *PlaybackHandler) reuseUpstream(
 	playSession *PlaybackSession,
 	source PlaybackMediaSource,
 	method string,
-) (reused *PlaybackSession, done bool, err error) {
+) (done bool, err error) {
 	current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
 	if err == nil {
 		if !playSession.ProgressPersistenceKnown || playSession.DisableProgressPersistence != current.DisableProgressPersistence {
 			h.recordCompatProgressPersistence(playSession.ID, current.DisableProgressPersistence)
 		}
 		_ = h.syncUpstreamAudioSelection(playSession, source)
-		return playSession, true, nil
+		return true, nil
 	}
 	if !errors.Is(err, playback.ErrSessionNotFound) {
-		return nil, true, err
+		return false, err
 	}
 	// After a restart the durable play session survives but the in-memory
 	// native session is gone; rebuild it from the recipe card so ownership and
 	// accounting are restored before the transcode is (re)started.
 	if h.tm != nil {
-		if rebuilt, err := h.reconstructUpstream(ctx, compatSession, playSession, source, method); err != nil {
-			return nil, true, err
-		} else if rebuilt {
-			return playSession, true, nil
+		if rebuilt, err := h.reconstructUpstream(ctx, compatSession, playSession, source, method); err != nil || rebuilt {
+			return rebuilt, err
 		}
 		// The durable compat row outlived the native session and no recipe
 		// card can rebuild it. Any transcode still keyed to the stale id must
@@ -3110,7 +3133,7 @@ func (h *PlaybackHandler) reuseUpstream(
 	playSession.UpstreamSessionID = ""
 	playSession.UpstreamPlayMethod = ""
 	playSession.TranscodeStarted = false
-	return nil, false, nil
+	return false, nil
 }
 
 // reconstructUpstream rebuilds the play's native upstream session from its
@@ -3236,8 +3259,10 @@ func (h *PlaybackHandler) recordCompatProgressPersistence(playSessionID string, 
 	})
 }
 
+// ensureTranscodeManifest serves a child HLS playlist, which never replaces
+// the play's upstream: a playlist for a version the play left is refused.
 func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource) ([]byte, error) {
-	return h.ensureTranscodeManifestWithToneMapMode(ctx, compatSession, playSessionID, source, "")
+	return h.ensureTranscodeManifestFor(ctx, compatSession, playSessionID, source, "", false)
 }
 
 func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
@@ -3247,7 +3272,18 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 	source PlaybackMediaSource,
 	requiredToneMapMode tonemap.Mode,
 ) ([]byte, error) {
-	playSession, err := h.ensureUpstreamPlayback(ctx, compatSession, playSessionID, source, "transcode")
+	return h.ensureTranscodeManifestFor(ctx, compatSession, playSessionID, source, requiredToneMapMode, true)
+}
+
+func (h *PlaybackHandler) ensureTranscodeManifestFor(
+	ctx context.Context,
+	compatSession *Session,
+	playSessionID string,
+	source PlaybackMediaSource,
+	requiredToneMapMode tonemap.Mode,
+	mayReplace bool,
+) ([]byte, error) {
+	playSession, err := h.ensureUpstream(ctx, compatSession, playSessionID, source, "transcode", mayReplace)
 	if err != nil {
 		return nil, err
 	}
@@ -4365,6 +4401,12 @@ func playedMediaSource(session *PlaybackSession, mediaSourceID string) *Playback
 	if source := findMediaSource(session, mediaSourceID); source != nil {
 		return source
 	}
+	return boundMediaSource(session)
+}
+
+// boundMediaSource returns the play's source for the file its upstream
+// session streams, or nil when none is recorded.
+func boundMediaSource(session *PlaybackSession) *PlaybackMediaSource {
 	if session == nil || session.UpstreamMediaFileID == 0 {
 		return nil
 	}
