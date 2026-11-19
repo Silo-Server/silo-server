@@ -52306,7 +52306,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "A feladatok a szerver indulásakor regisztrálódnak, ezért be- vagy kikapcsolásuk újraindítás után lép érvénybe. Ha egy feladat már létezik, az ütemezését a feladat oldalán módosíthatja."
+      "value": "Egy feladat be- vagy kikapcsolása újraindítás nélkül érvénybe lép, de a többi szervernek eltarthat egy ideig, amíg átveszi a változást. Ha egy feladat be van kapcsolva, az ütemezését a feladat oldalán módosíthatja."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -63421,136 +63421,10 @@
       "value": "Nem sikerült betölteni az értesítési beállításokat"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Az új tartalmak rögzítése ki van kapcsolva, ezért semmi sem küldhető el. Kapcsolja vissza a Feldolgozás alatt."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "A küldés szüneteltetve van; az új tartalmak a várólistán várakoznak. Kapcsolja vissza a Feldolgozás alatt."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Kikapcsolva helyette a napi összefoglalót kapják."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hogyan észleli a Silo az új tartalmakat, hogyan csoportosítja őket üzenetekbe, és meddig őrzi meg azokat."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Érdeklődők meghatározása"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Minden elem összevetése mindenki beállításaival."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Csoportosítás és elárasztás elleni védelem"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Feldolgozás"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Tartalom maximális kora"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "A régebbi elemeket a rendszer elveti, hogy ne elavult hírként érkezzenek."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Üzenetek maximális száma sorozatonként"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Az ezen felülieket a rendszer kihagyja az adott kötegből."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Új tartalmak észlelése"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Új elemek rögzítése a könyvtárak átvizsgálásakor."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Folyamat"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasott értesítések"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Megőrzés"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Küldési előzmények"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Annak nyilvántartása, amiről a Silo már értesített."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Várakozási ablak"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Az együtt átvizsgált elemek egyetlen értesítésként érkeznek."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasatlan értesítések"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64455,18 +64329,6 @@
     {
       "type": 0,
       "value": "Értesítések"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "nap"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "óra"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71068,7 +70930,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kézbesítési csatornák, szervercsatornák, valamint az, hogy az új tartalomból hogyan lesznek értesítések."
+      "value": "Kézbesítési csatornák és szervercsatornák."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71167,12 +71029,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Csoportosítás és elárasztás elleni védelem"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71191,28 +71047,10 @@
       "value": "Epizódonkénti e-mail választásának engedélyezése"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Tartalom maximális kora"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Üzenetek maximális száma sorozatonként"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Az igénylő megemlítése a Discordon"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Új tartalom észlelése"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71221,46 +71059,16 @@
       "value": "Személyes webhookok"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Feldolgozás"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasott értesítések"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Továbbítási URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Megőrzés"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Elküldött előzmények"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Szervercsatornák"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Várakozási időablak"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71275,12 +71083,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasatlan értesítések"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71291,12 +71093,6 @@
     {
       "type": 0,
       "value": "Webhookok személyenként"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Érdeklődők meghatározása"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -72707,6 +72503,12 @@
     {
       "type": 0,
       "value": "TV-bejelentkezés: indítás"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poszterkérések"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

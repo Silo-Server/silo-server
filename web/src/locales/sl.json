@@ -64377,7 +64377,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Opravila se registrirajo ob zagonu strežnika, zato vklop ali izklop opravila začne veljati po ponovnem zagonu. Ko opravilo obstaja, njegov urnik spremenite na strani opravila."
+      "value": "Vklop ali izklop opravila začne veljati brez ponovnega zagona, vendar lahko drugi strežniki za uveljavitev potrebujejo trenutek. Ko je opravilo vklopljeno, njegov urnik spremenite na strani opravila."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -76980,136 +76980,10 @@
       "value": "Nastavitev obvestil ni bilo mogoče naložiti"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nova vsebina se ne beleži, zato ni mogoče poslati ničesar. Beleženje znova vklopite v razdelku Obdelava."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Pošiljanje je zaustavljeno; nova vsebina čaka v čakalni vrsti. Pošiljanje znova vklopite v razdelku Obdelava."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Ko je izklopljeno, namesto tega prejmejo dnevni povzetek."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Kako Silo zazna novo vsebino, jo združi v sporočila in kako dolgo jih hrani."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Določanje prejemnikov"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Vsak element se primerja z nastavitvami vseh uporabnikov."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Združevanje in zaščita pred poplavo sporočil"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Obdelava"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Največja starost vsebine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Starejši elementi se zavržejo, namesto da bi prispeli kot zastarele novice."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Največ sporočil na serijo"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Vse nad to mejo se v tem paketu preskoči."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Zaznavanje nove vsebine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Beleži nove elemente med pregledovanjem knjižnic."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Cevovod"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Prebrana obvestila"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Hramba"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Zgodovina poslanih"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Zapis o tem, o čem je Silo že poslal obvestila."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Čas umiritve"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementi, katerih pregledovanje se konča hkrati, prispejo kot eno obvestilo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neprebrana obvestila"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -78062,18 +77936,6 @@
     {
       "type": 0,
       "value": "Obvestila"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dni"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ur"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -84885,7 +84747,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kanali za dostavo, kanali strežnika in kako nova vsebina postane obvestilo."
+      "value": "Kanali za dostavo in kanali strežnika."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -84984,12 +84846,6 @@
       "value": "E-pošta"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Združevanje in nadzor poplave sporočil"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -85008,28 +84864,10 @@
       "value": "Dovoli izbiro e-poštnega sporočila za vsako epizodo"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Največja starost vsebine"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Največ sporočil na serijo"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Omeni vlagatelja zahteve v Discordu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Zaznavanje nove vsebine"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -85038,46 +84876,16 @@
       "value": "Osebni webhooki"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Obdelava"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Prebrana obvestila"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL posrednika"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Hramba"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Zgodovina poslanih"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Kanali strežnika"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Časovno okno umiritve"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -85092,12 +84900,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neprebrana obvestila"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -85108,12 +84910,6 @@
     {
       "type": 0,
       "value": "Webhooki na osebo"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Ugotavljanje, kdo to želi"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -86572,6 +86368,12 @@
     {
       "type": 0,
       "value": "Prijava na TV: začetek"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Zahteve za plakate"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

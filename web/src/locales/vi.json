@@ -52614,7 +52614,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tác vụ được đăng ký khi máy chủ khởi động, nên việc bật hoặc tắt một tác vụ chỉ có hiệu lực sau khi khởi động lại. Khi tác vụ đã tồn tại, hãy thay đổi lịch của tác vụ trên trang tác vụ đó."
+      "value": "Việc bật hoặc tắt một tác vụ có hiệu lực mà không cần khởi động lại, tuy các máy chủ khác có thể cần một lúc để nhận thay đổi. Khi tác vụ đã bật, hãy thay đổi lịch của tác vụ trên trang tác vụ đó."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -63825,136 +63825,10 @@
       "value": "Không thể tải cài đặt thông báo"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nội dung mới không được ghi nhận nên không thể gửi gì. Bật lại trong mục Xử lý."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Đã tạm dừng gửi; nội dung mới chờ trong hàng đợi. Bật lại trong mục Xử lý."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Khi tắt, họ sẽ nhận bản tóm tắt hằng ngày."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cách Silo phát hiện nội dung mới, gom nhóm thành tin nhắn và thời gian lưu giữ chúng."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Xác định ai muốn nhận"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Đối chiếu từng mục với tùy chọn của mọi người."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gom nhóm và kiểm soát tràn"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Xử lý"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Tuổi nội dung tối đa"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Các mục cũ hơn sẽ bị bỏ thay vì đến dưới dạng tin đã cũ."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Số tin nhắn tối đa cho mỗi phim bộ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Phần vượt quá mức này sẽ bị bỏ qua trong đợt đó."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Phát hiện nội dung mới"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Ghi nhận các mục mới trong khi quét thư viện."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Quy trình"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Thông báo đã đọc"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Lưu giữ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Lịch sử đã gửi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Bản ghi những gì Silo đã thông báo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Khoảng chờ ổn định"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Các mục quét xong cùng lúc sẽ được gộp thành một thông báo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Thông báo chưa đọc"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64859,18 +64733,6 @@
     {
       "type": 0,
       "value": "Thông báo"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "ngày"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "giờ"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71504,7 +71366,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kênh gửi, kênh máy chủ và cách nội dung mới trở thành thông báo."
+      "value": "Kênh gửi và kênh máy chủ."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71603,12 +71465,6 @@
       "value": "Email"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gộp nhóm và chống tràn thông báo"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71627,28 +71483,10 @@
       "value": "Cho phép mọi người chọn nhận email cho từng tập"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Tuổi nội dung tối đa"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Số tin nhắn tối đa mỗi phim bộ"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Nhắc đến người yêu cầu trên Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Phát hiện nội dung mới"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71657,46 +71495,16 @@
       "value": "Webhook cá nhân"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Xử lý"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Thông báo đã đọc"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Lưu giữ"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Lịch sử đã gửi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Kênh máy chủ"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Khoảng thời gian chờ ổn định"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71711,12 +71519,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Thông báo chưa đọc"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71727,12 +71529,6 @@
     {
       "type": 0,
       "value": "Số webhook mỗi người"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Xác định ai muốn nhận"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -73143,6 +72939,12 @@
     {
       "type": 0,
       "value": "Đăng nhập TV: bắt đầu"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Yêu cầu ảnh poster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

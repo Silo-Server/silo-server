@@ -46617,7 +46617,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tugas didaftarkan saat server dimulai, jadi mengaktifkan atau menonaktifkan tugas baru berlaku setelah server dimulai ulang. Setelah tugas ada, ubah jadwalnya di halaman tugas tersebut."
+      "value": "Mengaktifkan atau menonaktifkan tugas langsung berlaku tanpa memulai ulang, meskipun server lain mungkin perlu waktu sejenak untuk menerapkannya. Setelah tugas aktif, ubah jadwalnya di halaman tugas tersebut."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -57032,136 +57032,10 @@
       "value": "Tidak dapat memuat pengaturan notifikasi"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Konten baru tidak sedang dicatat, jadi tidak ada yang dapat dikirim. Aktifkan kembali di Pemrosesan."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Pengiriman dijeda; konten baru menunggu di antrean. Aktifkan kembali di Pemrosesan."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Jika nonaktif, pengguna menerima ringkasan harian sebagai gantinya."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cara Silo mendeteksi konten baru, mengelompokkannya menjadi pesan, dan berapa lama pesan disimpan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang menginginkannya"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Cocokkan setiap item dengan preferensi semua pengguna."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Pengelompokan dan pengendalian banjir pesan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Pemrosesan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Usia konten maksimum"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Item yang lebih lama dibuang alih-alih tiba sebagai berita usang."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Pesan maksimum per serial"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Apa pun yang melebihi batas ini dilewati untuk batch tersebut."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Deteksi konten baru"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Catat item baru selama pemindaian perpustakaan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang sudah dibaca"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Retensi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Riwayat pengiriman"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Catatan hal yang sudah diberitahukan Silo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Jendela tunggu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Item yang selesai dipindai bersamaan tiba sebagai satu notifikasi."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang belum dibaca"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58042,18 +57916,6 @@
     {
       "type": 0,
       "value": "Notifikasi"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "hari"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "jam"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -64548,7 +64410,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Saluran pengiriman, saluran server, dan cara konten baru menjadi notifikasi."
+      "value": "Saluran pengiriman dan saluran server."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -64647,12 +64509,6 @@
       "value": "Email"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Pengelompokan dan kontrol banjir"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -64671,28 +64527,10 @@
       "value": "Izinkan pengguna memilih email per episode"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Usia konten maksimum"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Pesan maksimum per serial"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Sebut peminta di Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Deteksi konten baru"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -64701,46 +64539,16 @@
       "value": "Webhook pribadi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Pemrosesan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang sudah dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Retensi"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Riwayat terkirim"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Saluran server"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Jendela penyelesaian"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -64755,12 +64563,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang belum dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -64771,12 +64573,6 @@
     {
       "type": 0,
       "value": "Webhook per orang"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang menginginkannya"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -66163,6 +65959,12 @@
     {
       "type": 0,
       "value": "Masuk di TV: mulai"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Permintaan poster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

@@ -35,6 +35,14 @@ type RetentionStats struct {
 	EmailVerificationReceiptsDeleted int64
 }
 
+// Retention windows: how long read and unread inbox rows are kept, and how
+// long processed release events are kept for debugging.
+const (
+	readDeliveryRetentionDays   = 90
+	unreadDeliveryRetentionDays = 180
+	releaseEventRetentionDays   = 30
+)
+
 // RunRetention applies the retention policy: read deliveries past the read
 // window, unread past the unread window, processed release events past the
 // debug window, unprocessed release events and watchlist promotion records
@@ -45,11 +53,12 @@ type RetentionStats struct {
 func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	var stats RetentionStats
 	now := time.Now().UTC()
-	readCutoff := now.AddDate(0, 0, -s.Settings.ReadRetentionDays(ctx))
-	unreadCutoff := now.AddDate(0, 0, -s.Settings.UnreadRetentionDays(ctx))
-	eventCutoff := now.AddDate(0, 0, -s.Settings.EventRetentionDays(ctx))
+	readCutoff := now.AddDate(0, 0, -readDeliveryRetentionDays)
+	unreadCutoff := now.AddDate(0, 0, -unreadDeliveryRetentionDays)
+	eventCutoff := now.AddDate(0, 0, -releaseEventRetentionDays)
+	staleCutoff := now.Add(-maxReleaseEventAge)
 
-	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff, now.Add(-s.Settings.MaxEventAge(ctx)))
+	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff, staleCutoff)
 	if err != nil {
 		return stats, fmt.Errorf("prune deliveries: %w", err)
 	}
@@ -61,10 +70,10 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	}
 	stats.EventsDeleted = events
 
-	// Unprocessed events accumulate without bound when fanout is disabled
-	// while availability detection keeps emitting; the fanout worker would
-	// suppress them as stale anyway, so retention reclaims them directly.
-	staleEvents, err := s.Releases.DeleteUnprocessedBefore(ctx, now.Add(-s.Settings.MaxEventAge(ctx)))
+	// Unprocessed events accumulate while no node runs fanout; the fanout
+	// worker would suppress them as stale anyway, so retention reclaims them
+	// directly.
+	staleEvents, err := s.Releases.DeleteUnprocessedBefore(ctx, staleCutoff)
 	if err != nil {
 		return stats, fmt.Errorf("prune stale release events: %w", err)
 	}
@@ -73,7 +82,7 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	// Watchlist promotion records past the same horizon can no longer make
 	// an arrival (watchlist.Arrivals.PrunePromotions).
 	if s.Fanout != nil && s.Fanout.watchlist != nil && s.Fanout.pool != nil {
-		promotions, err := s.Fanout.watchlist.PrunePromotions(ctx, s.Fanout.pool, now.Add(-s.Settings.MaxEventAge(ctx)))
+		promotions, err := s.Fanout.watchlist.PrunePromotions(ctx, s.Fanout.pool, staleCutoff)
 		if err != nil {
 			return stats, fmt.Errorf("prune watchlist promotions: %w", err)
 		}

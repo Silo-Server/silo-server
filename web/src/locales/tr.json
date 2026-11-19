@@ -51898,7 +51898,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Görevler sunucu başlatılırken kaydedilir, bu nedenle bir görevi açmak veya kapatmak yeniden başlatmadan sonra etkili olur. Bir görev oluşturulduktan sonra zamanlamasını görev sayfasından değiştirin."
+      "value": "Bir görevi açmak veya kapatmak yeniden başlatma gerektirmeden uygulanır, ancak diğer sunucuların değişikliği algılaması biraz zaman alabilir. Bir görev açıldıktan sonra zamanlamasını görev sayfasından değiştirin."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -63029,136 +63029,10 @@
       "value": "Bildirim ayarları yüklenemedi"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Yeni içerik kaydedilmiyor, bu nedenle hiçbir şey gönderilemez. İşleme altından yeniden açın."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Gönderme duraklatıldı; yeni içerik kuyrukta bekliyor. İşleme altından yeniden açın."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Kapalı olduğunda bunun yerine günlük özet gönderilir."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo’nun yeni içeriği nasıl fark ettiği, mesajlarda nasıl grupladığı ve bunları ne kadar süre sakladığı."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Kimin istediğini belirle"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Her öğeyi herkesin tercihleriyle eşleştirir."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gruplama ve yoğunluk denetimi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "İşleme"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "En fazla içerik yaşı"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Daha eski öğeler, eskimiş haber olarak gelmek yerine atılır."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Dizi başına en fazla mesaj"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Bunu aşan her şey o grup için atlanır."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Yeni içeriği fark et"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Kitaplık taramaları sırasında yeni öğeleri kaydeder."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "İşlem hattı"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmuş bildirimler"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Saklama"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Gönderim geçmişi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo’nun daha önce bildirdiği şeylerin kaydı."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Birleştirme aralığı"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Taraması birlikte biten öğeler tek bir bildirim olarak gelir."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmamış bildirimler"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64063,18 +63937,6 @@
     {
       "type": 0,
       "value": "Bildirimler"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "gün"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "saat"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -70636,7 +70498,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Teslim kanalları, sunucu kanalları ve yeni içeriğin nasıl bildirime dönüştüğü."
+      "value": "Teslim kanalları ve sunucu kanalları."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70735,12 +70597,6 @@
       "value": "E-posta"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gruplama ve yoğunluk denetimi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -70759,28 +70615,10 @@
       "value": "Kişilerin bölüm başına e-posta seçmesine izin ver"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "En fazla içerik yaşı"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Dizi başına en fazla mesaj"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "İstek sahibini Discord’da etiketle"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Yeni içeriği algıla"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -70789,46 +70627,16 @@
       "value": "Kişisel Webhook’lar"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "İşleme"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmuş bildirimler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Aktarma URL’si"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Saklama"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Gönderim geçmişi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Sunucu Kanalları"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Bekleme aralığı"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -70843,12 +70651,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmamış bildirimler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -70859,12 +70661,6 @@
     {
       "type": 0,
       "value": "Kişi başına webhook"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Kimin istediğini belirle"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -72275,6 +72071,12 @@
     {
       "type": 0,
       "value": "TV oturum açma: başlatma"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poster istekleri"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

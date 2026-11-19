@@ -52474,7 +52474,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tehtävät rekisteröidään palvelimen käynnistyessä, joten tehtävän ottaminen käyttöön tai poistaminen käytöstä tulee voimaan uudelleenkäynnistyksen jälkeen. Kun tehtävä on olemassa, muuta sen aikataulua tehtävän omalla sivulla."
+      "value": "Tehtävän ottaminen käyttöön tai poistaminen käytöstä tulee voimaan ilman uudelleenkäynnistystä, mutta muilta palvelimilta muutoksen huomaaminen voi kestää hetken. Kun tehtävä on käytössä, muuta sen aikataulua tehtävän omalla sivulla."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -63613,136 +63613,10 @@
       "value": "Ilmoitusasetusten lataaminen epäonnistui"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Uutta sisältöä ei kirjata, joten mitään ei voi lähettää. Ota se takaisin käyttöön kohdassa Käsittely."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Lähettäminen on keskeytetty; uusi sisältö odottaa jonossa. Ota se takaisin käyttöön kohdassa Käsittely."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Pois-tilassa heille lähetetään sen sijaan päivittäinen yhteenveto."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Miten Silo havaitsee uuden sisällön, ryhmittelee sen viesteiksi ja kuinka kauan se säilyttää viestit."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Vastaanottajien selvittäminen"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Vertaa jokaista kohdetta kaikkien mieltymyksiin."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Ryhmittely ja viestitulvan esto"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Käsittely"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Sisällön enimmäisikä"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Vanhemmat kohteet hylätään, jotta ne eivät saavu vanhentuneina uutisina."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Viestejä enintään sarjaa kohden"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Tämän ylittävät ohitetaan kyseisessä erässä."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Uuden sisällön havaitseminen"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Kirjaa uudet kohteet kirjastoskannausten aikana."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Käsittelyketju"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Luetut ilmoitukset"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Säilytys"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Lähetyshistoria"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Kirjanpito siitä, mistä Silo on jo ilmoittanut."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Tasaantumisaika"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Kohteet, joiden skannaus valmistuu samaan aikaan, saapuvat yhtenä ilmoituksena."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Lukemattomat ilmoitukset"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64647,18 +64521,6 @@
     {
       "type": 0,
       "value": "Ilmoitukset"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "päivää"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "tuntia"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71272,7 +71134,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Toimituskanavat, palvelinkanavat ja se, miten uudesta sisällöstä tulee ilmoituksia."
+      "value": "Toimituskanavat ja palvelinkanavat."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71371,12 +71233,6 @@
       "value": "Sähköposti"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Ryhmittely ja ilmoitustulvan esto"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71395,28 +71251,10 @@
       "value": "Anna käyttäjien valita sähköposti jokaisesta jaksosta"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Sisällön enimmäisikä"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Viestejä enintään sarjaa kohden"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Mainitse pyytäjä Discordissa"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Havaitse uusi sisältö"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71425,46 +71263,16 @@
       "value": "Henkilökohtaiset webhookit"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Käsittely"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Luetut ilmoitukset"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Välittäjän URL-osoite"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Säilytys"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Lähetyshistoria"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Palvelinkanavat"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Tasaantumisikkuna"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71479,12 +71287,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Lukemattomat ilmoitukset"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71495,12 +71297,6 @@
     {
       "type": 0,
       "value": "Webhookeja henkilöä kohden"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Selvitä, kuka sitä haluaa"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -72911,6 +72707,12 @@
     {
       "type": 0,
       "value": "Tv-kirjautuminen: aloitus"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Julistepyynnöt"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

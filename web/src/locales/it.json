@@ -58274,7 +58274,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Le attività vengono registrate all’avvio del server, quindi attivarne o disattivarne una ha effetto dopo un riavvio. Una volta creata un’attività, modificane la pianificazione nella sua pagina."
+      "value": "Attivare o disattivare un’attività ha effetto senza riavvio, anche se gli altri server possono impiegare qualche istante per recepire la modifica. Una volta attivata un’attività, modificane la pianificazione nella pagina dell’attività."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -70129,136 +70129,10 @@
       "value": "Impossibile caricare le impostazioni delle notifiche"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "I nuovi contenuti non vengono registrati, quindi non si può inviare nulla. Riattiva l’opzione in Elaborazione."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "L’invio è in pausa; i nuovi contenuti attendono in coda. Riattivalo in Elaborazione."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Se disattivato, viene inviato invece il riepilogo giornaliero."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Come Silo rileva i nuovi contenuti, li raggruppa in messaggi e per quanto tempo li conserva."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Individua chi li vuole"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Confronta ogni elemento con le preferenze di tutti."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Raggruppamento e controllo dei picchi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Elaborazione"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Età massima dei contenuti"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Gli elementi più vecchi vengono scartati invece di arrivare come notizie superate."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Messaggi massimi per serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Ciò che supera questo limite viene saltato per quel batch."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Rileva nuovi contenuti"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registra i nuovi elementi durante le scansioni della libreria."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifiche lette"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Conservazione"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Cronologia invii"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Registro di ciò che Silo ha già notificato."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Finestra di assestamento"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Gli elementi che terminano la scansione insieme arrivano come un’unica notifica."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifiche non lette"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71187,18 +71061,6 @@
     {
       "type": 0,
       "value": "Notifiche"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "giorni"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ore"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -77879,7 +77741,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Canali di consegna, canali del server e come i nuovi contenuti diventano notifiche."
+      "value": "Canali di consegna e canali del server."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -77978,12 +77840,6 @@
       "value": "Email"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Raggruppamento e controllo del flood"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -78002,28 +77858,10 @@
       "value": "Consenti di scegliere un’email per episodio"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Età massima dei contenuti"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Numero massimo di messaggi per serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Menziona su Discord chi ha fatto la richiesta"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Rileva i nuovi contenuti"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -78032,46 +77870,16 @@
       "value": "Webhook personali"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Elaborazione"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifiche lette"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL del relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Conservazione"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Cronologia degli invii"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Canali del server"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Finestra di assestamento"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -78086,12 +77894,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifiche non lette"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -78102,12 +77904,6 @@
     {
       "type": 0,
       "value": "Webhook per persona"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Determina i destinatari"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -79542,6 +79338,12 @@
     {
       "type": 0,
       "value": "Accesso TV: avvio"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Richieste di locandine"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

@@ -135,8 +135,8 @@ series, or a series the viewer may not see, is 404.
 
 `DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
 The series notifies again while Next Up is active for it. Fanout reads the mute when it
-evaluates a new episode, after the release settle delay (30 seconds by
-default): an episode it evaluated while the series was muted is not announced
+evaluates a new episode, after the release settle delay (a fixed 30
+seconds): an episode it evaluated while the series was muted is not announced
 later, and one still waiting for fanout when the profile unmutes is announced.
 The same holds the other way: a mute made just after an episode arrives can
 still stop its notification. Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
@@ -341,7 +341,8 @@ until an administrator turns delivery on. Native clients see the effective
 state through `GET /api/v2/notifications/capabilities` and need no change.
 
 Relay errors are problem documents, with `Retry-After` retained when supplied.
-Validation failures are 422 and relay upstream failures are the shared 500
+An invalid `relay_url` is a 400 (`malformed_request`), a deployment the relay
+rejects is a 422, and relay upstream failures are the shared 500
 `internal_error`. Native clients and Jellyfin compatibility do not manage relay
 credentials and need no consumer change.
 
@@ -559,7 +560,7 @@ The operation is **non-retryable**. A delayed repeat can clear an address reques
 
 ### Delete a personal webhook
 
-`DELETE /api/v2/notifications/webhooks/{id}` (`deleteNotificationWebhook`) requires the original row's strong validator in `If-Match`. The bounded webhook list supplies that quoted validator in each item's `etag`. Authenticated profile authority and the demo guard apply. Missing/foreign resources return `404` before precondition evaluation; an existing resource without `If-Match` returns `428`, a stale validator returns `412` with the current `ETag`, and an exact match returns bodyless `204`. Standard conditional-header grammar applies. The UI never supplies a wildcard.
+`DELETE /api/v2/notifications/webhooks/{id}` (`deleteNotificationWebhook`) requires the original row's strong validator in `If-Match`. The bounded webhook list supplies that quoted validator in each item's `etag`. Authenticated profile authority and the demo guard apply. Missing/foreign resources return `404` before precondition evaluation; an existing resource without `If-Match` returns `428`, a stale validator returns `412` with the current `ETag`, and an exact match returns bodyless `204`. Standard conditional-header grammar applies, so `If-Match: *` also passes for an existing row; the UI never sends it.
 
 A database sequence and insert/update trigger allocate a fresh revision for every row change, including configuration and provider outcome writers. Revision allocation is not based on timestamps and never reuses a deleted identity's validator. Deletion locks the profile-owned row, evaluates its current validator, and deletes within that same transaction; a concurrent editor that commits first is preserved by a stale-delete refusal. Stored delivery attempts cascade only on a successful deletion. Deploy the revision migration before code that reads the new column. This does not change provider delivery or recall an already-dispatched request.
 
@@ -581,7 +582,7 @@ This operation is non-retryable. The existing settings action captures ID and au
 
 ### Update personal webhook configuration
 
-`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state, `notify_next_up` and `notify_requests` are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`.
+`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state, `notify_next_up` and `notify_requests` are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`. As with delete, `If-Match: *` also passes for an existing row; the UI never sends it.
 
 The repository locks the profile's exact row, checks its current revision, applies existing validation and writes configuration in one transaction. URL replacement preserves type restrictions, destination validation and encrypted URL binding. URL changes and re-enabling retain the existing failure-reset behavior. The write does not copy secret, type or delivery outcome fields from an editor. The server-owned revision trigger remains required and covers provider bookkeeping; those changes can conservatively invalidate an editor. Other writers may still change the row after this operation commits. A successful response is an observation, not a lease.
 

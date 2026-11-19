@@ -64646,7 +64646,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Úlohy sa registrujú pri spustení servera, takže zapnutie alebo vypnutie úlohy sa prejaví až po reštarte. Keď úloha existuje, jej plán zmeníte na stránke úlohy."
+      "value": "Zapnutie alebo vypnutie úlohy sa prejaví bez reštartu, hoci ostatným serverom môže chvíľu trvať, kým zmenu zaznamenajú. Keď je úloha zapnutá, jej plán zmeníte na stránke úlohy."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -77285,136 +77285,10 @@
       "value": "Nepodarilo sa načítať nastavenia upozornení"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nový obsah sa nezaznamenáva, takže sa nedá nič odoslať. Znova to zapnite v časti Spracovanie."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Odosielanie je pozastavené; nový obsah čaká vo fronte. Znova ho zapnite v časti Spracovanie."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Keď je vypnuté, dostanú namiesto toho denný prehľad."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Ako Silo zisťuje nový obsah, zoskupuje ho do správ a ako dlho ich uchováva."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Zistiť, kto o obsah stojí"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Porovnať každú položku s predvoľbami všetkých."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Zoskupovanie a ochrana pred zahltením"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Spracovanie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maximálny vek obsahu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Staršie položky sa zahodia, aby neprišli ako zastarané novinky."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maximálny počet správ na seriál"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Všetko nad tento limit sa v danej dávke preskočí."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Zaznamenávať nový obsah"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Zaznamenávať nové položky počas skenovania knižníc."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Fázy spracovania"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Prečítané upozornenia"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Uchovávanie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "História odoslaných"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Záznam o tom, o čom už Silo upozornilo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Čakacie okno"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Položky, ktorých skenovanie sa dokončí naraz, prídu ako jedno upozornenie."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neprečítané upozornenia"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -78367,18 +78241,6 @@
     {
       "type": 0,
       "value": "Upozornenia"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dní"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "hodín"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -85178,7 +85040,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kanály doručovania, serverové kanály a spôsob, akým sa z nového obsahu stávajú upozornenia."
+      "value": "Kanály doručovania a serverové kanály."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -85277,12 +85139,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Zoskupovanie a ochrana pred zahltením"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -85301,28 +85157,10 @@
       "value": "Povoliť používateľom zvoliť si e-mail pre každú epizódu"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maximálny vek obsahu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maximum správ na seriál"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Označiť žiadateľa v službe Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Zistiť nový obsah"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -85331,46 +85169,16 @@
       "value": "Osobné webhooky"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Spracovanie"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Prečítané upozornenia"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL relé"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Uchovávanie"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "História odoslaných"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverové kanály"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Okno ustálenia"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -85385,12 +85193,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neprečítané upozornenia"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -85401,12 +85203,6 @@
     {
       "type": 0,
       "value": "Webhooky na osobu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Zistiť, kto o to má záujem"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -86865,6 +86661,12 @@
     {
       "type": 0,
       "value": "Prihlásenie na TV: začiatok"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Požiadavky na plagáty"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

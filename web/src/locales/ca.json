@@ -58486,7 +58486,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Les tasques es registren quan s’inicia el servidor, de manera que activar-ne o desactivar-ne una té efecte després d’un reinici. Un cop existeix una tasca, canvia’n la programació a la pàgina de la tasca."
+      "value": "Activar o desactivar una tasca s’aplica sense reiniciar, tot i que els altres servidors poden trigar una mica a detectar-ho. Un cop una tasca està activada, canvia’n la programació a la pàgina de la tasca."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -70361,136 +70361,10 @@
       "value": "No s’ha pogut carregar la configuració de les notificacions"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "No s’està registrant el contingut nou, així que no es pot enviar res. Torna-ho a activar a Processament."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "L’enviament està en pausa; el contingut nou espera a la cua. Torna’l a activar a Processament."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Si està desactivat, se’ls envia el resum diari."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Com detecta Silo el contingut nou, com l’agrupa en missatges i quant de temps els conserva."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Determina qui el vol"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Compara cada element amb les preferències de tothom."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Agrupació i control d’allaus"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Processament"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Antiguitat màxima del contingut"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Els elements més antics es descarten en lloc d’arribar com a notícies antigues."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Màxim de missatges per sèrie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "El que superi aquest límit s’omet en aquest lot."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Detecta el contingut nou"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registra els elements nous durant les anàlisis de la biblioteca."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Flux de processament"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions llegides"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Conservació"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historial d’enviaments"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Registre del que Silo ja ha notificat."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Finestra d’espera"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Els elements que acaben l’anàlisi alhora arriben en una sola notificació."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions no llegides"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71419,18 +71293,6 @@
     {
       "type": 0,
       "value": "Notificacions"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dies"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "hores"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -78135,7 +77997,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Canals d’entrega, canals del servidor i com el contingut nou es converteix en notificacions."
+      "value": "Canals d’entrega i canals del servidor."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -78234,12 +78096,6 @@
       "value": "Correu electrònic"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Agrupació i control d’excés de missatges"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -78258,28 +78114,10 @@
       "value": "Permet triar un correu electrònic per episodi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Antiguitat màxima del contingut"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Nombre màxim de missatges per sèrie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Menciona qui ha fet la sol·licitud a Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Detecta el contingut nou"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -78288,46 +78126,16 @@
       "value": "Webhooks personals"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Processament"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions llegides"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL del relé"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Conservació"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historial d’enviaments"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Canals del servidor"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Interval d’estabilització"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -78342,12 +78150,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions no llegides"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -78358,12 +78160,6 @@
     {
       "type": 0,
       "value": "Webhooks per persona"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Determina qui ho vol"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -79798,6 +79594,12 @@
     {
       "type": 0,
       "value": "Inici de sessió a la TV: començament"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Sol·licituds de pòsters"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

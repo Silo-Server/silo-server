@@ -52442,7 +52442,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Opgaver registreres, når serveren starter, så det træder først i kraft efter en genstart, når du slår en opgave til eller fra. Når en opgave findes, kan du ændre dens tidsplan på opgavens side."
+      "value": "Når du slår en opgave til eller fra, træder det i kraft uden genstart, men andre servere kan være et øjeblik om at registrere ændringen. Når en opgave er slået til, kan du ændre dens tidsplan på opgavens side."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -63561,136 +63561,10 @@
       "value": "Kunne ikke indlæse notifikationsindstillingerne"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nyt indhold registreres ikke, så intet kan sendes. Slå det til igen under Behandling."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Afsendelse er sat på pause; nyt indhold venter i køen. Slå det til igen under Behandling."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Fra sender dem den daglige oversigt i stedet."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hvordan Silo opdager nyt indhold, samler det i beskeder, og hvor længe de gemmes."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Find ud af, hvem der vil have det"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Match hvert element mod alles præferencer."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gruppering og begrænsning af beskedmængde"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maks. alder for indhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Ældre elementer kasseres i stedet for at ankomme som forældede nyheder."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maks. beskeder pr. serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Alt ud over dette springes over i den pågældende batch."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Opdag nyt indhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registrer nye elementer under biblioteksscanninger."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Læste notifikationer"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Opbevaring"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Afsendelseshistorik"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Oversigt over, hvad Silo allerede har sendt notifikationer om."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Samlevindue"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementer, der bliver færdigscannet samtidig, kommer som én notifikation."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ulæste notifikationer"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64595,18 +64469,6 @@
     {
       "type": 0,
       "value": "Notifikationer"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dage"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "timer"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71176,7 +71038,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Leveringskanaler, serverkanaler, og hvordan nyt indhold bliver til notifikationer."
+      "value": "Leveringskanaler og serverkanaler."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71275,12 +71137,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gruppering og flodkontrol"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71299,28 +71155,10 @@
       "value": "Lad personer vælge en e-mail pr. afsnit"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maks. alder for indhold"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maks. beskeder pr. serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Nævn anmoderen på Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Registrer nyt indhold"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71329,46 +71167,16 @@
       "value": "Personlige webhooks"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Læste notifikationer"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Relay-URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Opbevaring"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Afsendelseshistorik"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverkanaler"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Stabiliseringsvindue"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71383,12 +71191,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ulæste notifikationer"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71399,12 +71201,6 @@
     {
       "type": 0,
       "value": "Webhooks pr. person"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Find ud af, hvem der vil have det"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -72815,6 +72611,12 @@
     {
       "type": 0,
       "value": "Login på tv: start"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatforespørgsler"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

@@ -52966,7 +52966,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Ülesanded registreeritakse serveri käivitumisel, seega jõustub ülesande sisse- või väljalülitamine pärast taaskäivitust. Kui ülesanne on olemas, muutke selle ajakava ülesande lehel."
+      "value": "Ülesande sisse- või väljalülitamine jõustub ilma taaskäivituseta, kuigi teistel serveritel võib selle rakendamiseks veidi aega kuluda. Kui ülesanne on sisse lülitatud, muutke selle ajakava ülesande lehel."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -64181,136 +64181,10 @@
       "value": "Teavituste seadete laadimine ebaõnnestus"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Uut sisu ei salvestata, seega ei saa midagi saata. Lülitage see jaotises „Töötlemine“ uuesti sisse."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Saatmine on peatatud; uus sisu ootab järjekorras. Lülitage see jaotises „Töötlemine“ uuesti sisse."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Kui see on väljas, saadetakse neile selle asemel igapäevane kokkuvõte."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Kuidas Silo uut sisu märkab, selle sõnumiteks rühmitab ja kui kaua neid säilitab."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Selgita välja, kes seda soovib"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Võrdle iga üksust kõigi kasutajate eelistustega."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Rühmitamine ja üleujutuse piiramine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Töötlemine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Sisu maksimaalne vanus"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Vanemad üksused jäetakse välja, et need ei jõuaks kohale aegunud uudistena."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maksimaalne sõnumite arv sarja kohta"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Kõik, mis seda ületab, jäetakse selles partiis vahele."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Märka uut sisu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Salvesta uued üksused meediakogu skannimise ajal."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Töötlusahel"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Loetud teavitused"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Säilitamine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Saatmisajalugu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Kirjed selle kohta, millest Silo on juba teavitanud."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Ooteaken"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Üksused, mille skannimine lõpeb koos, saabuvad ühe teavitusena."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Lugemata teavitused"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -65219,18 +65093,6 @@
     {
       "type": 0,
       "value": "Teavitused"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "päeva"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "tundi"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71868,7 +71730,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Edastuskanalid, serveri kanalid ja see, kuidas uuest sisust saavad teavitused."
+      "value": "Edastuskanalid ja serveri kanalid."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71967,12 +71829,6 @@
       "value": "E-post"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Rühmitamine ja üleujutuse piiramine"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71991,28 +71847,10 @@
       "value": "Luba inimestel valida e-kiri iga osa kohta"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Sisu maksimaalne vanus"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Sõnumite maksimumarv sarja kohta"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Maini taotlejat Discordis"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Uue sisu tuvastamine"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -72021,46 +71859,16 @@
       "value": "Isiklikud webhookid"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Töötlemine"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Loetud teavitused"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Edastusserveri URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Säilitamine"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Saatmisajalugu"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serveri kanalid"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Stabiliseerumise ajaaken"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -72075,12 +71883,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Lugemata teavitused"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -72091,12 +71893,6 @@
     {
       "type": 0,
       "value": "Webhooke inimese kohta"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Huviliste väljaselgitamine"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -73507,6 +73303,12 @@
     {
       "type": 0,
       "value": "Teleri sisselogimine: alustamine"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatite päringud"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

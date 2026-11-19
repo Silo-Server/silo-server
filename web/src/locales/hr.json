@@ -58506,7 +58506,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Zadaci se registriraju pri pokretanju poslužitelja pa uključivanje ili isključivanje zadatka stupa na snagu nakon ponovnog pokretanja. Kada zadatak postoji, promijenite njegov raspored na stranici zadatka."
+      "value": "Uključivanje ili isključivanje zadatka primjenjuje se bez ponovnog pokretanja, no drugim poslužiteljima može trebati trenutak da preuzmu promjenu. Kada je zadatak uključen, promijenite njegov raspored na stranici zadatka."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -70381,136 +70381,10 @@
       "value": "Nije moguće učitati postavke obavijesti"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Novi se sadržaj ne bilježi pa se ništa ne može poslati. Ponovno ga uključite u odjeljku Obrada."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Slanje je pauzirano; novi sadržaj čeka u redu čekanja. Ponovno ga uključite u odjeljku Obrada."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Kada je isključeno, umjesto toga šalje se dnevni sažetak."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Kako Silo uočava novi sadržaj, grupira ga u poruke i koliko ih dugo čuva."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Utvrdi tko to želi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Usporedi svaku stavku s preferencijama svih korisnika."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Grupiranje i ograničavanje količine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Obrada"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Najveća starost sadržaja"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Starije se stavke odbacuju umjesto da stignu kao zastarjele vijesti."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Najviše poruka po seriji"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Sve iznad toga preskače se za tu skupinu."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Uočavaj novi sadržaj"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Bilježi nove stavke tijekom skeniranja medijateka."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Tijek obrade"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Pročitane obavijesti"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Zadržavanje"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Povijest slanja"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Zapis o onome o čemu je Silo već poslao obavijest."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Razdoblje čekanja"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Stavke čije skeniranje završi zajedno stižu kao jedna obavijest."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Nepročitane obavijesti"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71439,18 +71313,6 @@
     {
       "type": 0,
       "value": "Obavijesti"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dana"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "sati"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -78147,7 +78009,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kanali isporuke, kanali poslužitelja i način na koji novi sadržaj postaje obavijest."
+      "value": "Kanali isporuke i kanali poslužitelja."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -78246,12 +78108,6 @@
       "value": "E-pošta"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Grupiranje i zaštita od preplavljivanja"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -78270,28 +78126,10 @@
       "value": "Dopusti odabir e-poruke za svaku epizodu"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Najveća starost sadržaja"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Najviše poruka po seriji"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Spomeni osobu koja je podnijela zahtjev na Discordu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Uoči novi sadržaj"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -78300,46 +78138,16 @@
       "value": "Osobni webhookovi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Obrada"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Pročitane obavijesti"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL releja"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Zadržavanje"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Povijest poslanog"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Kanali poslužitelja"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Vremenski okvir stabilizacije"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -78354,12 +78162,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Nepročitane obavijesti"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -78370,12 +78172,6 @@
     {
       "type": 0,
       "value": "Webhookovi po osobi"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Utvrdi tko ga želi"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -79810,6 +79606,12 @@
     {
       "type": 0,
       "value": "Prijava na TV-u: početak"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Zahtjevi za postere"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

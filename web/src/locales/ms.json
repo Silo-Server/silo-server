@@ -46605,7 +46605,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tugas didaftarkan semasa pelayan bermula, jadi menghidupkan atau mematikan tugas berkuat kuasa selepas dimulakan semula. Setelah tugas wujud, tukar jadualnya di halaman tugas itu."
+      "value": "Menghidupkan atau mematikan tugas berkuat kuasa tanpa perlu dimulakan semula, walaupun pelayan lain mungkin mengambil sedikit masa untuk menerimanya. Setelah tugas dihidupkan, tukar jadualnya di halaman tugas itu."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -57020,136 +57020,10 @@
       "value": "Tidak dapat memuatkan tetapan pemberitahuan"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Kandungan baharu tidak direkodkan, jadi tiada apa-apa boleh dihantar. Hidupkannya semula di bawah Pemprosesan."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Penghantaran dijeda; kandungan baharu menunggu dalam baris gilir. Hidupkannya semula di bawah Pemprosesan."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Jika dimatikan, ringkasan harian dihantar kepada mereka."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cara Silo mengesan kandungan baharu, mengumpulkannya ke dalam mesej, dan berapa lama mesej itu disimpan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang mahukannya"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Padankan setiap item dengan keutamaan semua pengguna."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Pengumpulan dan kawalan limpahan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Pemprosesan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Usia kandungan maksimum"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Item yang lebih lama digugurkan dan tidak dihantar sebagai berita lapuk."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Mesej maksimum bagi setiap siri"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Apa-apa yang melebihi had ini dilangkau untuk kelompok itu."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Kesan kandungan baharu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Rekodkan item baharu semasa imbasan pustaka."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Saluran paip"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan yang dibaca"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Penyimpanan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sejarah penghantaran"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Rekod perkara yang telah diberitahu oleh Silo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Tempoh penstabilan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Item yang selesai diimbas bersama-sama dihantar sebagai satu pemberitahuan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan yang belum dibaca"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58030,18 +57904,6 @@
     {
       "type": 0,
       "value": "Pemberitahuan"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "hari"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "jam"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -64524,7 +64386,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Saluran penghantaran, saluran pelayan, dan cara kandungan baharu menjadi pemberitahuan."
+      "value": "Saluran penghantaran dan saluran pelayan."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -64623,12 +64485,6 @@
       "value": "E-mel"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Pengumpulan dan kawalan limpahan"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -64647,28 +64503,10 @@
       "value": "Benarkan pengguna memilih e-mel bagi setiap episod"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Usia kandungan maksimum"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Mesej maksimum bagi setiap siri"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Sebut peminta di Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Kesan kandungan baharu"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -64677,46 +64515,16 @@
       "value": "Webhook Peribadi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Pemprosesan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan yang dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL geganti"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Penyimpanan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sejarah dihantar"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Saluran Pelayan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Tempoh tenang"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -64731,12 +64539,6 @@
       "value": "Geganti Tolakan Silo"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan belum dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -64747,12 +64549,6 @@
     {
       "type": 0,
       "value": "Webhook bagi setiap orang"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang mahukannya"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -66139,6 +65935,12 @@
     {
       "type": 0,
       "value": "Log masuk TV: mula"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Permintaan poster"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

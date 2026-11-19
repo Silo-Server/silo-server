@@ -57354,7 +57354,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "⟦Ţåšķš åŕé ŕéĝîšţéŕéđ ŵĥéñ ţĥé šéŕṽéŕ šţåŕţš, šö ţûŕñîñĝ öñé öñ öŕ öƒƒ ţåķéš éƒƒéçţ åƒţéŕ å ŕéšţåŕţ. Öñçé å ţåšķ éẋîšţš, çĥåñĝé îţš šçĥéđûļé öñ îţš ţåšķ þåĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţûŕñîñĝ å ţåšķ öñ öŕ öƒƒ åþþļîéš ŵîţĥöûţ å ŕéšţåŕţ, ţĥöûĝĥ öţĥéŕ šéŕṽéŕš çåñ ţåķé å ɱöɱéñţ ţö þîçķ îţ ûþ. Öñçé å ţåšķ îš öñ, çĥåñĝé îţš šçĥéđûļé öñ îţš ţåšķ þåĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -69249,136 +69249,10 @@
       "value": "⟦Çöûļđñ'ţ ļöåđ ñöţîƒîçåţîöñ šéţţîñĝš~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "⟦Ñéŵ çöñţéñţ îš ñöţ ƀéîñĝ ŕéçöŕđéđ, šö ñöţĥîñĝ çåñ ƀé šéñţ. Ţûŕñ îţ ƀåçķ öñ ûñđéŕ Þŕöçéššîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "⟦Šéñđîñĝ îš þåûšéđ; ñéŵ çöñţéñţ ŵåîţš îñ ţĥé ǫûéûé. Ţûŕñ îţ ƀåçķ öñ ûñđéŕ Þŕöçéššîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "⟦Öƒƒ šéñđš ţĥéɱ ţĥé đåîļý šûɱɱåŕý îñšţéåđ.~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "⟦Ĥöŵ Šîļö ñöţîçéš ñéŵ çöñţéñţ, ĝŕöûþš îţ îñţö ɱéššåĝéš, åñđ ĥöŵ ļöñĝ îţ ķééþš ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "⟦Ŵöŕķ öûţ ŵĥö ŵåñţš îţ~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåţçĥ éåçĥ îţéɱ åĝåîñšţ éṽéŕýöñé'š þŕéƒéŕéñçéš.~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "⟦Ĝŕöûþîñĝ åñđ ƒļööđ çöñţŕöļ~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "⟦Þŕöçéššîñĝ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ çöñţéñţ åĝé~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "⟦Öļđéŕ îţéɱš åŕé đŕöþþéđ îñšţéåđ öƒ åŕŕîṽîñĝ åš šţåļé ñéŵš.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ ɱéššåĝéš þéŕ šĥöŵ~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "⟦Åñýţĥîñĝ þåšţ ţĥîš îš šķîþþéđ ƒöŕ ţĥåţ ƀåţçĥ.~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "⟦Ñöţîçé ñéŵ çöñţéñţ~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéçöŕđ ñéŵ îţéɱš đûŕîñĝ ļîƀŕåŕý šçåñš.~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "⟦Þîþéļîñé~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéţéñţîöñ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "⟦Šéñţ ĥîšţöŕý~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéçöŕđ öƒ ŵĥåţ Šîļö åļŕéåđý ñöţîƒîéđ åƀöûţ.~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "⟦Šéţţļé ŵîñđöŵ~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "⟦Îţéɱš ţĥåţ ƒîñîšĥ šçåññîñĝ ţöĝéţĥéŕ åŕŕîṽé åš öñé ñöţîƒîçåţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ûñŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -70347,18 +70221,6 @@
     {
       "type": 0,
       "value": "⟦Ñöţîƒîçåţîöñš~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "⟦đåýš~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "⟦ĥöûŕš~~⟧"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -77644,7 +77506,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "⟦Đéļîṽéŕý çĥåññéļš, šéŕṽéŕ çĥåññéļš, åñđ ĥöŵ ñéŵ çöñţéñţ ƀéçöɱéš ñöţîƒîçåţîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Đéļîṽéŕý çĥåññéļš åñđ šéŕṽéŕ çĥåññéļš.~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -77743,12 +77605,6 @@
       "value": "⟦Éɱåîļ~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "⟦Ĝŕöûþîñĝ åñđ ƒļööđ çöñţŕöļ~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -77767,28 +77623,10 @@
       "value": "⟦Ļéţ þéöþļé þîçķ åñ éɱåîļ þéŕ éþîšöđé~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ çöñţéñţ åĝé~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ ɱéššåĝéš þéŕ šĥöŵ~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "⟦Ṁéñţîöñ ţĥé ŕéǫûéšţéŕ öñ Đîšçöŕđ~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "⟦Ñöţîçé ñéŵ çöñţéñţ~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -77797,46 +77635,16 @@
       "value": "⟦Þéŕšöñåļ Ŵéƀĥööķš~~~~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "⟦Þŕöçéššîñĝ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "⟦Ŕéļåý ÛŔĻ~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéţéñţîöñ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "⟦Šéñţ ĥîšţöŕý~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "⟦Šéŕṽéŕ Çĥåññéļš~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "⟦Šéţţļé ŵîñđöŵ~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -77851,12 +77659,6 @@
       "value": "⟦Šîļö Þûšĥ Ŕéļåý~~~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ûñŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -77867,12 +77669,6 @@
     {
       "type": 0,
       "value": "⟦Ŵéƀĥööķš þéŕ þéŕšöñ~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "⟦Ŵöŕķ öûţ ŵĥö ŵåñţš îţ~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -79295,6 +79091,12 @@
     {
       "type": 0,
       "value": "⟦ŢṼ šîĝñ-îñ: šţåŕţ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "⟦Þöšţéŕ ŕéǫûéšţš~~~~~~⟧"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

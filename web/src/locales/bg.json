@@ -52590,7 +52590,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Задачите се регистрират при стартиране на сървъра, затова включването или изключването на задача влиза в сила след рестартиране. След като задачата съществува, променете графика ѝ от страницата на задачата."
+      "value": "Включването или изключването на задача влиза в сила без рестартиране, но на другите сървъри може да им отнеме малко време, за да отразят промяната. След като задачата е включена, променете графика ѝ от страницата на задачата."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -63809,136 +63809,10 @@
       "value": "Не можаха да се заредят настройките за известия"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Новото съдържание не се записва, затова нищо не може да бъде изпратено. Включете го отново в секцията „Обработка“."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Изпращането е на пауза; новото съдържание чака в опашката. Включете го отново в секцията „Обработка“."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Когато е изключено, вместо това се изпраща дневното обобщение."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Как Silo открива новото съдържание, групира го в съобщения и колко дълго ги пази."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Определяне кой го иска"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Сравняване на всеки елемент с предпочитанията на всички."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Групиране и ограничаване на наплива"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Обработка"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Максимална възраст на съдържанието"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "По-старите елементи се отхвърлят, вместо да пристигат като остарели новини."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Максимум съобщения на сериал"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Всичко над това се пропуска за съответната партида."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Откриване на ново съдържание"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Записване на новите елементи при сканиране на библиотеките."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Конвейер"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочетени известия"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Съхранение"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "История на изпратените"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Запис за това, за какво Silo вече е изпратил известие."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Период на изчакване"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Елементите, чието сканиране завърши заедно, пристигат като едно известие."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочетени известия"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64843,18 +64717,6 @@
     {
       "type": 0,
       "value": "Известия"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "дни"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "часове"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71480,7 +71342,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Канали за доставка, сървърни канали и как новото съдържание се превръща в известия."
+      "value": "Канали за доставка и сървърни канали."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71579,12 +71441,6 @@
       "value": "Имейл"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Групиране и ограничаване на наплива"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71603,28 +71459,10 @@
       "value": "Избор на имейл за всеки епизод"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Максимална възраст на съдържанието"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Максимум съобщения на сериал"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Споменаване на заявителя в Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Откриване на ново съдържание"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71633,46 +71471,16 @@
       "value": "Лични уебхукове"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Обработка"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочетени известия"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL адрес на релето"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Съхранение"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "История на изпратените"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Сървърни канали"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Интервал на изчакване"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71687,12 +71495,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочетени известия"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71703,12 +71505,6 @@
     {
       "type": 0,
       "value": "Уебхукове на човек"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Определяне кой го иска"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -73119,6 +72915,12 @@
     {
       "type": 0,
       "value": "Вход на ТВ: начало"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Заявки за постери"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

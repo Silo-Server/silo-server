@@ -58462,7 +58462,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Sarcinile sunt înregistrate la pornirea serverului, așa că activarea sau dezactivarea uneia are efect după o repornire. După ce o sarcină există, modificați-i programul pe pagina sarcinii."
+      "value": "Activarea sau dezactivarea unei sarcini se aplică fără repornire, deși celelalte servere pot avea nevoie de câteva momente pentru a o prelua. După ce o sarcină este activată, modificați-i programul pe pagina sarcinii."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -70365,136 +70365,10 @@
       "value": "Nu s-au putut încărca setările notificărilor"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Conținutul nou nu este înregistrat, deci nu se poate trimite nimic. Reactivați opțiunea în secțiunea Procesare."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Trimiterea este întreruptă; conținutul nou așteaptă în coadă. Reactivați-o în secțiunea Procesare."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Dacă este dezactivat, se trimite în schimb rezumatul zilnic."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cum detectează Silo conținutul nou, cum îl grupează în mesaje și cât timp le păstrează."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Identificarea persoanelor interesate"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Compară fiecare element cu preferințele tuturor."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Grupare și limitarea avalanșelor de mesaje"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Procesare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Vechimea maximă a conținutului"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Elementele mai vechi sunt eliminate în loc să ajungă drept noutăți depășite."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Număr maxim de mesaje per serial"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Ce depășește această limită este omis pentru lotul respectiv."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Detectarea conținutului nou"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Înregistrează elementele noi în timpul scanărilor bibliotecii."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Flux de procesare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări citite"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Păstrare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Istoricul trimiterilor"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Evidența notificărilor deja trimise de Silo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Interval de stabilizare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementele a căror scanare se termină împreună sosesc într-o singură notificare."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări necitite"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71423,18 +71297,6 @@
     {
       "type": 0,
       "value": "Notificări"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "zile"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ore"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -78143,7 +78005,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Canale de livrare, canale de server și modul în care conținutul nou devine notificări."
+      "value": "Canale de livrare și canale de server."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -78242,12 +78104,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Grupare și limitarea volumului de mesaje"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -78266,28 +78122,10 @@
       "value": "Permiteți utilizatorilor să aleagă un e-mail per episod"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Vechimea maximă a conținutului"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Număr maxim de mesaje per serial"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Menționați solicitantul pe Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Detectarea conținutului nou"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -78296,46 +78134,16 @@
       "value": "Webhookuri personale"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Procesare"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări citite"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Adresa URL a releului"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Păstrare"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Istoricul trimiterilor"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Canale de server"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Interval de stabilizare"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -78350,12 +78158,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări necitite"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -78366,12 +78168,6 @@
     {
       "type": 0,
       "value": "Webhookuri per persoană"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Stabilirea destinatarilor interesați"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -79806,6 +79602,12 @@
     {
       "type": 0,
       "value": "Conectare pe TV: pornire"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Cereri pentru postere"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

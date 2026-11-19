@@ -58214,7 +58214,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Les tâches sont enregistrées au démarrage du serveur : activer ou désactiver une tâche prend donc effet après un redémarrage. Une fois une tâche créée, modifiez sa planification sur sa page de tâche."
+      "value": "L’activation ou la désactivation d’une tâche s’applique sans redémarrage, mais les autres serveurs peuvent mettre un moment à la prendre en compte. Une fois une tâche activée, modifiez sa planification sur sa page de tâche."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -70045,136 +70045,10 @@
       "value": "Impossible de charger les paramètres de notification"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Les nouveaux contenus ne sont pas enregistrés, donc rien ne peut être envoyé. Réactivez l’option dans Traitement."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "L’envoi est en pause ; les nouveaux contenus attendent dans la file d’attente. Réactivez-le dans Traitement."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Désactivé, le résumé quotidien est envoyé à la place."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Comment Silo détecte les nouveaux contenus, les regroupe en messages et combien de temps il les conserve."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Déterminer qui est intéressé"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Comparer chaque élément aux préférences de chacun."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Regroupement et limitation des envois"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Traitement"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Ancienneté maximale du contenu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Les éléments plus anciens sont ignorés au lieu d’arriver comme des nouvelles périmées."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Nombre maximal de messages par série"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Au-delà, les éléments sont ignorés pour ce lot."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Détecter les nouveaux contenus"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Enregistrer les nouveaux éléments lors des analyses de bibliothèque."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Chaîne de traitement"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifications lues"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Conservation"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historique des envois"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Trace de ce que Silo a déjà notifié."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Fenêtre de stabilisation"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Les éléments dont l’analyse se termine ensemble arrivent dans une seule notification."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifications non lues"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71103,18 +70977,6 @@
     {
       "type": 0,
       "value": "Notifications"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "jours"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "heures"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -77763,7 +77625,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Canaux de diffusion, canaux du serveur et transformation des nouveaux contenus en notifications."
+      "value": "Canaux de diffusion et canaux du serveur."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -77862,12 +77724,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Regroupement et limitation des envois"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -77886,28 +77742,10 @@
       "value": "Permettre de choisir un e-mail par épisode"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Ancienneté maximale du contenu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Nombre maximal de messages par série"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Mentionner la personne qui a fait la demande sur Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Repérer les nouveaux contenus"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -77916,46 +77754,16 @@
       "value": "Webhooks personnels"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Traitement"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifications lues"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL du relais"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Conservation"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historique des envois"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Canaux du serveur"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Délai de stabilisation"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -77970,12 +77778,6 @@
       "value": "Relais push Silo"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifications non lues"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -77986,12 +77788,6 @@
     {
       "type": 0,
       "value": "Webhooks par personne"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Déterminer qui est intéressé"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -79426,6 +79222,12 @@
     {
       "type": 0,
       "value": "Connexion TV : démarrage"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Demandes d’affiche"
     }
   ],
   "web.admin.settings.security.endpoint.login": [

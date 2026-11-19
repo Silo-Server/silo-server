@@ -52718,7 +52718,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Οι εργασίες καταχωρίζονται κατά την εκκίνηση του διακομιστή, οπότε η ενεργοποίηση ή απενεργοποίηση μιας εργασίας ισχύει μετά από επανεκκίνηση. Όταν μια εργασία υπάρχει ήδη, αλλάξτε το πρόγραμμά της στη σελίδα της εργασίας."
+      "value": "Η ενεργοποίηση ή απενεργοποίηση μιας εργασίας ισχύει χωρίς επανεκκίνηση, αν και οι άλλοι διακομιστές μπορεί να χρειαστούν λίγο χρόνο για να την εφαρμόσουν. Όταν μια εργασία είναι ενεργή, αλλάξτε το πρόγραμμά της στη σελίδα της εργασίας."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -63865,136 +63865,10 @@
       "value": "Δεν ήταν δυνατή η φόρτωση των ρυθμίσεων ειδοποιήσεων"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Το νέο περιεχόμενο δεν καταγράφεται, οπότε δεν μπορεί να σταλεί τίποτα. Ενεργοποιήστε την καταγραφή ξανά στην ενότητα «Επεξεργασία»."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Η αποστολή έχει τεθεί σε παύση. Το νέο περιεχόμενο περιμένει στην ουρά. Ενεργοποιήστε την ξανά στην ενότητα «Επεξεργασία»."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Αν είναι ανενεργό, λαμβάνουν την ημερήσια σύνοψη."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Πώς το Silo εντοπίζει νέο περιεχόμενο, πώς το ομαδοποιεί σε μηνύματα και για πόσο καιρό τα διατηρεί."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Εύρεση ενδιαφερόμενων"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Αντιστοίχιση κάθε στοιχείου με τις προτιμήσεις όλων."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Ομαδοποίηση και έλεγχος υπερφόρτωσης"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Επεξεργασία"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Μέγιστη ηλικία περιεχομένου"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Τα παλαιότερα στοιχεία απορρίπτονται αντί να φτάνουν ως ξεπερασμένα νέα."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Μέγιστα μηνύματα ανά σειρά"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Ό,τι υπερβαίνει αυτό το όριο παραλείπεται για τη συγκεκριμένη παρτίδα."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Εντοπισμός νέου περιεχομένου"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Καταγραφή νέων στοιχείων κατά τις σαρώσεις βιβλιοθηκών."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Ροή επεξεργασίας"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Αναγνωσμένες ειδοποιήσεις"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Διατήρηση"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Ιστορικό αποστολών"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Καταγραφή των στοιχείων για τα οποία το Silo έχει ήδη στείλει ειδοποίηση."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Διάστημα αναμονής"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Τα στοιχεία που ολοκληρώνουν τη σάρωση μαζί φτάνουν ως μία ειδοποίηση."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Μη αναγνωσμένες ειδοποιήσεις"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64899,18 +64773,6 @@
     {
       "type": 0,
       "value": "Ειδοποιήσεις"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "ημέρες"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ώρες"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71532,7 +71394,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Κανάλια παράδοσης, κανάλια διακομιστή και πώς το νέο περιεχόμενο γίνεται ειδοποιήσεις."
+      "value": "Κανάλια παράδοσης και κανάλια διακομιστή."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71631,12 +71493,6 @@
       "value": "Email"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Ομαδοποίηση και έλεγχος υπερφόρτωσης"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71655,28 +71511,10 @@
       "value": "Να επιτρέπεται η επιλογή email ανά επεισόδιο"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Μέγιστη ηλικία περιεχομένου"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Μέγιστος αριθμός μηνυμάτων ανά σειρά"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Αναφορά του χρήστη που υπέβαλε το αίτημα στο Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Εντοπισμός νέου περιεχομένου"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71685,46 +71523,16 @@
       "value": "Προσωπικά webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Επεξεργασία"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Αναγνωσμένες ειδοποιήσεις"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL αναμεταδότη"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Διατήρηση"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Ιστορικό απεσταλμένων"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Κανάλια διακομιστή"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Παράθυρο σταθεροποίησης"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71739,12 +71547,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Μη αναγνωσμένες ειδοποιήσεις"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71755,12 +71557,6 @@
     {
       "type": 0,
       "value": "Webhook ανά άτομο"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Εντοπισμός ενδιαφερόμενων"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -73171,6 +72967,12 @@
     {
       "type": 0,
       "value": "Σύνδεση τηλεόρασης: έναρξη"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Αιτήματα αφίσας"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
