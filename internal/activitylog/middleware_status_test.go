@@ -59,6 +59,7 @@ func TestMiddlewareLogsOneRowPerPlay(t *testing.T) {
 	const stream = "/api/v2/stream/s1"
 	for _, tc := range []struct {
 		name       string
+		method     string
 		path       string
 		rangeValue string
 		status     int  // 0 writes nothing
@@ -66,15 +67,17 @@ func TestMiddlewareLogsOneRowPerPlay(t *testing.T) {
 		wantRows   int
 		wantStatus int
 	}{
-		{"no range", stream, "", http.StatusOK, false, 1, http.StatusOK},
-		{"open-ended range from byte 0", stream, "bytes=0-", http.StatusPartialContent, false, 1, http.StatusPartialContent},
-		{"closed range from byte 0", stream, "bytes=0-16777215", http.StatusPartialContent, false, 1, http.StatusPartialContent},
-		{"closed range past byte 0", stream, "bytes=16777216-18874367", http.StatusPartialContent, false, 0, 0},
-		{"suffix range", stream, "bytes=-1024", http.StatusPartialContent, false, 0, 0},
-		{"refused range past byte 0", stream, "bytes=16777216-", http.StatusRequestedRangeNotSatisfiable, false, 1, http.StatusRequestedRangeNotSatisfiable},
-		{"abandoned range past byte 0", stream, "bytes=16777216-18874367", 0, true, 0, 0},
-		{"range that does not parse", stream, "bytes=abc", http.StatusRequestedRangeNotSatisfiable, false, 1, http.StatusRequestedRangeNotSatisfiable},
-		{"range past byte 0 outside the stream paths", "/api/v2/libraries", "bytes=100-", http.StatusPartialContent, false, 1, http.StatusPartialContent},
+		{"no range", http.MethodGet, stream, "", http.StatusOK, false, 1, http.StatusOK},
+		{"open-ended range from byte 0", http.MethodGet, stream, "bytes=0-", http.StatusPartialContent, false, 1, http.StatusPartialContent},
+		{"closed range from byte 0", http.MethodGet, stream, "bytes=0-16777215", http.StatusPartialContent, false, 1, http.StatusPartialContent},
+		{"closed range past byte 0", http.MethodGet, stream, "bytes=16777216-18874367", http.StatusPartialContent, false, 0, 0},
+		{"suffix range", http.MethodGet, stream, "bytes=-1024", http.StatusPartialContent, false, 0, 0},
+		{"refused range past byte 0", http.MethodGet, stream, "bytes=16777216-", http.StatusRequestedRangeNotSatisfiable, false, 1, http.StatusRequestedRangeNotSatisfiable},
+		{"abandoned range past byte 0", http.MethodGet, stream, "bytes=16777216-18874367", 0, true, 0, 0},
+		{"range that does not parse", http.MethodGet, stream, "bytes=abc", http.StatusRequestedRangeNotSatisfiable, false, 1, http.StatusRequestedRangeNotSatisfiable},
+		{"range past byte 0 answered with the stream from its origin", http.MethodGet, stream, "bytes=16777216-", http.StatusOK, false, 1, http.StatusOK},
+		{"answered preflight", http.MethodOptions, stream, "", http.StatusNoContent, false, 0, 0},
+		{"range past byte 0 outside the stream paths", http.MethodGet, "/api/v2/libraries", "bytes=100-", http.StatusPartialContent, false, 1, http.StatusPartialContent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := &captureWriter{}
@@ -89,7 +92,7 @@ func TestMiddlewareLogsOneRowPerPlay(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil).WithContext(ctx)
+			req := httptest.NewRequest(tc.method, tc.path, nil).WithContext(ctx)
 			if tc.rangeValue != "" {
 				req.Header.Set("Range", tc.rangeValue)
 			}

@@ -103,6 +103,8 @@ func playbackMediaCORS(next http.Handler) http.Handler {
 		header.Set("Access-Control-Allow-Origin", "*")
 		header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 		header.Set("Access-Control-Allow-Headers", "Range")
+		// Without it a browser that preflights Range asks again every 5 seconds.
+		header.Set("Access-Control-Max-Age", "600")
 		w.WriteHeader(http.StatusNoContent)
 	})
 }

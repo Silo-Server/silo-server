@@ -426,7 +426,9 @@ Three kinds of response are readable from another origin. Each carries
 - The original-file stream, `GET` and `HEAD` on `/api/v2/stream/{session_id}`,
   refusals included, with `Range` allowed and `Content-Range` exposed. The web player reads it from
   the media origin. The `OPTIONS` preflight answers `204` before any
-  credential is read, with `GET, HEAD, OPTIONS` and the `Range` header allowed.
+  credential is read, with `GET, HEAD, OPTIONS` and the `Range` header allowed,
+  and `Access-Control-Max-Age: 600` so a browser that preflights `Range` does
+  not repeat it for every range.
 - The HLS manifest and segment answers, refusals included, with `Range` allowed
   and the range and validator headers exposed, so a player such as a Google Cast receiver can
   read them. The API answers no `OPTIONS` preflight there; Cast receivers

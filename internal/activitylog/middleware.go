@@ -41,8 +41,10 @@ var excludedPrefixes = []string{
 // manifest chunk (isStreamChunk) writes no row. A range request that continues a
 // play (isRangeContinuation) writes none either when it succeeds or its client
 // abandons it; one that fails keeps its row, so a refused or broken range stays
-// visible. A request with no Range header, or a range from byte 0, is a play's
-// start and writes a row.
+// visible, and so does a GET answered 200, which is a stream started again from
+// its origin. A request with no Range header, or a range from byte 0, is a
+// play's start and writes a row. An answered CORS preflight is no play and
+// writes none.
 var streamPrefixes = []string{
 	"/api/v2/stream/",
 	"/api/v2/playback/transcode/",
@@ -144,10 +146,7 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				return
 			}
 			status := RecordedStatus(r, wrapped.status, wrapped.wroteHeader)
-			// A range that continues a play adds a row only by failing; an abandoned one is
-			// a seek or a stripe deadline, which the client does on purpose.
-			if onStreamPath && isRangeContinuation(r.Header.Get("Range")) &&
-				(status < http.StatusBadRequest || status == StatusClientClosedRequest) {
+			if onStreamPath && skipsStreamRow(r, status) {
 				return
 			}
 			path = RedactSecretPathParams(r, path)
@@ -217,6 +216,25 @@ func isStreamChunk(path string) bool {
 	return strings.Contains(path, "/segment/") ||
 		strings.Contains(path, "/master.m3u8") ||
 		strings.Contains(path, "/subtitles/")
+}
+
+// skipsStreamRow reports whether a finished request on a stream path writes no
+// row. A range that continues a play adds a row only by failing; an abandoned
+// one is a seek or a stripe deadline, which the client does on purpose. A GET
+// answered 200 sent the stream again from its start, as a progressive remux
+// does for a range past byte 0, so it keeps its row. An answered OPTIONS is the
+// media origin's CORS preflight.
+func skipsStreamRow(r *http.Request, status int) bool {
+	if status >= http.StatusBadRequest && status != StatusClientClosedRequest {
+		return false
+	}
+	if r.Method == http.MethodOptions {
+		return true
+	}
+	if r.Method == http.MethodGet && status == http.StatusOK {
+		return false
+	}
+	return isRangeContinuation(r.Header.Get("Range"))
 }
 
 // isRangeContinuation reports whether a Range header asks for bytes after a
