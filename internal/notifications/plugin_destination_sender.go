@@ -92,19 +92,24 @@ const (
 
 // keptEnabledFailure reports whether an attempt's stored failure message is
 // one of a failure the destination isn't at fault for.
+// agedDisableMinAttempts is how many sends an attempt needs before reaching
+// the age cap can disable its destination. Fewer means the time went to a
+// server or sweep that wasn't running, not to the destination failing.
+const agedDisableMinAttempts = 3
+
 // agedAttemptFinish closes an attempt whose delivery passed the age cap,
 // without a send. Long retry waits can reach the cap before the schedule runs
 // out, so the cap applies the exhausted schedule's rule to the attempt's last
 // failure: an ordinary one disables a destination that stayed quiet since the
-// message was queued. attempt_number counts sends, so zero means none was
-// made; a failed send with no message (a plugin's bare RETRY) is ordinary.
+// message was queued, once agedDisableMinAttempts sends were made. A failed
+// send with no message (a plugin's bare RETRY) is ordinary.
 func agedAttemptFinish(attempt DeliveryAttempt, queued time.Time) pluginAttemptFinish {
 	aged := pluginAttemptFinish{outcome: WebhookOutcomeFailed, message: "not delivered in time"}
 	lastFailure := ""
 	if attempt.FailureMessage != nil {
 		lastFailure = *attempt.FailureMessage
 	}
-	if attempt.AttemptNumber == 0 || keptEnabledFailure(lastFailure) {
+	if attempt.AttemptNumber < agedDisableMinAttempts || keptEnabledFailure(lastFailure) {
 		return aged
 	}
 	if lastFailure != "" {
@@ -555,7 +560,11 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 		CapabilityId:  d.CapabilityID,
 	})
 	result := pluginSendResultOf(resp, err)
-	result.message = redactPluginText(result.message, channel, stored)
+	// Only text the plugin supplied is masked. The host's own messages carry
+	// no setting, and the age cap recognizes them as written.
+	if !keptEnabledFailure(result.message) {
+		result.message = redactPluginText(result.message, channel, stored)
+	}
 	result.duration = time.Since(started)
 	result.sent = d
 	if err != nil {

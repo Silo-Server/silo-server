@@ -730,11 +730,13 @@ to the plugin service, so neither package imports the other.
     can't pile up when the single retry sweep falls behind. Long
     `retry_after_seconds` waits can reach the cap before the schedule runs
     out, so the cap applies the exhausted schedule's rule: when the
-    attempt's last stored failure was an ordinary one, the destination is
-    disabled if it stayed quiet since the message was queued. After a
-    plugin-unavailable or decrypt failure, or before any send, it is not.
-    The attempt stores only its last failure's message, so those two kinds
-    are told apart by the host's fixed text for them.
+    attempt's last stored failure was an ordinary one and at least three
+    sends were made (`agedDisableMinAttempts`), the destination is disabled
+    if it stayed quiet since the message was queued. After a
+    plugin-unavailable or decrypt failure, or with fewer sends (the time
+    went to a server or sweep that wasn't running), it is not. The attempt
+    stores only its last failure's message, so those two kinds are told
+    apart by the host's fixed text for them, which is stored unmasked.
 - **Finishing.** The attempt's outcome, the failure count, the disable and
   the `plugin_destination.auto_disabled` notice's inbox row commit in one
   transaction, and the notice, which reaches no webhook or plugin
