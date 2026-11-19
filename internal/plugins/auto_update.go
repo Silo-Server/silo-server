@@ -587,10 +587,19 @@ func (s *AutoUpdateService) autoUpdatePlugin(ctx context.Context, existing *Inst
 func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *Installation, entry CatalogEntry) error {
 	newVersion := entry.Manifest.GetVersion()
 
-	if err := s.installations.Update(ctx, existing.ID, UpdateInstallationInput{
+	// The offer was decided against existing's release. Another install that
+	// landed meanwhile, possibly of a newer release, makes it stale (#4518).
+	err := s.installations.Update(ctx, existing.ID, UpdateInstallationInput{
 		automatic:        true,
 		AvailableVersion: &newVersion,
-	}); err != nil {
+		IfInstallPath:    &existing.InstallPath,
+	})
+	if errors.Is(err, ErrInstallationChanged) {
+		s.logger.InfoContext(ctx, "dropped stale plugin update offer: the plugin was replaced meanwhile",
+			"plugin_id", existing.PluginID, "available_version", newVersion)
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("record available version for plugin %s: %w", existing.PluginID, err)
 	}
 
