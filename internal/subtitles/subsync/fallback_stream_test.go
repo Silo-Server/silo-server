@@ -77,10 +77,10 @@ func TestExecuteStillReportsNoMatchWhenNoStreamMatches(t *testing.T) {
 }
 
 // A fallback stream that can't be read right now (a busy host, no node, a
-// canceled run) leaves the job unanswered: it fails as unavailable, to be
-// retried, instead of ending no_match on a stream nobody heard. A stream the
-// file itself can't decode is skipped, and the planned stream's no_match
-// stands.
+// canceled run, a storage error) leaves the job unanswered: it fails with
+// that error, retryable where it is, instead of ending no_match on a stream
+// nobody heard. A stream the file itself can't decode is skipped, and the
+// planned stream's no_match stands.
 func TestExecuteKeepsAnUnreadFallbackStreamRetryable(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err        error
@@ -91,6 +91,7 @@ func TestExecuteKeepsAnUnreadFallbackStreamRetryable(t *testing.T) {
 			Attempts: []mediasample.AttemptError{{Reason: mediasample.ReasonTimeout, Err: errors.New("timed out")}}},
 			wantStatus: JobFailed, wantFail: FailureUnavailable},
 		"canceled":         {err: context.Canceled, wantStatus: JobFailed, wantFail: FailureUnavailable},
+		"storage error":    {err: errors.New("load speech artifact: connection refused"), wantStatus: JobFailed, wantFail: FailureError},
 		"unreadable track": {err: &mediasample.Error{Reason: mediasample.ReasonExit, Attempts: []mediasample.AttemptError{{Reason: mediasample.ReasonExit, Err: errors.New("exit status 1"), StderrTail: "Stream map '0:a:1' matches no streams."}}}, wantStatus: string(StatusNoMatch)},
 	} {
 		t.Run(name, func(t *testing.T) {

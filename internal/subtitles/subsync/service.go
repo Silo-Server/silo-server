@@ -743,11 +743,11 @@ func (s *Service) align(ctx context.Context, r *run) (Outcome, error) {
 
 // alignOtherStreams aligns the cues against the file's other audio streams,
 // in file order, and returns the first alignment that matches. A stream the
-// file itself can't decode is skipped. One that can't be read right now (no
-// node, a busy host, a canceled run) means the subtitle was never heard
-// against it, so when no stream matches, that error is returned and the job
-// fails as retryable rather than ending no_match. Progress stays where
-// matching left it.
+// file itself can't decode is skipped. Any other read failure (no node, a
+// busy host, a canceled run, a storage error loading cached speech) means
+// the subtitle was never heard against that stream, so when no stream
+// matches, the first such error is returned and the job fails with it rather
+// than ending no_match. Progress stays where matching left it.
 func (s *Service) alignOtherStreams(ctx context.Context, file *models.MediaFile, used speechPlan, cues []subtitles.SubtitleCue, current subtitles.Timing, background bool) (Alignment, string, bool, error) {
 	runtime := time.Duration(used.Runtime * float64(time.Second))
 	var unread error
@@ -761,7 +761,7 @@ func (s *Service) alignOtherStreams(ctx context.Context, file *models.MediaFile,
 		}
 		windows, _, executedOn, err := s.speechForPlan(ctx, file, plan, background, nil)
 		if err != nil {
-			if unread == nil && failureOf(err) == FailureUnavailable {
+			if unread == nil && failureOf(err) != FailureNoAudio {
 				unread = err
 			}
 			continue
