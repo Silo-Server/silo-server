@@ -195,6 +195,9 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		// written, from the confirmed snapshot; the finalizer must not too.
 		// A competing finalizer that finishes first told them itself.
 		finalizeCtx, notice := withProviderNoticeDeferred(parent)
+		// The confirmed stop removed the live copy, so the finalizer records
+		// from the attempt row; the copy's measurement goes with it.
+		finalizeCtx = withEndWatch(finalizeCtx, session)
 		receipt = h.finalizeRealtimeStop(finalizeCtx, store, record, session.ID, receipt, stopFinalizationLease)
 		notify = notice.left
 	}
@@ -254,7 +257,7 @@ func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *pla
 	if !claim.ownEnd(abortStopID(session.ID)) {
 		// An earlier stop won the row and never finished: finish it as
 		// that stop, then tear down as an abort without its writers.
-		h.FinishOtherEnd(ctx, claim, session.ID)
+		h.FinishOtherEnd(withEndWatch(ctx, session), claim, session.ID)
 		h.finalizeSessionAbort(ctx, session, true, "abort", nativeEndClaim{})
 		return nil
 	}

@@ -654,7 +654,12 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 		position = playback.PositionUnknown
 	}
 	session := h.attemptSessionV2(ctx, record, position, paused)
+	session.Watch = endWatch(ctx)
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	if accepted != nil && accepted.Sequence > record.LastSequence {
+		// The stop's own final sample, newer than any progress a copy saw.
+		observeEndSample(session, time.Now())
+	}
 	result := h.recordStopHistory(ctx, session, reason)
 	// The copy on another replica is dropped without telling providers, so
 	// the end recorded here does, unless its caller tells them itself.

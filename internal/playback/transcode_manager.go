@@ -92,6 +92,11 @@ type TranscodeManager struct {
 	// handler stored for the session, so a session rebuilt after a restart
 	// keeps its client. No-op when nil.
 	RestoreReconstructedClient func(ctx context.Context, card *RecipeCard)
+	// RestoreReconstructedWatch returns the watch-time measurement the
+	// embedding handler saved for a session, so a session rebuilt after a
+	// restart or on another server keeps measuring the same play. ok is false
+	// when none was saved. No-op when nil.
+	RestoreReconstructedWatch func(ctx context.Context, sessionID string) (watch WatchTime, ok bool)
 
 	// Package-private execution seams keep reconstruction lifecycle tests
 	// deterministic without invoking a host FFmpeg binary. Production always
@@ -896,6 +901,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		s.OutputProtocol = OutputProtocolHLS
 	} else if method == PlayRemux {
 		s.OutputContainer, s.OutputProtocol = OutputContainerFMP4, OutputProtocolHTTP
+	}
+	if m.RestoreReconstructedWatch != nil {
+		if watch, ok := m.RestoreReconstructedWatch(ctx, sessionID); ok {
+			s.Watch = watch
+		}
 	}
 	session, err := m.registerReconstructedSession(ctx, s)
 	if err != nil {

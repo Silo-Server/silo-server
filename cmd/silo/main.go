@@ -4476,7 +4476,14 @@ func main() {
 		}
 	}
 
-	// 2b. Remove this node's heartbeat and sessions from shared state.
+	// 2b. Remove this node's heartbeat and sessions from shared state, after
+	// saving the sessions' watch time for whichever server rebuilds or stops
+	// them next.
+	if reconciler != nil {
+		if err := reconciler.SaveWatch(shutdownCtx); err != nil {
+			slog.Error("watch time save error", "error", err)
+		}
+	}
 	if heartbeatWriter != nil {
 		if err := heartbeatWriter.CleanupSelf(shutdownCtx); err != nil {
 			slog.Error("heartbeat cleanup error", "error", err)
