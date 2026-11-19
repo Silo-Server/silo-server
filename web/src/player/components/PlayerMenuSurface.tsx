@@ -26,9 +26,8 @@ interface PlayerMenuSurfaceProps {
   role?: "menu" | "dialog";
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
   /**
-   * The menu's trigger wrapper. A pointer press outside it closes the menu.
-   * Focus-based dismissal alone is not enough: Safari does not focus buttons
-   * on click, so the trigger never blurs.
+   * The wrapper containing the trigger and menu. Focus moving outside it
+   * closes the menu, as does an outside pointer press on desktop.
    */
   anchorRef?: RefObject<HTMLElement | null>;
 }
@@ -151,14 +150,20 @@ export function PlayerMenuSurface({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  // Coarse pointers get a full-screen backdrop button instead.
   useEffect(() => {
-    if (isCoarsePointer || !anchorRef) return;
-    const handlePointerDown = (event: PointerEvent) => {
+    if (!anchorRef) return;
+    const dismissOutside = (event: Event) => {
       if (!anchorRef.current?.contains(event.target as Node)) onClose();
     };
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+    // Safari can blur the focused item before an in-menu click without
+    // moving focus to another element. Dismiss only when focus lands outside.
+    document.addEventListener("focusin", dismissOutside, true);
+    // Coarse pointers get a full-screen backdrop button instead.
+    if (!isCoarsePointer) document.addEventListener("pointerdown", dismissOutside, true);
+    return () => {
+      document.removeEventListener("focusin", dismissOutside, true);
+      document.removeEventListener("pointerdown", dismissOutside, true);
+    };
   }, [anchorRef, isCoarsePointer, onClose]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
