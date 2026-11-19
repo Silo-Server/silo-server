@@ -2,11 +2,12 @@ import { useThemeMusic } from "./useThemeMusic";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
-import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useAvailableUserLibraries, useUserLibraries } from "@/hooks/queries/libraries";
 import type { ItemDetail } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Button } from "@/components/ui/button";
+import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { toast } from "sonner";
@@ -15,28 +16,30 @@ import SeriesContent from "@/pages/ItemDetail/SeriesContent";
 import SeasonContent from "@/pages/ItemDetail/SeasonContent";
 import EpisodeContent from "@/pages/ItemDetail/EpisodeContent";
 import AudiobookContent from "@/pages/ItemDetail/AudiobookContent";
+import "@/pages/audiobooks/audiobooks.css";
 import EbookContent from "@/pages/ItemDetail/EbookContent";
 import MangaContent from "@/pages/ItemDetail/MangaContent";
 import ItemDetailSkeleton from "./ItemDetailSkeleton";
+import AudiobookDetailSkeleton from "./AudiobookDetailSkeleton";
 import {
   useSidebarItemDetailsReady,
   useSidebarItemEnteredFromHome,
 } from "@/components/sidebarItemNavigationContext";
 import { parseOptionalLibraryId } from "@/components/sidebarItemNavigation";
 import { useShowAdvisoryAge } from "@/hooks/useShowAdvisoryAge";
+import { markItemDetailShown } from "@/lib/itemNavigationTiming";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
+import { useT } from "@/i18n";
 
 interface HomeItemTransitionShape {
   compact: boolean;
   hidePoster: boolean;
-  squarePoster: boolean;
   hasLogo: boolean;
 }
 
 const NEUTRAL_HOME_ITEM_TRANSITION_SHAPE: HomeItemTransitionShape = {
   compact: false,
   hidePoster: false,
-  squarePoster: false,
   hasLogo: false,
 };
 
@@ -49,16 +52,16 @@ function getHomeItemTransitionShape(
   return {
     compact: item.type === "season",
     hidePoster: item.type === "episode",
-    squarePoster: item.type === "audiobook",
     // An unknown choice reserves the logo box, as the hero itself does.
     hasLogo: showTitleArt !== false && Boolean(item.logo_url),
   };
 }
 
 function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
+  const t = useT();
   const showTitleArt = useShowTitleArt();
   const [shape] = useState(() => getHomeItemTransitionShape(item, showTitleArt));
-  const { compact, hidePoster, squarePoster, hasLogo } = shape;
+  const { compact, hidePoster, hasLogo } = shape;
 
   return (
     <div
@@ -66,7 +69,7 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
       className="bg-background min-h-screen"
       aria-busy="true"
     >
-      <span className="sr-only">Loading item details</span>
+      <span className="sr-only">{t("web.detail.page.loadingDetails")}</span>
       <section aria-hidden="true" className="border-border/10 border-b">
         <div
           className={`page-shell-wide flex flex-col justify-end pb-8 ${
@@ -80,13 +83,9 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
               <div
                 data-testid="home-item-transition-poster"
                 className={`home-item-transition-block flex-shrink-0 rounded-lg border border-solid shadow-[var(--shadow-md)] ${
-                  squarePoster
-                    ? compact
-                      ? "aspect-square w-[180px] sm:w-[200px]"
-                      : "aspect-square w-[200px] sm:w-[260px]"
-                    : compact
-                      ? "aspect-[2/3] w-[140px] sm:w-[160px]"
-                      : "aspect-[2/3] w-[170px] sm:w-[220px]"
+                  compact
+                    ? "aspect-[2/3] w-[140px] sm:w-[160px]"
+                    : "aspect-[2/3] w-[170px] sm:w-[220px]"
                 }`}
               />
             )}
@@ -124,6 +123,7 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
  * when the viewer can still open it.
  */
 function ItemUnavailable({ libraryId }: { libraryId?: number }) {
+  const t = useT();
   const { data: libraries, dataUpdatedAt, isFetching, isError, refetch } = useUserLibraries();
   const [shownAt] = useState(() => Date.now());
   // The 404 may mean the viewer just lost this library, which a cached list
@@ -140,12 +140,14 @@ function ItemUnavailable({ libraryId }: { libraryId?: number }) {
 
   return (
     <PageUnavailable
-      title="This item isn't available"
-      description="It may have been removed, or you may not have access to it."
+      title={t("web.detail.page.unavailableTitle")}
+      description={t("web.detail.page.unavailableBody")}
     >
       {library && (
         <Button asChild variant="outline">
-          <ViewTransitionLink to={`/library/${library.id}`}>Browse library</ViewTransitionLink>
+          <ViewTransitionLink to={`/library/${library.id}`}>
+            {t("web.detail.page.browseLibrary")}
+          </ViewTransitionLink>
         </Button>
       )}
     </PageUnavailable>
@@ -153,6 +155,7 @@ function ItemUnavailable({ libraryId }: { libraryId?: number }) {
 }
 
 export default function ItemDetail() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const libraryId = parseOptionalLibraryId(searchParams.get("libraryId"));
@@ -174,18 +177,52 @@ export default function ItemDetail() {
   // Items without an advisory skip the lookup, which is most of them.
   const showAdvisoryAge = useShowAdvisoryAge(item?.advisory_age != null);
   const enteredItemFromHome = useSidebarItemEnteredFromHome();
+  // While the item loads, its library (from the link) or a cached copy says
+  // whether the page will be a book, so the placeholder can take its layout.
+  // The sidebar has already read the library list; this only looks at that copy.
+  const { data: availableLibraries } = useAvailableUserLibraries({ enabled: false });
+  const loadingAudiobook =
+    item?.type === "audiobook" ||
+    (libraryId !== undefined &&
+      availableLibraries?.find((library) => library.id === libraryId)?.type === "audiobooks");
 
-  useDocumentTitle(itemNotFound ? "Not found" : (item?.title ?? "Item"));
+  useDocumentTitle(
+    itemNotFound
+      ? t("web.detail.page.notFoundTitle")
+      : (item?.title ?? t("web.detail.page.itemTabFallback")),
+  );
   useThemeMusic(item, loading);
 
   useEffect(() => {
     // A 404 has the page to itself; a toast would only repeat it.
     if (itemError && !isNotFoundProblem(itemError)) {
-      toast.error(itemError instanceof Error ? itemError.message : "Failed to load item");
+      toast.error(
+        loadErrorDescription(
+          itemError,
+          itemError instanceof Error ? itemError.message : t("web.detail.page.loadFailedToast"),
+        ),
+      );
     }
-  }, [itemError]);
+  }, [itemError, t]);
+
+  const detailShown = !loading && itemDetailsReady && item !== undefined;
+  useEffect(() => {
+    if (detailShown && id) markItemDetailShown(id);
+  }, [detailShown, id]);
 
   if (loading || !itemDetailsReady) {
+    if (loadingAudiobook) {
+      return (
+        <div
+          data-testid={enteredItemFromHome ? "home-item-transition-shell" : undefined}
+          className={enteredItemFromHome ? "bg-background min-h-screen" : undefined}
+          aria-busy="true"
+        >
+          <span className="sr-only">{t("web.detail.page.loadingDetails")}</span>
+          <AudiobookDetailSkeleton solid={enteredItemFromHome} />
+        </div>
+      );
+    }
     if (enteredItemFromHome) {
       return <HomeItemTransitionShell key={id} item={item} />;
     }
@@ -196,8 +233,8 @@ export default function ItemDetail() {
     if (itemError && !itemNotFound) {
       return (
         <PageUnavailable
-          title="Couldn't load this item"
-          description="Something went wrong while loading it. Try again in a moment."
+          title={t("web.detail.page.itemLoadFailed")}
+          description={loadErrorDescription(itemError, t("web.detail.page.loadFailedBody"))}
           onRetry={() => void refetch()}
           retrying={isFetching}
         />
@@ -226,7 +263,7 @@ export default function ItemDetail() {
         />
       );
     case "season":
-      return <SeasonContent item={item as ItemDetail & { type: "season" }} />;
+      return <SeasonContent item={item as ItemDetail & { type: "season" }} libraryId={libraryId} />;
     case "episode":
       return (
         <EpisodeContent item={item as ItemDetail & { type: "episode" }} libraryId={libraryId} />
@@ -255,12 +292,14 @@ export default function ItemDetail() {
       // Podcasts are listed in libraries, but no web page shows one yet.
       return (
         <PageUnavailable
-          title="Podcasts can't be opened in the web app yet"
-          description={`"${item.title}" is in your library, but the web app has no podcast page.`}
+          title={t("web.detail.page.podcastUnsupportedTitle")}
+          description={t("web.detail.page.podcastUnsupportedBody", { title: item.title })}
         >
           {libraryId !== undefined && (
             <Button asChild variant="outline">
-              <ViewTransitionLink to={`/library/${libraryId}`}>Browse library</ViewTransitionLink>
+              <ViewTransitionLink to={`/library/${libraryId}`}>
+                {t("web.detail.page.browseLibrary")}
+              </ViewTransitionLink>
             </Button>
           )}
         </PageUnavailable>
@@ -268,7 +307,7 @@ export default function ItemDetail() {
     default:
       return (
         <div className="page-shell text-muted-foreground py-8">
-          Unsupported item type: {item.type}
+          {t("web.detail.page.unsupportedType", { type: item.type })}
         </div>
       );
   }

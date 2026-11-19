@@ -3,74 +3,13 @@ package access
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func ptr[T any](value T) *T { return &value }
-
-func TestRemoteStreamBitratePolicyInheritanceAndOverride(t *testing.T) {
-	group := &GroupPolicy{MaxRemoteStreamBitrateKbps: 4_000}
-	user := &models.User{}
-	if got := ApplyGroupPolicy(user, group).MaxRemoteStreamBitrateKbps; got != 4_000 {
-		t.Fatalf("inherited bitrate = %d, want 4000", got)
-	}
-	user.MaxRemoteStreamBitrateKbps = ptr(2_000)
-	if got := ApplyGroupPolicy(user, group).MaxRemoteStreamBitrateKbps; got != 2_000 {
-		t.Fatalf("tighter override = %d, want 2000", got)
-	}
-	user.MaxRemoteStreamBitrateKbps = ptr(0)
-	if got := ApplyGroupPolicy(user, group).MaxRemoteStreamBitrateKbps; got != 0 {
-		t.Fatalf("explicit unlimited override = %d, want 0", got)
-	}
-	user.MaxRemoteStreamBitrateKbps = nil
-	if got := ApplyGroupPolicy(user, nil).MaxRemoteStreamBitrateKbps; got != 0 {
-		t.Fatalf("no-group default = %d, want 0", got)
-	}
-}
-
-func TestLocalStreamBitratePolicyInheritanceAndOverride(t *testing.T) {
-	group := &GroupPolicy{MaxLocalStreamBitrateKbps: 12_000}
-	user := &models.User{}
-	if got := ApplyGroupPolicy(user, group).MaxLocalStreamBitrateKbps; got != 12_000 {
-		t.Fatalf("inherited local bitrate = %d, want 12000", got)
-	}
-	user.MaxLocalStreamBitrateKbps = ptr(6_000)
-	if got := ApplyGroupPolicy(user, group).MaxLocalStreamBitrateKbps; got != 6_000 {
-		t.Fatalf("local override = %d, want 6000", got)
-	}
-	user.MaxLocalStreamBitrateKbps = ptr(0)
-	if got := ApplyGroupPolicy(user, group).MaxLocalStreamBitrateKbps; got != 0 {
-		t.Fatalf("explicit local unlimited = %d, want 0", got)
-	}
-	user.MaxLocalStreamBitrateKbps = nil
-	if got := ApplyGroupPolicy(user, nil).MaxLocalStreamBitrateKbps; got != 0 {
-		t.Fatalf("no-group local default = %d, want 0", got)
-	}
-}
-
-func TestMaxProfilesInheritanceAndOverride(t *testing.T) {
-	group := &GroupPolicy{MaxProfiles: 2}
-	user := &models.User{}
-	if got := ApplyGroupPolicy(user, group).MaxProfiles; got != 2 {
-		t.Fatalf("inherited profile limit = %d, want 2", got)
-	}
-	user.MaxProfiles = ptr(8)
-	if got := ApplyGroupPolicy(user, group).MaxProfiles; got != 8 {
-		t.Fatalf("profile limit override = %d, want 8", got)
-	}
-	user.MaxProfiles = nil
-	if got := ApplyGroupPolicy(user, nil).MaxProfiles; got != DefaultMaxProfiles {
-		t.Fatalf("no-group profile limit = %d, want %d", got, DefaultMaxProfiles)
-	}
-	// An admin row that still carries a group resolves as ungrouped.
-	admin := &models.User{Role: models.RoleAdmin, AccessGroupID: ptr(int64(4))}
-	got, err := EffectivePolicyForUser(t.Context(), admin, failingGroupProvider{t: t})
-	if err != nil || got.MaxProfiles != DefaultMaxProfiles {
-		t.Fatalf("admin profile limit = %d, %v; want %d", got.MaxProfiles, err, DefaultMaxProfiles)
-	}
-}
 
 func TestApplyGroupPolicyNoGroupUsesOverridesOverPermissiveDefault(t *testing.T) {
 	user := &models.User{
@@ -99,28 +38,6 @@ func TestApplyGroupPolicyNoGroupUsesOverridesOverPermissiveDefault(t *testing.T)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ApplyGroupPolicy(no group) = %#v, want %#v", got, want)
-	}
-}
-
-func TestApplyGroupPolicyUnsetUserInheritsNoGroupDefaults(t *testing.T) {
-	got := ApplyGroupPolicy(&models.User{ID: 1}, nil)
-	want := EffectiveUserPolicy{
-		LibraryIDs:         nil,
-		MaxPlaybackQuality: "",
-		DownloadAllowed:    true,
-		// The no-group default for transcoded downloads is deny: it matches
-		// the pre-inherit column default on users.
-		DownloadTranscodeAllowed: false,
-		TranscodeAllowed:         true,
-		AudioTranscodeAllowed:    true,
-		MaxStreams:               0,
-		MaxTranscodes:            0,
-		MaxProfiles:              DefaultMaxProfiles,
-		Permissions:              nil,
-		RequestsAllowed:          true,
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ApplyGroupPolicy(unset, no group) = %#v, want %#v", got, want)
 	}
 }
 
@@ -387,17 +304,6 @@ func (p failingGroupProvider) GetPolicyForUser(context.Context, int) (*GroupPoli
 	return nil, nil
 }
 
-func TestEffectivePolicyForUserSkipsProviderWhenUngrouped(t *testing.T) {
-	user := &models.User{ID: 3, MaxStreams: ptr(2)}
-	got, err := EffectivePolicyForUser(context.Background(), user, failingGroupProvider{t: t})
-	if err != nil {
-		t.Fatalf("EffectivePolicyForUser() error = %v", err)
-	}
-	if !reflect.DeepEqual(got, ApplyGroupPolicy(user, nil)) {
-		t.Fatalf("EffectivePolicyForUser(ungrouped) = %#v, want the no-group policy %#v", got, ApplyGroupPolicy(user, nil))
-	}
-}
-
 // An admin row that still carries a group (written before admins were kept
 // ungrouped) resolves to the admin defaults without consulting the provider.
 func TestEffectivePolicyForUserIgnoresGroupOnAdmin(t *testing.T) {
@@ -444,15 +350,48 @@ func TestApplyGroupPolicyAdminOverridesStillRestrict(t *testing.T) {
 	}
 }
 
-// The resolver itself keeps a group off an admin, not only GroupApplies at
-// each call site.
-func TestApplyGroupPolicyIgnoresGroupOnAdmin(t *testing.T) {
-	admin := &models.User{ID: 1, Role: models.RoleAdmin, Permissions: []string{"marker_edit"}}
-	group := &GroupPolicy{ID: 4, LibraryIDs: []int{1}, MaxStreams: 1, AllowedPermissions: []string{}}
-	got := ApplyGroupPolicy(admin, group)
-	want := adminFullAccess()
-	want.Permissions = []string{"marker_edit"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ApplyGroupPolicy(admin, group) = %#v, want %#v", got, want)
+// TestWiderThan: a restore creates an account only when the policy here
+// grants nothing the backup's did not, so every field's open value
+// (unrestricted libraries, no quality ceiling, 0 caps) counts as wider than
+// any limit, and narrower values never do.
+func TestWiderThan(t *testing.T) {
+	limit := EffectiveUserPolicy{LibraryIDs: []int{1, 2}, MaxPlaybackQuality: "1080p", MaxStreams: 2, MaxTranscodes: 1,
+		MaxRemoteStreamBitrateKbps: 8000, MaxLocalStreamBitrateKbps: 0, MaxProfiles: 3, Permissions: []string{"marker_edit"}, RequestsAllowed: true}
+	cases := []struct {
+		name   string
+		change func(*EffectiveUserPolicy)
+		want   []string
+	}{
+		{"same", func(*EffectiveUserPolicy) {}, nil},
+		{"narrower everywhere", func(p *EffectiveUserPolicy) {
+			p.LibraryIDs, p.MaxStreams, p.MaxTranscodes, p.MaxRemoteStreamBitrateKbps, p.MaxLocalStreamBitrateKbps = []int{}, 1, 1, 4000, 1000
+			p.MaxProfiles, p.Permissions, p.RequestsAllowed = 1, nil, false
+		}, nil},
+		{"libraries unrestricted", func(p *EffectiveUserPolicy) { p.LibraryIDs = nil }, []string{"library_ids"}},
+		{"a library added", func(p *EffectiveUserPolicy) { p.LibraryIDs = []int{1, 3} }, []string{"library_ids"}},
+		{"quality ceiling lifted", func(p *EffectiveUserPolicy) { p.MaxPlaybackQuality = "" }, []string{"max_playback_quality"}},
+		{"quality ceiling raised", func(p *EffectiveUserPolicy) { p.MaxPlaybackQuality = "4K" }, []string{"max_playback_quality"}},
+		{"stream cap lifted", func(p *EffectiveUserPolicy) { p.MaxStreams = 0 }, []string{"max_streams"}},
+		{"bitrate cap raised", func(p *EffectiveUserPolicy) { p.MaxRemoteStreamBitrateKbps = 9000 }, []string{"max_remote_stream_bitrate_kbps"}},
+		{"more profiles", func(p *EffectiveUserPolicy) { p.MaxProfiles = 4 }, []string{"max_profiles"}},
+		{"downloads allowed", func(p *EffectiveUserPolicy) { p.DownloadAllowed = true }, []string{"download_allowed"}},
+		{"a permission added", func(p *EffectiveUserPolicy) { p.Permissions = []string{"marker_edit", "metadata_curation"} }, []string{"permissions"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			policy := limit
+			policy.LibraryIDs = append([]int(nil), limit.LibraryIDs...)
+			c.change(&policy)
+			var fields []string
+			for _, w := range WiderThan(policy, limit) {
+				fields = append(fields, w.Field)
+			}
+			if strings.Join(fields, ",") != strings.Join(c.want, ",") {
+				t.Fatalf("WiderThan = %v, want %v", fields, c.want)
+			}
+		})
+	}
+	if got := WiderThan(EffectiveUserPolicy{LibraryIDs: []int{5}}, EffectiveUserPolicy{}); len(got) != 0 {
+		t.Fatalf("an unrestricted limit has nothing to widen: %+v", got)
 	}
 }

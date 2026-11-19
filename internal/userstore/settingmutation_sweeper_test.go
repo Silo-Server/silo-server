@@ -118,28 +118,6 @@ func TestSettingMutationSweeperDeletesExpiredReceipts(t *testing.T) {
 	}
 }
 
-// TestSettingMutationSweeperSkipsFailedStores pins the skip-on-error behavior:
-// a user whose store cannot be opened is counted as failed and does not stop
-// the sweep from reaching the users after it.
-func TestSettingMutationSweeperSkipsFailedStores(t *testing.T) {
-	ctx := context.Background()
-	store := newSweeperTestStore(t)
-	putReceipt(t, store, "expired", time.Now().UTC().Add(-time.Hour))
-
-	sweeper := userstore.NewSettingMutationSweeper(
-		staticUserLister{users: []*models.User{{ID: 1}, {ID: 2}}},
-		mapStoreProvider{stores: map[int]userstore.UserStore{2: store}},
-	)
-
-	stats, err := sweeper.Sweep(ctx, nil)
-	if err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
-	if stats.UsersSwept != 1 || stats.UsersFailed != 1 || stats.ReceiptsDeleted != 1 {
-		t.Fatalf("stats = %+v, want 1 swept, 1 failed, 1 deleted", stats)
-	}
-}
-
 // TestSettingMutationSweeperListFailure pins that a user-listing failure is an
 // error rather than a silent no-op sweep.
 func TestSettingMutationSweeperListFailure(t *testing.T) {

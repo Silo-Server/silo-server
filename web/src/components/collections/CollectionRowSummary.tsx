@@ -1,15 +1,20 @@
 import { House, Library as LibraryIcon } from "lucide-react";
 
 import { rowMeta, type CollectionRow } from "@/lib/collections/rows";
+import { useAppLanguage } from "@/i18n";
 
 /** A Home rows row in a list: a house for Home or a library for a library page, its title and place. */
 export function CollectionRowSummary({
   row,
   libraryNames,
+  note,
 }: {
   row: CollectionRow;
   libraryNames: ReadonlyMap<number, string>;
+  /** A line under the place, such as what a delete does to the row. */
+  note?: string;
 }) {
+  useAppLanguage();
   const Icon = row.page.kind === "home" ? House : LibraryIcon;
   return (
     <>
@@ -21,6 +26,7 @@ export function CollectionRowSummary({
         <span className="text-muted-foreground truncate text-[12.5px]">
           {rowMeta(row, libraryNames)}
         </span>
+        {note ? <span className="text-[12.5px] text-pretty">{note}</span> : null}
       </span>
     </>
   );

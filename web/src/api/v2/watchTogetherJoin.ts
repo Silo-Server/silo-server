@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -22,6 +23,6 @@ export async function joinRoom(
   });
   if (!isCapturedProfileAuthorityActive(authority)) throw new StaleApiRequestContextError();
   if (typeof result.room?.room_id !== "string" || !result.room.room_id)
-    throw new Error("Invalid joined room identity.");
+    throw new Error(t("web.common.errors.joinedRoomIdentityInvalid"));
   return normalizeRoomResponse(result.room.room_id, result);
 }

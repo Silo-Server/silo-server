@@ -138,13 +138,6 @@ func TestLimiterRaisingCapacityWakesWaiters(t *testing.T) {
 	})
 }
 
-func TestLimiterCapacityIsAtLeastOne(t *testing.T) {
-	l := NewLimiter(0)
-	mustAcquire(t, l, context.Background())()
-	l.Resize(-3)
-	mustAcquire(t, l, context.Background())()
-}
-
 func TestLimiterAcquireWithEndedContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

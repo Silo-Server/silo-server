@@ -3,6 +3,8 @@ package apiv2
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -77,6 +79,7 @@ type AdminTask struct {
 	LastExecution  *AdminTaskExecutionSummary `json:"last_execution,omitempty"`
 	Triggers       []AdminTaskTrigger         `json:"triggers"`
 	NextRunAt      *Instant                   `json:"next_run_at,omitempty"`
+	StartedAt      *Instant                   `json:"started_at,omitempty" doc:"When the run in progress on this process started. Absent while the task is idle."`
 	ExecutionScope string                     `json:"execution_scope" enum:"process" doc:"Live execution and cancellation concern this server process; no durable dispatch or cluster-wide status is promised."`
 }
 type AdminTaskSchedule struct {
@@ -141,13 +144,18 @@ func taskExecutionOf(e taskmanager.ExecutionResult) AdminTaskExecution {
 			out.Steps = result.Steps
 		}
 	}
-	if e.Status == adminjob.StatusFailed {
+	switch e.Status {
+	case adminjob.StatusFailed:
 		out.ErrorMessage = "Task failed. Inspect administrator diagnostics for details."
+	case adminjob.StatusCancelled:
+		// The task runner writes the message of a run it stopped itself (a
+		// max runtime stop), so unlike failure text it is safe to show.
+		out.ErrorMessage = e.ErrorMessage
 	}
 	return out
 }
 func taskOf(t taskmanager.TaskInfo) AdminTask {
-	out := AdminTask{Key: t.Key, Name: t.Name, Description: t.Description, Category: string(t.Category), State: string(t.State), Progress: t.Progress, ManualOnly: t.ManualOnly, Triggers: taskTriggersOf(t.Triggers), NextRunAt: instantPtr(t.NextRunAt), ExecutionScope: "process"}
+	out := AdminTask{Key: t.Key, Name: t.Name, Description: t.Description, Category: string(t.Category), State: string(t.State), Progress: t.Progress, ManualOnly: t.ManualOnly, Triggers: taskTriggersOf(t.Triggers), NextRunAt: instantPtr(t.NextRunAt), StartedAt: instantPtr(t.StartedAt), ExecutionScope: "process"}
 	if t.LastExecution != nil {
 		out.LastExecution = new(taskExecutionOf(*t.LastExecution).AdminTaskExecutionSummary)
 	}
@@ -247,8 +255,21 @@ func (reg *Registry) cancelAdminTask(_ context.Context, in *AdminTaskInput) (*Ad
 	}
 	return &AdminTaskOutput{Body: taskOf(reg.deps.AdminTasks.GetTaskInfo(in.Key))}, nil
 }
-func taskScheduleTag(ctx context.Context, key string, revision int64) EntityTag {
-	return collectionEditorTag(ctx, "admin-task-schedule", key, revision)
+
+// taskScheduleTag names one schedule representation. A saved schedule is
+// fenced by its revision. An unsaved one (revision zero) reports the task's
+// defaults, which change without a revision when a plugin task's binding
+// trigger or manifest default changes, so its tag also carries those triggers:
+// an editor opened before the defaults changed gets 412 rather than saving its
+// stale copy over the new default.
+func taskScheduleTag(ctx context.Context, key string, s taskmanager.Schedule) EntityTag {
+	kind := "admin-task-schedule"
+	if s.Revision == 0 {
+		encoded, _ := json.Marshal(s.Triggers)
+		digest := sha256.Sum256(encoded)
+		kind += ":defaults:" + hex.EncodeToString(digest[:12])
+	}
+	return collectionEditorTag(ctx, kind, key, s.Revision)
 }
 func (reg *Registry) getAdminTaskSchedule(ctx context.Context, in *AdminTaskInput) (*AdminTaskScheduleOutput, error) {
 	if _, err := reg.taskInfo(in.Key); err != nil {
@@ -258,7 +279,7 @@ func (reg *Registry) getAdminTaskSchedule(ctx context.Context, in *AdminTaskInpu
 	if err != nil {
 		return nil, taskProblem(err)
 	}
-	return &AdminTaskScheduleOutput{ETag: taskScheduleTag(ctx, in.Key, s.Revision).String(), Body: AdminTaskSchedule{TaskKey: in.Key, Triggers: taskTriggersOf(s.Triggers)}}, nil
+	return &AdminTaskScheduleOutput{ETag: taskScheduleTag(ctx, in.Key, s).String(), Body: AdminTaskSchedule{TaskKey: in.Key, Triggers: taskTriggersOf(s.Triggers)}}, nil
 }
 func (reg *Registry) updateAdminTaskSchedule(ctx context.Context, in *AdminTaskScheduleInput) (*AdminTaskScheduleOutput, error) {
 	if _, err := reg.taskInfo(in.Key); err != nil {
@@ -268,7 +289,7 @@ func (reg *Registry) updateAdminTaskSchedule(ctx context.Context, in *AdminTaskS
 	if err != nil {
 		return nil, taskProblem(err)
 	}
-	tag := taskScheduleTag(ctx, in.Key, s.Revision)
+	tag := taskScheduleTag(ctx, in.Key, s)
 	if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, tag); p != nil {
 		return nil, p
 	}
@@ -309,12 +330,21 @@ func (reg *Registry) updateAdminTaskSchedule(ctx context.Context, in *AdminTaskS
 	}
 	saved, err := reg.deps.AdminTasks.UpdateSchedule(ctx, in.Key, expected, configs)
 	if mismatch, ok := errors.AsType[*taskmanager.ScheduleConflict](err); ok {
-		return nil, StaleVersionProblem(taskScheduleTag(ctx, in.Key, mismatch.Actual))
+		if mismatch.Actual != 0 {
+			return nil, StaleVersionProblem(taskScheduleTag(ctx, in.Key, taskmanager.Schedule{Revision: mismatch.Actual}))
+		}
+		// Only an unsaved schedule's tag depends on its triggers. Without
+		// them the tag would match no later read, so send none.
+		current, readErr := reg.deps.AdminTasks.GetSchedule(ctx, in.Key)
+		if readErr != nil {
+			return nil, StaleVersionProblem(EntityTag{})
+		}
+		return nil, StaleVersionProblem(taskScheduleTag(ctx, in.Key, current))
 	}
 	if err != nil {
 		return nil, taskProblem(err)
 	}
-	return &AdminTaskScheduleOutput{ETag: taskScheduleTag(ctx, in.Key, saved.Revision).String(), Body: AdminTaskSchedule{TaskKey: in.Key, Triggers: taskTriggersOf(saved.Triggers)}}, nil
+	return &AdminTaskScheduleOutput{ETag: taskScheduleTag(ctx, in.Key, saved).String(), Body: AdminTaskSchedule{TaskKey: in.Key, Triggers: taskTriggersOf(saved.Triggers)}}, nil
 }
 func (reg *Registry) listAdminTaskHistory(ctx context.Context, cursors *Cursors, in *AdminTaskHistoryInput) (*AdminTaskHistoryOutput, error) {
 	if _, err := reg.taskInfo(in.Key); err != nil {

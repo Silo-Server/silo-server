@@ -82,6 +82,8 @@ type Stream struct {
 	// FrameSideDataRead reports that the first frame was read, so an empty
 	// FrameSideDataList means the frame carries no side data.
 	FrameSideDataRead bool `json:"-"`
+	// FrameColorRange is the range FFmpeg reported on that first frame.
+	FrameColorRange string `json:"-"`
 }
 
 // Disposition is the subset of FFprobe disposition flags used by scans.
@@ -220,6 +222,7 @@ func NormalizeVideoTrack(stream Stream) models.VideoTrack {
 		VideoRange:          videoRangeLabel(stream, dvProfile),
 		VideoRangeType:      videoRangeType(stream, dvProfile, dvConfig.DVBLCompatID, hdr10Plus),
 		ColorRange:          colorRange,
+		FrameColorRange:     frameColorRange(stream),
 		ColorPrimaries:      stream.ColorPrimaries,
 		ColorSpace:          stream.ColorSpace,
 		ColorTransfer:       stream.ColorTransfer,
@@ -227,6 +230,22 @@ func NormalizeVideoTrack(stream Stream) models.VideoTrack {
 		PixelFormat:         stream.PixFmt,
 		ReferenceFrames:     stream.Refs,
 	}
+}
+
+// frameColorRange returns the stored form of the first decoded frame's range,
+// or "" when the frame was not read.
+func frameColorRange(stream Stream) string {
+	if !stream.FrameSideDataRead {
+		return ""
+	}
+	return RecordedFrameColorRange(stream.FrameColorRange)
+}
+
+// RecordedFrameColorRange is the value stored for a first frame that FFmpeg
+// reported range as: the range itself, or "unknown" when it reported none, so
+// a read frame is never mistaken for one not read.
+func RecordedFrameColorRange(reported string) string {
+	return firstNonEmpty(strings.TrimSpace(reported), "unknown")
 }
 
 func dolbyVisionConfigRecord(sideData []SideData) (SideData, bool) {
@@ -360,6 +379,53 @@ func parseBitDepth(stream Stream) int {
 		return value
 	}
 	return parseNumeric(string(stream.BitsPerSample))
+}
+
+// Matroska statistics tags that mkvmerge writes with a track's measured
+// bitrate in bits per second; older muxers write the language-suffixed form.
+const (
+	matroskaBPSTag    = "BPS"
+	matroskaBPSEngTag = "BPS-eng"
+)
+
+// StreamBitrateKbps returns a stream's bitrate in kbps, or 0 when unknown.
+// Matroska has no per-stream bitrate field, so ffprobe reports bit_rate as
+// N/A there unless the codec header states one (AC-3, E-AC-3 and DTS do;
+// AAC, FLAC, Opus and TrueHD do not). mkvmerge writes the measured rate as a
+// BPS statistics tag (BPS-eng in older muxers), which is the fallback. The
+// tag order matches Jellyfin's ProbeResultNormalizer.
+func StreamBitrateKbps(stream Stream) int {
+	if kbps := bitrateKbps(stream.BitRate); kbps > 0 {
+		return kbps
+	}
+	for _, key := range []string{matroskaBPSEngTag, matroskaBPSTag} {
+		for tag, value := range stream.Tags {
+			if strings.EqualFold(tag, key) {
+				if kbps := bitrateKbps(value); kbps > 0 {
+					return kbps
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// maxStreamBitrateKbps (10 Gb/s) is far above any real audio stream or
+// compressed video. A larger value is a corrupt tag, and storing it would fail
+// every client bitrate limit and overflow clients' 32-bit bitrate fields.
+const maxStreamBitrateKbps = 10_000_000
+
+// bitrateKbps converts a bits-per-second string to kbps, or 0 when it is
+// unparseable or out of range.
+func bitrateKbps(raw string) int {
+	bps, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0
+	}
+	if kbps := bps / 1000; kbps > 0 && kbps <= maxStreamBitrateKbps {
+		return kbps
+	}
+	return 0
 }
 
 func parseNumeric(raw string) int {

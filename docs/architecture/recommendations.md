@@ -171,6 +171,9 @@ not lost. A refresh that finds the profile's lock held by
 another server marks the profile stale and stops, so two refreshes never
 finish out of order.
 
+- Ratings are stored as scores from 1 to 10 and weighed in whole stars,
+  rounding half up: 9-10 is 5 stars, 7-8 is 4, 5-6 is 3, and 1-4 (1-2
+  stars) is a dislike. The star counts below use those bands.
 - Episodes roll up to their series. A series decays once by its most recent
   signal, as a movie decays by its last watch. A series with no signal for
   30 days counts in proportion to its episodes watched with a positive
@@ -517,13 +520,19 @@ finds a profile's rows missing asks for a refresh at most once per profile per
 asks too, so a lost first refresh recovers. Because You Watched anchors are the
 profile's three most recent completed titles of `recommendableMediaTypes` that
 still exist in the catalog, taken from its latest ten such completions and
-passing over those it rated 2 stars or lower; the worker, the reads and
-Watch Tonight choose them the same way. A read asks for a refresh only when
-there are anchors and none has a cached row.
+passing over those it rated 2 stars or lower or marked Not interested. A read
+whose filter limits the libraries (a library section, a Jellyfin `ParentId`, a
+viewer limited to some libraries, a disabled library) takes the three most
+recent in its libraries from the latest fifty completions instead, so watching
+one library does not take another library's row away until fifty newer titles
+were finished elsewhere. The worker builds rows for the three most recent
+overall and for each library's three most recent of the latest fifty, not
+counting titles in a disabled library, which covers every such read; Watch
+Tonight and a library's For You fill use the three most recent overall. A read
+asks for a refresh only when there are anchors and none has a cached row.
 
-List reads return at most 50 items per row (default 20); the v1 for-you and
-similar-users reads keep 20, and section "see all" reads return up to 60, a
-whole cached row. Home and library sections read the whole cached pool,
+List reads return at most 50 items per row (default 20), and section "see all"
+reads return up to 60, a whole cached row. Home and library sections read the whole cached pool,
 scope it to the section's libraries, then trim to the section's size. The
 main row is ranked for every title the profile can see, so a library with a
 small share of the catalog can hold few of its titles. A library's For You
@@ -537,5 +546,5 @@ Jellyfin's `/Movies/Recommendations` sends only rows its headings describe
 truthfully: up to two Because You Watched rows under their anchor's title,
 dropped when the viewer cannot see the anchor, and the taste-cluster rows
 under their genre label (see [jellycompat-api.md](../jellycompat-api.md)). A
-per-section items request that fails to load answers `500`; the aggregate
-sections endpoints still degrade to empty rows.
+per-section items request that fails to load answers `500`; the v2 aggregate
+sections endpoints leave that row out.

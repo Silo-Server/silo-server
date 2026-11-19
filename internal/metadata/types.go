@@ -82,6 +82,10 @@ type ProcessRequest struct {
 	// identityCorrection is set when an Identify, or an NFO on a manual
 	// refresh, corrects the item's stored match (identityChoiceCorrects).
 	identityCorrection bool
+	// resetToProvider marks an admin's Reset to Provider: the item's locks are
+	// cleared and every unlocked field takes the providers' value, empty
+	// included. See resetToProvider in mergeAndPersist.
+	resetToProvider bool
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.

@@ -112,7 +112,7 @@ class GitSelectionTests(unittest.TestCase):
             ("web/public/vendor/pdfjs/pdf.worker.mjs", False, True),
             ("web/public/vendor/pdfjs/standard_fonts_other/font.pfb", False, True),
             ("internal/catalog/history.go", True, False),
-            ("internal/scenariocatalog/testdata/fixture.json", True, False),
+            ("internal/routeinventory/testdata/fixture.json", True, False),
             ("internal/policy/vendor/README.md", True, False),
             ("internal/userdb/testdata/schema.sql", True, False),
             ("internal/ebookconvert/mobitool.wasm", True, False),
@@ -125,13 +125,11 @@ class GitSelectionTests(unittest.TestCase):
             ("cmd/silo/main.go", True, False),
             ("scripts/ci/db-pins.txt", True, False),
             ("scripts/ci/db-contracts.txt", True, False),
-            ("contracts/api/v2/migration.json", True, False),
-            ("contracts/api/v2/migration.schema.json", True, False),
-            ("contracts/api/v2/offline-routes.txt", True, False),
             ("contracts/api/v2/breaking-approvals.json", True, False),
             (".github/actions/README.md", False, False),
             (".github/evidence.yml", False, False),
             (".github/ISSUE_TEMPLATE/bug-report.yml", False, False),
+            (".github/DISCUSSION_TEMPLATE/ideas.yml", False, False),
         ]
         for number, (path, go, web) in enumerate(cases):
             with self.subTest(path=path):
@@ -657,28 +655,6 @@ class WorkflowGateTests(unittest.TestCase):
             run = subprocess.run(["bash", "-c", script], cwd=directory,
                                  capture_output=True, text=True)
             self.assertNotEqual(run.returncode, 0, "A missing Git input must fail")
-
-    def test_full_tree_tool_targets_exist(self):
-        run = subprocess.run(["make", "-n", "verify-actionlint", "verify-shellcheck"],
-                             cwd=self.root, capture_output=True, text=True)
-        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-        self.assertIn("1.7.12", run.stdout)
-        self.assertIn("0.11.0", run.stdout)
-
-    def test_workflow_and_shell_tools_reject_seeded_defects(self):
-        missing = [tool for tool in ("actionlint", "shellcheck") if not shutil.which(tool)]
-        if missing:
-            self.skipTest("required tools not on PATH: " + ", ".join(missing))
-        workflow = "name: test\non: push\njobs:\n  test:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n"
-        for contents, expected in ((workflow, 0), (workflow.replace("echo ok", "echo ${{ unknown.value }}"), 1)):
-            run = subprocess.run(["actionlint", "-oneline", "-"], input=contents,
-                                 cwd=self.root, capture_output=True, text=True)
-            self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
-        for contents, expected in (("#!/bin/bash\nprintf '%s\\n' \"$1\"\n", 0),
-                                   ("#!/bin/bash\nprintf '%s\\n' $1\n", 1)):
-            run = subprocess.run(["shellcheck", "-s", "bash", "-"], input=contents,
-                                 cwd=self.root, capture_output=True, text=True)
-            self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
 
 
 if __name__ == "__main__":

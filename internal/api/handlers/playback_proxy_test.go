@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -57,7 +58,7 @@ func TestRelayToTranscodeNodeAcknowledgesOnlyFullDownstreamResponse(t *testing.T
 			}))
 			defer node.Close()
 
-			handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+			handler := &PlaybackHandler{JWTSecret: "proxy-test-secret", NodeKeys: nodeauthtest.SameKey("proxy-test-secret")}
 			req := withPlaybackRouteParam(
 				httptest.NewRequest(http.MethodGet, "/playback/transcode/public/segment/seg_00007.ts", nil),
 				"session_id",
@@ -126,7 +127,7 @@ func TestRelayToTranscodeNodeCarriesLongTitleTokenOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			handler := &PlaybackHandler{JWTSecret: secret}
+			handler := &PlaybackHandler{JWTSecret: secret, NodeKeys: nodeauthtest.SameKey(secret)}
 			req := withPlaybackRouteParam(
 				httptest.NewRequest(http.MethodGet, "/playback/transcode/public/master.m3u8?st="+token, nil),
 				"session_id",
@@ -171,7 +172,7 @@ func TestRelayToTranscodeNodeDoesNotAcknowledgeFailedDownstreamWrite(t *testing.
 	}))
 	defer node.Close()
 
-	handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+	handler := &PlaybackHandler{JWTSecret: "proxy-test-secret", NodeKeys: nodeauthtest.SameKey("proxy-test-secret")}
 	req := withPlaybackRouteParam(
 		httptest.NewRequest(http.MethodGet, "/playback/transcode/public/segment/seg_00007.ts", nil),
 		"session_id",
@@ -221,7 +222,7 @@ func TestRelayToTranscodeNodeReusesNodeConnections(t *testing.T) {
 		concurrency = 20
 		waves       = 2
 	)
-	handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+	handler := &PlaybackHandler{JWTSecret: "proxy-test-secret", NodeKeys: nodeauthtest.SameKey("proxy-test-secret")}
 
 	t.Run("sequential", func(t *testing.T) {
 		node := newConnCountingTranscodeNode(t, false)
@@ -363,7 +364,7 @@ func TestRelayToTranscodeNodeRefusesNodeRedirectsOnNativeV2(t *testing.T) {
 			}))
 			defer node.Close()
 
-			handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+			handler := &PlaybackHandler{JWTSecret: "proxy-test-secret", NodeKeys: nodeauthtest.SameKey("proxy-test-secret")}
 			serve := RefuseRelayRedirects(func(w http.ResponseWriter, r *http.Request) {
 				if err := handler.relayToTranscodeNode(w, r, node.URL, "/transcode/remote/master.m3u8"); err != nil {
 					t.Fatalf("relay error = %v", err)

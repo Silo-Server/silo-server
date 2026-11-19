@@ -2,14 +2,56 @@ package apiv2
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
+// behindTrustedProxy runs h behind clientip.Middleware, as the API listener
+// does, with httptest's default peer (192.0.2.1) as a trusted proxy.
+func behindTrustedProxy(t *testing.T, h http.Handler) http.Handler {
+	t.Helper()
+	trusted, err := clientip.ParseCIDRs("192.0.2.1/32")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return clientip.Middleware(clientip.NewResolver(trusted))(h)
+}
+
+// TestStartDeviceLoginForwardedOrigin: without a public URL the link names
+// the origin the device used, and a client that is not a trusted proxy cannot
+// choose its scheme or host with forwarded headers (#2917). TestStartDeviceLogin
+// covers a trusted proxy's headers.
+func TestStartDeviceLoginForwardedOrigin(t *testing.T) {
+	h := behindTrustedProxy(t, newTestHandler(t, pilotDeps(nil, nil)))
+	for _, tc := range []struct {
+		name, proto, host, want string
+	}{
+		{"proto list", "https,http", "", "http://example.com/activate"},
+		{"proto and host", "https", "silo.example.test", "http://example.com/activate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/api/v2/auth/device/start", strings.NewReader(`{}`))
+			r.RemoteAddr = "198.51.100.7:1234" // not a trusted proxy
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("X-Forwarded-Proto", tc.proto)
+			if tc.host != "" {
+				r.Header.Set("X-Forwarded-Host", tc.host)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri":"`+tc.want+`"`) {
+				t.Fatalf("%d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestStartDeviceLogin(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
+	h := behindTrustedProxy(t, newTestHandler(t, pilotDeps(nil, nil)))
 	rec := do(t, h, http.MethodPost, "/api/v2/auth/device/start", `{"device_name":"Living room TV","device_platform":"tvos"}`,
 		map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-Host": "silo.example.test"})
 	if rec.Code != 201 || rec.Header().Get("Cache-Control") != "no-store" {
@@ -24,7 +66,7 @@ func TestStartDeviceLogin(t *testing.T) {
 	pub := pilotDeps(nil, nil)
 	publicURL := "https://media.example.test/"
 	pub.ServerConnections.PublicURL = func() string { return publicURL }
-	public := newTestHandler(t, pub)
+	public := behindTrustedProxy(t, newTestHandler(t, pub))
 	rec = do(t, public, http.MethodPost, "/api/v2/auth/device/start", `{}`,
 		map[string]string{"X-Forwarded-Proto": "http", "X-Forwarded-Host": "192.168.1.20:8090"})
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri_complete":"https://media.example.test/activate?code=48217730"`) {

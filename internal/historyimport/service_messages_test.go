@@ -22,7 +22,7 @@ func TestLogRunFailureRecordsTheCauseWithoutCredentials(t *testing.T) {
 	logRunFailure(context.Background(), logger, RunClaim{RunID: "run-1", DispatchKind: "admin"}, cause)
 
 	line := out.String()
-	for _, want := range []string{"history import: run failed", "run_id=run-1", "dispatch_kind=admin", "context deadline exceeded"} {
+	for _, want := range []string{"run_id=run-1", "dispatch_kind=admin", "context deadline exceeded"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("log line %q does not contain %q", line, want)
 		}

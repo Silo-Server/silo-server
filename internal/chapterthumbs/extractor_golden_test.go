@@ -21,9 +21,10 @@ type goldenExtraction struct {
 }
 
 // TestExtractFrameArgumentsMatchGolden pins every hardware, tone-map, SDR,
-// and HDR case to the ffmpeg arguments, attempt timeouts, and reasons that
-// chapter thumbnails produced before they moved onto mediasample
-// (testdata/extract_argv_golden.json, recorded from the previous extractor).
+// and HDR case to its ffmpeg arguments, attempt timeouts, and reasons
+// (testdata/extract_argv_golden.json): the ones chapter thumbnails produced
+// before they moved onto mediasample, recorded from the previous extractor,
+// with the pixel-aspect scale step since appended to every filter chain.
 // Every attempt fails with a generic error so that each fallback runs.
 func TestExtractFrameArgumentsMatchGolden(t *testing.T) {
 	data, err := os.ReadFile("testdata/extract_argv_golden.json")

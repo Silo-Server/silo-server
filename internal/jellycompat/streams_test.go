@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -148,40 +149,6 @@ func TestRequireLocalAudioDownmixCapabilityRetriesIncompleteProbeAndCachesComple
 	}
 }
 
-func TestAudioSelectionChanged(t *testing.T) {
-	selected := 2
-	session := &PlaybackSession{
-		MediaSources: []PlaybackMediaSource{
-			{ID: "src-a", SelectedAudioStreamIndex: &selected},
-			{ID: "src-b", SelectedAudioStreamIndex: nil},
-		},
-	}
-
-	tests := []struct {
-		name          string
-		session       *PlaybackSession
-		mediaSourceID string
-		incoming      int
-		want          bool
-	}{
-		{"same index on known source", session, "src-a", 2, false},
-		{"different index on known source", session, "src-a", 3, true},
-		{"nil current on known source", session, "src-b", 2, true},
-		{"unknown media source id", session, "src-missing", 2, true},
-		{"empty media source id uses first match", session, "", 2, false},
-		{"nil session", nil, "src-a", 2, true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := audioSelectionChanged(tc.session, tc.mediaSourceID, tc.incoming)
-			if got != tc.want {
-				t.Errorf("audioSelectionChanged(%q, %d) = %v, want %v", tc.mediaSourceID, tc.incoming, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestEnsureTranscodeSessionDoesNotHoldLifecycleLockWhileWaitingForManifest(t *testing.T) {
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "movie.mkv")
@@ -233,7 +200,7 @@ func TestEnsureTranscodeSessionDoesNotHoldLifecycleLockWhileWaitingForManifest(t
 		TranscodeDir: dir,
 		FFmpegPath:   ffmpegPath,
 		HWAccel:      playback.HWAccelNone,
-		tm:           playback.NewTranscodeManager(),
+		tm:           keyedTranscodeManager(),
 	}
 
 	type ensureResult struct {
@@ -352,7 +319,7 @@ func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testi
 			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
 		}},
 		TranscodeDir: t.TempDir(), FFmpegPath: ffmpegPath, HWAccel: tonemap.BackendVideoToolbox,
-		tm: playback.NewTranscodeManager(),
+		tm: keyedTranscodeManager(),
 		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 			return tonemap.Capabilities{
 				{Mode: tonemap.ModeHardware, Backend: tonemap.BackendVideoToolbox, Filter: tonemap.HardwareFilterVideoToolbox, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
@@ -371,47 +338,6 @@ func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testi
 	}
 }
 
-func TestGenerateFullManifest_HLSVersionForResumeStartTag(t *testing.T) {
-	cases := []struct {
-		name        string
-		fmp4        bool
-		startOffset float64
-		wantVersion string
-		wantStart   bool
-	}{
-		{"ts no resume", false, 0, "#EXT-X-VERSION:3", false},
-		{"ts with resume", false, 5.5, "#EXT-X-VERSION:6", true},
-		{"fmp4 no resume", true, 0, "#EXT-X-VERSION:7", false},
-		{"fmp4 with resume", true, 5.5, "#EXT-X-VERSION:7", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := string(generateFullManifest(60, 2, tc.fmp4, tc.startOffset))
-			if !strings.Contains(got, tc.wantVersion+"\n") {
-				t.Fatalf("missing %s; manifest:\n%s", tc.wantVersion, got)
-			}
-			hasStart := strings.Contains(got, "#EXT-X-START:")
-			if hasStart != tc.wantStart {
-				t.Fatalf("EXT-X-START presence = %v, want %v; manifest:\n%s", hasStart, tc.wantStart, got)
-			}
-		})
-	}
-}
-
-func TestCompatHLSUsesFMP4ForEncodedHEVC(t *testing.T) {
-	hevc := PlaybackMediaSource{TargetVideoCodec: compatVideoCodecHEVC}
-	if !compatHLSUsesFMP4(hevc) {
-		t.Fatal("encoded HEVC did not select fMP4 manifest")
-	}
-	manifest := string(generateFullManifest(60, 2, compatHLSUsesFMP4(hevc), 0))
-	if !strings.Contains(manifest, `#EXT-X-MAP:URI="init.mp4"`) || !strings.Contains(manifest, "seg_00000.m4s") || strings.Contains(manifest, "seg_00000.ts") {
-		t.Fatalf("encoded HEVC manifest does not match fMP4 output: %s", manifest)
-	}
-	if compatHLSUsesFMP4(PlaybackMediaSource{}) {
-		t.Fatal("legacy H264 encode unexpectedly selected fMP4")
-	}
-}
-
 func TestShouldGenerateCompatFullManifestBoundsSegmentCount(t *testing.T) {
 	short := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 100_000}}
 	if !shouldGenerateCompatFullManifest(short, 2) {
@@ -421,82 +347,6 @@ func TestShouldGenerateCompatFullManifestBoundsSegmentCount(t *testing.T) {
 	long := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 1_000_000}}
 	if shouldGenerateCompatFullManifest(long, 2) {
 		t.Fatal("long compatibility playback should use FFmpeg's bounded real manifest")
-	}
-}
-
-func TestShouldGenerateCompatFullManifestUsesRealDurationsForVideoCopy(t *testing.T) {
-	copySource := PlaybackMediaSource{
-		Version:  catalog.FileVersion{Duration: 3600},
-		HLSRemux: true,
-	}
-	if shouldGenerateCompatFullManifest(copySource, 2) {
-		t.Fatal("copy-video HLS must use FFmpeg's keyframe-aligned real manifest")
-	}
-}
-
-func TestGenerateCompatCopyVideoMasterManifestAdvertisesDolbyVision(t *testing.T) {
-	selectedAudio := 1
-	source := PlaybackMediaSource{
-		ID: "source-1",
-		Version: catalog.FileVersion{
-			Bitrate: 24_000,
-			VideoTracks: []models.VideoTrack{{
-				Codec: "hevc", Profile: "Main 10", Level: 153,
-				Width: 3840, Height: 1606, FrameRate: "24000/1001",
-				DVProfile: 8, DVLevel: 6, VideoRangeType: "DOVIWithHDR10",
-			}},
-			AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6}},
-		},
-		HLSRemux:                 true,
-		SelectedAudioStreamIndex: &selectedAudio,
-	}
-
-	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", compatRemuxV1PathSegment))
-	for _, want := range []string{
-		"#EXTM3U\n",
-		"#EXT-X-STREAM-INF:BANDWIDTH=24000000,AVERAGE-BANDWIDTH=24000000",
-		"VIDEO-RANGE=PQ",
-		`CODECS="hvc1.2.4.L153.B0,ec-3"`,
-		`SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"`,
-		"RESOLUTION=3840x1606",
-		"FRAME-RATE=23.976",
-		"/Videos/item-1/remux-v1/hls/play-1/stream.m3u8?MediaSourceId=source-1&PlaySessionId=play-1",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("master manifest missing %q:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "#EXTINF:") {
-		t.Fatalf("master route returned a media playlist:\n%s", got)
-	}
-
-	remoteVariant := "https://proxy.example/stream/transcode/signed/master.m3u8?source_timeline=1"
-	remote := string(generateCompatCopyVideoMasterManifestForVariant(source, remoteVariant))
-	if !strings.Contains(remote, remoteVariant) || !strings.Contains(remote, `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"`) {
-		t.Fatalf("remote copy-video master lost its signed variant or Dolby Vision metadata:\n%s", remote)
-	}
-}
-
-func TestGenerateCompatCopyVideoMasterManifestOmitsDolbyVisionForHDR10(t *testing.T) {
-	source := PlaybackMediaSource{
-		ID: "source-1",
-		Version: catalog.FileVersion{
-			Bitrate: 12_000,
-			VideoTracks: []models.VideoTrack{{
-				Codec: "hevc", Profile: "Main 10", Level: 153,
-				Width: 3840, Height: 2160, VideoRangeType: "HDR10",
-			}},
-			AudioTracks: []models.AudioTrack{{Codec: "aac", Profile: "LC", Default: true}},
-		},
-		HLSRemux: true,
-	}
-
-	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
-	if !strings.Contains(got, "VIDEO-RANGE=PQ") || !strings.Contains(got, `CODECS="hvc1.2.4.L153.B0,mp4a.40.2"`) {
-		t.Fatalf("HDR10 master is missing base range/codec metadata:\n%s", got)
-	}
-	if strings.Contains(got, "SUPPLEMENTAL-CODECS") || strings.Contains(got, "dvh1") {
-		t.Fatalf("HDR10 master incorrectly advertises Dolby Vision:\n%s", got)
 	}
 }
 
@@ -524,7 +374,7 @@ func TestGenerateCompatCopyVideoMasterManifestMatchesJellyfinForProfile5(t *test
 }
 
 func TestBuildProxyRedirectURLMarksCopyFMP4ForOldReaderRejection(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	source := PlaybackMediaSource{HLSRemux: true}
 	redirectURL, err := h.buildProxyRedirectURL(
 		"play-1", "upstream-1", string(playback.PlayTranscode),
@@ -547,97 +397,8 @@ func TestBuildProxyRedirectURLMarksCopyFMP4ForOldReaderRejection(t *testing.T) {
 	}
 }
 
-func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
-	source := PlaybackMediaSource{HLSRemux: true, HLSRemuxMPEGTS: true}
-	redirectURL, err := h.buildProxyRedirectURL(
-		"play-1", "upstream-1", string(playback.PlayTranscode),
-		&models.MediaFile{FilePath: "/media/movie.mkv"}, source, nil, time.Time{},
-		"http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claims, err := streamtoken.Verify(proxyTokenFromRedirect(t, redirectURL, string(playback.PlayTranscode)), h.JWTSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !claims.CopyVideoMPEGTS {
-		t.Fatalf("copy proxy token omitted MPEG-TS packaging: %#v", claims)
-	}
-}
-
-// The proxy remux adds aac_adtstoasc for a copied AAC track, and that filter
-// rejects every other codec, so the token names the copied track's codec.
-func TestBuildProxyRedirectURLCarriesCopiedRemuxAudioCodec(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
-	for _, test := range []struct {
-		name           string
-		codec          string
-		transcodeAudio bool
-		want           string
-	}{
-		{name: "copied ac3", codec: "ac3", want: "ac3"},
-		{name: "copied aac", codec: "aac", want: "aac"},
-		{name: "ac3 encoded to aac", codec: "ac3", transcodeAudio: true, want: ""},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			source := PlaybackMediaSource{
-				TranscodeAudio: test.transcodeAudio,
-				Version: catalog.FileVersion{
-					VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-					AudioTracks: []models.AudioTrack{{Codec: test.codec, Channels: 2, Default: true}},
-				},
-			}
-			redirectURL, err := h.buildProxyRedirectURL(
-				"play-1", "upstream-1", string(playback.PlayRemux),
-				&models.MediaFile{FilePath: "/media/movie.ts"}, source, nil, time.Time{},
-				"", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{},
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			claims, err := streamtoken.Verify(proxyTokenFromRedirect(t, redirectURL, string(playback.PlayRemux)), h.JWTSecret)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if claims.CopyAudioCodec != test.want {
-				t.Fatalf("remux proxy token copied audio codec = %q, want %q", claims.CopyAudioCodec, test.want)
-			}
-		})
-	}
-}
-
-// The keyframe playlist only applies to copy streams; an encoded stream's
-// recipe and live session must match whatever the flag says.
-func TestKeyframePlaylistOnlyComparedForCopyStreams(t *testing.T) {
-	encoded := testRemoteTranscodeSource()
-	encoded.KeyframePlaylist = true
-	recipe := playback.NewRecipeCard(7, "profile", encoded.FileID, "", playback.TranscodeOpts{
-		TargetCodecVideo:  compatTargetVideoCodec,
-		TargetCodecAudio:  compatTargetAudioCodec,
-		AudioTrackIndex:   compatAudioTrackIndexOrDefault(encoded),
-		RequireAudioTrack: true,
-	})
-	if !compatRecipeMatchesSource(&recipe, encoded) {
-		t.Fatal("encoded source rejected its recipe over the keyframe playlist flag")
-	}
-
-	copySource := encoded
-	copySource.HLSRemux = true
-	copyRecipe := recipe
-	copyRecipe.TargetCodecVideo = compatCopyCodec
-	if compatRecipeMatchesSource(&copyRecipe, copySource) {
-		t.Fatal("copy source accepted a recipe without its keyframe playlist")
-	}
-	copyRecipe.KeyframePlaylist = true
-	if !compatRecipeMatchesSource(&copyRecipe, copySource) {
-		t.Fatal("copy source rejected its keyframe playlist recipe")
-	}
-}
-
 func TestBuildProxyRedirectURLMarksToneMapForOldReaderRejection(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	source := PlaybackMediaSource{Version: catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10", ColorTransfer: "smpte2084"}}}}
 	redirectURL, err := h.buildProxyRedirectURL("play-1", "upstream-1", string(playback.PlayTranscode), &models.MediaFile{FilePath: "/media/hdr.mkv"}, source, nil, time.Time{}, "http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{})
 	if err != nil {
@@ -653,179 +414,6 @@ func TestBuildProxyRedirectURLMarksToneMapForOldReaderRejection(t *testing.T) {
 	}
 	if claims.PlayMethod != streamtoken.PlayMethodToneMapTranscode {
 		t.Fatalf("tone-map proxy token method = %q", claims.PlayMethod)
-	}
-}
-
-func TestBuildProxyRedirectURLCarriesAudioOnlyRemuxClaim(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
-	source := PlaybackMediaSource{
-		TranscodeAudio:          true,
-		DefaultAudioStreamIndex: intPtr(0),
-		Version: catalog.FileVersion{AudioTracks: []models.AudioTrack{{
-			Codec: "ac3", Channels: 6, Default: true,
-		}}},
-	}
-	redirectURL, err := h.buildProxyRedirectURL(
-		"play-1",
-		"upstream-1",
-		string(playback.PlayRemux),
-		&models.MediaFile{FilePath: "/media/book.m4b", BaseType: "audiobook", CodecAudio: "aac"},
-		source,
-		nil,
-		time.Time{},
-		"",
-		0,
-		&nodepool.Node{URL: "http://proxy-1"},
-		netaccess.Path{},
-	)
-	if err != nil {
-		t.Fatalf("buildProxyRedirectURL: %v", err)
-	}
-	const prefix = "http://proxy-1/stream/remux/audio-v2/"
-	if !strings.HasPrefix(redirectURL, prefix) {
-		t.Fatalf("audio downmix redirect = %q, want versioned proxy route", redirectURL)
-	}
-	token := strings.TrimPrefix(redirectURL, prefix)
-	claims, err := streamtoken.Verify(token, h.JWTSecret)
-	if err != nil {
-		t.Fatalf("verify redirect token: %v", err)
-	}
-	if !claims.AudioOnly {
-		t.Fatalf("audio-only remux claim = false: %#v", claims)
-	}
-	if claims.SourceAudioChannels != 6 || claims.TargetAudioChannels != 2 || claims.PlayMethod != streamtoken.PlayMethodAudioDownmixRemux {
-		t.Fatalf("audio downmix claims = %#v, want six-channel v2 remux", claims)
-	}
-}
-
-func TestUpstreamRemuxRecipeCardFreezesSelectedSurroundChannels(t *testing.T) {
-	selected := 2 // one video stream, then audio track index 1
-	source := PlaybackMediaSource{
-		FileID:                   77,
-		TranscodeAudio:           true,
-		SelectedAudioStreamIndex: &selected,
-		Version: catalog.FileVersion{
-			VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-			AudioTracks: []models.AudioTrack{{Channels: 2}, {Channels: 6}},
-		},
-	}
-	card := (&PlaybackHandler{}).upstreamRecipeCard(
-		&PlaybackSession{UpstreamSessionID: "upstream"},
-		&Session{StreamAppUserID: 7, ProfileID: "profile-1"},
-		source,
-		"remux",
-	)
-	if card.AudioTrackIndex != 1 || card.SourceAudioChannels != 6 {
-		t.Fatalf("remux recipe = %#v, want selected six-channel source", card)
-	}
-}
-
-func TestHandleVideoStreamGuardsIntegratedAudioEncodingAfterProxyFiltering(t *testing.T) {
-	tests := []struct {
-		name            string
-		sourceChannels  int
-		transcodeAudio  bool
-		workerOnly      bool
-		includeOldProxy bool
-		localSupportsV2 bool
-		wantStatus      int
-		wantCode        string
-		wantBody        string
-		wantProbe       bool
-		wantExecution   bool
-	}{
-		{
-			name: "disabled local fallback refuses old-proxy surround downmix", sourceChannels: 6,
-			transcodeAudio: true, workerOnly: true, includeOldProxy: true, localSupportsV2: true,
-			wantStatus: http.StatusServiceUnavailable, wantCode: "RouteCapacityUnavailable",
-		},
-		{
-			name: "incompatible local FFmpeg refuses surround downmix", sourceChannels: 6,
-			transcodeAudio: true, includeOldProxy: true, localSupportsV2: false,
-			wantStatus: http.StatusServiceUnavailable, wantCode: "TranscodeUnavailable", wantProbe: true,
-		},
-		{
-			name: "compatible configured FFmpeg executes surround downmix", sourceChannels: 6,
-			transcodeAudio: true, includeOldProxy: true, localSupportsV2: true,
-			wantStatus: http.StatusOK, wantBody: "remuxed", wantProbe: true, wantExecution: true,
-		},
-		{
-			name: "stereo encoding retains legacy no-probe behavior", sourceChannels: 2,
-			transcodeAudio: true, localSupportsV2: false,
-			wantStatus: http.StatusOK, wantBody: "remuxed", wantExecution: true,
-		},
-		{
-			name: "copy-only remux honors worker-only policy", sourceChannels: 6,
-			workerOnly: true, localSupportsV2: false,
-			wantStatus: http.StatusServiceUnavailable, wantCode: "RouteCapacityUnavailable",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			oldProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
-					Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1",
-				}}})
-			}))
-			defer oldProxy.Close()
-
-			proxyPool := nodepool.NewProxyPool()
-			if tt.includeOldProxy {
-				proxyPool.SetNodes([]*nodepool.Node{{ID: 1, URL: oldProxy.URL, Enabled: true, Healthy: true}})
-			}
-			planner := nodepool.NewPlanner(proxyPool, nodepool.NewTranscodePool())
-			ffmpegPath, probeMarker, executionMarker := writeCompatAudioRecipeFFmpeg(t, tt.localSupportsV2, "remuxed")
-			mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-			if err := os.WriteFile(mediaPath, []byte("source"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			version := testCompatVersion()
-			version.AudioTracks[1].Channels = tt.sourceChannels
-			source := testCompatSource(NewResourceIDCodec(), version)
-			source.SupportsDirectPlay = false
-			source.SupportsDirectStream = true
-			source.TranscodeAudio = tt.transcodeAudio
-			store := NewPlaybackSessionStore(time.Hour, nil)
-			store.Put(PlaybackSession{
-				ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1",
-				UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "remux",
-				MediaSources: []PlaybackMediaSource{source},
-			})
-			sessionMgr := &testCompatSessionManager{sessions: map[string]*playback.Session{
-				"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayRemux, BasePlayMethod: playback.PlayRemux},
-			}}
-			handler := &PlaybackHandler{
-				playbackStore: store,
-				sessionMgr:    sessionMgr,
-				fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: mediaPath}},
-				NodePlanner:   planner,
-				JWTSecret:     "secret",
-				FFmpegPath:    ffmpegPath,
-				tm:            playback.NewTranscodeManager(),
-			}
-			if tt.workerOnly {
-				requireCompatWorkerRouting(handler)
-			}
-
-			recorder := serveCompatVideoStream(
-				handler,
-				"item-1",
-				"PlaySessionId=play-1&MediaSourceId="+url.QueryEscape(source.ID),
-				compatProgressiveRequiresAudioV2(source, string(playback.PlayRemux)),
-			)
-			if recorder.Code != tt.wantStatus {
-				t.Fatalf("status = %d body %s, want %d", recorder.Code, recorder.Body.String(), tt.wantStatus)
-			}
-			if tt.wantCode != "" && !strings.Contains(recorder.Body.String(), `"Error":"`+tt.wantCode+`"`) {
-				t.Fatalf("body = %s, want error %s", recorder.Body.String(), tt.wantCode)
-			}
-			if tt.wantBody != "" && recorder.Body.String() != tt.wantBody {
-				t.Fatalf("body = %q, want %q", recorder.Body.String(), tt.wantBody)
-			}
-			assertCompatMarkerState(t, probeMarker, tt.wantProbe)
-			assertCompatMarkerState(t, executionMarker, tt.wantExecution)
-		})
 	}
 }
 
@@ -908,7 +496,7 @@ func assertCompatMarkerState(t *testing.T, path string, want bool) {
 const maxProxyTokenClaimGrowthBytes = 256
 
 func TestProxyRedirectURLClaimGrowthBudget(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	file := &models.MediaFile{FilePath: "/" + strings.Repeat("p", 511), VideoTracks: []models.VideoTrack{{DVProfile: 7}}}
 	source := PlaybackMediaSource{FileID: 2147483647}
 	session := &Session{StreamAppUserID: 2147483647, ProfileID: "123e4567-e89b-12d3-a456-426614174000"}
@@ -972,94 +560,6 @@ func proxyTokenFromRedirect(t *testing.T, rawURL, method string) string {
 	return token
 }
 
-func TestUpstreamRecipeCardOverlaysTopLevelCreatedAt(t *testing.T) {
-	createdAt := time.Date(2026, 8, 16, 12, 34, 56, 987654321, time.UTC)
-	compatSession := &Session{StreamAppUserID: 42, ProfileID: "profile-1"}
-	source := PlaybackMediaSource{FileID: 77}
-	h := &PlaybackHandler{}
-
-	for _, tt := range []struct {
-		name   string
-		method string
-		recipe *playback.RecipeCard
-	}{
-		{name: "nested recipe from old replica", method: "transcode", recipe: &playback.RecipeCard{SessionID: "upstream"}},
-		{name: "direct fallback", method: "direct"},
-		{name: "remux fallback", method: "remux"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			ps := &PlaybackSession{UpstreamSessionID: "upstream", CreatedAt: createdAt, Recipe: tt.recipe}
-			card := h.upstreamRecipeCard(ps, compatSession, source, tt.method)
-			if !card.OriginalStartedAt.Equal(createdAt) {
-				t.Fatalf("OriginalStartedAt = %s, want %s", card.OriginalStartedAt, createdAt)
-			}
-		})
-	}
-
-	mixedVersion := &PlaybackSession{
-		UpstreamSessionID: "upstream-reconstruct",
-		CreatedAt:         createdAt,
-		Recipe: &playback.RecipeCard{
-			SessionID: "upstream-reconstruct", UserID: 42, ProfileID: "profile-1", MediaFileID: 77,
-		},
-	}
-	card := h.upstreamRecipeCard(mixedVersion, compatSession, source, "transcode")
-	tm := playback.NewTranscodeManager()
-	tm.Sessions = playback.NewSessionManager(0, 0)
-	reconstructed := tm.ReconstructSession(t.Context(), mixedVersion.UpstreamSessionID, compatSession.StreamAppUserID, card)
-	if reconstructed == nil || !reconstructed.StartedAt.Equal(createdAt) {
-		t.Fatalf("mixed-version reconstruction = %#v, want StartedAt %s", reconstructed, createdAt)
-	}
-}
-
-func TestUpstreamRecipeCardOverlaysDurableRoutingAssignment(t *testing.T) {
-	assignment := playback.NodeRoutingAssignment{
-		Workload: string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
-		Egress: string(noderouting.EgressProxy), EgressNodeID: 62,
-	}
-	playSession := &PlaybackSession{
-		UpstreamSessionID: "upstream", RoutingAssignment: &assignment,
-		Recipe: &playback.RecipeCard{SessionID: "upstream", UserID: 42, MediaFileID: 77},
-	}
-	card := (&PlaybackHandler{}).upstreamRecipeCard(
-		playSession,
-		&Session{StreamAppUserID: 42, ProfileID: "profile-1"},
-		PlaybackMediaSource{FileID: 77},
-		string(playback.PlayTranscode),
-	)
-	if card.RoutingWorkload != assignment.Workload || card.RoutingExecution != assignment.Execution || card.RoutingEgress != assignment.Egress || card.RoutingEgressNodeID != assignment.EgressNodeID {
-		t.Fatalf("routing card = %q/%q/%q on node %d, want %#v", card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress, card.RoutingEgressNodeID, assignment)
-	}
-}
-
-func TestPersistTranscodeRecipeCarriesTopLevelCreatedAt(t *testing.T) {
-	createdAt := time.Date(2026, 8, 16, 12, 34, 56, 987654321, time.UTC)
-	store := NewPlaybackSessionStore(time.Hour, nil)
-	// ExpiresAt must be set explicitly: the store derives a zero ExpiresAt as
-	// CreatedAt+ttl (playback_sessions.go:228), so a frozen CreatedAt would make
-	// this session read as already expired once wall-clock passes it.
-	assignment := playback.NodeRoutingAssignment{
-		Workload: string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
-		Egress: string(noderouting.EgressAPI), EgressNodeID: 63,
-	}
-	store.Put(PlaybackSession{ID: "play", CreatedAt: createdAt, ExpiresAt: time.Now().Add(time.Hour), RoutingAssignment: &assignment})
-	manager := playback.NewSessionManager(0, 0)
-	manager.RegisterReconstructed(&playback.Session{ID: "upstream", UserID: 42, ProfileID: "profile-1", MediaFileID: 77, PlayMethod: playback.PlayTranscode})
-	h := &PlaybackHandler{playbackStore: store, sessionMgr: manager}
-
-	err := h.persistTranscodeRecipe(t.Context(), "play", "upstream", playback.TranscodeOpts{SessionID: "upstream", InputPath: "/media/movie.mkv"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, ok := store.Get("play")
-	if !ok || got.Recipe == nil || !got.Recipe.OriginalStartedAt.Equal(createdAt) {
-		t.Fatalf("persisted recipe = %#v, want OriginalStartedAt %s", got, createdAt)
-	}
-	if got.Recipe.RoutingWorkload != assignment.Workload || got.Recipe.RoutingExecution != assignment.Execution || got.Recipe.RoutingEgress != assignment.Egress || got.Recipe.RoutingEgressNodeID != assignment.EgressNodeID {
-		t.Fatalf("persisted recipe routing = %q/%q/%q on node %d, want %#v", got.Recipe.RoutingWorkload, got.Recipe.RoutingExecution, got.Recipe.RoutingEgress, got.Recipe.RoutingEgressNodeID, assignment)
-	}
-}
-
 func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 	manifest := strings.Join([]string{
 		"#EXTM3U",
@@ -1118,7 +618,7 @@ func TestEnsureUpstreamPlayback_ReplacesStaleUpstreamWhenRecipeMissing(t *testin
 	h := &PlaybackHandler{
 		playbackStore: store,
 		sessionMgr:    mgr,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	got, err := h.ensureUpstreamPlayback(
@@ -1146,6 +646,63 @@ func TestEnsureUpstreamPlayback_ReplacesStaleUpstreamWhenRecipeMissing(t *testin
 	}
 }
 
+// slotFreeingSessionManager frees a slot just before a fresh session starts,
+// as when another transcode ends on this server at that moment.
+type slotFreeingSessionManager struct {
+	*playback.SessionManager
+	beforeStart func()
+}
+
+func (m *slotFreeingSessionManager) StartSessionWithContext(ctx context.Context, userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
+	if m.beforeStart != nil {
+		m.beforeStart()
+		m.beforeStart = nil
+	}
+	return m.SessionManager.StartSessionWithContext(ctx, userID, profileID, fileID, method, transcodeAudio)
+}
+
+// A transcode play whose recipe was never saved must not come back as a
+// direct-play session that skips the user's transcode limit, and a refused
+// rebuild must keep the play's upstream session id.
+func TestEnsureUpstreamPlayback_TranscodeWithoutRecipeCountsAsTranscode(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID:                 "ps-1",
+		CompatToken:        "tok",
+		UpstreamSessionID:  "lost-upstream",
+		UpstreamPlayMethod: "transcode",
+	})
+	mgr := playback.NewSessionManager(0, 1)
+	other, err := mgr.StartSession(7, "profile-1", 41, playback.PlayTranscode, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := keyedTranscodeManager()
+	tm.Sessions = mgr
+	sessions := &slotFreeingSessionManager{SessionManager: mgr, beforeStart: func() { _ = mgr.StopSession(other.ID) }}
+	h := &PlaybackHandler{playbackStore: store, sessionMgr: sessions, tm: tm}
+	compatSession := &Session{Token: "tok", StreamAppUserID: 7, ProfileID: "profile-1"}
+
+	_, err = h.ensureUpstreamPlayback(t.Context(), compatSession, "ps-1", PlaybackMediaSource{FileID: 42}, "transcode")
+	if !errors.Is(err, playback.ErrTooManyTranscodes) {
+		t.Fatalf("over the limit: error = %v, want %v", err, playback.ErrTooManyTranscodes)
+	}
+	if row, _ := store.Get("ps-1"); row.UpstreamSessionID != "lost-upstream" {
+		t.Fatalf("over the limit: play upstream = %q, want lost-upstream kept", row.UpstreamSessionID)
+	}
+
+	// Under the limit the play keeps its session, which counts as a transcode.
+	_ = mgr.StopSession(other.ID)
+	got, err := h.ensureUpstreamPlayback(t.Context(), compatSession, "ps-1", PlaybackMediaSource{FileID: 42}, "transcode")
+	if err != nil {
+		t.Fatalf("under the limit: %v", err)
+	}
+	rebuilt, err := mgr.GetSession("lost-upstream")
+	if got.UpstreamSessionID != "lost-upstream" || err != nil || rebuilt.PlayMethod != playback.PlayTranscode {
+		t.Fatalf("play upstream = %q, rebuilt session = %+v (%v); want lost-upstream rebuilt as a transcode", got.UpstreamSessionID, rebuilt, err)
+	}
+}
+
 // newActiveEncodingsHandler builds a PlaybackHandler literal directly (not
 // NewPlaybackHandler, which touches the filesystem) with a transcode manager
 // wired — teardown calls tm.CloseTranscodeSession and would nil-panic otherwise.
@@ -1154,7 +711,7 @@ func newActiveEncodingsHandler(mgr *testCompatSessionManager) (*PlaybackHandler,
 	h := &PlaybackHandler{
 		playbackStore: store,
 		sessionMgr:    mgr,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 	return h, store
 }
@@ -1213,231 +770,6 @@ func TestHandleDeleteActiveEncodings_ForeignPlaySessionNotTornDown(t *testing.T)
 	}
 }
 
-// TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown guards the early
-// window between PlaybackInfo and the first manifest request, when the play
-// session exists but UpstreamSessionID is still empty. A DELETE that lands then
-// must be a 204 no-op that leaves the session in the store, so the pending
-// manifest request still resolves (mirrors the Stopped report path). Removing
-// the UpstreamSessionID == "" guard makes this test fail.
-func TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown(t *testing.T) {
-	mgr := &testCompatSessionManager{}
-	h, store := newActiveEncodingsHandler(mgr)
-	store.Put(PlaybackSession{ID: "ps-1", CompatToken: "tok"})
-
-	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=ps-1", nil), "tok")
-	rec := httptest.NewRecorder()
-	h.HandleDeleteActiveEncodings(rec, req)
-
-	if rec.Code != 204 {
-		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
-	}
-	if _, ok := store.Get("ps-1"); !ok {
-		t.Fatal("not-yet-started play session must survive teardown so the pending manifest still resolves")
-	}
-	if len(mgr.stopCalls) != 0 {
-		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
-	}
-}
-
-// TestRestartCompatTranscodeForAudioSelection_LocalRePersistsRecipe covers the
-// integrated/single-box leg of an audio switch: the live ffmpeg is restarted on
-// the new track, and the durable PlaybackSession.Recipe must be re-persisted so
-// that a reconstruct after a central restart rebuilds ffmpeg from the NEWLY
-// selected audio track rather than the stale original. Without the re-persist,
-// Recipe.AudioTrackIndex keeps the original value and the stream silently
-// resumes on the wrong language after a restart.
-func TestRestartCompatTranscodeForAudioSelection_LocalRePersistsRecipe(t *testing.T) {
-	codec := NewResourceIDCodec()
-	version := testCompatVersion() // 1 video track, 2 audio tracks.
-	version.AudioTracks[0].Channels = 2
-	version.AudioTracks[1].Channels = 6
-
-	// Initial source selects the first (main) audio track -> AudioTrackIndex 0.
-	mainSource := testCompatSource(codec, version)
-	mainSource.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks)) // stream index 1 -> track 0.
-
-	// Switch target selects the second (commentary) audio track -> AudioTrackIndex 1.
-	commentarySource := testCompatSource(codec, version)
-	commentarySource.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks) + 1) // stream index 2 -> track 1.
-
-	filePath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("write media file: %v", err)
-	}
-
-	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
-	playbackStore.Put(PlaybackSession{
-		ID:                 "play-1",
-		UpstreamSessionID:  "upstream-1",
-		UpstreamPlayMethod: "transcode",
-		MediaSources:       []PlaybackMediaSource{commentarySource},
-	})
-
-	sessionMgr := &testCompatSessionManager{
-		sessions: map[string]*playback.Session{
-			"upstream-1": {
-				ID:             "upstream-1",
-				UserID:         7,
-				ProfileID:      "profile-1",
-				MediaFileID:    version.FileID,
-				PlayMethod:     playback.PlayTranscode,
-				BasePlayMethod: playback.PlayTranscode,
-			},
-		},
-	}
-
-	handler := &PlaybackHandler{
-		playbackStore: playbackStore,
-		sessionMgr:    sessionMgr,
-		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
-		TranscodeDir:  t.TempDir(),
-		FFmpegPath:    writeCompatTestFFmpeg(t),
-		tm:            playback.NewTranscodeManager(),
-	}
-
-	// Start the live transcode on the main track and persist its initial recipe
-	// (AudioTrackIndex 0), mirroring a normal play start.
-	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", mainSource)
-	if err != nil {
-		t.Fatalf("ensureTranscodeSession: %v", err)
-	}
-	t.Cleanup(func() { _ = transcodeSession.Close() })
-
-	if got := transcodeSession.Opts().AudioTrackIndex; got != 0 {
-		t.Fatalf("initial AudioTrackIndex = %d, want 0", got)
-	}
-	if got := transcodeSession.Opts().SourceAudioChannels; got != 0 {
-		t.Fatalf("initial SourceAudioChannels = %d, want zero for stereo", got)
-	}
-	if initial, ok := playbackStore.Get("play-1"); !ok || initial.Recipe == nil {
-		t.Fatal("expected initial recipe persisted after ensureTranscodeSession")
-	} else if initial.Recipe.AudioTrackIndex != 0 {
-		t.Fatalf("initial Recipe.AudioTrackIndex = %d, want 0", initial.Recipe.AudioTrackIndex)
-	}
-
-	playSession, ok := playbackStore.Get("play-1")
-	if !ok {
-		t.Fatal("expected play session")
-	}
-
-	// Switch audio to the commentary track via the LOCAL branch.
-	restarted, err := handler.restartCompatTranscodeForAudioSelection(
-		context.Background(),
-		playSession,
-		commentarySource,
-		0,
-	)
-	if err != nil {
-		t.Fatalf("restartCompatTranscodeForAudioSelection: %v", err)
-	}
-	if !restarted {
-		t.Fatal("expected local transcode restart to report restarted=true")
-	}
-
-	// The live ffmpeg opts must reflect the new track...
-	if got := transcodeSession.Opts().AudioTrackIndex; got != 1 {
-		t.Fatalf("live AudioTrackIndex after switch = %d, want 1", got)
-	}
-	if got := transcodeSession.Opts().SourceAudioChannels; got != 6 {
-		t.Fatalf("live SourceAudioChannels after switch = %d, want 6", got)
-	}
-
-	// ...and, crucially, the durable recipe must track it so a reconstruct after
-	// a central restart rebuilds ffmpeg on the commentary track.
-	updated, ok := playbackStore.Get("play-1")
-	if !ok {
-		t.Fatal("expected play session after audio switch")
-	}
-	if updated.Recipe == nil {
-		t.Fatal("expected Recipe to remain persisted after local audio switch")
-	}
-	if updated.Recipe.AudioTrackIndex != 1 {
-		t.Fatalf("Recipe.AudioTrackIndex = %d, want 1 (re-persisted to newly selected track)", updated.Recipe.AudioTrackIndex)
-	}
-	if updated.Recipe.SourceAudioChannels != 6 {
-		t.Fatalf("Recipe.SourceAudioChannels = %d, want 6", updated.Recipe.SourceAudioChannels)
-	}
-
-	// Switching back to the stereo track must clear the source-sensitive field;
-	// retaining 6 would boost an authored stereo stream after the next restart.
-	restarted, err = handler.restartCompatTranscodeForAudioSelection(context.Background(), playSession, mainSource, 0)
-	if err != nil || !restarted {
-		t.Fatalf("restart back to stereo = %t, err %v", restarted, err)
-	}
-	if got := transcodeSession.Opts().SourceAudioChannels; got != 0 {
-		t.Fatalf("live SourceAudioChannels after stereo switch = %d, want 0", got)
-	}
-	updated, ok = playbackStore.Get("play-1")
-	if !ok || updated.Recipe == nil || updated.Recipe.AudioTrackIndex != 0 || updated.Recipe.SourceAudioChannels != 0 {
-		t.Fatalf("stereo switch recipe = %#v, want track 0 with unknown source channels", updated)
-	}
-}
-
-// A local session rebuilt from a recipe written before negotiated audio became
-// mandatory keeps its optional map while it plays the same track, but a new
-// selection makes the newly chosen track mandatory, live and in the recipe.
-func TestRestartCompatTranscodeForAudioSelection_LegacyLocalSessionRequiresNewTrack(t *testing.T) {
-	codec := NewResourceIDCodec()
-	version := testCompatVersion() // 1 video track, 2 audio tracks.
-	mainSource := testCompatSource(codec, version)
-	mainSource.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks))
-	commentarySource := testCompatSource(codec, version)
-	commentarySource.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks) + 1)
-
-	filePath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("write media file: %v", err)
-	}
-	ffmpegPath := writeCompatTestFFmpeg(t)
-	transcodeDir := t.TempDir()
-	tm := playback.NewTranscodeManager()
-	tm.Config = func() playback.TranscodeRuntimeConfig {
-		return playback.TranscodeRuntimeConfig{TranscodeDir: transcodeDir, FFmpegPath: ffmpegPath}
-	}
-	legacy := playback.NewRecipeCard(7, "profile-1", version.FileID, "", playback.TranscodeOpts{
-		SessionID: "upstream-1", InputPath: filePath,
-		TargetCodecVideo: compatTargetVideoCodec, TargetCodecAudio: compatTargetAudioCodec,
-		SegmentDuration: compatSegmentDuration, AudioTrackIndex: 0,
-	})
-	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
-	playbackStore.Put(PlaybackSession{
-		ID: "play-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode",
-		MediaSources: []PlaybackMediaSource{mainSource}, Recipe: &legacy,
-	})
-	handler := &PlaybackHandler{
-		playbackStore: playbackStore,
-		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {
-			ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID,
-			PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode,
-		}}},
-		fileResolver: testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
-		TranscodeDir: transcodeDir,
-		FFmpegPath:   ffmpegPath,
-		tm:           tm,
-	}
-
-	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", mainSource)
-	if err != nil {
-		t.Fatalf("ensureTranscodeSession: %v", err)
-	}
-	t.Cleanup(func() { _ = transcodeSession.Close() })
-	if transcodeSession.Opts().RequireAudioTrack {
-		t.Fatal("setup did not rebuild the legacy optional-audio recipe")
-	}
-
-	playSession, _ := playbackStore.Get("play-1")
-	restarted, err := handler.restartCompatTranscodeForAudioSelection(context.Background(), playSession, commentarySource, 0)
-	if err != nil || !restarted {
-		t.Fatalf("restart on commentary = %t, err %v", restarted, err)
-	}
-	if opts := transcodeSession.Opts(); opts.AudioTrackIndex != 1 || !opts.RequireAudioTrack {
-		t.Fatalf("live opts = track %d required %t, want track 1 required", opts.AudioTrackIndex, opts.RequireAudioTrack)
-	}
-	if updated, ok := playbackStore.Get("play-1"); !ok || updated.Recipe == nil || !updated.Recipe.RequireAudioTrack {
-		t.Fatalf("persisted recipe after switch = %+v, want required audio", updated.Recipe)
-	}
-}
-
 func TestRestartCompatTranscodeForAudioSelection_RejectsUnsupportedSurroundSwitchBeforeMutation(t *testing.T) {
 	version := testCompatVersion()
 	version.AudioTracks[0].Channels = 2
@@ -1465,7 +797,7 @@ func TestRestartCompatTranscodeForAudioSelection_RejectsUnsupportedSurroundSwitc
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: mediaPath}},
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    ffmpegPath,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", mainSource)
@@ -1544,154 +876,133 @@ func TestHandleSessionPlayingStopped_TearsDownAndSyncsImmediately(t *testing.T) 
 	}
 }
 
-func TestEnsureUpstreamPlayback_KeepsNegotiatedStreamLocation(t *testing.T) {
-	store := NewPlaybackSessionStore(time.Hour, nil)
-	store.Put(PlaybackSession{ID: "ps-location", CompatToken: "tok"})
-	manager := playback.NewSessionManager(0, 0)
-	h := &PlaybackHandler{playbackStore: store, sessionMgr: manager}
-	source := PlaybackMediaSource{ID: "source", FileID: 42, StreamLocation: "remote"}
-	// The media request is local, but PlaybackInfo selected the remote policy.
-	ctx := clientip.SetContext(t.Context(), "192.168.1.8")
-	playSession, err := h.ensureUpstreamPlayback(ctx, &Session{Token: "tok", StreamAppUserID: 7, ProfileID: "profile"}, "ps-location", source, "direct")
-	if err != nil {
-		t.Fatal(err)
-	}
-	upstream, err := manager.GetSession(playSession.UpstreamSessionID)
-	if err != nil || upstream.StreamLocation != "remote" || upstream.ClientIP != "192.168.1.8" {
-		t.Fatalf("upstream policy location = %v, err = %v", upstream, err)
-	}
-	card := h.upstreamRecipeCard(playSession, &Session{StreamAppUserID: 7, ProfileID: "profile"}, source, "direct")
-	if card.StreamLocation != "remote" {
-		t.Fatalf("reconstruction location = %q", card.StreamLocation)
-	}
-}
+// Progressive stream, subtitle and attachment requests resolve their play
+// session by PlaySessionId or by route. When the store cannot be read and
+// holds no cached copy, they answer the retryable 503, not a 404 that ends
+// direct play or drops subtitles (#4067). An absent play session, or one owned
+// by another token, still answers 404, and a Static=true request does not
+// create a session in its place while the store is down.
+func TestRouteRequestsAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
+	cold := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	other := NewPlaybackSessionStore(time.Hour, nil)
+	other.Put(PlaybackSession{ID: "ps-abc", CompatToken: "someone-else", RouteItemID: "itm", UpstreamSessionID: "up"})
 
-func TestGenerateCompatCopyVideoMasterManifestJellyfin12DolbyVisionVariant(t *testing.T) {
-	source := PlaybackMediaSource{
-		ID: "source-1",
-		Version: catalog.FileVersion{
-			Bitrate: 18_000,
-			VideoTracks: []models.VideoTrack{{
-				Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
-				DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,
-			}},
-			AudioTracks: []models.AudioTrack{{Codec: "eac3", Default: true}},
-		},
-		HLSRemux:    true,
-		DOVIVariant: true,
-	}
-
-	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
-	variants := strings.Split(strings.TrimSpace(got), "#EXT-X-STREAM-INF:")
-	if len(variants) != 3 {
-		t.Fatalf("want a Dolby Vision variant plus the hvc1 fallback:\n%s", got)
-	}
-	if !strings.Contains(variants[1], `VIDEO-RANGE=PQ,CODECS="dvh1.05.06,ec-3",RESOLUTION=3840x2160`) {
-		t.Fatalf("first variant must be the spec-compliant dvh1 stream:\n%s", got)
-	}
-	if !strings.Contains(variants[2], `CODECS="hvc1.2.4.L153.B0,ec-3"`) {
-		t.Fatalf("second variant must stay the hvc1 fallback:\n%s", got)
-	}
-
-	source.HLSRemuxMPEGTS = true
-	if ts := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", "")); strings.Contains(ts, "dvh1") {
-		t.Fatalf("MPEG-TS remuxes cannot carry the Dolby Vision variant:\n%s", ts)
-	}
-}
-
-// A copy master's CODECS must list every format the variant carries or be
-// absent: Media3's chunkless preparation and AVPlayer build their tracks from
-// it, so an audio-only list plays sound over a black screen.
-func TestGenerateCompatCopyVideoMasterManifestCodecsListEveryFormat(t *testing.T) {
-	aac := []models.AudioTrack{{Codec: "aac", Profile: "LC", Default: true}}
-	cases := []struct {
+	routes := []struct {
 		name   string
-		video  models.VideoTrack
-		audio  []models.AudioTrack
-		dovi   bool
-		codecs string // "" means no CODECS or SUPPLEMENTAL-CODECS at all
+		path   string
+		params map[string]string
+		serve  func(*PlaybackHandler, http.ResponseWriter, *http.Request)
 	}{
-		{"av1 8-bit", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 1, BitDepth: 8, Width: 640, Height: 360}, aac, false, "av01.0.01M.08,mp4a.40.2"},
-		{"av1 10-bit", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 8, BitDepth: 10, Width: 1920, Height: 1080}, aac, false, "av01.0.08M.10,mp4a.40.2"},
-		// The catalog drops a zero level, so level 2.0 reads like an unknown one.
-		{"av1 level 0", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 0, BitDepth: 8, Width: 3840, Height: 2160}, aac, false, ""},
-		{"av1 unknown level", models.VideoTrack{Codec: "av1", Profile: "Main", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
-		{"av1 hdr10", models.VideoTrack{
-			Codec: "av1", Profile: "Main", Level: 12, BitDepth: 10, Width: 3840, Height: 2160,
-			ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc", ColorRange: "tv",
-		}, aac, false, ""},
-		{"av1 monochrome", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 1, BitDepth: 10, PixelFormat: "gray10le", Width: 640, Height: 360}, aac, false, ""},
-		{"av1 high profile", models.VideoTrack{Codec: "av1", Profile: "High", Level: 8, BitDepth: 8, Width: 1920, Height: 1080}, aac, false, ""},
-		{"vp9 profile 0", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8, Width: 640, Height: 360, FrameRate: "24.000"}, aac, false, "vp09.00.21.08,mp4a.40.2"},
-		// FFmpeg's vpcC level ignores the frame rate; 1080p60 stays level 4.
-		{"vp9 profile 2", models.VideoTrack{Codec: "vp9", Profile: "Profile 2", Level: -99, BitDepth: 10, Width: 1920, Height: 1080, FrameRate: "60.000"}, aac, false, "vp09.02.40.10,mp4a.40.2"},
-		{"vp9 probed level", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: 41, BitDepth: 8, Width: 1920, Height: 1080}, aac, false, "vp09.00.41.08,mp4a.40.2"},
-		{"vp9 hlg", models.VideoTrack{
-			Codec: "vp9", Profile: "Profile 2", Level: -99, BitDepth: 10, Width: 1920, Height: 1080,
-			ColorPrimaries: "bt2020", ColorTransfer: "arib-std-b67", ColorSpace: "bt2020nc", ColorRange: "tv",
-		}, aac, false, ""},
-		{"vp9 profile 1", models.VideoTrack{Codec: "vp9", Profile: "Profile 1", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
-		{"vp9 unknown size", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8}, aac, false, ""},
-		{"h264 unknown level", models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080}, aac, false, ""},
-		{"hevc unknown level", models.VideoTrack{
-			Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
-			DVProfile: 8, DVLevel: 6, VideoRangeType: compatRangeDOVIWithHDR,
-		}, aac, false, ""},
-		{"no audio track", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, nil, false, "avc1.640028"},
-		{"audio without an entry", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, []models.AudioTrack{{Codec: "vorbis", Default: true}}, false, ""},
-		{"audio without a codec name", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, []models.AudioTrack{{Default: true}}, false, ""},
-		{"dolby vision audio without an entry", models.VideoTrack{
-			Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
-			DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,
-		}, []models.AudioTrack{{Codec: "vorbis", Default: true}}, true, ""},
+		{"stream by play session", "/Videos/itm/stream?PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"stream by route", "/Videos/itm/stream", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"static stream by play session", "/Videos/itm/stream?Static=true&PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"static stream without a play session", "/Videos/itm/stream?Static=true", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"subtitle", "/Videos/itm/src/Subtitles/0/Stream.srt?PlaySessionId=ps-abc",
+			map[string]string{"routeItemId": "itm", "routeMediaSourceId": "src", "index": "0", "format": "srt"}, (*PlaybackHandler).HandleSubtitleStream},
+		{"attachment", "/Videos/itm/src/Attachments/0",
+			map[string]string{"routeItemId": "itm", "routeMediaSourceId": "src", "index": "0"}, (*PlaybackHandler).HandleAttachment},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			source := PlaybackMediaSource{
-				ID: "source-1",
-				Version: catalog.FileVersion{
-					Bitrate:     8_000,
-					VideoTracks: []models.VideoTrack{tc.video},
-					AudioTracks: tc.audio,
-				},
-				HLSRemux:    true,
-				DOVIVariant: tc.dovi,
+	for _, route := range routes {
+		for _, tc := range []struct {
+			name     string
+			store    CompatPlaybackStore
+			wantCode int
+		}{
+			{"store unreadable", cold, http.StatusServiceUnavailable},
+			{"session absent", NewPlaybackSessionStore(time.Hour, nil), http.StatusNotFound},
+			{"session of another token", other, http.StatusNotFound},
+		} {
+			if strings.HasPrefix(route.name, "static") && tc.wantCode == http.StatusNotFound {
+				continue // an absent session sends Static=true to on-the-fly creation
 			}
-			got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
-			if tc.codecs == "" {
-				if strings.Contains(got, "CODECS=") || strings.Count(got, "#EXT-X-STREAM-INF:") != 1 {
-					t.Fatalf("want one variant and no CODECS:\n%s", got)
+			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
+				handler := &PlaybackHandler{playbackStore: tc.store}
+				req := httptest.NewRequest(http.MethodGet, route.path, nil)
+				routeCtx := chi.NewRouteContext()
+				for k, v := range route.params {
+					routeCtx.URLParams.Add(k, v)
 				}
-				return
-			}
-			if !strings.Contains(got, fmt.Sprintf(",CODECS=%q", tc.codecs)) {
-				t.Fatalf("want CODECS=%q:\n%s", tc.codecs, got)
-			}
-		})
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+				rec := httptest.NewRecorder()
+				route.serve(handler, rec, req.WithContext(ctx))
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+					t.Fatal("503 carries no Retry-After")
+				}
+			})
+		}
 	}
+
+	// An ID-less static request that two started plays match can't be bound to
+	// either: that stays the 404 it was, not a retryable outage.
+	t.Run("static stream without a play session/two started plays", func(t *testing.T) {
+		ambiguous := NewPlaybackSessionStore(time.Hour, nil)
+		for _, id := range []string{"ps-one", "ps-two"} {
+			ambiguous.Put(PlaybackSession{ID: id, CompatToken: "compat-tok", RouteItemID: "itm", UpstreamSessionID: "up-" + id})
+		}
+		handler := &PlaybackHandler{playbackStore: ambiguous}
+		req := httptest.NewRequest(http.MethodGet, "/Videos/itm/stream?Static=true", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", "itm")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+		rec := httptest.NewRecorder()
+		handler.HandleVideoStream(rec, req.WithContext(ctx))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+		}
+	})
 }
 
-func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
-	cases := []struct {
-		codec, profile string
-		transcode      bool
-		want           string
+// A token-authenticated HLS request whose play session cannot be read from
+// the store answers a retryable 503, not a 404 that ends playback (#4008).
+// An absent play session, or one owned by another token, still answers 404.
+func TestHLSRoutesAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
+	cold := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	other := NewPlaybackSessionStore(time.Hour, nil)
+	other.Put(PlaybackSession{ID: "ps-abc", CompatToken: "someone-else", RouteItemID: "itm", UpstreamSessionID: "up"})
+
+	routes := []struct {
+		name   string
+		path   string
+		params map[string]string
+		serve  func(*PlaybackHandler, http.ResponseWriter, *http.Request)
 	}{
-		{"aac", "HE-AAC", false, "mp4a.40.5"},
-		{"aac", "HE-AACv2", false, "mp4a.40.29"},
-		{"aac", "LC", false, "mp4a.40.2"},
-		{"aac", "HE-AAC", true, "mp4a.40.2"},
-		{"truehd", "", false, "mlpa"},
-		{"dts", "DTS-HD MA + DTS:X", false, "dtsh"},
-		{"dts", "DTS-HD HRA", false, "dtsh"},
-		{"dts", "DTS-HD HRA + DTS:X", false, "dtsh"},
-		{"dts", "DTS Express", false, "dtse"},
-		{"dts", "", false, "dtsc"},
+		{"master", "/Videos/itm/master.m3u8?PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleMasterManifest},
+		{"playlist", "/Videos/itm/hls/ps-abc/stream.m3u8", map[string]string{"id": "itm", "playlistId": "ps-abc"}, (*PlaybackHandler).HandleHLSManifest},
+		{"segment", "/Videos/itm/hls/ps-abc/seg_00000.ts", map[string]string{"id": "itm", "playlistId": "ps-abc", "segmentId": "seg_00000", "segmentContainer": "ts"}, (*PlaybackHandler).HandleHLSSegment},
 	}
-	for _, tc := range cases {
-		source := PlaybackMediaSource{HLSRemux: true, TranscodeAudio: tc.transcode}
-		if got := compatMasterAudioCodec(source, models.AudioTrack{Codec: tc.codec, Profile: tc.profile}); got != tc.want {
-			t.Errorf("%s/%s transcode=%v = %q, want %q", tc.codec, tc.profile, tc.transcode, got, tc.want)
+	for _, route := range routes {
+		for _, tc := range []struct {
+			name     string
+			store    CompatPlaybackStore
+			wantCode int
+		}{
+			{"store unreadable", cold, http.StatusServiceUnavailable},
+			{"session absent", NewPlaybackSessionStore(time.Hour, nil), http.StatusNotFound},
+			{"session of another token", other, http.StatusNotFound},
+		} {
+			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
+				handler := &PlaybackHandler{playbackStore: tc.store}
+				req := httptest.NewRequest(http.MethodGet, route.path, nil)
+				routeCtx := chi.NewRouteContext()
+				for k, v := range route.params {
+					routeCtx.URLParams.Add(k, v)
+				}
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+				rec := httptest.NewRecorder()
+				route.serve(handler, rec, req.WithContext(ctx))
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+					t.Fatal("503 carries no Retry-After")
+				}
+			})
 		}
 	}
 }

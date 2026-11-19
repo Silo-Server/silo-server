@@ -54,7 +54,13 @@ func eventsSocketAllowed(ctx context.Context) bool {
 		return true
 	}
 	claims := claimsFrom(ctx)
-	return claims != nil && claims.TokenType == auth.TokenTypeAPIKey && claims.Role == models.RoleAdmin && slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) && !declaresProfile(ctx)
+	if claims == nil || claims.TokenType != auth.TokenTypeAPIKey {
+		return false
+	}
+	if userKeyEventsSocket(ctx, claims) {
+		return true
+	}
+	return claims.Role == models.RoleAdmin && slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) && !declaresProfile(ctx)
 }
 
 func (c EventsCapabilities) capabilityState() string { return StateAvailable }

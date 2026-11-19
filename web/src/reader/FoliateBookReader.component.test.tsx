@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, createRef, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,8 +46,13 @@ vi.mock("@/reader/readest/libs/document", async () => {
 
 vi.mock("foliate-js/view.js", () => ({}));
 
+// @ts-expect-error The vendored JavaScript module does not ship TypeScript declarations.
+import { search as foliateSearch } from "../../vendor/foliate-js/search.js";
+
 import FoliateBookReader, {
   ebookReaderProgressQueryKey,
+  READER_SEARCH_RESULT_LIMIT,
+  type FoliateBookReaderHandle,
   type ReaderReadyState,
 } from "@/reader/FoliateBookReader";
 
@@ -63,6 +68,12 @@ class FakeFoliateView extends HTMLElement {
   close = vi.fn();
   init = vi.fn(async () => {});
   goToFraction = vi.fn(async () => {});
+  clearSearch = vi.fn();
+  search?: (options: {
+    query: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }) => AsyncGenerator<unknown>;
   open = vi.fn((book: unknown) => {
     this.book = book;
     const behavior = viewOpenBehaviors.shift();
@@ -132,7 +143,13 @@ describe("FoliateBookReader open flow", () => {
   const fileA = makeFile(7, "a.epub");
   const fileB = makeFile(8, "b.epub");
 
-  function ui(file: FileVersion, props: { onReady?: (state: ReaderReadyState) => void } = {}) {
+  function ui(
+    file: FileVersion,
+    props: {
+      onReady?: (state: ReaderReadyState) => void;
+      ref?: Ref<FoliateBookReaderHandle>;
+    } = {},
+  ) {
     return (
       <QueryClientProvider client={queryClient}>
         <FoliateBookReader contentID="book-1" file={file} title="Book" {...props} />
@@ -432,6 +449,145 @@ describe("FoliateBookReader open flow", () => {
     expect(queryClient.getQueryData(ebookReaderProgressQueryKey("book-1"))).toMatchObject({
       location: "epubcfi(/6/8)",
       progress: 0.5,
+    });
+  });
+
+  // Each search parks until its gate opens, then yields `count` results. It
+  // ignores the abort signal so the handle itself must drop a superseded run.
+  function gatedSearch(view: FakeFoliateView, count = 1, truncated = false) {
+    const runs = new Map<
+      string,
+      { signal?: AbortSignal; limit?: number; gate: ReturnType<typeof deferred<void>> }
+    >();
+    view.search = async function* ({ query, signal, limit }) {
+      const gate = deferred<void>();
+      runs.set(query, { signal, limit, gate });
+      await gate.promise;
+      yield {
+        index: 0,
+        subitems: Array.from({ length: count }, (_, i) => ({
+          cfi: `epubcfi(/6/2!/4/2,/1:${i},/1:${i + 4})-${query}`,
+          // foliate's excerpt shape; the handle turns it into display text.
+          excerpt: { pre: "the ", match: query, post: " sails" },
+        })),
+      };
+      if (truncated) yield { truncated };
+    };
+    return runs;
+  }
+
+  it("resolves a superseded search to null so it cannot replace the newer results", async () => {
+    mocks.loaderOpen.mockResolvedValue({ book: makeBook("A") });
+    const reader = createRef<FoliateBookReaderHandle>();
+    await act(async () => {
+      root.render(ui(fileA, { ref: reader }));
+    });
+    const runs = gatedSearch(viewAt(0));
+
+    const first = reader.current!.search("whale");
+    await act(async () => {});
+    const second = reader.current!.search("ship");
+    await act(async () => {});
+    expect(runs.get("whale")?.signal?.aborted).toBe(true);
+    expect(runs.get("ship")?.signal?.aborted).toBe(false);
+
+    // The newer search finishes first; the older one resumes afterwards.
+    runs.get("ship")!.gate.resolve();
+    await expect(second).resolves.toEqual({
+      results: [expect.objectContaining({ cfi: expect.stringContaining("-ship") })],
+      truncated: false,
+    });
+    runs.get("whale")!.gate.resolve();
+    await expect(first).resolves.toBeNull();
+
+    // clearSearch also stops the running search.
+    const third = reader.current!.search("sea");
+    await act(async () => {});
+    reader.current!.clearSearch();
+    expect(runs.get("sea")?.signal?.aborted).toBe(true);
+    runs.get("sea")!.gate.resolve();
+    await expect(third).resolves.toBeNull();
+  });
+
+  it("asks for the result limit and reports the view's cut-off marker", async () => {
+    mocks.loaderOpen.mockResolvedValue({ book: makeBook("A") });
+    const reader = createRef<FoliateBookReaderHandle>();
+    await act(async () => {
+      root.render(ui(fileA, { ref: reader }));
+    });
+    for (const truncated of [false, true]) {
+      const runs = gatedSearch(viewAt(0), READER_SEARCH_RESULT_LIMIT, truncated);
+      const pending = reader.current!.search("lamp");
+      await act(async () => {});
+      expect(runs.get("lamp")?.limit).toBe(READER_SEARCH_RESULT_LIMIT);
+      runs.get("lamp")!.gate.resolve();
+      const outcome = await pending;
+      expect(outcome?.results).toHaveLength(READER_SEARCH_RESULT_LIMIT);
+      expect(outcome?.truncated).toBe(truncated);
+    }
+  });
+
+  it("aborts a running search when its view closes for another file", async () => {
+    mocks.loaderOpen.mockImplementation((file: File) =>
+      Promise.resolve({ book: makeBook(file.name) }),
+    );
+    const reader = createRef<FoliateBookReaderHandle>();
+    await act(async () => {
+      root.render(ui(fileA, { ref: reader }));
+    });
+    const runs = gatedSearch(viewAt(0));
+    const pending = reader.current!.search("whale");
+    await act(async () => {});
+
+    await act(async () => {
+      root.render(ui(fileB, { ref: reader }));
+    });
+
+    expect(viewAt(0).close).toHaveBeenCalled();
+    expect(runs.get("whale")?.signal?.aborted).toBe(true);
+    runs.get("whale")!.gate.resolve();
+    await expect(pending).resolves.toBeNull();
+
+    // A closed book can fail the section load the search is waiting on.
+    const failing = gatedSearch(viewAt(1));
+    const failed = reader.current!.search("ship");
+    await act(async () => {});
+    await act(async () => {
+      root.render(ui(fileA, { ref: reader }));
+    });
+    expect(failing.get("ship")?.signal?.aborted).toBe(true);
+    failing.get("ship")!.gate.reject(new Error("book destroyed"));
+    await expect(failed).resolves.toBeNull();
+  });
+
+  it("returns foliate's search excerpts as display text", async () => {
+    mocks.loaderOpen.mockResolvedValue({ book: makeBook("A") });
+    const reader = createRef<FoliateBookReaderHandle>();
+    await act(async () => {
+      root.render(ui(fileA, { ref: reader }));
+    });
+    // foliate's own search builds the excerpt, so the reader sees its real shape.
+    const [match] = Array.from(
+      foliateSearch(["The ferry left the harbor before dawn."], "harbor", {}) as Iterable<{
+        excerpt: unknown;
+      }>,
+    );
+    viewAt(0).search = async function* () {
+      yield {
+        index: 0,
+        subitems: [{ cfi: "epubcfi(/6/2!/4/2,/1:19,/1:25)", excerpt: match?.excerpt }],
+      };
+    };
+
+    await expect(reader.current!.search("harbor")).resolves.toEqual({
+      results: [
+        {
+          cfi: "epubcfi(/6/2!/4/2,/1:19,/1:25)",
+          label: "",
+          excerpt: "The ferry left the harbor before dawn.",
+        },
+      ],
+      truncated: false,
     });
   });
 });

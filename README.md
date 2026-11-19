@@ -12,7 +12,7 @@
   <a href="https://github.com/Silo-Server/silo-server/releases"><img alt="Latest GitHub release" src="https://img.shields.io/github/v/release/Silo-Server/silo-server?include_prereleases&amp;sort=semver&amp;display_name=tag&amp;style=flat-square&amp;label=release"></a>
   <a href="https://github.com/orgs/Silo-Server/packages/container/package/silo-server"><img alt="Container image on GHCR" src="https://img.shields.io/badge/container-GHCR-2496ED?style=flat-square&amp;logo=docker&amp;logoColor=white"></a>
   <a href="https://github.com/Silo-Server/silo-server/actions/workflows/ci.yml"><img alt="Continuous integration" src="https://img.shields.io/github/actions/workflow/status/Silo-Server/silo-server/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
-  <img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white">
+  <img alt="Go 1.27" src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white">
   <a href="LICENSE"><img alt="AGPL-3.0-or-later license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-555555?style=flat-square"></a>
 </p>
@@ -77,8 +77,9 @@ Existing library data is preserved when upgrading.
     </td>
     <td width="33%" valign="top">
       <strong>Scale</strong><br><br>
-      Start with one integrated server; split proxy and transcode roles across
-      shared PostgreSQL and Redis when you need to.
+      Start with one integrated server; add transcode nodes that need only its
+      URL and a key, or proxy nodes that share its PostgreSQL and Redis, when
+      you need to.
     </td>
   </tr>
 </table>
@@ -105,9 +106,9 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-Hardware transcoding (VA-API or NVIDIA) and access for proxy or transcode
-nodes on other hosts are commented out in `docker-compose.yml`; uncomment the
-lines you need.
+Hardware transcoding (VA-API or NVIDIA) and PostgreSQL and Redis access for
+proxy nodes on other hosts are commented out in `docker-compose.yml`; uncomment
+the lines you need. Transcode nodes reach the server on its web port.
 
 ### Updating an install from before the omnibus image
 
@@ -157,25 +158,44 @@ implement and review changes through our own workflow, and pull request volume
 has outgrown what we can review carefully, so a good issue usually helps us
 more than a pull request.
 
+Feature ideas go in
+[Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
+not issues.
+
 Pull requests are still welcome from contributors who've had one merged in a
-Silo repository, or when a maintainer asks for one. We close other pull
-requests without review. [CONTRIBUTING.md](CONTRIBUTING.md) explains what makes
-an issue useful.
+Silo repository, or when a maintainer asks for one; a feature pull request also
+needs an issue in this repository that a maintainer has labeled `accepted`.
+Other pull requests are closed automatically without review; when a maintainer
+asked for one, they reopen it. [CONTRIBUTING.md](CONTRIBUTING.md) explains what
+makes an issue useful.
 
 ## Supporting Silo
 
-Silo is developed in spare time and funded out of pocket, and will stay free and
-open source. [GitHub Sponsors](https://github.com/sponsors/quick104) covers AI
-development tooling (Claude, Codex), push-notification relay infrastructure, and
-future project costs. Bug reports, code, and documentation help just as much.
+Silo is free and open source, and it will stay that way. It's built in spare
+time and paid for out of pocket.
 
-Code review is supported by [Macroscope](https://macroscope.com) through its
-open source program.
+<p align="center">
+  <a href="https://github.com/sponsors/quick104"><img alt="Sponsor Silo on GitHub" src="https://img.shields.io/badge/sponsor-GitHub%20Sponsors-EA4AAA?style=for-the-badge&amp;logo=githubsponsors&amp;logoColor=white"></a>
+</p>
 
-<p>
+Sponsorship pays for AI development tooling (Claude, Codex), the
+push-notification relay, and future project costs. You can help just as much
+without spending anything:
+
+- **Report bugs** with steps to reproduce on
+  [GitHub Issues](https://github.com/Silo-Server/silo-server/issues).
+- **Help other users** on [Discord](https://discord.gg/siloserver).
+- **Improve the docs** at [siloserver.org](https://siloserver.org/docs).
+- **Contribute code** by following [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Sponsors
+
+<p align="center">
   <a href="https://macroscope.com">
     <img alt="Sponsored by Macroscope" src="assets/macroscope-banner.png" width="400">
   </a>
+  <br>
+  <sub>Code review is supported by <a href="https://macroscope.com">Macroscope</a> through its open source program.</sub>
 </p>
 
 ## License and trademarks

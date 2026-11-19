@@ -29,6 +29,7 @@ type NotificationInboxService interface {
 	ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error)
 	MuteNotificationSeries(context.Context, int, string, string) error
 	UnmuteNotificationSeries(context.Context, int, string, string) error
+	SetNotificationSeriesMuted(context.Context, int, string, []string, bool) (map[string]notifications.SeriesMuteOutcome, error)
 }
 
 // NotificationItem preserves event-specific reason data while normalizing IDs
@@ -135,25 +136,19 @@ type NotificationCapabilitiesOutput struct {
 	Body         NotificationCapabilities
 }
 type NotificationPreferences struct {
-	ProfileID              ID   `json:"profile_id"`
-	Enabled                bool `json:"enabled"`
-	NotifyFavorites        bool `json:"notify_favorites"`
-	NotifyWatchlist        bool `json:"notify_watchlist"`
-	NotifyContinueWatching bool `json:"notify_continue_watching"`
-	NotifyNextUp           bool `json:"notify_next_up"`
+	ProfileID    ID   `json:"profile_id"`
+	Enabled      bool `json:"enabled"`
+	NotifyNextUp bool `json:"notify_next_up"`
 }
 
 func notificationPreferencesOf(p notifications.Preferences) NotificationPreferences {
-	return NotificationPreferences{ProfileID: ID(p.ProfileID), Enabled: p.Enabled, NotifyFavorites: p.NotifyFavorites, NotifyWatchlist: p.NotifyWatchlist, NotifyContinueWatching: p.NotifyContinueWatching, NotifyNextUp: p.NotifyNextUp}
+	return NotificationPreferences{ProfileID: ID(p.ProfileID), Enabled: p.Enabled, NotifyNextUp: p.NotifyNextUp}
 }
 
 type NotificationPreferencesOutput struct{ Body NotificationPreferences }
 type NotificationPreferencesPatch struct {
-	Enabled                *bool `json:"enabled,omitempty"`
-	NotifyFavorites        *bool `json:"notify_favorites,omitempty"`
-	NotifyWatchlist        *bool `json:"notify_watchlist,omitempty"`
-	NotifyContinueWatching *bool `json:"notify_continue_watching,omitempty"`
-	NotifyNextUp           *bool `json:"notify_next_up,omitempty"`
+	Enabled      *bool `json:"enabled,omitempty"`
+	NotifyNextUp *bool `json:"notify_next_up,omitempty"`
 }
 type NotificationPreferencesInput struct {
 	RawBody []byte
@@ -227,6 +222,11 @@ func registerNotificationInbox(reg *Registry) {
 		body := notificationCapabilitiesOf(svc.NotificationCapabilities(ctx))
 		body.Series.Available = reg.deps.PersonalLists != nil
 		body.Series.Mute = body.Series.Available
+		body.Series.BulkMute = body.Series.Available
+		if destinations := reg.deps.NotificationPluginDestinations; destinations != nil && destinations.Available() {
+			kinds, err := destinations.Channels(ctx)
+			body.PluginDestinations = NotificationPluginDestinationCapability{Available: err == nil && len(kinds) > 0, MaxPerProfile: notifications.PluginDestinationMaxPerProfile}
+		}
 		return &NotificationCapabilitiesOutput{Body: body}, nil
 	})
 	Register(reg, notificationOperation(http.MethodGet, "", "listNotifications"), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
@@ -390,7 +390,7 @@ func registerNotificationInbox(reg *Registry) {
 			}
 		}
 		b := in.Body
-		prefs, err := svc.PatchNotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyFavorites: b.NotifyFavorites, NotifyWatchlist: b.NotifyWatchlist, NotifyContinueWatching: b.NotifyContinueWatching, NotifyNextUp: b.NotifyNextUp})
+		prefs, err := svc.PatchNotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyNextUp: b.NotifyNextUp})
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -399,8 +399,10 @@ func registerNotificationInbox(reg *Registry) {
 }
 
 // Only the extension display operation admits a display token. Reuse the
-// bridge's session/profile validation and both limiter positions, including
-// the pre-auth budget protecting the long-lived token's session lookup.
+// bridge's session/profile validation and charge each request to the limiter
+// once: the display-token path before the long-lived token's session lookup,
+// the access-token path after RequireAuth. A credential that does not validate
+// is refused before any limiter, as on every other authenticated operation.
 func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.Handler, string) {
 	if deps.Auth == nil {
 		return nil, "auth"
@@ -408,19 +410,18 @@ func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.
 	if deps.ViewerAccess == nil {
 		return nil, "viewer access"
 	}
-	postAuth := func(next http.Handler) http.Handler {
-		h := deps.ViewerAccess.RequireViewerAccess(apimw.RequireProfile(next))
+	viewer := func(next http.Handler) http.Handler {
+		return deps.ViewerAccess.RequireViewerAccess(apimw.RequireProfile(next))
+	}
+	limited := func(next http.Handler) http.Handler {
+		h := viewer(next)
 		if deps.RateLimit != nil {
 			h = deps.RateLimit(h)
 		}
 		return h
 	}
-	fallback := func(next http.Handler) http.Handler { return deps.Auth.RequireAuth(postAuth(next)) }
-	chain := make([]func(http.Handler) http.Handler, 0, 2)
-	if deps.RateLimit != nil {
-		chain = append(chain, deps.RateLimit)
-	}
-	return append(chain, deps.Auth.RequireApplePushDisplayAuth(fallback, postAuth)), ""
+	fallback := func(next http.Handler) http.Handler { return deps.Auth.RequireAuth(limited(next)) }
+	return []func(http.Handler) http.Handler{deps.Auth.RequireApplePushDisplayAuth(fallback, deps.RateLimit, viewer)}, ""
 }
 
 // NotificationCapabilities is the v2 projection of configured notification channels.
@@ -434,6 +435,9 @@ type NotificationCapabilities struct {
 	Email       NotificationAccountChannelCapability `json:"email"`
 	Discord     NotificationAccountChannelCapability `json:"discord"`
 	Series      NotificationSeriesCapability         `json:"series"`
+	// PluginDestinations is filled from the plugin destination seam, not
+	// the shared bridge view, so the frozen v1 capability stays unchanged.
+	PluginDestinations NotificationPluginDestinationCapability `json:"plugin_destinations"`
 }
 
 // NotificationSeriesCapability reports listNotificationSeries and the series
@@ -441,6 +445,7 @@ type NotificationCapabilities struct {
 type NotificationSeriesCapability struct {
 	Available bool `json:"available" doc:"GET /notifications/series lists the series whose new episodes can notify the profile"`
 	Mute      bool `json:"mute" doc:"PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted"`
+	BulkMute  bool `json:"bulk_mute" doc:"POST /notifications/series/mute and /notifications/series/unmute mute and unmute many series at once, and GET /notifications/series accepts status=muted"`
 }
 type NotificationInAppCapability struct {
 	Enabled bool `json:"enabled"`
@@ -478,5 +483,5 @@ func notificationCapabilitiesOf(v handlers.NotificationCapabilitiesView) Notific
 	}
 }
 func (c NotificationCapabilities) capabilityState() string {
-	return enabledCapabilityState(c.InApp.Enabled || c.ApplePush.Available || c.AndroidPush.Available || c.WebPush.Available || c.Webhooks.Available || c.Email.Available || c.Discord.Available)
+	return enabledCapabilityState(c.InApp.Enabled || c.ApplePush.Available || c.AndroidPush.Available || c.WebPush.Available || c.Webhooks.Available || c.Email.Available || c.Discord.Available || c.PluginDestinations.Available)
 }

@@ -39,11 +39,32 @@ const (
 	DefaultMeilisearchIndex            = "silo_media_items"
 	DefaultMeilisearchTimeoutMS        = 800
 	DefaultMeilisearchMatchingStrategy = "last"
-	SearchMeilisearchSchemaVersion     = 3
+	// SearchMeilisearchSchemaVersion is the generation of the indexed
+	// document's shape. Bump it when a catalogSearchDocument field is added,
+	// removed, renamed or computed differently, or when the embedder block
+	// changes in a way catalogSearchMeilisearchSchemaVersion does not already
+	// hash: a bump marks every active index incompatible and rebuilds it from
+	// PostgreSQL. Do not bump it for an index-settings change
+	// (catalogSearchMeilisearchIndexSettings: searchable, filterable or
+	// displayed attributes, ranking rules, typo tolerance, pagination); the
+	// sync task applies those in place.
+	SearchMeilisearchSchemaVersion = 4
 
-	DefaultMeilisearchSyncBatchSize     = 500
-	DefaultMeilisearchRebuildBatchSize  = 5000
-	DefaultMeilisearchRebuildQueueDepth = 4
+	DefaultMeilisearchSyncBatchSize    = 500
+	DefaultMeilisearchRebuildBatchSize = 5000
+	// DefaultMeilisearchRebuildQueueDepth is how many document tasks a
+	// rebuild keeps enqueued. Meilisearch puts every consecutive enqueued
+	// document task for one index into its next batch, limited only by
+	// experimental-limit-batched-tasks-total-size (half the memory, at most
+	// 10 GiB) and experimental-max-number-of-batched-tasks (unlimited) by
+	// default. Much of a batch's time is work over the whole index paid once
+	// per batch, so a batch should carry many tasks. The rebuild refills the
+	// queue only as its oldest task finishes, so a batch takes about half the
+	// queue: 16 makes batches of about 8 payloads of up to
+	// meilisearchMaxDocumentPayloadBytes each. Queued payloads cost
+	// Meilisearch disk (up to 16 x 80 MiB of update files), not Silo memory:
+	// Silo holds only the payload it is building.
+	DefaultMeilisearchRebuildQueueDepth = 16
 	DefaultMeilisearchSemanticEnabled   = false
 	DefaultMeilisearchSemanticRatio     = 0.50
 	DefaultMeilisearchEmbedder          = "silo_recommendations"
@@ -83,10 +104,12 @@ type CatalogSearchResult struct {
 	IndexPendingEvents int
 	// Mode reports which retrieval path actually served this result —
 	// "keyword" or "hybrid". For Meilisearch it reflects POST-downgrade
-	// reality (a hybrid request that fell back to keyword reports "keyword").
+	// reality (a hybrid request that fell back to keyword reports "keyword",
+	// as does one whose meaning half found nothing above its score floor).
 	Mode string
-	// SemanticUsed is true only when a hybrid request was issued AND survived;
-	// it goes false on any hybrid->keyword downgrade.
+	// SemanticUsed is true only when a hybrid request succeeded and placed at
+	// least one meaning match in the ranking; it goes false on any
+	// hybrid->keyword downgrade.
 	SemanticUsed   bool
 	FallbackReason string
 }
@@ -414,6 +437,10 @@ type CatalogSearchSemanticCapability struct {
 	Reason     string `json:"reason,omitempty"`
 	Embedder   string `json:"embedder,omitempty"`
 	Dimensions int    `json:"dimensions,omitempty"`
+	// missingIndexUID names the index the probe found missing from
+	// Meilisearch, so the status can report an active index that no longer
+	// exists without a second request. Not serialized.
+	missingIndexUID string
 }
 
 type CatalogSearchMeiliStatus struct {

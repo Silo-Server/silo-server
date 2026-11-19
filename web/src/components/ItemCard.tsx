@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { numberText, useAppLanguage, useT, type MessageKey, type Translate } from "@/i18n";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCardArtwork, {
@@ -9,6 +10,7 @@ import MediaCardArtwork, {
 import type { BrowseItem } from "@/api/types";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import { homeDismissalForCard } from "@/hooks/queries/homeDismissals";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
@@ -17,7 +19,9 @@ import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
 import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { buildItemHref } from "@/lib/mediaNavigation";
+import { joinList } from "@/lib/appLocale";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import WatchProgressBar from "@/components/WatchProgressBar";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 function formatDate(value?: string | null) {
@@ -27,16 +31,21 @@ function formatDate(value?: string | null) {
   return formatPreferredDate(value, "medium") || null;
 }
 
-function formatRuntime(minutes?: number | null) {
+function formatRuntime(t: Translate, minutes?: number | null) {
   if (!minutes || minutes <= 0) {
     return null;
   }
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   if (hours === 0) {
-    return `${remainingMinutes}m`;
+    return t("web.item.card.runtimeMinutes", { minutes: remainingMinutes });
   }
-  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+  return remainingMinutes === 0
+    ? t("web.item.card.runtimeHours", { hours: hours })
+    : t("web.item.card.runtimeHoursMinutes", {
+        hours: hours,
+        minutes: remainingMinutes,
+      });
 }
 
 // A rating reads the same as on the title page: its source's mark, then the
@@ -57,11 +66,13 @@ function percent(value?: number | null) {
   return value != null ? formatPercent(value) : null;
 }
 
-function formatProgress(ratio?: number | null) {
+function formatProgress(t: Translate, ratio?: number | null) {
   if (ratio == null) {
     return null;
   }
-  return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+  return t("web.common.format.percent", {
+    percent: numberText(Math.round(Math.max(0, Math.min(1, ratio)) * 100)),
+  });
 }
 
 // mangaCountChipLabel returns the top-right poster chip label for a manga
@@ -71,7 +82,7 @@ function formatProgress(ratio?: number | null) {
 // so the chip fits narrow cards without occluding the cover; the detail page
 // carries the spelled-out counts. Strictly manga-gated so no other card type
 // renders it.
-function mangaCountChipLabel(item: BrowseItem): string | null {
+function mangaCountChipLabel(t: Translate, item: BrowseItem): string | null {
   if (item.type !== "manga") {
     return null;
   }
@@ -79,18 +90,26 @@ function mangaCountChipLabel(item: BrowseItem): string | null {
   const chapters = item.manga_chapter_count ?? 0;
   const parts: string[] = [];
   if (volumes > 0) {
-    parts.push(`${volumes} Vol`);
+    parts.push(t("web.item.card.mangaVolumes", { count: volumes }));
   }
   if (chapters > 0) {
-    parts.push(`${chapters} Ch`);
+    parts.push(t("web.item.card.mangaChapters", { count: chapters }));
   }
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+const MANGA_STATUS_LABELS: Partial<Record<string, MessageKey>> = {
+  Ongoing: "web.item.card.mangaStatus.ongoing",
+  Completed: "web.item.card.mangaStatus.completed",
+  Hiatus: "web.item.card.mangaStatus.hiatus",
+  Cancelled: "web.item.card.mangaStatus.cancelled",
+  Upcoming: "web.item.card.mangaStatus.upcoming",
+};
+
 // mangaStatusChip returns the top-left publication-status pill for a manga
 // browse card (color-coded), or null when the item is not manga or has no
 // status. Strictly manga-gated so no other card type renders it.
-function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | null {
+function mangaStatusChip(t: Translate, item: BrowseItem): { label: string; tone: string } | null {
   if (item.type !== "manga") {
     return null;
   }
@@ -106,71 +125,109 @@ function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | nu
       Cancelled: "text-red-300 border-red-400/30",
       Upcoming: "text-violet-200 border-violet-400/30",
     }[status] ?? "text-foreground border-white/15";
-  return { label: status, tone };
+  // The server sends one stable English value per status; an unknown value shows as sent.
+  const labelKey = MANGA_STATUS_LABELS[status];
+  return { label: labelKey ? t(labelKey) : status, tone };
+}
+
+/** An audiobook the profile is partway through: its position and length. */
+function audiobookProgress(item: BrowseItem): { position: number; duration: number } | null {
+  if (item.type !== "audiobook" || item.user_state?.played) return null;
+  const position = item.position_seconds ?? 0;
+  const duration = item.duration_seconds ?? 0;
+  return position > 0 && duration > 0 ? { position, duration } : null;
+}
+
+/**
+ * An audiobook card's resting detail line, in the card's short runtime format
+ * ("3h 36m") so it fits a narrow card: the time left while the profile is
+ * partway through, else the book's length; the year when neither is known.
+ */
+function audiobookStatusLabel(t: Translate, item: BrowseItem): string | null {
+  const progress = audiobookProgress(item);
+  if (progress) {
+    const leftMinutes = Math.max(1, Math.round((progress.duration - progress.position) / 60));
+    const left = formatRuntime(t, leftMinutes);
+    return left ? t("web.audiobooks.duration.left", { duration: left }) : null;
+  }
+  return formatRuntime(t, item.runtime);
 }
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
+  // "Added 3 minutes ago" comes from a plain helper; follow language changes.
+  useAppLanguage();
+  const t = useT();
   const episodeLabels = buildEpisodeCardLabels(item);
-  const defaultLabel = [item.year || "", item.type === "series" ? "Series" : ""]
+  const defaultLabel = [
+    item.year ? numberText(item.year) : "",
+    item.type === "series" ? t("web.item.card.series") : "",
+  ]
     .filter(Boolean)
     .join(" · ");
+  const restingLabel = (item.type === "audiobook" && audiobookStatusLabel(t, item)) || defaultLabel;
 
   switch (sortField) {
     case "added_at":
     case "recently_added": {
       const ago = item.added_at ? timeAgo(item.added_at) : null;
-      return <>{ago ?? defaultLabel}</>;
+      return <>{ago ?? restingLabel}</>;
     }
     case "title":
       if (episodeLabels) {
         return <>{episodeLabels.episodeCode}</>;
       }
-      return <>{defaultLabel}</>;
+      return <>{restingLabel}</>;
     case "year":
-      return <>{item.year || defaultLabel}</>;
+      return <>{item.year ? numberText(item.year) : restingLabel}</>;
     case "content_rating":
-      return <>{item.content_rating || defaultLabel}</>;
+      return <>{item.content_rating || restingLabel}</>;
     case "runtime":
       return (
-        <>{formatRuntime(item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
+        <>{formatRuntime(t, item.sort_metrics?.runtime_minutes ?? item.runtime) ?? restingLabel}</>
       );
     case "rating_imdb":
-      return ratingLabel("IMDb", outOfTen(item.rating_imdb)) ?? <>{defaultLabel}</>;
+      return ratingLabel("IMDb", outOfTen(item.rating_imdb)) ?? <>{restingLabel}</>;
     case "rating_tmdb":
-      return ratingLabel("TMDB", outOfTen(item.rating_tmdb)) ?? <>{defaultLabel}</>;
+      return ratingLabel("TMDB", outOfTen(item.rating_tmdb)) ?? <>{restingLabel}</>;
     case "rating_rt_critic":
-      return ratingLabel("RT", percent(item.rating_rt_critic)) ?? <>{defaultLabel}</>;
+      return ratingLabel("RT", percent(item.rating_rt_critic)) ?? <>{restingLabel}</>;
     case "rating_rt_audience":
-      return ratingLabel("RT Audience", percent(item.rating_rt_audience)) ?? <>{defaultLabel}</>;
+      return (
+        ratingLabel(t("web.item.card.rtAudience"), percent(item.rating_rt_audience)) ?? (
+          <>{restingLabel}</>
+        )
+      );
     case "release_date":
       return (
-        <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? defaultLabel}</>
+        <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? restingLabel}</>
       );
     case "last_air_date":
-      return <>{formatDate(item.last_air_date) ?? defaultLabel}</>;
+      return <>{formatDate(item.last_air_date) ?? restingLabel}</>;
     case "resolution":
       return (
-        <>{item.sort_metrics?.resolution || item.overlay_summary?.resolution || defaultLabel}</>
+        <>{item.sort_metrics?.resolution || item.overlay_summary?.resolution || restingLabel}</>
       );
     case "bitrate":
-      return <>{formatBitrate(item.sort_metrics?.bitrate_kbps ?? undefined) || defaultLabel}</>;
+      return <>{formatBitrate(item.sort_metrics?.bitrate_kbps ?? undefined) || restingLabel}</>;
     case "progress":
-      return <>{formatProgress(item.sort_metrics?.progress_ratio) ?? defaultLabel}</>;
+      return <>{formatProgress(t, item.sort_metrics?.progress_ratio) ?? restingLabel}</>;
     case "date_viewed":
-      return <>{formatDate(item.sort_metrics?.viewed_at) ?? defaultLabel}</>;
-    case "plays":
-      return <>{item.sort_metrics?.play_count ?? defaultLabel}</>;
+      return <>{formatDate(item.sort_metrics?.viewed_at) ?? restingLabel}</>;
+    case "plays": {
+      const plays = item.sort_metrics?.play_count;
+      return <>{plays != null ? numberText(plays) : restingLabel}</>;
+    }
     case "author":
-      return <>{item.sort_metrics?.author || defaultLabel}</>;
+      return <>{item.sort_metrics?.author || restingLabel}</>;
     case "narrator":
-      return <>{item.sort_metrics?.narrator || defaultLabel}</>;
+      return <>{item.sort_metrics?.narrator || restingLabel}</>;
     case "series":
-      return <>{item.sort_metrics?.series_name || defaultLabel}</>;
+      return <>{item.sort_metrics?.series_name || restingLabel}</>;
     default:
       if (episodeLabels) {
         return <>{episodeLabels.episodeCode}</>;
       }
-      return <>{defaultLabel}</>;
+      return <>{restingLabel}</>;
   }
 }
 
@@ -195,6 +252,7 @@ export default function ItemCard({
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
+  const t = useT();
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
@@ -202,8 +260,15 @@ export default function ItemCard({
     item.type === "episode" && item.series_id
       ? buildItemHref({ contentId: item.series_id, libraryId })
       : itemHref;
-  const mangaCountLabel = mangaCountChipLabel(item);
-  const mangaStatus = mangaStatusChip(item);
+  const mangaCountLabel = mangaCountChipLabel(t, item);
+  const listening = audiobookProgress(item);
+  // An audiobook card names its author, unless the listing is sorted by
+  // author and the detail line already does.
+  const authorLine =
+    item.type === "audiobook" && sortField !== "author" && item.authors?.length
+      ? joinList(item.authors)
+      : null;
+  const mangaStatus = mangaStatusChip(t, item);
   const cardRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -211,6 +276,7 @@ export default function ItemCard({
       <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}
+          prefetchOn={selectionMode ? "press" : "intent"}
           aria-label={displayTitle}
           className="block overflow-hidden rounded-xl"
         >
@@ -224,32 +290,46 @@ export default function ItemCard({
             lazy
           >
             {item.status === "pending" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
-                Scanning
+                {t("web.item.card.statusScanning")}
               </span>
             )}
             {item.status === "unmatched" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-red-300 uppercase">
-                Unmatched
+                {t("web.item.card.statusUnmatched")}
               </span>
             )}
             {item.status === "ambiguous" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-amber-200 uppercase">
-                Ambiguous
+                {t("web.item.card.statusAmbiguous")}
               </span>
             )}
             {/* Manga cards carry purpose-built status/count chips in both top
                 corners; generic overlays would render underneath them. */}
             {item.status === "matched" && item.type !== "manga" && overlayPrefs && (
-              <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
+              <CardOverlays
+                data={overlayDataFromBrowseItem(item)}
+                prefs={overlayPrefs}
+                hasProgressBar={listening != null}
+              />
             )}
             {item.status === "matched" && item.type !== "manga" && (
               <CardWatchStatus userState={item.user_state} />
             )}
+            {listening && (
+              <WatchProgressBar percent={(listening.position / listening.duration) * 100} />
+            )}
             {(mangaStatus || mangaCountLabel) && (
               /* One shared row so the two chips split the card width and
-                 truncate instead of overlapping on narrow cards. */
-              <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5">
+                 truncate instead of overlapping on narrow cards. Left to right
+                 in every language, like the rest of the artwork's corners. */
+              <div
+                dir="ltr"
+                className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5"
+              >
                 {mangaStatus ? (
                   <span
                     className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
@@ -280,7 +360,11 @@ export default function ItemCard({
         {selectionMode && onToggleSelect && (
           <button
             type="button"
-            aria-label={selected ? `Deselect ${item.title}` : `Select ${item.title}`}
+            aria-label={
+              selected
+                ? t("web.item.card.deselect", { title: item.title })
+                : t("web.item.card.select", { title: item.title })
+            }
             aria-pressed={selected}
             onClick={(event) => {
               event.preventDefault();
@@ -291,6 +375,7 @@ export default function ItemCard({
               event.preventDefault();
               event.stopPropagation();
             }}
+            // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
             className="absolute top-2.5 left-2.5 z-20 inline-flex size-8 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/70"
           >
             <span
@@ -312,16 +397,25 @@ export default function ItemCard({
           quickActionMode={quickActionMode}
           longPressRef={cardRef}
           itemTitle={displayTitle}
+          dismissAction={homeDismissalForCard(item)}
         />
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
         <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
           {displayTitle}
         </ViewTransitionLink>
+        {authorLine ? (
+          <ViewTransitionLink
+            to={itemHref}
+            className="bidi-text text-muted-foreground mt-0.5 block truncate text-[0.75rem] hover:underline"
+          >
+            {authorLine}
+          </ViewTransitionLink>
+        ) : null}
         {episodeLabels?.episodeTitle ? (
           <ViewTransitionLink
             to={itemHref}
-            className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
+            className="bidi-text text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
           >
             {episodeLabels.episodeTitle}
           </ViewTransitionLink>

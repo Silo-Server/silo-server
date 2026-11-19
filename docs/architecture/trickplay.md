@@ -13,8 +13,7 @@ lifecycle; `internal/mediasample` decodes and tiles the frames (see
 A library opts in through `trickplay_enabled` on the v2 library resources
 (`createLibrary`, `updateLibrary`); `trickplay_supported` reports whether the
 server can generate them (an assets store is configured), and
-`GET /api/v2/libraries/capabilities` reports `trickplay: true`. The frozen
-v1 library bodies neither read nor write it. Turning it on or off, or changing
+`GET /api/v2/libraries/capabilities` reports `trickplay: true`. Turning it on or off, or changing
 the library's type or whether it is enabled, runs a reconcile pass right away
 on the server that handled the change; turning it off, disabling the library,
 or changing it to a non-video type deletes the library's previews.
@@ -41,8 +40,11 @@ own publish.
 Every server works the queue; the work per file is independent, so nothing
 serializes it across servers.
 
-- A claim takes the due `pending` row that has waited longest with
-  `FOR UPDATE SKIP LOCKED`, and leases it with a fresh attempt token stored
+- A claim takes the due `pending` row of the newest file (the highest
+  `media_file_id`) with `FOR UPDATE SKIP LOCKED`, after any rows an
+  administrator queued for regeneration, so new files get previews before
+  a backlog and a retry that has come due does not wait behind it. It
+  leases the row with a fresh attempt token stored
   in `lease_owner`. It records the file's size, hash, and duration at that
   moment (`source_*`).
 - The worker renews its lease while it runs. A lease that runs out, because
@@ -65,7 +67,10 @@ serializes it across servers.
 `recipe_version` is the newest generation algorithm (`AlgorithmVersion`)
 that has touched a row. A server claims, requeues, and invalidates only rows
 at or below its own version, so servers on different versions during a
-rolling upgrade never undo each other's work.
+rolling upgrade never undo each other's work. The one exception is the HDR
+conversion check (reconcile step 5), which servers at the same version but
+with a different classification can repeat, at most once per walk of the
+queue.
 
 ## Reconcile
 
@@ -83,6 +88,23 @@ so a large library drains without waiting for the next scheduled task:
    algorithm, with other settings (`published_recipe`), in another store, or
    from a different file. An `unusable` row is requeued when its file
    changes.
+5. Checks the HDR conversion of the finished rows among the next 5,000 queue
+   rows, in file order from a cursor kept in the database
+   (`trickplay_tone_map_cursor`), so the whole queue is covered over successive
+   passes on whichever servers run them, at a bounded cost per pass. Rows
+   checked do not continue a pass; only a full batch of requeues does.
+   `tone_map_source` records the conversion the published sheets were made with
+   (`toneMapKey`: `none`, `best_effort`, or the `tonemap.SourceKind`). A row
+   whose file's catalog facts now call for another one is requeued: a rescan or
+   backfill rewrote its color facts without changing the file, such as an HDR10
+   file first recorded as limited range and later as full range. Requeuing,
+   here and in step 4, clears `tone_map_source`, so sheets a server that does
+   not record it republishes are adopted rather than requeued again. A row
+   without one (published before the column existed) takes the conversion its
+   facts call for, except `pq_full_range`, which arrived after sheets were
+   first published: those are made again. A server whose classification of the
+   same facts differs from another's requeues an affected file at most once per
+   walk of the queue while both run.
 
 ## Generation
 
@@ -211,9 +233,13 @@ the lease, and the uploads; a node only decodes and tiles
   with playback and downloads and chooses among nodes by available capacity
   and load. Those provisional reservations belong to one API process; a node's
   reported load accounts for work accepted from other replicas.
-- A node takes one run at a time. `node_busy`, `node_unavailable`, a
+- A node takes up to `playback.trickplay_node_capacity` runs at once
+  (default 1, at most 64, applied live, counted across every API server that
+  sends it work) and refuses the next at once with `node_busy` rather than
+  queueing it. Each run counts in the node's reported active jobs, so it
+  takes one of the node's `max_jobs` slots from playback while it runs. `node_busy`, `node_unavailable`, a
   refused request, or a connection that drops moves the run to the next
-  node. A node whose ffmpeg cannot open an input that passed its path check
+  node. A node whose ffmpeg cannot open an input its source grant approved
   (such as a file its user may not read) answers `input_unreadable`, which
   does not count against the file: it moves on like `node_unavailable`.
   `unsupported` (the node's ffmpeg lacks a filter, decoder, or device the run
@@ -224,8 +250,10 @@ the lease, and the uploads; a node only decodes and tiles
   extraction in `prefer_transcode_nodes` mode. In `transcode_nodes_only` mode
   it counts against the file when no node makes the sheets. Only a
   `permanent` sampling failure marks the file unusable, as it would locally.
-- Remote extraction checks the media path on the node. It does not require
-  the API server's media mount to be readable.
+- Remote extraction opens the file through a
+  [source grant](transcode-nodes.md#source-grants). Minting the grant stats the
+  file on the API server, so the API server's media mount must be readable;
+  when it is not, the node counts as unavailable.
 - The request carries a hardware attempt and a software attempt; a node
   whose accelerator cannot decode drops the hardware attempt.
 

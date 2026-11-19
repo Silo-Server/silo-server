@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 import { useAdminTimeseries } from "@/hooks/queries/admin/dashboardInsights";
 import { formatDataTotal, formatMbps, formatMbpsValue } from "../format";
 import {
@@ -14,9 +13,11 @@ import {
 import { useWidgetRange } from "../widgetChrome";
 import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { WidgetViewToggle } from "../WidgetViewToggle";
 import { buildEgressBands } from "./egressBands";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
+import { useAppLanguage, useT } from "@/i18n";
 
 /**
  * Egress the deployment served over the chosen window, in Mbps.
@@ -39,10 +40,15 @@ import { buildTimeseriesPoints } from "./timeseriesSeries";
  * Installs without proxy nodes never see the switch.
  */
 export function EgressWidget() {
-  const { range } = useWidgetRange();
+  const t = useT();
+  // buildEgressBands names the "Other" band, so the bands follow the language.
+  const language = useAppLanguage();
+  // The view is stored with the placement, so Nodes survives a reload.
+  const { range, view, setView } = useWidgetRange();
   const query = useAdminTimeseries(rangeHours(range));
-  const [byNode, setByNode] = useState(false);
-  const bands = useMemo(() => buildEgressBands(query.data), [query.data]);
+  const byNode = view === "nodes";
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs the labels
+  const bands = useMemo(() => buildEgressBands(query.data), [query.data, language]);
   const showBands = byNode && bands !== null;
   const hasDownloadTraffic = useMemo(
     () => (query.data?.points ?? []).some((point) => (point.download_egress_kbps ?? 0) > 0),
@@ -67,85 +73,67 @@ export function EgressWidget() {
 
   return (
     <Card className="h-full">
-      <WidgetHeader title={rangeTitle("Egress", range)}>
+      <WidgetHeader title={rangeTitle(t("web.admin.dashboard.widgets.egress.title"), range)}>
         {totalBytes != null ? (
           // Secondary to the peak: when the header is too narrow for both
           // beside the range picker, the total is dropped rather than
           // truncated. CardHeader is the `card-header` container.
           <span className="text-muted-foreground hidden text-[11px] whitespace-nowrap tabular-nums @md/card-header:inline">
-            Total {formatDataTotal(totalBytes)}
+            {t("web.admin.dashboard.widgets.egress.total", { value: formatDataTotal(totalBytes) })}
           </span>
         ) : null}
         <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
-          Peak {formatMbps(peak)}
+          {t("web.admin.dashboard.widgets.egress.peak", { value: formatMbps(peak) })}
         </span>
-        {bands ? <EgressViewToggle byNode={byNode} onChange={setByNode} /> : null}
+        {bands ? (
+          <WidgetViewToggle
+            value={byNode ? "nodes" : "total"}
+            options={[
+              {
+                value: "total",
+                label: t("web.admin.dashboard.widgets.egress.viewTotal"),
+                ariaLabel: t("web.admin.dashboard.widgets.egress.viewTotalLabel"),
+              },
+              {
+                value: "nodes",
+                label: t("web.admin.dashboard.widgets.egress.viewNodes"),
+                ariaLabel: t("web.admin.dashboard.widgets.egress.viewNodesLabel"),
+              },
+            ]}
+            onChange={setView}
+          />
+        ) : null}
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
         <TimeseriesChartBody
           query={query}
           points={points}
-          seriesLabel="Egress"
+          seriesLabel={t("web.admin.dashboard.widgets.egress.seriesLabel")}
           overlays={
             hasDownloadTraffic && !showBands
-              ? [{ label: "Downloads", points: downloadPoints, seriesIndex: 1 }]
+              ? [
+                  {
+                    label: t("web.admin.dashboard.widgets.egress.downloadsSeries"),
+                    points: downloadPoints,
+                    seriesIndex: 1,
+                  },
+                ]
               : undefined
           }
           stacks={showBands ? bands : undefined}
-          ariaLabel={`Egress over ${rangePhrase(range)}, in megabits per second`}
-          errorMessage="Failed to load egress history."
-          emptyMessage="No egress samples yet"
+          ariaLabel={t("web.admin.dashboard.widgets.egress.chartLabel", {
+            range: rangePhrase(range),
+          })}
+          errorMessage={t("web.admin.dashboard.widgets.egress.loadFailed")}
+          emptyMessage={t("web.admin.dashboard.widgets.egress.empty")}
           formatValue={formatMbps}
           formatTick={formatMbpsValue}
-          formatTimestamp={(t) => formatRangeTimestamp(range, t, { withTime: true })}
+          formatTimestamp={(time) => formatRangeTimestamp(range, time, { withTime: true })}
           edgeLabels={rangeEdgeLabels(range)}
           fill
         />
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * Total/Nodes switch, styled like the range picker beside it. Two toggle
- * buttons rather than one: each says which view it shows, and the pressed
- * state tells a screen reader which one is on.
- */
-function EgressViewToggle({
-  byNode,
-  onChange,
-}: {
-  byNode: boolean;
-  onChange: (byNode: boolean) => void;
-}) {
-  const options = [
-    { byNode: false, label: "Total", ariaLabel: "Show total egress" },
-    { byNode: true, label: "Nodes", ariaLabel: "Show egress by node" },
-  ];
-  return (
-    <div className="border-border/60 bg-muted/20 flex shrink-0 items-center gap-0.5 rounded-full border p-0.5">
-      {options.map((option) => {
-        const active = option.byNode === byNode;
-        return (
-          <button
-            key={option.label}
-            type="button"
-            aria-pressed={active}
-            aria-label={option.ariaLabel}
-            className={cn(
-              "cursor-pointer rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold transition-colors",
-              "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
-              active
-                ? "border-primary/40 bg-primary/15 text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/60",
-            )}
-            onClick={() => onChange(option.byNode)}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }

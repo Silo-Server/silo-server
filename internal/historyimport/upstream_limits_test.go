@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -213,106 +212,37 @@ func TestHistoryImportProvidersFailOnOversizedSecondaryListings(t *testing.T) {
 	}
 }
 
-// A heavy but legitimate page, several MiB, still decodes.
-func TestJellyfinFetchItemsAcceptsLargeLegitimatePage(t *testing.T) {
+func TestJellyfinFetchPageEnforcesListingLimits(t *testing.T) {
 	t.Parallel()
 
-	name := strings.Repeat("n", 20<<10)
-	var page strings.Builder
-	page.WriteString(`{"TotalRecordCount":` + strconv.Itoa(jellyfinPageSize) + `,"Items":[`)
-	for i := range jellyfinPageSize {
-		if i > 0 {
-			page.WriteByte(',')
-		}
-		page.WriteString(`{"Id":"` + strconv.Itoa(i) + `","Type":"Movie","Name":"` + name + `"}`)
-	}
-	page.WriteString(`]}`)
-	body := page.String()
-	if len(body) < 3<<20 {
-		t.Fatalf("fixture is %d bytes, want a multi-MiB page", len(body))
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
-	defer server.Close()
+	for _, tc := range []struct {
+		limit        string
+		budget       listingBudget
+		wantRequests int64
+	}{
+		{"listing_pages", listingBudget{pages: maxListingPages - 1}, 1},
+		{"listing_items", listingBudget{items: maxListingItems - 1}, 2},
+	} {
+		t.Run(tc.limit, func(t *testing.T) {
+			var requests atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				_, _ = w.Write([]byte(`{"Items":[{"Id":"1"}]}`))
+			}))
+			defer server.Close()
 
-	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "u", AccessToken: "t"}
-	items, err := newUnthrottledJellyfinClient().FetchItems(trustLoopback(context.Background()), auth, "IsPlayed", jellyfinPlayableItemTypes)
-	if err != nil {
-		t.Fatalf("FetchItems: %v", err)
-	}
-	if len(items) != jellyfinPageSize {
-		t.Fatalf("items = %d, want %d", len(items), jellyfinPageSize)
-	}
-}
-
-// A Jellyfin server that answers every page full and never reports a total
-// would be paged forever; the item cap ends the listing with an error.
-func TestJellyfinFetchItemsStopsEndlessFullPages(t *testing.T) {
-	t.Parallel()
-
-	page := `{"Items":[` + strings.TrimSuffix(strings.Repeat(`{},`, jellyfinPageSize), ",") + `]}`
-	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(page))
-	}))
-	defer server.Close()
-
-	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "u", AccessToken: "t"}
-	_, err := newUnthrottledJellyfinClient().FetchItems(trustLoopback(context.Background()), auth, "IsPlayed", jellyfinPlayableItemTypes)
-	if !errors.Is(err, ErrUpstreamResponseTooLarge) {
-		t.Fatalf("err = %v, want ErrUpstreamResponseTooLarge", err)
-	}
-	if want := int64(maxListingItems/jellyfinPageSize + 1); requests.Load() != want {
-		t.Fatalf("requests = %d, want %d", requests.Load(), want)
-	}
-}
-
-// A Plex server that reports a huge totalSize but hands out one row per page
-// is stopped by the page cap.
-func TestPlexFetchUserHistoryStopsAtPageCap(t *testing.T) {
-	t.Parallel()
-
-	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"MediaContainer":{"totalSize":1000000000,"Metadata":[{"ratingKey":"1"}]}}`))
-	}))
-	defer server.Close()
-
-	_, err := newUnthrottledPlexClient().FetchUserHistory(trustLoopback(context.Background()), server.URL, "t", "1")
-	if !errors.Is(err, ErrUpstreamResponseTooLarge) {
-		t.Fatalf("err = %v, want ErrUpstreamResponseTooLarge", err)
-	}
-	if requests.Load() != maxListingPages {
-		t.Fatalf("requests = %d, want %d", requests.Load(), maxListingPages)
-	}
-}
-
-// Emby trusts a reported total over short pages, so the same page cap ends a
-// total that never arrives.
-func TestEmbyFetchItemsStopsAtPageCap(t *testing.T) {
-	t.Parallel()
-
-	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"TotalRecordCount":1000000000,"Items":[{"Id":"1"}]}`))
-	}))
-	defer server.Close()
-
-	client := NewEmbyClient()
-	client.limiter = nil
-	_, err := client.FetchItems(trustLoopback(context.Background()), embyLocalAuth{BaseURL: server.URL, UserID: "u", AccessToken: "t"}, "IsPlayed")
-	if !errors.Is(err, ErrUpstreamResponseTooLarge) {
-		t.Fatalf("err = %v, want ErrUpstreamResponseTooLarge", err)
-	}
-	if requests.Load() != maxListingPages {
-		t.Fatalf("requests = %d, want %d", requests.Load(), maxListingPages)
+			auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "u", AccessToken: "t"}
+			ctx := trustLoopback(t.Context())
+			client := newUnthrottledJellyfinClient()
+			if _, err := client.fetchPage(ctx, auth, server.URL, nil, 0, &tc.budget); err != nil {
+				t.Fatalf("last allowed page: %v", err)
+			}
+			if _, err := client.fetchPage(ctx, auth, server.URL, nil, 1, &tc.budget); !errors.Is(err, ErrUpstreamResponseTooLarge) || exceededLimit(err) != tc.limit {
+				t.Fatalf("page after the limit: got %v, want %s", err, tc.limit)
+			}
+			if got := requests.Load(); got != tc.wantRequests {
+				t.Fatalf("upstream received %d requests, want %d", got, tc.wantRequests)
+			}
+		})
 	}
 }

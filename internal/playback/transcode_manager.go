@@ -68,9 +68,15 @@ type TranscodeManager struct {
 	Config func() TranscodeRuntimeConfig
 	// LogSinkFn returns the ffmpeg log sink for reconstructed processes.
 	LogSinkFn func() FFmpegLogSink
-	// JWTSecretFn returns the shared secret that signs remote transcode-node
-	// DELETEs.
-	JWTSecretFn func() string
+	// NodeKeysFn returns the keyring that signs remote transcode-node
+	// DELETEs with each node's own key.
+	NodeKeysFn func() nodeauth.Keyring
+	// NodeRecipesFn returns the store transcode nodes rebuild their
+	// transports from (internal/noderecipe). StopRemoteTranscode deletes the
+	// stopped transport's recipe there before it sends the node its DELETE,
+	// unless the recipe names another node. Nil, or a nil result, deletes
+	// nothing.
+	NodeRecipesFn func() NodeRecipeDeleter
 	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
 	// error so the embedding handler can tear down the playback session (keeping
 	// the card, so a resume can respawn). dead is the exact session that crashed;
@@ -81,6 +87,11 @@ type TranscodeManager struct {
 	// StartThrottler optionally starts the segment throttler for a (re)started
 	// transcode, reading the embedding handler's settings. No-op when nil.
 	StartThrottler func(ctx context.Context, ts *TranscodeSession)
+	// RestoreReconstructedClient fills in the client metadata of a card that
+	// carries none (a stream token's card never does) from what the embedding
+	// handler stored for the session, so a session rebuilt after a restart
+	// keeps its client. No-op when nil.
+	RestoreReconstructedClient func(ctx context.Context, card *RecipeCard)
 
 	// Package-private execution seams keep reconstruction lifecycle tests
 	// deterministic without invoking a host FFmpeg binary. Production always
@@ -145,11 +156,11 @@ func NewTranscodeManager() *TranscodeManager {
 	}
 }
 
-func (m *TranscodeManager) jwtSecret() string {
-	if m.JWTSecretFn == nil {
-		return ""
+func (m *TranscodeManager) nodeKeys() nodeauth.Keyring {
+	if m.NodeKeysFn == nil {
+		return nil
 	}
-	return m.JWTSecretFn()
+	return m.NodeKeysFn()
 }
 
 func (m *TranscodeManager) logSink() FFmpegLogSink {
@@ -318,12 +329,56 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 	return true
 }
 
+// NodeRecipeDeleter deletes the recipe a transcode node rebuilds a transport
+// from, keeping one issued for another route
+// (RecipeExecutor.IssuedForAnotherRoute). *noderecipe.Store implements it.
+type NodeRecipeDeleter interface {
+	DeleteUnlessIssuedElsewhere(ctx context.Context, transportID string, executor RecipeExecutor) (kept bool, err error)
+}
+
+// nodeRecipeDeleteTimeout bounds the recipe deletion a remote stop runs
+// before it tells the node to stop.
+const nodeRecipeDeleteTimeout = 5 * time.Second
+
 // StopRemoteTranscode removes only the remote node process. It deliberately
 // leaves the local live-map entry untouched for an atomic remote-to-local v3
 // replacement.
+//
+// The transport's stored node recipe is deleted first, so a request a relay
+// forwards while the stop is in flight cannot have the node rebuild the
+// session from it. The deletion keeps a recipe that names another node: a
+// transport keeps its id when it moves, and jellycompat reuses one id across
+// the start candidates it tries, so a late stop on one node must not remove
+// the card of the node that runs the transport now. A failed deletion is
+// logged and the node is told to stop either way.
 func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL string) {
+	if transcodeNodeURL == "" {
+		return
+	}
+	m.deleteNodeRecipeUnlessMoved(sessionID, transcodeNodeURL)
 	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL, true); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
+	}
+}
+
+// deleteNodeRecipeUnlessMoved deletes transportID's stored node recipe unless
+// it names a node other than the one at transcodeNodeURL.
+func (m *TranscodeManager) deleteNodeRecipeUnlessMoved(transportID, transcodeNodeURL string) {
+	if m.NodeRecipesFn == nil {
+		return
+	}
+	recipes := m.NodeRecipesFn()
+	if recipes == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), nodeRecipeDeleteTimeout)
+	defer cancel()
+	kept, err := recipes.DeleteUnlessIssuedElsewhere(ctx, transportID, RecipeExecutor{NodeURL: transcodeNodeURL})
+	switch {
+	case err != nil:
+		slog.Warn("delete the stopped transport's node recipe failed", "error", err, "session", transportID, "node", transcodeNodeURL, "playback_session_id", transportID)
+	case kept:
+		slog.Info("kept a node recipe that names another node", "session", transportID, "node", transcodeNodeURL, "playback_session_id", transportID)
 	}
 }
 
@@ -408,18 +463,20 @@ func (m *TranscodeManager) RestartSessionLocked(ctx context.Context, sessionID s
 // RestartSegmentLocked resolves and restarts one missing HLS segment under the
 // per-session lifecycle lock. Copy-video resolution reads the current manifest,
 // so keeping resolution and restart inside the same lock preserves the mapping
-// it observed.
+// it observed. seenGeneration is the GenerationStartedAt of the progress the
+// restart was decided on (see TranscodeSession.RestartSegmentSince).
 func (m *TranscodeManager) RestartSegmentLocked(
 	ctx context.Context,
 	sessionID string,
 	ts *TranscodeSession,
 	segNum int,
+	seenGeneration time.Time,
 ) (SegmentRecoveryTarget, bool, error) {
 	var target SegmentRecoveryTarget
 	var ok bool
 	err := m.restartSessionLocked(sessionID, ts, func() error {
 		var restartErr error
-		target, ok, restartErr = ts.RestartSegment(ctx, segNum)
+		target, ok, restartErr = ts.RestartSegmentSince(ctx, segNum, seenGeneration)
 		return restartErr
 	})
 	return target, ok, err
@@ -642,9 +699,8 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 		if card == nil {
 			return transcodeLoadResult{status: SessionMissing}
 		}
-		var ok bool
-		session, inserted, ok = m.reconstructSession(ctx, sessionID, requestUserID, *card, true)
-		if !ok || session == nil {
+		session, inserted, _ = m.reconstructSession(ctx, sessionID, requestUserID, *card, true)
+		if session == nil {
 			return transcodeLoadResult{status: SessionMissing}
 		}
 		if inserted != nil {
@@ -718,26 +774,35 @@ func (m *TranscodeManager) completeTranscodeLoad(
 // Returns the (re)registered session, or nil if reconstruct is not possible (no
 // card, ownership mismatch, or unsupported session manager).
 func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID string, requestUserID int, card RecipeCard) *Session {
-	session, _, ok := m.reconstructSession(ctx, sessionID, requestUserID, card, false)
-	if !ok {
-		return nil
-	}
+	session, _ := m.ReconstructSessionWithError(ctx, sessionID, requestUserID, card)
 	return session
 }
 
-func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID string, requestUserID int, card RecipeCard, deferToneMapConfirmation bool) (*Session, *Session, bool) {
+// ReconstructSessionWithError is ReconstructSession that also returns the
+// admission error (ErrTooManyStreams, ErrTooManyTranscodes,
+// ErrTranscodingDisabled or ErrAudioTranscodingDisabled) when the user's
+// limits refused the rebuild. Every other refusal returns a nil session and a
+// nil error.
+func (m *TranscodeManager) ReconstructSessionWithError(ctx context.Context, sessionID string, requestUserID int, card RecipeCard) (*Session, error) {
+	session, _, err := m.reconstructSession(ctx, sessionID, requestUserID, card, false)
+	return session, err
+}
+
+// reconstructSession returns a nil session when it cannot rebuild, with the
+// admission error when the user's limits refused it.
+func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID string, requestUserID int, card RecipeCard, deferToneMapConfirmation bool) (*Session, *Session, error) {
 	if m == nil || m.Sessions == nil {
-		return nil, nil, false
+		return nil, nil, nil
 	}
 	if card.SessionID == "" || card.SessionID != sessionID {
 		// The token's recipe must be for the session id in the URL; a mismatch is
 		// a forged or stale request.
-		return nil, nil, false
+		return nil, nil, nil
 	}
 	if err := ValidateCopyFMP4RecipeCard(card); err != nil {
 		slog.WarnContext(ctx, "transcode reconstruct copy recipe rejected", "component", "playback",
 			"session", sessionID, "playback_session_id", sessionID, "error", err)
-		return nil, nil, false
+		return nil, nil, nil
 	}
 	// Re-bind ownership to the card owner. A zero caller is allowed (the authless
 	// transcode delivery routes — HLS master.m3u8 / segment — treat the session
@@ -748,7 +813,7 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		slog.WarnContext(ctx, "transcode reconstruct ownership rejected", "component", "playback",
 			"session", sessionID, "playback_session_id", sessionID,
 			"request_user", requestUserID, "card_user", card.UserID)
-		return nil, nil, false
+		return nil, nil, nil
 	}
 
 	// An empty PlayMethod is a card written before direct/remux were
@@ -761,6 +826,9 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 	toneMapMode := card.ToneMapMode
 	if deferToneMapConfirmation && method == PlayTranscode {
 		toneMapMode = ""
+	}
+	if m.RestoreReconstructedClient != nil && card.ClientName == "" && card.ClientUserAgent == "" && card.DeviceID == "" {
+		m.RestoreReconstructedClient(ctx, &card)
 	}
 	s := &Session{
 		ID:                            card.SessionID,
@@ -802,6 +870,8 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		DeviceID:         normalizeClientMetadataValue(card.DeviceID, 128),
 		DevicePlatform:   normalizeClientMetadataValue(card.DevicePlatform, 40),
 		IsJellyfinCompat: card.IsJellyfinCompat,
+		// So do the reasons the admin views give for the adaptation.
+		AdaptationReasons: NormalizeAdaptationReasons(card.AdaptationReasons),
 		// The card carries no address; the media request rebuilding the
 		// session comes from the viewer's player.
 		ClientIP: clientip.FromContext(ctx),
@@ -816,36 +886,20 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		RequestedMediaFileID:       card.RequestedMediaFileID,
 		DisableProgressPersistence: card.DisableProgressPersistence,
 	}
+	if card.VideoStreamCopy() {
+		// A copy applies neither target; the card keeps them only to match and
+		// rebuild the negotiated stream, so the admin views must not show them.
+		s.TargetResolution, s.TargetBitrateKbps = "", 0
+	}
 	if card.IsTranscodeRecipe() {
 		s.OutputContainer = HLSOutputContainer(card.TranscodeOpts("", "", nil))
 		s.OutputProtocol = OutputProtocolHLS
 	} else if method == PlayRemux {
 		s.OutputContainer, s.OutputProtocol = OutputContainerFMP4, OutputProtocolHTTP
 	}
-	// Enforce the same per-user concurrency caps a fresh StartSession would, so a
-	// replayed token cannot reconstruct past the user's limit. Reconstructing the
-	// user's own surviving sessions still succeeds up to the cap; only the over-cap
-	// replay is rejected.
-	session, err := m.Sessions.RegisterReconstructedWithLimits(ctx, s)
+	session, err := m.registerReconstructedSession(ctx, s)
 	if err != nil {
-		// Admission denials must still refuse: a replayed token cannot reconstruct
-		// past a current cap or after transcoding has been disabled for the user.
-		if errors.Is(err, ErrTooManyStreams) || errors.Is(err, ErrTooManyTranscodes) || errors.Is(err, ErrTranscodingDisabled) || errors.Is(err, ErrAudioTranscodingDisabled) {
-			slog.WarnContext(ctx, "playback session reconstruct refused by admission policy", "component", "playback",
-				"session", sessionID, "playback_session_id", sessionID,
-				"user", card.UserID, "method", method, "error", err)
-			return nil, nil, false
-		}
-		// Otherwise the limit provider itself could not be evaluated (e.g. a
-		// transient Postgres error during a post-restart reconstruct wave). Fail
-		// open and admit the session WITHOUT the limit gate: denying here would
-		// collapse a recoverable dependency error into a permanent 404 and stop
-		// playback for a user who is within their limits. The cap will re-apply on
-		// the next fresh StartSession once the provider recovers.
-		slog.WarnContext(ctx, "playback session reconstruct admitting despite unevaluated limits (degraded; limit provider unavailable)", "component", "playback",
-			"session", sessionID, "playback_session_id", sessionID,
-			"user", card.UserID, "method", method, "error", err)
-		session = m.Sessions.RegisterReconstructed(s)
+		return nil, nil, err
 	}
 	slog.InfoContext(ctx, "playback session reconstructed from recipe card", "component", "playback",
 		"session", sessionID, "playback_session_id", sessionID, "user", card.UserID, "method", method)
@@ -853,7 +907,36 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 	if session == s {
 		inserted = s
 	}
-	return session, inserted, true
+	return session, inserted, nil
+}
+
+// registerReconstructedSession enforces the same per-user concurrency caps a
+// fresh StartSession would, so a replayed token cannot reconstruct past the
+// user's limit. Reconstructing the user's own surviving sessions still succeeds
+// up to the cap; only the over-cap replay is rejected, with its admission error.
+func (m *TranscodeManager) registerReconstructedSession(ctx context.Context, s *Session) (*Session, error) {
+	session, err := m.Sessions.RegisterReconstructedWithLimits(ctx, s)
+	if err == nil {
+		return session, nil
+	}
+	// Admission denials must still refuse: a replayed token cannot reconstruct
+	// past a current cap or after transcoding has been disabled for the user.
+	if errors.Is(err, ErrTooManyStreams) || errors.Is(err, ErrTooManyTranscodes) || errors.Is(err, ErrTranscodingDisabled) || errors.Is(err, ErrAudioTranscodingDisabled) {
+		slog.WarnContext(ctx, "playback session reconstruct refused by admission policy", "component", "playback",
+			"session", s.ID, "playback_session_id", s.ID,
+			"user", s.UserID, "method", s.PlayMethod, "error", err)
+		return nil, err
+	}
+	// Otherwise the limit provider itself could not be evaluated (e.g. a
+	// transient Postgres error during a post-restart reconstruct wave). Fail
+	// open and admit the session WITHOUT the limit gate: denying here would
+	// collapse a recoverable dependency error into a permanent 404 and stop
+	// playback for a user who is within their limits. The cap will re-apply on
+	// the next fresh StartSession once the provider recovers.
+	slog.WarnContext(ctx, "playback session reconstruct admitting despite unevaluated limits (degraded; limit provider unavailable)", "component", "playback",
+		"session", s.ID, "playback_session_id", s.ID,
+		"user", s.UserID, "method", s.PlayMethod, "error", err)
+	return m.Sessions.RegisterReconstructed(s), nil
 }
 
 // ReconstructTranscode rebuilds the in-memory TranscodeSession (and, if
@@ -1003,12 +1086,15 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 		return nil, ctx.Err()
 	}
 	defer slotRelease()
+	// Past admission the rebuild serves every request waiting on it, so its
+	// probes and its start must not end with the request that triggered it.
+	rebuildCtx := context.WithoutCancel(ctx)
 	var toneMapErr error
 	resolveToneMapExecutor := m.resolveToneMapExecutor
 	if resolveToneMapExecutor == nil {
 		resolveToneMapExecutor = ResolveToneMapExecutor
 	}
-	opts, toneMapErr = resolveToneMapExecutor(ctx, opts)
+	opts, toneMapErr = resolveToneMapExecutor(rebuildCtx, opts)
 	if toneMapErr != nil {
 		slog.ErrorContext(ctx, "reconstruct tone-map recipe unavailable", "component", "playback", "error", toneMapErr,
 			"session", sessionID, "playback_session_id", sessionID)
@@ -1036,9 +1122,9 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	}
 	// Under hw_accel=auto a reconstruct walks the same safer paths as a fresh
 	// start, keeping a slow process rather than duplicating it. Every other
-	// recipe starts once without waiting, as segment requests already wait for
-	// a reconstructed process.
-	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
+	// recipe starts once, and only one that decodes on the GPU is waited on,
+	// so a decoder that rejects the source can move to CPU decoding.
+	transcodeSession, err := StartReconstructTranscode(rebuildCtx, newPipeline(rebuildCtx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil, err
@@ -1072,14 +1158,35 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 		m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
 	})
 
-	if m.StartThrottler != nil {
-		m.StartThrottler(ctx, transcodeSession)
-	}
+	m.StartInitialThrottler(ctx, transcodeSession)
 	m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
 	slog.InfoContext(ctx, "transcode process reconstructed from recipe card", "component", "playback",
 		"session", sessionID, "playback_session_id", sessionID,
 		"requested_segment", requestedSegment, "start_segment_number", opts.StartSegmentNumber)
 	return transcodeSession, nil
+}
+
+// initialThrottleSettingsTimeout bounds the settings read behind a transcode's
+// first throttler start. A rebuild holds the session lifecycle lock and a
+// reconstruct slot across that read, so a stalled database must not keep them.
+const initialThrottleSettingsTimeout = 5 * time.Second
+
+// StartInitialThrottler starts the throttler for a transcode that was just
+// started or rebuilt. The transcode outlives the request that asked for it, so
+// the settings read is detached from that request and bounded instead. A
+// restart hook calls StartThrottler with the context Restart gives it, which
+// ends when the session closes or restartHookTimeout passes.
+func (m *TranscodeManager) StartInitialThrottler(ctx context.Context, ts *TranscodeSession) {
+	if m.StartThrottler == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), initialThrottleSettingsTimeout)
+	defer cancel()
+	m.StartThrottler(ctx, ts)
+	if ctx.Err() != nil {
+		slog.WarnContext(ctx, "transcode throttle settings read timed out; the transcode may run unthrottled until its next restart",
+			"component", "playback", "playback_session_id", ts.Opts().SessionID, "timeout", initialThrottleSettingsTimeout)
+	}
 }
 
 func reconstructionOutputDir(root, sessionID, signedSubdir string) string {
@@ -1096,6 +1203,8 @@ func reconstructionOutputDir(root, sessionID, signedSubdir string) string {
 // MonitorLocalTranscodeExit watches a local ffmpeg process and, on an error exit,
 // invokes OnFFmpegCrash so the embedding handler tears down the playback session.
 // A clean exit (no error) leaves the segments servable until the client stops.
+// A failure the session answers by restarting on CPU decode is restarted here
+// instead (see restartCrashedOnCPUDecode).
 func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *TranscodeSession) {
 	if m == nil || sessionID == "" || session == nil {
 		return
@@ -1116,15 +1225,19 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 		if current != session {
 			return
 		}
-		if session.IsRunning() {
-			return
-		}
-
 		// When ffmpeg exits cleanly (no error), the segments are fully written and
 		// should remain servable until the client stops the session. This is
 		// critical for copy-mode where ffmpeg finishes writing all content much
 		// faster than real-time playback. Only tear down the session on error exits.
-		if session.WaitError() == nil {
+		//
+		// Both facts come from one read: a segment request can restart the
+		// session between separate reads, and its replacement must not be torn
+		// down for the crash it recovered from.
+		crashed, restartsOnCPU := session.crashState()
+		if !crashed {
+			return
+		}
+		if restartsOnCPU && m.restartCrashedOnCPUDecode(sessionID, session) {
 			return
 		}
 
@@ -1136,6 +1249,42 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 			m.OnFFmpegCrash(context.Background(), sessionID, session)
 		}
 	}()
+}
+
+// restartCrashedOnCPUDecode restarts a crashed session whose restart moves it
+// to CPU decode and reports whether it should stay registered. Tearing it down
+// would let the client reconstruct it on GPU decode, which fails at the same
+// frame, and a stream whose playlist lists only produced segments never asks
+// for the missing one.
+func (m *TranscodeManager) restartCrashedOnCPUDecode(sessionID string, session *TranscodeSession) bool {
+	ctx := context.Background()
+	keep := true
+	err := m.restartSessionLocked(sessionID, session, func() error {
+		crashed, restartsOnCPU := session.crashState()
+		if !restartsOnCPU {
+			// A segment request restarted it while this waited for the lock.
+			// Keep it unless that restart failed as well.
+			keep = !crashed
+			return nil
+		}
+		// Resume at the client's position, as a segment request would, so the
+		// pruner and throttler keep a true view of it. Segments FFmpeg had
+		// produced beyond that point are encoded again.
+		_, _, err := session.RestartSegment(ctx, session.LastRequestedSegment())
+		return err
+	})
+	if errors.Is(err, ErrSessionSuperseded) {
+		return true
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "restarting a crashed transcode with CPU decoding failed; tearing it down",
+			"component", "playback",
+			"playback_session_id", sessionID,
+			"error", err,
+		)
+		return false
+	}
+	return keep
 }
 
 // CloseTranscodeSession stops a transcode session. If transcodeNodeURL is
@@ -1177,6 +1326,10 @@ func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan stru
 		transcodes := m.transcodes
 		m.transcodes = make(map[string]*TranscodeSession)
 		m.transcodeMu.Unlock()
+		// Close without the lifecycle lock. A restart holds that lock through
+		// its restart hook, which can block on the FFmpeg context only Close
+		// cancels. Close itself waits for a restart in flight, and none starts
+		// after it: the session is gone from the map and refuses restarts.
 		for _, session := range transcodes {
 			if session != nil {
 				_ = session.Close()
@@ -1220,6 +1373,53 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	return true
 }
 
+// CloseTranscodeSessionIfSessionGone is for a start or rebuild that may have
+// registered expected after its playback session ended: whatever removed the
+// session closed the transcode first and found none. It reports whether
+// hasSession found no session for sessionID, and in that case tears down
+// expected if it is still the registered transcode.
+//
+// hasSession is read under the transcode map lock, which a request also takes
+// to adopt a registered transcode after it has registered the session again.
+// So either that request registered the session before this read, which then
+// finds it, or it reads the map after the removal and starts its own
+// transcode. A check followed by CloseTranscodeSessionIf would close a
+// transcode adopted in between.
+//
+// The close removes the output directory, so it runs under the session
+// lifecycle lock, which a start or rebuild holds before it writes there. The
+// caller must not hold that lock, and hasSession must not call into the
+// manager.
+func (m *TranscodeManager) CloseTranscodeSessionIfSessionGone(sessionID string, expected *TranscodeSession, hasSession func() bool) bool {
+	// The usual case takes no lock: the session is there.
+	if hasSession() {
+		return false
+	}
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	return m.CloseTranscodeSessionIfSessionGoneLocked(sessionID, expected, hasSession)
+}
+
+// CloseTranscodeSessionIfSessionGoneLocked is CloseTranscodeSessionIfSessionGone
+// for a caller that already holds sessionID's lifecycle lock, such as a start
+// publishing its transcode.
+func (m *TranscodeManager) CloseTranscodeSessionIfSessionGoneLocked(sessionID string, expected *TranscodeSession, hasSession func() bool) bool {
+	m.transcodeMu.Lock()
+	if hasSession() {
+		m.transcodeMu.Unlock()
+		return false
+	}
+	registered := expected != nil && m.transcodes[sessionID] == expected
+	if registered {
+		delete(m.transcodes, sessionID)
+	}
+	m.transcodeMu.Unlock()
+	if registered {
+		_ = expected.Close()
+	}
+	return true
+}
+
 // remoteTranscodeControlClient sends stop requests to transcode nodes. Playback
 // paths call the stop synchronously, so a stop aimed at a dead host must give
 // up as quickly as the start that found it dead: it uses the same connect bound
@@ -1231,7 +1431,7 @@ var remoteTranscodeControlClient = func() *http.Client {
 	}
 	transport := base.Clone()
 	transport.DialContext = nodepool.NodeDialContext()
-	return &http.Client{Transport: transport}
+	return &http.Client{Transport: transport, CheckRedirect: nodepool.RefuseRedirects}
 }()
 
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
@@ -1255,7 +1455,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)
 	}
-	if err := nodeauth.Sign(req, transcodeNodeURL, m.jwtSecret()); err != nil {
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, m.nodeKeys()); err != nil {
 		return fmt.Errorf("sign remote transcode delete: %w", err)
 	}
 

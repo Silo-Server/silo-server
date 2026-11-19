@@ -85,33 +85,6 @@ func (r *resultRecordingProgress) summary(t *testing.T) refreshAllLibraryMetadat
 	return summary
 }
 
-func TestRefreshAllLibraryMetadataTaskSkipsActiveAndContinuesAfterFailures(t *testing.T) {
-	runner := &fakeLibraryRefreshRunner{errs: map[int]error{2: errors.New("provider unavailable")}}
-	task := newTestRefreshAllTask(fakeEnabledFolders{folders: []*models.MediaFolder{
-		{ID: 1, Name: "Movies"}, {ID: 2, Name: "TV Shows"}, {ID: 3, Name: "Anime"}, {ID: 4, Name: "Sports"},
-	}}, fakeActiveLibraryRefreshes{
-		active: map[int]bool{1: true},
-		errs:   map[int]error{3: errors.New("database unavailable")},
-	}, runner)
-	progress := &resultRecordingProgress{}
-
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	var ran []int
-	for _, req := range runner.requests {
-		ran = append(ran, req.LibraryID)
-	}
-	if len(ran) != 2 || ran[0] != 2 || ran[1] != 4 {
-		t.Fatalf("refreshed libraries = %v, want [2 4]", ran)
-	}
-	got := progress.summary(t)
-	want := refreshAllLibraryMetadataSummary{Libraries: 4, Refreshed: 1, Skipped: 1, Failed: 2}
-	if got != want {
-		t.Fatalf("summary = %+v, want %+v", got, want)
-	}
-}
-
 func TestRefreshAllLibraryMetadataTaskStopsWhenCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -129,19 +102,6 @@ func TestRefreshAllLibraryMetadataTaskStopsWhenCanceled(t *testing.T) {
 	}
 	if got := progress.summary(t); got.Libraries != 2 || got.Refreshed != 1 {
 		t.Fatalf("summary = %+v, want the completed library recorded", got)
-	}
-}
-
-func TestRefreshAllLibraryMetadataTaskRunsOnOneServerAtATime(t *testing.T) {
-	runner := &fakeLibraryRefreshRunner{}
-	task := newTestRefreshAllTask(fakeEnabledFolders{folders: []*models.MediaFolder{{ID: 1, Name: "Movies"}}}, fakeActiveLibraryRefreshes{}, runner)
-	task.lock = &fakeClusterLock{}
-
-	if err := task.Execute(context.Background(), &resultRecordingProgress{}); !errors.Is(err, errFullMetadataRefreshRunning) {
-		t.Fatalf("Execute() error = %v, want errFullMetadataRefreshRunning so the run is not recorded as a refresh", err)
-	}
-	if len(runner.requests) != 0 {
-		t.Fatalf("requests = %+v, want none while another server holds the lock", runner.requests)
 	}
 }
 

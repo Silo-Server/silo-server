@@ -26,6 +26,7 @@ type TaskManager struct {
 	logger         *slog.Logger
 	observers      []Observer
 	libraryTypes   LibraryTypesFunc
+	firingClaims   FiringClaims
 }
 
 // New creates a new TaskManager.
@@ -82,10 +83,14 @@ func (m *TaskManager) Start(ctx context.Context) {
 
 		configs, err := m.triggerRepo.GetTriggers(ctx, key)
 		if err == nil && configs == nil {
-			// Default providers may read settings. Resolve them only for new
-			// schedules, outside the repository transaction. Initialization
-			// rechecks saved state so a concurrent edit still takes precedence.
-			configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+			if followsDefaultTriggers(w.task) {
+				configs = w.task.DefaultTriggers()
+			} else {
+				// Default providers may read settings. Resolve them only for new
+				// schedules, outside the repository transaction. Initialization
+				// rechecks saved state so a concurrent edit still takes precedence.
+				configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+			}
 		}
 		if err != nil {
 			m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
@@ -123,7 +128,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}
 		}
 
-		merged := make(chan struct{}, 1)
+		// merged carries the trigger that fired, whose config gives the run's
+		// max runtime, or nil when the schedule changed.
+		merged := make(chan Trigger, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -135,7 +142,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				case _, ok := <-tr.C():
 					if ok {
 						select {
-						case merged <- struct{}{}:
+						case merged <- tr:
 						default:
 						}
 					}
@@ -149,21 +156,25 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				return
 			case <-w.triggerUpdate:
 				select {
-				case merged <- struct{}{}:
+				case merged <- nil:
 				default:
 				}
 			}
 		}()
 
+		var fired Trigger
 		select {
 		case <-ctx.Done():
 			close(done)
 			return
-		case <-merged:
+		case fired = <-merged:
 			close(done)
 		}
 
-		if w.triggerChanged.CompareAndSwap(true, false) {
+		// A schedule change only rebuilds the triggers. Checking fired too keeps
+		// a stale update signal, whose flag an earlier wake already cleared,
+		// from starting a run that no trigger asked for.
+		if changed := w.triggerChanged.CompareAndSwap(true, false); changed || fired == nil {
 			continue
 		}
 
@@ -183,8 +194,16 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			m.rearmTriggersFromNow(w)
 			continue
 		}
+		if !m.claimFiring(ctx, w, fired) {
+			// Another server runs this firing. Rearm from now, as after a
+			// skipped preflight: this server's last result is older than that
+			// run, so an interval would otherwise fire again at once.
+			m.reloadLastResult(ctx, w)
+			m.rearmTriggersFromNow(w)
+			continue
+		}
 
-		result, err := w.run(ctx)
+		result, err := w.run(ctx, fired.Config().MaxRuntime())
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
@@ -262,7 +281,7 @@ func (m *TaskManager) RunTask(ctx context.Context, key string) error {
 		return err
 	}
 
-	result, err := w.run(ctx)
+	result, err := w.run(ctx, 0)
 	if err != nil {
 		return err
 	}
@@ -298,7 +317,7 @@ func (m *TaskManager) StartTask(key string) (TaskInfo, error) {
 	if err != nil {
 		return TaskInfo{}, err
 	}
-	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true))
+	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true), 0)
 	if err != nil {
 		return TaskInfo{}, err
 	}
@@ -378,6 +397,11 @@ func isManualOnly(task Task) bool {
 	return ok && manual.ManualOnly()
 }
 
+func followsDefaultTriggers(task Task) bool {
+	follower, ok := task.(DefaultFollowingTask)
+	return ok && follower.FollowsDefaultTriggers()
+}
+
 func startSpread(task Task) time.Duration {
 	spreader, ok := task.(StartSpreader)
 	if !ok {
@@ -421,15 +445,22 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 }
 
 // GetSchedule reads the durable editor state rather than a live trigger snapshot.
+// A DefaultFollowingTask with no saved schedule reports its DefaultTriggers at
+// revision zero, the schedule it runs until one is saved.
 func (m *TaskManager) GetSchedule(ctx context.Context, key string) (Schedule, error) {
-	if _, err := m.getWorker(key); err != nil {
+	w, err := m.getWorker(key)
+	if err != nil {
 		return Schedule{}, err
 	}
 	repo, ok := m.triggerRepo.(GuardedTriggerRepository)
 	if !ok {
 		return Schedule{}, fmt.Errorf("guarded task schedules unavailable")
 	}
-	return repo.GetSchedule(ctx, key)
+	schedule, err := repo.GetSchedule(ctx, key)
+	if err == nil && schedule.Revision == 0 && followsDefaultTriggers(w.task) {
+		schedule.Triggers = w.task.DefaultTriggers()
+	}
+	return schedule, err
 }
 
 // UpdateSchedule persists under the original revision and installs that schedule

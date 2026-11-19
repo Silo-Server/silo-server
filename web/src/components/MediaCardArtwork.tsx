@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 // known only from TMDB read the same under their artwork.
 export const MEDIA_CARD_CAPTION_CLASS = "px-1 pt-3";
 export const MEDIA_CARD_TITLE_CLASS =
-  "block truncate text-[0.875rem] font-semibold tracking-tight hover:underline";
+  "bidi-text block truncate text-[0.875rem] font-semibold tracking-tight hover:underline";
 export const MEDIA_CARD_META_CLASS =
   "text-muted-foreground mt-1 block truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase hover:underline";
 
@@ -20,8 +20,10 @@ export const MEDIA_CARD_CENTER_ACTION_CLASS =
   "media-card-play-trigger bg-primary text-primary-foreground absolute top-1/2 left-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95";
 
 // Library grid cards fade into the theme background; row cards and TMDB
-// titles use a black scrim.
+// titles use a black scrim. A cover shown on its own, with nothing drawn over
+// it, takes none.
 const SCRIM_CLASS = {
+  none: "",
   background:
     "from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90",
   black:
@@ -106,7 +108,7 @@ export default function MediaCardArtwork({
       ) : (
         !thumbhashUrl && <DefaultArtwork mediaType={mediaType} className={dimClass} />
       )}
-      <div className={SCRIM_CLASS[scrim]} />
+      {scrim !== "none" && <div className={SCRIM_CLASS[scrim]} />}
       {children}
     </div>
   );

@@ -217,7 +217,7 @@ func (s *Scanner) cacheExtraStill(ctx context.Context, extraID, path string, inf
 	}
 	stored, thumbhash, err := s.imageCacher.CacheExtraStill(ctx, data, extraID)
 	// The same test a collection artwork upload uses for bad input.
-	if err != nil && (errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(data)) {
+	if err != nil && imageutil.SourceUnusable(err, data) {
 		return "", "", fmt.Errorf("%w: %w", errUndecodableExtraStill, err)
 	}
 	return stored, thumbhash, err

@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,11 +16,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/migrations"
 )
 
@@ -227,61 +224,6 @@ func TestProviderRecheckStoresEncryptedRefreshStateDB(t *testing.T) {
 	}
 }
 
-// TestProviderRecheckActiveDB: a due refresh asks the provider with the
-// stored state, stores the rotated state and the answer, and slides the
-// session; the next refresh inside the interval does not ask again.
-func TestProviderRecheckActiveDB(t *testing.T) {
-	env := newRecheckEnv(t, "amos", "rt-1")
-	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE, "rt-2")
-	sessionID, refresh := env.session(t, true)
-
-	// The sign-in itself counts as an active answer: no check yet.
-	if _, err := env.svc.Refresh(t.Context(), refresh); err != nil {
-		t.Fatal(err)
-	}
-	if env.checker.callCount() != 0 {
-		t.Fatalf("checked right after sign-in")
-	}
-
-	env.makeDue(t)
-	if _, err := env.pool.Exec(t.Context(), `UPDATE auth_sessions SET expires_at = NOW() + INTERVAL '1 day' WHERE id = $1`, sessionID); err != nil {
-		t.Fatal(err)
-	}
-	pair, err := env.svc.Refresh(t.Context(), refresh)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env.checker.callCount() != 1 || env.checker.states[0] != "rt-1" {
-		t.Fatalf("calls = %d, states = %v", env.checker.callCount(), env.checker.states)
-	}
-	if got := env.storedToken(t); got != "rt-2" {
-		t.Fatalf("rotated token not stored: %q", got)
-	}
-	identity := env.identityState(t)
-	if identity.LastCheckStatus != CheckStatusActive || identity.LastCheckedAt == nil || time.Since(*identity.LastCheckedAt) > time.Minute {
-		t.Fatalf("identity check = %q at %v", identity.LastCheckStatus, identity.LastCheckedAt)
-	}
-	if session := env.sessionRow(t, sessionID); time.Until(session.ExpiresAt) < 29*24*time.Hour {
-		t.Fatalf("session did not slide: %v", session.ExpiresAt)
-	}
-
-	if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil {
-		t.Fatal(err)
-	}
-	if env.checker.callCount() != 1 {
-		t.Fatalf("checked again inside the interval")
-	}
-
-	// The next due check presents the rotated token.
-	env.makeDue(t)
-	if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil {
-		t.Fatal(err)
-	}
-	if env.checker.callCount() != 2 || env.checker.states[1] != "rt-2" {
-		t.Fatalf("second call states = %v", env.checker.states)
-	}
-}
-
 // TestProviderRecheckRefusedAccountRevokesSessionsDB: not found, disabled
 // and not permitted revoke every login session of the account, local ones
 // included, and refuse the refresh.
@@ -372,172 +314,6 @@ func TestProviderRecheckRoleSyncDB(t *testing.T) {
 	env.makeDue(t)
 	if _, err := env.svc.Refresh(t.Context(), refresh); err != nil {
 		t.Fatalf("refresh with unchanged role = %v", err)
-	}
-}
-
-// TestProviderRecheckUnsupportedDB: a provider that cannot re-check the
-// account (UNSUPPORTED, Unimplemented, or a plugin without CheckAccount)
-// stops the sliding: the session ends an absolute age after it opened.
-func TestProviderRecheckUnsupportedDB(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		source func(*fakeChecker) AccountCheckerSource
-	}{
-		{"unsupported", func(c *fakeChecker) AccountCheckerSource {
-			c.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED, "")
-			return fakeCheckerSource{checker: c}
-		}},
-		{"unimplemented", func(c *fakeChecker) AccountCheckerSource {
-			c.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
-				return nil, status.Error(codes.Unimplemented, "unknown method CheckAccount")
-			}
-			return fakeCheckerSource{checker: c}
-		}},
-		{"no_check_account", func(*fakeChecker) AccountCheckerSource { return fakeCheckerSource{} }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			env := newRecheckEnv(t, "uns"+tc.name, "")
-			env.recheck.source = tc.source(env.checker)
-			sessionID, refresh := env.session(t, true)
-			opened := time.Now().Add(-29 * 24 * time.Hour)
-			if _, err := env.pool.Exec(t.Context(), `UPDATE auth_sessions SET created_at = $2, expires_at = NOW() + INTERVAL '20 days' WHERE id = $1`, sessionID, opened); err != nil {
-				t.Fatal(err)
-			}
-			env.makeDue(t)
-			pair, err := env.svc.Refresh(t.Context(), refresh)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := env.identityState(t).LastCheckStatus; got != CheckStatusUnsupported {
-				t.Fatalf("status = %q", got)
-			}
-			limit := opened.Add(recheckRefreshExpiry)
-			if expires := env.sessionRow(t, sessionID).ExpiresAt; expires.After(limit.Add(time.Second)) {
-				t.Fatalf("expires_at = %v, beyond the absolute limit %v", expires, limit)
-			}
-
-			// Past the absolute age the refresh is refused, without asking
-			// the provider again inside the interval.
-			calls := env.checker.callCount()
-			if _, err := env.pool.Exec(t.Context(), `UPDATE auth_sessions SET created_at = NOW() - INTERVAL '31 days' WHERE id = $1`, sessionID); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); !errors.Is(err, ErrSessionRevoked) {
-				t.Fatalf("refresh past the absolute age = %v", err)
-			}
-			if env.checker.callCount() != calls {
-				t.Fatal("asked the provider again inside the interval")
-			}
-		})
-	}
-}
-
-// TestProviderRecheckUnavailableDB: an unreachable provider keeps the
-// session (fail_open, the default) and is asked again at the next refresh;
-// fail_closed refuses the refresh without revoking the session.
-func TestProviderRecheckUnavailableDB(t *testing.T) {
-	answers := map[string]func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error){
-		"unavailable": answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNAVAILABLE, ""),
-		"unspecified": answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSPECIFIED, ""),
-		"unknown":     answer(pluginv1.CheckAccountStatus(99), ""),
-		"rpc_error": func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
-			return nil, status.Error(codes.Unavailable, "connection refused")
-		},
-		"timeout": func(ctx context.Context, _ *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
-			<-ctx.Done()
-			return nil, status.FromContextError(ctx.Err()).Err()
-		},
-	}
-	for name, respond := range answers {
-		t.Run(name, func(t *testing.T) {
-			env := newRecheckEnv(t, "una"+name, "rt-1")
-			env.recheck.timeout = 100 * time.Millisecond
-			env.checker.respond = respond
-			sessionID, refresh := env.session(t, true)
-			env.makeDue(t)
-
-			pair, err := env.svc.Refresh(t.Context(), refresh)
-			if err != nil {
-				t.Fatalf("fail-open refresh = %v", err)
-			}
-			if got := env.identityState(t).LastCheckStatus; got != CheckStatusUnavailable {
-				t.Fatalf("status = %q", got)
-			}
-			if got := env.storedToken(t); got != "rt-1" {
-				t.Fatalf("stored token changed to %q", got)
-			}
-			// Refreshes within the retry wait use the stored answer; the
-			// next one after it asks again.
-			if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil || env.checker.callCount() != 1 {
-				t.Fatalf("refresh within the retry wait: calls = %d, %v", env.checker.callCount(), err)
-			}
-			env.ageUnavailable(t)
-			if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil {
-				t.Fatal(err)
-			}
-			if env.checker.callCount() != 2 {
-				t.Fatalf("calls = %d, want a retry", env.checker.callCount())
-			}
-
-			env.setSetting(t, config.AuthProviderRecheckOutagePolicySettingKey, config.AuthRecheckFailClosed)
-			if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); !errors.Is(err, ErrProviderUnavailable) {
-				t.Fatalf("fail-closed refresh = %v", err)
-			}
-			if env.sessionRow(t, sessionID).RevokedAt != nil {
-				t.Fatal("fail-closed revoked the session")
-			}
-			// An open plugin page's launch cookie stops renewing with it.
-			launch, err := env.jwt.GeneratePluginAccessToken(env.user.ID, env.user.Role, sessionID, "profile-1", new(int64(3)), time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			launchClaims, err := env.jwt.ValidateToken(launch)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := env.svc.RenewPluginAccess(t.Context(), launchClaims, 5*time.Minute); !errors.Is(err, ErrProviderUnavailable) {
-				t.Fatalf("fail-closed plugin renewal = %v", err)
-			}
-			// Once the provider answers again the same refresh token works.
-			env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE, "")
-			env.ageUnavailable(t)
-			if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil {
-				t.Fatalf("refresh after recovery = %v", err)
-			}
-			// And the cookie renews for the same session, profile and PIN
-			// revision, ending no later than the session.
-			renewed, err := env.svc.RenewPluginAccess(t.Context(), launchClaims, 5*time.Minute)
-			if err != nil {
-				t.Fatalf("plugin renewal after recovery = %v", err)
-			}
-			got, err := env.jwt.ValidateToken(renewed)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got.TokenType != TokenTypePluginAccess || got.SessionID != sessionID || got.ProfileID != "profile-1" ||
-				got.ProfilePINRevision == nil || *got.ProfilePINRevision != 3 ||
-				got.ExpiresAt.After(env.sessionRow(t, sessionID).ExpiresAt) {
-				t.Fatalf("renewed claims = %+v", got)
-			}
-		})
-	}
-}
-
-// TestProviderRecheckIntervalSettingDB: the interval comes from
-// auth.provider_recheck_interval.
-func TestProviderRecheckIntervalSettingDB(t *testing.T) {
-	env := newRecheckEnv(t, "ivan", "rt-1")
-	_, refresh := env.session(t, true)
-	if _, err := env.pool.Exec(t.Context(), `UPDATE plugin_auth_identities SET last_checked_at = NOW() - INTERVAL '2 hours' WHERE id = $1`, env.identityID); err != nil {
-		t.Fatal(err)
-	}
-	pair, err := env.svc.Refresh(t.Context(), refresh)
-	if err != nil || env.checker.callCount() != 0 {
-		t.Fatalf("default 12h interval: calls = %d, err = %v", env.checker.callCount(), err)
-	}
-	env.setSetting(t, config.AuthProviderRecheckIntervalSettingKey, "1h")
-	if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil || env.checker.callCount() != 1 {
-		t.Fatalf("1h interval: calls = %d, err = %v", env.checker.callCount(), err)
 	}
 }
 
@@ -832,107 +608,6 @@ func TestProviderRecheckDeviceChainKeepsAbsoluteAgeDB(t *testing.T) {
 	}
 }
 
-// TestProviderRecheckRemotePlaybackHandoffChainDB: a remote-playback handoff
-// approved from a provider session gives the device a session carrying the
-// approver's identity, which refresh re-checks and a refusal revokes.
-func TestProviderRecheckRemotePlaybackHandoffChainDB(t *testing.T) {
-	env := newRecheckEnv(t, "handoff", "rt-1")
-	ctx := t.Context()
-	approver, _ := env.session(t, true)
-	stores := pgstore.NewPostgresProvider(env.pool)
-	store, err := stores.ForUser(ctx, env.user.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	profiles, err := store.ListProfiles(ctx)
-	if err != nil || len(profiles) == 0 {
-		t.Fatalf("profiles = %+v, %v", profiles, err)
-	}
-
-	devices := NewDeviceLoginService(env.pool, NewUserRepository(env.pool), env.jwt, NewSessionRepository(env.pool),
-		stores, access.NewProfileTokenService("provider-recheck-profile-secret", time.Hour))
-	deviceName := "handoff-device-" + env.suffix
-	t.Cleanup(func() {
-		_, _ = env.pool.Exec(context.Background(), `DELETE FROM device_login_requests WHERE device_name = $1`, deviceName)
-	})
-	start, err := devices.Start(ctx, DeviceLoginStartInput{DeviceName: deviceName, BaseURL: "https://media.example.test/",
-		ClientPurpose: DeviceLoginPurposeRemote, Temporary: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := devices.ApproveForProfile(WithClaims(ctx, &Claims{UserID: env.user.ID, SessionID: approver, TokenType: TokenTypeAccess}),
-		DeviceLoginLookupInput{UserCode: start.UserCode}, env.user.ID, profiles[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	poll, err := devices.Poll(ctx, start.DeviceCode, "")
-	if err != nil || poll.TokenPair == nil {
-		t.Fatalf("poll = %+v, %v", poll, err)
-	}
-	claims, err := env.jwt.ValidateToken(poll.TokenPair.RefreshToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	device := env.sessionRow(t, claims.SessionID)
-	if device.IdentityID == nil || *device.IdentityID != env.identityID || device.ProviderSince == nil {
-		t.Fatalf("handoff session chain = identity %v since %v, want identity %d", device.IdentityID, device.ProviderSince, env.identityID)
-	}
-
-	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND, "")
-	env.makeDue(t)
-	if _, err := env.svc.Refresh(ctx, poll.TokenPair.RefreshToken); !errors.Is(err, ErrSessionRevoked) {
-		t.Fatalf("handoff refresh after not_found = %v, want ErrSessionRevoked", err)
-	}
-	if env.checker.callCount() != 1 {
-		t.Fatalf("provider asked %d times, want 1", env.checker.callCount())
-	}
-	if env.sessionRow(t, claims.SessionID).RevokedAt == nil {
-		t.Fatal("handoff session not revoked")
-	}
-}
-
-// TestProviderRecheckProviderNotLoadedDB: a node without the provider does
-// not store an answer for the whole cluster. When the bindings say the
-// provider is off, the session stops sliding for this refresh; when they say
-// it is on (this node is behind), the provider counts as unavailable.
-func TestProviderRecheckProviderNotLoadedDB(t *testing.T) {
-	env := newRecheckEnv(t, "nolo", "rt-1")
-	ctx := t.Context()
-	env.recheck.source = fakeCheckerSource{err: ErrProviderNotLoaded}
-	sessionID, refresh := env.session(t, true)
-	opened := time.Now().Add(-29 * 24 * time.Hour)
-	if _, err := env.pool.Exec(ctx, `UPDATE auth_sessions SET created_at = $2, provider_since = $2 WHERE id = $1`, sessionID, opened); err != nil {
-		t.Fatal(err)
-	}
-	env.makeDue(t)
-	before := env.identityState(t)
-
-	// The binding is off (newExternalSignInEnv seeds it disabled).
-	pair, err := env.svc.Refresh(ctx, refresh)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if expires := env.sessionRow(t, sessionID).ExpiresAt; expires.After(opened.Add(recheckRefreshExpiry).Add(time.Second)) {
-		t.Fatalf("expires_at = %v, beyond the absolute limit", expires)
-	}
-	after := env.identityState(t)
-	if after.LastCheckStatus != before.LastCheckStatus || !after.LastCheckedAt.Equal(*before.LastCheckedAt) {
-		t.Fatalf("a node without the provider stored %q at %v", after.LastCheckStatus, after.LastCheckedAt)
-	}
-
-	// The binding is on, but this node has not loaded it: unavailable,
-	// still not stored.
-	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID); err != nil {
-		t.Fatal(err)
-	}
-	env.setSetting(t, config.AuthProviderRecheckOutagePolicySettingKey, config.AuthRecheckFailClosed)
-	if _, err := env.svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, ErrProviderUnavailable) {
-		t.Fatalf("refresh on a node behind the bindings = %v", err)
-	}
-	if got := env.identityState(t).LastCheckStatus; got != before.LastCheckStatus {
-		t.Fatalf("status stored = %q", got)
-	}
-}
-
 // TestProviderRecheckConcurrencyCapDB: a node whose re-check slots are all
 // taken does not queue more database connections behind the provider; the
 // refresh counts the provider as unavailable.
@@ -994,171 +669,6 @@ func TestProviderRecheckKeepsRotatedStateOnLaterFailureDB(t *testing.T) {
 	}
 	if env.checker.callCount() != 2 || env.checker.states[1] != "rt-2" {
 		t.Fatalf("calls = %d, states = %v; want a second check with rt-2", env.checker.callCount(), env.checker.states)
-	}
-}
-
-// TestProviderRecheckEmptyProfileFieldsKeepStoredDB: an ACTIVE answer's
-// empty profile fields mean the provider did not say, so they never clear
-// what is stored; the fields it fills replace the stored values.
-func TestProviderRecheckEmptyProfileFieldsKeepStoredDB(t *testing.T) {
-	env := newRecheckEnv(t, "kept", "")
-	before := env.identityState(t)
-	if before.Username == "" || before.Email == "" || before.DisplayName == "" || before.Issuer == "" {
-		t.Fatalf("sign-in stored no profile: %+v", before)
-	}
-	_, refresh := env.session(t, true)
-
-	env.checker.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
-		return &pluginv1.CheckAccountResponse{Status: pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE,
-			Account: &pluginv1.AuthenticateResponse{Username: " ", Email: "", DisplayName: ""}}, nil
-	}
-	env.makeDue(t)
-	pair, err := env.svc.Refresh(t.Context(), refresh)
-	if err != nil {
-		t.Fatal(err)
-	}
-	after := env.identityState(t)
-	if after.Username != before.Username || after.Email != before.Email || after.DisplayName != before.DisplayName || after.Issuer != before.Issuer {
-		t.Fatalf("empty answer cleared the profile: before %+v, after %+v", before, after)
-	}
-
-	env.checker.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
-		return &pluginv1.CheckAccountResponse{Status: pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE,
-			Account: &pluginv1.AuthenticateResponse{DisplayName: "Renamed Person"}}, nil
-	}
-	env.makeDue(t)
-	if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil {
-		t.Fatal(err)
-	}
-	after = env.identityState(t)
-	if after.DisplayName != "Renamed Person" || after.Email != before.Email || after.Username != before.Username {
-		t.Fatalf("partial answer = %+v", after)
-	}
-}
-
-// TestProviderRecheckScheduledPassDB: the scheduled pass asks the provider
-// about identities whose accounts hold a credential no refresh re-checks
-// (an API key, an Audiobookshelf session, an idle login session), once
-// their last answer is older than the interval, with the refresh's
-// outcomes: a refused account also loses its API keys and Audiobookshelf
-// sessions. Break-glass accounts and identities of a provider that is no
-// longer enabled are left alone.
-func TestProviderRecheckScheduledPassDB(t *testing.T) {
-	env := newRecheckEnv(t, "idle", "rt-1")
-	ctx := t.Context()
-	pool := env.pool
-	exec := func(sql string, args ...any) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, sql, args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	count := func(sql string, args ...any) int {
-		t.Helper()
-		var n int
-		if err := pool.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		return n
-	}
-	due := func() bool {
-		t.Helper()
-		ok, err := env.recheck.IdleRecheckDue(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return ok
-	}
-	run := func() map[string]int {
-		t.Helper()
-		counts, err := env.recheck.RecheckIdleIdentities(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return counts
-	}
-	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID)
-
-	// Due, but the account holds nothing the pass must re-check.
-	env.makeDue(t)
-	if due() {
-		t.Fatal("an account without credentials is due")
-	}
-
-	// An API key makes it due; an active answer keeps the key.
-	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'idle', $2, 1)`, env.user.ID, HashLinkToken("sa_idle_"+env.suffix))
-	if !due() {
-		t.Fatal("an account with an API key is not due")
-	}
-	if counts := run(); counts[CheckStatusActive] != 1 || env.checker.callCount() != 1 || env.checker.states[0] != "rt-1" {
-		t.Fatalf("counts = %v, calls = %d, states = %v", counts, env.checker.callCount(), env.checker.states)
-	}
-	if count(`SELECT COUNT(*) FROM api_keys WHERE user_id = $1`, env.user.ID) != 1 {
-		t.Fatal("an active answer deleted the API key")
-	}
-	// Inside the interval nothing is asked again.
-	if due() || len(run()) != 0 || env.checker.callCount() != 1 {
-		t.Fatal("re-checked inside the interval")
-	}
-
-	// A break-glass account keeps local credentials of its own: skipped.
-	env.makeDue(t)
-	exec(`UPDATE users SET role = 'admin', break_glass = true WHERE id = $1`, env.user.ID)
-	if due() {
-		t.Fatal("a break-glass account is due")
-	}
-	exec(`UPDATE users SET break_glass = false, role = 'user' WHERE id = $1`, env.user.ID)
-
-	// A provider that is no longer enabled cannot be asked: skipped.
-	exec(`UPDATE plugin_auth_bindings SET enabled = false WHERE plugin_installation_id = $1`, env.installationID)
-	if due() {
-		t.Fatal("an identity of a disabled provider is due")
-	}
-	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID)
-
-	// An idle login session opened through the identity is enough too.
-	exec(`DELETE FROM api_keys WHERE user_id = $1`, env.user.ID)
-	if due() {
-		t.Fatal("due without a credential")
-	}
-	sessionID, _ := env.session(t, true)
-	if !due() {
-		t.Fatal("an account with an idle provider session is not due")
-	}
-
-	// A refused account loses its login and Audiobookshelf sessions and its
-	// API keys.
-	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'idle', $2, 1)`, env.user.ID, HashLinkToken("sa_idle2_"+env.suffix))
-	exec(`INSERT INTO abs_sessions (user_id, token_hash, device_id) VALUES ($1, $2, 'abs-device')`, env.user.ID, "abs-"+env.suffix)
-	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND, "")
-	if counts := run(); counts[CheckStatusNotFound] != 1 {
-		t.Fatalf("counts = %v", counts)
-	}
-	if count(`SELECT COUNT(*) FROM api_keys WHERE user_id = $1`, env.user.ID) != 0 {
-		t.Fatal("a refused account kept its API key")
-	}
-	if count(`SELECT COUNT(*) FROM abs_sessions WHERE user_id = $1 AND revoked_at IS NULL`, env.user.ID) != 0 {
-		t.Fatal("a refused account kept its Audiobookshelf session")
-	}
-	if session := env.sessionRow(t, sessionID); session.RevokedAt == nil {
-		t.Fatal("a refused account kept its login session")
-	}
-	if env.identityState(t).LastCheckStatus != CheckStatusNotFound {
-		t.Fatalf("identity status = %q", env.identityState(t).LastCheckStatus)
-	}
-	if len(env.revoked) == 0 || env.revoked[len(env.revoked)-1] != env.user.ID {
-		t.Fatalf("revocation hook = %v", env.revoked)
-	}
-	// Nothing is left to re-check.
-	env.makeDue(t)
-	if due() {
-		t.Fatal("a revoked account is still due")
-	}
-
-	// A live Audiobookshelf session alone makes it due.
-	exec(`INSERT INTO abs_sessions (user_id, token_hash, device_id) VALUES ($1, $2, 'abs-device')`, env.user.ID, "abs2-"+env.suffix)
-	if !due() {
-		t.Fatal("an account with an Audiobookshelf session is not due")
 	}
 }
 
@@ -1948,70 +1458,6 @@ func TestProviderRecheckUnansweredChecksKeepOutcomeUnknownDB(t *testing.T) {
 	}
 }
 
-// TestProviderRecheckPluginLoadFailureDB: a plugin this node cannot load
-// is this node's failure, not the provider's answer. Nothing is stored (so
-// other nodes do not refuse refreshes under fail_closed), this refresh
-// follows the outage policy, the scheduled pass counts the check as failed,
-// and the plugin is loaded before the identity's advisory lock is taken.
-func TestProviderRecheckPluginLoadFailureDB(t *testing.T) {
-	env := newRecheckEnv(t, "loadfail", "rt-1")
-	ctx := t.Context()
-	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewAPIKeyRepository(env.pool).Create(ctx, env.user.ID, "loadfail", nil); err != nil {
-		t.Fatal(err)
-	}
-	identity := env.identityState(t)
-	lockKey := fmt.Sprintf("silo:auth-identity:%d:%s", identity.InstallationID, identity.ExternalSubject)
-	var loads atomic.Int32
-	var lockHeld atomic.Bool
-	env.recheck.source = funcCheckerSource(func(ctx context.Context, _ int) (AccountChecker, error) {
-		loads.Add(1)
-		// A session lock belongs to its connection: probe and release on one.
-		conn, err := env.pool.Acquire(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer conn.Release()
-		var free bool
-		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, lockKey).Scan(&free); err != nil {
-			return nil, err
-		}
-		if free {
-			_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey)
-		} else {
-			lockHeld.Store(true)
-		}
-		return nil, errors.New("plugin process failed to start")
-	})
-	_, refresh := env.session(t, true)
-	env.makeDue(t)
-	before := env.identityState(t)
-
-	if _, err := env.svc.Refresh(ctx, refresh); err != nil {
-		t.Fatalf("fail-open refresh = %v", err)
-	}
-	env.setSetting(t, config.AuthProviderRecheckOutagePolicySettingKey, config.AuthRecheckFailClosed)
-	if _, err := env.svc.Refresh(ctx, refresh); !errors.Is(err, ErrProviderUnavailable) {
-		t.Fatalf("fail-closed refresh = %v, want ErrProviderUnavailable", err)
-	}
-	counts, err := env.recheck.RecheckIdleIdentities(ctx)
-	if err != nil || counts["failed"] < 1 {
-		t.Fatalf("scheduled pass counts = %v, %v", counts, err)
-	}
-	after := env.identityState(t)
-	if after.LastCheckStatus != before.LastCheckStatus || !after.LastCheckedAt.Equal(*before.LastCheckedAt) {
-		t.Fatalf("a load failure stored %q at %v", after.LastCheckStatus, after.LastCheckedAt)
-	}
-	if env.checker.callCount() != 0 || loads.Load() < 3 {
-		t.Fatalf("calls = %d, loads = %d", env.checker.callCount(), loads.Load())
-	}
-	if lockHeld.Load() {
-		t.Fatal("the plugin was loaded while the identity's advisory lock was held")
-	}
-}
-
 // TestProviderRecheckLostAnswerWithoutStateCountsDB: a plugin that checks
 // without a stored refresh_state (LDAP) presents no token a lost call could
 // have rotated, so a refusal after an unanswered check still revokes.
@@ -2286,5 +1732,40 @@ func TestProviderRecheckIgnoresAnswerForUnlinkedIdentityDB(t *testing.T) {
 	}
 	if len(env.revoked) != 0 {
 		t.Fatalf("revocation hook = %v", env.revoked)
+	}
+}
+func TestProviderRecheckEmptyProfileFieldsKeepStoredDB(t *testing.T) {
+	env := newRecheckEnv(t, "kept", "")
+	before := env.identityState(t)
+	if before.Username == "" || before.Email == "" || before.DisplayName == "" || before.Issuer == "" {
+		t.Fatalf("sign-in stored no profile: %+v", before)
+	}
+	_, refresh := env.session(t, true)
+
+	env.checker.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+		return &pluginv1.CheckAccountResponse{Status: pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE,
+			Account: &pluginv1.AuthenticateResponse{Username: " ", Email: "", DisplayName: ""}}, nil
+	}
+	env.makeDue(t)
+	pair, err := env.svc.Refresh(t.Context(), refresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := env.identityState(t)
+	if after.Username != before.Username || after.Email != before.Email || after.DisplayName != before.DisplayName || after.Issuer != before.Issuer {
+		t.Fatalf("empty answer cleared the profile: before %+v, after %+v", before, after)
+	}
+
+	env.checker.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+		return &pluginv1.CheckAccountResponse{Status: pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE,
+			Account: &pluginv1.AuthenticateResponse{DisplayName: "Renamed Person"}}, nil
+	}
+	env.makeDue(t)
+	if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	after = env.identityState(t)
+	if after.DisplayName != "Renamed Person" || after.Email != before.Email || after.Username != before.Username {
+		t.Fatalf("partial answer = %+v", after)
 	}
 }

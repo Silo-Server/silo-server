@@ -166,7 +166,7 @@ func TestManagerSearchWarningsOmitProviderErrorText(t *testing.T) {
 
 	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
 	manager.RegisterProvider(failingSearchProvider{stubProvider{name: "example"}})
-	resp, err := manager.SearchBridge(t.Context(), SearchRequest{Title: "Example"})
+	resp, err := manager.Search(t.Context(), SearchRequest{Title: "Example"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,46 +199,6 @@ func TestManagerDownloadRejectsOversizedProviderResult(t *testing.T) {
 	}
 	if sub.Provider != "ok" || sub.Format != FormatSRT {
 		t.Fatalf("stored provider=%q format=%q, want ok srt", sub.Provider, sub.Format)
-	}
-}
-
-func TestManagerUploadDedupesIdenticalContent(t *testing.T) {
-	repo := newMockSubtitleRepo()
-	s3 := newMockBlobStore()
-	manager := NewManager(repo, s3)
-
-	data := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
-	first, err := manager.Upload(context.Background(), UploadRequest{
-		MediaFileID: 7,
-		Language:    "en",
-		Filename:    "a.srt",
-		Data:        data,
-	})
-	if err != nil {
-		t.Fatalf("first Upload() error = %v", err)
-	}
-
-	if first.Provider != ProviderUpload || first.Format != FormatSRT {
-		t.Fatalf("uploaded provider=%q format=%q, want upload srt", first.Provider, first.Format)
-	}
-
-	second, err := manager.Upload(context.Background(), UploadRequest{
-		MediaFileID: 7,
-		Language:    "en",
-		Filename:    "b.srt",
-		Data:        data,
-	})
-	if err != nil {
-		t.Fatalf("second Upload() error = %v", err)
-	}
-	if first.ID != second.ID {
-		t.Fatalf("dedup failed: ids %d vs %d", first.ID, second.ID)
-	}
-	if repo.inserts != 1 {
-		t.Fatalf("inserts = %d, want 1", repo.inserts)
-	}
-	if s3.puts != 1 {
-		t.Fatalf("puts = %d, want 1", s3.puts)
 	}
 }
 

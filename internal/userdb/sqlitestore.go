@@ -30,8 +30,8 @@ var _ userstore.SectionOverrideEnumerator = (*SQLiteUserStore)(nil)
 
 // ListAllSectionOverrides exposes the account-wide read capability used by
 // scheduled section maintenance.
-func (s *SQLiteUserStore) ListAllSectionOverrides(_ context.Context) ([]userstore.SectionOverride, error) {
-	return ListAllSectionOverrides(s.db)
+func (s *SQLiteUserStore) ListAllSectionOverrides(ctx context.Context) ([]userstore.SectionOverride, error) {
+	return ListAllSectionOverrides(ctx, s.db)
 }
 
 // --- Profiles ---
@@ -52,8 +52,8 @@ func (s *SQLiteUserStore) UpdateProfile(_ context.Context, id string, u userstor
 	return UpdateProfile(s.db, id, u)
 }
 
-func (s *SQLiteUserStore) DeleteProfile(_ context.Context, id string) error {
-	return DeleteProfile(s.db, id)
+func (s *SQLiteUserStore) DeleteProfile(ctx context.Context, id string) ([]string, error) {
+	return DeleteProfile(ctx, s.db, id)
 }
 
 // --- Progress ---
@@ -114,6 +114,10 @@ func (s *SQLiteUserStore) ListProgress(_ context.Context, profileID, status stri
 
 func (s *SQLiteUserStore) ListCompletedProgressSince(_ context.Context, profileID string, since, until time.Time, limit int) ([]userstore.WatchProgress, error) {
 	return ListCompletedProgressSince(s.db, profileID, since, until, limit)
+}
+
+func (s *SQLiteUserStore) ListProgressItemIDs(ctx context.Context, profileID string) ([]string, error) {
+	return ListProgressItemIDs(ctx, s.db, profileID)
 }
 
 func (s *SQLiteUserStore) ListProgressPage(_ context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
@@ -379,6 +383,10 @@ func (s *SQLiteUserStore) ListSectionOverrides(_ context.Context, profileID, sco
 
 func (s *SQLiteUserStore) SaveSectionOverrides(_ context.Context, profileID, scope, libraryID string, overrides []userstore.SectionOverride) error {
 	return SaveSectionOverrides(s.db, profileID, scope, libraryID, overrides)
+}
+
+func (s *SQLiteUserStore) RenameCollectionRows(ctx context.Context, kind, collectionID, oldTitle, newTitle string, visibleTo func(profileID string) bool) error {
+	return RenameCollectionRows(ctx, s.db, kind, collectionID, oldTitle, newTitle, visibleTo)
 }
 
 func (s *SQLiteUserStore) ResetSectionOverrides(_ context.Context, profileID, scope, libraryID string) error {

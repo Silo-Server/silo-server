@@ -1,7 +1,9 @@
+import { t } from "@/i18n";
 import type { ApiError } from "./types";
 import type { components } from "./v2/schema";
 import { storage } from "../utils/storage";
 import { randomUUID } from "../lib/uuid";
+import { appLanguage } from "../lib/appLocale";
 import { problemId } from "./v2/problemId";
 import { API_READ_TIMEOUT_MS, startRequestDeadline } from "./requestDeadline";
 
@@ -383,7 +385,7 @@ function sharedRefresh(): { outcome: Promise<RefreshOutcome>; promise: Promise<b
  */
 export class SessionRefreshUnavailableError extends Error {
   constructor() {
-    super("The session could not be refreshed because the server did not answer.");
+    super(t("web.common.errors.sessionRefreshUnavailable"));
     this.name = "SessionRefreshUnavailableError";
   }
 }
@@ -747,6 +749,10 @@ function buildApiHeaders(options: RequestInit = {}): Record<string, string> {
   }
   for (const [name, value] of Object.entries(getDeviceHeaders())) {
     setHeader(headers, name, value);
+  }
+  // The language the interface applied, for server-rendered text.
+  if (!hasHeader(headers, "Accept-Language")) {
+    headers["Accept-Language"] = appLanguage();
   }
   return headers;
 }

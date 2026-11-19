@@ -1,4 +1,5 @@
-import type { OverlayDef } from "../types";
+import { t } from "@/i18n";
+import type { OverlayData, OverlayDef } from "../types";
 
 // "Ribbon" overlays — status badges that sit in the visual register of corner
 // ribbons. Only entries backed by a real API field belong in this registry;
@@ -6,8 +7,23 @@ import type { OverlayDef } from "../types";
 
 // Amber, for a title TMDB no longer lists as saved.
 export const ATTENTION_ACCENT = "#f59e0b";
+export const COMPLETE_ACCENT = "#21c452";
 
-function formatShowStatus(value: string | undefined): string | null {
+/** Whether a series or season poster is complete, partly in the library, or has no badge. */
+function availabilityState(d: OverlayData): "complete" | "partial" | null {
+  const have = d.availability_have;
+  const total = d.availability_total;
+  if (have == null || total == null || total <= 0) return null;
+  return have >= total ? "complete" : "partial";
+}
+
+type ShowStatusKey = "Returning" | "Ended" | "Cancelled" | "Upcoming";
+
+/**
+ * The status as the English badge key a viewer's per-value image matches (see
+ * `getValueKey`), or the API's own value when it is not one we know.
+ */
+function showStatusKey(value: string | undefined): string | null {
   if (!value) return null;
   switch (value.toLowerCase()) {
     case "returning":
@@ -29,27 +45,50 @@ function formatShowStatus(value: string | undefined): string | null {
   }
 }
 
+const SHOW_STATUS_LABELS: Record<ShowStatusKey, () => string> = {
+  Returning: () => t("web.settings.overlays.badge.showStatus.value.returning"),
+  Ended: () => t("web.settings.overlays.badge.showStatus.value.ended"),
+  Cancelled: () => t("web.settings.overlays.badge.showStatus.value.cancelled"),
+  Upcoming: () => t("web.settings.overlays.badge.showStatus.value.upcoming"),
+};
+
+/** The badge text: the known statuses in the interface language, any other value as the API sent it. */
+function formatShowStatus(value: string | undefined): string | null {
+  const key = showStatusKey(value);
+  if (key === null) return null;
+  return Object.hasOwn(SHOW_STATUS_LABELS, key) ? SHOW_STATUS_LABELS[key as ShowStatusKey]() : key;
+}
+
 export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "show_status",
     category: "ribbons",
-    label: "Show Status",
-    description: "Series lifecycle: Returning, Ended, Cancelled",
+    get label() {
+      return t("web.settings.overlays.badge.showStatus.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.showStatus.description");
+    },
     defaultPosition: "right-edge",
     defaultEnabled: false,
     iconId: "tv",
     iconCapable: true,
-    availabilityNote: "Populated by metadata plugins (TMDB/TVDB updates pending)",
+    get availabilityNote() {
+      return t("web.settings.overlays.badge.showStatus.availabilityNote");
+    },
     getValue: (d) => formatShowStatus(d.show_status),
-    getValueKey: (d) => formatShowStatus(d.show_status),
+    getValueKey: (d) => showStatusKey(d.show_status),
     valueKeySuggestions: ["Returning", "Ended", "Cancelled", "Upcoming"],
   },
   {
     id: "request_status",
     category: "ribbons",
-    label: "Request Status",
-    description:
-      "Where a watchlist title the library doesn't have yet stands: downloading, release date, awaiting approval",
+    get label() {
+      return t("web.settings.overlays.badge.requestStatus.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.requestStatus.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: true,
     iconCapable: true,
@@ -57,5 +96,38 @@ export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
     getValue: (d) => d.request_status || null,
     getIcon: (d) => d.request_status_icon ?? null,
     getAccent: (d) => (d.request_status_attention ? ATTENTION_ACCENT : null),
+  },
+  {
+    id: "availability",
+    category: "ribbons",
+    get label() {
+      return t("web.settings.overlays.badge.availability.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.availability.description");
+    },
+    defaultPosition: "top-left",
+    defaultEnabled: false,
+    iconCapable: true,
+    introducedInManifest: 29,
+    getValue: (d) => {
+      switch (availabilityState(d)) {
+        case "complete":
+          return t("web.settings.overlays.badge.availability.value.complete");
+        case "partial":
+          return t("web.settings.overlays.badge.availability.value.fraction", {
+            have: d.availability_have ?? 0,
+            total: d.availability_total ?? 0,
+          });
+        default:
+          return null;
+      }
+    },
+    getIcon: (d) => (availabilityState(d) === "complete" ? "check" : null),
+    getAccent: (d) => {
+      const state = availabilityState(d);
+      if (state === null) return null;
+      return state === "complete" ? COMPLETE_ACCENT : ATTENTION_ACCENT;
+    },
   },
 ];

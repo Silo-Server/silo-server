@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 )
 
 // A capability lookup overtaken by an invalidation was handing the caller the
@@ -16,7 +18,7 @@ import (
 // a tone-map executor from it — possibly hardware the newer report says is
 // gone. It re-probes instead.
 func TestLookupRemoteCapabilitiesRefetchesWhenOvertakenMidFlight(t *testing.T) {
-	handler := NewPlaybackHandler(nil)
+	handler := newKeyedPlaybackHandler(nil)
 	var fetches atomic.Int32
 
 	// Captured after the server exists; the cache is keyed by the URL the lookup
@@ -48,7 +50,7 @@ func TestLookupRemoteCapabilitiesRefetchesWhenOvertakenMidFlight(t *testing.T) {
 	t.Cleanup(node.Close)
 	nodeURL = node.URL
 
-	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), nodeURL, false); err != nil {
+	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), nodeauth.TargetTranscode, nodeURL, false); err != nil {
 		t.Fatalf("lookupRemoteCapabilitiesV3: %v", err)
 	}
 	if got := fetches.Load(); got != 2 {
@@ -62,7 +64,7 @@ func TestLookupRemoteCapabilitiesRefetchesWhenOvertakenMidFlight(t *testing.T) {
 // back to the 120s fallback, short of what a two-device node legitimately asks
 // for, so planning lost its inventory precisely after the invalidation.
 func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
-	handler := NewPlaybackHandler(nil)
+	handler := newKeyedPlaybackHandler(nil)
 
 	// The invalidation under test also starts a background re-probe, and a
 	// local node answers it in well under a millisecond. Left free, that probe
@@ -93,7 +95,7 @@ func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
 	// request, and a failed assertion must not turn into a hang.
 	t.Cleanup(release)
 
-	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), node.URL, false); err != nil {
+	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), nodeauth.TargetTranscode, node.URL, false); err != nil {
 		t.Fatalf("lookupRemoteCapabilitiesV3: %v", err)
 	}
 	learned := handler.remoteToneMapProbeTimeoutV3(node.URL)
@@ -116,7 +118,7 @@ func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
 	// the re-probe held at the node, an entry here can only be the one the
 	// invalidation should have removed.
 	handler.v3NodeCapabilitiesMu.Lock()
-	_, cached := handler.v3NodeCapabilities[node.URL]
+	_, cached := handler.v3NodeCapabilities[transcodeCapabilityKey(node.URL)]
 	handler.v3NodeCapabilitiesMu.Unlock()
 	if cached {
 		t.Fatal("invalidation left the inventory cached")

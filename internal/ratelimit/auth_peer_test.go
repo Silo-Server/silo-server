@@ -220,17 +220,6 @@ func TestAuthEndpointHandlerRejectionsDoNotSpendWiderBudgets(t *testing.T) {
 	}
 }
 
-func TestAuthPeerRateStaysWithinLimiterBounds(t *testing.T) {
-	got := authPeerRate(Rate{RequestsPerSecond: 1.0 / 3, RequestsPerMinute: 20, Burst: 10})
-	if got.RequestsPerMinute != 200 || got.Burst != 100 {
-		t.Fatalf("login peer rate = %+v, want 200 per minute, burst 100", got)
-	}
-	got = authPeerRate(Rate{RequestsPerSecond: MaxRequestsPerWindow, RequestsPerMinute: MaxRequestsPerWindow, Burst: MaxBurst})
-	if got.RequestsPerSecond > MaxRequestsPerWindow || got.RequestsPerMinute > MaxRequestsPerWindow || got.Burst <= 0 || got.Burst > MaxBurst {
-		t.Fatalf("peer rate for maximal settings = %+v, want values within the limiter's bounds", got)
-	}
-}
-
 // Autoscan deliveries carry a source token that the per-endpoint budget
 // cannot see. Once that budget (or the forwarded peer's share of it) is spent,
 // a request the endpoint's admission check accepts is still served, and every

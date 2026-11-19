@@ -26,6 +26,15 @@ func (s *S3) PutStream(ctx context.Context, key string, r io.Reader, contentType
 	}
 	return s.client.PutObjectStream(ctx, s.client.Bucket(), key, r, contentType)
 }
+
+// PutStreamParts streams an object as a multipart upload of partSize-byte
+// parts, for objects too large for the default part size's part count.
+func (s *S3) PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
+	return s.client.PutObjectStreamParts(ctx, s.client.Bucket(), key, r, contentType, partSize)
+}
 func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
 	if err := ValidateKey(key); err != nil {
 		return nil, ObjectInfo{}, err
@@ -116,7 +125,16 @@ func (s *S3) BeginMutationFence(ctx context.Context) (func(), error) {
 // storage and are kept as configured, the prefix normalized exactly as the
 // client applies it.
 func (s *S3) Identity() string {
-	return BackendS3 + "|" + normalizeEndpoint(s.client.Endpoint()) + "|" + strings.ToLower(strings.TrimSpace(s.client.Bucket())) + "|" + s.client.KeyPrefix()
+	return S3Identity(s.client.Endpoint(), s.client.Bucket(), s.client.KeyPrefix())
+}
+
+// S3Identity is the Identity an S3 store opened on endpoint, bucket, and key
+// prefix would report, for callers that compare configured settings with a
+// recorded identity without opening a client. keyPrefix must already be in
+// s3client.NormalizeKeyPrefix form, as the client stores it: normalizing it
+// again would trim a prefix such as " cache" and change a recorded identity.
+func S3Identity(endpoint, bucket, keyPrefix string) string {
+	return BackendS3 + "|" + normalizeEndpoint(endpoint) + "|" + strings.ToLower(strings.TrimSpace(bucket)) + "|" + keyPrefix
 }
 
 // normalizeEndpoint lowercases only the case-insensitive parts of an endpoint

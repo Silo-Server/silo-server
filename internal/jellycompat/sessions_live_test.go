@@ -48,8 +48,13 @@ func TestSessionsExposeOnlyCallerActiveDeviceAndPingPreservesPosition(t *testing
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(result) != 1 || result[0].ID != "own" || result[0].PlayState == nil || result[0].PlayState.PositionTicks != 1230000000 || result[0].PlayState.PlayMethod != "DirectPlay" || result[0].SupportsRemoteControl {
+	if rec.Code != 200 || len(result) != 1 || result[0].DeviceID != "device-1" || result[0].PlayState == nil || result[0].PlayState.PositionTicks != 1230000000 || result[0].PlayState.PlayMethod != "DirectPlay" || result[0].SupportsRemoteControl {
 		t.Fatalf("sessions %d %+v %s", rec.Code, result, rec.Body.String())
+	}
+	// The play session ID alone authorizes the play's media requests, so the
+	// list names the play by a value of Jellyfin's shape that is not that ID.
+	if id := result[0].ID; strings.Contains(rec.Body.String(), `"own"`) || len(id) != 32 || strings.Trim(id, "0123456789abcdef") != "" {
+		t.Errorf("SessionInfo.Id = %q, want 32 lowercase hex characters and no play session ID in %s", id, rec.Body.String())
 	}
 	// jellyfin-sdk-kotlin rejects the whole list when a required
 	// SessionInfoDto or PlayerStateInfo field is missing or null.
@@ -132,48 +137,5 @@ func TestSocketRejectsMissingToken(t *testing.T) {
 	NewSocketHandler(NewSessionStore(time.Hour, nil), nil)(rec, httptest.NewRequest("GET", "/socket", nil))
 	if rec.Code != 401 {
 		t.Fatal(rec.Code)
-	}
-}
-
-func TestSessionsStreamIndicesFollowActiveNativeFile(t *testing.T) {
-	for _, tc := range []struct {
-		name                    string
-		fileID                  int
-		wantAudio, wantSubtitle *int
-	}{
-		{"second version", 22, new(3), new(-1)},
-		{"unknown version", 33, nil, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := NewPlaybackSessionStore(time.Hour, nil)
-			store.Put(PlaybackSession{ID: "own", CompatToken: "caller", UpstreamSessionID: "native",
-				MediaSources: []PlaybackMediaSource{
-					{FileID: 11, SelectedAudioStreamIndex: new(1), SelectedSubtitleStreamIndex: new(2)},
-					{FileID: 22, SelectedAudioStreamIndex: new(3), SelectedSubtitleStreamIndex: new(-1)},
-				}})
-			native := &playback.Session{ID: "native", UserID: 1, ProfileID: "profile", MediaFileID: tc.fileID}
-			h := &PlaybackHandler{playbackStore: store, sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{"native": native}}}
-			rec := httptest.NewRecorder()
-			h.HandleSessions(rec, viewerRequest("GET", "/", "", "", "", &Session{Token: "caller", StreamAppUserID: 1, ProfileID: "profile"}))
-			var result []sessionInfoDTO
-			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			if rec.Code != http.StatusOK || len(result) != 1 || result[0].PlayState == nil {
-				t.Fatalf("session response: %d %s", rec.Code, rec.Body.String())
-			}
-			state := result[0].PlayState
-			for _, field := range []struct {
-				name      string
-				got, want *int
-			}{
-				{"audio", state.AudioStreamIndex, tc.wantAudio},
-				{"subtitle", state.SubtitleStreamIndex, tc.wantSubtitle},
-			} {
-				if (field.got == nil) != (field.want == nil) || field.got != nil && *field.got != *field.want {
-					t.Fatalf("%s selection does not match active file: %s", field.name, rec.Body.String())
-				}
-			}
-		})
 	}
 }

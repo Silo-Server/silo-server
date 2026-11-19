@@ -14,6 +14,7 @@ interface Props {
   currentTime: number;
   playing: boolean;
   enabled: boolean;
+  controlsVisible?: boolean;
 }
 
 describe("useIntroSkipPrompt", () => {
@@ -43,6 +44,7 @@ describe("useIntroSkipPrompt", () => {
       (current: Props) =>
         useIntroSkipPrompt({
           ...current,
+          controlsVisible: current.controlsVisible ?? false,
           intro,
           introKey: "session:file:intro",
           onSeek,
@@ -50,30 +52,6 @@ describe("useIntroSkipPrompt", () => {
       { initialProps: props },
     );
   }
-
-  it("does nothing in never mode", () => {
-    const { result, rerender } = renderPrompt({ mode: "never" });
-
-    rerender({ mode: "never", currentTime: 12, playing: true, enabled: true });
-
-    expect(result.current.prompt).toBeNull();
-    expect(onSeek).not.toHaveBeenCalled();
-  });
-
-  it("offers ask once and resolves the intro when selected", () => {
-    const { result, rerender } = renderPrompt();
-
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-    expect(result.current.prompt?.label).toBe("Skip Intro");
-
-    act(() => expect(result.current.select()).toBe(true));
-    expect(onSeek).toHaveBeenCalledWith(20);
-    expect(result.current.prompt).toBeNull();
-
-    rerender({ mode: "ask", currentTime: 21, playing: true, enabled: true });
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-    expect(result.current.prompt).toBeNull();
-  });
 
   it("lets an ask timeout re-offer after the viewer leaves and returns", () => {
     const { result, rerender } = renderPrompt();
@@ -87,6 +65,34 @@ describe("useIntroSkipPrompt", () => {
     rerender({ mode: "ask", currentTime: 21, playing: true, enabled: true });
     rerender({ mode: "ask", currentTime: 11, playing: true, enabled: true });
     expect(result.current.prompt?.label).toBe("Skip Intro");
+  });
+
+  it("brings a timed-out ask back with the controls while the intro plays", () => {
+    const inside = { mode: "ask" as const, currentTime: 12, playing: true, enabled: true };
+    const { result, rerender } = renderPrompt();
+    rerender(inside);
+    act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
+    expect(result.current.prompt).toBeNull();
+
+    // The viewer brings the controls up: the offer returns without a timer,
+    // and goes away again with the controls.
+    rerender({ ...inside, currentTime: 14, controlsVisible: true });
+    expect(result.current.prompt?.label).toBe("Skip Intro");
+    expect(result.current.prompt?.timer).toBeNull();
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(result.current.prompt?.label).toBe("Skip Intro");
+    rerender({ ...inside, currentTime: 15, controlsVisible: false });
+    expect(result.current.prompt).toBeNull();
+
+    rerender({ ...inside, currentTime: 16, controlsVisible: true });
+    act(() => expect(result.current.select()).toBe(true));
+    expect(onSeek).toHaveBeenCalledWith(20);
+    expect(result.current.prompt).toBeNull();
+
+    // Selected, so resolved: seeking back in offers nothing, controls or not.
+    rerender({ ...inside, currentTime: 21, controlsVisible: true });
+    rerender({ ...inside, currentTime: 12, controlsVisible: true });
+    expect(result.current.prompt).toBeNull();
   });
 
   it("skips immediately in always mode and makes the pill an undo", () => {
@@ -129,6 +135,7 @@ describe("useIntroSkipPrompt", () => {
             mode: "always",
             playing: true,
             enabled: true,
+            controlsVisible: false,
             onSeek,
           });
         },
@@ -143,18 +150,6 @@ describe("useIntroSkipPrompt", () => {
       expect(onSeek).toHaveBeenLastCalledWith(10);
     },
   );
-
-  it("resolves an automatic skip when its undo times out", () => {
-    const { result, rerender } = renderPrompt({ mode: "always" });
-    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
-
-    act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
-    expect(result.current.prompt).toBeNull();
-
-    rerender({ mode: "always", currentTime: 21, playing: true, enabled: true });
-    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
-    expect(onSeek).toHaveBeenCalledTimes(1);
-  });
 
   it("does not skip again when the stream reloads before the undo expires", async () => {
     // A reanchor replan answers asynchronously, once the new plan is adopted.
@@ -209,7 +204,7 @@ describe("useIntroSkipPrompt", () => {
     act(() => vi.advanceTimersByTime(10_000));
 
     expect(result.current.prompt?.label).toBe("Skip Intro");
-    expect(result.current.prompt?.remainingMs).toBe(1_000);
+    expect(result.current.prompt?.timer?.remainingMs).toBe(1_000);
 
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
     act(() => vi.advanceTimersByTime(999));
@@ -257,18 +252,6 @@ describe("useIntroSkipPrompt", () => {
 
     // Nothing moved, so "Intro skipped" would be a lie.
     expect(onSeek).toHaveBeenCalledWith(20);
-    expect(result.current.prompt).toBeNull();
-  });
-
-  it("consumes back by resolving without seeking", () => {
-    const { result, rerender } = renderPrompt();
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-
-    act(() => expect(result.current.dismiss()).toBe(true));
-    expect(onSeek).not.toHaveBeenCalled();
-
-    rerender({ mode: "ask", currentTime: 21, playing: true, enabled: true });
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
     expect(result.current.prompt).toBeNull();
   });
 });

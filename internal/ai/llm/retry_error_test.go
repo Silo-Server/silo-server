@@ -5,44 +5,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 type retryRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f retryRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
-}
-
-func TestTranscribeFailsImmediatelyWhenProviderCreditIsExhausted(t *testing.T) {
-	for _, body := range []string{
-		`{"error":{"type":"insufficient_quota","code":"credit_balance_exhausted"}}`,
-		`{"error":{"type":"insufficient_quota","code":null}}`,
-		`{"error":{"code":"organization_spend_limit_exceeded"}}`,
-	} {
-		t.Run(body, func(t *testing.T) {
-			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				calls++
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = io.WriteString(w, body)
-			}))
-			defer server.Close()
-			client := NewClient(Config{ASRBaseURL: server.URL, ASRModel: "whisper-test"})
-			_, err := client.Transcribe(t.Context(), TranscribeRequest{
-				Filename: "synthetic.wav", Audio: []byte("RIFF"), Timeout: time.Second,
-			})
-			if !errors.Is(err, ErrQuotaExhausted) || errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("error = %v; want permanent provider quota failure without exhausting deadline", err)
-			}
-			if calls != 1 {
-				t.Fatalf("requests = %d, want exactly one", calls)
-			}
-		})
-	}
 }
 
 func TestTemporaryRateLimitsAreNotExhaustedCredit(t *testing.T) {

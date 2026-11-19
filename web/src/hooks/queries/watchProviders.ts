@@ -1,13 +1,54 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { captureProfileRequestContext } from "@/api/client";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import { captureProfileRequestContext, SessionRefreshUnavailableError } from "@/api/client";
+import { v2, V2ProblemError, V2TimeoutError, V2TransportError } from "@/api/v2/request";
 import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
 import { invalidateAllRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { toast } from "sonner";
+import { t, type MessageKey } from "@/i18n";
 import { storage } from "@/utils/storage";
 import type { PluginConfigSchema } from "@/api/types";
+
+/** A settings change attempted before the connection's settings were read. */
+class ReloadBeforeSavingError extends Error {}
+
+/**
+ * Why a watch-provider request failed, in the interface language, for the line
+ * under the toast that names the action. A problem's text is already in that
+ * language; errors whose message is English developer text get a translated
+ * line instead, or none.
+ */
+function failureReason(err: unknown): string | undefined {
+  if (err instanceof V2ProblemError || err instanceof ReloadBeforeSavingError) return err.message;
+  // A body that isn't a problem document: a proxy's error page, for example.
+  if (err instanceof V2TransportError) return t("error.internal_error");
+  // No answer: the deadline, a failed fetch, or a sign-in refresh that got none.
+  if (
+    err instanceof V2TimeoutError ||
+    err instanceof SessionRefreshUnavailableError ||
+    err instanceof TypeError
+  ) {
+    return t("web.common.ui.loadError.timeout");
+  }
+  return undefined;
+}
+
+/**
+ * Device-authorization outcomes whose shared problem text, written for other
+ * flows, would mislead here: a code not approved yet answers conflict, and a
+ * declined one not_permitted.
+ */
+function pollFailureReason(err: unknown): string | undefined {
+  if (!(err instanceof V2ProblemError)) return undefined;
+  if (err.problemType === "conflict") return t("web.common.toast.watchProviders.authNotApproved");
+  if (err.problemType === "not_permitted") return t("web.common.toast.watchProviders.authDeclined");
+  return undefined;
+}
+
+function toastFailure(action: MessageKey, err: unknown, reason?: string) {
+  toast.error(t(action), { description: reason ?? failureReason(err) });
+}
 
 export type WatchProviderConnectionConfig = Record<string, Record<string, unknown>>;
 
@@ -166,7 +207,7 @@ export async function fetchWatchProviders() {
   return { providers: result.items as WatchProviderSummary[] };
 }
 
-export async function fetchWatchProviderConnection(provider: string) {
+async function fetchWatchProviderConnection(provider: string) {
   const profileContext = captureProfileRequestContext();
   const scope = profileContext ? { profileContext } : {};
   const result = await v2("GET /api/v2/watch-providers/{provider}/connection", {
@@ -302,10 +343,7 @@ function isActiveSyncRun(run: WatchProviderSyncRun) {
 // was seen: either the run previously seen as queued or running, or a newer
 // run already final when first seen, such as a scheduled run that started and
 // ended between two reads. The first read of the page is never a completion.
-export function syncRunFinished(
-  previous: WatchProviderSyncRun | undefined,
-  latest: WatchProviderSyncRun,
-) {
+function syncRunFinished(previous: WatchProviderSyncRun | undefined, latest: WatchProviderSyncRun) {
   if (previous === undefined || isActiveSyncRun(latest)) return false;
   return previous.id === latest.id ? isActiveSyncRun(previous) : true;
 }
@@ -323,7 +361,7 @@ export function useStartWatchProviderDeviceAuth(provider: string) {
   return useMutation({
     retry: false,
     mutationFn: () => startWatchProviderDeviceAuth(provider),
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to start auth"),
+    onError: (err) => toastFailure("web.common.toast.watchProviders.startAuthFailed", err),
   });
 }
 
@@ -338,9 +376,10 @@ export function usePollWatchProviderDeviceAuth(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      toast.success("Watch provider connected");
+      toast.success(t("web.common.toast.watchProviders.connected"));
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to finish auth"),
+    onError: (err) =>
+      toastFailure("web.common.toast.watchProviders.finishAuthFailed", err, pollFailureReason(err)),
   });
 }
 
@@ -361,10 +400,9 @@ export function useConnectWatchProviderAPIKey(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      toast.success("Watch provider connected");
+      toast.success(t("web.common.toast.watchProviders.connected"));
     },
-    onError: (err) =>
-      toast.error(err instanceof Error ? err.message : "Failed to connect provider"),
+    onError: (err) => toastFailure("web.common.toast.watchProviders.connectFailed", err),
   });
 }
 
@@ -377,7 +415,9 @@ export function useUpdateWatchProviderConnection(provider: string) {
       const current = queryClient.getQueryData<WatchProviderConnection>(
         watchProviderKeys.connection(getActiveProfileId(), provider),
       );
-      if (!current?.etag) throw new Error("Reload provider settings before saving changes.");
+      if (!current?.etag) {
+        throw new ReloadBeforeSavingError(t("web.common.toast.watchProviders.reloadBeforeSaving"));
+      }
       return updateWatchProviderConnection(provider, body, current.etag);
     },
     onSuccess: (settings, _variables, context) => {
@@ -393,7 +433,7 @@ export function useUpdateWatchProviderConnection(provider: string) {
         });
         return;
       }
-      toast.error(err instanceof Error ? err.message : "Failed to update provider");
+      toastFailure("web.common.toast.watchProviders.updateFailed", err);
     },
   });
 }
@@ -408,10 +448,9 @@ export function useDeleteWatchProviderConnection(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      toast.success("Watch provider disconnected");
+      toast.success(t("web.common.toast.watchProviders.disconnected"));
     },
-    onError: (err) =>
-      toast.error(err instanceof Error ? err.message : "Failed to disconnect provider"),
+    onError: (err) => toastFailure("web.common.toast.watchProviders.disconnectFailed", err),
   });
 }
 
@@ -431,26 +470,36 @@ export function useTriggerWatchProviderSync(provider: string) {
       });
       queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
       queryClient.invalidateQueries({ queryKey: watchlistKeys.list() });
-      toast.success("Watch provider sync started");
+      toast.success(t("web.common.toast.watchProviders.syncStarted"));
     },
     onError: (err) => {
       if (err instanceof V2ProblemError && err.status === 429) {
         const retryAfter = err.retryAfterSeconds;
         toast.error(
-          retryAfter ? `Sync available in ${formatRetryAfter(retryAfter)}` : "Sync is cooling down",
+          retryAfter
+            ? syncAvailableIn(retryAfter)
+            : t("web.common.toast.watchProviders.syncCoolingDown"),
         );
         return;
       }
-      toast.error(err instanceof Error ? err.message : "Failed to start sync");
+      toastFailure("web.common.toast.watchProviders.syncFailed", err);
     },
   });
 }
 
-function formatRetryAfter(seconds: number) {
-  if (seconds < 60) return `${seconds}s`;
+function syncAvailableIn(seconds: number) {
+  if (seconds < 60)
+    return t("web.common.toast.watchProviders.syncAvailableSeconds", { count: seconds });
   const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60)
+    return t("web.common.toast.watchProviders.syncAvailableMinutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  const values = { count: hours, count_text: hours };
+  return remainingMinutes > 0
+    ? t("web.common.toast.watchProviders.syncAvailableHoursMinutes", {
+        ...values,
+        minutes: remainingMinutes,
+      })
+    : t("web.common.toast.watchProviders.syncAvailableHours", values);
 }

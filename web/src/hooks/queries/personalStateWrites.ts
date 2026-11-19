@@ -1,4 +1,12 @@
 /**
+ * Marks a write to the viewer's state on an item, such as the favorite,
+ * watchlist and rating toggles and the watched mark, which patch the item's
+ * cached detail before the server answers. An owed detail refetch waits for
+ * them (updateCatalogItemDetail).
+ */
+export const PERSONAL_STATE_WRITE_KEY = ["personal-state-write"] as const;
+
+/**
  * Settings shared by the favorite, watchlist and rating toggles.
  *
  * A toggle either reaches the server or fails visibly; it is never held back
@@ -8,7 +16,10 @@
  * run whatever the reported network state, so an offline request fails at
  * once and rolls back with an error.
  */
-export const personalStateMutationOptions = { networkMode: "always" } as const;
+export const personalStateMutationOptions = {
+  networkMode: "always",
+  mutationKey: PERSONAL_STATE_WRITE_KEY,
+} as const;
 
 /**
  * How long a toggle waits for the server before failing. Writes get no

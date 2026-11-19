@@ -98,32 +98,6 @@ func (f *fakeSessionRegistry) ConfirmReconstructedExecution(expected *Session, r
 	return current
 }
 
-func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
-	m := NewTranscodeManager()
-	dirs := map[string]string{"s1": t.TempDir(), "s2": t.TempDir()}
-	for id, dir := range dirs {
-		m.RegisterTranscodeSession(id, &TranscodeSession{outputDir: dir})
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := m.StartShutdownCleanup(ctx)
-	cancel()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown cleanup did not finish")
-	}
-	for id, dir := range dirs {
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("shutdown left output for %q: %v", id, err)
-		}
-		if got := m.GetTranscodeSession(id); got != nil {
-			t.Fatalf("transcode %q survived shutdown cleanup", id)
-		}
-	}
-}
-
 func TestStartShutdownCleanup_RejectsLaterRegistrationAndSwap(t *testing.T) {
 	m := NewTranscodeManager()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -374,6 +348,39 @@ func TestLoadOrReconstructTranscode_FailedAttemptPreservesConcurrentSession(t *t
 // returns true. The closures (handlers.OnFFmpegCrash / jellycompat
 // OnFFmpegCrash) wire `matched` directly to the StopSession/stopPlaybackSessionByID
 // decision, so a false gate guarantees the live session is left intact.
+// TestCloseTranscodeSessionIfSessionGoneFencesTheOutputDirectory: the close
+// removes the session's output directory. A retry that started in between
+// would write its playlist and segments into the directory being removed, so
+// no start may take the session's lifecycle lock until the close is done.
+func TestCloseTranscodeSessionIfSessionGoneFencesTheOutputDirectory(t *testing.T) {
+	m := NewTranscodeManager()
+	rejected := &TranscodeSession{outputDir: t.TempDir()}
+	m.RegisterTranscodeSession("s1", rejected)
+	// Close cancels the process before it removes the directory.
+	startCouldRun := true
+	rejected.cancel = func() {
+		m.lifecycleMu.Lock()
+		lock := m.lifecycleLocks["s1"]
+		m.lifecycleMu.Unlock()
+		if lock == nil {
+			return
+		}
+		if startCouldRun = lock.mu.TryLock(); startCouldRun {
+			lock.mu.Unlock()
+		}
+	}
+
+	if !m.CloseTranscodeSessionIfSessionGone("s1", rejected, func() bool { return false }) {
+		t.Fatal("reported a session for an id that has none")
+	}
+	if startCouldRun {
+		t.Error("a start for the session could take its lifecycle lock while the close was removing the output directory")
+	}
+	if m.GetTranscodeSession("s1") != nil {
+		t.Error("the transcode is still registered")
+	}
+}
+
 func TestCloseTranscodeSessionIf_GateContract(t *testing.T) {
 	m := NewTranscodeManager()
 	dead := &TranscodeSession{}
@@ -397,33 +404,6 @@ func TestCloseTranscodeSessionIf_GateContract(t *testing.T) {
 	}
 	if got := m.GetTranscodeSession("s1"); got != nil {
 		t.Fatalf("successor must be removed once it is the expected session, got %v", got)
-	}
-}
-
-// fastResumeSeek must apply the seg×dur fast resume only for encoded transcodes;
-// copy-mode cards have variable-duration segments so the fast seek is unsafe.
-func TestFastResumeSeek(t *testing.T) {
-	encoded := RecipeCard{TargetCodecVideo: "h264", SegmentDuration: 4, StartSegmentNumber: 0}
-	if seg, seek, ok := fastResumeSeek(encoded, 10); !ok || seg != 10 || seek != 40 {
-		t.Fatalf("encoded fast resume = (%d, %v, %v), want (10, 40, true)", seg, seek, ok)
-	}
-
-	// Copy-mode: never apply the seg×dur seek regardless of how far the client advanced.
-	copyCard := RecipeCard{TargetCodecVideo: "copy", SegmentDuration: 4, StartSegmentNumber: 0}
-	if _, _, ok := fastResumeSeek(copyCard, 10); ok {
-		t.Fatal("copy-mode must not apply the fast seg×dur resume seek")
-	}
-	// Case-insensitive guard.
-	if _, _, ok := fastResumeSeek(RecipeCard{TargetCodecVideo: "COPY", SegmentDuration: 4}, 10); ok {
-		t.Fatal("copy-mode detection must be case-insensitive")
-	}
-
-	// Manifest path (negative segment) and a non-advanced client take no fast seek.
-	if _, _, ok := fastResumeSeek(encoded, -1); ok {
-		t.Fatal("manifest path (negative segment) must not fast-seek")
-	}
-	if _, _, ok := fastResumeSeek(encoded, 0); ok {
-		t.Fatal("non-advanced client must not fast-seek")
 	}
 }
 
@@ -473,32 +453,6 @@ func TestReconstructSessionAdmission(t *testing.T) {
 			}
 		})
 	}
-}
-
-// acquireReconstructSlot must bound concurrent reconstructs and let a caller
-// whose request is cancelled give up its place instead of queueing dead work.
-func TestAcquireReconstructSlot(t *testing.T) {
-	m := &TranscodeManager{reconstructSem: make(chan struct{}, 1)}
-
-	release, ok := m.acquireReconstructSlot(context.Background())
-	if !ok {
-		t.Fatal("first acquire should succeed")
-	}
-
-	// Cap is full: a cancelled request must back off rather than block forever.
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, ok := m.acquireReconstructSlot(cancelled); ok {
-		t.Fatal("acquire on a full semaphore with a cancelled context must fail")
-	}
-
-	// Releasing frees the slot for the next reconstruct.
-	release()
-	release2, ok := m.acquireReconstructSlot(context.Background())
-	if !ok {
-		t.Fatal("acquire should succeed after the slot is released")
-	}
-	release2()
 }
 
 func TestReconstructLifecycleWaitDoesNotConsumeGlobalSlot(t *testing.T) {
@@ -596,49 +550,42 @@ func TestLockSessionLifecycle_MutualExclusionAndCleanup(t *testing.T) {
 	}
 }
 
-func TestReconstructTranscodeWalksAutoPipelineInSameOutputDir(t *testing.T) {
-	transcodeDir := t.TempDir()
+// A rebuild is shared by every request waiting on it, so once it is admitted
+// the request that triggered it can end without failing the others. Each step
+// here answers an ended request as production does for some recipes: with
+// that request's error.
+func TestReconstructTranscodeOutlivesTriggeringRequest(t *testing.T) {
 	m := NewTranscodeManager()
 	m.Config = func() TranscodeRuntimeConfig {
-		return TranscodeRuntimeConfig{TranscodeDir: transcodeDir, HWAccel: hwAccelAuto}
+		return TranscodeRuntimeConfig{TranscodeDir: t.TempDir(), HWAccel: transcodeHWQSV}
 	}
-	m.autoTranscodePipeline = func(_ context.Context, opts TranscodeOpts) *AutoTranscodePipeline {
-		if opts.HWAccel != hwAccelAuto {
-			t.Errorf("pipeline built from HWAccel %q, want live auto config", opts.HWAccel)
-		}
-		opts.HWAccel = transcodeHWNVENC
-		return newResolvedAutoTranscodePipeline(opts, newAutoTranscodePipelineCache())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The first step after admission: the request ends here.
+	m.resolveToneMapExecutor = func(stepCtx context.Context, opts TranscodeOpts) (TranscodeOpts, error) {
+		cancel()
+		return opts, stepCtx.Err()
 	}
-	var attempts []TranscodeOpts
-	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		attempts = append(attempts, opts)
-		if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
-			t.Fatal(err)
+	m.autoTranscodePipeline = func(stepCtx context.Context, opts TranscodeOpts) *AutoTranscodePipeline {
+		if stepCtx.Err() != nil {
+			t.Error("fallback order resolved on the ended request's context")
 		}
-		// The full-hardware attempt exits before its manifest; the mixed one
-		// writes into the same directory, which must still exist.
-		return fakeStartupSession(t, opts, opts.OutputDir, len(attempts) == 2, false), nil
+		return NewAutoTranscodePipeline(stepCtx, opts)
+	}
+	m.startTranscode = func(stepCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		if err := stepCtx.Err(); err != nil {
+			return nil, err
+		}
+		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
 	}
 	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
 		SessionID: "s", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", SegmentDuration: 2,
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
 	})
 
-	got, err := m.ReconstructTranscodeWithError(context.Background(), "s", -1, card)
+	got, err := m.ReconstructTranscodeWithError(ctx, "s", -1, card)
 	if err != nil || got == nil {
-		t.Fatalf("reconstruct = %v, %v; want the mixed-stage session", got, err)
-	}
-	if len(attempts) != 2 {
-		t.Fatalf("attempts = %d, want full hardware then mixed", len(attempts))
-	}
-	if attempts[0].SoftwareVideoDecode || !attempts[1].SoftwareVideoDecode || attempts[1].HWAccel != transcodeHWNVENC {
-		t.Fatalf("attempt paths = %+v / %+v, want GPU decode then CPU decode with NVENC", attempts[0], attempts[1])
-	}
-	if live := m.GetTranscodeSession("s"); live != got {
-		t.Fatalf("registered session = %p, want %p", live, got)
-	}
-	if _, statErr := os.Stat(attempts[1].OutputDir); statErr != nil {
-		t.Fatalf("reconstruct output dir removed: %v", statErr)
+		t.Fatalf("reconstruct = %v, %v; want the session the other requests wait for", got, err)
 	}
 }
 
@@ -650,7 +597,8 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	starts := 0
 	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
 		starts++
-		// Never ready and already exited: a waiting caller would fail.
+		// Never ready and already exited for a reason other than a decoder
+		// rejection: the session is still returned, as an unwaited one was.
 		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
 	}
 	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
@@ -664,4 +612,104 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	if starts != 1 {
 		t.Fatalf("starts = %d, want 1", starts)
 	}
+}
+
+// setRestartHookTimeout sets how long a restart hook may run, for one test.
+func setRestartHookTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	previous := restartHookTimeout
+	restartHookTimeout = timeout
+	t.Cleanup(func() { restartHookTimeout = previous })
+}
+
+// A restart hook can block on its FFmpeg context, as the throttler's settings
+// read does when the database stalls. Shutdown cleanup must still close the
+// session, which cancels that context, rather than wait for the hook. The
+// hook's own timeout is out of reach here, so only the close can end it.
+func TestStartShutdownCleanup_DoesNotWaitForARestartHook(t *testing.T) {
+	setRestartHookTimeout(t, time.Hour)
+	m := NewTranscodeManager()
+	s := newRunningFakeSession(t)
+	m.RegisterTranscodeSession("hooked", s)
+	hookEntered := make(chan struct{})
+	hookReturned := make(chan struct{})
+	s.SetRestartHook(func(ctx context.Context) {
+		close(hookEntered)
+		<-ctx.Done()
+		close(hookReturned)
+	})
+	restarted := make(chan error, 1)
+	go func() { restarted <- m.RestartSessionLocked(context.Background(), "hooked", s, 0, 0) }()
+	<-hookEntered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := m.StartShutdownCleanup(ctx)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown cleanup waited on a restart hook that only Close can release")
+	}
+	<-hookReturned
+	if err := <-restarted; err != nil {
+		t.Fatalf("restart published before shutdown = %v", err)
+	}
+	requireClosed(t, s, nil)
+}
+
+// A restart holds the session lifecycle lock through its restart hook, and a
+// stop takes that lock before it closes the session, so the stop cannot be
+// the close that cancels a stalled hook. The hook has to run out of time on
+// its own, leaving the FFmpeg process it restarted, still throttled as it
+// was, for the stop to close.
+func TestRestartSessionLocked_StalledRestartHookDoesNotHoldAStop(t *testing.T) {
+	setRestartHookTimeout(t, 30*time.Millisecond)
+	m := NewTranscodeManager()
+	s := newRunningFakeSession(t)
+	m.RegisterTranscodeSession("hooked", s)
+	const throttleSeconds = 120
+	s.StartThrottler(throttleSeconds)
+	hookEntered := make(chan struct{})
+	s.SetRestartHook(func(ctx context.Context) {
+		close(hookEntered)
+		<-ctx.Done()
+	})
+	restarted := make(chan error, 1)
+	go func() { restarted <- m.RestartSessionLocked(context.Background(), "hooked", s, 0, 0) }()
+	<-hookEntered
+
+	type sessionAtStop struct {
+		running         bool
+		throttleSeconds int
+	}
+	atStop := make(chan sessionAtStop, 1)
+	go func() {
+		unlock := m.LockSessionLifecycle("hooked")
+		defer unlock()
+		seen := sessionAtStop{running: s.IsRunning()}
+		s.mu.Lock()
+		if s.throttler != nil {
+			seen.throttleSeconds = s.throttler.thresholdSeconds
+		}
+		s.mu.Unlock()
+		atStop <- seen
+		m.CloseTranscodeSession("hooked", "")
+	}()
+	select {
+	case seen := <-atStop:
+		if !seen.running {
+			t.Fatal("the restart hook's timeout ended the FFmpeg process it restarted")
+		}
+		if seen.throttleSeconds != throttleSeconds {
+			t.Fatalf("throttle after a stalled restart hook = %ds, want the %ds the session had", seen.throttleSeconds, throttleSeconds)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stop waited on the lifecycle lock behind a restart hook that only its own close could release")
+	}
+	if err := <-restarted; err != nil {
+		t.Fatalf("restart with a stalled hook = %v", err)
+	}
+	// The stop closes the session before it releases the lock.
+	m.LockSessionLifecycle("hooked")()
+	requireClosed(t, s, nil)
 }

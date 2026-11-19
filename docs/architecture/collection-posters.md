@@ -19,7 +19,8 @@ posters. Each viewer sees the first four members it can access that have a poste
 collection order. Access uses the same predicates as the collection's member list
 (`itemAccessConditions`: library allow and deny lists, maturity limits, excluded media types),
 so a collage never shows a title the viewer's member list leaves out. A smart collection lists
-its members from its query and has no collage. Only `collection_type` makes a collection live: a
+its members from its query, so its sources are the first matches the viewer's list of it shows
+(see [Smart collections](#smart-collections)). Only `collection_type` makes a collection live: a
 query definition on any other type is ignored, and its members are its stored items
 (`catalog.ResolveLibraryCollectionMembership`).
 
@@ -36,8 +37,8 @@ the same posters:
   background build. The build is deduplicated per node, bounded, and backs off after a failure.
   A build lost with its node is retried by the next read. A source poster that doesn't resolve or
   download fails the build, so a collage is never stored without one of the posters its key names.
-- A sync, template bundle apply, or poster removal builds the unrestricted viewer's collage up
-  front, so the common case is ready before anyone asks.
+- A sync, template bundle apply, poster removal, or saving a smart collection's rules builds the
+  unrestricted viewer's collage up front, so the common case is ready before anyone asks.
 - Listing a collection or serving its collage through a Jellyfin image tag touches the
   collage's `last_used_at` at most daily. Building any collage of a collection deletes that
   collection's collages unused for a week. Rows also go with their collection
@@ -53,12 +54,35 @@ the same posters:
 - The artwork reconcile sweeps the table like other artwork surfaces. A cleared row reads as a
   missing collage and is rebuilt on the next read.
 
+## Smart collections
+
+A list read never runs a smart collection's query. A background refresh reads its first
+matches, builds their collage, and records it, keyed by collection and a hash of the viewer's
+access filter, with a hash of the definition it was made for (no collage when the viewer can see
+no match with a poster). A read serves those records with one statement for all of a list's
+smart collections. It queues a refresh when the record is missing, names another definition, or
+names a collage the artwork reconcile cleared (serving nothing until then), or is older than the refresh interval (15 minutes; serving the
+recorded collage meanwhile), so a new match reaches the collage within that time. A record goes
+with its collection, and with its collage when that collage is retired as unused. A refresh also
+deletes the collection's records nobody refreshed for a week, such as one left behind when a
+profile's restrictions changed its access hash, with or without a collage. A viewer that still
+reads with that access finds no record on its next read, sees no collage, and queues the refresh
+that records it again. Server and personal smart collections share this (`smartCollageSet`):
+
+- Server collections record in `library_collection_smart_collages`. Their members never depend
+  on the viewer's account or profile, so the access hash leaves those out and viewers with the
+  same restrictions share a record. The definition hash covers the rules, the default sort
+  (`sort_config`) and the libraries the collection shows in, since each changes which titles
+  the viewer's list shows first.
+- Personal collections record in `user_personal_collection_smart_collages`; see
+  [Personal collections](#personal-collections).
+
 ## Returning a poster
 
 `catalog.LibraryCollectionService.CollectionPosters` is the only way to answer "which poster
 does this viewer see". Never build a viewer-facing response from `poster_url` alone:
 
-- The v1 and v2 handlers build responses from `withViewerPosters` copies
+- The v2 handlers build responses from `withViewerPosters` copies
   (`internal/api/handlers/library_collections.go`). That covers the library Collections tab,
   server collections, and admin responses. `/api/v2` collections and collection cards mark a
   collage with `poster_is_collage`, so a client can tell it from an uploaded poster.
@@ -71,7 +95,14 @@ Collection list responses differ by viewer. None of them may be cached across pr
 ## Counts and visibility
 
 A server collection's stored count is every member it has; a smart collection's
-`item_count_cached` is counted with no access filter and can be up to an hour old. A viewer whose
+`item_count_cached` is counted with no access filter. `catalog.SmartCountRefresher` recounts it
+when the collection is saved, about 10 seconds after a scan publishes `scan_complete` for a library
+its rule draws from (`catalog.SmartCountScheduler`, on the node that ran the scan), and hourly.
+Changes that are not scans, such as metadata edits or a date-based rule moving on, can leave it up
+to an hour old. The recounts are not ordered against each other: one that started earlier, on
+another pass or another node, can finish last and write an older number, which the next recount
+corrects. Only a changed count is written, because any write to the row advances the collection's
+revision and so ends open catalog cursors and fails editor saves. A viewer whose
 access narrows the catalog (library allowlist or disabled libraries, maturity limits, excluded
 media types) is shown its own count instead: `LibraryCollectionRepository.ViewerCollectionCounts`
 counts the members the collection's catalog page lists for it (manga chapters excluded), and
@@ -85,8 +116,18 @@ Unrestricted viewers and the admin collection routes keep the stored count.
 ## Personal collections
 
 A personal collection's assigned poster is the one its creator uploaded, linked or imported,
-stored in `user_personal_collections.poster_url`. Without one it shows a collage, by the rules
-above with these differences:
+stored in `user_personal_collections.poster_url`. That column holds an http(s) image URL, a
+root-relative path to a bundled template poster, or a storage key the server built under the
+collection's own `user-collection-images/{collection}/` directory. No request may set a key:
+an import accepts only a template path or an http(s) URL, and an upload or linked image is
+stored under a key the server names. Every read resolves the poster through
+`personalCollectionPosterURL` (`internal/api/handlers`), which signs a key only when
+`usercollections.OwnsPosterKey` places it in that directory and otherwise returns no poster. A
+backup restore applies the same rule. Signing any other stored key would give its reader a link,
+valid without a session, to an object the collection does not own.
+
+Without an assigned poster the collection shows a collage, by the rules above with these
+differences:
 
 - The viewer's filter is `catalog.PersonalCollectionFilter`: for another profile's shared
   collection, the viewer's access intersected with the owner's, resolved on every read. Sources
@@ -94,27 +135,25 @@ above with these differences:
   predicates as the collection's item count and pages, manga chapters excluded. A smart
   collection's sources are the first matches of its query, read like its item pages, so a smart
   personal collection has a collage. The display filter is not applied.
-- A list read never runs a smart collection's query. A background refresh reads its matches,
-  builds their collage, and records it in `user_personal_collection_smart_collages`, keyed by
-  collection and a hash of the viewer's access filter, with a hash of the query definition it was
-  made for (no collage when the viewer can see no match with a poster). A read serves that
-  record with one statement for all of a list's smart collections. It queues a refresh when the
-  record is missing or names another definition (serving nothing until then), or is older than
-  `SmartRefreshInterval` (15 minutes; serving the recorded collage meanwhile), so a new match
-  reaches the collage within that time. A record goes with its collection, and with its collage
-  when that collage is retired as unused.
+- A smart collection's collage is recorded as [Smart collections](#smart-collections)
+  describes, in `user_personal_collection_smart_collages`, with a hash of the query definition
+  and an interval of `SmartRefreshInterval`.
 - `user_personal_collection_poster_variants` holds the collages, keyed by account, collection
   and collage key, and goes with its collection or account (`ON DELETE CASCADE`). Its delete
   trigger is the same `queue_deleted_collection_collage`.
 - Objects live at `user-collection-images/{collection}/collage/{variant}.{key}.webp`, beside
-  uploaded posters.
+  uploaded posters. Deleting a collection, a profile or an account deletes the
+  `user-collection-images/{collection}/` prefix of every collection it removed once the delete
+  commits: the profile delete returns the IDs of the collections it deleted, and the account
+  delete reads them from Postgres in its transaction before the `users` cascade removes them,
+  so deleting an account on the per-user SQLite store leaves its collections' artwork. A failed
+  cleanup only logs, and nothing retries it.
 - `catalog.PersonalCollectionCollages.Posters` is the read path. Callers group collections by
   owner, resolve each owner once, and pass only collections without an assigned poster
   (`ownerScopedCollectionReads` in `internal/api/handlers`).
 - A create, edit, membership change, poster removal or sync calls `Refresh`, which waits about
   two seconds so a burst of changes to one collection shares one build, then builds the acting
   profile's collage (the owner's filter for a scheduled sync) through the build queue.
-- Only `/api/v2` reads show collages. The `/api/v1` bridge is frozen and keeps returning
-  assigned posters only. Accounts on the per-user SQLite store keep their collections outside
-  Postgres and have no collage.
+- Accounts on the per-user SQLite store keep their collections outside Postgres and have no
+  collage.
 - Jellyfin clients never see personal collections, so jellycompat has no personal collage path.

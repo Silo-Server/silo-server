@@ -8,6 +8,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useT } from "@/i18n";
+import { appLanguage } from "@/lib/appLocale";
+import { profilePageKind } from "@/lib/homeRows/describe";
+import type { PageRef } from "@/lib/homeRows/types";
 import { useReturnFocus } from "./useReturnFocus";
 
 /**
@@ -16,37 +20,48 @@ import { useReturnFocus } from "./useReturnFocus";
  */
 export function ResetProfileDialog({
   open,
-  pageName,
+  page,
+  pageLabel,
   ownTitles,
   onConfirm,
   onOpenChange,
 }: {
   open: boolean;
-  /** "Home" or "Movies page". */
-  pageName: string;
+  page: PageRef;
+  /** The library's name on a library page. */
+  pageLabel: string;
   /** Rows this profile added on the page, which the reset deletes. */
   ownTitles: string[];
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   const returnFocus = useReturnFocus();
+  const where = { page_kind: profilePageKind(page, pageLabel), page: pageLabel };
+  // "A, B, C" in English, the language's own list punctuation elsewhere.
+  const ownList = new Intl.ListFormat(appLanguage(), { type: "unit", style: "short" });
   const bullets: Array<[LucideIcon, string | null]> = [
-    [EyeOff, "Rows you hid or removed come back, in the server's order."],
-    [Pencil, "Rows you renamed or changed go back to how the server has them."],
-    [Trash2, ownTitles.length > 0 ? `Rows you added (${ownTitles.join(", ")}) are deleted.` : null],
-    [Library, "Your other pages and other profiles don't change."],
+    [EyeOff, t("web.home.rows.reset.hidden")],
+    [Pencil, t("web.home.rows.reset.changed")],
+    [
+      Trash2,
+      ownTitles.length > 0
+        ? t("web.home.rows.reset.added", { rows: ownList.format(ownTitles) })
+        : null,
+    ],
+    [Library, t("web.home.rows.reset.otherPages")],
   ];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-5 sm:max-w-[560px]" {...returnFocus}>
         <DialogHeader>
-          <DialogTitle>Reset your {pageName} to the server&apos;s rows?</DialogTitle>
+          <DialogTitle>{t("web.home.rows.profilePage.resetTitle", where)}</DialogTitle>
           <DialogDescription>
-            Your {pageName} goes back to the rows the server shows everyone.
+            {t("web.home.rows.profilePage.resetDescription", where)}
           </DialogDescription>
         </DialogHeader>
         <ul
-          aria-label="What changes"
+          aria-label={t("web.home.rows.whatChanges")}
           className="text-foreground/85 m-0 grid list-none gap-2.5 p-0 text-sm leading-normal"
         >
           {bullets.map(([Icon, text]) =>
@@ -59,14 +74,14 @@ export function ResetProfileDialog({
           )}
         </ul>
         <DialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-[13px]">This can&apos;t be undone.</p>
+          <p className="text-muted-foreground text-[13px]">{t("web.home.rows.cantUndo")}</p>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={onConfirm}>
               <RotateCcw />
-              Reset
+              {t("web.home.rows.reset.confirm")}
             </Button>
           </div>
         </DialogFooter>

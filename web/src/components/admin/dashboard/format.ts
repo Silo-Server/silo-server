@@ -1,11 +1,16 @@
 import type { ScanRun } from "@/api/types";
 import { formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
+import { formatLocale } from "@/lib/appLocale";
+import { t, type MessageKey } from "@/i18n";
 
 export function formatFileCount(count: number | null | undefined) {
   if (count == null) {
     return "—";
   }
-  return count === 1 ? "1 file" : `${count.toLocaleString()} files`;
+  return t("web.admin.dashboard.format.fileCount", {
+    count,
+    count_text: count.toLocaleString(formatLocale()),
+  });
 }
 
 /**
@@ -14,13 +19,17 @@ export function formatFileCount(count: number | null | undefined) {
  */
 export function formatWatchTime(totalSeconds: number | null | undefined) {
   if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
-    return "0m";
+    return t("web.admin.dashboard.format.duration.minutes", { minutes: 0 });
   }
   if (totalSeconds < 3600) {
-    return `${Math.max(1, Math.round(totalSeconds / 60))}m`;
+    return t("web.admin.dashboard.format.duration.minutes", {
+      minutes: Math.max(1, Math.round(totalSeconds / 60)),
+    });
   }
   const hours = totalSeconds / 3600;
-  return `${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
+  return t("web.admin.dashboard.format.watchTimeHours", {
+    hours: hours.toLocaleString(formatLocale(), { maximumFractionDigits: 1 }),
+  });
 }
 
 /**
@@ -32,7 +41,7 @@ export function formatMbpsValue(mbps: number) {
     return "—";
   }
   const decimals = mbps > 0 && mbps < 10 ? 1 : 0;
-  return mbps.toLocaleString(undefined, {
+  return mbps.toLocaleString(formatLocale(), {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
@@ -42,10 +51,17 @@ export function formatMbps(mbps: number) {
   if (!Number.isFinite(mbps)) {
     return "—";
   }
-  return `${formatMbpsValue(mbps)} Mbps`;
+  return t("web.common.format.bitrate.mbps", { rate: formatMbpsValue(mbps) });
 }
 
-const DATA_TOTAL_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
+const DATA_TOTAL_UNIT_KEYS: readonly MessageKey[] = [
+  "web.common.format.size.bytes",
+  "web.common.format.size.kb",
+  "web.common.format.size.mb",
+  "web.common.format.size.gb",
+  "web.common.format.size.tb",
+  "web.common.format.size.pb",
+];
 
 /**
  * Data transferred over a window. Decimal (1000-based) units, matching the
@@ -65,26 +81,39 @@ export function formatDataTotal(bytes: number | null | undefined) {
   for (;;) {
     const decimals = unit > 0 && value < 100 ? 1 : 0;
     const rounded = Number(value.toFixed(decimals));
-    if (rounded >= 1000 && unit < DATA_TOTAL_UNITS.length - 1) {
+    if (rounded >= 1000 && unit < DATA_TOTAL_UNIT_KEYS.length - 1) {
       value /= 1000;
       unit += 1;
       continue;
     }
     const shown = unit > 0 && rounded < 100 ? 1 : 0;
-    return `${rounded.toLocaleString(undefined, {
-      minimumFractionDigits: shown,
-      maximumFractionDigits: shown,
-    })} ${DATA_TOTAL_UNITS[unit]}`;
+    return t(DATA_TOTAL_UNIT_KEYS[unit] ?? "web.common.format.size.pb", {
+      size: rounded.toLocaleString(formatLocale(), {
+        minimumFractionDigits: shown,
+        maximumFractionDigits: shown,
+      }),
+    });
   }
 }
 
 export function formatDashboardLibraryScanProgress(scan: ScanRun, activeScanCount: number) {
-  const status = scan.status === "running" ? "Scanning" : "Queued";
+  const running = scan.status === "running";
   const progress = formatActiveScanProgress(scan);
   const detail =
-    progress || (scan.status === "running" ? formatActiveScanMode(scan) : "Waiting for capacity");
-  const extraScans = activeScanCount > 1 ? ` + ${activeScanCount - 1} more` : "";
-  return `${status}: ${detail}${extraScans}`;
+    progress ||
+    (running ? formatActiveScanMode(scan) : t("web.admin.dashboard.format.scanWaitingForCapacity"));
+  if (activeScanCount > 1) {
+    return t(
+      running
+        ? "web.admin.dashboard.format.scanRunningWithMore"
+        : "web.admin.dashboard.format.scanQueuedWithMore",
+      { detail, more: activeScanCount - 1, more_text: activeScanCount - 1 },
+    );
+  }
+  return t(
+    running ? "web.admin.dashboard.format.scanRunning" : "web.admin.dashboard.format.scanQueued",
+    { detail },
+  );
 }
 
 /**
@@ -113,16 +142,20 @@ export function formatScanDuration(
 
 function formatDurationSeconds(totalSeconds: number): string {
   if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
+    return t("web.admin.dashboard.format.duration.seconds", { seconds: totalSeconds });
   }
   if (totalSeconds < 3600) {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+    return seconds === 0
+      ? t("web.admin.dashboard.format.duration.minutes", { minutes })
+      : t("web.admin.dashboard.format.duration.minutesSeconds", { minutes, seconds });
   }
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
-  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+  return minutes === 0
+    ? t("web.admin.dashboard.format.duration.hours", { hours })
+    : t("web.admin.dashboard.format.duration.hoursMinutes", { hours, minutes });
 }
 
 /**
@@ -143,7 +176,9 @@ export function formatUptime(startedAt: string | null | undefined, now: number =
   }
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
-  return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
+  return hours === 0
+    ? t("web.admin.dashboard.format.duration.days", { days })
+    : t("web.admin.dashboard.format.duration.daysHours", { days, hours });
 }
 
 /** Sub-10ms round trips keep their decimals; anything slower does not need them. */
@@ -151,7 +186,14 @@ export function formatLatency(latencyMs: number) {
   if (!Number.isFinite(latencyMs)) {
     return "—";
   }
-  return `${latencyMs.toLocaleString(undefined, {
-    maximumFractionDigits: latencyMs < 10 ? 2 : 0,
-  })} ms`;
+  return t("web.admin.dashboard.format.latencyMs", {
+    value: latencyMs.toLocaleString(formatLocale(), {
+      maximumFractionDigits: latencyMs < 10 ? 2 : 0,
+    }),
+  });
+}
+
+/** A whole or one-decimal percentage, already formatted, as a label. */
+export function formatPercentLabel(percent: string): string {
+  return t("web.common.format.percent", { percent });
 }

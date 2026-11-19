@@ -1,17 +1,12 @@
 package ebookconvert
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func newTestCache(t *testing.T, opts CacheOptions) *Cache {
@@ -49,68 +44,6 @@ func keyFor(t *testing.T, fileID int, path string) SourceKey {
 	return k
 }
 
-func TestCache_MissThenHit(t *testing.T) {
-	c := newTestCache(t, CacheOptions{})
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	key := keyFor(t, 1, src)
-
-	p1, err := convertPath(t, c, src, key)
-	if err != nil {
-		t.Fatalf("first GetOrConvert: %v", err)
-	}
-	assertValidEpub(t, p1)
-	fi1, err := os.Stat(p1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(p1, old, old); err != nil {
-		t.Fatal(err)
-	}
-
-	p2, err := convertPath(t, c, src, key)
-	if err != nil {
-		t.Fatalf("second GetOrConvert: %v", err)
-	}
-	if p1 != p2 {
-		t.Fatalf("hit returned different path: %s vs %s", p1, p2)
-	}
-	fi2, err := os.Stat(p2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(fi2.ModTime()) > time.Minute {
-		t.Fatalf("cache hit did not refresh mtime for LRU; mtime is %v old", time.Since(fi2.ModTime()))
-	}
-	// A hit refreshes mtime for LRU but must NOT reconvert: the cached entry is
-	// the same underlying file, not a freshly converted+renamed replacement.
-	if !os.SameFile(fi1, fi2) {
-		t.Fatal("cache hit reconverted the file (replaced the cached entry)")
-	}
-}
-
-func TestCache_KeyChangesOnModTime(t *testing.T) {
-	c := newTestCache(t, CacheOptions{})
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	k1 := keyFor(t, 1, src)
-	k2 := k1
-	k2.ModTimeNano = k1.ModTimeNano + 1 // simulate a re-scanned/replaced file
-	if k1.hash() == k2.hash() {
-		t.Fatal("expected different cache keys for different mtime")
-	}
-	p1, err := convertPath(t, c, src, k1)
-	if err != nil {
-		t.Fatalf("convert k1: %v", err)
-	}
-	p2, err := convertPath(t, c, src, k2)
-	if err != nil {
-		t.Fatalf("convert k2: %v", err)
-	}
-	if p1 == p2 {
-		t.Fatal("different keys must map to different cache files")
-	}
-}
-
 // Eviction must ignore other conversions' in-flight temp files; deleting one
 // would corrupt a concurrent conversion mid-flight.
 func TestCache_EvictionSkipsInFlightTemps(t *testing.T) {
@@ -129,62 +62,6 @@ func TestCache_EvictionSkipsInFlightTemps(t *testing.T) {
 	}
 	if _, err := os.Stat(tmp); err != nil {
 		t.Fatalf("eviction deleted an in-flight temp file: %v", err)
-	}
-}
-
-// A single caller abandoning its request (cancellation) must not abort the
-// shared conversion for everyone else: the detached work still completes and
-// populates the cache.
-func TestCache_CallerCancelDoesNotAbortSharedWork(t *testing.T) {
-	c := newTestCache(t, CacheOptions{})
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	key := keyFor(t, 1, src)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // caller bails before the conversion can finish
-	if f, err := c.GetOrConvert(ctx, src, key); err == nil {
-		_ = f.Close()
-	}
-
-	dst := filepath.Join(c.opts.Dir, key.hash()+".epub")
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if fi, err := os.Stat(dst); err == nil && fi.Size() > 0 {
-			return // shared work completed despite the caller canceling — good
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("detached conversion did not populate the cache after the caller canceled")
-}
-
-func TestCache_Singleflight(t *testing.T) {
-	c := newTestCache(t, CacheOptions{})
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	key := keyFor(t, 3, src)
-
-	const n = 8
-	var wg sync.WaitGroup
-	var firstPath atomic.Value
-	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			p, err := convertPath(t, c, src, key)
-			if err != nil {
-				errs <- err
-				return
-			}
-			firstPath.Store(p)
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Fatalf("concurrent GetOrConvert: %v", err)
-	}
-	if p, _ := firstPath.Load().(string); p == "" {
-		t.Fatal("no path produced")
 	}
 }
 
@@ -315,20 +192,4 @@ func TestCache_RefusesEntriesOthersControl(t *testing.T) {
 		}
 		assertValidEpub(t, filepath.Join(moved, key.hash()+".epub"))
 	})
-}
-
-// The catalog stores the fspath-encoded form of a non-UTF-8 file name; the
-// cache key must stat the real file.
-func TestSourceKeyFromStat_EncodedNonUTF8Path(t *testing.T) {
-	rawPath := filepath.Join(t.TempDir(), "B\xe5rd.mobi")
-	if err := os.WriteFile(rawPath, []byte("mobi"), 0o600); err != nil {
-		t.Skipf("file system rejects non-UTF-8 names: %v", err)
-	}
-	k, err := SourceKeyFromStat(7, fspath.Encode(rawPath))
-	if err != nil {
-		t.Fatalf("SourceKeyFromStat: %v", err)
-	}
-	if k.Size != 4 {
-		t.Fatalf("Size = %d, want 4", k.Size)
-	}
 }

@@ -3,6 +3,7 @@ import { TriangleAlert } from "lucide-react";
 
 import { RestartServerButton } from "@/components/admin/RestartServerButton";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 export interface RestartBannerProps {
@@ -24,9 +25,6 @@ export interface RestartBannerProps {
   className?: string;
 }
 
-const DEFAULT_RESTART_DESCRIPTION =
-  "Saved settings that are only read at startup take effect after a restart. Playback sessions will reconnect.";
-
 /**
  * The single restart prompt for the admin area: an amber banner at the top of
  * the content column, rendered once by `AdminLayout` so it stays with the admin
@@ -45,6 +43,7 @@ export function RestartBanner({
   description,
   className,
 }: RestartBannerProps) {
+  const t = useT();
   const pending = restartRequired;
   // "Later" records what was pending at the time, not a boolean: the server's
   // restart_required flag never clears while the process lives, so a fresh
@@ -66,7 +65,7 @@ export function RestartBanner({
       role="status"
       className={cn(
         "mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-500/30 px-4 py-3 sm:mb-6 sm:px-5",
-        "bg-[linear-gradient(90deg,color-mix(in_srgb,var(--warning)_16%,transparent),color-mix(in_srgb,var(--warning)_6%,transparent))]",
+        "bg-[linear-gradient(calc(90deg*var(--dir-sign)),color-mix(in_srgb,var(--warning)_16%,transparent),color-mix(in_srgb,var(--warning)_6%,transparent))]",
         className,
       )}
     >
@@ -77,16 +76,16 @@ export function RestartBanner({
           their own row instead of squeezing the message to a few characters,
           and on a wide page everything still shares one line. */}
       <div className="min-w-0 flex-1 basis-64">
-        <p className="text-[13px] font-medium">Restart required</p>
+        <p className="text-[13px] font-medium">{t("web.admin.common.restartBanner.title")}</p>
         <p className="text-muted-foreground text-[11.5px]">
-          {description ?? DEFAULT_RESTART_DESCRIPTION}
+          {description ?? t("web.admin.common.restartBanner.description")}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => setDismissedSignature(signature)}>
-          Later
+          {t("web.admin.common.restartBanner.later")}
         </Button>
-        <RestartServerButton label="Restart server" />
+        <RestartServerButton label={t("web.admin.common.restartBanner.restart")} />
       </div>
     </div>
   );

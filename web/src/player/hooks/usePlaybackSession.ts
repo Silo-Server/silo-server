@@ -7,7 +7,7 @@ import { settleTrackPreferenceWrites } from "../utils/trackPreferenceWrites";
 import { playbackStartEnded } from "../bandwidth-probe";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
 import {
-  CONNECTION_LOST_ERROR,
+  connectionLostError,
   describePlanTerminal,
   describePlaybackTransportError,
 } from "../playback-errors";
@@ -30,6 +30,7 @@ import { reportSessionRouteEventV2 } from "../route-events-v2";
 import { replanV2 } from "../lifecycle-v2";
 import { takePlaybackIntent } from "../first-frame";
 import { buildPlayerStreamUrl } from "../stream-url";
+import { t } from "@/i18n";
 import { randomUUID } from "@/lib/uuid";
 import {
   FEATURE_OUTPUT_CHANGE_V3,
@@ -118,6 +119,26 @@ export function reconnectDelayMs(attempt: number): number {
 }
 
 /**
+ * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
+ * so the stop uses fetch keepalive to outlive a closing page. An unloading
+ * page sends it at once rather than after any progress still in flight.
+ *
+ * A player that unmounts while the page stays tells its host once the stop
+ * settles: the page it returned to read its watch state while the stop was
+ * still on its way.
+ */
+function stopOnPageExit(config: PlayerConfig, sessionId: string | null, unloading = false) {
+  if (!sessionId) return;
+  void stopSequencedSession(config, sessionId, true, unloading)
+    .catch(() => {
+      // Best effort: the session expires server-side.
+    })
+    .then(() => {
+      if (!unloading) config.onSessionStopped?.();
+    });
+}
+
+/**
  * Whether a failed reconnect request is worth repeating later: the server was
  * unreachable or overloaded, or it asked for a retry. Anything else is its
  * considered answer.
@@ -199,9 +220,15 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
    * `track_change` replan selecting (or clearing) the server-side subtitle
    * track. Only needed for tracks the server has to render — burn-in and
    * conversion. Sidecar tracks are fetched from the plan's inventory and drawn
-   * by the client without involving the server.
+   * by the client without involving the server. `storedSubtitleId` names the
+   * stored subtitle picked, when the caller knows it, so a queued pick keeps
+   * to it if a deletion moves the ordinals before it goes out.
    */
-  changeSubtitleTrack: (combinedIndex: number | null, currentPosition: number) => void;
+  changeSubtitleTrack: (
+    combinedIndex: number | null,
+    currentPosition: number,
+    storedSubtitleId?: number,
+  ) => void;
   /** `quality_change` replan for a label taken from `plan.available_qualities`. */
   changeQuality: (
     label: string,
@@ -241,6 +268,12 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
    * Resolves with whether a plan at the new position was adopted.
    */
   reanchorSeek: (positionSeconds: number) => Promise<boolean>;
+  /**
+   * The player moved to `positionSeconds` inside the stream it has, without a
+   * replan. A quality, track or output change queued behind the replan in
+   * flight then resumes there rather than where it was asked for.
+   */
+  reportSeek: (positionSeconds: number) => void;
   /** Re-reads the subtitle inventory by replanning with the selection unchanged. */
   refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
@@ -280,6 +313,58 @@ function subtitleSourceOf(source: string): PlayerSubtitleInfo["source"] {
 }
 
 /**
+ * Whether an announced track can join `inventory` at the ordinal the server
+ * gave it: it either takes the next free ordinal or re-announces the stored
+ * subtitle already at that ordinal. Ordinals are dense, so anything else
+ * means the inventory no longer matches the server's.
+ */
+function canFoldAnnouncedSubtitleTrack(
+  inventory: readonly SubtitleInventoryItemV3[],
+  track: SubtitleInventoryItemV3,
+): boolean {
+  const current = inventory.find((item) => item.combined_index === track.combined_index);
+  if (!current) return track.combined_index === inventory.length;
+  return (
+    track.stored_subtitle_id !== undefined &&
+    current.stored_subtitle_id === track.stored_subtitle_id
+  );
+}
+
+/**
+ * The stored subtitle a replan's subtitle pick names: the one its caller
+ * named, else the one at its ordinal in `inventory`, the inventory it was
+ * picked from.
+ */
+function pickedStoredSubtitleId(
+  options: ReplanOptions,
+  inventory: readonly SubtitleInventoryItemV3[],
+): number | undefined {
+  const index = options.subtitle?.index;
+  if (index === undefined) return undefined;
+  return (
+    options.storedSubtitleId ??
+    inventory.find((item) => item.combined_index === index)?.stored_subtitle_id
+  );
+}
+
+/**
+ * `options` with its subtitle pick at the ordinal its stored subtitle holds in
+ * `to`, or turned off when that stored subtitle is gone. `from` is the
+ * inventory the pick was made from.
+ */
+function withSubtitleOrdinalIn(
+  options: ReplanOptions,
+  from: readonly SubtitleInventoryItemV3[],
+  to: readonly SubtitleInventoryItemV3[],
+): ReplanOptions {
+  const storedId = pickedStoredSubtitleId(options, from);
+  if (storedId === undefined) return options;
+  const moved = to.find((item) => item.stored_subtitle_id === storedId)?.combined_index ?? null;
+  if (moved === options.subtitle?.index) return options;
+  return { ...options, subtitle: moved === null ? null : { id: "", index: moved } };
+}
+
+/**
  * Maps the plan's subtitle inventory onto the player's track shape.
  *
  * `index` is the server's combined ordinal, copied verbatim: it is the identity
@@ -306,6 +391,7 @@ function mapSubtitleInventory(
     forced: item.forced,
     hearing_impaired: item.hearing_impaired,
     sync_key: item.sync_key,
+    stored_subtitle_id: item.stored_subtitle_id,
     url: item.url ? buildPlayerStreamUrl(config.apiBaseUrl, item.url, token) : "",
     font_bundle_url: item.font_bundle_url
       ? buildPlayerStreamUrl(config.apiBaseUrl, item.font_bundle_url, token)
@@ -373,8 +459,8 @@ function describeDecisionWithoutPlan(decision: DecisionResponseV3): PlaybackSess
     return describePlanTerminal(decision.terminal);
   }
   return {
-    title: "Playback unavailable",
-    message: "This server is not accepting playback requests right now.",
+    title: t("web.player.watch.playbackUnavailable"),
+    message: t("web.player.error.notAcceptingRequests"),
   };
 }
 
@@ -392,20 +478,20 @@ function describePlaybackSessionError(
   // ("signal timed out", "Failed to fetch") means nothing to the viewer.
   if (isTransientPlayerRequestError(error)) {
     return {
-      title: "Playback unavailable",
-      message: "Silo couldn't reach the server. Check your connection, then try again.",
+      title: t("web.player.watch.playbackUnavailable"),
+      message: t("web.player.error.serverUnreachable"),
     };
   }
 
   if (error instanceof Error && error.message.trim().length > 0) {
     return {
-      title: "Playback unavailable",
+      title: t("web.player.watch.playbackUnavailable"),
       message: error.message,
     };
   }
 
   return {
-    title: "Playback unavailable",
+    title: t("web.player.watch.playbackUnavailable"),
     message: fallbackMessage,
   };
 }
@@ -448,7 +534,10 @@ export function usePlaybackSession(
     [probe, browserEngine.capabilities],
   );
   const clientPlaybackContext = useMemo(
-    () => buildClientPlaybackContextV3(probe, browserEngine.capabilities),
+    () =>
+      buildClientPlaybackContextV3(probe, browserEngine.capabilities, {
+        reopensProgressiveAtPosition: true,
+      }),
     [probe, browserEngine.capabilities],
   );
   const nativeOriginalSupport = useMemo<NativeOriginalSupport>(
@@ -491,6 +580,8 @@ export function usePlaybackSession(
   });
 
   const sessionIdRef = useRef<string | null>(null);
+  // Stops still in flight for sessions this player has already let go of.
+  const pendingStopsRef = useRef(new Set<Promise<void>>());
   const planRef = useRef<PlanV3 | null>(null);
   // What a `plan_summary` reports against, by adoption: the plan may have been
   // replaced, and its session ended, by the time the summary is sent.
@@ -585,6 +676,11 @@ export function usePlaybackSession(
   const adoptionWaitersRef = useRef<Array<{ loadSequence: number; resolve: () => void }>>([]);
   /** A Restore's `learned_limit: "clear"` that has not gone out yet. */
   const clearOwedRef = useRef(false);
+  /**
+   * A subtitle announcement arrived while a replan was queued, so the plan in
+   * flight may predate the inventory change it announced.
+   */
+  const subtitleRefreshOwedRef = useRef(false);
   const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
@@ -593,6 +689,8 @@ export function usePlaybackSession(
     planId: string;
     /** The file the queued request's track ordinals index into. */
     mediaFileId: number;
+    /** The subtitle inventory the queued request's subtitle ordinal indexes. */
+    subtitleInventory: readonly SubtitleInventoryItemV3[];
     onAdopt?: (planRevision: number) => void;
   } | null>(null);
   const issueReplanRef = useRef<
@@ -902,8 +1000,16 @@ export function usePlaybackSession(
   );
 
   const stopSession = useCallback(
-    async (sessionId: string) => {
-      await stopSequencedSession(config, sessionId);
+    (sessionId: string) => {
+      const stop = stopSequencedSession(config, sessionId);
+      const pendingStops = pendingStopsRef.current;
+      pendingStops.add(stop);
+      void stop
+        .catch(() => {})
+        .finally(() => {
+          pendingStops.delete(stop);
+        });
+      return stop;
     },
     [config],
   );
@@ -1068,7 +1174,7 @@ export function usePlaybackSession(
       try {
         const selectedFileId = selectFileId(preferredFileId);
         if (!selectedFileId) {
-          throw new Error("No playable version found");
+          throw new Error(t("web.player.error.noPlayableVersion.title"));
         }
 
         const startAudioTrackIndex = tracks ? tracks.audioIndex : explicitAudioTrackIndex;
@@ -1236,7 +1342,7 @@ export function usePlaybackSession(
       forceStartPosition: forceInitialPosition,
       allowPreserveExistingSessionOnError: false,
       replacementErrorMessage: "Failed to replace playback request",
-      initialErrorMessage: "Failed to start playback",
+      initialErrorMessage: t("web.player.error.fallback.start"),
       intentAt,
     });
   }, [
@@ -1251,8 +1357,21 @@ export function usePlaybackSession(
     versionPicked,
   ]);
 
+  // A closed tab, a reload or a navigation away never unmounts the player, so
+  // the stop goes out from pagehide. A page kept in the back-forward cache can
+  // come back playing, so its session stays; the server stops counting it
+  // toward the stream limit once its progress reports stop.
+  useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) stopOnPageExit(config, sessionIdRef.current, true);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [config]);
+
   // Clean up session on unmount.
   useEffect(() => {
+    const pendingStops = pendingStopsRef.current;
     return () => {
       // A start can finish after unmount, before it has published a session ID.
       // Let that reply take the stale-start path and stop its own session
@@ -1262,12 +1381,13 @@ export function usePlaybackSession(
       endReconnect(false);
       // A start this player left still loading no longer holds off speed tests.
       playbackStartEnded();
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-      // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
-      void stopSequencedSession(config, sid, true).catch(() => {
-        // Best effort: the session expires server-side.
-      });
+      stopOnPageExit(config, sessionIdRef.current);
+      // Stops already sent for sessions this player retired, such as one whose
+      // new output was refused, can still be on their way too. Each tells the
+      // host as it settles, so a slow one cannot hold up the others.
+      for (const stop of pendingStops) {
+        void stop.catch(() => {}).then(() => config.onSessionStopped?.());
+      }
     };
   }, [config, endReconnect]);
 
@@ -1309,12 +1429,16 @@ export function usePlaybackSession(
         const hasQueuedFailureRecovery =
           queuedOperation === "failure_recovery" || queuedOperation === "seek_failure_recovery";
         const hasQueuedOutputChange = queuedOperation === "output_change";
+        const isPendingUserIntent =
+          options.operation === "track_change" || options.operation === "quality_change";
+        const hasQueuedUserIntent =
+          queuedOperation === "track_change" || queuedOperation === "quality_change";
         if (
           options.operation === "seek_reanchor" &&
-          hasQueuedOutputChange &&
+          (hasQueuedOutputChange || hasQueuedUserIntent) &&
           pendingReplanRef.current
         ) {
-          // The output refresh will open a fresh route at its position anyway;
+          // The queued change will open a fresh route at its position anyway;
           // fold a later seek into that queued intent rather than silently
           // dropping the viewer's newest target.
           pendingReplanRef.current = {
@@ -1326,18 +1450,11 @@ export function usePlaybackSession(
           };
           return false;
         }
-        const isPendingUserIntent =
-          options.operation === "track_change" || options.operation === "quality_change";
-        const hasQueuedUserIntent =
-          queuedOperation === "track_change" || queuedOperation === "quality_change";
         const shouldQueue =
           isPendingFailureRecovery ||
           (isPendingUserIntent && !hasQueuedFailureRecovery) ||
           (isPendingOutputChange && !hasQueuedFailureRecovery && !hasQueuedUserIntent) ||
-          (options.operation === "seek_reanchor" &&
-            !hasQueuedFailureRecovery &&
-            !hasQueuedOutputChange &&
-            !hasQueuedUserIntent);
+          (options.operation === "seek_reanchor" && !hasQueuedFailureRecovery);
         if (shouldQueue) {
           pendingReplanRef.current?.resolve(false);
           return new Promise<boolean>((resolve) => {
@@ -1348,6 +1465,7 @@ export function usePlaybackSession(
               resolve,
               planId: plan.plan_id,
               mediaFileId: plan.effective_media_file_id,
+              subtitleInventory: plan.subtitle.inventory,
               onAdopt,
             };
           });
@@ -1361,8 +1479,8 @@ export function usePlaybackSession(
         setState((current) => ({
           ...current,
           replanning: false,
-          errorTitle: "Playback failed",
-          error: "Playback failed after repeated recovery attempts.",
+          errorTitle: t("web.player.error.recoveryExhausted.title"),
+          error: t("web.player.error.recoveryExhausted.message"),
         }));
         return false;
       }
@@ -1441,7 +1559,9 @@ export function usePlaybackSession(
         if (isFailureRecovery) {
           attemptedPlanKeysRef.current = attemptedPlanKeys;
           attemptCountRef.current = Math.min(attemptCount + 1, MAX_ATTEMPT_COUNT_V3 + 1);
-        } else {
+        } else if (!reconnect) {
+          // A reconnect changes nothing the viewer asked for, so the routes
+          // that already failed in this attempt stay excluded.
           attemptedPlanKeysRef.current = [];
           attemptCountRef.current = 1;
         }
@@ -1508,7 +1628,11 @@ export function usePlaybackSession(
           beginReconnectRef.current(options.positionSeconds, playIntent, false);
           return false;
         }
-        const nextError = describePlaybackSessionError(err, "Failed to update playback", "update");
+        const nextError = describePlaybackSessionError(
+          err,
+          t("web.player.error.fallback.update"),
+          "update",
+        );
         setState((current) => ({
           ...current,
           replanning: false,
@@ -1541,20 +1665,38 @@ export function usePlaybackSession(
               pendingReplan.options.subtitle !== null);
           const trackPickAppliesToCurrentFile =
             !namesTrack || pendingReplan.mediaFileId === planRef.current?.effective_media_file_id;
-          if (recoveryAppliesToCurrentPlan && trackPickAppliesToCurrentFile) {
+          const refreshOwed = subtitleRefreshOwedRef.current;
+          subtitleRefreshOwedRef.current = false;
+          if (!recoveryAppliesToCurrentPlan || !trackPickAppliesToCurrentFile) {
+            pendingReplan.resolve(false);
+          } else if (
+            refreshOwed &&
+            pickedStoredSubtitleId(pendingReplan.options, pendingReplan.subtitleInventory) !==
+              undefined
+          ) {
+            // The plan just adopted may predate the announced change, and a
+            // pick by ordinal needs the server's current inventory: the plan
+            // is refetched first, and the pick waits behind it.
+            void issueReplanRef.current({
+              operation: "track_change",
+              positionSeconds: pendingReplan.options.positionSeconds,
+            });
+            if (replanInFlightRef.current) pendingReplanRef.current = pendingReplan;
+            else pendingReplan.resolve(false);
+          } else {
+            // The menu the pick was made from may predate a deletion that
+            // moved its stored subtitle to another ordinal.
+            const options = withSubtitleOrdinalIn(
+              pendingReplan.options,
+              pendingReplan.subtitleInventory,
+              planRef.current?.subtitle.inventory ?? pendingReplan.subtitleInventory,
+            );
             // A capability change can queue behind a replan created by an older
             // render. Dispatch through the latest callback so its request carries
             // the current output evidence rather than the closed-over snapshot.
             void issueReplanRef
-              .current(
-                pendingReplan.options,
-                pendingReplan.retireSessionOnRefusal,
-                false,
-                pendingReplan.onAdopt,
-              )
+              .current(options, pendingReplan.retireSessionOnRefusal, false, pendingReplan.onAdopt)
               .then(pendingReplan.resolve);
-          } else {
-            pendingReplan.resolve(false);
           }
         } else {
           pendingReplan?.resolve(false);
@@ -1599,7 +1741,7 @@ export function usePlaybackSession(
         forceStartPosition: resumeFromAdoptedPlan ? true : startIntent.forceStartPosition,
         allowPreserveExistingSessionOnError: false,
         replacementErrorMessage: "Failed to refresh playback output",
-        initialErrorMessage: "Failed to refresh playback output",
+        initialErrorMessage: t("web.player.error.fallback.refresh"),
         // Before any plan was adopted, the viewer is still waiting on the
         // Play they pressed, so the replacement start keeps its clock. After
         // one, video has been shown and nobody pressed Play for this start.
@@ -1646,13 +1788,14 @@ export function usePlaybackSession(
   );
 
   const changeSubtitleTrack = useCallback(
-    (combinedIndex: number | null, currentPosition: number) => {
+    (combinedIndex: number | null, currentPosition: number, storedSubtitleId?: number) => {
       const plan = planRef.current;
       if (!plan) return;
       void replan({
         operation: "track_change",
         positionSeconds: currentPosition,
         subtitle: combinedIndex == null ? null : { id: "", index: combinedIndex },
+        ...(combinedIndex != null && storedSubtitleId !== undefined && { storedSubtitleId }),
       });
     },
     [replan],
@@ -1746,11 +1889,14 @@ export function usePlaybackSession(
   // the route and could push a direct-play viewer onto a transcode. Each
   // attempt first asks for the current route again with a `track_change` that
   // changes nothing (the server keeps the route eligible and answers with a
-  // fresh plan at the saved position). If the session did not survive — a
-  // server restart answers 404 — it starts a new session at the same position
-  // with the same tracks. Unreachable or overloaded answers back off; any
-  // adopted plan ends the cycle; the viewer leaving or another start cancels
-  // it.
+  // fresh plan at the saved position). A progressive remux reanchors instead:
+  // the no-op track_change replans from the top and can hand back a route that
+  // already failed in this attempt, while a reanchor reopens the remux at the
+  // saved position, as the remux range refusal promises. If the session did not
+  // survive — a server restart answers 404 — it starts a new session at the
+  // same position with the same tracks. Unreachable or overloaded answers back
+  // off; any adopted plan ends the cycle; the viewer leaving or another start
+  // cancels it.
 
   const scheduleReconnectAttempt = useCallback((delayMs: number) => {
     const reconnect = reconnectRef.current;
@@ -1790,7 +1936,7 @@ export function usePlaybackSession(
       reconnect.resume = resume;
       if (reconnect.attempts >= RECONNECT_MAX_ATTEMPTS) {
         // The stream keeps dropping right after every recovery.
-        giveUpReconnect(CONNECTION_LOST_ERROR);
+        giveUpReconnect(connectionLostError());
         return;
       }
       setState((current) => ({
@@ -1818,7 +1964,7 @@ export function usePlaybackSession(
     reconnect.attempts += 1;
     const retryLater = () => {
       if (reconnect.attempts >= RECONNECT_MAX_ATTEMPTS) {
-        giveUpReconnect(CONNECTION_LOST_ERROR);
+        giveUpReconnect(connectionLostError());
         return;
       }
       scheduleReconnectAttempt(reconnectDelayMs(reconnect.attempts));
@@ -1827,11 +1973,11 @@ export function usePlaybackSession(
 
     if (planRef.current && sessionIdRef.current) {
       try {
-        const adopted = await issueReplanRef.current(
-          { operation: "track_change", positionSeconds },
-          false,
-          true,
-        );
+        const operation =
+          planRef.current.delivery === "server_remux_progressive"
+            ? "seek_reanchor"
+            : "track_change";
+        const adopted = await issueReplanRef.current({ operation, positionSeconds }, false, true);
         // An adopted plan has already ended the cycle.
         if (adopted || !isCurrent()) return;
       } catch (error) {
@@ -1865,7 +2011,7 @@ export function usePlaybackSession(
       forceStartPosition: true,
       allowPreserveExistingSessionOnError: true,
       replacementErrorMessage: "Failed to restart playback after the connection was lost",
-      initialErrorMessage: "Failed to restart playback",
+      initialErrorMessage: t("web.player.error.fallback.restart"),
       intentAt: null,
       reconnect: true,
       // The plan's selection is the viewer's: the player replans every
@@ -1879,7 +2025,7 @@ export function usePlaybackSession(
         retryLater();
         return;
       }
-      giveUpReconnect(describePlaybackSessionError(outcome.error, CONNECTION_LOST_ERROR.message));
+      giveUpReconnect(describePlaybackSessionError(outcome.error, connectionLostError().message));
       return;
     }
     if (outcome.kind === "refused") {
@@ -1964,16 +2110,44 @@ export function usePlaybackSession(
     [replan, reportEvent],
   );
 
+  const reportSeek = useCallback((positionSeconds: number) => {
+    const pending = pendingReplanRef.current;
+    if (!pending || !Number.isFinite(positionSeconds) || positionSeconds < 0) return;
+    // A recovery or reanchor names a position of its own; the other queued
+    // operations only carry where the viewer was when they were asked for.
+    const { operation } = pending.options;
+    if (
+      operation !== "quality_change" &&
+      operation !== "track_change" &&
+      operation !== "output_change"
+    ) {
+      return;
+    }
+    pendingReplanRef.current = { ...pending, options: { ...pending.options, positionSeconds } };
+  }, []);
+
   /**
    * Re-reads the subtitle inventory.
    *
    * There is no "refresh" operation in v3, and there does not need to be: a
    * `track_change` that changes nothing returns a fresh plan — inventory
    * included — without excluding the route already playing.
+   *
+   * A track, quality or output change queued behind the replan in flight
+   * returns a fresh plan too, so the refresh leaves it queued rather than
+   * replacing the viewer's choice with an echo of the current tracks. A queued
+   * pick of a stored subtitle names its ordinal in a menu the change may have
+   * moved, so the plan is refetched before it goes out (see the queue's
+   * dispatch in `replan`).
    */
   const refreshSubtitles = useCallback(
     (currentPosition: number) => {
       if (!planRef.current) return;
+      const queued = pendingReplanRef.current?.options.operation;
+      if (queued === "track_change" || queued === "quality_change" || queued === "output_change") {
+        subtitleRefreshOwedRef.current = true;
+        return;
+      }
       void replan({ operation: "track_change", positionSeconds: currentPosition });
     },
     [replan],
@@ -1983,11 +2157,22 @@ export function usePlaybackSession(
    * Folds a track the server pushed over the realtime socket into the plan's
    * inventory at the ordinal the server assigned it. The ordinal is never
    * derived client-side, which is why the payload carries the whole entry.
+   *
+   * The ordinal is only meaningful against the server's current inventory.
+   * Deleting a stored subtitle shifts the later ones down without telling
+   * this player, so the announced ordinal can name a different track in this
+   * plan. The track is folded in only when it extends the inventory or
+   * re-announces the stored subtitle already there; otherwise the plan is
+   * refetched, and the server keeps the viewer's subtitle by its identity.
    */
   const applySubtitleTrack = useCallback(
     (track: SubtitleInventoryItemV3) => {
       const plan = planRef.current;
       if (!plan) return;
+      if (!canFoldAnnouncedSubtitleTrack(plan.subtitle.inventory, track)) {
+        refreshSubtitles(playbackPositionRef.current);
+        return;
+      }
       const inventory = [
         ...plan.subtitle.inventory.filter((item) => item.combined_index !== track.combined_index),
         track,
@@ -2000,7 +2185,7 @@ export function usePlaybackSession(
         subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
       }));
     },
-    [config],
+    [config, refreshSubtitles],
   );
 
   const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {
@@ -2068,7 +2253,7 @@ export function usePlaybackSession(
             // old plan active on the client.
             allowPreserveExistingSessionOnError: false,
             replacementErrorMessage: "Failed to switch playback version",
-            initialErrorMessage: "Failed to switch version",
+            initialErrorMessage: t("web.player.error.fallback.switchVersion"),
             intentAt,
             onAdopt: (revision) => {
               adopted = true;
@@ -2100,6 +2285,7 @@ export function usePlaybackSession(
     retryConnection,
     invalidatePlan,
     reanchorSeek,
+    reportSeek,
     refreshSubtitles,
     applySubtitleTrack,
     updatePlaybackState,

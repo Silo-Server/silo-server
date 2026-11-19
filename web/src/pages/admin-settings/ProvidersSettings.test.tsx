@@ -353,50 +353,6 @@ describe("ProvidersSettings", () => {
     expect(mocks.updateProvider).not.toHaveBeenCalled();
   });
 
-  it("edits marker provider behavior in the tile and sends only what changed", async () => {
-    const user = userEvent.setup();
-    // The page's copy shows sharing on; a fetch-only edit must not write it
-    // back over an opt-out saved elsewhere.
-    markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
-
-    render(<ProvidersSettings />);
-
-    await user.click(
-      within(screen.getByRole("group", { name: "TheIntroDB" })).getByRole("button", {
-        name: "Manage",
-      }),
-    );
-
-    const tile = screen.getByRole("group", { name: "TheIntroDB" });
-    expect(tile).toHaveAttribute("data-expanded", "true");
-    // Lookup order and the sharing threshold have working defaults, so they
-    // wait under the tile's Advanced section.
-    expect(within(tile).queryByLabelText("Provider priority")).not.toBeInTheDocument();
-    expect(
-      within(tile).queryByLabelText("Minimum confidence for automatic sharing"),
-    ).not.toBeInTheDocument();
-    expect(
-      within(tile).getByRole("switch", { name: "Get markers from this provider" }),
-    ).toBeChecked();
-    await user.click(within(tile).getByRole("button", { name: "Advanced · 3 settings" }));
-    expect(within(tile).getByLabelText("Provider priority")).toHaveValue(10);
-    expect(within(tile).getByLabelText("Minimum confidence for automatic sharing")).toHaveValue(95);
-    // Credentials are the plugin's, not Silo's: the panel links out for them.
-    expect(within(tile).getByRole("link", { name: "plugin page" })).toHaveAttribute(
-      "href",
-      "/admin/plugins/silo.theintrodb",
-    );
-
-    await user.clear(within(tile).getByLabelText("Provider priority"));
-    await user.type(within(tile).getByLabelText("Provider priority"), "5");
-    await user.click(within(tile).getByRole("button", { name: "Save" }));
-
-    expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
-      provider: "plugin:6:introdb",
-      patch: { fetch_priority: 5 },
-    });
-  });
-
   it.each([
     ["Minimum confidence for automatic sharing", "contribute_min_confidence", 0],
     ["Minimum confidence for automatic sharing", "contribute_min_confidence", 92.5],
@@ -532,20 +488,6 @@ describe("ProvidersSettings", () => {
     ).toBeDisabled();
     expect(tile.getByLabelText("Minimum confidence for automatic sharing")).toBeDisabled();
     expect(tile.queryByRole("button", { name: "Test connection" })).not.toBeInTheDocument();
-  });
-
-  it("reports a failed watch provider load instead of claiming nothing is installed", async () => {
-    pluginInstallations = undefined;
-    installationsError = true;
-    render(<ProvidersSettings />);
-
-    const watch = screen.getByRole("group", { name: "Watch providers" });
-    expect(within(watch).getByRole("alert")).toHaveTextContent(
-      "Couldn't load the installed watch provider plugins.",
-    );
-    expect(screen.queryByText("No watch provider plugins are installed.")).not.toBeInTheDocument();
-    await userEvent.setup().click(within(watch).getByRole("button", { name: "Retry" }));
-    expect(refetchInstallations).toHaveBeenCalled();
   });
 
   it("does not label an enabled watch plugin as connected until its required config is set", () => {

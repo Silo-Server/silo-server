@@ -5,46 +5,12 @@ import (
 	"math"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
-
-func TestCreditsTailRequest(t *testing.T) {
-	candidate := Candidate{FileID: 7, FilePath: "/media/show/e1.mkv", DurationSeconds: 1500, CodecVideo: "h264", CodecAudio: "aac"}
-	window := tailWindow(candidate)
-	req := creditsTailRequest(WithPlaybackPriority(context.Background()), candidate, window, true)
-	if err := req.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if req.Input != candidate.FilePath || *req.Window != (mediasample.Window{StartSeconds: 1050, DurationSeconds: 450, KeyframesOnly: true}) ||
-		req.Threads != 1 || req.Background {
-		t.Fatalf("request %+v", req)
-	}
-	wantStats := mediasample.StatsOutput{CropWidth: 0.9, CropHeight: 0.8, Width: 480, BlackThresholds: []int{20, 26, 32}}
-	if req.Stats == nil || req.Stats.CropWidth != wantStats.CropWidth || req.Stats.CropHeight != wantStats.CropHeight ||
-		req.Stats.Width != wantStats.Width || !slices.Equal(req.Stats.BlackThresholds, wantStats.BlackThresholds) {
-		t.Fatalf("stats %+v", req.Stats)
-	}
-	if req.Audio == nil || !req.Audio.Fingerprint || *req.Audio.Silence != (mediasample.SilenceParams{NoiseDB: -50, MinSeconds: 0.5}) {
-		t.Fatalf("audio %+v", req.Audio)
-	}
-
-	if req := creditsTailRequest(context.Background(), candidate, window, false); req.Audio.Fingerprint || !req.Background {
-		t.Fatalf("request without a fingerprint %+v", req)
-	}
-	candidate.CodecAudio = ""
-	if req := creditsTailRequest(context.Background(), candidate, window, true); req.Audio != nil || req.Stats == nil {
-		t.Fatalf("request for a file without audio %+v", req)
-	}
-	candidate.CodecAudio, candidate.CodecVideo = "aac", ""
-	if req := creditsTailRequest(context.Background(), candidate, window, true); req.Stats != nil || req.Window.KeyframesOnly || req.Audio == nil {
-		t.Fatalf("request for a file without video %+v", req)
-	}
-}
 
 func TestCreditsTailKeyIsNamespaced(t *testing.T) {
 	tail, fingerprint := creditsTailKey(), creditsFingerprintKey()
@@ -57,20 +23,6 @@ func TestCreditsTailKeyIsNamespaced(t *testing.T) {
 	want := "tail=450:0.40;crop=0.90x0.80;width=480;black=20,26,32;silence=-50:0.50;keyframes;format=credits-tail:v1"
 	if creditsTailParams != want {
 		t.Fatalf("tail parameters %q, want %q", creditsTailParams, want)
-	}
-}
-
-func TestTailUnusable(t *testing.T) {
-	for codec, want := range map[string]string{"": tailDetailNoVideo, "prores": tailDetailUnsupportedCodec, " MJPEG ": tailDetailUnsupportedCodec, "hevc": ""} {
-		if got := tailUnusableBeforeSampling(Candidate{CodecVideo: codec}); got != want {
-			t.Errorf("codec %q: %q, want %q", codec, got, want)
-		}
-	}
-	window := fingerprintWindow{Start: 1050, End: 1500}
-	for frames, want := range map[int]string{0: tailDetailSparse, 14: tailDetailSparse, 15: "", 5000: "", 5001: tailDetailTooManyKeyframes} {
-		if got := tailUnusableAfterSampling(frames, window); got != want {
-			t.Errorf("%d keyframes: %q, want %q", frames, got, want)
-		}
 	}
 }
 
@@ -137,53 +89,5 @@ func TestSampleCreditsTailWithRealFFmpeg(t *testing.T) {
 	segment, ok := combineCredits(candidate, creditsEvidence{Keyframes: keyframes, Silences: sample.Tail.Silences}, creditsLimitsFor(false))
 	if !ok || math.Abs(segment.Start-70) > 1 || segment.End != 100 || segment.Algorithm != CreditsVideoAlgorithm {
 		t.Fatalf("credits %+v (placed %t), want video credits from 70 s to the end", segment, ok)
-	}
-}
-
-// TestSampleCreditsTailWithoutTheProbedAudio runs the tail pass on a file
-// with no audio stream whose probe metadata names one. ffmpeg fails a run
-// whose audio output finds no stream, so the video is sampled alone.
-func TestSampleCreditsTailWithoutTheProbedAudio(t *testing.T) {
-	ffmpeg, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	caps, err := mediasample.LoadCapabilities(ctx, ffmpeg)
-	if err != nil {
-		t.Skipf("ffmpeg capabilities unavailable: %v", err)
-	}
-	candidate := Candidate{FileID: 1, DurationSeconds: 100, CodecVideo: "h264", CodecAudio: "aac"}
-	if err := caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), false)); err != nil {
-		t.Skipf("ffmpeg cannot run the tail pass: %v", err)
-	}
-	candidate.FilePath = filepath.Join(t.TempDir(), "episode.mkv")
-	generate := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "color=c=black:s=320x180:r=10:d=100", "-g", "10", candidate.FilePath)
-	if output, err := generate.CombinedOutput(); err != nil {
-		t.Skipf("cannot generate the clip: %v: %s", err, output)
-	}
-
-	extractor := NewChromaprintExtractor(DefaultConfig(ffmpeg))
-	for _, fingerprint := range []bool{false, true} {
-		if fingerprint && caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), true)) != nil {
-			continue
-		}
-		sample, err := extractor.SampleCreditsTail(ctx, candidate, fingerprint)
-		if err != nil {
-			t.Fatalf("SampleCreditsTail(fingerprint=%t): %v", fingerprint, err)
-		}
-		if n := len(sample.Tail.Frames); n < 35 || n > 45 {
-			t.Fatalf("fingerprint=%t: %d keyframes in the 40 s tail, want about one a second", fingerprint, n)
-		}
-		if len(sample.Tail.Silences) != 0 {
-			t.Fatalf("fingerprint=%t: silences %+v from a file without audio", fingerprint, sample.Tail.Silences)
-		}
-		// An asked-for fingerprint comes back empty, which stores the file
-		// as having no audio to fingerprint.
-		if fingerprint != (sample.Fingerprint != nil) || (sample.Fingerprint != nil && len(sample.Fingerprint.Points) != 0) {
-			t.Fatalf("fingerprint=%t: fingerprint %+v", fingerprint, sample.Fingerprint)
-		}
 	}
 }

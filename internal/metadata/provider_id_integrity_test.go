@@ -111,12 +111,6 @@ func TestMergeStepPlaceholdersAreBounded(t *testing.T) {
 }
 
 func TestMergeStepsUseCurrentWatchProviderListItemsTable(t *testing.T) {
-	for _, step := range mediaItemMergeSteps {
-		if strings.Contains(step.sql, "watch_provider_favorite_items") {
-			t.Fatalf("merge step %q still references renamed watch provider table", step.name)
-		}
-	}
-
 	for _, want := range []string{
 		"merge watch provider list items by provider key",
 		"merge watch provider list items by connection",

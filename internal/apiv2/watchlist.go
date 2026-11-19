@@ -70,9 +70,10 @@ func registerWatchlist(reg *Registry) {
 }
 
 // listWatchlist answers from the same listing v1 GET /watchlist uses, paged
-// by keyset. A limit+1 probe decides has_more from the raw rows, so a hidden
-// series, an entry the catalog no longer has, or one the viewer may not see
-// never hides the rows behind it.
+// by keyset; a limit+1 probe decides has_more. The seam answers only entries
+// the viewer may see, so the probe and the cursor row are visible items and a
+// cursor never names a hidden title. A fully-watched series is still an
+// entry without a card, so it never hides the rows behind it.
 func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *WatchlistListInput) (*WatchlistCollectionOutput, error) {
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")

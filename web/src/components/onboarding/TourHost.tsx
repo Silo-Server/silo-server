@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   Bell,
@@ -15,6 +14,7 @@ import {
   Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import type { OnboardingFlow, OnboardingStep, OnboardingStepLink } from "@/api/v2/onboarding";
 import { getProfileToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { settingValueFromString } from "@/hooks/queries/admin/users";
 import { useSetSettingValue, type SettingIdentity } from "@/hooks/queries/settingValues";
 import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 /**
  * Renders the server-driven first-run tour as a modal overlay. The step
@@ -62,6 +63,8 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   const progress = useOnboardingProgress();
   const navigate = useNavigate();
   const [saveFailed, setSaveFailed] = useState(false);
+  const t = useT();
+  const primaryRef = useRef<HTMLButtonElement>(null);
 
   const step = steps[index];
 
@@ -108,83 +111,121 @@ export function TourHost({ flow, onDone }: TourHostProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- finish is stable enough for this one-shot; re-running on step change is the point
   }, [step]);
 
+  // The buttons are disabled while a step saves, which drops focus to <body>.
+  // Once the next step shows, put it back on the primary button.
+  const pending = progress.isPending;
+  useEffect(() => {
+    if (pending) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body) primaryRef.current?.focus();
+  }, [index, pending]);
+
   if (saveFailed)
     return (
       <div role="alert">
-        Progress could not be saved.{" "}
-        <Button onClick={() => window.location.reload()}>Reload tour</Button>
+        {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- the space between the message and the button */}
+        {t("web.onboarding.tour.saveFailed")}{" "}
+        <Button onClick={() => window.location.reload()}>
+          {t("web.onboarding.tour.reloadTour")}
+        </Button>
       </div>
     );
   if (!step) return null;
 
   const isLast = index === steps.length - 1;
 
-  // Portaled to <body>: an ancestor in the app layout creates a fixed-position
-  // containing block, which would pin inset-0 to the content pane and leave
-  // the sidebar un-scrimmed and un-blurred.
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Feature tour"
+  // Radix Dialog traps focus in the tour and hides the app behind it from
+  // assistive tech. It portals to <body>: an ancestor in the app layout
+  // creates a fixed-position containing block, which would pin inset-0 to the
+  // content pane and leave the sidebar un-scrimmed and un-blurred. Escape
+  // skips the tour, like the Skip button; a press on the scrim does nothing.
+  return (
+    <DialogPrimitive.Root
+      open
+      onOpenChange={(open) => {
+        if (!open && !progress.isPending) finish({ skipped: true });
+      }}
     >
-      <div className="bg-card border-border max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border p-6 shadow-2xl sm:p-7">
-        <StepBody step={step} />
-
-        <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
-          <Button
-            variant="ghost"
-            disabled={progress.isPending}
-            size="sm"
-            onClick={() => finish({ skipped: true })}
-            className="text-muted-foreground shrink-0"
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl">
+          <DialogPrimitive.Content
+            aria-describedby={undefined}
+            onOpenAutoFocus={(e) => {
+              e.preventDefault();
+              primaryRef.current?.focus();
+            }}
+            onPointerDownOutside={(e) => e.preventDefault()}
+            className="bg-card border-border max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border p-6 shadow-2xl outline-none sm:p-7"
           >
-            Skip tour
-          </Button>
-          <div className="flex min-w-0 items-center gap-4">
-            {/* Pips are decorative; on phones they'd crowd the buttons out. */}
-            <div className="hidden items-center gap-1.5 sm:flex" aria-hidden="true">
-              {steps.map((s, i) => (
-                <span
-                  key={s.id}
-                  className={cn(
-                    "h-1.5 rounded-full transition-all",
-                    i === index ? "bg-primary w-4" : "bg-secondary w-1.5",
+            <DialogPrimitive.Title className="sr-only">
+              {t("web.onboarding.tour.label")}
+            </DialogPrimitive.Title>
+            <StepBody step={step} />
+
+            <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
+              <Button
+                variant="ghost"
+                disabled={progress.isPending}
+                size="sm"
+                onClick={() => finish({ skipped: true })}
+                className="text-muted-foreground shrink-0"
+              >
+                {t("web.onboarding.tour.skip")}
+              </Button>
+              <div className="flex min-w-0 items-center gap-4">
+                {/* Pips are decorative; on phones they'd crowd the buttons out. */}
+                <div className="hidden items-center gap-1.5 sm:flex" aria-hidden="true">
+                  {steps.map((s, i) => (
+                    <span
+                      key={s.id}
+                      className={cn(
+                        "h-1.5 rounded-full transition-all",
+                        i === index ? "bg-primary w-4" : "bg-secondary w-1.5",
+                      )}
+                    />
+                  ))}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  {index > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={progress.isPending}
+                      onClick={() => setIndex(index - 1)}
+                    >
+                      {t("common.back")}
+                    </Button>
                   )}
-                />
-              ))}
+                  {step.kind === "handoff" ? (
+                    <Button
+                      ref={primaryRef}
+                      size="sm"
+                      disabled={progress.isPending}
+                      onClick={() => finish({ skipped: false, route: step.route })}
+                    >
+                      {step.title ?? t("web.onboarding.tour.finish")}
+                    </Button>
+                  ) : (
+                    <Button
+                      ref={primaryRef}
+                      size="sm"
+                      disabled={progress.isPending}
+                      onClick={advance}
+                    >
+                      {isLast
+                        ? t("common.done")
+                        : index === 0
+                          ? t("web.onboarding.tour.showMe")
+                          : t("web.onboarding.tour.next")}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="flex shrink-0 gap-2">
-              {index > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={progress.isPending}
-                  onClick={() => setIndex(index - 1)}
-                >
-                  Back
-                </Button>
-              )}
-              {step.kind === "handoff" ? (
-                <Button
-                  size="sm"
-                  disabled={progress.isPending}
-                  onClick={() => finish({ skipped: false, route: step.route })}
-                >
-                  {step.title ?? "Finish"}
-                </Button>
-              ) : (
-                <Button size="sm" disabled={progress.isPending} onClick={advance}>
-                  {isLast ? "Done" : index === 0 ? "Show me" : "Next"}
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Overlay>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -222,10 +263,13 @@ function StepBody({ step }: { step: OnboardingStep }) {
  * links fall back to a plain external-link button.
  */
 function StoreLink({ link }: { link: OnboardingStepLink }) {
+  const t = useT();
   const brand = link.url.includes("apple.com")
     ? {
         Icon: AppleLogo,
-        eyebrow: link.url.includes("testflight") ? "TestFlight beta" : "App Store",
+        eyebrow: link.url.includes("testflight")
+          ? t("web.onboarding.tour.testFlightBeta")
+          : "App Store",
       }
     : link.url.includes("play.google.com")
       ? { Icon: GooglePlayLogo, eyebrow: "Google Play" }
@@ -236,7 +280,7 @@ function StoreLink({ link }: { link: OnboardingStepLink }) {
       <Button variant="outline" size="sm" asChild className="max-w-full">
         <a href={link.url} target="_blank" rel="noopener noreferrer">
           <span className="truncate">{link.label}</span>
-          <ExternalLink className="ml-1.5 size-3.5 shrink-0" aria-hidden="true" />
+          <ExternalLink className="ms-1.5 size-3.5 shrink-0" aria-hidden="true" />
         </a>
       </Button>
     );
@@ -353,7 +397,7 @@ function SettingControl({ step }: { step: OnboardingStep }) {
           type="button"
           onClick={() => save(opt.value)}
           className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-start text-sm transition-colors",
             value === opt.value ? "bg-secondary font-medium" : "hover:bg-secondary/50",
           )}
         >

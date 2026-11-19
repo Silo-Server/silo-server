@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { RequestMediaType, RequestState } from "@/api/types";
 import { v2 } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
@@ -49,7 +50,7 @@ export async function listWatchlistTitlesV2(signal?: AbortSignal): Promise<Watch
     out.push(...result.items.map(watchlistTitleFromV2));
     const next = result.page?.has_more ? result.page.next_cursor : undefined;
     if (!next) return out;
-    if (seen.has(next)) throw new Error("The watchlist titles list repeated a page cursor.");
+    if (seen.has(next)) throw new Error(t("web.common.errors.watchlistPageRepeated"));
     seen.add(next);
     cursor = next;
   }

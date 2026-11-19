@@ -9,17 +9,13 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 const remoteNodeInventoryProbeTimeout = 5 * time.Second
-
-// resourceSampler is the read side of the local host's resource sampler.
-type resourceSampler interface {
-	Snapshot() nodemetrics.Snapshot
-}
 
 // playbackSettings reports the playback configuration a local probe should run
 // under. It is a function rather than three strings because these settings hot
@@ -32,33 +28,24 @@ type playbackSettings func() (ffmpegPath, hwAccel, hwDevice string)
 // SystemHandler serves read-only system inspection endpoints.
 type SystemHandler struct {
 	transcodePool *nodepool.TranscodePool
-	jwtSecret     string
+	nodeKeys      nodeauth.Keyring
 	playback      playbackSettings
 	buildInfo     buildinfo.Info
-	resources     resourceSampler
 }
 
 // NewSystemHandler creates a SystemHandler. playback supplies the current
 // playback settings on each call, so a local probe verifies the backend and
 // devices this host would transcode on right now.
-func NewSystemHandler(transcodePool *nodepool.TranscodePool, jwtSecret string, playback playbackSettings) *SystemHandler {
+func NewSystemHandler(transcodePool *nodepool.TranscodePool, nodeKeys nodeauth.Keyring, playback playbackSettings) *SystemHandler {
 	if playback == nil {
 		playback = func() (string, string, string) { return "", "", "" }
 	}
 	return &SystemHandler{
 		transcodePool: transcodePool,
-		jwtSecret:     jwtSecret,
+		nodeKeys:      nodeKeys,
 		playback:      playback,
 		buildInfo:     buildinfo.Current(),
 	}
-}
-
-// SetResourceSampler wires the local host's resource sampler. Without one,
-// /admin/system/resources reports the host as unsampled rather than failing:
-// the endpoint's answer is "what does this host look like right now", and
-// "nothing is measuring it" is a valid answer to that.
-func (h *SystemHandler) SetResourceSampler(sampler resourceSampler) {
-	h.resources = sampler
 }
 
 // SystemResources is the local host's current resource sample.
@@ -69,32 +56,6 @@ type SystemResources struct {
 	SampledAt string                   `json:"sampled_at,omitempty"`
 	System    *nodemetrics.SystemStats `json:"system,omitempty"`
 	GPU       []nodemetrics.GPUStats   `json:"gpu,omitempty"`
-}
-
-// HandleSystemResources handles GET /admin/system/resources.
-//
-// This is the API host's own sample — the counterpart to the per-node
-// last_stats on /admin/nodes, which the Nodes page reads. The API host is not a
-// registered stream node, so without this route the machine actually serving
-// the request is the one machine an operator cannot see.
-//
-// It reads a snapshot the sampler already published, so it costs nothing and
-// cannot hang, no matter what a mount or a GPU query is doing.
-func (h *SystemHandler) HandleSystemResources(w http.ResponseWriter, _ *http.Request) {
-	if h.resources == nil {
-		writeJSON(w, http.StatusOK, SystemResources{})
-		return
-	}
-	snapshot := h.resources.Snapshot()
-	response := SystemResources{
-		Available: snapshot.Available,
-		System:    snapshot.System,
-		GPU:       snapshot.GPU,
-	}
-	if !snapshot.SampledAt.IsZero() {
-		response.SampledAt = snapshot.SampledAt.UTC().Format(time.RFC3339)
-	}
-	writeJSON(w, http.StatusOK, response)
 }
 
 // NodeHWAccel reports one transcode node's GPU inventory.
@@ -115,14 +76,6 @@ type NodeHWAccel struct {
 type HWAccelInventory struct {
 	playback.HWAccelInfo
 	Nodes []NodeHWAccel `json:"nodes,omitempty"`
-}
-
-// HandleHWAccel handles GET /admin/system/hw-accel.
-// With transcode nodes registered it probes every healthy node (the primary
-// flat fields come from the first that responds, preserving the historical
-// shape); with none it probes the local host.
-func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.ReadHardwareAcceleration(w, r))
 }
 
 // ReadHardwareAcceleration preserves the bridge inventory and deadline behavior
@@ -234,15 +187,10 @@ func extendWriteDeadlineBy(w http.ResponseWriter, r *http.Request, budget time.D
 	}
 }
 
-// HandleBuildInfo handles GET /admin/system/build.
-func (h *SystemHandler) HandleBuildInfo(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.buildInfo)
-}
-
 func (h *SystemHandler) fetchRemoteHWAccel(ctx context.Context, node *nodepool.Node) (playback.HWAccelInfo, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, h.remoteInventoryTimeout(node))
 	defer cancel()
-	return fetchRemoteTranscodeCapabilities(requestCtx, node.URL, h.jwtSecret)
+	return fetchRemoteNodeCapabilities(requestCtx, node.SignTarget(), node.URL, h.nodeKeys)
 }
 
 // remoteInventoryTimeout bounds one node's inventory fetch by that node's own

@@ -3,6 +3,7 @@ package blobstore
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"testing/synctest"
 )
@@ -96,4 +97,15 @@ func TestPauseMutationsReleasesTakenFencesWhenCanceled(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// partSizedStore records the part size a multipart write asked for.
+type partSizedStore struct {
+	*Filesystem
+	partSize int64
+}
+
+func (s *partSizedStore) PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error {
+	s.partSize = partSize
+	return s.PutStream(ctx, key, r, contentType)
 }

@@ -12,7 +12,7 @@ import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
  * The one place playback.auto_play_next is read and written.
  *
  * Two surfaces edit this setting — the Playback settings screen and the
- * post-roll "Auto-play is on/off" toggle — and both render the *resolved*
+ * post-roll "Auto-play" switch — and both render the *resolved*
  * value. The contract resolves profile_device above profile, so a surface that
  * writes the device row while the other writes the profile row makes the
  * second control inert: it saves a profile value the device row keeps
@@ -35,6 +35,19 @@ const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 
 /** The scope a stale override can hide in, cleared on every save. */
 const DEVICE_SCOPE: SettingIdentity = { scope: "profile_device" };
+
+/**
+ * The setting for a reader that acts on it without asking, such as the player's
+ * credits countdown: null until the server answers, so a viewer who turned
+ * auto-play off is never advanced on the default. It shares the query below, so
+ * a save made through useAutoPlayNextSetting reaches it too. A failed read
+ * falls back to the contract default, as that hook does.
+ */
+export function useAutoPlayNextEnabled(options?: { enabled?: boolean }): boolean | null {
+  const query = useEffectiveSettings({ keys: [KEY], enabled: options?.enabled });
+  if (query.data === undefined && !query.isError) return null;
+  return (query.data?.[KEY]?.value ?? SETTING_DEFINITIONS[KEY].defaultValue) as boolean;
+}
 
 export function useAutoPlayNextSetting() {
   const query = useEffectiveSettings({ keys: [KEY] });

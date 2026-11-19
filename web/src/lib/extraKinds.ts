@@ -1,3 +1,5 @@
+import { t, type MessageKey } from "@/i18n";
+
 /**
  * Shared kind vocabulary for remote provider videos (ItemVideo) and local
  * extras files (ItemExtra). Keep in sync with the server's kind list.
@@ -16,27 +18,27 @@ export const EXTRA_KINDS = [
 export type ExtraKind = (typeof EXTRA_KINDS)[number];
 
 /** Singular label, used for individual video/extra cards. */
-const EXTRA_KIND_LABELS: Record<string, string> = {
-  trailer: "Trailer",
-  teaser: "Teaser",
-  featurette: "Featurette",
-  clip: "Clip",
-  behind_the_scenes: "Behind the Scenes",
-  bloopers: "Bloopers",
-  deleted_scene: "Deleted Scene",
-  other: "Extra",
+const EXTRA_KIND_LABELS: Record<string, MessageKey> = {
+  trailer: "web.detail.extras.kind.trailer",
+  teaser: "web.detail.extras.kind.teaser",
+  featurette: "web.detail.extras.kind.featurette",
+  clip: "web.detail.extras.kind.clip",
+  behind_the_scenes: "web.detail.extras.kind.behindTheScenes",
+  bloopers: "web.detail.extras.kind.bloopers",
+  deleted_scene: "web.detail.extras.kind.deletedScene",
+  other: "web.detail.extras.kind.otherKind",
 };
 
 /** Plural group label, used for section headings when grouping by kind. */
-const EXTRA_KIND_GROUP_LABELS: Record<string, string> = {
-  trailer: "Trailers",
-  teaser: "Teasers",
-  featurette: "Featurettes",
-  clip: "Clips",
-  behind_the_scenes: "Behind the Scenes",
-  bloopers: "Bloopers",
-  deleted_scene: "Deleted Scenes",
-  other: "Other",
+const EXTRA_KIND_GROUP_LABELS: Record<string, MessageKey> = {
+  trailer: "web.detail.extras.kindGroup.trailer",
+  teaser: "web.detail.extras.kindGroup.teaser",
+  featurette: "web.detail.extras.kindGroup.featurette",
+  clip: "web.detail.extras.kindGroup.clip",
+  behind_the_scenes: "web.detail.extras.kindGroup.behindTheScenes",
+  bloopers: "web.detail.extras.kindGroup.bloopers",
+  deleted_scene: "web.detail.extras.kindGroup.deletedScene",
+  other: "web.detail.extras.kindGroup.otherKind",
 };
 
 /**
@@ -48,9 +50,9 @@ export const PROVIDER_TRAILER_KINDS: ExtraKind[] = EXTRA_KINDS.filter(
 );
 
 export function extraKindLabel(kind: string): string {
-  return EXTRA_KIND_LABELS[kind] ?? "Extra";
+  return t(EXTRA_KIND_LABELS[kind] ?? "web.detail.extras.kind.otherKind");
 }
 
 export function extraKindGroupLabel(kind: string): string {
-  return EXTRA_KIND_GROUP_LABELS[kind] ?? "Other";
+  return t(EXTRA_KIND_GROUP_LABELS[kind] ?? "web.detail.extras.kindGroup.otherKind");
 }

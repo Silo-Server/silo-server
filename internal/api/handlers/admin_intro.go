@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -131,30 +129,6 @@ func NewAdminIntroHandler(
 		baseContext: baseContext,
 		logger:      logger,
 	}
-}
-
-type redetectIntroResponse struct {
-	Status string `json:"status"`
-}
-
-func (h *AdminIntroHandler) HandleRefreshEpisodeMarkers(w http.ResponseWriter, r *http.Request) {
-	h.handleEpisodeMarkers(w, r, "refresh")
-}
-
-func (h *AdminIntroHandler) HandleRedetectEpisodeIntro(w http.ResponseWriter, r *http.Request) {
-	h.handleEpisodeMarkers(w, r, "redetect")
-}
-
-// handleEpisodeMarkers serves the frozen /api/v1 endpoints, which analyze
-// episode intros only, keep their original messages, and report
-// already_running while any analysis of the episode runs.
-func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.Request, action string) {
-	status, err := h.refreshItemMarkers(r.Context(), chi.URLParam(r, "id"), action, introMarkerKinds, localRefreshOptions{})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, redetectIntroResponse{Status: status})
 }
 
 // RefreshEpisodeMarkers serves the frozen /api/v1 routes and the /api/v2
@@ -318,6 +292,7 @@ func (h *AdminIntroHandler) runLocalItemAnalysis(ctx context.Context, itemID, ki
 		"season_groups_considered", summary.SeasonGroupsConsidered,
 		"chapter_markers_written", summary.ChapterMarkersWritten,
 		"chromaprint_markers_written", summary.ChromaprintMarkersWritten,
+		"chromaprint_markers_withdrawn", summary.ChromaprintMarkersWithdrawn,
 		"fingerprint_cache_hits", summary.FingerprintCacheHits,
 		"fingerprints_computed", summary.FingerprintsComputed,
 		"credits_chapter_markers_written", summary.CreditsChapterMarkersWritten,

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { Bell, BellOff, Search } from "lucide-react";
+import { toast } from "sonner";
 import type { NotificationPreferences } from "@/api/types";
 import type { NotifiedSeries, NotifiedSeriesOptions } from "@/api/v2/notifications";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -8,6 +9,7 @@ import { buildItemHref } from "@/lib/mediaNavigation";
 import { cn } from "@/lib/utils";
 import { LoadMoreOnScroll } from "@/components/LoadMoreOnScroll";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -17,47 +19,44 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   formatEpisodeCode,
   useNotificationPreferences,
   useNotificationSeries,
+  useSetManyNotificationSeriesMuted,
   useSetNotificationSeriesMuted,
 } from "@/hooks/queries/notifications";
 import { useDebounce } from "@/hooks/useDebounce";
 import { NotificationPoster } from "./NotificationPoster";
-import { NOTIFICATION_REASONS } from "./reasons";
+import { SelectionBar } from "./SelectionBar";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 
-type Reason = (typeof NOTIFICATION_REASONS)[number]["key"];
-
-/** The preference that lets each reason notify, named as its switch is. */
-const REASON_PREFERENCES: Record<Reason, { key: keyof NotificationPreferences; label: string }> = {
-  favorite: { key: "notify_favorites", label: "Favorites" },
-  watchlist: { key: "notify_watchlist", label: "Watchlist" },
-  continue_watching: { key: "notify_continue_watching", label: "Continue Watching" },
-  next_up: { key: "notify_next_up", label: "Next Up" },
-};
-
-/** What a new episode has to be for the series to notify. */
-function triggerText(series: NotifiedSeries): string {
-  const { favorite, watchlist, continue_watching: continueWatching } = series.active_reasons;
+/** Which new episode notifies for the series: only the first to arrive after
+ * the one the profile is up to. */
+function triggerText(t: Translate, series: NotifiedSeries): string {
   const code = series.next_up_after && formatEpisodeCode(series.next_up_after);
-  if (favorite || watchlist || continueWatching || !code) return "Any new episode";
-  return `Any episode after ${code}`;
+  return code
+    ? t("web.notifications.series.nextEpisodeAfter", { code })
+    : t("web.notifications.series.nextNewEpisode");
 }
 
-/** Why a listed series does not notify: the mute, or the switches that
- * silence it. */
-function silencedText(series: NotifiedSeries, prefs: NotificationPreferences | undefined) {
-  if (series.muted) return "Muted";
-  if (prefs && !prefs.enabled) return "Notifications are off";
-  const off = prefs
-    ? NOTIFICATION_REASONS.filter(
-        (reason) => series.reasons[reason.key] && !prefs[REASON_PREFERENCES[reason.key].key],
-      ).map((reason) => REASON_PREFERENCES[reason.key].label)
-    : [];
-  if (off.length === 0) return "Won’t notify right now";
-  const names = off.length === 1 ? off[0] : `${off.slice(0, -1).join(", ")} and ${off.at(-1)}`;
-  return `${names} notifications are off`;
+/** Why a listed series does not notify on its next new episode: the mute,
+ * the switches that silence it, an episode to catch up on first, or Next Up
+ * being off for the series. */
+function silencedText(
+  t: Translate,
+  series: NotifiedSeries,
+  prefs: NotificationPreferences | undefined,
+) {
+  if (series.muted) return t("web.notifications.series.muted");
+  if (prefs && !prefs.enabled) return t("web.notifications.series.notificationsOff");
+  if (prefs && !prefs.notify_next_up)
+    return t("web.notifications.series.reasonsOff", {
+      names: t("web.notifications.preferences.nextUp"),
+    });
+  if (series.active_reasons.next_up) return t("web.notifications.series.afterCatchUp");
+  return t("web.notifications.series.wontNotifyNow");
 }
 
 /** Mutes or unmutes a row's series; absent when the server cannot. */
@@ -66,93 +65,123 @@ type MuteAction = {
   set: (series: NotifiedSeries, muted: boolean) => void;
 };
 
+/** The table's columns: selection, series, what notifies, and the switch.
+ * Narrow screens drop what notifies into the series cell. */
+function rowGrid(selectable: boolean) {
+  return cn(
+    "grid items-center gap-x-3 px-3",
+    selectable
+      ? "grid-cols-[1.25rem_minmax(0,1fr)_auto] sm:grid-cols-[1.25rem_minmax(0,1fr)_15rem_auto]"
+      : "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_15rem_auto]",
+  );
+}
+
 function NotifiedSeriesRow({
   series,
   prefs,
   mute,
+  selection,
 }: {
   series: NotifiedSeries;
   prefs: NotificationPreferences | undefined;
   mute: MuteAction | undefined;
+  selection: { selected: boolean; toggle: () => void; disabled: boolean } | undefined;
 }) {
+  const t = useT();
   const { item } = series;
-  const muteLabel = series.muted ? "Unmute" : "Mute";
+  const notifyText = series.notifies ? triggerText(t, series) : silencedText(t, series, prefs);
+  const dim = !series.notifies;
   return (
-    <li className="hover:bg-muted/60 flex items-center gap-1 rounded-xl pr-2 transition-colors">
+    <li
+      className={cn(
+        rowGrid(selection !== undefined),
+        "border-border/60 min-h-[3.5rem] border-b py-2 transition-colors",
+        selection?.selected ? "bg-secondary/70" : "hover:bg-muted/40",
+      )}
+    >
+      {selection && (
+        <Checkbox
+          checked={selection.selected}
+          disabled={selection.disabled}
+          onCheckedChange={selection.toggle}
+          aria-label={t("web.notifications.series.selectSeries", { title: item.title })}
+          className="size-[1.125rem] rounded-[5px]"
+        />
+      )}
       <ViewTransitionLink
         to={buildItemHref({ contentId: item.content_id })}
-        className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-3"
+        className="flex min-w-0 items-center gap-3 rounded-md"
       >
-        <div className={`shrink-0 ${series.notifies ? "" : "opacity-50"}`}>
-          <NotificationPoster url={item.poster_url} thumbhash={item.poster_thumbhash} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div
-            className={`truncate text-sm font-medium ${series.notifies ? "" : "text-muted-foreground"}`}
+        <NotificationPoster
+          url={item.poster_url}
+          thumbhash={item.poster_thumbhash}
+          className={cn("h-[39px] w-[26px] rounded", dim && "opacity-40")}
+        />
+        <span className="min-w-0">
+          <span
+            className={cn("block truncate text-sm font-medium", dim && "text-muted-foreground")}
           >
             {item.title}
-          </div>
-          <div className="text-muted-foreground mt-0.5 truncate text-sm">
-            {series.notifies ? triggerText(series) : silencedText(series, prefs)}
-          </div>
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {NOTIFICATION_REASONS.filter((reason) => series.reasons[reason.key]).map((reason) => {
-              const off = series.muted || !series.active_reasons[reason.key];
-              return (
-                <span
-                  key={reason.key}
-                  className={cn(
-                    "text-muted-foreground rounded-full px-2 py-0.5 text-[10px] font-medium",
-                    off ? "border-border border line-through" : "bg-muted",
-                  )}
-                >
-                  {reason.label}
-                  {off && <span className="sr-only"> (off)</span>}
-                </span>
-              );
-            })}
-          </div>
-        </div>
+          </span>
+          {/* Narrow screens show what notifies under the title. */}
+          <span className="text-muted-foreground block truncate text-xs sm:hidden">
+            {notifyText}
+          </span>
+        </span>
       </ViewTransitionLink>
-      {mute && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground shrink-0"
-          disabled={mute.pending === item.content_id}
-          aria-label={`${muteLabel} ${item.title}`}
-          title={
-            series.muted
-              ? "Notify me about new episodes again"
-              : "Stop notifying me about new episodes"
-          }
-          onClick={() => mute.set(series, !series.muted)}
-        >
-          {series.muted ? <Bell /> : <BellOff />}
-          <span className="hidden sm:inline">{muteLabel}</span>
-        </Button>
-      )}
+      <span
+        className={cn(
+          "hidden truncate text-[13px] sm:block",
+          dim ? "text-muted-foreground/80" : "text-muted-foreground",
+        )}
+      >
+        {series.muted ? (
+          <span className="inline-flex items-center gap-1.5">
+            <BellOff className="h-3.5 w-3.5" />
+            {notifyText}
+          </span>
+        ) : (
+          notifyText
+        )}
+      </span>
+      <span className="flex justify-end">
+        {mute && (
+          <Switch
+            checked={!series.muted}
+            disabled={mute.pending === item.content_id}
+            onCheckedChange={(on) => mute.set(series, !on)}
+            aria-label={t("web.notifications.series.notifySwitch", { title: item.title })}
+            title={
+              series.muted
+                ? t("web.notifications.series.unmuteHint")
+                : t("web.notifications.series.muteHint")
+            }
+          />
+        )}
+      </span>
     </li>
   );
 }
 
-const REASON_FILTERS = [
-  { value: "all", label: "All reasons" },
-  { value: "favorite", label: "Favorites" },
-  { value: "watchlist", label: "Watchlist" },
-  { value: "continue_watching", label: "Continue Watching" },
-  { value: "next_up", label: "Next Up" },
-] as const;
+/** The tabs over the table: every series, or the muted ones. */
+const SERIES_FILTERS = [
+  { value: "all", labelKey: "web.notifications.inbox.filterAll", icon: undefined },
+  { value: "muted", labelKey: "web.notifications.series.muted", icon: BellOff },
+] as const satisfies readonly {
+  value: string;
+  labelKey: MessageKey;
+  icon: ComponentType<{ className?: string }> | undefined;
+}[];
 
 const SORTS = [
-  { value: "title", label: "Title (A–Z)" },
-  { value: "-title", label: "Title (Z–A)" },
-  { value: "-latest_episode_added", label: "Latest episode" },
-  { value: "-added_at", label: "Recently added" },
-  { value: "-year", label: "Release year" },
-] as const;
+  { value: "title", labelKey: "web.notifications.series.sortTitleAsc" },
+  { value: "-title", labelKey: "web.notifications.series.sortTitleDesc" },
+  { value: "-latest_episode_added", labelKey: "web.notifications.series.sortLatestEpisode" },
+  { value: "-added_at", labelKey: "web.notifications.series.sortRecentlyAdded" },
+  { value: "-year", labelKey: "web.notifications.series.sortReleaseYear" },
+] as const satisfies readonly { value: string; labelKey: MessageKey }[];
 
-type ReasonFilter = (typeof REASON_FILTERS)[number]["value"];
+type SeriesFilter = (typeof SERIES_FILTERS)[number]["value"];
 type SortOption = (typeof SORTS)[number]["value"];
 
 function oneOf<T extends string>(
@@ -164,12 +193,14 @@ function oneOf<T extends string>(
 }
 
 /**
- * The Series view's search, reason filter, and sort, kept in the URL so they
+ * The Series view's search, filter tab, and sort, kept in the URL so they
  * survive opening a series and coming back.
  */
-function useSeriesOptions() {
+function useSeriesOptions(canFilterMuted: boolean) {
   const [params, setParams] = useSearchParams();
-  const reason = oneOf(REASON_FILTERS, params.get("reason"), "all");
+  // Without the Muted tab, All is the only one and the tabs are not shown.
+  const filters = canFilterMuted ? SERIES_FILTERS : [];
+  const filter = oneOf(filters, params.get("filter"), "all");
   const sort = oneOf(SORTS, params.get("sort"), "title");
   const q = params.get("q") ?? "";
   const set = (key: string, value: string, fallback: string) =>
@@ -183,21 +214,20 @@ function useSeriesOptions() {
       { replace: true },
     );
   return {
-    reason,
+    filters,
+    filter,
     sort,
     q,
-    setReason: (value: ReasonFilter) => set("reason", value, "all"),
+    setFilter: (value: SeriesFilter) => set("filter", value, "all"),
     setSort: (value: SortOption) => set("sort", value, "title"),
     setQ: (value: string) => set("q", value, ""),
-    options: {
-      q: q.trim(),
-      reason: reason === "all" ? undefined : reason,
-      sort,
-    } satisfies NotifiedSeriesOptions,
+    status: filter === "muted" ? ("muted" as const) : ("all" as const),
+    options: { q: q.trim(), sort } satisfies NotifiedSeriesOptions,
   };
 }
 
 function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions> }) {
+  const t = useT();
   const [text, setText] = useState(series.q);
   const debounced = useDebounce(text, 300);
   const setQ = series.setQ;
@@ -212,73 +242,87 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on URL changes only, not on each keystroke
   }, [series.q]);
   return (
-    <div className="mb-3 flex flex-col gap-2 px-3 sm:flex-row sm:items-center">
-      <div className="relative min-w-0 flex-1">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2" />
-        <Input
-          type="search"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Search series"
-          aria-label="Search series"
-          className="h-9 pl-8"
-        />
-      </div>
-      <div className="flex gap-2">
-        <Select
-          value={series.reason}
-          onValueChange={(value) => series.setReason(value as ReasonFilter)}
-        >
-          <SelectTrigger
-            className="h-9 flex-1 sm:w-auto sm:min-w-[9.5rem] sm:flex-none"
-            aria-label="Filter by reason"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {REASON_FILTERS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <>
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative min-w-0 flex-1">
+          <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+          <Input
+            type="search"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder={t("web.notifications.series.search")}
+            aria-label={t("web.notifications.series.search")}
+            className="h-10 ps-9"
+          />
+        </div>
         <Select value={series.sort} onValueChange={(value) => series.setSort(value as SortOption)}>
           <SelectTrigger
-            className="h-9 flex-1 sm:w-auto sm:min-w-[9.5rem] sm:flex-none"
-            aria-label="Sort"
+            className="h-10 w-full sm:w-56"
+            aria-label={t("web.notifications.series.sort")}
           >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {SORTS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.label}
+                {t(option.labelKey)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
-    </div>
+      {series.filters.length > 0 && (
+        <div
+          role="group"
+          aria-label={t("web.notifications.series.filterLabel")}
+          className="-mx-1 mt-3 flex gap-1 overflow-x-auto px-1 pb-1"
+        >
+          {series.filters.map((option) => {
+            const Icon = option.icon;
+            const active = series.filter === option.value;
+            return (
+              <Button
+                key={option.value}
+                variant={active ? "secondary" : "ghost"}
+                size="sm"
+                className={cn("shrink-0 rounded-full", !active && "text-muted-foreground")}
+                aria-pressed={active}
+                onClick={() => series.setFilter(option.value)}
+              >
+                {Icon && <Icon className="h-3.5 w-3.5" />}
+                {t(option.labelKey)}
+              </Button>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
 /**
  * The Series view of the notifications page: every series whose new episodes
- * notify this profile, then the ones that won't, because its preferences
- * silence them or it muted them. Both lists load as the viewer scrolls; the
- * second starts once the first is complete. With canMute, each row can mute
- * or unmute its series.
+ * can notify this profile, or that it muted, as a table.
+ * With canMute each row has a switch that mutes its series; with canBulkMute
+ * rows can be selected and muted or unmuted together.
  */
 export function NotifiedSeriesList({
-  onOpenPreferences,
+  switcher,
   canMute = false,
+  canBulkMute = false,
 }: {
-  onOpenPreferences: () => void;
+  /** The Inbox/Series control, placed above the toolbar. */
+  switcher: ReactNode;
   canMute?: boolean;
+  canBulkMute?: boolean;
 }) {
-  const series = useSeriesOptions();
+  const t = useT();
+  // The Muted tab needs status=muted, which comes with bulk mute.
+  const series = useSeriesOptions(canBulkMute);
   const setMuted = useSetNotificationSeriesMuted();
+  const setManyMuted = useSetManyNotificationSeriesMuted();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [selectingAll, setSelectingAll] = useState(false);
   const mute: MuteAction | undefined = canMute
     ? {
         pending: setMuted.isPending ? setMuted.variables?.seriesId : undefined,
@@ -286,123 +330,194 @@ export function NotifiedSeriesList({
           setMuted.mutate({ seriesId: entry.item.content_id, title: entry.item.title, muted }),
       }
     : undefined;
-  const active = useNotificationSeries("active", series.options);
-  const inactive = useNotificationSeries("inactive", series.options);
+  const list = useNotificationSeries(series.status, series.options);
   const { data: prefs } = useNotificationPreferences();
-  const notifying = active.data?.pages.flatMap((page) => page.series) ?? [];
-  const silenced = inactive.data?.pages.flatMap((page) => page.series) ?? [];
-  const filtered = series.options.q !== "" || series.options.reason !== undefined;
-  // The scroll foot pages the list it sits under: notifying series first.
-  const tail = active.hasNextPage ? active : inactive;
+  const rows = list.data?.pages.flatMap((page) => page.series) ?? [];
+  const filtered = series.options.q !== "" || series.filter !== "all";
+  const selectedRows = rows.filter((row) => selected.has(row.item.content_id));
+  // While a new search, tab, or sort loads, the previous rows stay on screen;
+  // they must not be selected or acted on, since they no longer match it.
+  const stale = list.isPlaceholderData;
+  // Checkboxes and the bulk actions also wait for Select all matching, which
+  // would overwrite the selection they change.
+  const selectionLocked = stale || selectingAll;
+  // Select all matching and a bulk mute or unmute never overlap, in either
+  // order: the bulk action deselects what Select all matching would re-add.
+  const bulkLocked = selectionLocked || setManyMuted.isPending;
+  const allLoadedSelected = rows.length > 0 && selectedRows.length === rows.length;
+
+  // Counts selection resets, so a Select all matching still loading when the
+  // selection is cleared, or the search, tab, or sort changes, selects nothing.
+  const selectionRun = useRef(0);
+  const clearSelection = () => {
+    selectionRun.current += 1;
+    setSelected(new Set());
+  };
+  // A new search, tab, or sort starts a new selection.
+  const optionsKey = JSON.stringify([series.status, series.options]);
+  useEffect(clearSelection, [optionsKey]);
+  /** Drops the series an action finished with, keeping any picked since. */
+  const deselect = (ids: string[]) =>
+    setSelected((set) => new Set([...set].filter((id) => !ids.includes(id))));
+
+  const toggle = (id: string) =>
+    setSelected((set) => {
+      const next = new Set(set);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
+  /** Loads every remaining page, then selects every series the view matches.
+   * A failed page, or a selection reset meanwhile, selects nothing. */
+  async function selectAllMatching() {
+    const run = ++selectionRun.current;
+    setSelectingAll(true);
+    try {
+      let { data, hasNextPage } = list;
+      while (hasNextPage && selectionRun.current === run)
+        ({ data, hasNextPage } = await list.fetchNextPage({ throwOnError: true }));
+      if (selectionRun.current !== run) return;
+      const ids = data?.pages.flatMap((page) => page.series.map((row) => row.item.content_id));
+      if (ids) setSelected(new Set(ids));
+    } catch {
+      toast.error(t("web.notifications.series.loadMoreFailed"));
+    } finally {
+      setSelectingAll(false);
+    }
+  }
+
+  function runBulk(muted: boolean) {
+    const seriesIds = [...selected];
+    setManyMuted.mutate({ seriesIds, muted }, { onSuccess: () => deselect(seriesIds) });
+  }
 
   let body;
-  if (active.isLoading || inactive.isLoading) {
+  if (list.isLoading) {
     body = (
-      <div className="space-y-2">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <Skeleton key={index} className="h-20 w-full rounded-xl" />
+      <div className="mt-2 space-y-2">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <Skeleton key={index} className="h-12 w-full rounded-lg" />
         ))}
       </div>
     );
-  } else if (
-    (active.isError && !active.isFetchNextPageError) ||
-    (inactive.isError && !inactive.isFetchNextPageError)
-  ) {
+  } else if (list.isError && !list.isFetchNextPageError) {
     body = (
-      <div role="alert" className="px-3 text-sm">
-        Could not load the series that notify you.{" "}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void Promise.all([active.refetch(), inactive.refetch()])}
-        >
-          Retry
-        </Button>
+      <div role="alert" className="mt-4 px-3 text-sm">
+        {t("web.notifications.series.loadFailed", {
+          retry: (chunks) => (
+            <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
+              {chunks}
+            </Button>
+          ),
+        })}
       </div>
     );
-  } else if (
-    notifying.length === 0 &&
-    silenced.length === 0 &&
-    // A page can resolve to no visible series and still have more behind it.
-    !active.hasNextPage &&
-    !inactive.hasNextPage
-  ) {
+  } else if (rows.length === 0 && !list.hasNextPage) {
     body = filtered ? (
       <div className="text-muted-foreground py-16 text-center text-sm">
-        No series match. Try another search or reason.
+        {t("web.notifications.series.noMatchFilter")}
       </div>
     ) : (
       <div className="text-muted-foreground flex flex-col items-center gap-3 py-20 text-center">
         <BellOff className="h-10 w-10 opacity-50" />
-        <div className="text-sm">No series notify you yet</div>
-        <div className="max-w-sm text-xs">
-          Series you favorite, add to your watchlist, or start watching show up here.
-        </div>
+        <div className="text-sm">{t("web.notifications.series.empty")}</div>
+        <div className="max-w-sm text-xs">{t("web.notifications.series.emptyHintNextUp")}</div>
       </div>
     );
   } else {
+    const headCell = "text-muted-foreground text-xs font-semibold";
     body = (
-      <div
-        className={
-          active.isPlaceholderData || inactive.isPlaceholderData ? "opacity-60" : undefined
-        }
-      >
-        <ul className="list-none space-y-1">
-          {notifying.map((entry) => (
+      <div className={stale ? "opacity-60" : undefined}>
+        <div className={cn(rowGrid(canBulkMute), "border-border h-10 border-y")}>
+          {canBulkMute && (
+            <Checkbox
+              checked={allLoadedSelected ? true : selectedRows.length > 0 ? "indeterminate" : false}
+              disabled={selectionLocked}
+              onCheckedChange={() =>
+                setSelected(
+                  allLoadedSelected ? new Set() : new Set(rows.map((row) => row.item.content_id)),
+                )
+              }
+              aria-label={t("web.notifications.series.selectShown")}
+              className="size-[1.125rem] rounded-[5px]"
+            />
+          )}
+          <span className={headCell}>{t("web.notifications.series.columnSeries")}</span>
+          <span className={cn(headCell, "hidden sm:block")}>
+            {t("web.notifications.series.columnNotifiesFor")}
+          </span>
+          <span className={cn(headCell, "text-end")}>
+            {mute ? t("web.notifications.series.columnNotify") : null}
+          </span>
+        </div>
+        <ul className="list-none">
+          {rows.map((entry) => (
             <NotifiedSeriesRow
               key={entry.item.content_id}
               series={entry}
               prefs={prefs}
               mute={mute}
+              selection={
+                canBulkMute
+                  ? {
+                      selected: selected.has(entry.item.content_id),
+                      toggle: () => toggle(entry.item.content_id),
+                      disabled: selectionLocked,
+                    }
+                  : undefined
+              }
             />
           ))}
         </ul>
-        {!active.hasNextPage && silenced.length > 0 && (
-          <section aria-labelledby="notified-series-silenced" className="mt-6">
-            <h2
-              id="notified-series-silenced"
-              className="text-muted-foreground after:bg-border mb-1 flex items-center gap-2 px-3 text-xs font-semibold after:h-px after:flex-1"
-            >
-              Won’t notify
-            </h2>
-            <ul className="list-none space-y-1">
-              {silenced.map((entry) => (
-                <NotifiedSeriesRow
-                  key={entry.item.content_id}
-                  series={entry}
-                  prefs={prefs}
-                  mute={mute}
-                />
-              ))}
-            </ul>
-          </section>
-        )}
         <LoadMoreOnScroll
-          hasNextPage={tail.hasNextPage}
-          isFetchingNextPage={tail.isFetchingNextPage}
-          isError={tail.isFetchNextPageError}
-          onLoadMore={() => void tail.fetchNextPage()}
-          errorMessage="Couldn’t load more series."
+          hasNextPage={list.hasNextPage}
+          isFetchingNextPage={list.isFetchingNextPage}
+          isError={list.isFetchNextPageError}
+          onLoadMore={() => void list.fetchNextPage()}
+          errorMessage={t("web.notifications.series.loadMoreFailed")}
           showSpinner
         />
       </div>
     );
   }
+
+  const count = { count: selected.size, count_text: String(selected.size) };
   return (
     <div>
-      <p className="text-muted-foreground mb-3 px-3 text-sm">
-        New episodes of these series notify this profile. Change which reasons count in{" "}
-        <button
-          type="button"
-          className="text-foreground underline underline-offset-4"
-          onClick={onOpenPreferences}
-        >
-          Preferences
-        </button>
-        {canMute ? ", or mute one series." : "."}
-      </p>
+      {switcher}
       <SeriesToolbar series={series} />
-      {body}
+      <div className="mt-3">{body}</div>
+      {selected.size > 0 && (
+        <SelectionBar
+          label={t("web.notifications.selection.seriesLabel")}
+          onClear={clearSelection}
+          summary={
+            <>
+              <span className="font-semibold">{t("web.notifications.selection.count", count)}</span>
+              {(list.hasNextPage || !allLoadedSelected) && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="text-foreground h-auto px-1 underline"
+                  disabled={bulkLocked}
+                  onClick={() => void selectAllMatching()}
+                >
+                  {t("web.notifications.selection.selectAllMatching")}
+                </Button>
+              )}
+            </>
+          }
+        >
+          <Button variant="ghost" size="sm" disabled={bulkLocked} onClick={() => runBulk(true)}>
+            <BellOff className="h-4 w-4" />
+            {t("web.notifications.series.mute")}
+          </Button>
+          <Button variant="ghost" size="sm" disabled={bulkLocked} onClick={() => runBulk(false)}>
+            <Bell className="h-4 w-4" />
+            {t("web.notifications.series.unmute")}
+          </Button>
+        </SelectionBar>
+      )}
     </div>
   );
 }

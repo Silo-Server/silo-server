@@ -15,6 +15,8 @@ import (
 )
 
 type fakeAdminCollections struct {
+	listReads, sectionReads, countReads int
+	countedIDs                          []string
 	AdminCollectionService
 	AdminCollectionExtrasService
 	view                                               handlers.AdminCollection
@@ -26,13 +28,10 @@ type fakeAdminCollections struct {
 	syncErr                                            error
 	template                                           handlers.AdminCollectionTemplateResult
 	bundles                                            []templates.BundleWithTemplates
-	bundleReads                                        int
 	catalog                                            *templates.Catalog
 	catalogReads                                       int
 	featureReads                                       int
 	listed                                             []handlers.AdminCollection
-	listReads, sectionReads, countReads                int
-	countedIDs                                         []string
 	sections                                           []handlers.AdminCollectionSection
 	rowCounts                                          map[string]handlers.AdminCollectionRowCount
 }
@@ -252,16 +251,49 @@ func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {
 	}
 }
 
-func TestAdminCollectionErrorRendersInvalidArtworkAsValidationProblem(t *testing.T) {
-	p := adminCollectionError(&handlers.APIError{
-		Status:  http.StatusBadRequest,
-		Code:    "bad_request",
-		Message: "The file is not a supported image.",
-	})
-	if p.Status != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() {
-		t.Fatalf("problem = %#v", p)
+// adminCollectionsServiceValidation runs create and update through the real
+// service, which validates before it touches the repository.
+type adminCollectionsServiceValidation struct {
+	*fakeAdminCollections
+	service *handlers.LibraryCollectionHandler
+}
+
+func (f adminCollectionsServiceValidation) CreateAdminCollection(ctx context.Context, cmd handlers.AdminCollectionCreate) (handlers.AdminCollection, error) {
+	return f.service.CreateAdminCollection(ctx, cmd)
+}
+func (f adminCollectionsServiceValidation) UpdateAdminCollection(ctx context.Context, id string, cmd handlers.AdminCollectionUpdate) (handlers.AdminCollection, error) {
+	return f.service.UpdateAdminCollection(ctx, id, cmd)
+}
+
+func TestAdminCollectionsRejectUnknownCollectionType(t *testing.T) {
+	deps, _ := libraryDeps(t)
+	deps.AdminCollections = adminCollectionsServiceValidation{fakeAdminCollections: newFakeAdminCollections(), service: &handlers.LibraryCollectionHandler{}}
+	h := newTestHandler(t, deps)
+	assertCollectionTypeProblem := func(label string, code int, body string) {
+		t.Helper()
+		var p struct {
+			Type   string `json:"type"`
+			Errors []struct {
+				Location string `json:"location"`
+				Detail   string `json:"detail"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			t.Fatalf("%s: %v %s", label, err, body)
+		}
+		if code != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() || len(p.Errors) != 1 ||
+			p.Errors[0].Location != "body.collection_type" || !strings.Contains(p.Errors[0].Detail, "manual, smart, mdblist, or tmdb") {
+			t.Fatalf("%s: got %d %s", label, code, body)
+		}
 	}
-	if len(p.Errors) != 1 || p.Errors[0].Detail != "The file is not a supported image." {
-		t.Fatalf("problem errors = %#v", p.Errors)
+
+	rec := do(t, h, http.MethodPost, "/api/v2/admin/collections", `{"title":"repro","library_id":"1","collection_type":"bogus"}`, bearer(adminToken))
+	assertCollectionTypeProblem("create", rec.Code, rec.Body.String())
+
+	path := "/api/v2/admin/collections/c1"
+	tag := do(t, h, http.MethodGet, path, "", bearer(adminToken)).Header().Get("ETag")
+	for _, body := range []string{`{"collection_type":"bogus"}`, `{"collection_type":""}`} {
+		rec := do(t, h, http.MethodPatch, path, body, with(bearer(adminToken), "If-Match", tag))
+		assertCollectionTypeProblem("update "+body, rec.Code, rec.Body.String())
 	}
 }

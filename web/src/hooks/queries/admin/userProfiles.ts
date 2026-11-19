@@ -1,5 +1,6 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t, type MessageKey } from "@/i18n";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { Profile } from "@/api/types";
@@ -62,9 +63,9 @@ function invalidateAccountProfiles(
   ]);
 }
 
-function failed(fallback: string) {
+function failed(fallback: MessageKey) {
   return (err: unknown) =>
-    toast.error(err instanceof Error && err.message ? err.message : fallback);
+    toast.error(err instanceof Error && err.message ? err.message : t(fallback));
 }
 
 export function useCreateAdminUserProfile(userId: number) {
@@ -84,8 +85,8 @@ export function useCreateAdminUserProfile(userId: number) {
       });
       return profileFromV2(profile);
     },
-    onSuccess: () => toast.success("Profile created"),
-    onError: failed("Couldn't create the profile"),
+    onSuccess: () => toast.success(t("web.admin.common.userProfiles.created")),
+    onError: failed("web.admin.common.userProfiles.createFailed"),
     onSettled: () => invalidateAccountProfiles(client, userId, context),
   });
 }
@@ -105,7 +106,7 @@ export function useUpdateAdminUserProfile(userId: number) {
       });
       return profileFromV2(profile);
     },
-    onError: failed("Couldn't save the profile"),
+    onError: failed("web.admin.common.userProfiles.saveFailed"),
     onSettled: () => invalidateAccountProfiles(client, userId, context),
   });
 }
@@ -114,6 +115,10 @@ export function useDeleteAdminUserProfile(userId: number) {
   const client = useQueryClient();
   const context = captureProfileRequestContext();
   return useMutation({
+    // Sent even offline, so it fails at once. The confirm dialog closes on
+    // click, so a delete held until reconnect would remove the profile and its
+    // watch history later, with nothing on screen saying one is pending.
+    networkMode: "always",
     retry: false,
     mutationFn: async (profileId: string) => {
       const authority = context ?? captureAdminUserAuthority();
@@ -123,8 +128,8 @@ export function useDeleteAdminUserProfile(userId: number) {
         profileContext: authority,
       });
     },
-    onSuccess: () => toast.success("Profile deleted"),
-    onError: failed("Couldn't delete the profile"),
+    onSuccess: () => toast.success(t("web.admin.common.userProfiles.deleted")),
+    onError: failed("web.admin.common.userProfiles.deleteFailed"),
     onSettled: () => invalidateAccountProfiles(client, userId, context),
   });
 }

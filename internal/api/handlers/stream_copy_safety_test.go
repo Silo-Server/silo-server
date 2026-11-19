@@ -270,7 +270,7 @@ func TestHandleTranscodeServe_RefusesRevivingACopyUnsafeHLSRecipe(t *testing.T) 
 				file := copySafetyStreamFile(t, &unsafe)
 
 				sessionMgr := playback.NewSessionManager(0, 0)
-				handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+				handler := newKeyedPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 				handler.JWTSecret = secret
 
 				sessionID := "lost-hls-" + route.name + "-" + executor.name
@@ -308,7 +308,7 @@ func TestHandleTranscodeServe_UndecidedRevivalIsRacedAndKnownUnsafeIsRefused(t *
 
 		sessionMgr := playback.NewSessionManager(0, 0)
 		racer := &recordingCopySafetyRacer{}
-		handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+		handler := newKeyedPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 		handler.JWTSecret = secret
 		handler.CopySafetyRacer = racer
 
@@ -331,7 +331,7 @@ func TestHandleTranscodeServe_UndecidedRevivalIsRacedAndKnownUnsafeIsRefused(t *
 		file := copySafetyStreamFile(t, nil)
 
 		sessionMgr := playback.NewSessionManager(0, 0)
-		handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+		handler := newKeyedPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 		handler.JWTSecret = secret
 		handler.CopySafetyRacer = &recordingCopySafetyRacer{knownUnsafe: true}
 

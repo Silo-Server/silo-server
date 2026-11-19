@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -55,7 +56,9 @@ func (t *SeedContentAvailabilityTask) Execute(ctx context.Context, progress task
 
 // RebuildReleaseInterestTask rebuilds profile_series_interest from favorites,
 // watchlist, and watch progress. It is the rollout backfill and the periodic
-// drift-repair pass; recomputes share the same code as live updates.
+// drift-repair pass; recomputes share the same code as live updates. Every API
+// server runs the task manager, and a server that finds another one rebuilding
+// skips the run.
 type RebuildReleaseInterestTask struct {
 	system *notifications.System
 }
@@ -88,9 +91,14 @@ func (t *RebuildReleaseInterestTask) Execute(ctx context.Context, progress taskm
 		return nil
 	}
 	progress.Report(0, "Rebuilding profile series interest")
-	if err := t.system.RebuildInterest(ctx, func(percent int, message string) {
+	err := t.system.RebuildInterest(ctx, func(percent int, message string) {
 		progress.Report(float64(percent), message)
-	}); err != nil {
+	})
+	if errors.Is(err, notifications.ErrInterestRebuildRunning) {
+		progress.Report(100, "Another server is rebuilding notification interest")
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("rebuilding notification interest: %w", err)
 	}
 	progress.Report(100, "Notification interest rebuilt")

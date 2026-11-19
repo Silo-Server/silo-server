@@ -23,10 +23,17 @@ import (
 // the v1 handlers and the v2 operations share. Each returns the view the v1
 // handler writes verbatim and, on failure, an *APIError.
 
-// HomeSections answers every section of the home page with its items for
+// HomeSections answers every section of the home page that has items for
 // the profile on the context, each row capped at viewer.ItemLimitCap items
 // when it is set.
 func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer) (SectionsView, error) {
+	return h.homeSections(ctx, viewer, false)
+}
+
+// homeSections is HomeSections. With keepEmptyRows, it answers sections with
+// no items as the frozen v1 endpoint always has, leaving out only an
+// off-season seasonal row and one that hiding watched titles emptied.
+func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer, keepEmptyRows bool) (SectionsView, error) {
 	start := time.Now()
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(ctx)
 	if err != nil {
@@ -40,6 +47,10 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	hideWatched := h.homeHidesWatchedItems(ctx)
 	withItems := h.fetcher.FetchAll(ctx, homeSectionsForFetch(resolved, hideWatched), nil, libraryIDs, userID, profileID, accessFilter)
 	fetchedAt := time.Now()
+	candidateCount := 0
+	for _, section := range withItems {
+		candidateCount += len(section.Items)
+	}
 	var userStates map[string]*itemUserStateResponse
 	if hideWatched {
 		// Filter before the cross-section diversity pass so a watched item
@@ -49,8 +60,14 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	}
 	withItems = cutCappedSectionItems(withItems, viewer.ItemLimitCap)
 	withItems = applyDiversityFilter(withItems)
-	withItems = dropEmptySeasonalSections(withItems)
-	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates)
+	if keepEmptyRows {
+		withItems = dropEmptySeasonalSections(withItems)
+	} else {
+		withItems = dropEmptySections(withItems)
+	}
+	filteredAt := time.Now()
+	var timings sectionBuildTimings
+	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability, &timings)
 	itemCount := 0
 	for _, section := range withItems {
 		itemCount += len(section.Items)
@@ -60,14 +77,26 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	if elapsed >= 500*time.Millisecond {
 		level = slog.LevelWarn
 	}
-	slog.Log(ctx, level, "home sections timing",
-		"total_ms", elapsed.Milliseconds(),
-		"resolve_ms", resolvedAt.Sub(start).Milliseconds(),
-		"next_up_ms", nextUpAt.Sub(resolvedAt).Milliseconds(),
-		"fetch_all_ms", fetchedAt.Sub(nextUpAt).Milliseconds(),
-		"build_response_ms", time.Since(fetchedAt).Milliseconds(),
-		"section_count", len(withItems), "item_count", itemCount,
+	logger := slog.Default()
+	if !logger.Enabled(ctx, level) {
+		return response, nil
+	}
+	// build_response_ms keeps its meaning (everything after fetch_all) so old
+	// and new lines compare; filter_ms and the per-lookup fields split it.
+	var fields [10 + sectionLookupCount]slog.Attr
+	attrs := append(fields[:0],
+		slog.Int64("total_ms", elapsed.Milliseconds()),
+		slog.Int64("resolve_ms", resolvedAt.Sub(start).Milliseconds()),
+		slog.Int64("next_up_ms", nextUpAt.Sub(resolvedAt).Milliseconds()),
+		slog.Int64("fetch_all_ms", fetchedAt.Sub(nextUpAt).Milliseconds()),
+		slog.Int64("build_response_ms", time.Since(fetchedAt).Milliseconds()),
+		slog.Int64("filter_ms", filteredAt.Sub(fetchedAt).Milliseconds()),
+		slog.Bool("hide_watched", hideWatched),
+		slog.Int("candidate_count", candidateCount),
+		slog.Int("section_count", len(withItems)),
+		slog.Int("item_count", itemCount),
 	)
+	logger.LogAttrs(ctx, level, "home sections timing", timings.appendLogAttrs(attrs)...)
 	return response, nil
 }
 
@@ -98,10 +127,11 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0], nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
 			sections.LogFetchError(ctx, "api", s, fetchErr)
-			// Unlike the aggregate read, which keeps the page up with an
-			// empty row, a failed single section answers an error, so a
-			// client can tell it from a section with nothing to show. A
-			// deleted collection is not a failure and keeps its empty row.
+			// Unlike the aggregate reads, which keep the page up by leaving
+			// the row out (v2) or answering it empty (v1), a failed single
+			// section answers an error, so a client can tell it from a
+			// section with nothing to show. A deleted collection is not a
+			// failure and keeps its empty row.
 			if !emptyOnFetchError && !sections.IsMissingCollection(fetchErr) {
 				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 			}
@@ -143,7 +173,7 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 			row.Items, hasMore = row.Items[:limit], true
 		}
 	}
-	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates).Sections
+	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability, nil).Sections
 	if len(built) == 0 {
 		return resolvedSectionResponse{
 			ID:          row.ID,
@@ -156,6 +186,8 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 			Customized:  row.Customized,
 			Items:       []sectionItemResponse{},
 			HasMore:     hasMore,
+			TitleKey:    row.TitleKey,
+			TitleArgs:   row.TitleArgs,
 		}
 	}
 	built[0].HasMore = hasMore
@@ -211,7 +243,7 @@ func (h *SectionHandler) homeLayoutWithItems(ctx context.Context, viewer Section
 	if n <= 0 || h.fetcher == nil {
 		return view, nil
 	}
-	view.IncludedSections = h.includedHomeRows(ctx, resolved[:n], h.homeHidesWatchedItems(ctx), viewer, budget,
+	view.IncludedSections = h.includedHomeRows(sections.WithCollectionCardGate(ctx), resolved[:n], h.homeHidesWatchedItems(ctx), viewer, budget,
 		func(ctx context.Context, s sections.ResolvedSection) (sections.SectionWithItems, error) {
 			return h.fetcher.FetchOne(ctx, s, nil, libraryIDs, userID, profileID, accessFilter)
 		})

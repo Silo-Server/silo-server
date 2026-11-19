@@ -80,67 +80,56 @@ func TestAFTKRTEAC3HLSCorrectionTranscodesAudioOnly(t *testing.T) {
 	}
 }
 
-func TestFireTVDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
+func TestDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 8
 	file.VideoTracks[0].DVBLCompatID = 1
 	file.VideoTracks[0].HDR10Plus = true
 	file.VideoTracks[0].VideoRange = "HDR"
 	file.VideoTracks[0].VideoRangeType = "DOVI HDR10+"
-	req := quirkRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10Plus: true, DolbyVisionProfiles: []int{8}}
-	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Features = append(direct.Features, ClientDV8HDR10PlusSanitizerV3)
-	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
-
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || len(result.Plan.RuntimeCorrections) != 1 || result.Plan.RuntimeCorrections[0] != ClientDV8HDR10PlusSanitizerV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFireTVDV8HDR10PlusV3 {
-		t.Fatalf("result = %#v", result)
-	}
-
-	direct.Features = nil
-	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
-	withoutRuntime := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
-	if withoutRuntime.Plan == nil || len(withoutRuntime.Plan.AppliedQuirks) != 0 || len(withoutRuntime.Plan.RuntimeCorrections) != 0 {
-		t.Fatalf("unadvertised correction applied: %#v", withoutRuntime.Plan)
-	}
-}
-
-func TestFirefoxMatroskaAACTimingQuirkIsExact(t *testing.T) {
-	request := validStartRequestV3()
-	request.ClientPlaybackContext.Device = DeviceContextV3{
-		Platform: "web",
-		PlatformDetails: map[string]string{
-			"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
-		},
-	}
-	source := SourceDescriptorV3{Container: "mkv", AudioCodec: "aac"}
-	quirk, ok := firefoxMatroskaAACTimingQuirkV3(source, request)
-	if !ok || quirk == nil || quirk.ID != QuirkFirefoxMatroskaAACTimingV3 || quirk.Action != "audio_only_transcode" {
-		t.Fatalf("Firefox Matroska AAC quirk = %#v, ok=%v", quirk, ok)
+	dv8Output := &HDRCapabilitiesV3{HDR10: true, HDR10Plus: true, DolbyVisionProfiles: []int{8}}
+	philips := func(soc string) DeviceContextV3 {
+		return DeviceContextV3{Platform: "android", Manufacturer: "TPV", Model: "Philips Google TV TA5", PlatformDetails: map[string]string{"sdk_int": "34", "soc_manufacturer": soc}}
 	}
 
 	for _, test := range []struct {
-		name      string
-		platform  string
-		userAgent string
-		container string
-		codec     string
+		name   string
+		device DeviceContextV3
+		quirk  string
 	}{
-		{name: "MP4 AAC", platform: "web", userAgent: "Mozilla/5.0 Firefox/154.0", container: "mp4", codec: "aac"},
-		{name: "Matroska Opus", platform: "web", userAgent: "Mozilla/5.0 Firefox/154.0", container: "mkv", codec: "opus"},
-		{name: "Chrome", platform: "web", userAgent: "Mozilla/5.0 Chrome/140.0", container: "mkv", codec: "aac"},
-		{name: "SeaMonkey", platform: "web", userAgent: "Mozilla/5.0 Firefox/128.0 SeaMonkey/2.53", container: "mkv", codec: "aac"},
-		{name: "non-web", platform: "android", userAgent: "Mozilla/5.0 Firefox/154.0", container: "mkv", codec: "aac"},
+		{name: "Fire TV", device: quirkRequestV3().ClientPlaybackContext.Device, quirk: QuirkFireTVDV8HDR10PlusV3},
+		{name: "MediaTek TV", device: philips("Mediatek"), quirk: "android.mediatek.dv8_hdr10plus_sei_v1"},
+		{name: "other SoC", device: philips("QTI")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			candidate := request
-			candidate.ClientPlaybackContext.Device.Platform = test.platform
-			candidate.ClientPlaybackContext.Device.PlatformDetails = map[string]string{"user_agent": test.userAgent}
-			if got, eligible := firefoxMatroskaAACTimingQuirkV3(SourceDescriptorV3{Container: test.container, AudioCodec: test.codec}, candidate); eligible || got != nil {
-				t.Fatalf("unexpected quirk = %#v, eligible=%v", got, eligible)
+			req := quirkRequestV3()
+			req.ClientPlaybackContext.Device = test.device
+			req.Capabilities.VideoDecode = hevcMain10DecodeV3()
+			req.Capabilities.HDRDetails = dv8Output
+			req.ClientPlaybackContext.Output.HDRDetails = dv8Output
+			direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			direct.Features = append(direct.Features, ClientDV8HDR10PlusSanitizerV3)
+			req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+
+			result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
+			if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if test.quirk == "" {
+				if len(result.Plan.AppliedQuirks) != 0 || len(result.Plan.RuntimeCorrections) != 0 {
+					t.Fatalf("unexpected correction: quirks=%#v corrections=%v", result.Plan.AppliedQuirks, result.Plan.RuntimeCorrections)
+				}
+				return
+			}
+			if len(result.Plan.RuntimeCorrections) != 1 || result.Plan.RuntimeCorrections[0] != ClientDV8HDR10PlusSanitizerV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != test.quirk {
+				t.Fatalf("quirks=%#v corrections=%v, want %s", result.Plan.AppliedQuirks, result.Plan.RuntimeCorrections, test.quirk)
+			}
+
+			direct.Features = nil
+			req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+			withoutRuntime := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
+			if withoutRuntime.Plan == nil || len(withoutRuntime.Plan.AppliedQuirks) != 0 || len(withoutRuntime.Plan.RuntimeCorrections) != 0 {
+				t.Fatalf("unadvertised correction applied: %#v", withoutRuntime.Plan)
 			}
 		})
 	}

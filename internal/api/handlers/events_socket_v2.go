@@ -15,13 +15,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/gorilla/websocket"
 )
 
 const eventsSchemeHTTP = "http"
@@ -87,10 +88,11 @@ func (h *EventsSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity) 
 		return "", err
 	}
 	identity.EffectiveRole = claims.Role
-	if identity.APIKeyID != 0 {
+	scope, ok := access.GetScope(validated)
+	// A monitoring key resolves no viewer scope: its revision stands in.
+	if identity.APIKeyID != 0 && !ok {
 		return h.Tickets.Mint(ctx, identity)
 	}
-	scope, ok := access.GetScope(validated)
 	// A fingerprint of fallback preferences would differ from the profile's
 	// real scope once the read recovers and end the connection as an access
 	// change; refuse the ticket as for any other failed read, and let the
@@ -304,7 +306,7 @@ type SocketAPIKeys interface {
 // minted.
 func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, keys SocketAPIKeys, publicURL string) *EventsSocketV2 {
 	h := &EventsSocketV2{Events: events, Tickets: tickets, APIKeys: keys, PublicOrigin: publicURL}
-	h.Validate = bySocketCredential(newSocketAuthorityValidator(sessions, users, resolver, actingAdmin), newAPIKeySocketValidator(keys, users, actingAdmin))
+	h.Validate = bySocketCredential(newSocketAuthorityValidator(sessions, users, resolver, actingAdmin), newAPIKeySocketValidator(keys, users, resolver, actingAdmin))
 	return h
 }
 
@@ -333,13 +335,19 @@ func bySocketCredential(login, keys EventsSocketValidator) EventsSocketValidator
 // administrator that the acting-admin decision admits with no profile, as it
 // does at the HTTP admin gate. A deleted key or a missing or disabled account
 // ends the credential; the rest are access changes.
-func newAPIKeySocketValidator(keys SocketAPIKeys, users access.UserRepository, actingAdmin apimw.ActingAdminDecider) EventsSocketValidator {
+//
+// An identity minted with the user role is a user key's and takes
+// validateUserKeySocket instead.
+func newAPIKeySocketValidator(keys SocketAPIKeys, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider) EventsSocketValidator {
 	if keys == nil || users == nil || actingAdmin == nil {
 		return nil
 	}
 	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
 		defer stop()
+		if identity.Role != eventsAdminRole {
+			return validateUserKeySocket(ctx, checkCtx, identity, keys, users, resolver)
+		}
 		if identity.APIKeyID <= 0 || identity.SessionID != "" || identity.ProfileID != "" || !identity.AccessExpiresAt.After(time.Now()) {
 			return ctx, nil, evt.ErrSocketTicket
 		}
@@ -364,6 +372,43 @@ func newAPIKeySocketValidator(keys SocketAPIKeys, users access.UserRepository, a
 		}
 		return apimw.SetClaims(ctx, claims), claims, nil
 	}
+}
+
+// validateUserKeySocket checks a user key's socket identity: the key must
+// keep the configuration revision it had at mint and an event scope
+// (auth.APIKeyEventScopes), a profile-bound key must act as its profile, and
+// the profile's viewer scope must still be the one the ticket was minted
+// under. The key skips the profile PIN, as it does over HTTP. A deleted key
+// or profile and a missing or disabled account end the credential; the rest
+// are access changes. The connection holds the user role whatever its
+// account's role is.
+func validateUserKeySocket(ctx, checkCtx context.Context, identity evt.SocketIdentity, keys SocketAPIKeys, users access.UserRepository, resolver apimw.ViewerResolver) (context.Context, *auth.Claims, error) {
+	if resolver == nil || identity.APIKeyID <= 0 || identity.SessionID != "" || !identity.AccessExpiresAt.After(time.Now()) {
+		return ctx, nil, evt.ErrSocketTicket
+	}
+	key, err := keys.GetMetadataByID(checkCtx, identity.APIKeyID)
+	if err != nil || key == nil || key.UserID != identity.UserID {
+		return ctx, nil, evt.ErrSocketTicket
+	}
+	user, err := users.GetByID(checkCtx, identity.UserID)
+	if err != nil || user == nil || !user.Enabled {
+		return ctx, nil, evt.ErrSocketTicket
+	}
+	if key.Revision != identity.APIKeyRevision || !auth.HoldsAPIKeyEventScope(key.Scopes) ||
+		(key.ProfileID != "" && key.ProfileID != identity.ProfileID) {
+		return ctx, nil, errSocketAccessChanged
+	}
+	scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, ProfileID: identity.ProfileID, SkipPINVerification: true})
+	if err != nil {
+		return ctx, nil, evt.ErrSocketTicket
+	}
+	if identity.AccessFingerprint != "" && !scope.PreferencesDegraded && identity.AccessFingerprint != eventsScopeFingerprint(scope) {
+		return ctx, nil, errSocketAccessChanged
+	}
+	claims := &auth.Claims{UserID: identity.UserID, Role: string(scopeUser), TokenType: auth.TokenTypeAPIKey, APIKeyID: key.ID, APIKeyScopes: key.Scopes, APIKeyProfileID: key.ProfileID}
+	ctx = apimw.SetClaims(ctx, claims)
+	ctx = apimw.SetProfileID(ctx, identity.ProfileID)
+	return access.SetScope(ctx, scope), claims, nil
 }
 
 // refuseRemotePlaybackSocket narrows validate to sessions that are not a
@@ -421,7 +466,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if authority.Role != identity.Role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken})
+		// The login-session claims the ticket stands for; Role is set below.
+		base := auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, TokenType: auth.TokenTypeAccess}
+		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken, SkipPINVerification: base.SkipsProfilePIN()})
 		if errors.Is(err, access.ErrProfileUnverified) || (err == nil && !scope.ProfileVerified) {
 			return ctx, nil, errSocketAccessChanged
 		}
@@ -435,8 +482,10 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		}
 		role := authority.Role
 		if role == eventsAdminRole {
+			admin := base
+			admin.Role = role
 			acting, err := actingAdmin(checkCtx, apimw.ActingAdminRequest{
-				Claims:    &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess},
+				Claims:    &admin,
 				ProfileID: identity.ProfileID,
 				DeviceID:  identity.DeviceID,
 			})
@@ -450,7 +499,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.AccessFingerprint != "" && identity.EffectiveRole != role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		claims := &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess}
+		final := base
+		final.Role = role
+		claims := &final
 		authority.Narrow(claims)
 		ctx = apimw.SetClaims(ctx, claims)
 		ctx = apimw.SetProfileID(ctx, identity.ProfileID)

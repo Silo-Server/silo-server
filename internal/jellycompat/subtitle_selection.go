@@ -285,8 +285,19 @@ func compatDetailSubtitleStreamIndex(detail *upstreamItemDetail, version catalog
 	// English one, even when forced tracks are otherwise hidden; Jellyfin
 	// clients get the same track.
 	if mode == compatSubtitleAlways {
-		if index := compatSignatureSubtitleIndex(candidates, detail.SubtitleTrackSignature); index != nil {
+		sig := detail.SubtitleTrackSignature
+		if index := compatSignatureSubtitleIndex(candidates, sig); index != nil {
 			return index
+		}
+		// A remux can retitle the remembered forced track, or a rescan add a
+		// region to its language. Rank the preferred language's tracks
+		// against the signature as the web player does, before forced tracks
+		// are hidden, so the forced track still wins. Other signatures keep
+		// Jellyfin's selection.
+		if !sig.IsZero() && sig.Forced && len(preferred) > 0 {
+			if index := compatSignatureFallbackSubtitleIndex(candidates, preferred[0], sig); index != nil {
+				return index
+			}
 		}
 	}
 	if !detail.ShowForcedSubtitles {
@@ -302,7 +313,7 @@ func compatSignatureSubtitleIndex(candidates []compatSubtitleCandidate, sig *use
 	if sig.IsZero() {
 		return nil
 	}
-	same := func(a, b string) bool { return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b)) }
+	same := compatSameSignatureTrait
 	for _, c := range candidates {
 		if same(c.Source, sig.Source) &&
 			same(c.Language, sig.Language) &&
@@ -314,6 +325,107 @@ func compatSignatureSubtitleIndex(candidates []compatSubtitleCandidate, sig *use
 		}
 	}
 	return nil
+}
+
+// compatSignatureFallbackSubtitleIndex ports the Silo web player's Always
+// fallback for a signature no candidate matches exactly
+// (findPreferredSubtitleIndexWithSignature): among the candidates in the
+// preferred language, the closest language tag wins, then the most matching
+// signature traits, then a full, plain, text, embedded track. The web player
+// also ranks tracks it would burn in last, which depends on a renderer
+// jellycompat does not know. It returns nil when no candidate is in the
+// preferred language.
+func compatSignatureFallbackSubtitleIndex(candidates []compatSubtitleCandidate, preferred string, sig *userstore.SubtitleTrackSignature) *int {
+	same := compatSameSignatureTrait
+	score := func(c compatSubtitleCandidate) int {
+		score := 0
+		if same(c.Source, sig.Source) {
+			score += 4
+		}
+		if c.Forced == sig.Forced {
+			score += 2
+		}
+		if c.HearingImpaired == sig.HearingImpaired {
+			score += 2
+		}
+		if same(c.Codec, sig.Codec) {
+			score++
+		}
+		if same(c.Label, sig.Label) {
+			score++
+		}
+		return score
+	}
+	priority := func(c compatSubtitleCandidate) int {
+		priority := 0
+		if c.Forced {
+			priority += 16
+		}
+		if c.HearingImpaired {
+			priority += 8
+		}
+		if compatBitmapSubtitle(c.Codec) {
+			priority += 4
+		}
+		switch c.Source {
+		case playback.SubtitleSourceExternalV3:
+			priority++
+		case playback.SubtitleSourceDownloadedV3:
+			priority += 2
+		}
+		return priority
+	}
+	var best *int
+	var bestRank, bestScore, bestPriority int
+	for _, c := range candidates {
+		rank := compatLanguageMatchRank(c.Language, preferred)
+		if rank < 0 {
+			continue
+		}
+		s, p := score(c), priority(c)
+		if best == nil || rank < bestRank || (rank == bestRank && (s > bestScore || (s == bestScore && p < bestPriority))) {
+			best, bestRank, bestScore, bestPriority = intPtr(c.Index), rank, s, p
+		}
+	}
+	return best
+}
+
+// compatLanguageMatchRank orders a remembered-track fallback as the web
+// player does: the same tag, then the bare language, then another variant.
+// Unlike ordinary Jellyfin selection, a regional preference can fall back
+// within its primary language. Unrelated languages return -1.
+func compatLanguageMatchRank(language, preferred string) int {
+	candidate := lang.CompatibleTag(language)
+	preferredTag := lang.CompatibleTag(preferred)
+	if candidate == "" || preferredTag == "" {
+		return -1
+	}
+	if candidate == preferredTag {
+		return 0
+	}
+	if primary := lang.PrimaryLanguage(candidate); primary == "" || primary != lang.PrimaryLanguage(preferredTag) {
+		return -1
+	}
+	if !strings.Contains(candidate, "-") {
+		return 1
+	}
+	return 2
+}
+
+// compatBitmapSubtitle mirrors the web player's isBitmapCodec.
+func compatBitmapSubtitle(codec string) bool {
+	switch compatSubtitleProfileFormat(codec) {
+	case "pgssub", "dvdsub", "dvbsub", "dvb_teletext": //nolint:goconst // the bitmap formats compatSubtitleProfileFormat returns
+		return true
+	default:
+		return false
+	}
+}
+
+// compatSameSignatureTrait compares a candidate's trait with a remembered
+// signature's, ignoring case and surrounding space.
+func compatSameSignatureTrait(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
 // compatSubtitleTrackLabel is the label the playback v3 inventory gives a
@@ -337,20 +449,52 @@ func compatSubtitleTrackLabel(track catalog.VersionSubtitleTrack) string {
 // client last saved, or "" when none is stored or it cannot be read. It only
 // tells Jellyfin's Default apart from Smart, which share Silo's "auto".
 func savedCompatSubtitleMode(ctx context.Context, provider userstore.UserStoreProvider, session *Session) string {
+	saved, _ := compatSavedConfiguration(ctx, provider, session)
+	return saved.SubtitleMode
+}
+
+// compatSavedUserConfiguration holds the user configuration fields a Jellyfin
+// client saved that playback consults.
+type compatSavedUserConfiguration struct {
+	SubtitleMode               string
+	RememberAudioSelections    *bool
+	RememberSubtitleSelections *bool
+}
+
+// remembersAudio reports RememberAudioSelections, true unless the client
+// turned it off, as in Jellyfin.
+func (c compatSavedUserConfiguration) remembersAudio() bool {
+	return c.RememberAudioSelections == nil || *c.RememberAudioSelections
+}
+
+// remembersSubtitles reports RememberSubtitleSelections, true unless the
+// client turned it off.
+func (c compatSavedUserConfiguration) remembersSubtitles() bool {
+	return c.RememberSubtitleSelections == nil || *c.RememberSubtitleSelections
+}
+
+// compatSavedConfiguration reads the configuration the viewer's Jellyfin
+// client last saved. It is zero when none is stored, and zero with an error
+// when it cannot be read, so a caller that must honor an opt-out can tell the
+// two apart.
+func compatSavedConfiguration(ctx context.Context, provider userstore.UserStoreProvider, session *Session) (compatSavedUserConfiguration, error) {
+	var saved compatSavedUserConfiguration
 	if provider == nil || session == nil || session.ProfileID == "" {
-		return ""
+		return saved, nil
 	}
 	store, err := provider.ForUser(ctx, session.StreamAppUserID)
-	if err != nil || store == nil {
-		return ""
+	if err != nil {
+		return saved, err
+	}
+	if store == nil {
+		return saved, nil
 	}
 	raw, err := store.GetSetting(ctx, configurationKey(session.ProfileID))
 	if err != nil || raw == "" {
-		return ""
+		return saved, err
 	}
-	var saved struct{ SubtitleMode string }
-	if json.Unmarshal([]byte(raw), &saved) != nil {
-		return ""
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+		return compatSavedUserConfiguration{}, err
 	}
-	return saved.SubtitleMode
+	return saved, nil
 }

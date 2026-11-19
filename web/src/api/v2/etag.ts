@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 /**
  * Reads that hand back the validator a later guarded write must send as
  * If-Match. Components never read response headers; they keep the returned
@@ -7,8 +8,7 @@ import { v2, type V2OperationKey, type V2RequestArgs, type V2Result } from "./re
 
 /** The validator to send as If-Match. Throws when a guarded read had none to give. */
 export function requiredETag(etag: string | undefined | null): string {
-  if (!etag || etag === "*")
-    throw new Error("Reload this collection before editing; its version is unavailable.");
+  if (!etag || etag === "*") throw new Error(t("web.common.errors.collectionVersionUnavailable"));
   return etag;
 }
 

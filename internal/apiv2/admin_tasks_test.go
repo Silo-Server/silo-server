@@ -376,6 +376,29 @@ func TestAdminTaskGuardAndLocalAcknowledgment(t *testing.T) {
 		t.Fatalf("false job acceptance: %d %s", started.Code, started.Body)
 	}
 }
+
+// An unsaved schedule reports the task's defaults at revision zero; when those
+// defaults change, an editor's earlier tag must stop matching.
+func TestAdminTaskUnsavedScheduleTagFollowsDefaults(t *testing.T) {
+	f := newFakeAdminTasks()
+	f.schedule = taskmanager.Schedule{Triggers: []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}}
+	h := adminTasksTestHandler(t, f)
+	base := Prefix + "/admin/tasks/fixture/triggers"
+	tag := do(t, h, "GET", base, "", bearer(adminToken)).Header().Get("ETag")
+	f.schedule.Triggers = []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:00"}}
+	stale := do(t, h, "PUT", base, `{"triggers":[{"type":"startup"}]}`, with(bearer(adminToken), "If-Match", tag))
+	requireProblem(t, stale, TypePreconditionFailed)
+	if f.writes != 0 {
+		t.Fatalf("stale tag saved over changed defaults: %+v", f)
+	}
+	current := do(t, h, "GET", base, "", bearer(adminToken)).Header().Get("ETag")
+	if current == tag || stale.Header().Get("ETag") != current {
+		t.Fatalf("tags: old %s, current %s, 412 %s", tag, current, stale.Header().Get("ETag"))
+	}
+	if saved := do(t, h, "PUT", base, `{"triggers":[]}`, with(bearer(adminToken), "If-Match", current)); saved.Code != 200 || f.expected != 0 {
+		t.Fatalf("first save: %d %s expected=%d", saved.Code, saved.Body, f.expected)
+	}
+}
 func TestAdminTaskAuthorizationAndValidation(t *testing.T) {
 	f := newFakeAdminTasks()
 	h := adminTasksTestHandler(t, f)
@@ -517,5 +540,25 @@ func TestTaskExecutionExposesMaintenanceStepsWithoutErrors(t *testing.T) {
 	other := taskExecutionOf(taskmanager.ExecutionResult{TaskKey: "match_media", ResultData: result.ResultData})
 	if other.Steps != nil {
 		t.Fatalf("Steps for another task = %+v, want none", other.Steps)
+	}
+}
+
+func TestTaskExecutionErrorMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  string
+		message string
+		want    string
+	}{
+		{name: "failure text stays private", status: "failed", message: "dial tcp 10.0.0.5:5432: refused", want: "Task failed. Inspect administrator diagnostics for details."},
+		{name: "max runtime stop explains itself", status: "cancelled", message: "Stopped after reaching the max runtime of 4h0m0s", want: "Stopped after reaching the max runtime of 4h0m0s"}, //nolint:misspell // Existing task state vocabulary.
+		{name: "admin cancel has none", status: "cancelled", want: ""}, //nolint:misspell // Existing task state vocabulary.
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := taskExecutionOf(taskmanager.ExecutionResult{TaskKey: "detect_intro_markers", Status: tc.status, ErrorMessage: tc.message})
+			if got.ErrorMessage != tc.want {
+				t.Fatalf("ErrorMessage = %q, want %q", got.ErrorMessage, tc.want)
+			}
+		})
 	}
 }

@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { components } from "./schema";
 import {
   captureProfileRequestContext,
@@ -33,7 +34,7 @@ export const MAX_MEMBER_STATE_IDS = 200;
 function numericID(value: string): number {
   const id = Number(value);
   if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(id))
-    throw new Error("Invalid member identity.");
+    throw new Error(t("web.common.errors.memberIdentityInvalid"));
   return id;
 }
 
@@ -52,7 +53,7 @@ export async function queryRoomMemberState(
   const ids = Array.from(new Set(contentIds.map((id) => id.trim()).filter(Boolean)));
   if (ids.length === 0) return { members: [], items: [] };
   if (ids.length > MAX_MEMBER_STATE_IDS)
-    throw new Error(`Member state reads are limited to ${MAX_MEMBER_STATE_IDS} items.`);
+    throw new Error(t("web.common.errors.memberStateLimit", { max: MAX_MEMBER_STATE_IDS }));
   const result = await v2("POST /api/v2/watch-together/rooms/{room_id}/member-state", {
     path: { room_id: roomId },
     headers: { "X-Room-Token": roomToken },

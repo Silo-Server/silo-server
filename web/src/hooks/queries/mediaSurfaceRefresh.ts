@@ -1,4 +1,5 @@
 import type { Query, QueryClient } from "@tanstack/react-query";
+import { API_READ_TIMEOUT_MS } from "@/api/requestDeadline";
 import type {
   HomeSectionItemsResponse,
   ItemDetail,
@@ -23,9 +24,12 @@ import {
   shuffleKeys,
   watchlistKeys,
 } from "./keys";
+import { sectionShowsWholeList } from "./homeRowLimit";
+import { PERSONAL_STATE_WRITE_KEY } from "./personalStateWrites";
 import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
+  isLibraryLayoutQueryKey,
 } from "@/lib/queryInvalidation";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
@@ -57,6 +61,12 @@ interface InvalidateMediaSurfaceOptions {
   // episode count) changes with them.
   refreshItemKeyedLists?: boolean;
   listOwnerIds?: ReadonlySet<string>;
+  /**
+   * Refresh catalog lists now, even while a list page is on its first read,
+   * for a change the viewer must not keep seeing, such as losing access to a
+   * library. See holdCatalogListsForFirstReads.
+   */
+  skipFirstReadHold?: boolean;
 }
 
 const MEDIA_SURFACE_REFRESH_DELAY_MS = 600;
@@ -84,18 +94,50 @@ const scheduledInvalidations = new WeakMap<
     }
   >
 >();
+const owedDetailRefreshes = new WeakMap<QueryClient, Set<string>>();
 
+// Writing data marks a query fresh. A detail that was already invalidated,
+// such as by another device's metadata save while no page showed it, still
+// owes a refetch (refetchDetailWhenWritesSettle).
 export function updateCatalogItemDetail(
   queryClient: QueryClient,
   itemId: string,
   updater: (detail: ItemDetail) => ItemDetail,
 ) {
-  queryClient.setQueriesData<ItemDetail>(
-    {
-      predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
-    },
-    (current) => (current ? updater(current) : current),
+  const filters = { predicate: (query: Query) => isItemDetailQueryKey(query.queryKey, itemId) };
+  const owesRefetch = queryClient
+    .getQueryCache()
+    .findAll(filters)
+    .some((query) => query.state.isInvalidated);
+  queryClient.setQueriesData<ItemDetail>(filters, (current) =>
+    current ? updater(current) : current,
   );
+  if (owesRefetch) refetchDetailWhenWritesSettle(queryClient, itemId);
+}
+
+// A read made while a write is pending can miss it and replace the write's
+// patch, and the toggles' own refreshes skip the item's detail. So an owed
+// detail is invalidated once no personal-state write is pending: overlapping
+// writes share one refetch after the last of them, and a patch with no write
+// behind it, such as a realtime event's, refetches at once.
+function refetchDetailWhenWritesSettle(queryClient: QueryClient, itemId: string) {
+  const waiting = owedDetailRefreshes.get(queryClient);
+  if (waiting) {
+    waiting.add(itemId);
+    return;
+  }
+  const owed = new Set([itemId]);
+  owedDetailRefreshes.set(queryClient, owed);
+  const refetchOnceSettled = () => {
+    if (queryClient.isMutating({ mutationKey: PERSONAL_STATE_WRITE_KEY }) > 0) return;
+    unsubscribe();
+    owedDetailRefreshes.delete(queryClient);
+    void queryClient.invalidateQueries({
+      predicate: (query) => [...owed].some((id) => isItemDetailQueryKey(query.queryKey, id)),
+    });
+  };
+  const unsubscribe = queryClient.getMutationCache().subscribe(refetchOnceSettled);
+  refetchOnceSettled();
 }
 
 // Callers must await this before writing optimistic state. The default
@@ -154,6 +196,19 @@ export function removeItemFromHomeSectionCaches(
       if (nextItems.length === current.section.items.length) {
         return current;
       }
+      const section = {
+        ...current.section,
+        total_count: Math.max(
+          0,
+          current.section.total_count - (current.section.items.length - nextItems.length),
+        ),
+        items: nextItems,
+      };
+      // A row cut at its limit can hold more than its count says, so losing a
+      // card must not make it read as its whole list.
+      if (!sectionShowsWholeList(current.section) && sectionShowsWholeList(section)) {
+        section.total_count = nextItems.length + 1;
+      }
       return {
         ...current,
         // A completed row's shown cards lose the removed ones, so none of its
@@ -161,14 +216,7 @@ export function removeItemFromHomeSectionCaches(
         ...(current.shown !== undefined && {
           shown: current.section.items.slice(0, current.shown).filter(kept).length,
         }),
-        section: {
-          ...current.section,
-          total_count: Math.max(
-            0,
-            current.section.total_count - (current.section.items.length - nextItems.length),
-          ),
-          items: nextItems,
-        },
+        section,
       };
     },
   );
@@ -211,7 +259,7 @@ function queryKeyStartsWith(queryKey: readonly unknown[], prefix: readonly unkno
 // Only these shapes are narrowed by itemId. episodeKeys.byItem is left out on
 // purpose: it is invalidated only through watchedKeys, and mapping it here
 // would change which episode lists a refresh touches.
-export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefined {
+function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefined {
   if (!Array.isArray(queryKey) || queryKey.length < 2) return undefined;
   if (
     queryKey[0] === "items" &&
@@ -416,7 +464,10 @@ function shouldInvalidateMediaSurfaceQuery(
     return activeCatalogQueryMatchesLibrary(queryKey, options.libraryId);
   }
   if (queryKeyStartsWith(queryKey, sectionKeys.all)) {
-    return activeSectionQueryMatchesLibrary(queryKey, options.libraryId);
+    return (
+      !isLibraryLayoutQueryKey(queryKey) &&
+      activeSectionQueryMatchesLibrary(queryKey, options.libraryId)
+    );
   }
   if (queryKeyStartsWith(queryKey, recKeys.all)) {
     return !(options.skipSimilarItems && queryKey[1] === "similar");
@@ -484,9 +535,96 @@ export async function invalidateMediaSurfaceQueries(
   const matches = (query: Query) =>
     shouldInvalidateMediaSurfaceQuery(query.queryKey, scoped, relatedIds);
   const runningLetterIndexes = refetchLetterIndexesWhenDone(queryClient, matches);
+  const holdsCatalogLists =
+    !options.skipFirstReadHold && holdCatalogListsForFirstReads(queryClient, matches);
   await queryClient.invalidateQueries({
-    predicate: (query) => matches(query) && !runningLetterIndexes.has(query),
+    predicate: (query) =>
+      matches(query) &&
+      !runningLetterIndexes.has(query) &&
+      !(holdsCatalogLists && isCatalogListQuery(query)),
   });
+}
+
+const CATALOG_LIST_KEY = [...catalogKeys.all, "list"] as const;
+// How long a sweep waits for each catalog page on its first read, from when
+// the hold first sees it: as long as a read may take before the client gives
+// up on it, so every read that can still land does, however late in the hold
+// it started.
+const CATALOG_LIST_READ_HOLD_MS = API_READ_TIMEOUT_MS;
+const heldCatalogListSweeps = new WeakMap<QueryClient, Array<(query: Query) => boolean>>();
+
+function isCatalogListQuery(query: Query) {
+  return queryKeyStartsWith(query.queryKey, CATALOG_LIST_KEY);
+}
+
+function firstCatalogListReads(queryClient: QueryClient, matches: (query: Query) => boolean) {
+  return queryClient.getQueryCache().findAll({
+    queryKey: CATALOG_LIST_KEY,
+    fetchStatus: "fetching",
+    predicate: (query) => query.state.data === undefined && matches(query),
+  });
+}
+
+// A catalog page on its first read has nothing to show until it lands. A
+// sweep refetches page 0, and page 0 coming back under a new snapshot re-keys
+// every later page: the first read loses its last observer, which aborts it,
+// and the page starts over under the new key with no earlier page to stand in
+// for it. A jump deep into a large title-ordered library takes longer than a
+// scan's sweep window to seek, so during a scan it never landed. While a list
+// page of the sweep is on its first read, the sweep leaves the catalog lists
+// alone and sweeps them once no first read remains that started within the
+// last CATALOG_LIST_READ_HOLD_MS; a read that runs past that fails on the
+// client anyway. Sweeps arriving meanwhile join the held one. A page already
+// shown still reloads under the new snapshot, showing what it held until
+// then. Returns whether the sweep must leave the lists alone.
+function holdCatalogListsForFirstReads(
+  queryClient: QueryClient,
+  matches: (query: Query) => boolean,
+): boolean {
+  const held = heldCatalogListSweeps.get(queryClient);
+  if (held) {
+    held.push(matches);
+    return true;
+  }
+  if (firstCatalogListReads(queryClient, matches).length === 0) return false;
+  const sweeps = [matches];
+  heldCatalogListSweeps.set(queryClient, sweeps);
+  const anySweep = (query: Query) => sweeps.some((match) => match(query));
+  void (async () => {
+    // When the hold first saw each first read; each gets its own deadline.
+    const seenAt = new Map<Query, number>();
+    const pendingReads = () => {
+      const now = Date.now();
+      return firstCatalogListReads(queryClient, anySweep).filter((query) => {
+        const seen = seenAt.get(query) ?? now;
+        seenAt.set(query, seen);
+        return now - seen < CATALOG_LIST_READ_HOLD_MS;
+      });
+    };
+    try {
+      let reads = pendingReads();
+      while (reads.length > 0) {
+        const nextDeadline = Math.min(
+          ...reads.map((query) => (seenAt.get(query) ?? 0) + CATALOG_LIST_READ_HOLD_MS),
+        );
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.allSettled(reads.map((query) => query.promise)),
+          new Promise((resolve) => (timer = setTimeout(resolve, nextDeadline - Date.now()))),
+        ]);
+        clearTimeout(timer);
+        reads = pendingReads();
+      }
+    } finally {
+      // Always release the hold, or every later sweep would join one that
+      // never ends and the lists would stop refreshing.
+      heldCatalogListSweeps.delete(queryClient);
+    }
+    await queryClient.invalidateQueries({
+      predicate: (query) => isCatalogListQuery(query) && anySweep(query),
+    });
+  })();
+  return true;
 }
 
 // itemKeyedListOwners is the items whose children a cached list holds.
@@ -553,20 +691,19 @@ export async function refreshLocalizedMediaQueries(queryClient: QueryClient) {
   bumpHomeRefreshSignal(queryClient);
 }
 
-// A letter index sorts the whole result, which on a large library can outlast
-// a scan's invalidation window, so cancelling and restarting it on every sweep
-// would keep it from ever finishing. A running read finishes instead, and one
-// more read follows it so changes made while it ran still land. Returns the
-// running reads, for the sweep to leave alone.
+// A letter index sorts the whole result and a browse count counts it, either
+// of which on a large library can outlast a scan's invalidation window, so
+// cancelling and restarting them on every sweep would keep them from ever
+// finishing. A running read finishes instead, and one more read follows it so
+// changes made while it ran still land. Returns the running reads, for the
+// sweep to leave alone.
 function refetchLetterIndexesWhenDone(
   queryClient: QueryClient,
   matches: (query: Query) => boolean,
 ): Set<Query> {
-  const running = queryClient.getQueryCache().findAll({
-    queryKey: catalogKeys.allLetters,
-    fetchStatus: "fetching",
-    predicate: matches,
-  });
+  const running = [catalogKeys.allLetters, catalogKeys.allCounts].flatMap((queryKey) =>
+    queryClient.getQueryCache().findAll({ queryKey, fetchStatus: "fetching", predicate: matches }),
+  );
   for (const query of running) {
     const refetchAfter = () =>
       queryClient.invalidateQueries(

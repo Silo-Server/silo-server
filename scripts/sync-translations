@@ -1,0 +1,173 @@
+#!/bin/sh
+# sync-translations: installs silo-translations output into a client repository.
+# Vendored by each client as scripts/sync-translations; keep copies identical to
+# Silo-Server/silo-translations tools/sync-translations.sh.
+#
+# The client keeps .silo-translations at its root:
+#   platform=web|apple|android|roku
+#   version=<release version, or local-<commit> for a local build>
+#   sha256=<SHA-256 of the release tarball, or - for a local build>
+#
+# Usage, from anywhere inside the client repository:
+#   scripts/sync-translations                         reinstall the pinned release
+#   scripts/sync-translations --version <v>           move to release <v> (pins its checksum)
+#   scripts/sync-translations --local <checkout>      generate from a silo-translations checkout
+#   scripts/sync-translations --platform <p> ...      first run, before .silo-translations exists
+#
+# Downloads use curl from the repository's public GitHub releases; no sign-in needed.
+# Nothing in the client changes until the download is verified and unpacked. Then the files are
+# copied in, files the previous install listed in .silo-translations-files and this one doesn't
+# are removed (a language that stopped shipping), the new list is saved, and .silo-translations
+# is written last. No listed path may pass through a symlink in the client.
+set -eu
+
+REPO=Silo-Server/silo-translations
+BASE_URL=${SILO_TRANSLATIONS_BASE_URL:-https://github.com/$REPO/releases/download}
+
+die() { echo "sync-translations: $*" >&2; exit 1; }
+
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+root=${SILO_TRANSLATIONS_ROOT:-$(git rev-parse --show-toplevel)}
+config=$root/.silo-translations
+platform='' version='' sha='' local=''
+
+if [ -f "$config" ]; then
+  platform=$(sed -n 's/^platform=//p' "$config")
+  version=$(sed -n 's/^version=//p' "$config")
+  sha=$(sed -n 's/^sha256=//p' "$config")
+fi
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --platform) platform=${2:?}; shift 2 ;;
+    --version) version=${2:?}; sha=; shift 2 ;;
+    --local) local=${2:?}; shift 2 ;;
+    *) die "unknown argument $1" ;;
+  esac
+done
+
+case $platform in web|apple|android|roku) ;; *) die "set --platform to web, apple, android or roku" ;; esac
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+mkdir "$tmp/tree"
+
+if [ -n "$local" ]; then
+  [ -f "$local/locales.json" ] || die "$local is not a silo-translations checkout"
+  make -s -C "$local" generate OUT="$tmp/gen" >&2
+  version=$(cat "$tmp/gen/.silo-translations-out")
+  sha=-
+  cp -R "$tmp/gen/$platform/." "$tmp/tree/"
+else
+  [ -n "$version" ] || die "no version pinned; pass --version <v>"
+  case $version in local-*) die "pinned to a local build ($version); rerun with --local <checkout> or --version <release>" ;; esac
+  asset=silo-translations-$platform-$version.tar.gz
+  curl -fsSL -o "$tmp/$asset" "$BASE_URL/v$version/$asset"
+  [ -n "$sha" ] || curl -fsSL -o "$tmp/SHA256SUMS" "$BASE_URL/v$version/SHA256SUMS"
+  if [ -z "$sha" ]; then
+    sha=$(awk -v f="$asset" '$2 == f || $2 == "*" f { print $1 }' "$tmp/SHA256SUMS")
+    [ -n "$sha" ] || die "SHA256SUMS of v$version has no entry for $asset"
+  fi
+  got=$(sha256 "$tmp/$asset")
+  [ "$got" = "$sha" ] || die "checksum mismatch for $asset: expected $sha, got $got"
+  # Only relative regular files and directories, nothing that climbs out of the tree.
+  tar -tvzf "$tmp/$asset" | awk '{ t = substr($1, 1, 1); if (t != "-" && t != "d") { print; bad = 1 } } END { exit bad }' \
+    || die "$asset contains links or special files"
+  tar -tzf "$tmp/$asset" | grep -E '^/|(^|/)\.\.(/|$)' && die "$asset contains unsafe paths"
+  tar -xzf "$tmp/$asset" -C "$tmp/tree"
+fi
+
+list=.silo-translations-files
+[ -f "$tmp/tree/$list" ] || die "the generated tree has no $list"
+# The new list is set aside and installed only after copying and pruning, so a failed run leaves
+# the old list in place and a retry still knows which files to remove.
+mv "$tmp/tree/$list" "$tmp/new-list"
+# Every check below reads the list line by line; a final entry without a newline would skip them.
+[ -z "$(tail -c 1 "$tmp/new-list")" ] || die "$list does not end with a newline"
+
+# A listed path must be relative and stay inside the client.
+unsafe() { grep -E '^/|(^|/)\.\.(/|$)|^$' "$1"; }
+# True when no part of the relative path $1 is a symlink inside the client, so writing or
+# removing it cannot reach outside.
+contained() {
+  rest=$1 cur=$root
+  while [ -n "$rest" ]; do
+    case $rest in */*) part=${rest%%/*} rest=${rest#*/} ;; *) part=$rest rest= ;; esac
+    cur=$cur/$part
+    [ -L "$cur" ] && return 1
+  done
+  return 0
+}
+# True when $1 is $2, then one path segment, then $3.
+one() {
+  case $1 in "$2"*"$3") ;; *) return 1 ;; esac
+  mid=${1#"$2"} mid=${mid%"$3"}
+  case $mid in "" | */*) return 1 ;; esac
+}
+# Only this platform's generated outputs may be installed or removed.
+allowed() {
+  case $platform in
+    web) one "$1" web/src/locales/ .json || [ "$1" = web/src/locales/keys.ts ] ;;
+    apple) [ "$1" = iosApp/iosApp/Localizable.xcstrings ] || one "$1" iosApp/InfoPlist/ /InfoPlist.xcstrings ;;
+    android) [ "$1" = android-shared/silo-locales.properties ] || [ "$1" = android-shared/src/androidMain/res/values/strings_catalog.xml ] ||
+      one "$1" android-shared/src/androidMain/res/values- /strings_catalog.xml ;;
+    roku) [ "$1" = locale/languages.json ] || one "$1" locale/ /strings.json || one "$1" i18n-charsets/ .txt || [ "$1" = source/util/pluralRules.bs ] ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ -f "$root/$list" ]; then
+  unsafe "$root/$list" && die "$root/$list has unsafe paths; fix it by hand"
+  cp "$root/$list" "$tmp/old-list"
+else
+  # Installed before file lists existed (or copied by hand): the generated files are the ones
+  # matching this platform's output paths, which clients never edit.
+  ( cd "$root" && case $platform in
+      web) ls web/src/locales/*.json web/src/locales/keys.ts ;;
+      apple) ls iosApp/iosApp/Localizable.xcstrings ;;
+      android) ls android-shared/src/androidMain/res/values*/strings_catalog.xml android-shared/silo-locales.properties ;;
+      roku) ls locale/*/strings.json locale/languages.json i18n-charsets/*.txt source/util/pluralRules.bs ;;
+    esac ) > "$tmp/old-list" 2>/dev/null || true
+fi
+
+unsafe "$tmp/new-list" && die "$list of the new tree has unsafe paths"
+while IFS= read -r path; do
+  allowed "$path" || die "$path is not a generated $platform output; refusing to install it"
+done < "$tmp/new-list"
+# Everything that gets copied must be a regular file named in the list, so the checks below
+# cover every write.
+( cd "$tmp/tree" && find . -type l ) | grep -q . && die "the generated tree contains symlinks"
+( cd "$tmp/tree" && find . -type f | sed 's|^\./||' | sort ) > "$tmp/tree-files"
+sort "$tmp/new-list" | cmp -s - "$tmp/tree-files" || die "the generated tree doesn't match its $list"
+# The sync's own metadata files are written too: the file list and the config (through its .tmp).
+for meta in "$list" .silo-translations .silo-translations.tmp; do
+  contained "$meta" || die "$root/$meta is a symlink; refusing to write there"
+done
+while IFS= read -r path; do
+  contained "$path" || die "$path goes through a symlink in the client; refusing to write there"
+done < "$tmp/new-list"
+sort "$tmp/old-list" > "$tmp/old-sorted"
+sort "$tmp/new-list" > "$tmp/new-sorted"
+comm -23 "$tmp/old-sorted" "$tmp/new-sorted" > "$tmp/remove"
+while IFS= read -r path; do
+  allowed "$path" || die "$path is not a generated $platform output; refusing to remove it"
+  contained "$path" || die "$path goes through a symlink in the client; refusing to remove it"
+done < "$tmp/remove"
+
+cp -R "$tmp/tree/." "$root/"
+
+# Only regular files; leave links and anything else alone.
+while IFS= read -r path; do
+  if [ -f "$root/$path" ] && [ ! -L "$root/$path" ]; then
+    rm -f "$root/$path"
+    rmdir "$(dirname "$root/$path")" 2>/dev/null || true
+  fi
+done < "$tmp/remove"
+cp "$tmp/new-list" "$root/$list"
+printf 'platform=%s\nversion=%s\nsha256=%s\n' "$platform" "$version" "$sha" > "$config.tmp"
+mv "$config.tmp" "$config"
+echo "sync-translations: $platform $version installed" >&2

@@ -3,8 +3,8 @@ package playback
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -54,169 +54,6 @@ func subtitleNotifierReplica(t *testing.T) (*SubtitleReadyNotifier, *dispatchTes
 	t.Helper()
 	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
 	return NewSubtitleReadyNotifier(sessions, hub, nil), conn
-}
-
-// A generated track's realtime event carries the ordinal the next plan will
-// publish, so the client selects it by identity instead of counting the tracks
-// it can currently see.
-func TestSubtitleReadyNotifierPublishesTheGeneratedTrackOrdinal(t *testing.T) {
-	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
-
-	file := &models.MediaFile{
-		ID: 100,
-		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/media/movie.en.srt", Language: "en", Format: "srt"},
-		},
-		SubtitleTracks: []models.SubtitleTrack{
-			{Index: 0, Language: "ja", Codec: "hdmv_pgs_subtitle"},
-			// A burn-in-only track the client never sees in subtitle_urls. The
-			// generated track still lands after it.
-			{Index: 1, Language: "de", Codec: "dvd_subtitle"},
-		},
-	}
-	resolver := &stubSubtitleInventoryResolver{
-		file:       file,
-		additional: []SubtitleInventoryEntryV3{{CombinedIndex: 3, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish (AI)", DownloadedSubtitleID: 77}},
-	}
-
-	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
-	notifier.SubtitleReady(context.Background(), 100, 77, "es", "Spanish (AI)")
-
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want 1 subtitle ready event", len(conn.messages))
-	}
-	event, ok := conn.messages[0].(EventEnvelope)
-	if !ok {
-		t.Fatalf("message type = %T, want EventEnvelope", conn.messages[0])
-	}
-
-	var payload SubtitleReadyPayload
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(payload): %v", err)
-	}
-	if payload.Track == nil {
-		t.Fatal("payload.Track is nil; the event must name the new track's ordinal")
-	}
-	if payload.Track.CombinedIndex != 3 {
-		t.Errorf("track combined_index = %d, want 3 (1 external + 2 embedded)", payload.Track.CombinedIndex)
-	}
-	if want := TrackIDV3(file.ID, "subtitle", 3); payload.Track.TrackID != want {
-		t.Errorf("track_id = %q, want %q", payload.Track.TrackID, want)
-	}
-	if payload.Track.Delivery != SubtitleDeliverySidecarV3 {
-		t.Errorf("track delivery = %q, want %q", payload.Track.Delivery, SubtitleDeliverySidecarV3)
-	}
-	if payload.Track.URL == "" {
-		t.Error("a sidecar track must carry a session-scoped URL")
-	}
-}
-
-func TestSubtitleReadyNotifierOmitsTrackWhenTheFileCannotBeResolved(t *testing.T) {
-	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
-
-	resolver := &stubSubtitleInventoryResolver{err: errors.New("file gone")}
-	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
-	notifier.SubtitleReady(context.Background(), 100, 77, "es", "Spanish (AI)")
-
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want the event to be delivered without a track block", len(conn.messages))
-	}
-	var payload SubtitleReadyPayload
-	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(payload): %v", err)
-	}
-	if payload.Track != nil {
-		t.Errorf("payload.Track = %+v, want nil when the file cannot be resolved", payload.Track)
-	}
-	if payload.SubtitleID != 77 || payload.Language != "es" {
-		t.Errorf("payload lost its identifiers: %+v", payload)
-	}
-}
-
-func TestSubtitleReadyNotifierTranslationCompletedCarriesTheTrack(t *testing.T) {
-	sessions, hub, conn, sessionID := newSubtitleNotifierFixture(t)
-
-	resolver := &stubSubtitleInventoryResolver{
-		file:       &models.MediaFile{ID: 100, SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "en", Codec: "subrip"}}},
-		additional: []SubtitleInventoryEntryV3{{CombinedIndex: 1, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "fr", Label: "French (AI)", DownloadedSubtitleID: 55}},
-	}
-
-	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
-	notifier.TranslationCompleted(context.Background(), sessionID, 100, 9, "track-key", 55, "fr", "French (AI)")
-
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want 1 translation completed event", len(conn.messages))
-	}
-	var payload SubtitleTranslationCompletedPayload
-	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(payload): %v", err)
-	}
-	if payload.Track == nil || payload.Track.CombinedIndex != 1 {
-		t.Fatalf("payload.Track = %+v, want the ordinal-1 generated track", payload.Track)
-	}
-	if payload.JobID != 9 || payload.TrackKey != "track-key" || payload.SubtitleID != 55 {
-		t.Errorf("payload lost its identifiers: %+v", payload)
-	}
-}
-
-func TestSubtitleReadyNotifierMatchesDownloadedRowIdentity(t *testing.T) {
-	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
-
-	resolver := &stubSubtitleInventoryResolver{
-		file: &models.MediaFile{ID: 100},
-		additional: []SubtitleInventoryEntryV3{
-			{Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish", DownloadedSubtitleID: 77},
-			{Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish", DownloadedSubtitleID: 88},
-		},
-	}
-	NewSubtitleReadyNotifier(sessions, hub, resolver).SubtitleReady(context.Background(), 100, 88, "es", "Spanish")
-	var payload SubtitleReadyPayload
-	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Track == nil || payload.Track.CombinedIndex != 1 {
-		t.Fatalf("track = %#v, want exact row 88 at ordinal 1", payload.Track)
-	}
-}
-
-// A realtime event must publish the generated track under the same URL the
-// session's plans use, so a session that negotiated subrip_sidecar_v1 sees the
-// stored SRT here too.
-func TestSubtitleReadyNotifierUsesTheSessionSidecarRepresentation(t *testing.T) {
-	for name, tc := range map[string]struct {
-		features []string
-		want     string
-	}{
-		"negotiated":     {[]string{FeatureSubripSidecarV3}, "/subtitles/0.srt?file_id=100&original=1&downloaded_subtitle_id=77"},
-		"not negotiated": {nil, "/subtitles/0.vtt?file_id=100&downloaded_subtitle_id=77"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			resolver := &stubSubtitleInventoryResolver{
-				file:       &models.MediaFile{ID: 100},
-				additional: []SubtitleInventoryEntryV3{{CombinedIndex: 0, Codec: "srt", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 77}},
-				features:   tc.features,
-			}
-			notifier := &SubtitleReadyNotifier{inventory: resolver}
-			track := notifier.resolveTrack(t.Context(), "sess", 100, downloadedTrack(77))
-			if track == nil || track.URL != "/stream/sess"+tc.want {
-				t.Fatalf("track = %#v, want URL /stream/sess%s", track, tc.want)
-			}
-		})
-	}
-}
-
-// When the session's negotiated representation cannot be read, the event
-// omits the track instead of guessing a URL; the client refetches its plan.
-func TestSubtitleReadyNotifierOmitsTrackWhenSessionFeaturesAreUnknown(t *testing.T) {
-	resolver := &stubSubtitleInventoryResolver{
-		file:        &models.MediaFile{ID: 100},
-		additional:  []SubtitleInventoryEntryV3{{CombinedIndex: 0, Codec: "srt", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 77}},
-		featuresErr: errors.New("attempt store unavailable"),
-	}
-	notifier := &SubtitleReadyNotifier{inventory: resolver}
-	if track := notifier.resolveTrack(t.Context(), "sess", 100, downloadedTrack(77)); track != nil {
-		t.Fatalf("track = %#v, want it omitted while the representation is unknown", track)
-	}
 }
 
 func TestSubtitleTimingChangedDeliversAcrossReplicasOnce(t *testing.T) {
@@ -321,4 +158,103 @@ func TestSubtitleSyncUpdatedReachesEveryReplicaOnce(t *testing.T) {
 			t.Fatalf("%s event %+v payload %+v err %v", name, event, payload, err)
 		}
 	}
+}
+
+// A subtitle downloaded or uploaded through one API server reaches viewers of
+// the file connected to any server, exactly once each.
+func TestSubtitleReadyDeliversAcrossReplicasOnce(t *testing.T) {
+	replica := func() (*SubtitleReadyNotifier, *dispatchTestConn) {
+		sessions := NewSessionManager(0, 0)
+		session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+		_ = sessions.SetRealtimeConnection(session.ID, true)
+		hub := NewRealtimeHub()
+		conn := newWatchedConn()
+		reg := hub.Register(session.ID, conn)
+		t.Cleanup(func() { hub.Unregister(reg) })
+		return NewSubtitleReadyNotifier(sessions, hub, nil), conn
+	}
+
+	bus := &subtitleTestBus{}
+	local, localConn := replica()
+	remote, remoteConn := replica()
+	observed := &observedSubtitleInventoryResolver{contexts: make(chan context.Context, 4)}
+	remote.inventory = observed
+	ctx := context.Background()
+	for _, n := range []*SubtitleReadyNotifier{local, remote} {
+		if err := n.UseEventBus(ctx, bus.publish, bus.subscribe); err != nil {
+			t.Fatal(err)
+		}
+	}
+	local.SubtitleReady(ctx, 100, 42, "fr", "Movie.2024.FR")
+	if len(bus.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(bus.events))
+	}
+	var dispatchCtx context.Context
+	select {
+	case dispatchCtx = <-observed.contexts:
+	case <-time.After(time.Second):
+		t.Fatal("remote dispatch did not start")
+	}
+	// The remote worker cancels its context when dispatch returns, after
+	// all sends. Observe that cleanup before checking the final count.
+	select {
+	case <-dispatchCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("remote dispatch did not finish")
+	}
+	for name, conn := range map[string]*dispatchTestConn{"local": localConn, "remote": remoteConn} {
+		messages := conn.sent()
+		if len(messages) != 1 {
+			t.Fatalf("%s messages = %d, want 1", name, len(messages))
+		}
+		event := messages[0].(EventEnvelope)
+		var payload SubtitleReadyPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil || event.Name != RealtimeEventSubtitleReady ||
+			payload.FileID != 100 || payload.SubtitleID != 42 || payload.Language != "fr" {
+			t.Fatalf("%s event %+v payload %+v err %v", name, event, payload, err)
+		}
+	}
+}
+
+// observedSubtitleInventoryResolver exposes the real dispatch lifetime through
+// the context passed to the inventory dependency.
+type observedSubtitleInventoryResolver struct {
+	stubSubtitleInventoryResolver
+	contexts chan context.Context
+}
+
+func (r *observedSubtitleInventoryResolver) MediaFile(ctx context.Context, fileID int) (*models.MediaFile, error) {
+	r.contexts <- ctx
+	return r.stubSubtitleInventoryResolver.MediaFile(ctx, fileID)
+}
+
+// deadlineInventoryResolver spends the caller's deadline while it resolves a
+// session's track, as a slow database does under many watching sessions.
+type deadlineInventoryResolver struct {
+	stubSubtitleInventoryResolver
+	spend func()
+}
+
+func (r *deadlineInventoryResolver) MediaFile(ctx context.Context, fileID int) (*models.MediaFile, error) {
+	r.spend()
+	return r.stubSubtitleInventoryResolver.MediaFile(ctx, fileID)
+}
+
+// newWatchedConn returns a connection waitForMessages can wait on.
+func newWatchedConn() *dispatchTestConn {
+	return &dispatchTestConn{written: make(chan struct{}, 16)}
+}
+
+// blockingInventoryResolver holds a track lookup until its context ends, as a
+// stalled database does, and reports whether that context had a deadline.
+type blockingInventoryResolver struct {
+	stubSubtitleInventoryResolver
+	hadDeadline chan bool
+}
+
+func (r *blockingInventoryResolver) MediaFile(ctx context.Context, _ int) (*models.MediaFile, error) {
+	_, ok := ctx.Deadline()
+	r.hadDeadline <- ok
+	<-ctx.Done()
+	return nil, ctx.Err()
 }

@@ -123,9 +123,12 @@ POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
 GET /Videos/{id}/AdditionalParts	non-media
+GET /Videos/{id}/Trickplay/{width}/tiles.m3u8	non-media
+GET /Videos/{id}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
@@ -133,25 +136,28 @@ HEAD /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	
 GET /Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/hevc-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/hevc-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-dv-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/remux-dv-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/remux-ts-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/remux-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/stream	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}	media	playback	viewer_egress	true	true
-GET /Videos/{itemId}/Trickplay/{width}/tiles.m3u8	non-media
-GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /api/v2/artwork/*	non-media
@@ -293,9 +299,12 @@ POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
 GET /Videos/{id}/AdditionalParts	non-media
+GET /Videos/{id}/Trickplay/{width}/tiles.m3u8	non-media
+GET /Videos/{id}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
@@ -303,25 +312,28 @@ HEAD /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	
 GET /Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/hevc-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/hevc-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-dv-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/remux-dv-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/remux-ts-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-v1/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /Videos/{id}/remux-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/stream	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}	media	playback	viewer_egress	true	true
-GET /Videos/{itemId}/Trickplay/{width}/tiles.m3u8	non-media
-GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /api/v2/artwork/*	non-media

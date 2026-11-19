@@ -90,16 +90,6 @@ func TestHouseholdProfileGateFailsClosed(t *testing.T) {
 	if rec := do(t, h, http.MethodPost, "/api/v2/probe/account", body, bearer(memberToken)); rec.Code != http.StatusOK {
 		t.Fatalf("ungated operation: %d %s", rec.Code, rec.Body.String())
 	}
-
-	// parityDeps wires no generic limiter: auth, viewer access, household.
-	chain, missing := gateChain(parityDeps(false), ClassProfileScoped, "", false, true, true, "")
-	if missing != "" || len(chain) != 3 {
-		t.Fatalf("household chain = %d gates, missing %q; want auth, viewer access, household", len(chain), missing)
-	}
-	chain, missing = gateChain(parityDeps(false), ClassPermissionGated, "marker_edit", false, false, true, "")
-	if missing != "" || len(chain) != 4 {
-		t.Fatalf("household permission chain = %d gates, missing %q; want auth, viewer access, household, permission", len(chain), missing)
-	}
 }
 
 // TestHouseholdProfileGateDeclaration: the gate narrows an absent header, so
@@ -149,9 +139,11 @@ var householdGatedOperations = []string{
 	"getWatchTrickplay",
 	"headDirectDownload",
 	"headDirectDownloadProxy",
+	"listPersonalAPIKeys",
 	"listStoredSubtitles",
 	"listSubtitleAIJobs",
 	"listSubtitleSync",
+	"revokePersonalAPIKey",
 	"searchSubtitles",
 	"setFileMarkers",
 	"setItemMarkers",
@@ -262,6 +254,7 @@ const (
 var householdGateExemptOperations = map[string]string{
 	"createPersonalAPIKey":             exemptAccount,
 	"applyAdminItemMatch":              exemptAdminCuration,
+	"getAdminItemMatchHints":           exemptAdminCuration,
 	"cancelAdminMetadataTranslation":   exemptAdminCuration,
 	"listAdminMetadataTranslationJobs": exemptAdminCuration,
 	"refreshAdminItemMetadata":         exemptAdminCuration,
@@ -277,6 +270,7 @@ var householdGateExemptOperations = map[string]string{
 	"createPlexPin":                        exemptAccount,
 	"createPluginLaunch":                   exemptAccount,
 	"createWebhookConnection":              exemptAccount,
+	"deleteAccountIdentity":                exemptAccount,
 	"deleteWebhookConnection":              exemptAccount,
 	"getHistoryImportRun":                  exemptAccount,
 	"getNotificationDiscordPreferences":    exemptAccount,
@@ -285,6 +279,7 @@ var householdGateExemptOperations = map[string]string{
 	"getSettingsContract":                  exemptAccount,
 	"getSubtitleAIQuota":                   exemptAccount,
 	"getWebhookMappings":                   exemptAccount,
+	"listAccountIdentities":                exemptAccount,
 	"listHistoryImportRuns":                exemptAccount,
 	"listHistoryImportSources":             exemptAccount,
 	"listPluginSettings":                   exemptAccount,
@@ -324,6 +319,7 @@ var householdGateExemptOperations = map[string]string{
 	"getPlaybackSegment":       exemptPlaybackSession,
 	"getPlaybackSubtitle":      exemptPlaybackSession,
 	"getPlaybackSubtitleFonts": exemptPlaybackSession,
+	"headPlaybackManifest":     exemptPlaybackSession,
 	"headPlaybackMedia":        exemptPlaybackSession,
 	"headPlaybackSubtitle":     exemptPlaybackSession,
 

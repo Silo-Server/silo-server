@@ -1,0 +1,12 @@
+{
+  "results": [
+    {
+      "series_id": "series:wire",
+      "outcome": "applied"
+    },
+    {
+      "series_id": "series:bear",
+      "outcome": "unchanged"
+    }
+  ]
+}

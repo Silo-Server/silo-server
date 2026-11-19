@@ -1,9 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
-	"net/http"
-
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -60,12 +57,6 @@ type ImagesCapabilityResponse struct {
 	OriginalMaxWidthPx int    `json:"original_max_width_px"`
 	StorageBackend     string `json:"-"`
 	Delivery           string `json:"-"`
-}
-
-// HandleImagesCapability reports the image_size contract.
-func HandleImagesCapability(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(GetImagesCapability())
 }
 
 // GetImagesCapability derives the shared size discovery view from the actual ladder.

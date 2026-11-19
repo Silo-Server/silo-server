@@ -83,7 +83,7 @@ func (reg *Registry) previewAdminSection(ctx context.Context, in *AdminSectionPr
 	if err != nil {
 		return nil, adminSectionError(err)
 	}
-	out := AdminSectionPreviewResult{Collection: NewCollection([]CatalogItem{}), TotalCount: value.TotalCount}
+	out := AdminSectionPreviewResult{Collection: NewCollection([]CatalogItem{}), TotalCount: value.TotalCount, Collections: sectionCollectionCardsOf(value.Collections)}
 	sel := reg.ratingSelection(ctx)
 	for _, item := range value.Items {
 		if item == nil {

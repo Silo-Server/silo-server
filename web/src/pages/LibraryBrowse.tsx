@@ -11,8 +11,16 @@ import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
 import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
-import { useCatalogLetters, useCatalogWindow, useLibraryHasItems } from "@/hooks/queries/catalog";
+import {
+  useCatalogCount,
+  useCatalogLetters,
+  useCatalogWindow,
+  useLibraryHasItems,
+} from "@/hooks/queries/catalog";
+import { useCatalogVisibleRange } from "@/hooks/useCatalogVisibleRange";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
+import { useT, type MessageKey, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 import { cn } from "@/lib/utils";
 import { normalizeQuerySortForScope } from "@/lib/querySortOptions";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
@@ -46,11 +54,11 @@ interface LibraryBrowseProps {
   onQueryDefinitionChange: (queryDefinition: QueryDefinition) => void;
 }
 
-const AXIS_LABELS: Record<AudiobookBrowseAxis, string> = {
-  books: "Books",
-  series: "Series",
-  authors: "Authors",
-  narrators: "Narrators",
+const AXIS_LABELS: Record<AudiobookBrowseAxis, MessageKey> = {
+  books: "web.library.browse.axisBooks",
+  series: "web.library.browse.axisSeries",
+  authors: "web.library.browse.axisAuthors",
+  narrators: "web.library.browse.axisNarrators",
 };
 
 const AXIS_GROUP_BY: Record<Exclude<AudiobookBrowseAxis, "books">, AudiobookGroupBy> = {
@@ -72,10 +80,11 @@ function AudiobookAxisTabs({
   value: AudiobookBrowseAxis;
   onChange: (axis: AudiobookBrowseAxis) => void;
 }) {
+  const t = useT();
   return (
     <div
       role="radiogroup"
-      aria-label="Browse audiobooks by"
+      aria-label={t("web.library.browse.axisLabel")}
       className="surface-panel inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {AUDIOBOOK_BROWSE_AXES.map((axis) => {
@@ -98,7 +107,7 @@ function AudiobookAxisTabs({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {AXIS_LABELS[axis]}
+            {t(AXIS_LABELS[axis])}
           </button>
         );
       })}
@@ -106,17 +115,62 @@ function AudiobookAxisTabs({
   );
 }
 
+type CountNoun = "movies" | "series" | "episodes" | "books" | "titles";
+
+/** What the browse lists, for its count: the library's kind, narrowed by the type picker. */
+function countNoun(
+  libraryType: string,
+  browseType: LibraryBrowseType,
+  mediaScope?: string,
+): CountNoun {
+  if (libraryType === "series") {
+    return browseType === "episode" ? "episodes" : "series";
+  }
+  if (libraryType === "movie" || libraryType === "movies") return "movies";
+  if (isAudiobookLibraryType(libraryType) || isEbookLibraryType(libraryType)) return "books";
+  switch (mediaScope) {
+    case "movie":
+      return "movies";
+    case "series":
+      return "series";
+    case "episode":
+      return "episodes";
+    case "audiobook":
+    case "ebook":
+      return "books";
+    default:
+      return "titles";
+  }
+}
+
+function countLabel(t: Translate, noun: CountNoun, count: number): string {
+  const values = { count, shown: count.toLocaleString(formatLocale()) };
+  switch (noun) {
+    case "movies":
+      return t("web.library.browse.countMovies", values);
+    case "series":
+      return t("web.library.browse.countSeries", values);
+    case "episodes":
+      return t("web.library.browse.countEpisodes", values);
+    case "books":
+      return t("web.library.browse.countBooks", values);
+    case "titles":
+      return t("web.catalog.page.titleCount", values);
+  }
+}
+
 function NoMatchingItems({ onClearFilters }: { onClearFilters?: () => void }) {
+  const t = useT();
   return (
     <div className="text-muted-foreground flex flex-col items-center gap-3 py-12 text-center">
-      <p>No items match your current filters.</p>
+      <p>{t("web.library.browse.noMatches")}</p>
       {onClearFilters ? (
         <button
           type="button"
           onClick={onClearFilters}
           className="text-primary text-sm font-medium hover:underline"
         >
-          Clear filters
+          {t("web.library.browse.clearFilters")}
         </button>
       ) : null}
     </div>
@@ -131,6 +185,7 @@ export default function LibraryBrowse({
   onBrowseTypeChange,
   onQueryDefinitionChange,
 }: LibraryBrowseProps) {
+  const t = useT();
   const limit = 60;
   const sortRelevanceScope =
     browseType === "episode"
@@ -159,30 +214,7 @@ export default function LibraryBrowse({
   const showMediaScopeSelector = libraryType === "mixed";
   const filtersKey = JSON.stringify(scopedQueryDefinition);
 
-  const [visibleRangeState, setVisibleRangeState] = useState<{
-    key: string;
-    range: [number, number];
-  }>({
-    key: filtersKey,
-    range: [0, limit - 1],
-  });
-  const visibleRange =
-    visibleRangeState.key === filtersKey
-      ? visibleRangeState.range
-      : ([0, limit - 1] as [number, number]);
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const handleVisibleRangeChange = useCallback(
-    (start: number, end: number) => {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        setVisibleRangeState({ key: filtersKey, range: [start, end] });
-      }, 50);
-    },
-    [filtersKey],
-  );
-
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
+  const [visibleRange, handleVisibleRangeChange] = useCatalogVisibleRange(filtersKey, limit);
 
   const audiobookAxis = isAudiobookLibraryType(libraryType)
     ? audiobookBrowseAxisFromBrowseType(browseType)
@@ -253,8 +285,33 @@ export default function LibraryBrowse({
   // greyed until the index lands, so the grid doesn't reflow and the bar
   // doesn't pop in. It steps aside only when there is nothing to index or the
   // index can't be read at all.
-  const reservesLetterBar =
-    titleOrdered && !browseCameBackEmpty && !(lettersQuery.isError && !lettersQuery.data);
+  const lettersReadable = !(lettersQuery.isError && !lettersQuery.data);
+  const reservesLetterBar = titleOrdered && !browseCameBackEmpty && lettersReadable;
+  // The count beside the filters, from the cheapest read that already knows
+  // it: the letter index in title order, else a first page that holds the
+  // whole result, else a count of its own, read only once the first page shows
+  // there is more.
+  const firstPageComplete = catalogQuery.data?.firstPageComplete;
+  const lettersGiveCount = titleOrdered && lettersReadable;
+  const countQuery = useCatalogCount(state, {
+    enabled: !isGroupedAxis && !lettersGiveCount && firstPageComplete === false,
+  });
+  let resultCount: number | undefined;
+  if (showLetterBar) {
+    resultCount = gridTotalItems;
+  } else if (firstPageComplete) {
+    resultCount = catalogQuery.data.knownItems;
+  } else if (!lettersGiveCount) {
+    resultCount = countQuery.count;
+  }
+  const resultCountLabel = resultCount
+    ? countLabel(t, countNoun(libraryType, browseType, queryDefinition.media_scope), resultCount)
+    : undefined;
+  const resultCountLoading =
+    resultCount === undefined &&
+    (catalogQuery.isLoading ||
+      (lettersGiveCount && lettersQuery.isLoading && totalItems > 0) ||
+      countQuery.isLoading);
   const libraryHasItemsQuery = useLibraryHasItems(libraryId, { enabled: browseCameBackEmpty });
   const isLoading =
     catalogQuery.isLoading || (browseCameBackEmpty && libraryHasItemsQuery.isLoading);
@@ -302,10 +359,10 @@ export default function LibraryBrowse({
   let refreshFailedMessage: string | undefined;
   if (browsePartlyFailed) {
     refreshFailedMessage = catalogQuery.sourceError
-      ? "Couldn't refresh this library."
-      : "Some items couldn't be loaded.";
+      ? t("web.library.browse.refreshFailed")
+      : t("web.library.browse.someItemsFailed");
   } else if (lettersRefreshFailed) {
-    refreshFailedMessage = "Couldn't refresh the letter bar, so a jump may land a little off.";
+    refreshFailedMessage = t("web.library.browse.lettersRefreshFailed");
   }
 
   if (isGroupedAxis) {
@@ -342,7 +399,9 @@ export default function LibraryBrowse({
     <div className="space-y-5 py-2 sm:space-y-6">
       {libraryType === "series" ? (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-muted-foreground text-sm font-medium">Type</span>
+          <span className="text-muted-foreground text-sm font-medium">
+            {t("web.library.browse.typeLabel")}
+          </span>
           <Select
             value={browseType}
             onValueChange={(value) => onBrowseTypeChange(value as LibraryBrowseType)}
@@ -351,8 +410,8 @@ export default function LibraryBrowse({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="series">Series</SelectItem>
-              <SelectItem value="episode">Episodes</SelectItem>
+              <SelectItem value="series">{t("web.catalog.mediaType.series")}</SelectItem>
+              <SelectItem value="episode">{t("web.catalog.mediaType.episodes")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -374,6 +433,8 @@ export default function LibraryBrowse({
         allowPersonalizedSorts
         sortRelevanceScope={sortRelevanceScope}
         libraryType={libraryType}
+        resultCountLabel={resultCountLabel}
+        resultCountLoading={resultCountLoading}
       />
       {refreshFailedMessage ? (
         <RefreshFailedNotice
@@ -387,7 +448,7 @@ export default function LibraryBrowse({
           empty state. */}
       {browseFailed ? (
         <PageUnavailable
-          title="Couldn't load this library"
+          title={t("web.library.browse.loadFailed")}
           description={loadErrorDescription(catalogQuery.error)}
           onRetry={retryBrowse}
           retrying={retrying}
@@ -395,7 +456,7 @@ export default function LibraryBrowse({
       ) : (
         <div
           className={
-            reservesLetterBar ? "pr-6 sm:pr-9 [@media(max-height:599px)]:pr-14" : undefined
+            reservesLetterBar ? "pe-6 sm:pe-9 [@media(max-height:599px)]:pe-14" : undefined
           }
         >
           <ItemGrid
@@ -410,6 +471,7 @@ export default function LibraryBrowse({
             onVisibleRangeChange={handleVisibleRangeChange}
             onTopRowChange={showLetterBar ? handleTopRowChange : undefined}
             sortField={scopedQueryDefinition.sort.field}
+            posterAspect={isAudiobookLibraryType(libraryType) ? "square" : "portrait"}
             emptyState={emptyState}
           />
         </div>

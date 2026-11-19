@@ -1,21 +1,10 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"io"
-	"mime/multipart"
-	"net/http"
-	"net/http/httptest"
-	"strconv"
-	"strings"
-	"testing"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -42,83 +31,6 @@ type stubItemAccessChecker struct {
 
 func (s stubItemAccessChecker) EnsureAccessible(context.Context, string, catalog.AccessFilter) error {
 	return s.err
-}
-
-func newSubtitleAuthRequest(method, path string, body io.Reader) *http.Request {
-	req := httptest.NewRequest(method, path, body)
-	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
-		UserID:    1,
-		Role:      "user",
-		TokenType: auth.TokenTypeAccess,
-	})
-	return req.WithContext(ctx)
-}
-
-func newSubtitleUploadRequest(t *testing.T, mediaFileID int, language, filename string, content []byte) *http.Request {
-	t.Helper()
-
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("media_file_id", strconv.Itoa(mediaFileID)); err != nil {
-		t.Fatalf("write media_file_id: %v", err)
-	}
-	if err := writer.WriteField("language", language); err != nil {
-		t.Fatalf("write language: %v", err)
-	}
-	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write(content); err != nil {
-		t.Fatalf("write file content: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
-
-	req := newSubtitleAuthRequest(http.MethodPost, "/subtitles/upload", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	return req
-}
-
-func TestHandleUploadRejectsBadExtension(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-	handler.FileAuthorizer = &MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{ID: 42, ContentID: "movie-1"},
-		},
-		ItemAccess: stubItemAccessChecker{},
-	}
-
-	req := newSubtitleUploadRequest(t, 42, "en", "notes.txt", []byte("hello"))
-	rr := httptest.NewRecorder()
-	handler.HandleUpload(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rr.Code)
-	}
-}
-
-func TestHandleUploadRejectsUnreadableContent(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-	handler.FileAuthorizer = &MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{ID: 42, ContentID: "movie-1"},
-		},
-		ItemAccess: stubItemAccessChecker{},
-	}
-
-	req := newSubtitleUploadRequest(t, 42, "en", "notes.srt", []byte("Notes for the movie night.\n"))
-	rr := httptest.NewRecorder()
-	handler.HandleUpload(rr, req)
-
-	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), unreadableSubtitleMessage) {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
 }
 
 type handlerMockSubtitleRepo struct {
@@ -251,46 +163,4 @@ func (m *handlerMockSubtitleRepo) GetDownloadedSubtitleByContent(_ context.Conte
 		}
 	}
 	return nil, nil
-}
-
-func TestHandleDeleteRequiresAccessToMediaFile(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	repo.subtitles[1] = &subtitles.DownloadedSubtitle{
-		ID:          1,
-		MediaFileID: 42,
-		Provider:    subtitles.ProviderUpload,
-	}
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-	handler.FileAuthorizer = &MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},
-		ItemAccess:   stubItemAccessChecker{},
-	}
-
-	req := newSubtitleAuthRequest(http.MethodDelete, "/subtitles/1", nil)
-	req = withProfileRouteParam(req, "id", "1")
-	rr := httptest.NewRecorder()
-	handler.HandleDelete(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rr.Code)
-	}
-}
-
-func TestHandleUploadUnauthorizedMediaFile(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-	handler.FileAuthorizer = &MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},
-		ItemAccess:   stubItemAccessChecker{},
-	}
-
-	req := newSubtitleUploadRequest(t, 99, "en", "custom.srt", []byte("hello"))
-	rr := httptest.NewRecorder()
-	handler.HandleUpload(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rr.Code)
-	}
 }

@@ -1,12 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2 } from "../player-v2";
 import type { SubtitleLanguageDetection, SubtitleResult } from "@/api/types";
 import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
-import { LANGUAGES } from "../utils/languageNames";
+import { languageOptions } from "../utils/languageNames";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 import type { StoredSubtitle } from "../utils/subtitleSync";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
+import { PlayerModalDialog } from "./PlayerModalDialog";
+
+/** Glyph on the close button, which carries a translated label. */
+const CLOSE_GLYPH = "✕";
+/** Spinning glyph while a result downloads; the span carries a translated label. */
+const SPINNER_GLYPH = "⟳";
 
 interface SubtitleSearchModalProps {
   mediaFileId: number;
@@ -17,7 +24,12 @@ interface SubtitleSearchModalProps {
    * Called with the stored subtitle a download or upload created, so the
    * player can show its automatic sync while it runs.
    */
-  onSubtitleDownloaded: (subtitle?: StoredSubtitle) => void;
+  onSubtitleDownloaded: (
+    subtitle: StoredSubtitle | undefined,
+    source: "download" | "upload",
+  ) => void;
+  /** Let the player snapshot its current subtitle choice before the request. */
+  onDownloadStarted?: () => void;
   /** False hides the online-search section; manual upload stays available. */
   onlineSearchEnabled?: boolean;
 }
@@ -46,8 +58,10 @@ export function SubtitleSearchModal({
   isOpen,
   onClose,
   onSubtitleDownloaded,
+  onDownloadStarted,
   onlineSearchEnabled = true,
 }: SubtitleSearchModalProps) {
+  const t = useT();
   const [selectedLang, setSelectedLang] = useState("en");
   const [results, setResults] = useState<SubtitleResult[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -55,8 +69,6 @@ export function SubtitleSearchModal({
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
-  const previousActiveElementRef = useRef<HTMLElement | null>(null);
-  const searchInputRef = useRef<HTMLSelectElement>(null);
   const downloadGeneration = useRef(0);
   const uploadedSubtitle = useRef<StoredSubtitle | undefined>(undefined);
   useEffect(() => {
@@ -67,23 +79,6 @@ export function SubtitleSearchModal({
     };
   }, [playerConfig, mediaFileId, isOpen]);
 
-  const handleClose = useCallback(() => {
-    previousActiveElementRef.current?.focus();
-    onClose();
-  }, [onClose]);
-
-  // Focus the search input on open and save the trigger element.
-  useEffect(() => {
-    if (!isOpen) return;
-    previousActiveElementRef.current = document.activeElement as HTMLElement;
-    // Delay to allow the modal to render before focusing.
-    const timer = setTimeout(() => {
-      // Without online search there is no search input; keep focus in the modal.
-      (searchInputRef.current ?? modalRef.current?.querySelector<HTMLElement>("button"))?.focus();
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [isOpen]);
-
   // The provider probe can resolve after the modal opened. If it hides online
   // search, the focused language select unmounts; keep focus inside the modal.
   useEffect(() => {
@@ -93,48 +88,6 @@ export function SubtitleSearchModal({
       modal.querySelector<HTMLElement>("button")?.focus();
     }
   }, [isOpen, onlineSearchEnabled]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        handleClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isOpen, handleClose]);
-
-  // Focus trap.
-  const handleFocusTrap = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const modal = modalRef.current;
-    if (!modal) return;
-
-    const focusable = modal.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    if (focusable.length === 0) return;
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    if (e.shiftKey) {
-      if (document.activeElement === first && last) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last && first) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  }, []);
 
   const handleSearch = useCallback(async () => {
     setSearching(true);
@@ -152,11 +105,11 @@ export function SubtitleSearchModal({
       setResults(response.results ?? []);
       setWarnings(response.warnings ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed");
+      setError(err instanceof Error ? err.message : t("web.subtitles.search.searchFailed"));
     } finally {
       setSearching(false);
     }
-  }, [playerConfig, mediaFileId, selectedLang]);
+  }, [playerConfig, mediaFileId, selectedLang, t]);
 
   const handleUpload = useCallback(
     async (input: {
@@ -214,12 +167,13 @@ export function SubtitleSearchModal({
   );
 
   const handleUploadSuccess = useCallback(() => {
-    onSubtitleDownloaded(uploadedSubtitle.current);
-    handleClose();
-  }, [onSubtitleDownloaded, handleClose]);
+    onSubtitleDownloaded(uploadedSubtitle.current, "upload");
+    onClose();
+  }, [onSubtitleDownloaded, onClose]);
 
   const handleDownload = useCallback(
     async (result: SubtitleResult) => {
+      onDownloadStarted?.();
       const generation = downloadGeneration.current;
       const token = playerConfig.getAccessToken();
       const profile = playerConfig.getProfileId();
@@ -246,43 +200,37 @@ export function SubtitleSearchModal({
           },
         });
         if (!current()) return;
-        onSubtitleDownloaded(response?.subtitle);
-        handleClose();
+        onSubtitleDownloaded(response?.subtitle, "download");
+        onClose();
       } catch (err) {
-        if (current()) setError(err instanceof Error ? err.message : "Download failed");
+        if (current())
+          setError(err instanceof Error ? err.message : t("web.subtitles.search.downloadFailed"));
       } finally {
         if (current()) setDownloading(null);
       }
     },
-    [playerConfig, mediaFileId, onSubtitleDownloaded, handleClose],
+    [playerConfig, mediaFileId, onSubtitleDownloaded, onDownloadStarted, onClose, t],
   );
 
   if (!isOpen) return null;
 
-  const modal = (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-      onClick={handleClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Add Subtitles"
-      onKeyDown={handleFocusTrap}
+  return (
+    <PlayerModalDialog
+      label={t("web.subtitles.search.title")}
+      className="w-full max-w-[480px] rounded-lg bg-neutral-900 text-white shadow-xl"
+      onClose={onClose}
     >
-      <div
-        ref={modalRef}
-        className="w-full max-w-[480px] rounded-lg bg-neutral-900 text-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div ref={modalRef}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h2 className="text-sm font-semibold">Add Subtitles</h2>
+          <h2 className="text-sm font-semibold">{t("web.subtitles.search.title")}</h2>
           <button
             type="button"
             className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-            onClick={handleClose}
-            aria-label="Close"
+            onClick={onClose}
+            aria-label={t("web.subtitles.closeDialog")}
           >
-            ✕
+            {CLOSE_GLYPH}
           </button>
         </div>
 
@@ -297,7 +245,9 @@ export function SubtitleSearchModal({
 
         {onlineSearchEnabled && (
           <div className="border-b border-white/10 px-4 py-2">
-            <p className="text-xs font-medium text-white/60">Search online</p>
+            <p className="text-xs font-medium text-white/60">
+              {t("web.subtitles.search.searchOnline")}
+            </p>
           </div>
         )}
 
@@ -305,13 +255,13 @@ export function SubtitleSearchModal({
         {onlineSearchEnabled && (
           <div className="flex gap-2 px-4 py-3">
             <select
-              ref={searchInputRef}
-              aria-label="Language"
+              data-autofocus
+              aria-label={t("web.subtitles.search.language")}
               className="flex-1 rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
               value={selectedLang}
               onChange={(e) => setSelectedLang(e.target.value)}
             >
-              {LANGUAGES.map((lang) => (
+              {languageOptions().map((lang) => (
                 <option key={lang.code} value={lang.code}>
                   {lang.label}
                 </option>
@@ -323,7 +273,7 @@ export function SubtitleSearchModal({
               onClick={handleSearch}
               disabled={searching}
             >
-              {searching ? "Searching\u2026" : "Search"}
+              {searching ? t("web.subtitles.search.searching") : t("web.subtitles.search.search")}
             </button>
           </div>
         )}
@@ -354,7 +304,7 @@ export function SubtitleSearchModal({
           <div className="max-h-[60vh] overflow-y-auto px-4 pb-4">
             {results.length === 0 && !searching && !error && (
               <p className="py-6 text-center text-xs text-white/40">
-                Select a language and press Search.
+                {t("web.subtitles.search.prompt")}
               </p>
             )}
 
@@ -367,7 +317,7 @@ export function SubtitleSearchModal({
                 <button
                   key={key}
                   type="button"
-                  className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-left hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                  className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-start hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
                   onClick={() => handleDownload(result)}
                   disabled={downloading !== null}
                 >
@@ -389,13 +339,15 @@ export function SubtitleSearchModal({
                   {/* HI badge */}
                   {result.hearing_impaired && (
                     <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[10px] text-white/60">
-                      HI
+                      {t("subtitleSearch.hearingImpaired")}
                     </span>
                   )}
 
                   {/* Download count */}
                   <span className="shrink-0 text-[10px] text-white/40">
-                    ↓{result.downloads.toLocaleString()}
+                    {t("web.subtitles.search.downloads", {
+                      downloads: result.downloads.toLocaleString(formatLocale()),
+                    })}
                   </span>
 
                   {/* Provider badge */}
@@ -412,8 +364,11 @@ export function SubtitleSearchModal({
 
                   {/* Download spinner */}
                   {isDownloading && (
-                    <span className="shrink-0 text-xs text-white/60" aria-label="Downloading">
-                      ⟳
+                    <span
+                      className="shrink-0 text-xs text-white/60"
+                      aria-label={t("web.subtitles.search.downloading")}
+                    >
+                      {SPINNER_GLYPH}
                     </span>
                   )}
                 </button>
@@ -422,8 +377,6 @@ export function SubtitleSearchModal({
           </div>
         )}
       </div>
-    </div>
+    </PlayerModalDialog>
   );
-
-  return createPortal(modal, document.body);
 }

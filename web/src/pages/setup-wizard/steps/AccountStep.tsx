@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createProfile } from "@/hooks/queries/profiles";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { useT } from "@/i18n";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { newPasswordProblem } from "@/lib/newPassword";
 
 import { StepFrame, StepSkeleton } from "../StepFrame";
 import { useWizardContext } from "../WizardContext";
@@ -35,6 +37,7 @@ export function AccountStep() {
     setupInitialUser,
     setSummary,
   } = useWizardContext();
+  const t = useT();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,6 +53,11 @@ export function AccountStep() {
     setEmailInvalid(badEmail);
     setMismatch(badMatch);
     if (badEmail || badMatch) return;
+    const passwordProblem = newPasswordProblem(password, confirmPassword);
+    if (passwordProblem) {
+      toast.error(passwordProblem);
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -58,7 +66,7 @@ export function AccountStep() {
       // Stay busy: this step unmounts as soon as the account exists.
     } catch (err) {
       setSubmitting(false);
-      toast.error(err instanceof Error ? err.message : "Failed to create admin account");
+      toast.error(err instanceof Error ? err.message : t("web.setup.account.createFailed"));
     }
   }
 
@@ -68,10 +76,10 @@ export function AccountStep() {
   if (user && profilesError) {
     return (
       <StepFrame
-        title="Couldn't load your profile"
-        lede="The account was created, but the household profile it comes with could not be read. Try again to continue setup."
+        title={t("web.setup.account.profileLoadFailedTitle")}
+        lede={t("web.setup.account.profileLoadFailedLede")}
         onContinue={retryProfiles}
-        continueLabel="Try again"
+        continueLabel={t("common.tryAgain")}
       >
         <div />
       </StepFrame>
@@ -92,16 +100,16 @@ export function AccountStep() {
 
   return (
     <StepFrame
-      title="Create the admin account"
-      lede="This account runs the server. Household members get their own profiles on it later, and other people can be invited with their own accounts."
+      title={t("web.setup.account.title")}
+      lede={t("web.setup.account.lede")}
       onSubmit={handleSubmit}
-      continueLabel="Create account"
-      busyLabel="Creating…"
+      continueLabel={t("web.auth.createAccount")}
+      busyLabel={t("web.setup.account.creating")}
       busy={submitting}
     >
       <div className="setup-section setup-section-padded">
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field id="setup-username" label="Username">
+          <Field id="setup-username" label={t("web.auth.username")}>
             <Input
               id="setup-username"
               value={username}
@@ -111,7 +119,7 @@ export function AccountStep() {
               required
             />
           </Field>
-          <Field id="setup-email" label="Email">
+          <Field id="setup-email" label={t("web.auth.email")}>
             <Input
               id="setup-email"
               type="email"
@@ -127,11 +135,11 @@ export function AccountStep() {
             />
             {emailInvalid ? (
               <p id="setup-email-error" className="text-destructive text-xs">
-                {INVALID_EMAIL_MESSAGE}
+                {invalidEmailMessage()}
               </p>
             ) : null}
           </Field>
-          <Field id="setup-password" label="Password">
+          <Field id="setup-password" label={t("web.auth.password")}>
             <Input
               id="setup-password"
               type="password"
@@ -141,7 +149,7 @@ export function AccountStep() {
               required
             />
           </Field>
-          <Field id="setup-confirm-password" label="Confirm password">
+          <Field id="setup-confirm-password" label={t("web.auth.confirmPassword")}>
             <Input
               id="setup-confirm-password"
               type="password"
@@ -157,7 +165,7 @@ export function AccountStep() {
             />
             {mismatch ? (
               <p id="setup-confirm-password-error" className="text-destructive text-xs">
-                The passwords don't match.
+                {t("web.setup.account.passwordMismatch")}
               </p>
             ) : null}
           </Field>
@@ -174,6 +182,7 @@ function CreateProfileStep({
   username: string;
   onCreated: (profile: Awaited<ReturnType<typeof createProfile>>) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState(username);
   const [submitting, setSubmitting] = useState(false);
 
@@ -184,21 +193,21 @@ function CreateProfileStep({
       onCreated(await createProfile({ name: name.trim() || username }));
     } catch (err) {
       setSubmitting(false);
-      toast.error(err instanceof Error ? err.message : "Failed to create profile");
+      toast.error(err instanceof Error ? err.message : t("web.setup.account.createProfileFailed"));
     }
   }
 
   return (
     <StepFrame
-      title="Create your profile"
-      lede="Your account is ready. Profiles keep each household member's watch history and preferences apart; this first one is yours."
+      title={t("web.setup.account.profileTitle")}
+      lede={t("web.setup.account.profileLede")}
       onSubmit={handleSubmit}
-      continueLabel="Create profile"
-      busyLabel="Creating…"
+      continueLabel={t("web.setup.account.profileSubmit")}
+      busyLabel={t("web.setup.account.creating")}
       busy={submitting}
     >
       <div className="setup-section setup-section-padded">
-        <Field id="setup-profile-name" label="Profile name">
+        <Field id="setup-profile-name" label={t("web.setup.account.profileName")}>
           <Input
             id="setup-profile-name"
             value={name}

@@ -24,6 +24,7 @@ import { adminKeys } from "../keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { describeReprobeOutcome } from "@/pages/adminNodesPresentation";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 const ADMIN_STALE_TIME = 30_000;
 
@@ -119,7 +120,8 @@ type NodeWriteIntent = {
   authority: ProfileRequestContextSnapshot | null;
   node?: StreamNode;
   body?: CreateNodeRequest | UpdateNodeRequest;
-  onSuccess?: () => void;
+  /** Gets the stored node a create or update acknowledged; nothing on delete. */
+  onSuccess?: (saved?: { id: string; name: string; type: string }) => void;
 };
 function useNodeWrite() {
   const client = useQueryClient();
@@ -148,8 +150,7 @@ function useNodeWrite() {
           onResponse,
         });
       } else {
-        if (!intent.node?.config_etag)
-          throw new Error("Reload nodes and reopen this action to obtain its original version.");
+        if (!intent.node?.config_etag) throw new Error(t("web.admin.errors.nodesReloadReopen"));
         const options = {
           ...common,
           path: { id: String(intent.node.id) },
@@ -170,16 +171,18 @@ function useNodeWrite() {
       if (!mounted.current || !isNodeWriteAuthorityActive(intent.authority))
         throw new StaleApiRequestContextError();
       if (result && (!etag || result.config_etag !== etag))
-        throw new Error(
-          "Node write acknowledgement is unavailable. Inspect current state before saving again.",
-        );
+        throw new Error(t("web.admin.errors.nodeWriteAckMissing"));
       return result;
     },
     onSuccess: (result, intent) => {
       if (!mounted.current || !intent.authority || !isNodeWriteAuthorityActive(intent.authority))
         return;
-      toast.success(intent.action === "delete" ? "Node deleted" : "Node configuration saved");
-      intent.onSuccess?.();
+      toast.success(
+        intent.action === "delete"
+          ? t("web.admin.nodes.hooks.nodes.deleted")
+          : t("web.admin.nodes.hooks.nodes.saved"),
+      );
+      intent.onSuccess?.(result);
       // A new node has never been checked, so it lists as unhealthy and takes
       // no work until the next health sweep, up to 30 seconds later. Check it
       // now; the check stores its result for every server.
@@ -201,9 +204,7 @@ function useNodeWrite() {
     },
     onError: (_error, intent) => {
       if (mounted.current && intent.authority && isNodeWriteAuthorityActive(intent.authority))
-        toast.error(
-          "Node change could not be confirmed. Reload nodes and reopen the action before another submission; retained edits have not been rebased.",
-        );
+        toast.error(t("web.admin.nodes.hooks.nodes.changeUnconfirmed"));
     },
     onSettled: (_result, _error, intent) => {
       if (intent.authority && isNodeWriteAuthorityActive(intent.authority))
@@ -217,7 +218,7 @@ export function useCreateNode() {
   const mutation = useNodeWrite();
   const intent = (
     body: CreateNodeRequest,
-    options?: { onSuccess?: () => void },
+    options?: { onSuccess?: NodeWriteIntent["onSuccess"] },
   ): NodeWriteIntent => ({
     action: "create",
     authority,
@@ -228,7 +229,7 @@ export function useCreateNode() {
     ...mutation,
     isAuthorityActive: () =>
       mutation.isMounted() && authority !== null && isNodeWriteAuthorityActive(authority),
-    mutate: (body: CreateNodeRequest, options?: { onSuccess?: () => void }) =>
+    mutate: (body: CreateNodeRequest, options?: { onSuccess?: NodeWriteIntent["onSuccess"] }) =>
       mutation.mutate(intent(body, options)),
     mutateAsync: (body: CreateNodeRequest) => mutation.mutateAsync(intent(body)),
   };
@@ -339,10 +340,12 @@ function useNodeObservationCommand(action: "check" | "reprobe") {
     onResult: (result, intent) => {
       if ("healthy" in result) {
         toast.success(
-          result.healthy ? `${intent.node.name} is healthy` : `${intent.node.name} is unhealthy`,
+          result.healthy
+            ? t("web.admin.nodes.hooks.nodes.health.healthy", { name: intent.node.name })
+            : t("web.admin.nodes.hooks.nodes.health.unhealthy", { name: intent.node.name }),
         );
         if (!result.health_persisted)
-          toast.error("Health was observed but could not be stored. Refresh node state.");
+          toast.error(t("web.admin.nodes.hooks.nodes.health.notStored"));
       } else {
         const outcome = describeReprobeOutcome(intent.node, {
           ...result,
@@ -352,8 +355,7 @@ function useNodeObservationCommand(action: "check" | "reprobe") {
         else toast.error(outcome.message);
       }
     },
-    errorMessage: () =>
-      "Node command could not be confirmed. Inspect node state before another explicit command.",
+    errorMessage: () => t("web.admin.nodes.hooks.nodes.commandUnconfirmed"),
   });
   return { ...command, mutate: (node: StreamNode) => command.mutate(node, action) };
 }
@@ -378,14 +380,77 @@ export function useSetNodeDrain() {
     onResult: (result, intent) =>
       toast.success(
         result.drain_requested
-          ? `Draining ${intent.node.name}. New work goes to other nodes.`
-          : `${intent.node.name} takes new work again.`,
+          ? t("web.admin.nodes.hooks.nodes.drain.draining", { name: intent.node.name })
+          : t("web.admin.nodes.hooks.nodes.drain.resumed", { name: intent.node.name }),
       ),
     errorMessage: (intent) =>
       intent.action
-        ? `Could not drain ${intent.node.name}. Refresh node state and try again.`
-        : `Could not resume ${intent.node.name}. Refresh node state and try again.`,
+        ? t("web.admin.nodes.hooks.nodes.drain.drainFailed", { name: intent.node.name })
+        : t("web.admin.nodes.hooks.nodes.drain.resumeFailed", { name: intent.node.name }),
   });
+}
+
+/**
+ * What node administration this API build supports. During a rolling deploy
+ * the web bundle can be newer than the server answering, so newer node actions
+ * are gated on it, and a failed read counts as "not supported".
+ */
+export function useAdminNodeCapabilities() {
+  return useQuery({
+    queryKey: adminKeys.nodeCapabilities(),
+    queryFn: ({ signal }) => v2("GET /api/v2/admin/nodes/capabilities", { signal }),
+    staleTime: ADMIN_STALE_TIME,
+    retry: false,
+  });
+}
+
+type IssueNodeKeyIntent = {
+  node: Pick<StreamNode, "id" | "name">;
+  authority: ProfileRequestContextSnapshot;
+  reveal: (key: string) => void;
+};
+
+/**
+ * Issues a transcode node's key, or rotates it when one exists; the previous
+ * key stops working at once. The key is in this one response only: it goes to
+ * `reveal` and the mutation resolves with nothing, so neither the query cache
+ * nor the mutation cache ever holds it. Never retried, because every call
+ * rotates. Failures stay on `error` for the caller to show; nothing is toasted.
+ */
+export function useIssueNodeKey() {
+  const queryClient = useQueryClient();
+  const renderedAuthority = captureProfileRequestContext();
+  const mutation = useMutation({
+    retry: false,
+    mutationFn: async ({ node, authority, reveal }: IssueNodeKeyIntent): Promise<void> => {
+      if (!isCapturedProfileAuthorityActive(authority)) throw new StaleApiRequestContextError();
+      const result = await v2("POST /api/v2/admin/nodes/{id}/key", {
+        path: { id: String(node.id) },
+        profileContext: authority,
+        retryAuthentication: false,
+      });
+      if (!isCapturedProfileAuthorityActive(authority)) throw new StaleApiRequestContextError();
+      reveal(result.node_key);
+    },
+    onSettled: (_result, _error, intent) => {
+      // key_issued changes on the row.
+      if (isCapturedProfileAuthorityActive(intent.authority))
+        queryClient.invalidateQueries({ queryKey: adminKeys.nodes() });
+    },
+  });
+  return {
+    isPending: mutation.isPending,
+    error: mutation.error,
+    reset: mutation.reset,
+    mutate: (node: Pick<StreamNode, "id" | "name">, reveal: (key: string) => void) => {
+      if (!renderedAuthority || !isCapturedProfileAuthorityActive(renderedAuthority)) return;
+      mutation.mutate({
+        node: { id: node.id, name: node.name },
+        authority: renderedAuthority,
+        reveal,
+      });
+    },
+  };
 }
 
 export function useToggleNode() {

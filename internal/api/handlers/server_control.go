@@ -45,26 +45,6 @@ func NewServerControlHandler(
 	}
 }
 
-// HandleRestart handles POST /admin/server/restart.
-func (h *ServerControlHandler) HandleRestart(w http.ResponseWriter, r *http.Request) {
-	var req serverRestartRequest
-	if err := decodeOptionalJSONBody(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	result, err := h.RequestAdminServerRestart(r.Context(), req)
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) {
-			writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request server restart")
-		return
-	}
-	writeJSON(w, http.StatusAccepted, result)
-}
-
 // AdminServerRestartRequest carries the optional notice shown to playback
 // sessions before this process shuts down.
 type AdminServerRestartRequest = serverRestartRequest
