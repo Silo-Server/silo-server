@@ -313,10 +313,17 @@ export function useAdminUserSettings(userId: number) {
   return { data, isLoading: values.isLoading, isError: values.isError };
 }
 
+/**
+ * Sent even offline, so it fails at once: replayed on reconnect, a setting
+ * write would replace whatever the user saved at that key meanwhile.
+ */
+const ADMIN_SETTING_WRITE_NETWORK_MODE = "always";
+
 export function useUpdateAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    networkMode: ADMIN_SETTING_WRITE_NETWORK_MODE,
     retry: false,
     mutationFn: async ({
       userId,
@@ -348,6 +355,7 @@ export function useDeleteAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    networkMode: ADMIN_SETTING_WRITE_NETWORK_MODE,
     retry: false,
     mutationFn: async ({
       userId,
@@ -448,6 +456,7 @@ export function useUpdateAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    networkMode: ADMIN_SETTING_WRITE_NETWORK_MODE,
     retry: false,
     mutationFn: async ({
       userId,
@@ -488,6 +497,7 @@ export function useDeleteAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    networkMode: ADMIN_SETTING_WRITE_NETWORK_MODE,
     retry: false,
     mutationFn: ({
       userId,
@@ -531,6 +541,7 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    networkMode: ADMIN_SETTING_WRITE_NETWORK_MODE,
     retry: false,
     mutationFn: async ({
       userId,

@@ -1,4 +1,9 @@
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  onlineManager,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
@@ -18,6 +23,12 @@ import {
 
 import { itemKeys } from "./keys";
 
+/**
+ * Sent even offline, so it fails at once: replayed on reconnect, a track
+ * choice would replace whatever another browser chose for the title meanwhile.
+ */
+export const TRACK_PREFERENCE_WRITE_NETWORK_MODE = "always";
+
 // Track preferences feed the effective defaults on item details; a
 // series-keyed preference feeds every episode's detail, so invalidate broadly.
 export function invalidateItemDetails(queryClient: QueryClient): Promise<unknown> {
@@ -32,12 +43,17 @@ export function invalidateItemDetails(queryClient: QueryClient): Promise<unknown
  * writes for the same title and dimension, so the viewer's last choice is the
  * one that sticks. The profile is captured now: a write that waits in line
  * still goes out for the profile that made the choice.
+ *
+ * A choice made offline fails here, as its request would, instead of waiting
+ * in line: an earlier request can stay pending until the browser reconnects,
+ * and the choice would then replace a newer one made in another browser.
  */
 export function runOrderedPreferenceWrite<T>(
   dimension: TrackPreferenceDimension,
   prefId: string,
   write: (profileContext: ProfileRequestContextSnapshot) => Promise<T>,
 ): Promise<T> {
+  if (!onlineManager.isOnline()) return Promise.reject(new TypeError("Failed to fetch"));
   const profileContext = captureProfileRequestContext();
   if (!profileContext) return Promise.reject(new StaleApiRequestContextError());
   return runTrackPreferenceWrite(
@@ -63,6 +79,7 @@ export function useSetAudioPreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    networkMode: TRACK_PREFERENCE_WRITE_NETWORK_MODE,
     mutationFn: ({ prefId, trackIndex, track }: SetAudioPreferenceInput) =>
       runOrderedPreferenceWrite("audio", prefId, (profileContext) =>
         v2("PUT /api/v2/audio-prefs/{series_id}", {
@@ -91,6 +108,7 @@ export function useDeleteAudioPreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    networkMode: TRACK_PREFERENCE_WRITE_NETWORK_MODE,
     mutationFn: (prefId: string) =>
       runOrderedPreferenceWrite("audio", prefId, (profileContext) =>
         v2("DELETE /api/v2/audio-prefs/{series_id}", {
