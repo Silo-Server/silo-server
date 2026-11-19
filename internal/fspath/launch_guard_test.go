@@ -38,6 +38,7 @@ var launchesOutsideFspath = map[string]string{
 	"internal/playback/transformations_v3.go:ProbeTransformationRegistryWithToneMapV3Result": "ffmpeg -bsfs and -encoders",
 	"internal/playback/transformations_v3.go:probeAudioRecipeFilterV3":                       "FFmpeg on a lavfi anullsrc input",
 	"internal/playback/transformations_v3.go:probeHEVCRecipeV3":                              "FFmpeg on a lavfi testsrc2 input",
+	"internal/playback/transformations_v3.go:probeSurroundBitstreamRecipeV3":                 "FFmpeg on a lavfi anullsrc input",
 	"internal/pluginhost/host.go:Start":                                                      "a plugin binary",
 	"internal/plugins/installer.go:loadManifestFromBinary":                                   "a plugin binary's manifest command",
 }
