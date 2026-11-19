@@ -3654,19 +3654,25 @@ describe("VideoPlayer plan failure recovery", () => {
     }
   });
 
-  it("fails a direct-play start that shows no frame by the startup deadline", async () => {
+  // The startup deadline is the session's contract: a start that never showed a
+  // frame must end the route ladder rather than replan again. Under
+  // quality:auto the ladder used to adopt a fresh transport every 60 s and only
+  // answered "No playable version found" at 186 s.
+  it("surfaces the retryable error at the startup deadline instead of replanning", async () => {
     vi.useFakeTimers();
     try {
       const onPlanFailure = vi.fn();
-      const { container } = renderPlayer({ onPlanFailure });
+      const onRestartPlayback = vi.fn();
+      const { container } = renderPlayer({ onPlanFailure, onRestartPlayback });
       await act(async () => vi.advanceTimersByTimeAsync(0));
       const video = container.querySelector("video");
       if (!video) throw new Error("expected video element");
       expect(video.src).toContain("/api/v1/stream/session-1");
 
       act(() => vi.advanceTimersByTime(STARTUP_TIMEOUT_MS));
-      expect(onPlanFailure).toHaveBeenCalledOnce();
-      expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+      expect(onPlanFailure).not.toHaveBeenCalled();
+      expect(screen.getByText("Playback failed. Please try again.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

@@ -1341,7 +1341,7 @@ export function VideoPlayer({
   }, [connectionStatus]);
 
   const failStartup = useCallback(
-    (cause: "deadline" | "network") => {
+    (cause: "deadline" | "network", replacement = false) => {
       console.error("[player] Playback startup timed out or exhausted recovery attempts");
 
       const activeHls = hlsRef.current;
@@ -1354,7 +1354,7 @@ export function VideoPlayer({
         video.removeAttribute("src");
         video.load();
       }
-      const fail = () => {
+      const report = () => {
         if (
           !reportCurrentPlanFailure({
             classification: "startup_timeout",
@@ -1370,10 +1370,22 @@ export function VideoPlayer({
           setPlayerError("Playback failed. Please try again.", true);
         }
       };
-      // When Auto lowers on its own, a start that missed its deadline lowers, as
-      // a long stall would.
-      if (cause === "deadline") startDeadlinePassedRef.current(fail);
-      else fail();
+      if (cause === "deadline" && !replacement) {
+        // The session's own start missed its deadline. That deadline is the
+        // contract: the route ladder has already had the whole window, and
+        // lowering into another transport is what stretched the promised 60 s to
+        // 186 s under quality:auto. The viewer gets the retryable card here, and
+        // its Try again starts a fresh session with a fresh budget. A
+        // *replacement* transport (a quality change or reconnect after playback
+        // started) keeps the lowering path: the stream was working, and this
+        // start is a new one.
+        setPlayerError("Playback failed. Please try again.", true);
+        return;
+      }
+      // When Auto lowers on its own, a replacement that misses its deadline
+      // lowers, as a long stall would.
+      if (cause === "deadline") startDeadlinePassedRef.current(report);
+      else report();
     },
     [reportCurrentPlanFailure, setPlayerError],
   );
@@ -1389,13 +1401,16 @@ export function VideoPlayer({
   // The guard belongs to the playback session, not to a plan: `planRevision`
   // bumps on every adoption, so recreating the guard there handed a session
   // that keeps replanning a fresh 60 s each time and it never reached its own
-  // deadline (no error, no Try again). A new transport asks for a fresh window
-  // through `armForReplacementTransport`, which only grants one to a transport
-  // that already played or already failed.
+  // deadline (no error, no Try again). A new transport asks for a window
+  // through `armForReplacementTransport`, which grants one only to a transport
+  // that already played: a session whose deadline has passed gets no further
+  // route, so the guard's failure surfaces instead of the ladder continuing.
   useEffect(() => {
     if (!isPlayerReady) return;
 
-    const guard = new StartupGuard((cause) => failStartupRef.current(cause));
+    const guard = new StartupGuard((cause, replacement) =>
+      failStartupRef.current(cause, replacement),
+    );
     startupGuardRef.current = guard;
 
     return () => {
@@ -3227,8 +3242,13 @@ export function VideoPlayer({
     // This effect reruns only when the transport changed, so the guard's
     // startup window follows the transport rather than the plan (see the guard
     // effect above). A start still waiting for its first frame keeps its
-    // deadline; one that already played or failed gets a fresh window.
-    startupGuardRef.current?.armForReplacementTransport();
+    // deadline; one that already played gets a fresh window. A session whose
+    // deadline already passed gets none: the ladder must stop, so the retryable
+    // error surfaces here instead of another route loading behind it.
+    if (startupGuardRef.current?.armForReplacementTransport() === false) {
+      failStartupRef.current("deadline", false);
+      return;
+    }
     transportStartupPendingRef.current = true;
     // A source is loading, a replan's as well as the first: speed tests wait
     // for it as for a start.
