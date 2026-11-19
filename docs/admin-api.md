@@ -2269,9 +2269,7 @@ episode, `media_type` is `episode`, `media_title` is the episode's title,
 `series_title` is the show's, and `media_item_id` is the episode's content ID,
 the value history's `media_item_id` and its filter take. The summary items, the
 household sessions listing and the row in each `session.*` event share this
-naming. `target_bitrate_kbps` is the video bitrate a transcode encodes to; it is
-null when the video is copied, and a session rebuilt after a restart reports the
-same value it did before.
+naming.
 
 `GET /api/v2/admin/sessions/summary` returns `{count, items}`. Optional `user_id`
 filters by account; omitted means all accounts. `limit` chooses a sample of 1–100
