@@ -232,7 +232,7 @@ const playerConfig: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
   getProfileId: () => "profile-1",
-  getDeviceId: () => "test-device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "test-device" }),
   getProfileToken: () => null,
 };
 
@@ -786,6 +786,221 @@ describe("VideoPlayer source timeline", () => {
       },
     );
 
+    it("keeps a seek on an original that loads after a refused quality change", async () => {
+      const { container, rerenderPlayer } = await seekBeforeMetadata();
+      rerenderPlayer({ plan: originalPlan, replanning: false, replanError: "Replan refused." });
+      const video = container.querySelector("video")!;
+
+      fireEvent.loadedMetadata(video);
+
+      expect(video.currentTime).toBe(30);
+    });
+
+    // A copy remux starts at the keyframe before where the change was asked for
+    // and reaches nothing outside what it has produced.
+    const remuxPlan = fixturePlanV3({
+      ...plan,
+      delivery: "server_remux_hls",
+      timeline: {
+        source_start_seconds: 120,
+        player_start_seconds: 0.5,
+        stream_origin_seconds: 119.5,
+        timeline_offset_seconds: 119.5,
+        can_seek_anywhere: false,
+        seek_restoration: "source_position",
+      },
+    });
+    const remuxStream = {
+      plan: remuxPlan,
+      planRevision: 2,
+      streamUrl: "/api/v1/stream/session-1?revision=2",
+    };
+
+    it("asks for a stream at the seek when the new stream cannot seek there", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+
+      rerenderPlayer({ ...remuxStream, replanning: false });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("asks for that stream once a change queued behind it settles without a stream", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      // The queued change is in flight when the remux lands, and is refused.
+      rerenderPlayer({ ...remuxStream, replanning: true });
+      await act(async () => Promise.resolve());
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replanError: "Replan refused." });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("asks for that stream when the queued change is refused before the stream loads", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { video, rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      // The remux's keyframe origin is the seek, and it starts 10 s later.
+      const originStream = {
+        ...remuxStream,
+        plan: fixturePlanV3({
+          ...remuxPlan,
+          timeline: {
+            ...remuxPlan.timeline,
+            source_start_seconds: 40,
+            player_start_seconds: 10,
+            stream_origin_seconds: 30,
+            timeline_offset_seconds: 30,
+          },
+        }),
+      };
+      rerenderPlayer({ ...originStream, replanning: true });
+      await act(async () => Promise.resolve());
+      // Not loaded yet: its clock reads the origin.
+      video.currentTime = 0;
+
+      rerenderPlayer({ ...originStream, replanning: false, replanError: "Replan refused." });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("waits for a version switch to settle before asking for that stream", async () => {
+      const onReanchorSeek = vi.fn(() => true);
+      const { rerenderPlayer } = await seekDuringReplan({ onReanchorSeek });
+      rerenderPlayer({ ...remuxStream, replanning: true });
+      await act(async () => Promise.resolve());
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replacing: true });
+      await act(async () => Promise.resolve());
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+
+      rerenderPlayer({ ...remuxStream, replanning: false, replacing: false });
+
+      await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(30));
+    });
+
+    it("starts the browser decoder that takes over the original at the seek", async () => {
+      engineRoute.chosen = true;
+      attachBrowserEngine.mockClear();
+      const browserEngine = {
+        containers: ["mkv"],
+        videoCodecs: ["h264"],
+        audioCodecs: ["aac"],
+        hdr: false,
+      };
+      try {
+        const { rerenderPlayer } = await seekDuringReplan({ browserEngine });
+        rerenderPlayer({
+          plan: originalPlan,
+          replanning: false,
+          planRevision: 2,
+          streamUrl: "/api/v1/stream/session-1?revision=2",
+        });
+
+        await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalledOnce());
+        expect(attachBrowserEngine.mock.calls[0]![0].source.startSeconds).toBe(30);
+      } finally {
+        engineRoute.chosen = false;
+      }
+    });
+
+    it("starts the stream at a later seek outside the window that a queued change took", async () => {
+      hlsJS.supported = true;
+      // The session folds the seek into the change queued behind the replan.
+      const onReanchorSeek = vi.fn(() => false);
+      const windowPlan = fixturePlanV3({
+        ...plan,
+        timeline: { ...plan.timeline, can_seek_anywhere: false },
+      });
+      const { container, rerenderPlayer } = renderPlayer({ plan: windowPlan, onReanchorSeek });
+      const video = container.querySelector("video")!;
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 100, end: () => 140 },
+      });
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      rerenderPlayer({ plan: windowPlan, replanning: true });
+
+      act(() => {
+        controls.current!.onSeek(130);
+      });
+      expect(video.currentTime).toBe(130);
+      fireEvent.seeked(video);
+      act(() => {
+        controls.current!.onSeek(30);
+      });
+      expect(onReanchorSeek).toHaveBeenCalledWith(30);
+      hlsJS.constructed.mockClear();
+
+      newStream(rerenderPlayer);
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed).toHaveBeenCalledWith(
+        expect.objectContaining({ startPosition: 30 }),
+      );
+    });
+
+    it("starts the stream at the room's last seek while a newer request is still held", async () => {
+      hlsJS.supported = true;
+      const base = roomConnection();
+      const connection = roomConnection({
+        room: { ...base.room!, self_role: "host", self_can_manage_room: true },
+      });
+      const { container, rerenderPlayer } = renderPlayer({
+        plan,
+        watchTogetherRoomId: "room-1",
+        watchTogetherConnection: connection,
+      });
+      const video = container.querySelector("video")!;
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      rerenderPlayer({ plan, replanning: true });
+      // The room runs a seek to 30 while the replan is in flight.
+      rerenderPlayer({
+        plan,
+        replanning: true,
+        watchTogetherConnection: {
+          ...connection,
+          transportCommand: roomPlayCommand({ action: "seek", position_seconds: 30 }),
+        },
+      });
+      await waitFor(() => expect(video.currentTime).toBeCloseTo(30, 1));
+      fireEvent.seeked(video);
+      // The host asks for 60, which the room has not run when the new stream
+      // lands.
+      act(() => {
+        controls.current!.onSeek(60);
+      });
+      expect(connection.sendRoomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "transport_request",
+          action: "seek",
+          position_seconds: 60,
+        }),
+      );
+      hlsJS.constructed.mockClear();
+
+      rerenderPlayer({
+        plan,
+        replanning: false,
+        planRevision: 2,
+        streamUrl: "/api/v1/stream/session-1?revision=2",
+        watchTogetherConnection: {
+          ...connection,
+          transportCommand: roomPlayCommand({ action: "seek", position_seconds: 30 }),
+        },
+      });
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed.mock.calls[0]![0].startPosition).toBeCloseTo(30, 1);
+    });
+
     it("forgets the seek when the replan settles without a new stream", async () => {
       hlsJS.supported = true;
       const { rerenderPlayer } = await seekDuringReplan();
@@ -909,6 +1124,7 @@ describe("VideoPlayer lost connection", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -991,5 +1207,324 @@ describe("VideoPlayer lost connection", () => {
     expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
     expect(onPlanFailure).toHaveBeenCalledOnce();
     expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+  });
+  /** The element's playhead, readiness, and one buffered range from 0. */
+  function setElementBuffer(
+    video: HTMLVideoElement,
+    {
+      currentTime,
+      bufferedEnd,
+      readyState,
+    }: { currentTime: number; bufferedEnd: number; readyState: number },
+  ) {
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: currentTime,
+    });
+    Object.defineProperty(video, "readyState", { configurable: true, value: readyState });
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => bufferedEnd } as unknown as TimeRanges,
+    });
+  }
+
+  /** An HLS stream that played and then lost the server with a minute buffered. */
+  async function drainingHlsStream(
+    props: Partial<Parameters<typeof VideoPlayer>[0]>,
+    canSeekAnywhere = true,
+    readyStateAtError: number = HTMLMediaElement.HAVE_ENOUGH_DATA,
+  ) {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: { ...fixturePlanV3().timeline, can_seek_anywhere: canSeekAnywhere },
+    });
+    const { container, rerenderPlayer } = renderPlayer({ plan, ...props });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    fireFrameTimeUpdate(video);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+
+    setElementBuffer(video, { currentTime: 10, bufferedEnd: 70, readyState: readyStateAtError });
+    act(() =>
+      hlsJS.latest?.emit("error", { fatal: true, type: "networkError", details: "fragLoadError" }),
+    );
+    return { video, rerenderPlayer };
+  }
+
+  it("plays out what hls.js buffered before handing the loss to the reconnect", async () => {
+    const onConnectionLost = vi.fn();
+    const { video } = await drainingHlsStream({ onConnectionLost });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    // A stall with media still ahead, such as a seek inside the buffer, that
+    // plays on again.
+    setElementBuffer(video, {
+      currentTime: 40,
+      bufferedEnd: 70,
+      readyState: HTMLMediaElement.HAVE_METADATA,
+    });
+    fireEvent.waiting(video);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    setElementBuffer(video, {
+      currentTime: 41,
+      bufferedEnd: 70,
+      readyState: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    // The buffer runs out.
+    setElementBuffer(video, {
+      currentTime: 70,
+      bufferedEnd: 70,
+      readyState: HTMLMediaElement.HAVE_CURRENT_DATA,
+    });
+    fireEvent.waiting(video);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(70, true);
+  });
+
+  it("reconnects a draining HLS stream whose playhead stays stuck with media ahead", async () => {
+    const onConnectionLost = vi.fn();
+    const { video } = await drainingHlsStream({ onConnectionLost });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    setElementBuffer(video, {
+      currentTime: 40,
+      bufferedEnd: 70,
+      readyState: HTMLMediaElement.HAVE_METADATA,
+    });
+    fireEvent.waiting(video);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(40, true);
+  });
+
+  it("leaves a draining HLS stream alone while the viewer pauses", async () => {
+    const onConnectionLost = vi.fn();
+    const { video } = await drainingHlsStream({ onConnectionLost });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    setElementBuffer(video, {
+      currentTime: 40,
+      bufferedEnd: 70,
+      readyState: HTMLMediaElement.HAVE_METADATA,
+    });
+    fireEvent.waiting(video);
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
+    fireEvent.pause(video);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+  });
+
+  it("reconnects at an unbuffered seek target inside the window of a draining HLS stream", async () => {
+    const onConnectionLost = vi.fn();
+    const onReanchorSeek = vi.fn();
+    const onSeek = vi.fn();
+    const { video } = await drainingHlsStream({ onConnectionLost, onReanchorSeek, onSeek });
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
+    fireEvent.pause(video);
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    act(() => controls.current?.onSeek(1_200));
+
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+    // A change queued behind the replan in flight resumes at the target too.
+    expect(onSeek).toHaveBeenCalledExactlyOnceWith(1_200);
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, false);
+  });
+
+  it.each([
+    { reanchored: false, reconnectsAt: [1_200, true] },
+    { reanchored: true, reconnectsAt: null },
+  ])(
+    "reanchors a draining HLS stream's seek outside the window first (reanchored: $reanchored)",
+    async ({ reanchored, reconnectsAt }) => {
+      const onConnectionLost = vi.fn();
+      const onReanchorSeek = vi.fn(() => Promise.resolve(reanchored));
+      await drainingHlsStream({ onConnectionLost, onReanchorSeek }, false);
+
+      await act(async () => {
+        await controls.current?.onSeek(1_200);
+      });
+
+      expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_200);
+      if (reconnectsAt) expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(...reconnectsAt);
+      else expect(onConnectionLost).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a seek back into the buffer when a draining stream's earlier reanchor fails", async () => {
+    const onConnectionLost = vi.fn();
+    let settleReanchor: (ok: boolean) => void = () => {};
+    const onReanchorSeek = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settleReanchor = resolve;
+        }),
+    );
+    const { video } = await drainingHlsStream({ onConnectionLost, onReanchorSeek }, false);
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 70 } as unknown as TimeRanges,
+    });
+
+    let outsideSeek: unknown;
+    act(() => {
+      outsideSeek = controls.current?.onSeek(1_200);
+    });
+    // The viewer seeks back into what is buffered before the reanchor fails.
+    act(() => controls.current?.onSeek(30));
+    await act(async () => {
+      settleReanchor(false);
+      await outsideSeek;
+    });
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_200);
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(video.currentTime).toBe(30);
+  });
+
+  it("skips from a draining stream's reconnect target after its reanchor fails", async () => {
+    const onConnectionLost = vi.fn();
+    const ready = vi.fn();
+    const onReanchorSeek = vi.fn((_seconds: number) => Promise.resolve(false));
+    const { rerenderPlayer } = await drainingHlsStream(
+      { onConnectionLost, onReanchorSeek, onPlaybackTransportReady: ready },
+      false,
+    );
+
+    await act(async () => {
+      await controls.current?.onSeek(1_200);
+    });
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, true);
+    // The session reports the failed reanchor as the reconnect starts.
+    rerenderPlayer({ replanError: "Update failed.", connectionStatus: "reconnecting" });
+    const transport = ready.mock.lastCall![0];
+    act(() => transport.skipForward());
+
+    expect(onReanchorSeek).toHaveBeenLastCalledWith(1_230);
+  });
+
+  it("hands a fatal hls.js network error on a stream that settled paused to the reconnect", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    const { container } = renderPlayer({
+      plan,
+      shouldAutoPlay: false,
+      onConnectionLost,
+      onPlanFailure,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    // With autoplay off, the first frame settles paused and never plays.
+    setElementBuffer(video, {
+      currentTime: 10,
+      bufferedEnd: 10,
+      readyState: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    fireEvent.canPlay(video);
+    act(() =>
+      hlsJS.latest?.emit("error", { fatal: true, type: "networkError", details: "levelLoadError" }),
+    );
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(10, false);
+    expect(hlsJS.startLoad).not.toHaveBeenCalled();
+    expect(onPlanFailure).not.toHaveBeenCalled();
+  });
+
+  it("checks a draining HLS stream that was already stalled when hls.js gave up", async () => {
+    const onConnectionLost = vi.fn();
+    await drainingHlsStream({ onConnectionLost }, true, HTMLMediaElement.HAVE_METADATA);
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    // Two checks a second apart find the playhead where it was.
+    await waitFor(() => expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(10, true), {
+      timeout: 4_000,
+    });
+  });
+
+  it("reconnects a Watch Together seek a draining HLS stream cannot reach as paused", async () => {
+    const onConnectionLost = vi.fn();
+    const connection = roomConnection();
+    const { rerenderPlayer } = await drainingHlsStream({
+      onConnectionLost,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: connection,
+    });
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: {
+          command_id: "room-seek-1",
+          session_id: "session-1",
+          selection_revision: 1,
+          action: "seek",
+          position_seconds: 1_200,
+          execute_at: new Date().toISOString(),
+          issued_at: new Date().toISOString(),
+          playback_state: "paused",
+        },
+      },
+    });
+
+    await waitFor(() => expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, false));
+  });
+
+  it("reconnects when hls.js fails again while the stream drains", async () => {
+    const onConnectionLost = vi.fn();
+    await drainingHlsStream({ onConnectionLost });
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    // hls.js gives up on a playhead that stopped moving with media buffered.
+    act(() =>
+      hlsJS.latest?.emit("error", {
+        fatal: true,
+        type: "mediaError",
+        details: "bufferStalledError",
+      }),
+    );
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(10, true);
   });
 });

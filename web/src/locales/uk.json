@@ -2053,6 +2053,164 @@
       "value": "Мова застосунку"
     }
   ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Наприкінці"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилину до кінця"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилини до кінця"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилин до кінця"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " хвилини до кінця"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунду до кінця"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунди до кінця"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунд до кінця"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "За "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " секунди до кінця"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Показ наступних епізодів"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Вимк."
+    }
+  ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
     {
       "type": 0,
@@ -64658,6 +64816,12 @@
       "value": "Вимкнено. Запуски лише очищають старі назви."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Генерування зупинено. Збережені рекомендації залишаться видимими в Огляді до перезапуску сервера."
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -113322,6 +113486,12 @@
       "value": "ваших бібліотеках"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Кількість недоступна"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -115402,6 +115572,24 @@
       "value": "Додати"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося перевірити, чи можна додати назви."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Завантажити ще раз"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Перевірка, чи можна додати назви…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -115420,6 +115608,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Цей сервер не може безпечно додавати назви, поки колекцію завантажено лише частково. Ви й далі можете вилучати назви та редагувати колекцію."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Завантажте назви ще раз, перш ніж додавати нові."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -115434,6 +115634,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Завантаження назв перед додаванням нових…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -125692,6 +125898,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Також у колекціях"
     }
   ],
   "web.detail.sections.cast": [
@@ -147499,42 +147711,6 @@
       "value": " до вашого списку перегляду"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Бо ви дивилися «"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "»"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Бо ви дивилися «"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "» і «"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "»"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -147597,6 +147773,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Схоже на "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Схоже на "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " і "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [

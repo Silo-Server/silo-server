@@ -1124,6 +1124,43 @@ Search finds it by either form ("harry potter box set" or "harry potter
 collection"), but "box", "set" or "collection" alone matches only names that
 contain the word themselves.
 
+## Collections on a title's page
+
+`GET /api/v2/catalog/items/{id}/collections?library_id=` (`listCatalogItemCollections`) answers
+the collections a movie or series page lists under "Also in": the collections that store the
+title and that the viewer may see. `items` holds the same `SectionCollectionCard` a row of
+collections carries (see "Rows of collections"), server collections first and then personal
+ones, each group by title. It is empty, never null, when no collection the viewer sees holds the
+title. `getCatalogSearchCapabilities` reports `item_collections: true` on a server that answers it.
+
+- A server collection is listed when it is visible, stores the title, sits in an enabled library
+  the viewer can open, and has members the viewer can see, as on a row of collections. A hidden
+  collection is never listed.
+- A personal collection is listed when it stores the title and the acting profile can see it:
+  its own, or another profile's shared on the same login when that profile may see the title too,
+  since the collection's page lists only what its owner can see.
+- Smart collections are not listed, server or personal, including a server collection made smart
+  that still holds the rows it stored as a manual one.
+- A server collection synced from a TMDB collection (`source_config.mode` `tmdb_collection`) is
+  left out when it is the TMDB collection of the box set `getCatalogItemBoxSet` answers for the
+  same `library_id`, so the page does not show the same franchise twice.
+
+When `items` holds exactly one collection, `preview_items` carries up to 6 of that collection's
+other titles as `CatalogItem` cards: the first page `listCatalogItems` answers for the collection,
+so the same order, Show only filter and access rules apply (for another profile's collection, only
+titles its owner can see too, and for a server collection, only titles in the library its card's
+`library_id` names). The title itself is never among them. A failure reading them leaves
+`preview_items` empty and still returns `items`. A page shows these titles under the
+collection's name, with a link to the collection, in place of the "Also in" row. It falls back to
+the row when `preview_items` is empty, as for a collection that holds only this title. With
+several collections `preview_items` is empty and the page shows every card. `preview_items` is
+empty, never null.
+
+`library_id` is the library the page was opened from; it only picks the box set, as on
+`getCatalogItemBoxSet`. A title that is missing or that the viewer cannot see answers `404`, whatever collections hold it, and so does an
+episode or season ID. The Jellyfin surface's `GET /Items/{id}/Collections` lists server
+collections only (see the Jellyfin compatibility notes).
+
 ## History ordering
 
 History defaults to chronological watch-event order. Explicit `date_viewed`

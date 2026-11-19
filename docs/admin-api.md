@@ -1616,7 +1616,7 @@ so summing that would report three hours for a movie someone abandoned after a
 minute. An entry with no finalized session in the window reports `0`. Each
 session contributes its measured watch time (`played_seconds`, below). A
 session recorded before watch time was measured only knows where it ended
-(`watched_seconds`), so its end position is capped at its wall-clock length;
+(`end_position_seconds`), so its end position is capped at its wall-clock length;
 that estimate still counts pauses and seeks.
 
 Profile display names live in the per-user stores rather than in watch history,
@@ -1810,22 +1810,33 @@ from one window is refused under another. Each entry also carries `series_title`
 episode and its series (`series_title` is empty when the series left the catalog); for
 anything else they are empty and null.
 
-`watched_seconds` is where the attempt ended, not how long it was watched: an attempt
-resumed partway through reports the resume point plus what was watched. `played_seconds`
-is the measured watch time: media advanced through by normal playback, without pauses,
-seeks or buffering. The playback session measures it from its progress reports
-(`playback.WatchTime`): a position advance between two reports counts as watched when it
-fits playback at up to twice normal speed plus a short allowance for report jitter, and
-anything larger is a seek. Time after the last progress report before the stop is not
-counted. A session finalized more than once keeps the largest measurement when the
-copies overlap in time (copies on several replicas), and adds them when one began
-measuring after the other ended (a session rebuilt under the same id after it was
-finalized). `measured` says whether the attempt has a measurement. With one,
-`start_position_seconds` is the first position it saw (where the play began or
-resumed), `paused_seconds` the time spent paused between reports, and `measured_since`
-and `measured_until` the first and last report behind it. Without one, which includes
-every attempt recorded before measurement existed, `played_seconds` and those four
-fields are null.
+`end_position_seconds` is where the attempt ended, not how long it was watched: an
+attempt resumed partway through ends past its resume point. `played_seconds` is the
+measured watch time: media advanced through by normal playback, without pauses, seeks or
+buffering. The playback session measures it from position samples
+(`playback.WatchTime`): the start position once the start has prepared its stream, each
+progress report, and the final position the stop carries. A position advance between two
+samples counts as watched when it fits playback at up to twice normal speed plus a short
+allowance for report jitter, and anything larger is a seek. Time after the last sample is
+not counted, so a stop without a final position, such as an administrator stop the
+player confirms, ends the measurement at the last progress report.
+
+The measurement survives the session's live copy. The server holding the session saves
+it with the session's lifecycle state when the session starts and on every live-session
+sync (every 15 seconds, and once more at a graceful shutdown). A session rebuilt after a
+restart or on another server carries on from the saved measurement, and so does a stop
+recorded by a server that does not hold the session, which then measures the stop's own
+final position. Such a stop can miss reports that arrived since the last save, so its
+`played_seconds` may fall short by up to one sync interval; it is never credited time the
+position does not account for. A session finalized more than once keeps the largest
+measurement when the copies overlap in time (copies on several replicas), and adds them
+when one began measuring after the other ended (a session rebuilt under the same id
+after it was finalized). `measured` says whether the attempt has a measurement. With one,
+`start_position_seconds` is the first position it saw (where the play began or resumed),
+`paused_seconds` the time spent paused between samples, and `measured_since` and
+`measured_until` the first and last sample behind it. Without one, which includes every
+attempt recorded before measurement existed, `played_seconds` and those four fields are
+null.
 
 `client_ip` is the viewer's last address on the playback session, or null when none was
 recorded. Rows written by earlier server versions hold the address of the request that
@@ -2501,7 +2512,11 @@ Every request body carries `command_id` (a client-allocated canonical UUID) and
 client can represent it exactly, that must rise within the session), plus optional `reason` and `deadline_ms` (bounded to 10000, default
 3000; ignored by message). Message adds a required `message` and optional
 `title`. Allocate the identity once per intended command and preserve the
-whole body on retry.
+whole body on retry. A delivered command carries `reason` as the frame's
+top-level `reason`, and a player that supports it shows it with its notice
+for a stop (and for a terminate, below); a message's text and title travel in the frame's payload,
+which omits `title` when none was given
+([control socket](architecture/playback-protocol-v3.md#25-session-liveness)).
 
 The server keeps one ledger per playback session in the process that serves
 the session's realtime lane. With several API replicas, a command that reaches
@@ -2608,12 +2623,24 @@ The JSON body is required (`{}` when there is no reason) and carries an optional
 `session_id`, `authority_revoked`, `already_revoked`, `durable_state`,
 `client_notified`, `delivery` (`dispatched`, `unavailable`, `failed`, `none`)
 and `command_id` when a dismissal was issued. `durable_state` reports `stopped`:
-a terminate that succeeds always commits the terminal stop. `already_revoked`
-stays `false`, because a repeat against a session this server no longer holds is
-`404` rather than a converged receipt. A player that is offline yields
-`authority_revoked: true` with `client_notified: false` and `200`. The ledger
-row keeps `natural_idempotent`. An unknown or already-ended session is `404`; a
-session whose stop cannot be committed in its current state is `409`. The
+a terminate that succeeds always commits the terminal stop. The answer to a
+session that is no longer live depends on which stop its playback attempt
+record shows. When the record shows an administrator's end, the terminate
+converges on every replica: `200` with `authority_revoked: true`,
+`already_revoked: true`, `delivery: "none"` and `client_notified: false`, and
+nothing is dispatched to the player. That end can come from an earlier
+terminate, from the stop fallback above, or from a player confirming an
+administrator's stop over the control socket. When the record shows the
+player's own stop, the answer is `404`. That includes a player that carried
+out an administrator's stop when its HTTP stop reached the server before its
+confirmation did. An expired or abandoned session is `404` too. The record
+stays readable for at least 24 hours after the play started (a replan onto a
+new stream extends it). After it lapses the session is unknown and the answer
+is `404`. A Jellyfin-protocol play keeps no attempt record, so a repeat
+terminate of one is `404` too. A player that is offline
+yields `authority_revoked: true` with `client_notified: false` and `200`. The
+ledger row keeps `natural_idempotent`. An unknown session is `404`; a session
+whose stop cannot be committed in its current state is `409`. The
 operation requires an acting administrator, is restricted in demo mode, and is
 registered unconditionally: it answers `503` and the shared command capability
 lists `terminate` with `terminate_revokes_authority: true` only when the durable
@@ -3585,9 +3612,13 @@ authority or a duplicated identifier fails the read rather than merging pages.
 `archive_url`; mixing the two or supplying neither is a 422 naming the field. Both paths
 fetch over the network. An installation with the same manifest `plugin_id` is stopped and
 replaced rather than duplicated, and metadata-provider capabilities are appended to the
-library chains. Success is 201 with the installation. There is no replay identity
-and no database uniqueness, so the row is non-retryable: a lost response may follow a
-committed install and the client reconciles from the installation list.
+library chains. Success is 201 with the installation. There is no replay identity, so the
+row is non-retryable: a lost response may follow a committed install and the client
+reconciles from the installation list. A plugin has at most one installation, enforced in
+the database: when two installs or uploads of a plugin that isn't installed yet run at once,
+or an automatic install of a default plugin runs alongside one, the one that finishes second
+is refused with 409 `conflict` and installs nothing. An automatic install that loses is
+skipped.
 
 A manifest whose ID or version maps to an empty, `.` or `..` directory name (after the host
 replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacement package
@@ -3730,6 +3761,12 @@ A metadata provider is checked with a movie search; a marker provider is asked f
 account statistics, which need the staged credentials.
 A completed failed check, including a plugin without connection-check support, is a 200
 result with `success` false and the message; only transport or store failures are problems.
+Each installation's `connection_check_supported` says whether the check contacts the
+provider: true for a marker provider and for a metadata provider that serves movies, since
+the probe is a movie search. A metadata provider without movie priority, such as a
+series-only one, reports false; its check succeeds without contacting anything. Clients
+offer the check only when the field is true. A marker provider without account statistics
+can still answer that checks are not supported, since only running it tells.
 The probe launches a process and may call a billed provider, so it is non-retryable: the
 web hook disables mutation retries and authentication replay and reports an uncertain
 result to the operator instead of resubmitting.

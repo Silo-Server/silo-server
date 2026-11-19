@@ -13,7 +13,7 @@
  * identifier as the code, so callers handle v1 and v2 failures the same way.
  */
 
-import { problemDisplayText } from "@/api/v2/request";
+import { isProblem, problemDisplayText } from "@/api/v2/request";
 import type { paths } from "@/api/v2/schema";
 import { t } from "@/i18n";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
@@ -93,13 +93,6 @@ export type PlayerV2Options<K extends PlayerV2Key> = {
   ([PlayerV2Body<K>] extends [never] ? unknown : { body: PlayerV2Body<K> }) &
   ([FormFields<OperationOf<K>>] extends [never] ? unknown : { form: FormFields<OperationOf<K>> });
 
-interface ProblemLike {
-  type?: string;
-  title?: string;
-  detail?: string;
-  errors?: { code?: string; detail?: string }[];
-}
-
 /**
  * The origin the v2 routes hang off. Strip the configured API version because
  * route literals already carry their "/api/v2/..." prefix. Older embedding
@@ -175,30 +168,41 @@ export async function playerV2<K extends PlayerV2Key>(
   );
 
   const text = await res.text().catch(() => "");
+  // Without a problem document (a proxy's HTML page, an empty body) the player
+  // has nothing readable to show beyond its own message: the body is markup
+  // and the status text is untranslated.
+  const requestFailed = t("web.player.error.requestFailed");
   if (!res.ok) {
-    let message = res.statusText || t("web.player.error.requestFailed");
+    let message = requestFailed;
     let code: string | undefined;
     try {
-      const problem = JSON.parse(text) as ProblemLike;
-      // A validation problem's own detail only points at its field errors,
-      // which say what to fix.
-      const fieldDetails = (problem.errors ?? [])
-        .map((error) => error.detail?.trim())
-        .filter(Boolean)
-        .join(" ");
-      const detail = fieldDetails || problem.detail?.trim() || problem.title?.trim();
-      message = problemDisplayText(problem, detail || message);
-      if (typeof problem.type === "string") {
-        const segment = problem.type.split("?")[0]?.split("/").pop() ?? "";
+      const parsed: unknown = JSON.parse(text);
+      // Only a problem document's text is shown. Other JSON (a gateway's own
+      // error object) is not the server's answer.
+      if (isProblem(parsed)) {
+        // A validation problem's own detail only points at its field errors,
+        // which say what to fix.
+        const fieldDetails = (parsed.errors ?? [])
+          .map((error) => error.detail?.trim())
+          .filter(Boolean)
+          .join(" ");
+        const detail = fieldDetails || parsed.detail?.trim() || parsed.title.trim();
+        message = problemDisplayText(parsed, detail || message);
+        const segment = parsed.type.split("?")[0]?.split("/").pop() ?? "";
         code = segment.replace(/#.*$/, "") || undefined;
       }
     } catch {
-      if (text.trim().length > 0) message = text.trim();
+      // Not JSON, or a problem with malformed fields: keep the player's own
+      // message so the caller still gets a PlayerFetchError.
     }
     throw new PlayerFetchError(res.status, message, code, text);
   }
 
   onResponse?.(res);
   if (text.trim() === "") return undefined as SuccessOf<OperationOf<K>>;
-  return JSON.parse(text) as SuccessOf<OperationOf<K>>;
+  try {
+    return JSON.parse(text) as SuccessOf<OperationOf<K>>;
+  } catch {
+    throw new PlayerFetchError(res.status, requestFailed, undefined, text);
+  }
 }

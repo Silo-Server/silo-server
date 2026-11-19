@@ -25,7 +25,6 @@ import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOver
 import { IntroSkipButton } from "./IntroSkipButton";
 import { BufferingQualityPill } from "./BufferingQualityPill";
 import { MarkerEditPanel } from "./MarkerEditPanel";
-import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
@@ -50,7 +49,6 @@ import { useSubtitleDelay } from "../hooks/useSubtitleDelay";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
-import { useNextEpisode } from "../hooks/useNextEpisode";
 import { resetStillWatchingStreak } from "../stillWatching";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { useWatchTogetherPlaybackSync } from "../hooks/useWatchTogetherPlaybackSync";
@@ -76,11 +74,7 @@ import { StartupGuard } from "../utils/startupGuard";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
-import {
-  markerOccurrenceAtTime,
-  resolveAutoplayMarker,
-  resolveMarkerRegions,
-} from "../utils/watchPageMarkers";
+import { markerOccurrenceAtTime, resolveMarkerRegions } from "../utils/watchPageMarkers";
 import type {
   PlaybackExitState,
   IntroSkipMode,
@@ -107,6 +101,7 @@ import type {
 import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import {
+  bufferedAheadSeconds,
   mediaDurationSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -349,9 +344,6 @@ interface VideoPlayerProps {
   autoSkipRecap?: boolean;
   preview?: PlayerTimeRange | null;
   markerSegments?: PlayerMarkerSegment[];
-  autoPlayNextPreview?: boolean;
-  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
-  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   /**
    * Notified after a successful in-player marker edit, with only the kinds it
@@ -392,6 +384,19 @@ interface VideoPlayerProps {
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 // MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
 const MEDIA_ERR_NETWORK = 2;
+// hls.js gives up on a stream the moment a request is refused, but keeps what
+// it buffered. While the element has at least this much media at its playhead
+// it plays on, and the reconnect waits for the buffer to run out.
+const MIN_DRAIN_AHEAD_SECONDS = 1;
+// `waiting` on a draining stream is checked again after this long: a seek
+// inside the buffer or a decoder hiccup has recovered by then, an empty buffer
+// has not.
+const DRAIN_CHECK_DELAY_MS = 1_000;
+
+/** Whether a draining stream still has media to play at `position` (player time). */
+function hasMediaAhead(video: HTMLVideoElement, position = video.currentTime): boolean {
+  return bufferedAheadSeconds(video.buffered, position) >= MIN_DRAIN_AHEAD_SECONDS;
+}
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 /**
  * Firefox's copy-remux stall is media that arrived and still made no frame.
@@ -435,6 +440,9 @@ function bufferedEndSeconds(media: HTMLMediaElement): number {
   return ranges.length ? ranges.end(ranges.length - 1) : 0;
 }
 const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
+// One page toast tells the viewer the session ended, whichever of the
+// administrator's command and the server's 410 arrives first.
+const SESSION_ENDED_TOAST_ID = "playback-session-ended";
 /** The buffering controller's display-only notices show for 5 seconds on every client. */
 const BUFFERING_NOTICE_VISIBLE_MS = 5_000;
 // The server returns a room to the lobby once its position is within two
@@ -569,8 +577,6 @@ export function VideoPlayer({
   autoSkipRecap = false,
   preview = null,
   markerSegments,
-  autoPlayNextPreview = false,
-  autoPlayNext = true,
   canEditMarkers = true,
   onMarkersEdited,
   duration: propDuration,
@@ -607,6 +613,8 @@ export function VideoPlayer({
   tRef.current = t;
   const playerConfig = usePlayerConfig();
   const isDetached = displayMode !== "foreground";
+  const isDetachedRef = useRef(isDetached);
+  isDetachedRef.current = isDetached;
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -1055,6 +1063,72 @@ export function VideoPlayer({
   // back to fail the plan. Set once the controller's hook has run below.
   const startDeadlinePassedRef = useRef<(fail: () => void) => void>((fail) => fail());
 
+  // -- Draining a dead HLS transport --
+  // After hls.js gives up on the network, the element plays on from what it
+  // buffered, so a server that is away for less than the buffer interrupts
+  // nothing yet. The reconnect starts when the buffer runs out: `waiting`
+  // with nothing buffered at the playhead, a seek that needs the server, or
+  // any further fatal error. One stream at a time, reset with the transport.
+  const hlsDrainingRef = useRef(false);
+  const drainCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopDraining = useCallback(() => {
+    hlsDrainingRef.current = false;
+    if (drainCheckTimerRef.current !== null) {
+      clearTimeout(drainCheckTimerRef.current);
+      drainCheckTimerRef.current = null;
+    }
+  }, []);
+  const reconnectFromDrainedStream = useCallback(() => {
+    stopDraining();
+    reportConnectionLostRef.current();
+  }, [stopDraining]);
+
+  // `waiting` alone doesn't mean the buffer is empty: it also fires on a seek
+  // inside the buffer and on a brief decoder stall. A playhead that stays put
+  // with media buffered gets one more look; a stream stuck there needs
+  // replacing as much as an empty one. A viewer who paused meanwhile isn't
+  // waiting for anything: playing again fires `waiting` if the element still
+  // can't play. Ending the drain clears the check.
+  const scheduleDrainCheck = useCallback(() => {
+    if (!hlsDrainingRef.current || drainCheckTimerRef.current !== null) return;
+    let stalledAt: number | null = null;
+    const check = () => {
+      drainCheckTimerRef.current = null;
+      const video = videoRef.current;
+      if (!video || video.paused || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
+      if (hasMediaAhead(video) && video.currentTime !== stalledAt) {
+        stalledAt = video.currentTime;
+        drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);
+        return;
+      }
+      reconnectFromDrainedStream();
+    };
+    drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);
+  }, [reconnectFromDrainedStream]);
+
+  /**
+   * reportConnectionLost for a fatal hls.js network error: while the element
+   * still has media ahead of its playhead, the stream drains instead.
+   */
+  const reportHlsConnectionLost = useCallback((): boolean => {
+    const video = videoRef.current;
+    if (
+      onConnectionLost &&
+      video &&
+      streamFramedRef.current &&
+      connectionStatusRef.current === "connected" &&
+      hasMediaAhead(video)
+    ) {
+      hlsDrainingRef.current = true;
+      // The element may already be stalled, with its `waiting` long gone.
+      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) scheduleDrainCheck();
+      return true;
+    }
+    return reportConnectionLost();
+  }, [onConnectionLost, reportConnectionLost, scheduleDrainCheck]);
+  const reportHlsConnectionLostRef = useRef(reportHlsConnectionLost);
+  reportHlsConnectionLostRef.current = reportHlsConnectionLost;
+
   // While the session reconnects, nothing plays: the element is paused (so
   // progress reports say so), and hls.js stops hammering the server. The
   // transport is rebuilt from the plan the reconnect adopts.
@@ -1134,16 +1208,40 @@ export function VideoPlayer({
   replanningRef.current = replanning;
   // The viewer's newest seek while a replan of this session was in flight, and
   // the plan revision it was made on. The replanned stream starts there
-  // instead of where the replan was asked for. A later seek, or a replan that
-  // settles without a new stream, drops it.
-  const replanSeekRef = useRef<{ sessionId: string; revision: number; seconds: number } | null>(
-    null,
-  );
+  // instead of where the replan was asked for. A later seek replaces it; a
+  // replan that settles without a new stream drops it, unless the stream
+  // playing never took it (`carriedFrom`), which then asks for a stream there.
+  const replanSeekRef = useRef<{
+    sessionId: string;
+    revision: number;
+    seconds: number;
+    // Where the stream that never took the seek started.
+    carriedFrom?: number;
+  } | null>(null);
+  // A version switch started meanwhile settles first: one that lands a stream
+  // replaces this session, and the request would pair its new attempt with the
+  // old session.
+  const replanSeekChangeInFlight = replanning || replacing;
   useEffect(() => {
-    if (!replanning && replanSeekRef.current?.revision === planRevision) {
-      replanSeekRef.current = null;
-    }
-  }, [planRevision, replanning]);
+    const replanSeek = replanSeekRef.current;
+    if (replanSeekChangeInFlight || replanSeek?.revision !== planRevision) return;
+    replanSeekRef.current = null;
+    const from = replanSeek.carriedFrom;
+    const video = videoRef.current;
+    if (from === undefined || !video || replanSeek.sessionId !== sessionIdRef.current) return;
+    // A stream that has reached its own start, started before the seek and
+    // played up to it took it. Until the stream loads, its clock reads the
+    // stream's origin, which can be short of its start.
+    const position = toMediaTime(video.currentTime, timelineOffsetRef.current);
+    const settled = (target: number) =>
+      resolvePendingSeekTime(position, target).pendingSeekTime === null;
+    const started = settled(from) || position >= from;
+    const reached =
+      started &&
+      (settled(replanSeek.seconds) ||
+        (replanSeek.seconds >= from && position >= replanSeek.seconds));
+    if (!reached) reanchorAtRef.current(replanSeek.seconds);
+  }, [planRevision, replanSeekChangeInFlight]);
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
   // delivers.
@@ -1505,13 +1603,8 @@ export function VideoPlayer({
   useEffect(() => {
     if (!replanError || replanning) return;
 
-    // A refused reanchor never reaches its target. Resume relative skips from
-    // the surviving stream instead of extending the abandoned request.
-    pendingSeekTimeRef.current = null;
-    setPendingSeekTime(null);
-    const video = videoRef.current;
-    if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
-
+    // A pending seek survives: the surviving stream still takes it. A refused
+    // reanchor releases its own target when its request settles (reanchorAt).
     const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
@@ -1633,14 +1726,27 @@ export function VideoPlayer({
     if (!roomNudgeActiveRef.current) video.playbackRate = baseRate;
   }, [baseRate]);
 
+  // Records a seek the viewer made: where playback is heading and, while a
+  // replan is in flight, where the stream that replan brings starts. The
+  // newest seek replaces an older one either way.
+  const noteViewerSeek = useCallback(
+    (seconds: number) => {
+      rememberPendingSeek(seconds);
+      replanSeekRef.current = replanningRef.current
+        ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
+        : null;
+      setCurrentTime(seconds);
+    },
+    [rememberPendingSeek],
+  );
+
   // Asks the server for a stream anchored at `seconds`. The replan decides
   // whether that took: a refused or failed replan leaves playback where it
   // was. With no handler it returns false.
   const reanchorAt = useCallback(
     (seconds: number): boolean | Promise<boolean> => {
       if (!onReanchorSeek) return false;
-      rememberPendingSeek(seconds);
-      setCurrentTime(seconds);
+      noteViewerSeek(seconds);
       const accepted = onReanchorSeek(seconds);
       if (typeof accepted === "boolean") {
         if (!accepted) releasePendingSeek(seconds);
@@ -1657,9 +1763,14 @@ export function VideoPlayer({
         },
       );
     },
-    [onReanchorSeek, releasePendingSeek, rememberPendingSeek],
+    [noteViewerSeek, onReanchorSeek, releasePendingSeek],
   );
+  const reanchorAtRef = useRef(reanchorAt);
+  reanchorAtRef.current = reanchorAt;
 
+  // Counts performPlayerSeek calls, so a seek's late fallback can tell it was
+  // replaced.
+  const playerSeekGenerationRef = useRef(0);
   // Reports whether the seek was taken up, which callers that show an
   // affordance for it (the intro prompt) need in order to know whether the
   // affordance did anything.
@@ -1673,12 +1784,8 @@ export function VideoPlayer({
       // A seek this stream takes: the replan in flight, and a change queued
       // behind it, resume there too.
       const takeSeek = () => {
-        rememberPendingSeek(seconds);
-        replanSeekRef.current = replanningRef.current
-          ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
-          : null;
+        noteViewerSeek(seconds);
         onSeek?.(seconds);
-        setCurrentTime(seconds);
       };
 
       // The original's metadata handler seeks there once the clock's origin
@@ -1689,8 +1796,23 @@ export function VideoPlayer({
       }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
+      // A draining stream can only play what it buffered. The reconnect
+      // resumes at a target that needs the server, unless a later seek has
+      // replaced it while the reanchor was failing.
+      const draining = hlsDrainingRef.current && connectionStatusRef.current === "connected";
+      const seekGeneration = ++playerSeekGenerationRef.current;
+      const reconnectAtTarget = () => {
+        if (!hlsDrainingRef.current || playerSeekGenerationRef.current !== seekGeneration) return;
+        rememberPendingSeek(seconds);
+        setCurrentTime(seconds);
+        reconnectFromDrainedStream();
+      };
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
         takeSeek();
+        if (draining && !hasMediaAhead(video, nativeSeconds)) {
+          reconnectFromDrainedStream();
+          return true;
+        }
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;
@@ -1698,14 +1820,34 @@ export function VideoPlayer({
 
       // Outside the server-anchored window: this is a timeline operation, not
       // a failure, so it asks for a reanchor rather than reporting a failure.
-      return reanchorAt(seconds);
+      // Only the reanchor moves the window; the reconnect's replan may keep
+      // it. A draining stream reconnects once the reanchor can't reach the
+      // server either.
+      const accepted = reanchorAt(seconds);
+      if (!draining || accepted === true) return accepted;
+      if (accepted === false) {
+        reconnectAtTarget();
+        return true;
+      }
+      return accepted.then(
+        (ok) => {
+          if (!ok) reconnectAtTarget();
+          return true;
+        },
+        () => {
+          reconnectAtTarget();
+          return true;
+        },
+      );
     },
     [
       canSeekAnywhere,
       handleSeek,
       isHlsStream,
+      noteViewerSeek,
       onSeek,
       reanchorAt,
+      reconnectFromDrainedStream,
       rememberPendingSeek,
       resetRoomCatchupRate,
     ],
@@ -2071,11 +2213,16 @@ export function VideoPlayer({
   // The server ended the session for good (an administrator stopped it while
   // this player could not be told directly): leave instead of reconnecting.
   const sessionEndedHandledRef = useRef(false);
+  // Set when an administrator's stop or terminate already showed the notice,
+  // with its reason; the exit below must still run.
+  const adminEndNoticeShownRef = useRef(false);
   useEffect(() => {
     if (connectionStatus !== "ended" && !progressSessionEnded) return;
     if (sessionEndedHandledRef.current) return;
     sessionEndedHandledRef.current = true;
-    toast.info(tRef.current("web.player.session.endedByAdmin"));
+    if (!adminEndNoticeShownRef.current) {
+      toast.info(tRef.current("web.player.session.endedByAdmin"), { id: SESSION_ENDED_TOAST_ID });
+    }
     void handleExit();
   }, [connectionStatus, handleExit, progressSessionEnded]);
 
@@ -2509,36 +2656,28 @@ export function VideoPlayer({
   const activeRecap = markerOccurrenceAtTime(savedMarkerRegions, "recap", currentTime);
   const activeCredits = markerOccurrenceAtTime(savedMarkerRegions, "credits", currentTime);
   const activePreview = markerOccurrenceAtTime(savedMarkerRegions, "preview", currentTime);
-  const autoplayMarker = useMemo(() => {
-    if (markerSegments !== undefined) {
-      return resolveAutoplayMarker(savedMarkerRegions, duration, autoPlayNextPreview);
-    }
-    return autoPlayNextPreview && preview ? preview : credits;
-  }, [markerSegments, savedMarkerRegions, duration, autoPlayNextPreview, preview, credits]);
-  const nextEpisode = useNextEpisode(
-    roomPlaybackActive ? null : autoplayMarker,
-    roomPlaybackActive ? undefined : seriesContext,
-    currentTime,
-    handleNavigate,
-    { autoPlay: autoPlayNext, playing },
-  );
-
-  // Previous-episode lookup (mirrors the helper in useNextEpisode). Auto-play
-  // is next-only, so we just need the reference + a navigation callback for
-  // the floating player cluster.
-  const prevEpisodeRef = (() => {
-    if (!seriesContext) return null;
-    const idx = seriesContext.episodes.findIndex(
-      (ep) =>
-        ep.seasonNumber === seriesContext.currentSeason &&
-        ep.episodeNumber === seriesContext.currentEpisode,
-    );
-    if (idx <= 0) return null;
-    return seriesContext.episodes[idx - 1] ?? null;
-  })();
+  // The neighbouring episodes for the floating player cluster. Next Up itself
+  // is the post-roll screen, timed from the end of the file by the host. A
+  // Watch Together room decides what plays next, so it offers no next episode.
+  const episodeIndex = seriesContext
+    ? seriesContext.episodes.findIndex(
+        (ep) =>
+          ep.seasonNumber === seriesContext.currentSeason &&
+          ep.episodeNumber === seriesContext.currentEpisode,
+      )
+    : -1;
+  const prevEpisodeRef =
+    seriesContext && episodeIndex > 0 ? (seriesContext.episodes[episodeIndex - 1] ?? null) : null;
+  const nextEpisodeRef =
+    seriesContext && !roomPlaybackActive && episodeIndex >= 0
+      ? (seriesContext.episodes[episodeIndex + 1] ?? null)
+      : null;
   const goToPrevEpisode = useCallback(() => {
     if (prevEpisodeRef) handleNavigate(prevEpisodeRef.contentId, "viewer");
   }, [prevEpisodeRef, handleNavigate]);
+  const goToNextEpisode = useCallback(() => {
+    if (nextEpisodeRef) handleNavigate(nextEpisodeRef.contentId, "viewer");
+  }, [nextEpisodeRef, handleNavigate]);
 
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
@@ -2551,25 +2690,11 @@ export function VideoPlayer({
     : year
       ? numberText(year)
       : undefined;
-  const cancelNextEpisodeAutoPlay = nextEpisode.cancelAutoPlay;
-  const cancelNextEpisodeAutoPlayRef = useRef(cancelNextEpisodeAutoPlay);
   const flushWatchProgressRef = useRef(flushWatchProgress);
-
-  useEffect(() => {
-    cancelNextEpisodeAutoPlayRef.current = cancelNextEpisodeAutoPlay;
-  }, [cancelNextEpisodeAutoPlay]);
 
   useEffect(() => {
     flushWatchProgressRef.current = flushWatchProgress;
   }, [flushWatchProgress]);
-
-  // Cancel the in-player credits countdown when entering postroll mode,
-  // since PlayingNextScreen takes over next-episode navigation.
-  useEffect(() => {
-    if (displayMode === "postroll") {
-      cancelNextEpisodeAutoPlay();
-    }
-  }, [cancelNextEpisodeAutoPlay, displayMode]);
 
   // -- Intro/recap skip --
   const activeSkipMarker = [activeRecap, activeCredits, activePreview].find(
@@ -2663,6 +2788,7 @@ export function VideoPlayer({
     // frame yet may be a route this browser cannot reach, so its network
     // failures go through startup recovery rather than the reconnect.
     streamPlayedRef.current = false;
+    stopDraining();
     streamFramedRef.current = false;
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
@@ -2838,25 +2964,49 @@ export function VideoPlayer({
     // A seek made while this stream's plan was fetched is where the stream is
     // heading, as a seek made while it loads is. Pending, it is also where a
     // replan resumes before this stream plays. Taken by the first transport of
-    // the plan that replaced the seek's plan.
+    // the plan that replaced the seek's plan. A room seek request the room has
+    // not run yet waits for the room's command; until then the stream heads
+    // for the seek the room ran last.
+    const pendingSeekIsHeld = () =>
+      pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current === roomHeldSeekRef.current;
+    const unheldPendingSeek = () => (pendingSeekIsHeld() ? null : pendingSeekTimeRef.current);
     const replanSeek = replanSeekRef.current;
+    let replanTarget: number | null = null;
     if (replanSeek && replanSeek.revision !== planRevision) {
       replanSeekRef.current = null;
-      const seconds = pendingSeekTimeRef.current ?? replanSeek.seconds;
-      if (
-        replanSeek.sessionId === sessionIdRef.current &&
-        canSeekAnywhereRef.current &&
-        seconds !== roomHeldSeekRef.current
-      ) {
-        rememberPendingSeek(seconds);
+      if (replanSeek.sessionId === sessionIdRef.current) {
+        replanTarget = unheldPendingSeek() ?? replanSeek.seconds;
       }
     }
-    // A seek the viewer made while the stream loads wins over the plan's start
-    // position; on a seek-anywhere plan it never replans. A room seek request
-    // the room has not run yet waits for the room's command.
-    const hlsStartPosition = () => {
-      const seconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
-      return seconds === null || seconds === roomHeldSeekRef.current
+    if (replanTarget !== null) {
+      const planStart = toMediaTime(effectiveInitialPosition, planTimelineOffsetRef.current);
+      if (canSeekAnywhereRef.current) {
+        if (!pendingSeekIsHeld()) rememberPendingSeek(replanTarget);
+      } else if (resolvePendingSeekTime(planStart, replanTarget).pendingSeekTime === null) {
+        // The plan's start already settles the seek.
+      } else if (replanningRef.current) {
+        // Another change is already in flight; the stream it brings takes the
+        // seek instead of this one.
+        replanSeekRef.current = {
+          sessionId: sessionIdRef.current,
+          revision: planRevision,
+          seconds: replanTarget,
+          carriedFrom: planStart,
+        };
+      } else {
+        // This stream starts where the replan was asked for and cannot seek
+        // anywhere: ask for one anchored at the seek.
+        reanchorAtRef.current(replanTarget);
+      }
+    }
+    // Where on the media this stream starts, when not at the plan's start: a
+    // seek the viewer made while the stream loads wins over the plan's start
+    // position; on a seek-anywhere plan it never replans.
+    const streamStartTarget = () =>
+      canSeekAnywhereRef.current ? (unheldPendingSeek() ?? replanTarget) : null;
+    const streamStartPosition = () => {
+      const seconds = streamStartTarget();
+      return seconds === null
         ? effectiveInitialPosition
         : toPlayerTime(seconds, timelineOffsetRef.current);
     };
@@ -2864,7 +3014,7 @@ export function VideoPlayer({
     const attachNativeHLS = () => {
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
-        video.currentTime = hlsStartPosition();
+        video.currentTime = streamStartPosition();
         attemptAutoplayWhenReady();
       };
       video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
@@ -2912,7 +3062,7 @@ export function VideoPlayer({
               maxBufferLength,
               maxMaxBufferLength: maxBufferLength,
               // hls.js seeks to this once the first fragment is buffered.
-              startPosition: hlsStartPosition(),
+              startPosition: streamStartPosition(),
               startFragPrefetch: true,
               // Segment requests may block while FFmpeg encodes on demand.
               // Remote transcode nodes can also briefly defer the initial
@@ -2957,9 +3107,20 @@ export function VideoPlayer({
                 error: data.error?.message,
               });
 
+              // A draining stream is already dead: whatever failed now, only
+              // the reconnect can replace it.
+              if (hlsDrainingRef.current) {
+                reconnectFromDrainedStream();
+                return;
+              }
+
               // hls.js has already retried the request; a fatal network error
-              // on a stream that played means the server went away.
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && reportConnectionLostRef.current()) {
+              // on a stream that played means the server went away. The
+              // element plays out what it buffered before the reconnect.
+              if (
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                reportHlsConnectionLostRef.current()
+              ) {
                 return;
               }
 
@@ -3138,7 +3299,7 @@ export function VideoPlayer({
             engineSession = attachBrowserEngine({
               video,
               surface,
-              source: route.source,
+              source: { ...route.source, startSeconds: Math.max(0, streamStartPosition()) },
               onMediaData: (request, bytes, first, last) => {
                 if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last);
               },
@@ -3210,7 +3371,9 @@ export function VideoPlayer({
             setDirectPlayOriginSeconds(origin);
             // A seek made while the origin was unknown wins over the start position.
             const mediaTarget =
-              pendingSeekTimeRef.current ?? toMediaTime(effectiveInitialPosition, planOffset);
+              unheldPendingSeek() ??
+              streamStartTarget() ??
+              toMediaTime(effectiveInitialPosition, planOffset);
             const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);
             if (Math.abs(video.currentTime - target) > 0.01) video.currentTime = target;
             applyElementDuration(video);
@@ -3231,6 +3394,7 @@ export function VideoPlayer({
       cleanupStartupListeners();
       video.removeEventListener("suspend", endHoldOnceLoaded);
       video.removeEventListener("canplay", endHoldOnceLoaded);
+      stopDraining();
       if (engineSession) {
         // Restores the element's own media pipeline before it is reset below.
         engineSession.destroy();
@@ -3264,9 +3428,11 @@ export function VideoPlayer({
     playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
+    reconnectFromDrainedStream,
     rememberPendingSeek,
     reportCurrentPlanFailure,
     shouldAutoPlay,
+    stopDraining,
   ]);
 
   // -- Video event listeners --
@@ -3404,6 +3570,7 @@ export function VideoPlayer({
       persistVolume(video.volume, viewerMuted);
     };
     const onWaiting = () => {
+      scheduleDrainCheck();
       // Delay showing the spinner so brief buffering between segments
       // or during initial HLS startup doesn't flash a spinner.
       if (!bufferingTimerRef.current) {
@@ -3474,8 +3641,6 @@ export function VideoPlayer({
       if (endedFiredRef.current) return;
       endedFiredRef.current = true;
       setHasEnded(true);
-      // Cancel any active credits countdown to prevent it racing with post-roll.
-      cancelNextEpisodeAutoPlayRef.current();
       // Flush progress so the server records the final position.
       flushWatchProgressRef.current().catch(() => {});
       // Use ref to get the latest callback, avoiding stale closure issues
@@ -3498,6 +3663,9 @@ export function VideoPlayer({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("error", onError);
     video.addEventListener("ended", onVideoEnded);
+    // hls.js reports an end it stalled into without a native `ended`; with At
+    // end nothing else would open Next Up then.
+    video.addEventListener(MEDIA_ENDED_EVENT, onVideoEnded);
     window.addEventListener("offline", onNetworkChange);
     window.addEventListener("online", onNetworkChange);
 
@@ -3519,6 +3687,7 @@ export function VideoPlayer({
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("error", onError);
       video.removeEventListener("ended", onVideoEnded);
+      video.removeEventListener(MEDIA_ENDED_EVENT, onVideoEnded);
     };
     // Listener behavior depends on pending seek reconciliation. Watch-together
     // deps are intentionally narrowed to the primitives the handlers read so
@@ -3531,6 +3700,7 @@ export function VideoPlayer({
     reportCurrentPlanFailure,
     resetRoomCatchupRate,
     roomReadinessPending,
+    scheduleDrainCheck,
     sessionId,
     watchTogetherRoomActive,
     watchTogetherSync,
@@ -4593,6 +4763,10 @@ export function VideoPlayer({
           video.paused &&
           transportStartupPendingRef.current &&
           video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        // The command sets the play state. A position this stream can't reach
+        // starts the reconnect inside applyRoomPosition, before the element
+        // pauses or plays below, and the reconnect resumes by this state.
+        viewerPlayingRef.current = command.action === "play";
         const playAllowed = !awaitingMedia && applyRoomPosition(video);
 
         if (command.action === "seek") {
@@ -4881,11 +5055,10 @@ export function VideoPlayer({
     }),
     [plan, activeQualityId],
   );
-  // Intro skip, the other segment skips and Next Up take priority; a
+  // Intro skip and the other segment skips take priority; a
   // buffering pill waits behind them with its timer frozen. A minimized
   // player shows no pill either, so the pill waits for it to come back.
-  const higherPriorityPillActive =
-    activeIntroPrompt !== null || nextEpisode.showCountdown || activeSkipMarker !== undefined;
+  const higherPriorityPillActive = activeIntroPrompt !== null || activeSkipMarker !== undefined;
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
@@ -5125,8 +5298,9 @@ export function VideoPlayer({
       currentTime,
       duration,
       playing,
+      fileId: activeFileId ?? selectedVersion?.file_id,
     });
-  }, [currentTime, duration, onPlaybackStateChange, playing]);
+  }, [activeFileId, currentTime, duration, onPlaybackStateChange, playing, selectedVersion]);
 
   useEffect(() => {
     if (!onPlaybackTransportReady) {
@@ -5154,6 +5328,23 @@ export function VideoPlayer({
     onPlaybackTransportReady(transport);
     return () => onPlaybackTransportReady(null);
   }, [onPlaybackTransportReady, skipActions]);
+
+  // A server message renders inside the player only in the foreground, so a
+  // minimized or detached player shows it as a page toast instead. The toast
+  // goes at the top: the minimized player sits along the bottom edge, where
+  // page toasts normally appear, and one there would cover its controls.
+  const showServerNotice = useCallback((next: PlaybackNoticeState) => {
+    if (isDetachedRef.current) {
+      const show = next.tone === "warning" ? toast.warning : toast.info;
+      show(next.title ?? next.message, {
+        description: next.title ? next.message : undefined,
+        duration: PLAYBACK_NOTICE_VISIBLE_MS,
+        position: "top-center",
+      });
+      return;
+    }
+    setNotice(next);
+  }, []);
 
   const executeRealtimeCommand = useCallback(
     async (command: PlaybackRealtimeCommandEnvelope) => {
@@ -5197,7 +5388,7 @@ export function VideoPlayer({
           return;
         }
         case "display_message":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.title"),
@@ -5208,7 +5399,7 @@ export function VideoPlayer({
           });
           return;
         case "server_restarting":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.restartingTitle"),
@@ -5219,7 +5410,7 @@ export function VideoPlayer({
           });
           return;
         case "server_shutting_down":
-          setNotice({
+          showServerNotice({
             title:
               readStringPayload(command.payload, "title") ??
               tRef.current("web.player.serverMessage.shuttingDownTitle"),
@@ -5252,28 +5443,47 @@ export function VideoPlayer({
           return;
         }
         case "stop":
-        case "terminate":
-          if (command.payload) {
-            const message = readStringPayload(command.payload, "message");
-            if (message) {
-              setNotice({
-                title:
-                  readStringPayload(command.payload, "title") ??
-                  (command.name === "terminate"
-                    ? tRef.current("web.player.serverMessage.endedTitle")
-                    : tRef.current("web.player.serverMessage.stoppingTitle")),
-                message,
-                tone: "warning",
-              });
+        case "terminate": {
+          // The player closes at once, so the notice is a page toast that
+          // stays on the screen the viewer lands on. An administrator's
+          // reason travels in the envelope's top-level reason.
+          const byAdmin = command.issued_by?.kind === "admin";
+          const message =
+            readStringPayload(command.payload, "message") ?? (command.reason?.trim() || undefined);
+          if (byAdmin) {
+            // A later 410 from the same end must not toast a second time.
+            adminEndNoticeShownRef.current = true;
+          }
+          if (byAdmin || message) {
+            let fallbackTitle = tRef.current("web.player.session.endedByAdmin");
+            if (!byAdmin) {
+              fallbackTitle =
+                command.name === "terminate"
+                  ? tRef.current("web.player.serverMessage.endedTitle")
+                  : tRef.current("web.player.serverMessage.stoppingTitle");
             }
+            toast.warning(readStringPayload(command.payload, "title") ?? fallbackTitle, {
+              // Replaces the generic notice when a 410 arrived first.
+              id: byAdmin ? SESSION_ENDED_TOAST_ID : undefined,
+              description: message,
+              duration: PLAYBACK_NOTICE_VISIBLE_MS,
+            });
           }
           await handleExit();
           return;
+        }
         default:
           throw new Error("unsupported");
       }
     },
-    [handleExit, handleVolumeChange, onPlanInvalidated, performPlayerSeek, replanPosition],
+    [
+      handleExit,
+      handleVolumeChange,
+      onPlanInvalidated,
+      performPlayerSeek,
+      replanPosition,
+      showServerNotice,
+    ],
   );
 
   const realtime = usePlaybackRealtime({
@@ -5774,7 +5984,7 @@ export function VideoPlayer({
           showSource={showMarkerSource}
         />
       )}
-      {!isDetached && !activeIntroPrompt && !nextEpisode.showCountdown && activeSkipMarker && (
+      {!isDetached && !activeIntroPrompt && activeSkipMarker && (
         <IntroSkipButton
           onSkip={skipMarker}
           label={skipMarkerLabel(t, activeSkipMarker.kind)}
@@ -5789,17 +5999,6 @@ export function VideoPlayer({
       {/* Marker editor */}
       {!isDetached && markerEditor.editing && (
         <MarkerEditPanel editor={markerEditor} currentTime={currentTime} />
-      )}
-
-      {/* Next episode overlay */}
-      {!isDetached && nextEpisode.showCountdown && nextEpisode.nextEpisode && (
-        <NextEpisodeOverlay
-          dockHeight={controlsVisible ? dockClearance : 0}
-          episode={nextEpisode.nextEpisode}
-          secondsRemaining={nextEpisode.secondsRemaining}
-          onSkip={nextEpisode.skipToNext}
-          onCancel={nextEpisode.cancelAutoPlay}
-        />
       )}
 
       {/* Live translation buffering indicator */}
@@ -5915,9 +6114,9 @@ export function VideoPlayer({
           showPlaybackInfo={showPlaybackInfo}
           onTogglePlaybackInfo={() => setShowPlaybackInfo((v) => !v)}
           hasPrevEpisode={!!prevEpisodeRef}
-          hasNextEpisode={!!nextEpisode.nextEpisode}
+          hasNextEpisode={!!nextEpisodeRef}
           onPrevEpisode={goToPrevEpisode}
-          onNextEpisode={nextEpisode.skipToNext}
+          onNextEpisode={goToNextEpisode}
           title={hudTitle}
           subtitleLabel={hudSubtitle}
         />

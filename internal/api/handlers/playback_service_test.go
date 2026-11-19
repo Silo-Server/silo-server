@@ -260,9 +260,14 @@ func TestStopPlaybackV2RefusesServerStopIDs(t *testing.T) {
 // TestStopPlaybackV2WithoutLiveSessionStillStopsTheRow covers a stop that
 // reaches a replica without the session's copy: the row stops, and the admin
 // log records the play from the attempt row, started when the attempt was.
+//
+// The play is measured from what its copy last saved, through the stop's own
+// final position.
 func TestStopPlaybackV2WithoutLiveSessionStillStopsTheRow(t *testing.T) {
 	f := newPlaybackServiceFixture(t)
-	admin := &recordingPlaybackAdminStore{}
+	var saved playback.WatchTime
+	saved.Observe(0, false, time.Now().Add(-15*time.Minute))
+	admin := &savedWatchAdminStore{watch: saved}
 	f.handler.AdminStore = admin
 	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
 	if err := f.manager.StopSession(f.session.ID); err != nil {
@@ -282,9 +287,23 @@ func TestStopPlaybackV2WithoutLiveSessionStillStopsTheRow(t *testing.T) {
 		t.Fatalf("admin history = %+v, want one row", admin.history)
 	}
 	row := admin.history[0]
-	if row.EndReason != PlaybackEndStopped || row.WatchedSeconds != 900 || row.StartedAt != record.CreatedAt.UTC().Format(time.RFC3339Nano) {
-		t.Fatalf("admin row = reason %q at %v started %s, want stopped at 900 started %s", row.EndReason, row.WatchedSeconds, row.StartedAt, record.CreatedAt)
+	if row.EndReason != PlaybackEndStopped || row.EndPositionSeconds != 900 || row.StartedAt != record.CreatedAt.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("admin row = reason %q at %v started %s, want stopped at 900 started %s", row.EndReason, row.EndPositionSeconds, row.StartedAt, record.CreatedAt)
 	}
+	if !row.Watch.Measured || row.Watch.StartPosition != 0 || row.Watch.PlayedSeconds != 900 || !row.Watch.Since.Equal(saved.Since) {
+		t.Fatalf("admin watch = %+v, want the saved measurement through the final 900 s", row.Watch)
+	}
+}
+
+// savedWatchAdminStore is a recording admin store whose sessions all have a
+// saved measurement.
+type savedWatchAdminStore struct {
+	recordingPlaybackAdminStore
+	watch playback.WatchTime
+}
+
+func (s *savedWatchAdminStore) SessionWatch(context.Context, string) (playback.WatchTime, bool, error) {
+	return s.watch, s.watch.Measured, nil
 }
 
 // TestReplayedStopFinishesTheWinningStopsEnd covers a stop that replays an
@@ -319,7 +338,7 @@ func TestReplayedStopFinishesTheWinningStopsEnd(t *testing.T) {
 			if err != nil || view.Outcome != PlaybackOutcomeReplayed {
 				t.Fatalf("view = %+v, %v", view, err)
 			}
-			if len(admin.history) != 1 || admin.history[0].EndReason != tc.reason || admin.history[0].WatchedSeconds != 600 {
+			if len(admin.history) != 1 || admin.history[0].EndReason != tc.reason || admin.history[0].EndPositionSeconds != 600 {
 				t.Fatalf("admin history = %+v, want one %s row at 600", admin.history, tc.reason)
 			}
 			if history, _ := userStore.ListHistory(t.Context(), "profile-1", 10, 0); len(history) != tc.watchedRows {
@@ -1115,7 +1134,7 @@ func TestNativeEndWritesOnceWhoeverWinsTheRow(t *testing.T) {
 			memory := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
 			tc.end(f, memory)
 
-			if len(admin.history) != 1 || admin.history[0].EndReason != tc.wantReason || admin.history[0].WatchedSeconds != tc.wantWatched {
+			if len(admin.history) != 1 || admin.history[0].EndReason != tc.wantReason || admin.history[0].EndPositionSeconds != tc.wantWatched {
 				t.Fatalf("admin history = %+v, want one %s row at %v", admin.history, tc.wantReason, tc.wantWatched)
 			}
 			history, err := userStore.ListHistory(t.Context(), "profile-1", 10, 0)
@@ -1209,8 +1228,11 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 		position   float64
 		wantReason PlaybackEndReason
 		race       func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3)
+		// wantMeasured: the worker records the play from the attempt row,
+		// with the measurement of the copy the confirmed stop removed.
+		wantMeasured bool
 	}{
-		{name: "worker finalizes", position: 900, wantReason: PlaybackEndTerminated},
+		{name: "worker finalizes", position: 900, wantReason: PlaybackEndTerminated, wantMeasured: true},
 		{name: "client stop finalized first", position: 900, wantReason: PlaybackEndStopped, race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
 			clientStop(t, f, uuid.NewString())
 		}},
@@ -1259,6 +1281,9 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 			}
 			if len(admin.history) != 1 || admin.history[0].EndReason != tc.wantReason {
 				t.Fatalf("admin history = %+v, want one %s row", admin.history, tc.wantReason)
+			}
+			if tc.wantMeasured && admin.history[0].Watch != snapshot.Watch {
+				t.Fatalf("admin watch = %+v, want the removed copy's %+v", admin.history[0].Watch, snapshot.Watch)
 			}
 			if tc.wantReason == PlaybackEndAborted && (len(scrobbler.pauses) != 1 || !scrobbler.pauses[0].SessionEnded) {
 				t.Fatalf("abort provider events = %+v, want one pause that ends the session", scrobbler.pauses)

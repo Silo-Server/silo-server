@@ -124,11 +124,14 @@ export function PluginSettingsPanels({
               configuredSecrets={saved?.configured_secrets}
               isSaving={saveConfig.isPending}
               isTesting={testConfig.isPending}
-              onTest={(key, nextValue, clearSecrets) =>
-                testConfig.mutateAsync({
-                  id: installation.id,
-                  body: { key, value: nextValue, clear_secrets: clearSecrets },
-                })
+              onTest={
+                installation.connection_check_supported
+                  ? (key, nextValue, clearSecrets) =>
+                      testConfig.mutateAsync({
+                        id: installation.id,
+                        body: { key, value: nextValue, clear_secrets: clearSecrets },
+                      })
+                  : undefined
               }
               onSave={(key, nextValue, clearSecrets) =>
                 saveConfig.mutate({

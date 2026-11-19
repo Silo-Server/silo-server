@@ -75,6 +75,15 @@ func (s *interestTrackingStore) ManualCollectionsHolding(ctx context.Context, cr
 	return reader.ManualCollectionsHolding(ctx, creatorProfileID, mediaItemID)
 }
 
+// CollectionsHolding preserves the title page's "Also in" membership read.
+func (s *interestTrackingStore) CollectionsHolding(ctx context.Context, mediaItemID string) ([]string, error) {
+	reader, ok := s.UserStore.(userstore.CollectionMembershipReader)
+	if !ok {
+		return nil, errors.New("collection membership reads are not supported")
+	}
+	return reader.CollectionsHolding(ctx, mediaItemID)
+}
+
 func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
 	store, err := p.inner.ForUser(ctx, userID)
 	if err != nil || store == nil {
