@@ -1,10 +1,39 @@
 package middleware
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
+
+// The panic log names the request path with any {token} or {secret}
+// parameter redacted, so a crash on a credential-bearing route doesn't write
+// the credential to the server log.
+func TestRecovererRedactsSecretPathParams(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const token = "s3cr3t-stream-token"
+	router := chi.NewRouter()
+	router.Use(Recoverer)
+	router.Get("/stream/{token}", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stream/"+token, nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(logs.String(), token) || !strings.Contains(logs.String(), "/stream/[redacted]") {
+		t.Fatalf("panic log = %q, want the path with its token redacted", logs.String())
+	}
+}
 
 // An aborted response is not a panic to answer: Recoverer passes
 // http.ErrAbortHandler on, so net/http still breaks the connection.

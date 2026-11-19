@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 )
 
 // Recoverer answers a handler's panic with a 500 that the recording
@@ -25,8 +27,11 @@ func Recoverer(next http.Handler) http.Handler {
 			if rec == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
 				panic(rec)
 			}
+			// The path can carry a bearer credential ({token} or {secret});
+			// log it redacted, as the request and activity logs do.
 			slog.ErrorContext(r.Context(), "panic serving request", "component", "api",
-				"method", r.Method, "path", r.URL.Path, "panic", fmt.Sprint(rec), "stack", string(debug.Stack()))
+				"method", r.Method, "path", activitylog.RedactSecretPathParams(r, r.URL.Path),
+				"panic", fmt.Sprint(rec), "stack", string(debug.Stack()))
 			w.WriteHeader(http.StatusInternalServerError)
 		}()
 		next.ServeHTTP(w, r)
