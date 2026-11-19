@@ -1,6 +1,5 @@
 import { ReadableStream } from "node:stream/web";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MediaRun } from "./mediaFetch";
 import {
   disposeSources,
   FakeServer,
@@ -69,12 +68,11 @@ describe("ParallelRangeSource reads", () => {
     });
     expect(server.maxInFlight).toBe(4);
     expect(server.maxPerRun).toBeLessThanOrEqual(4);
-    // Each worker run passes its one run to every request, the head included.
-    expect(runs()).toBe(2);
-    const byRun = new Map<MediaRun | undefined, number>();
-    for (const r of server.requests) byRun.set(r.run, (byRun.get(r.run) ?? 0) + 1);
-    expect(byRun.size).toBe(2);
-    expect([...byRun.keys()].every((run) => run !== undefined)).toBe(true);
+    // The source passes its one run to every request of every worker, the head included, so
+    // the page's meter counts the striped read as one request.
+    expect(runs()).toBe(1);
+    expect(new Set(server.requests.map((r) => r.run)).size).toBe(1);
+    expect(server.requests[0]?.run).toBeDefined();
   });
 
   it("keeps one range in flight across two workers until the file size is known", async () => {

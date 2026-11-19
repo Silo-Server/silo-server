@@ -4,11 +4,14 @@ import type { WorkerToPageMessage } from "./protocol";
 const MEDIA_DATA_REPORT_MS = 250;
 
 /**
- * One read worker's run: the bytes every range, retry and head request of it
- * has received, and when the first and latest arrived. The page joins the runs
- * of one source into one request. `spans` holds one `[first, last]` per
- * response, from its first body chunk to its latest: the time the run was
- * receiving. Time waiting for headers, or between ranges, is in none.
+ * One metered request: the bytes its responses have received, and when the
+ * first and latest arrived. The striped reader counts every range, retry and
+ * head request of a source into one run; a stock read is a run of its own.
+ * `spans` is the time the run was receiving: the union of each response's time
+ * from its first body chunk to its latest, as sorted `[first, last]` pairs that
+ * do not overlap. Time waiting for headers, or between ranges, is in none. The
+ * list has one entry per stretch of receiving, not one per response, so a long
+ * play keeps it short.
  */
 export interface MediaRun {
   request: number;
@@ -27,7 +30,8 @@ export interface MediaRun {
  * `fetch` counts into the run it is given, so a reader that sends many short
  * ranges reports them as one long request, which the page's throughput meter
  * can use, for the time at least one of its responses was receiving. Without a
- * run, each call is its own request.
+ * run, each call is its own request, as a stock read is: the meter's gate on
+ * short requests then applies to each one.
  */
 export function createMeteredFetch(post: (message: WorkerToPageMessage) => void) {
   let nextMediaRequest = 0;
@@ -44,14 +48,23 @@ export function createMeteredFetch(post: (message: WorkerToPageMessage) => void)
     const response = await fetch(input, init);
     if (!response.body) return response;
     const counting = run ?? newRun();
-    let span: [number, number] | undefined;
+    // When this response's previous chunk arrived; undefined before its first.
+    let previous: number | undefined;
     const counted = response.body.pipeThrough(
       new TransformStream<Uint8Array, Uint8Array>({
         transform(chunk, controller) {
           counting.last = performance.timeOrigin + performance.now();
           if (counting.bytes === 0) counting.first = counting.last;
-          if (span) span[1] = counting.last;
-          else counting.spans.push((span = [counting.last, counting.last]));
+          // This response was receiving from its previous chunk until now. Now is never
+          // earlier than a time already in the list, so the stretch joins every entry it
+          // reaches back into, from the tail.
+          let from = previous ?? counting.last;
+          const spans = counting.spans;
+          while (spans.length > 0 && (spans[spans.length - 1] as [number, number])[1] >= from) {
+            from = Math.min(from, (spans.pop() as [number, number])[0]);
+          }
+          spans.push([from, counting.last]);
+          previous = counting.last;
           counting.bytes += chunk.byteLength;
           counting.report ??= setTimeout(() => {
             counting.report = null;

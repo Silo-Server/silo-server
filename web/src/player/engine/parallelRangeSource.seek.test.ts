@@ -92,6 +92,41 @@ describe("seek while both read workers are busy", () => {
     }
   });
 
+  // Mediabunny aligns a read's start down to 64 KiB and caps its end at the file's size, so a
+  // seek near the end of the file asks for the very hole a read queued before the seek waits on.
+  it("retires an old worker for a seek whose first read asks for a queued read's hole", async () => {
+    vi.useFakeTimers();
+    try {
+      const server = new FakeServer(pattern(SIZE));
+      server.fault = () => ({ kind: "slowBody", intervalMs: 1_000 });
+      const { source } = makeSource(server);
+      source.endWarmHead();
+      const a = read(source, 0, 5 * MIB);
+      const b = read(source, 34 * MIB, 39 * MIB);
+      await advanceUntil(
+        () => orchestratorOf(source).workers.length === 2 && server.inFlight === 4,
+        900,
+      );
+      const tail = SIZE - MIB;
+      const queued = read(source, tail, SIZE);
+      expect(orchestratorOf(source).queuedReads.length).toBe(1);
+      const before = server.requests.length;
+      source.endWarmHead();
+      const seek = read(source, tail + 4 * KIB, tail + 5 * KIB);
+      await advanceUntil(() => requestFor(server, tail + 4 * KIB, before) !== undefined, 1_000);
+      expect(same(await settled(seek), server.bytes.subarray(tail + 4 * KIB, tail + 5 * KIB))).toBe(
+        true,
+      );
+      expect(same(await settled(queued), server.bytes.subarray(tail, SIZE))).toBe(true);
+      expect(same(await settled(a), server.bytes.subarray(0, 5 * MIB))).toBe(true);
+      expect(same(await settled(b), server.bytes.subarray(34 * MIB, 39 * MIB))).toBe(true);
+      // The seek's worker took the queued read with it: the file's last byte is fetched once.
+      expect(server.requests.filter((r) => r.last === SIZE - 1).length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaves the seek's ranges alone when a read from the replaced playback contends", async () => {
     vi.useFakeTimers();
     try {

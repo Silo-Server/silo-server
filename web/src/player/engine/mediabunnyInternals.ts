@@ -10,9 +10,12 @@
  *   `signalWorkerStoppedRunning`, and `options.prefetchProfile`, which the
  *   read-ahead floor wraps. `signalWorkerStoppedRunning` clears a stopped worker's reads unless
  *   the worker is aborted, so a trim must cover the bytes those reads wait for.
+ *   - `read`, which the source wraps: it is synchronous, and calls `createWorker` for a new
+ *     read before it looks at the queue.
  *   - `createWorker`, which the source wraps: its name, its `null` while every worker runs, and
- *     that `read()` and the queue restart call it through `this`. The restart starts the oldest
- *     queued read with that read's exact hole.
+ *     that `read()` and the queue restart call it through `this`. The restart runs after a
+ *     worker stops, outside `read()`.
+ *   - `checkQueuedReadsAgainstWorker`, which moves the queued reads a worker covers onto it.
  *   - `workers`, which a retired worker leaves.
  *   - `queuedReads`, sorted by `hole.start` with no overlaps, and each entry's `hole`,
  *     `strictTarget`, `pendingSlices` and `age`.
@@ -60,7 +63,9 @@ interface ReadOrchestrator {
   supplyFileSize(size: number): void;
   supplyWorkerData(worker: ReadWorker, bytes: Uint8Array): void;
   signalWorkerStoppedRunning(worker: ReadWorker): void;
+  read(...args: unknown[]): unknown;
   createWorker(startPos: number, targetPos: number, strictTarget: boolean): ReadWorker | null;
+  checkQueuedReadsAgainstWorker(worker: ReadWorker): void;
   workers: ReadWorker[];
   /** Sorted by `hole.start`, holes never overlapping. */
   queuedReads: QueuedRead[];
@@ -70,7 +75,7 @@ interface ReadOrchestrator {
 /** The private surface of `UrlSource` this file reads and writes. */
 interface UrlSourceInternals {
   _url: string | URL | Request;
-  /** The constructor normalizes headers to a plain record. */
+  /** The engine passes headers as a plain record; the constructor copies them only to drop a `Range`. */
   _requestInit: RequestInit & { headers?: Record<string, string> };
   _getRetryDelay: (attempts: number, error: unknown, url: string | URL | Request) => number | null;
   _orchestrator: ReadOrchestrator;

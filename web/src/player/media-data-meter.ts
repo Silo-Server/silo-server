@@ -55,8 +55,8 @@ export class MediaDataMeter {
    * `request` has received `bytes` in all, the first of them at `first` and
    * the latest at `last`. A request reports again as more arrives. `spans` is
    * the time it was receiving, as `[first, last]` pairs; without it the
-   * request was receiving from `first` to `last`. The browser engine's runs
-   * report as one request with their spans, so the time between their ranges
+   * request was receiving from `first` to `last`. The browser engine's striped read
+   * reports as one request with its spans, so the time between its ranges
    * is not receiving time.
    */
   received(

@@ -102,6 +102,14 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 export class ParallelRangeSource extends InternalUrlSource {
   private readonly stripeUrl: string;
   private readonly metered: MeteredFetch;
+  /**
+   * Every range, retry and head request of this source counts into one run, so the page's
+   * meter sees the striped read as one long request. A stock read, which a plan URL that
+   * ignores `Range` falls back to, stays a request of its own.
+   */
+  private readonly run: MediaRun;
+  /** True while Mediabunny's `read()` runs: a `createWorker` call then is for a new read. */
+  private reading = false;
   /** The ranges in flight across the workers, the workers queued for a slot, and each worker's wake function. */
   private readonly slots = { active: 0, waiting: [] as SlotToken[], wakers: new Set<() => void>() };
   private headOpen = true;
@@ -158,24 +166,35 @@ export class ParallelRangeSource extends InternalUrlSource {
     super(headUrl, { ...options, fetchFn: metered.fetch });
     this.stripeUrl = stripeUrl;
     this.metered = metered;
+    this.run = metered.newRun();
     const orchestrator = this._orchestrator;
     const profile = orchestrator.options.prefetchProfile;
     orchestrator.options.prefetchProfile = (start, end, workers) => {
       const range = profile(start, end, workers);
       return { start: range.start, end: Math.max(range.end, start + READ_AHEAD_BYTES) };
     };
+    // `read()` is synchronous and calls `createWorker` for a new read before it looks at the
+    // queue. Mediabunny's only other call restarts a queued read after a worker stops, outside
+    // `read()`. A new read can ask for the same hole as a queued one, so the hole cannot tell
+    // the two apart.
+    const read = orchestrator.read.bind(orchestrator);
+    orchestrator.read = (...args) => {
+      this.reading = true;
+      try {
+        return read(...args);
+      } finally {
+        this.reading = false;
+      }
+    };
     const createWorker = orchestrator.createWorker.bind(orchestrator);
     orchestrator.createWorker = (startPos, targetPos, strictTarget) => {
       const created = createWorker(startPos, targetPos, strictTarget);
       if (created !== null) return created;
-      // Mediabunny starts a queued read with that read's hole: such a call is no new read.
-      const queued = orchestrator.queuedReads.some(
-        (read) => read.hole.start === startPos && read.hole.end === targetPos,
-      );
       const older = [...this.runs].filter(([, run]) => run.status() < this.seeks);
       if (older.length === 0) return null;
       for (const [, run] of older) run.trim();
-      if (queued) return null;
+      // A queue restart is no new read: it waits its turn.
+      if (!this.reading) return null;
       // A new read: retire the older worker that owes the fewest bytes and take its place.
       let victim = older[0]![0];
       for (const [worker] of older) {
@@ -345,9 +364,10 @@ export class ParallelRangeSource extends InternalUrlSource {
     }
     const abortController = new AbortController();
     this._abortControllers.set(worker, abortController);
-    // One run per worker run: the page sees every range, retry and head request
-    // of it as one long request.
-    const run = this.metered.newRun();
+    // A worker that took a retired worker's place can cover a read still on the queue, which
+    // Mediabunny would otherwise start again once a worker stops and fetch the same bytes twice.
+    // Mediabunny does the same for a read it adds to a running worker.
+    orchestrator.checkQueuedReadsAgainstWorker(worker);
 
     const ranges: StripeRange[] = []; // in file order; the first is the next to deliver
     let nextStart = worker.currentPos;
@@ -428,7 +448,7 @@ export class ParallelRangeSource extends InternalUrlSource {
           };
           nextStart = range.end;
           ranges.push(range);
-          void this.readRange(range, run, range.controller.signal, notify);
+          void this.readRange(range, this.run, range.controller.signal, notify);
         }
         // A worker with nothing in flight that waits for the file size keeps its place in
         // the queue, so it takes the first free slot once the size is known, ahead of the

@@ -134,4 +134,36 @@ describe("createMeteredFetch", () => {
       expect(meter.throughputKbps(performance.timeOrigin + performance.now())).toBe(want);
     },
   );
+  // One span per response would grow with every range of a long play, and each report copies
+  // the list. The run keeps the union instead: a chunk can join several earlier stretches.
+  it("keeps a run's receiving time as merged stretches", async () => {
+    let spans: [number, number][] = [];
+    const metered = createMeteredFetch((message) => {
+      if (message.type === "media-data") spans = message.spans;
+    });
+    const run = metered.newRun();
+    const origin = performance.timeOrigin + performance.now();
+    const reads: Promise<void>[] = [];
+    // The first response's second chunk, at 1300 ms, reaches back over the two that came between.
+    for (const [at, every] of [
+      [0, 1300],
+      [600, 100],
+      [800, 100],
+      [2000, 100],
+    ] as const) {
+      await vi.advanceTimersByTimeAsync(origin + at - (performance.timeOrigin + performance.now()));
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ranged(timedBody(2, MIB / 4, every))),
+      );
+      reads.push(drain((await metered.fetch("https://media.example.test/s", undefined, run)).body));
+    }
+    await vi.advanceTimersByTimeAsync(400);
+    await Promise.all(reads);
+
+    expect(spans.map(([first, last]) => [first - origin, last - origin])).toEqual([
+      [0, 1300],
+      [2000, 2100],
+    ]);
+  });
 });

@@ -4,8 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
-import type { EngineCapabilities } from "../engine/capabilities";
-import { MediaDataMeter } from "../media-data-meter";
 import { fixturePlanV3, fixtureSubtitleInventoryItemV3 } from "../protocol-v3.fixtures";
 import type {
   PlaybackRealtimeCommandEnvelope,
@@ -969,52 +967,5 @@ describe("VideoPlayer lost connection", () => {
     expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
     expect(onPlanFailure).toHaveBeenCalledOnce();
     expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
-  });
-});
-
-describe("VideoPlayer engine media meter", () => {
-  beforeEach(() => {
-    engineRoute.chosen = true;
-    attachBrowserEngine.mockClear();
-    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
-    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    engineRoute.chosen = false;
-    cleanup();
-    vi.restoreAllMocks();
-  });
-
-  // Each range of a striped read is a sub-second response, under the meter's
-  // gate on its own. The engine reports them as runs, and the player joins the
-  // runs of one attach into one request, so their receiving time adds up.
-  it("counts two short engine runs of one attach as one request", async () => {
-    const MIB = 2 ** 20;
-    const meters = new Set<MediaDataMeter>();
-    const received = MediaDataMeter.prototype.received;
-    vi.spyOn(MediaDataMeter.prototype, "received").mockImplementation(function (
-      this: MediaDataMeter,
-      ...args: Parameters<MediaDataMeter["received"]>
-    ) {
-      meters.add(this);
-      received.apply(this, args);
-    });
-
-    renderPlayer({ browserEngine: {} as EngineCapabilities });
-    await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
-    const onMediaData = attachBrowserEngine.mock.lastCall?.[0].onMediaData;
-    if (!onMediaData) throw new Error("expected the player to pass onMediaData");
-
-    const t = performance.now();
-    act(() => {
-      onMediaData(0, MIB, t, t + 600, [[t, t + 600]]);
-      onMediaData(1, MIB, t + 1000, t + 1600, [[t + 1000, t + 1600]]);
-    });
-
-    expect(meters.size).toBe(1);
-    const [meter] = [...meters];
-    expect(meter?.throughputKbps(performance.now())).toBe(Math.floor((2 * MIB * 8) / 1200));
   });
 });
