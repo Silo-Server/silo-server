@@ -3,6 +3,7 @@ package playback
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -35,7 +36,20 @@ const (
 	// where it is); it covers the artifact's own from-zero demux, which is what
 	// a page far into the file waits on. A 4K remux measured ~8x realtime on the
 	// relay this was diagnosed on, so pages a few minutes in land well inside it.
+	//
+	// The budget is not what a deep page needs on a slow relay: the same 4K
+	// identity measured about 1x realtime (1-2 MB of .sup in 95 s), so a page
+	// 20 minutes into the track is ~20 minutes of fill away and no budget a
+	// client will hold the request for covers it. subtitlePageReachMargin is
+	// what turns that measurement into the final answer early instead.
 	subtitlePageRecoveryBudget = 90 * time.Second
+
+	// subtitlePageReachMargin is how far past the remaining wait the fill's
+	// measured reach must fall before the page is answered finally. A fill whose
+	// rate would arrive at 1.5x the remaining budget may speed up (the
+	// transcode competing for the relay pauses), so only a shortfall this wide
+	// is a verdict.
+	subtitlePageReachMargin = 2.0
 
 	// subtitlePageRecoveryStallWindow is how long the watermark may stay put
 	// before the page stops waiting for it, once nothing is filling the track
@@ -73,12 +87,19 @@ type subtitlePageRecovery struct {
 // PageRecoveryDue is true on the first refusal only, which is the one request
 // allowed to start the recovery fill.
 func (c *SubtitleCache) pageRecoveryRefusal(opts StreamExtractOpts, start, covered float64, retryAfter time.Duration, retryReason string) error {
-	wait, due, stalled := c.notePageRecovery(opts, start, covered)
+	wait, due, stalled, reachRate := c.notePageRecovery(opts, start, covered)
 	if due {
 		recordSubtitlePageRecoveryStarted()
 	}
 	if stalled || wait > c.pageRecoveryBudget() {
 		recordSubtitlePageRecoveryUnavailable()
+		// The measured numbers belong with the final answer: the wait is over
+		// because the artifact cannot reach the page inside it, and the rate
+		// that proves it is what a later budget change has to be based on.
+		slog.Warn("subtitle page unavailable within its recovery budget",
+			logKeyComponent, logValuePlayback,
+			"start", start, "covered", covered, "waited", wait,
+			"budget", c.pageRecoveryBudget(), "artifact_seconds_per_second", reachRate)
 		return &SubtitleExtractionUnavailableError{
 			Reason:       SubtitlePageUnavailableReason,
 			Start:        start,
@@ -110,7 +131,8 @@ func (c *SubtitleCache) pageRecoveryNow() time.Time {
 
 // notePageRecovery updates one track's wait entry and reports how long it has
 // waited, whether this is the first refusal of that wait, and whether the
-// artifact has stopped advancing.
+// artifact has stopped advancing or has been measured too slow to reach the page
+// inside the wait still left.
 //
 // The wait is keyed by the track, not by the refused page position. A client
 // re-anchors a few seconds forward on every bitmap-page retry, so a per-page
@@ -119,10 +141,10 @@ func (c *SubtitleCache) pageRecoveryNow() time.Time {
 // the production deep-4K page. The artifact is a per-track object, so its wait
 // budget is too; a page at a different position of the same track inherits the
 // wait the earlier page opened, which is what makes the final answer reachable.
-func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered float64) (wait time.Duration, due, stalled bool) {
+func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered float64) (wait time.Duration, due, stalled bool, reachRate float64) {
 	key, ok := c.pageRecoveryKey(opts, start)
 	if !ok {
-		return 0, false, false
+		return 0, false, false, 0
 	}
 	now := c.pageRecoveryNow()
 	// Whether a fill still holds this identity's slot decides the stall verdict,
@@ -142,7 +164,7 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 			c.prunePageRecoveryLocked(now)
 		}
 		c.pageWaits[key] = subtitlePageRecovery{first: now, lastSeen: now, lastCover: covered, start: start}
-		return 0, true, false
+		return 0, true, false, 0
 	}
 	wait = now.Sub(entry.first)
 	stalled = !filling && covered <= entry.lastCover && now.Sub(entry.lastSeen) >= subtitlePageRecoveryStallWindow
@@ -154,6 +176,25 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 	if !filling && c.fillEndedFinal(opts, entry.first) {
 		stalled = true
 	}
+	// What reaching this page costs is measurable once the fill has advanced:
+	// the media seconds it parsed between two refusals, over the wall seconds
+	// between them. A page the fill cannot reach inside the wait still left, by
+	// a wide margin, can never be answered by retrying, so the final answer is
+	// due now rather than after the budget — the production deep 4K page spent
+	// 95 s on a fill that was parsing at about real time toward a page twenty
+	// minutes ahead. The margin keeps a merely tight estimate retryable: fills
+	// speed up when the transcode competing for the relay pauses, so only an
+	// order-of-magnitude shortfall is a verdict.
+	if !stalled && filling && covered > entry.lastCover {
+		elapsed := now.Sub(entry.lastSeen)
+		if elapsed > 0 {
+			reachRate = (covered - entry.lastCover) / elapsed.Seconds()
+			remaining := c.pageRecoveryBudget() - wait
+			if reachRate > 0 && remaining > 0 && (start-covered)/reachRate > subtitlePageReachMargin*remaining.Seconds() {
+				stalled = true
+			}
+		}
+	}
 	entry.lastSeen = now
 	entry.lastCover = covered
 	if wait == 0 && start != entry.start {
@@ -162,7 +203,7 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		entry.start = start
 	}
 	c.pageWaits[key] = entry
-	return wait, false, stalled
+	return wait, false, stalled, reachRate
 }
 
 // progressiveFillInFlight reports whether a progressive .sup fill currently holds
