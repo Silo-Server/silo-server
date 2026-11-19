@@ -15978,9 +15978,6 @@
           "client_version": {
             "type": "string"
           },
-          "content_id": {
-            "type": "string"
-          },
           "device_id": {
             "description": "Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared.",
             "type": "string"
@@ -15993,10 +15990,8 @@
             "description": "Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown",
             "type": "string"
           },
-          "episode_name": {
-            "type": "string"
-          },
           "episode_number": {
+            "description": "Episode number; absent when not an episode",
             "format": "int64",
             "type": "integer"
           },
@@ -16030,10 +16025,16 @@
             "minLength": 1,
             "type": "string"
           },
+          "media_item_id": {
+            "description": "Catalog content id of what is playing: the episode for an episode, as admin playback history's media_item_id. Absent when unknown",
+            "type": "string"
+          },
           "media_title": {
+            "description": "Episode or item title, as admin playback history names it; empty when the item is no longer in the catalog",
             "type": "string"
           },
           "media_type": {
+            "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
           },
           "node_display_name": {
@@ -16117,10 +16118,12 @@
             "type": "string"
           },
           "season_number": {
+            "description": "Episode season; absent when not an episode",
             "format": "int64",
             "type": "integer"
           },
-          "series_name": {
+          "series_title": {
+            "description": "Series title for an episode; absent otherwise",
             "type": "string"
           },
           "session_id": {
@@ -16456,9 +16459,6 @@
       "AdminPlaybackSummaryItem": {
         "additionalProperties": false,
         "properties": {
-          "episode_name": {
-            "type": "string"
-          },
           "episode_number": {
             "format": "int64",
             "type": "integer"
@@ -16467,16 +16467,19 @@
             "type": "boolean"
           },
           "media_title": {
+            "description": "Episode or item title, as the session row names it",
             "type": "string"
           },
           "media_type": {
+            "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
           },
           "season_number": {
             "format": "int64",
             "type": "integer"
           },
-          "series_name": {
+          "series_title": {
+            "description": "Series title for an episode; absent otherwise",
             "type": "string"
           },
           "user_id": {
@@ -46102,24 +46105,10 @@
             ],
             "type": "string"
           },
-          "content_id": {
-            "description": "Catalog content id of the playing item; empty when unknown",
-            "examples": [
-              "tt0111161"
-            ],
-            "type": "string"
-          },
           "effective_play_method": {
             "description": "Bucketed method: direct, remux, direct_stream or transcode; empty when unknown",
             "examples": [
               "direct"
-            ],
-            "type": "string"
-          },
-          "episode_name": {
-            "description": "Empty unless an episode",
-            "examples": [
-              ""
             ],
             "type": "string"
           },
@@ -46180,14 +46169,22 @@
             "minLength": 1,
             "type": "string"
           },
+          "media_item_id": {
+            "description": "Catalog content id of what is playing: the episode for an episode; empty when unknown",
+            "examples": [
+              "tt0111161"
+            ],
+            "type": "string"
+          },
           "media_title": {
+            "description": "Episode or item title; empty when unknown",
             "examples": [
               "The Shawshank Redemption"
             ],
             "type": "string"
           },
           "media_type": {
-            "description": "Catalog item type; empty when unknown",
+            "description": "episode, or the catalog item type; empty when unknown",
             "examples": [
               "movie"
             ],
@@ -46337,8 +46334,8 @@
               "null"
             ]
           },
-          "series_name": {
-            "description": "Empty unless an episode",
+          "series_title": {
+            "description": "Series title for an episode; empty otherwise",
             "examples": [
               ""
             ],
@@ -46539,11 +46536,10 @@
           "profile_name",
           "media_file_id",
           "requested_media_file_id",
-          "content_id",
+          "media_item_id",
           "media_title",
           "media_type",
-          "series_name",
-          "episode_name",
+          "series_title",
           "season_number",
           "episode_number",
           "poster_url",

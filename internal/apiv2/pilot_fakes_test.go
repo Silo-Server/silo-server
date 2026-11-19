@@ -375,7 +375,7 @@ func fixtureProfilelessSession() handlers.PlaybackSessionView {
 	duration := 8520
 	return handlers.PlaybackSessionView{
 		SessionID: "ps-9c1d", UserID: 1, Username: "laura",
-		MediaFileID: 7, RequestedMediaFileID: 7, ContentID: "tt0111161", MediaTitle: "The Shawshank Redemption", MediaType: "movie",
+		MediaFileID: 7, RequestedMediaFileID: 7, MediaItemID: "tt0111161", MediaTitle: "The Shawshank Redemption", MediaType: "movie",
 		PosterURL: "https://media.example/poster-7.jpg", PlayMethod: "direct", ReportingNode: "api", EffectivePlayMethod: "direct",
 		FileDuration: &duration, StartedAt: fixedTime(), UpdatedAt: fixedTime().Add(2 * time.Minute),
 		PositionSeconds: 120, IsPaused: true, HasPlaybackControl: false,
@@ -391,8 +391,8 @@ func fixtureSession() handlers.PlaybackSessionView {
 	season, episode, duration, kbps, channels, node := 1, 3, 2640, 12000, 6, 3
 	return handlers.PlaybackSessionView{
 		SessionID: "ps-7f3a", UserID: 1, Username: "laura", ProfileID: "p-owner", ProfileName: "Laura",
-		MediaFileID: 42, RequestedMediaFileID: 42, ContentID: "ep-123", MediaTitle: "Pilot", MediaType: "episode",
-		SeriesName: "Example Show", EpisodeName: "Pilot", SeasonNumber: &season, EpisodeNumber: &episode,
+		MediaFileID: 42, RequestedMediaFileID: 42, MediaItemID: "ep-123", MediaTitle: "Pilot", MediaType: "episode",
+		SeriesTitle: "Example Show", SeasonNumber: &season, EpisodeNumber: &episode,
 		PosterURL: "https://media.example/poster-42.jpg", PlayMethod: "transcode", ReportingNode: "node-3", NodeDisplayName: "Basement",
 		FileDuration: &duration, StartedAt: fixedTime(), UpdatedAt: fixedTime().Add(time.Minute),
 		PositionSeconds: 61.5, IsPaused: false, HasPlaybackControl: true,

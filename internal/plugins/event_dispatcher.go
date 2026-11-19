@@ -295,7 +295,7 @@ func PublicPayloadJSON(env events.Envelope) ([]byte, error) {
 // event catalog defines, so fields the host adds internally never reach
 // plugins. Data that doesn't match the event's catalog type is an error.
 func publicPayload(env events.Envelope) (*structpb.Struct, error) {
-	raw, err := withStringIDs(env)
+	raw, err := pluginEventData(env)
 	if err != nil {
 		return nil, err
 	}
@@ -306,16 +306,11 @@ func publicPayload(env events.Envelope) (*structpb.Struct, error) {
 	return decodeRawJSON(projected), nil
 }
 
-// withStringIDs makes a catalog event's identifiers JSON strings, as the
-// catalog defines them. The host's payloads are shared with the events
-// socket, which still carries some IDs as numbers (a scan's library_id, a
-// job's created_by_user_id), so the conversion happens
-// here: a top-level `id` or `*_id` field holding a number becomes its
-// decimal string, and zero, which no stored row has, becomes absent (a
-// server-queued job's created_by_user_id). A notification names only its
-// profile, and profile IDs repeat across accounts, so the account the
-// envelope is addressed to is added as user_id. Plugin events pass through.
-func withStringIDs(env events.Envelope) (json.RawMessage, error) {
+// pluginEventData adapts socket payloads to the SDK catalog. Numeric IDs
+// become strings, and zero IDs (such as a server-queued job's creator)
+// become absent. A notification needs its envelope's account as user_id
+// because profile IDs repeat across accounts.
+func pluginEventData(env events.Envelope) (json.RawMessage, error) {
 	if publicevents.IsPluginEvent(env.Event) || len(env.Data) == 0 {
 		return env.Data, nil
 	}
@@ -339,7 +334,47 @@ func withStringIDs(env events.Envelope) (json.RawMessage, error) {
 	if env.Event == publicevents.NotificationCreated && env.UserID > 0 {
 		fields["user_id"] = jsonString(strconv.Itoa(env.UserID))
 	}
+	switch env.Event {
+	case publicevents.SessionStarted, publicevents.SessionPaused, publicevents.SessionResumed:
+		if raw := fields["session"]; len(raw) > 0 {
+			session, err := pluginPlaybackSession(raw, env.EpisodeFileItem)
+			if err != nil {
+				return nil, err
+			}
+			fields["session"] = session
+		}
+	}
 	return json.Marshal(fields)
+}
+
+// The dispatcher also projects stored deliveries before calling the plugin.
+// Those rows already use the SDK's names and carry no local file item.
+func pluginPlaybackSession(raw json.RawMessage, fileItem *events.PlaybackFileItem) (json.RawMessage, error) {
+	var row struct {
+		publicevents.PlaybackSession
+		MediaItemID string `json:"media_item_id"`
+		SeriesTitle string `json:"series_title"`
+	}
+	if string(raw) == "null" {
+		return raw, nil
+	}
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return nil, err
+	}
+	if row.MediaItemID != "" {
+		row.ContentID = row.MediaItemID
+	}
+	if row.SeriesTitle != "" {
+		row.SeriesName = row.SeriesTitle
+	}
+	// Only a row still in the socket's shape is rewritten, so projecting an
+	// already projected row again leaves it as it is.
+	if fileItem != nil && row.MediaItemID != "" {
+		row.EpisodeName = row.MediaTitle
+		row.MediaTitle = fileItem.Title
+		row.MediaType = fileItem.Type
+	}
+	return json.Marshal(row.PlaybackSession)
 }
 
 func isJSONNumber(value json.RawMessage) bool {

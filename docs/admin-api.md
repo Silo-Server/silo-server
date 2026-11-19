@@ -2274,6 +2274,14 @@ The detailed session list also accepts `user_id` to filter by login account
 before pagination. Cursors bind that filter, the page size and caller authority;
 changing a filter requires a fresh first page.
 
+A row names what is playing as [playback history](#playback-history)
+names it, so a live row and the history entry its play leaves agree: for an
+episode, `media_type` is `episode`, `media_title` is the episode's title,
+`series_title` is the show's, and `media_item_id` is the episode's content ID,
+the value history's `media_item_id` and its filter take. The summary items, the
+household sessions listing and the row in each `session.*` WebSocket event share this
+naming.
+
 `GET /api/v2/admin/sessions/summary` returns `{count, items}`. Optional `user_id`
 filters by account; omitted means all accounts. `limit` chooses a sample of 1–100
 observations (default 20), ordered by start time descending and session identity
@@ -2281,8 +2289,8 @@ as the tie-breaker. The count includes every matching observation and shares the
 sample's database snapshot. Missing accounts or no activity return zero and an
 empty array. The summary has no pagination.
 
-Summary items expose only account ID, media title/type, optional series/episode
-labels and numbers, and paused state. They omit session/profile identifiers,
+Summary items expose only account ID, media title/type, the optional series
+title and episode numbers, and paused state. They omit session/profile identifiers,
 client network/device details, file IDs and playback controls. The summary reuses
 the live session loader and inherits its synchronization and cleanup delay.
 `admin:sessions:summary:read` grants only this summary and session capabilities;

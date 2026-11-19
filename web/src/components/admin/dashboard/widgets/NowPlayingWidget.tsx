@@ -224,9 +224,9 @@ function useFittedCardCount(cardCount: number) {
 function StreamCard({ session, showPoster }: { session: AdminSession; showPoster: boolean }) {
   const t = useT();
   const isEpisode =
-    session.series_name && session.season_number != null && session.episode_number != null;
+    session.series_title && session.season_number != null && session.episode_number != null;
   const title = isEpisode
-    ? session.episode_name ||
+    ? session.media_title ||
       t("web.admin.dashboard.widgets.nowPlaying.episodeFallback", {
         season: String(session.season_number),
         episode: String(session.episode_number),
@@ -277,9 +277,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
       <div className="flex min-w-0 flex-1 flex-col">
         {isEpisode ? (
           <>
-            {session.content_id ? (
+            {session.media_item_id ? (
               <Link
-                to={`/item/${session.content_id}`}
+                to={`/item/${session.media_item_id}`}
                 className="hover:text-primary truncate text-sm font-bold transition-colors"
               >
                 {title}
@@ -294,9 +294,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           </>
         ) : (
           <>
-            {session.content_id ? (
+            {session.media_item_id ? (
               <Link
-                to={`/item/${session.content_id}`}
+                to={`/item/${session.media_item_id}`}
                 className="hover:text-primary truncate text-sm font-bold transition-colors"
               >
                 {title}

@@ -68,6 +68,13 @@ var ClientChannels = []EventChannel{
 	ChannelDownloads,
 }
 
+// PlaybackFileItem is the catalog item linked to a playing file. For an
+// episode, its title and type can differ from the episode's own.
+type PlaybackFileItem struct {
+	Title string
+	Type  string
+}
+
 type Envelope struct {
 	Channel   EventChannel    `json:"channel"`
 	Event     string          `json:"event"`
@@ -90,15 +97,19 @@ type Envelope struct {
 	// plugin (and only if it is already a subscriber). Used by
 	// RuntimeHostServer.PublishEventTo.
 	TargetPluginID string `json:"target_plugin_id,omitempty"`
+	// EpisodeFileItem supplies the local plugin dispatcher with the file's
+	// catalog item. The socket and the cross-node relay use Data.
+	EpisodeFileItem *PlaybackFileItem `json:"-"`
 }
 
 type PublishOptions struct {
-	EventID    string
-	UserID     int
-	ProfileID  string
-	AdminOnly  bool
-	AllViewers bool
-	V2Only     bool
+	EpisodeFileItem *PlaybackFileItem
+	EventID         string
+	UserID          int
+	ProfileID       string
+	AdminOnly       bool
+	AllViewers      bool
+	V2Only          bool
 }
 
 type EventsHelloMessage struct {
