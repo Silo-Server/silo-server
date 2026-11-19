@@ -313,9 +313,9 @@ only after its write commits; every API server drains them, at most 32 every
 100 ms across the cluster, and each reaches sockets on every server. Delivery is
 at most once; changes still unpublished after a day are dropped. Two changes to
 one download written close together can arrive out of order and can share an
-`at`, which has millisecond precision. The number in the envelope's `event_id`
-(`download-change:<n>`) rises with each recorded change and orders them; the
-admin routes hold the current state.
+`at`, which has millisecond precision. The envelope's `event_id` is an opaque
+identifier and carries no order. Treat an event as a sign that the download
+changed, and read its current state from the admin routes.
 
 ### Access changes
 
