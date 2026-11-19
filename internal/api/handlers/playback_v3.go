@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -143,9 +144,12 @@ type v3NodeCapabilityCache struct {
 }
 
 type preparedTransportV3 struct {
-	url                string
-	nodeURL            string
-	transportID        string
+	url         string
+	nodeURL     string
+	transportID string
+	// generation is the HLS transport generation the url names
+	// (playback.TransportQueryParam); empty for non-HLS transports.
+	generation         string
 	hwAccel            string
 	toneMapMode        tonemap.Mode
 	routingWorkload    noderouting.Workload
@@ -4452,7 +4456,8 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	previousNodeURL, previousTransportID := h.liveTranscodeRouteV3(session)
 	return preparedTransportV3{
 		sessionRecipe:    sessionRecipe,
-		url:              url,
+		url:              withTransportMarkerV3(url, session.ID, outputSubdir),
+		generation:       outputSubdir,
 		hwAccel:          ts.Opts().EffectiveEncoderHWAccel(),
 		toneMapMode:      ts.Opts().ToneMapMode,
 		routingWorkload:  routingWorkloadV3(result),
@@ -4793,7 +4798,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if mode.headerAuth {
 		sessionRecipe = sessionRecipeCardV3(card, session, result)
 	}
-	return preparedTransportV3{sessionRecipe: sessionRecipe, url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
+	return preparedTransportV3{sessionRecipe: sessionRecipe, url: withTransportMarkerV3(url, session.ID, transportID), generation: transportID, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
 		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() *transportErrorV3 {
 			if committed {
@@ -4933,6 +4938,17 @@ func sourceVideoTranscodeFactsV3(file *models.MediaFile, result playback.Planner
 
 // v3SessionStreamState builds the durable stream state for a prepared transport.
 func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3, mode mediaAuthModeV3) playback.SessionStreamState {
+	generation := transport.generation
+	if generation == "" {
+		// A transport that publishes no HLS URL still gets a generation of its
+		// own, so the playlist of the HLS transport it replaced is superseded
+		// too and cannot revive that transcode from the recipe its URLs carry.
+		planID := ""
+		if result.Plan != nil {
+			planID = result.Plan.PlanID
+		}
+		generation = transportGenerationV3(session.ID, planID)
+	}
 	state := playback.SessionStreamState{
 		PlayMethod:                    result.PlayMethod,
 		BasePlayMethod:                result.PlayMethod,
@@ -4946,6 +4962,7 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		ToneMapMode:                   transport.toneMapMode,
 		TranscodeNodeURL:              transport.nodeURL,
 		TranscodeTransportID:          transport.transportID,
+		TransportGeneration:           generation,
 		TranscodeRouteSet:             true,
 		RoutingNetworkProvider:        new(netaccess.PathFromContext(ctx).Provider),
 		RoutingWorkload:               string(transport.routingWorkload),
@@ -5027,6 +5044,22 @@ func plannedAudioTrackIndexV3(result playback.PlannerResultV3, fallback int) int
 		return *result.Plan.SelectedTracks.Audio.Index
 	}
 	return fallback
+}
+
+// withTransportMarkerV3 names an HLS transport generation on the stream URL a
+// plan publishes. The playlist echoes the query into its segment URIs, so a
+// player's requests keep naming the transport its playlist came from after a
+// replan replaces it (playback.TransportSuperseded).
+func withTransportMarkerV3(rawURL, sessionID, generation string) string {
+	marker := playback.TransportMarker(sessionID, generation)
+	if marker == "" {
+		return rawURL
+	}
+	sep := "?"
+	if strings.ContainsRune(rawURL, '?') {
+		sep = "&"
+	}
+	return rawURL + sep + playback.TransportQueryParam + "=" + url.QueryEscape(marker)
 }
 
 func transportGenerationV3(sessionID, planID string) string {
@@ -6835,6 +6868,7 @@ func reusedHLSTransportV3(session *playback.Session, streamURL string) preparedT
 		transport.routingEgressURL = session.RoutingEgressNodeURL
 		transport.nodeURL = session.TranscodeNodeURL
 		transport.transportID = session.TranscodeTransportID
+		transport.generation = session.TransportGeneration
 		transport.hwAccel = session.TranscodeHWAccel
 		transport.toneMapMode = session.ToneMapMode
 	}

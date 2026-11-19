@@ -260,7 +260,7 @@ type playbackDeliveryWriter struct {
 
 func (w *playbackDeliveryWriter) transport() *streamResponseWriter {
 	if w.inner == nil {
-		w.inner = &streamResponseWriter{ResponseWriter: w.ResponseWriter, request: w.request, problemType: playbackDeliveryProblemType, redactHeaders: []string{playbackContentLength, playbackContentEncoding, directDisposition, jobLocationHeader, etagField, playbackLastModified}}
+		w.inner = &streamResponseWriter{ResponseWriter: w.ResponseWriter, request: w.request, problemType: func(status int) ProblemType { return playbackDeliveryProblemType(status, w.Header()) }, redactHeaders: []string{playbackContentLength, playbackContentEncoding, directDisposition, jobLocationHeader, etagField, playbackLastModified}}
 	}
 	return w.inner
 }
@@ -270,7 +270,13 @@ func (w *playbackDeliveryWriter) transport() *streamResponseWriter {
 // stopped or expired), which has its own corrective action: start again. A
 // 502 is a relay whose transcode node could not serve it (unreachable, keyless,
 // or refusing the relay's signature): the node is unavailable, not the server.
-func playbackDeliveryProblemType(status int) ProblemType {
+//
+// A 404 whose handler named playback.TransportSupersededCode is a request
+// from a playlist a replan replaced (playback protocol v3 §6).
+func playbackDeliveryProblemType(status int, header http.Header) ProblemType {
+	if status == http.StatusNotFound && header.Get(playback.ErrorHeader) == playback.TransportSupersededCode {
+		return TypePlaybackTransportSuperseded
+	}
 	switch status {
 	case http.StatusGone:
 		return TypePlaybackSessionEnded
