@@ -1676,6 +1676,10 @@ func (h *PlaybackHandler) savedWatch(ctx context.Context, sessionID string) (pla
 	if !ok {
 		return playback.WatchTime{}, false
 	}
+	return readSavedWatch(ctx, reader, sessionID)
+}
+
+func readSavedWatch(ctx context.Context, reader sessionWatchReader, sessionID string) (playback.WatchTime, bool) {
 	watch, found, err := reader.SessionWatch(ctx, sessionID)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to read a session's saved watch time", "component", "api",
@@ -1691,6 +1695,17 @@ func (h *PlaybackHandler) restoreReconstructedWatch(ctx context.Context, session
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconstructedClientTimeout)
 	defer cancel()
 	return h.savedWatch(ctx, sessionID)
+}
+
+// ReconstructedWatchRestorer is restoreReconstructedWatch for a transcode
+// manager this handler does not own, such as jellycompat's, which rebuilds
+// the same native sessions after a restart.
+func ReconstructedWatchRestorer(store *PGPlaybackAdminStore) func(context.Context, string) (playback.WatchTime, bool) {
+	return func(ctx context.Context, sessionID string) (playback.WatchTime, bool) {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconstructedClientTimeout)
+		defer cancel()
+		return readSavedWatch(ctx, store, sessionID)
+	}
 }
 
 // observeEndSample measures the final sample an end recorded from outside

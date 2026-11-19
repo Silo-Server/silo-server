@@ -4148,6 +4148,7 @@ func main() {
 
 		// Wire direct dependencies when DB is available.
 		if deps.DB != nil {
+			compatDeps.RestoreReconstructedWatch = handlers.ReconstructedWatchRestorer(handlers.NewPGPlaybackAdminStore(deps.DB, nil))
 			browseRepo := catalog.NewBrowseRepository(deps.DB)
 			itemRepo := catalog.NewItemRepository(deps.DB)
 			seasonRepo := catalog.NewSeasonRepository(deps.DB)
