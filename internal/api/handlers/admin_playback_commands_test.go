@@ -216,6 +216,15 @@ func TestSequencedCommandValidationAndSessionState(t *testing.T) {
 	if !ok || env.Name != playback.CommandDisplayMessage || string(env.Payload) != `{"message":"Movie night ends at nine","title":"Heads up"}` {
 		t.Fatalf("message envelope = %#v", conn.messages[len(conn.messages)-1])
 	}
+	// An untitled message has no title key, not an empty one a player shows.
+	untitled := sequencedInput(session.ID, sequencedCommandC, 3, playback.CommandDisplayMessage)
+	untitled.Message = "Back in five"
+	if _, err := control.Command(ctx, untitled); err != nil {
+		t.Fatal(err)
+	}
+	if env, _ := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope); string(env.Payload) != `{"message":"Back in five"}` {
+		t.Fatalf("untitled payload = %s", env.Payload)
+	}
 	if _, err := sessionMgr.GetSession(session.ID); err != nil {
 		t.Fatalf("message must not end the session: %v", err)
 	}

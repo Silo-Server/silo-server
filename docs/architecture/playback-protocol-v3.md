@@ -464,6 +464,23 @@ after the player sends a valid `hello`:
 `hello`, and the socket counts as connected only once a valid one arrives. The
 list does not limit what the server sends.
 
+Every command the server sends is one frame:
+
+```json
+{"type": "command", "command_id": "…", "session_id": "…", "name": "terminate", "reason": "…", "issued_by": {"kind": "admin"}, "deadline_ms": 3000, "payload": {}}
+```
+
+`reason`, `issued_by` and `deadline_ms` are optional, and `payload` is
+always an object. `reason` is the one place a command's reason travels. For
+an administrator's `stop` or `terminate` (`issued_by.kind` is `admin`) it is
+the free-form text the administrator typed, and a player that supports it
+shows it with its notice. For an administrator's `server_restarting` it
+defaults to the machine code `server_restart_requested`, and for
+`plan_invalidated` it is a machine code repeated in its payload (§6.1).
+`payload` holds the command's own arguments: `display_message` carries
+`{"message": "…"}` and adds `title` only when the administrator gave one, and
+an administrator's `stop` or `terminate` carries an empty object.
+
 As soon as the socket is open, the player can receive an administrator's
 `stop`, `terminate`, or `display_message`, and the `server_restarting` notice;
 once it is connected, also `plan_invalidated` (§6.1) and an administrator's
