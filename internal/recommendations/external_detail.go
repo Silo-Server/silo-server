@@ -224,14 +224,15 @@ func (r *externalRun) dropOwnedDetails(ctx context.Context, details []externalDe
 // storeDetails upserts the fetched titles and returns the IDs and canonical
 // texts of those to embed: every fetched title whose text differs from the
 // one stored with its vector and from one the provider refused. A title
-// whose text changed loses its old vector, and the refusal of its old text,
-// before its detail is stored: whether the embedding then fails or the
-// process stops, the title has a due detail or no vector, so the next run
-// embeds it instead of ranking it by the old text, or skipping it, until its
-// detail is due again.
+// whose text changed loses its old vector before its detail is stored, and
+// the refusal of its old text once it is: whether the embedding then fails
+// or the process stops, the title has a due detail or no vector, so the next
+// run embeds it instead of ranking it by the old text, or skipping it, until
+// its detail is due again.
 func (r *externalRun) storeDetails(ctx context.Context, details []externalDetail, storedTexts map[ExternalTitleKey]string, refused *refusedEmbedInputs) (ids, texts []string, err error) {
 	titles := make([]ExternalTitle, 0, len(details))
 	var changed []ExternalTitleKey
+	var unrefuse []string
 	for _, d := range details {
 		if d.detail == nil {
 			continue
@@ -251,7 +252,7 @@ func (r *externalRun) storeDetails(ctx context.Context, details []externalDetail
 		if hasVector {
 			changed = append(changed, d.key)
 		}
-		refused.remove(id)
+		unrefuse = append(unrefuse, id)
 		ids = append(ids, id)
 		texts = append(texts, text)
 	}
@@ -260,6 +261,11 @@ func (r *externalRun) storeDetails(ctx context.Context, details []externalDetail
 	}
 	if err := r.e.repo.UpsertExternalTitles(ctx, titles); err != nil {
 		return nil, nil, err
+	}
+	// Only now: a failed write leaves the detail due, and the refusal of
+	// the old text must still hold if the next fetch returns it again.
+	for _, id := range unrefuse {
+		refused.remove(id)
 	}
 	return ids, texts, nil
 }

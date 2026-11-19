@@ -176,9 +176,11 @@ func compareExternalKeys(a, b ExternalTitleKey) int {
 	return cmp.Or(cmp.Compare(a.MediaType, b.MediaType), cmp.Compare(a.TMDBID, b.TMDBID))
 }
 
-// ExternalSourcesToFetch returns, in input order, the source keys that need a
-// fetch: never fetched, last fetch failed, or last fetched (with links or
-// empty) before staleBefore.
+// ExternalSourcesToFetch returns the source keys that need a fetch: never
+// fetched, last fetch failed, or last fetched (with links or empty) before
+// staleBefore. They come in input order, those whose last fetch failed last,
+// so sources that keep failing cannot use up a run's requests ahead of ones
+// that have not been tried.
 func (r *Repo) ExternalSourcesToFetch(ctx context.Context, sourceKeys []string, staleBefore time.Time) ([]string, error) {
 	if len(sourceKeys) == 0 {
 		return nil, nil
@@ -191,7 +193,7 @@ func (r *Repo) ExternalSourcesToFetch(ctx context.Context, sourceKeys []string, 
 		   OR  s.status = 'failed'
 		   OR  s.fetched_at IS NULL
 		   OR  s.fetched_at < $2
-		ORDER  BY k.ord`, sourceKeys, staleBefore)
+		ORDER  BY COALESCE(s.status = 'failed', false), k.ord`, sourceKeys, staleBefore)
 	if err != nil {
 		return nil, fmt.Errorf("list outside sources to fetch: %w", err)
 	}

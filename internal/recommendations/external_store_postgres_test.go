@@ -152,7 +152,7 @@ func (f *externalFixture) links(name string) []ExternalLink {
 
 // A source is fetched when it never was, when its last fetch failed, or when
 // its last result (links or none) is older than the cutoff. An empty result
-// inside the cutoff is not fetched again.
+// inside the cutoff is not fetched again. Failed sources come last.
 func TestExternalSourcesToFetchDB(t *testing.T) {
 	f := newExternalFixture(t, 910_000_000)
 	ctx := context.Background()
@@ -166,7 +166,7 @@ func TestExternalSourcesToFetchDB(t *testing.T) {
 	f.exec(`UPDATE external_title_sources SET fetched_at = now() - interval '40 days' WHERE source_key = ANY($1)`,
 		[]string{f.source("ok-stale"), f.source("empty-stale")})
 
-	names := []string{"never", "ok-fresh", "ok-stale", "empty-fresh", "empty-stale", "failed"}
+	names := []string{"failed", "never", "ok-fresh", "ok-stale", "empty-fresh", "empty-stale"}
 	keys := make([]string, len(names))
 	for i, n := range names {
 		keys[i] = f.source(n)
