@@ -1510,9 +1510,14 @@ func (s *Service) ResolveManagedFile(ctx context.Context, userID int, profileID,
 	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
 		return nil, err
 	}
-	s.recordFileRequestAddress(ctx, dl)
 	proxyEligible := proxyDeliveryAllowed(cfg)
-	return s.resolveDownloadBytesTarget(ctx, dl, filter, proxyEligible, proxyEligible)
+	target, err := s.resolveDownloadBytesTarget(ctx, dl, filter, proxyEligible, proxyEligible)
+	if err != nil {
+		return nil, err
+	}
+	// Only a request that will be served counts as seeing the device.
+	s.recordFileRequestAddress(ctx, dl)
+	return target, nil
 }
 
 // recordFileRequestAddress records where an authorized file request came

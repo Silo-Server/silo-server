@@ -9516,7 +9516,7 @@
             "type": "string"
           },
           "last_client_ip": {
-            "description": "Address of the device's latest status report or file request for the download; null when none was recorded. A file request from a new address replaces it at most once a minute",
+            "description": "Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded",
             "type": [
               "string",
               "null"
@@ -24623,7 +24623,7 @@
             "type": "string"
           },
           "last_client_ip": {
-            "description": "Address of the device's latest status report or file request for the download; null when none was recorded. A file request from a new address replaces it at most once a minute",
+            "description": "Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded",
             "type": [
               "string",
               "null"

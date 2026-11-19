@@ -17337,7 +17337,7 @@ export interface components {
        * @example 1
        */
       id: string;
-      /** @description Address of the device's latest status report or file request for the download; null when none was recorded. A file request from a new address replaces it at most once a minute */
+      /** @description Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded */
       last_client_ip: string | null;
       /** @description Where its prepared file is: server or node:<id>; absent when it has none */
       location?: string;
@@ -23032,7 +23032,7 @@ export interface components {
        * @example 1
        */
       id: string;
-      /** @description Address of the device's latest status report or file request for the download; null when none was recorded. A file request from a new address replaces it at most once a minute */
+      /** @description Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded */
       last_client_ip: string | null;
       /** @description Catalog type of content_id (movie, series, …); empty when unknown */
       media_type: string;

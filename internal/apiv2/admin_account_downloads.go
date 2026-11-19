@@ -102,7 +102,7 @@ type AdminUserDownload struct {
 	CompletedAt       NullableInstant                  `json:"completed_at"`
 	StatusEventAt     NullableInstant                  `json:"status_event_at" doc:"Latest accepted client status report; null when the app never reported"`
 	CreatedClientIP   *string                          `json:"created_client_ip" nullable:"true" doc:"Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it"`
-	LastClientIP      *string                          `json:"last_client_ip" nullable:"true" doc:"Address of the device's latest status report or file request for the download; null when none was recorded. A file request from a new address replaces it at most once a minute"`
+	LastClientIP      *string                          `json:"last_client_ip" nullable:"true" doc:"Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded"`
 }
 
 type AdminUserDownloadsOutput struct {
