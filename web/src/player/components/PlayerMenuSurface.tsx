@@ -26,8 +26,8 @@ interface PlayerMenuSurfaceProps {
   role?: "menu" | "dialog";
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
   /**
-   * The wrapper containing the trigger and menu. Focus moving outside it
-   * closes the menu, as does an outside pointer press on desktop.
+   * The wrapper containing the trigger and menu. Focus moving outside it or
+   * leaving the window closes the menu, as does an outside pointer press on desktop.
    */
   anchorRef?: RefObject<HTMLElement | null>;
 }
@@ -156,12 +156,14 @@ export function PlayerMenuSurface({
       if (!anchorRef.current?.contains(event.target as Node)) onClose();
     };
     // Safari can blur the focused item before an in-menu click without
-    // moving focus to another element. Dismiss only when focus lands outside.
+    // moving focus. Use focusin to detect an actual move outside the menu.
     document.addEventListener("focusin", dismissOutside, true);
+    window.addEventListener("blur", onClose);
     // Coarse pointers get a full-screen backdrop button instead.
     if (!isCoarsePointer) document.addEventListener("pointerdown", dismissOutside, true);
     return () => {
       document.removeEventListener("focusin", dismissOutside, true);
+      window.removeEventListener("blur", onClose);
       document.removeEventListener("pointerdown", dismissOutside, true);
     };
   }, [anchorRef, isCoarsePointer, onClose]);
