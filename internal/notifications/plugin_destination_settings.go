@@ -210,36 +210,39 @@ func truncateRunes(text string, limit int) string {
 	return string([]rune(text)[:limit])
 }
 
-// pluginSecretForms is how a secret can appear in text: as stored, without
-// its surrounding whitespace and, when at least minEncodedSecretLen bytes,
-// the stored bytes in the encodings a provider or plugin is likely to quote
-// them in. A credential pasted with a stray space is sent with it, so its
-// encoded forms carry the space too.
+// pluginSecretForms is how a secret can appear in text: as stored and
+// without its surrounding whitespace and, when at least minEncodedSecretLen
+// bytes, both of those in the encodings a provider or plugin is likely to
+// quote them in. A credential pasted with a stray space is sent with it, and
+// a plugin may trim it first.
 func pluginSecretForms(secret string) []string {
 	trimmed := strings.TrimSpace(secret)
 	if trimmed == "" {
 		return nil
 	}
-	forms := []string{secret}
+	plain := []string{secret}
 	if trimmed != secret {
-		forms = append(forms, trimmed)
+		plain = append(plain, trimmed)
 	}
+	forms := slices.Clone(plain)
 	if len(trimmed) < minEncodedSecretLen {
 		return forms
 	}
-	raw := []byte(secret)
-	for _, form := range []string{
-		base64.StdEncoding.EncodeToString(raw),
-		base64.RawStdEncoding.EncodeToString(raw),
-		base64.URLEncoding.EncodeToString(raw),
-		base64.RawURLEncoding.EncodeToString(raw),
-		url.QueryEscape(secret),
-		url.PathEscape(secret),
-		hex.EncodeToString(raw),
-		strings.ToUpper(hex.EncodeToString(raw)),
-	} {
-		if !slices.Contains(forms, form) {
-			forms = append(forms, form)
+	for _, value := range plain {
+		raw := []byte(value)
+		for _, form := range []string{
+			base64.StdEncoding.EncodeToString(raw),
+			base64.RawStdEncoding.EncodeToString(raw),
+			base64.URLEncoding.EncodeToString(raw),
+			base64.RawURLEncoding.EncodeToString(raw),
+			url.QueryEscape(value),
+			url.PathEscape(value),
+			hex.EncodeToString(raw),
+			strings.ToUpper(hex.EncodeToString(raw)),
+		} {
+			if !slices.Contains(forms, form) {
+				forms = append(forms, form)
+			}
 		}
 	}
 	return forms

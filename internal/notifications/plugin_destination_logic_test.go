@@ -286,12 +286,14 @@ func TestRedactPluginText(t *testing.T) {
 	// trimmed. A value too short for its encodings to be telling ("4321") is
 	// masked only as written.
 	secret := " tk_live_123/+? "
-	for _, encoded := range []string{
-		strings.TrimSpace(secret),
-		base64.StdEncoding.EncodeToString([]byte(secret)), base64.RawStdEncoding.EncodeToString([]byte(secret)),
-		base64.URLEncoding.EncodeToString([]byte(secret)), base64.RawURLEncoding.EncodeToString([]byte(secret)),
-		url.QueryEscape(secret), url.PathEscape(secret), hex.EncodeToString([]byte(secret)), strings.ToUpper(hex.EncodeToString([]byte(secret))),
-	} {
+	var forms []string
+	for _, value := range []string{secret, strings.TrimSpace(secret)} {
+		forms = append(forms, value,
+			base64.StdEncoding.EncodeToString([]byte(value)), base64.RawStdEncoding.EncodeToString([]byte(value)),
+			base64.URLEncoding.EncodeToString([]byte(value)), base64.RawURLEncoding.EncodeToString([]byte(value)),
+			url.QueryEscape(value), url.PathEscape(value), hex.EncodeToString([]byte(value)), strings.ToUpper(hex.EncodeToString([]byte(value))))
+	}
+	for _, encoded := range forms {
 		withSecret := pluginSettings{Values: map[string]any{"token": secret}, WriteOnly: []string{}}
 		if got := redactPluginText("auth header "+encoded+" refused", channel, withSecret); strings.Contains(got, encoded) {
 			t.Fatalf("redactPluginText() = %q, leaks the encoded secret %q", got, encoded)
