@@ -126839,7 +126839,7 @@ export interface operations {
   unsubscribeNotificationEmailOneClick: {
     parameters: {
       query?: {
-        /** @description Email capability token. Missing, expired or consumed proof returns an HTML error page. */
+        /** @description Email capability token. Missing or unknown proof returns an HTML error page. The token stays valid after use. */
         token?: string;
       };
       header?: never;
