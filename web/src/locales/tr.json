@@ -13358,7 +13358,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — gösterdikleri koleksiyon ne burada ne de yedekte var"
+              "value": " geri yüklenemiyor — gösterdiği koleksiyon ne burada ne de yedekte var"
             }
           ]
         },
@@ -13426,7 +13426,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu bunları kabul edemiyor"
+              "value": " geri yüklenemiyor — bu sunucu bunu kabul edemiyor"
             }
           ]
         },
@@ -13562,7 +13562,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişim grupları bu sunucuda yok"
+              "value": " geri yüklenemiyor — erişim grubu bu sunucuda yok"
             }
           ]
         },
@@ -13596,7 +13596,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — içerikleri bu sunucunun kataloğunda yok"
+              "value": " geri yüklenemiyor — içeriği bu sunucunun kataloğunda yok"
             }
           ]
         },
@@ -13630,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu daha sıkı değerlerini koruyor"
+              "value": " geri yüklenemiyor — erişimi genişleteceği için bu sunucu kendi daha sıkı değerlerini koruyor"
             }
           ]
         },
@@ -13642,7 +13642,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu daha sıkı değerlerini koruyor"
+              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu kendi daha sıkı değerlerini koruyor"
             }
           ]
         }
@@ -13664,7 +13664,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — kitaplıkları bu sunucuda yok"
+              "value": " geri yüklenemiyor — kitaplığı bu sunucuda yok"
             }
           ]
         },
@@ -13698,7 +13698,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — kitaplıkları burada geri yüklenemiyor"
+              "value": " geri yüklenemiyor — kitaplığı burada geri yüklenemiyor"
             }
           ]
         },
@@ -13800,7 +13800,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — farklı bir SECRET_KEY ile şifrelenmişler"
+              "value": " geri yüklenemiyor — farklı bir SECRET_KEY ile şifrelenmiş"
             }
           ]
         },
@@ -13834,7 +13834,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — önce bir eklenti kataloğundan yüklenmeleri gerekiyor"
+              "value": " geri yüklenemiyor — önce bir eklenti kataloğundan yüklenmesi gerekiyor"
             }
           ]
         },
@@ -13868,7 +13868,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — birincil profillerinin de birlikte geri yüklenmesi gerekiyor"
+              "value": " geri yüklenemiyor — birincil profilinin de birlikte geri yüklenmesi gerekiyor"
             }
           ]
         },
@@ -13902,7 +13902,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — yedekte bulunmuyorlar"
+              "value": " geri yüklenemiyor — yedekte bulunmuyor"
             }
           ]
         },
@@ -14038,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu onlara yedektekinden daha fazla erişim verirdi"
+              "value": " geri yüklenemiyor — bu sunucu buna yedektekinden daha fazla erişim verirdi"
             }
           ]
         },
@@ -14050,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu onlara yedektekinden daha fazla erişim verirdi"
+              "value": " geri yüklenemiyor — bu sunucu bunlara yedektekinden daha fazla erişim verirdi"
             }
           ]
         }
@@ -14106,7 +14106,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — burada zaten aynılar"
+              "value": " geri yüklenemiyor — burada zaten aynı"
             }
           ]
         },
@@ -14174,7 +14174,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — yedekteki kopyaları okunamıyor"
+              "value": " geri yüklenemiyor — yedekteki kopyası okunamıyor"
             }
           ]
         },
@@ -14208,7 +14208,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — dış hizmetlere bağlanıyorlar ve bu sunucu yedeği doğrulayamıyor"
+              "value": " geri yüklenemiyor — dış hizmetlere bağlanıyor ve bu sunucu yedeği doğrulayamıyor"
             }
           ]
         },
@@ -14813,8 +14813,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Gizle"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14971,8 +14991,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Göster"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19291,6 +19331,20 @@
     {
       "type": 0,
       "value": "Sunucunun saat diliminde."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Sunucunun saat dilimine göre. Sizin saat diliminizde: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -59833,6 +59887,12 @@
       "value": "Bağlantı denetimi başarısız oldu."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Sunucu ortamının bu ayarı belirleyip belirlemediği kontrol edilemedi. Düzenlemek için sayfayı yeniden yükleyin."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60392,7 +60452,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Güncel değerleri görmek için yeniden yükleyin. Değişen ayarlarda ve kayıtlı parolalarla anahtarlarda yaptığınız düzenlemeler geri alınır; diğer düzenlemeleriniz korunur."
+      "value": "Güncel değerleri görmek için yeniden yükleyin. Değişen ayarlarda, kayıtlı parola ve anahtarlarda ve bunlarla ilişkili ayarlarda yaptığınız düzenlemeler geri alınır; diğer düzenlemeleriniz korunur."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -75033,6 +75093,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Ortam değişkenleri depolama ayarlarını belirlediği sürece ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") depolama buraya taşınamaz. Önce bu değişkenlerin ayarını kaldırın ve tüm API sunucularını yeniden başlatın."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76939,6 +77013,18 @@
     {
       "type": 0,
       "value": "Autoscan webhook yeniden denemesi"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Silo gömülü yazı tiplerini bit hızına katmamaya başlamadan önce taranmış, ASS altyazılı MKV dosyalarının üst bilgisini yeniden okur; böylece bu dosyaların kodu, akışta kullanılmayan bir bit hızı yüzünden dönüştürülmez."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Gömülü yazı tipli dosyaların bit hızını düzelt"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

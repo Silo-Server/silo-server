@@ -13630,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kan niet worden hersteld — het zou de toegang verruimen, dus deze server houdt zijn eigen strengere waarden aan"
             }
           ]
         },
@@ -13642,7 +13642,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kunnen niet worden hersteld — ze zouden de toegang verruimen, dus deze server houdt zijn strengere waarden aan"
             }
           ]
         }
@@ -14038,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up deed"
+              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up"
             }
           ]
         },
@@ -14050,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up deed"
+              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up"
             }
           ]
         }
@@ -14797,8 +14797,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Verbergen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14947,8 +14967,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tonen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19291,6 +19331,20 @@
     {
       "type": 0,
       "value": "In de tijdzone van de server."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "In de tijdzone van de server. Dat is "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " in jouw tijdzone."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -60069,6 +60123,12 @@
       "value": "Verbindingscontrole mislukt."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kan niet controleren of de omgeving van de server dit instelt. Laad de pagina opnieuw om dit te bewerken."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60628,7 +60688,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Laad opnieuw om de huidige waarden te zien. Je wijzigingen in instellingen die zijn veranderd en in opgeslagen wachtwoorden en sleutels worden ongedaan gemaakt; je andere wijzigingen blijven behouden."
+      "value": "Laad opnieuw om de huidige waarden te zien. Je wijzigingen in instellingen die zijn veranderd, en in opgeslagen wachtwoorden en sleutels met de bijbehorende instellingen, worden ongedaan gemaakt; je andere wijzigingen blijven behouden."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -75297,6 +75357,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Opslag kan hier niet worden verplaatst zolang de omgeving opslaginstellingen vastlegt ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Verwijder eerst die variabelen en start elke API-server opnieuw."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -77211,6 +77285,18 @@
     {
       "type": 0,
       "value": "Autoscan-webhook opnieuw proberen"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Leest opnieuw de header van MKV-bestanden met ASS-ondertitels die zijn gescand voordat Silo ingesloten lettertypen niet meer meetelde in de bitrate, zodat ze niet worden getranscodeerd voor een bitrate die ze niet streamen."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Bitrate van bestanden met ingesloten lettertypen corrigeren"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

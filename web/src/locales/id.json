@@ -12703,7 +12703,7 @@
             },
             {
               "type": 0,
-              "value": " tidak dapat dipulihkan — koleksi yang ditampilkan tidak ada di sini maupun di cadangan"
+              "value": " tidak dapat dipulihkan — koleksi yang ditampilkannya tidak ada di sini maupun di cadangan"
             }
           ]
         }
@@ -12879,7 +12879,7 @@
             },
             {
               "type": 0,
-              "value": " tidak dapat dipulihkan — item ini akan memperluas akses, jadi server ini mempertahankan nilainya yang lebih ketat"
+              "value": " tidak dapat dipulihkan — item ini akan memperluas akses, jadi server ini mempertahankan nilainya sendiri yang lebih ketat"
             }
           ]
         }
@@ -13690,8 +13690,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sembunyikan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13804,8 +13816,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tampilkan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17538,6 +17562,20 @@
     {
       "type": 0,
       "value": "Dalam zona waktu server."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Menurut zona waktu server. Di zona waktu Anda, itu pukul "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -53836,6 +53874,12 @@
       "value": "Pemeriksaan koneksi gagal."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa apakah lingkungan server mengatur opsi ini. Muat ulang halaman untuk mengeditnya."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54379,7 +54423,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Muat ulang untuk melihat nilai saat ini. Perubahan Anda pada pengaturan yang berubah, serta pada kata sandi dan kunci yang disimpan, dibatalkan; perubahan Anda yang lain tetap dipertahankan."
+      "value": "Muat ulang untuk melihat nilai saat ini. Perubahan Anda pada pengaturan yang berubah, serta pada kata sandi dan kunci yang disimpan beserta pengaturan terkaitnya, dibatalkan; perubahan Anda yang lain tetap dipertahankan."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -68846,6 +68890,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Penyimpanan tidak dapat dipindahkan ke sini selama environment menetapkan pengaturan penyimpanan ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Hapus variabel tersebut dan mulai ulang setiap server API terlebih dahulu."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -70666,6 +70724,18 @@
     {
       "type": 0,
       "value": "Coba ulang webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Membaca ulang header file MKV dengan subtitel ASS yang dipindai sebelum Silo mengecualikan font tersemat dari bitrate, agar file tersebut tidak ditranskode karena bitrate yang sebenarnya tidak dikirim saat streaming."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Perbaiki bitrate file dengan font tersemat"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

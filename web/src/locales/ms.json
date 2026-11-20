@@ -12703,7 +12703,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — koleksi yang dipaparkan tiada di sini atau dalam sandaran"
+              "value": " tidak boleh dipulihkan — koleksi yang dipaparkannya tiada di sini atau dalam sandaran"
             }
           ]
         }
@@ -12857,7 +12857,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — judulnya tiada dalam katalog pelayan ini"
+              "value": " tidak boleh dipulihkan — tajuknya tiada dalam katalog pelayan ini"
             }
           ]
         }
@@ -13033,7 +13033,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — profil utamanya mesti dipulihkan bersama"
+              "value": " tidak boleh dipulihkan — profil utamanya mesti dipulihkan bersamanya"
             }
           ]
         }
@@ -13143,7 +13143,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — pelayan ini akan memberikan akses lebih luas berbanding sandaran"
+              "value": " tidak boleh dipulihkan — pelayan ini akan memberikannya akses lebih luas berbanding sandaran"
             }
           ]
         }
@@ -13690,8 +13690,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sembunyikan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13804,8 +13816,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tunjukkan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17538,6 +17562,20 @@
     {
       "type": 0,
       "value": "Dalam zon waktu pelayan."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Dalam zon waktu pelayan. Bersamaan pukul "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " di tempat anda."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -53824,6 +53862,12 @@
       "value": "Semakan sambungan gagal."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak sama ada persekitaran pelayan menetapkan tetapan ini. Muat semula halaman untuk mengeditnya."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54367,7 +54411,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Muat semula untuk melihat nilai semasa. Suntingan anda pada tetapan yang berubah, serta pada kata laluan dan kunci yang disimpan, dibatalkan; suntingan anda yang lain dikekalkan."
+      "value": "Muat semula untuk melihat nilai semasa. Suntingan anda pada tetapan yang berubah, serta pada kata laluan dan kunci yang disimpan berserta tetapan yang berkaitan dengannya, dibatalkan; suntingan anda yang lain dikekalkan."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -68822,6 +68866,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Storan tidak boleh dipindahkan ke sini semasa persekitaran menetapkan tetapan storan ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Nyahtetapkan pemboleh ubah itu dan mulakan semula setiap pelayan API dahulu."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -70642,6 +70700,18 @@
     {
       "type": 0,
       "value": "Cuba semula webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Membaca semula pengepala fail MKV yang mempunyai sari kata ASS dan diimbas sebelum Silo mengecualikan fon terbenam daripada kadar bit, supaya fail itu tidak ditranskod untuk kadar bit yang sebenarnya tidak distrim."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Betulkan kadar bit fail yang mempunyai fon terbenam"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

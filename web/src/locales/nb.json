@@ -13358,7 +13358,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – samlingen de viser, finnes ikke her eller i sikkerhetskopien"
+              "value": " kan ikke gjenopprettes – samlingen den viser, finnes ikke her eller i sikkerhetskopien"
             }
           ]
         },
@@ -13392,7 +13392,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – innstillingene deres er kryptert med en annen SECRET_KEY"
+              "value": " kan ikke gjenopprettes – innstillingene er kryptert med en annen SECRET_KEY"
             }
           ]
         },
@@ -13426,7 +13426,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – denne serveren kan ikke ta imot dem"
+              "value": " kan ikke gjenopprettes – denne serveren kan ikke ta imot den"
             }
           ]
         },
@@ -13494,7 +13494,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – filene deres mangler på denne serveren"
+              "value": " kan ikke gjenopprettes – filene mangler på denne serveren"
             }
           ]
         },
@@ -13528,7 +13528,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – mappene deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – mappene finnes ikke på denne serveren"
             }
           ]
         },
@@ -13562,7 +13562,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – tilgangsgruppen deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – tilgangsgruppen finnes ikke på denne serveren"
             }
           ]
         },
@@ -13596,7 +13596,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – tittelen deres finnes ikke i denne serverens katalog"
+              "value": " kan ikke gjenopprettes – tittelen finnes ikke i denne serverens katalog"
             }
           ]
         },
@@ -13630,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de ville utvidet tilgangen, så denne serveren beholder sine strengere verdier"
+              "value": " kan ikke gjenopprettes – den ville utvidet tilgangen, så denne serveren beholder sine egne strengere verdier"
             }
           ]
         },
@@ -13664,7 +13664,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – biblioteket deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – biblioteket finnes ikke på denne serveren"
             }
           ]
         },
@@ -13698,7 +13698,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – biblioteket deres kan ikke gjenopprettes her"
+              "value": " kan ikke gjenopprettes – biblioteket kan ikke gjenopprettes her"
             }
           ]
         },
@@ -13800,7 +13800,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de er kryptert med en annen SECRET_KEY"
+              "value": " kan ikke gjenopprettes – den er kryptert med en annen SECRET_KEY"
             }
           ]
         },
@@ -13834,7 +13834,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de må først installeres fra en programtilleggskatalog"
+              "value": " kan ikke gjenopprettes – den må først installeres fra en programtilleggskatalog"
             }
           ]
         },
@@ -13868,7 +13868,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – hovedprofilen deres må gjenopprettes sammen med dem"
+              "value": " kan ikke gjenopprettes – hovedprofilen må gjenopprettes sammen med den"
             }
           ]
         },
@@ -13902,7 +13902,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – sikkerhetskopien inneholder dem ikke"
+              "value": " kan ikke gjenopprettes – sikkerhetskopien inneholder den ikke"
             }
           ]
         },
@@ -14038,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – denne serveren ville gitt dem mer tilgang enn sikkerhetskopien gjorde"
+              "value": " kan ikke gjenopprettes – denne serveren ville gitt den mer tilgang enn sikkerhetskopien gjorde"
             }
           ]
         },
@@ -14106,7 +14106,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de er allerede like her"
+              "value": " kan ikke gjenopprettes – den er allerede lik her"
             }
           ]
         },
@@ -14174,7 +14174,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – sikkerhetskopiens kopi av dem kan ikke leses"
+              "value": " kan ikke gjenopprettes – sikkerhetskopiens kopi av den kan ikke leses"
             }
           ]
         },
@@ -14208,7 +14208,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de kobler til eksterne tjenester, og denne serveren kan ikke bekrefte sikkerhetskopien"
+              "value": " kan ikke gjenopprettes – den kobler til eksterne tjenester, og denne serveren kan ikke bekrefte sikkerhetskopien"
             }
           ]
         },
@@ -14789,8 +14789,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skjul dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14939,8 +14959,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Vis dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19331,6 +19371,20 @@
     {
       "type": 0,
       "value": "I serverens tidssone."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "I serverens tidssone. Det tilsvarer kl. "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " i din tidssone."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -60401,6 +60455,12 @@
       "value": "Tilkoblingssjekken mislyktes."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kunne ikke sjekke om serverens miljø angir denne innstillingen. Last inn siden på nytt for å redigere den."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60960,7 +61020,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Last inn på nytt for å se de gjeldende verdiene. Endringene dine i innstillinger som er endret, og i lagrede passord og nøkler, blir angret. De andre endringene dine beholdes."
+      "value": "Last inn på nytt for å se de gjeldende verdiene. Endringene dine i innstillinger som er endret, og i lagrede passord og nøkler med tilhørende innstillinger, blir angret. De andre endringene dine beholdes."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -75641,6 +75701,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Lagringen kan ikke flyttes her mens miljøet angir lagringsinnstillinger ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Fjern først disse variablene, og start alle API-servere på nytt."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -77555,6 +77629,18 @@
     {
       "type": 0,
       "value": "Nytt forsøk for Autoscan-webhooker"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Leser filhodet på nytt i MKV-filer med ASS-undertekster som ble skannet før Silo holdt innebygde skrifter utenfor bithastigheten, slik at de ikke omkodes for en bithastighet de ikke strømmer."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Korriger bithastighet for filer med innebygde skrifter"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

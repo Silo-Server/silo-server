@@ -13406,7 +13406,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bộ sưu tập mà chúng hiển thị không có ở đây hoặc trong bản sao lưu"
+              "value": " mục không thể khôi phục — bộ sưu tập mà mục này hiển thị không có ở đây hoặc trong bản sao lưu"
             }
           ]
         },
@@ -13418,7 +13418,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bộ sưu tập mà chúng hiển thị không có ở đây hoặc trong bản sao lưu"
+              "value": " mục không thể khôi phục — bộ sưu tập mà các mục này hiển thị không có ở đây hoặc trong bản sao lưu"
             }
           ]
         }
@@ -13440,7 +13440,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cài đặt của chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — cài đặt của mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         },
@@ -13452,7 +13452,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cài đặt của chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — cài đặt của các mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         }
@@ -13474,7 +13474,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này không thể nhận chúng"
+              "value": " mục không thể khôi phục — máy chủ này không thể nhận mục này"
             }
           ]
         },
@@ -13486,7 +13486,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này không thể nhận chúng"
+              "value": " mục không thể khôi phục — máy chủ này không thể nhận các mục này"
             }
           ]
         }
@@ -13542,7 +13542,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — tệp của chúng bị thiếu trên máy chủ này"
+              "value": " mục không thể khôi phục — tệp của mục này bị thiếu trên máy chủ này"
             }
           ]
         },
@@ -13554,7 +13554,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — tệp của chúng bị thiếu trên máy chủ này"
+              "value": " mục không thể khôi phục — tệp của các mục này bị thiếu trên máy chủ này"
             }
           ]
         }
@@ -13576,7 +13576,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư mục của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư mục của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13588,7 +13588,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư mục của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư mục của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13610,7 +13610,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nhóm quyền truy cập của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — nhóm quyền truy cập của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13622,7 +13622,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nhóm quyền truy cập của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — nhóm quyền truy cập của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13644,7 +13644,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nội dung của chúng không có trong danh mục của máy chủ này"
+              "value": " mục không thể khôi phục — nội dung của mục này không có trong danh mục của máy chủ này"
             }
           ]
         },
@@ -13656,7 +13656,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nội dung của chúng không có trong danh mục của máy chủ này"
+              "value": " mục không thể khôi phục — nội dung của các mục này không có trong danh mục của máy chủ này"
             }
           ]
         }
@@ -13678,7 +13678,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
+              "value": " mục không thể khôi phục — mục này sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
             }
           ]
         },
@@ -13690,7 +13690,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
+              "value": " mục không thể khôi phục — các mục này sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
             }
           ]
         }
@@ -13712,7 +13712,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư viện của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư viện của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13724,7 +13724,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư viện của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư viện của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13746,7 +13746,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể khôi phục thư viện của chúng ở đây"
+              "value": " mục không thể khôi phục — không thể khôi phục thư viện của mục này ở đây"
             }
           ]
         },
@@ -13758,7 +13758,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể khôi phục thư viện của chúng ở đây"
+              "value": " mục không thể khôi phục — không thể khôi phục thư viện của các mục này ở đây"
             }
           ]
         }
@@ -13848,7 +13848,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         },
@@ -13860,7 +13860,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — các mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         }
@@ -13882,7 +13882,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cần cài đặt chúng từ danh mục plugin trước"
+              "value": " mục không thể khôi phục — cần cài đặt mục này từ danh mục plugin trước"
             }
           ]
         },
@@ -13894,7 +13894,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cần cài đặt chúng từ danh mục plugin trước"
+              "value": " mục không thể khôi phục — cần cài đặt các mục này từ danh mục plugin trước"
             }
           ]
         }
@@ -13916,7 +13916,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của chúng cùng lúc"
+              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của mục này cùng lúc"
             }
           ]
         },
@@ -13928,7 +13928,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của chúng cùng lúc"
+              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của các mục này cùng lúc"
             }
           ]
         }
@@ -13950,7 +13950,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bản sao lưu không có chúng"
+              "value": " mục không thể khôi phục — bản sao lưu không có mục này"
             }
           ]
         },
@@ -13962,7 +13962,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bản sao lưu không có chúng"
+              "value": " mục không thể khôi phục — bản sao lưu không có các mục này"
             }
           ]
         }
@@ -14086,7 +14086,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho chúng nhiều quyền truy cập hơn bản sao lưu"
+              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho mục này nhiều quyền truy cập hơn bản sao lưu"
             }
           ]
         },
@@ -14098,7 +14098,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho chúng nhiều quyền truy cập hơn bản sao lưu"
+              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho các mục này nhiều quyền truy cập hơn bản sao lưu"
             }
           ]
         }
@@ -14154,7 +14154,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng đã giống hệt ở đây"
+              "value": " mục không thể khôi phục — mục này ở đây đã giống hệt"
             }
           ]
         },
@@ -14166,7 +14166,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng đã giống hệt ở đây"
+              "value": " mục không thể khôi phục — các mục này ở đây đã giống hệt"
             }
           ]
         }
@@ -14222,7 +14222,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể đọc bản sao của chúng trong bản sao lưu"
+              "value": " mục không thể khôi phục — không thể đọc bản sao của mục này trong bản sao lưu"
             }
           ]
         },
@@ -14234,7 +14234,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể đọc bản sao của chúng trong bản sao lưu"
+              "value": " mục không thể khôi phục — không thể đọc bản sao của các mục này trong bản sao lưu"
             }
           ]
         }
@@ -14256,7 +14256,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
+              "value": " mục không thể khôi phục — mục này kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
             }
           ]
         },
@@ -14268,7 +14268,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
+              "value": " mục không thể khôi phục — các mục này kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
             }
           ]
         }
@@ -14837,8 +14837,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ẩn các mục này"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn mục này"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các mục này"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14987,8 +15007,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Hiển thị các mục này"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị mục này"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các mục này"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19411,6 +19451,20 @@
     {
       "type": 0,
       "value": "Theo múi giờ của máy chủ."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Theo múi giờ của máy chủ. Tức là "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " theo giờ của bạn."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -60609,6 +60663,12 @@
       "value": "Kiểm tra kết nối không thành công."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra xem môi trường của máy chủ có thiết lập cài đặt này không. Tải lại trang để chỉnh sửa."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -61168,7 +61228,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Tải lại để xem các giá trị hiện tại. Các chỉnh sửa của bạn đối với những cài đặt đã thay đổi, cũng như với mật khẩu và khóa đã lưu, sẽ bị hoàn tác; các chỉnh sửa khác của bạn vẫn được giữ."
+      "value": "Tải lại để xem các giá trị hiện tại. Các chỉnh sửa của bạn đối với những cài đặt đã thay đổi, cũng như đối với mật khẩu và khóa đã lưu cùng các cài đặt liên quan, sẽ bị hoàn tác; các chỉnh sửa khác của bạn vẫn được giữ."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -75945,6 +76005,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Không thể chuyển bộ nhớ đến đây khi môi trường đang đặt cài đặt bộ nhớ ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Hãy bỏ đặt các biến đó và khởi động lại mọi máy chủ API trước."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -77867,6 +77941,18 @@
     {
       "type": 0,
       "value": "Thử lại webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Đọc lại phần đầu của các tệp MKV có phụ đề ASS được quét trước khi Silo loại phông chữ nhúng ra khỏi tốc độ bit, để các tệp này không bị chuyển mã vì một tốc độ bit mà chúng không thực sự phát trực tuyến."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Sửa tốc độ bit của tệp có phông chữ nhúng"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

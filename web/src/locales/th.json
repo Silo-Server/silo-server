@@ -13051,7 +13051,7 @@
             },
             {
               "type": 0,
-              "value": " รายการไม่ได้ — รายการเหล่านี้จะขยายสิทธิ์เข้าถึง เซิร์ฟเวอร์นี้จึงคงค่าที่เข้มงวดกว่าไว้"
+              "value": " รายการไม่ได้ — รายการเหล่านี้จะขยายสิทธิ์เข้าถึง เซิร์ฟเวอร์นี้จึงคงค่าที่เข้มงวดกว่าของตนไว้"
             }
           ]
         }
@@ -13954,8 +13954,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "ซ่อน"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อน"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14076,8 +14088,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "แสดง"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดง"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17818,6 +17842,20 @@
     {
       "type": 0,
       "value": "ตามเขตเวลาของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "ตามเขตเวลาของเซิร์ฟเวอร์ ซึ่งตรงกับ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " ในเขตเวลาของคุณ"
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -54800,6 +54838,12 @@
       "value": "ตรวจสอบการเชื่อมต่อไม่สำเร็จ"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบไม่ได้ว่าสภาพแวดล้อมของเซิร์ฟเวอร์ตั้งค่านี้ไว้หรือไม่ โหลดหน้าซ้ำเพื่อแก้ไขการตั้งค่านี้"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -55343,7 +55387,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน ระบบจะยกเลิกการแก้ไขการตั้งค่าที่มีการเปลี่ยนแปลง และการแก้ไขรหัสผ่านและคีย์ที่บันทึกไว้ ส่วนการแก้ไขอื่นจะยังคงอยู่"
+      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน ระบบจะยกเลิกการแก้ไขการตั้งค่าที่มีการเปลี่ยนแปลง และการแก้ไขรหัสผ่านและคีย์ที่บันทึกไว้พร้อมการตั้งค่าที่เกี่ยวข้อง ส่วนการแก้ไขอื่นจะยังคงอยู่"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -69854,6 +69898,20 @@
       "value": ")"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "ย้ายพื้นที่จัดเก็บมาที่นี่ไม่ได้ขณะที่สภาพแวดล้อมกำหนดการตั้งค่าพื้นที่จัดเก็บไว้ ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") ยกเลิกการตั้งค่าตัวแปรเหล่านั้นแล้วรีสตาร์ตเซิร์ฟเวอร์ API ทุกเครื่องก่อน"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -71686,6 +71744,18 @@
     {
       "type": 0,
       "value": "ลองเว็บฮุก Autoscan อีกครั้ง"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "อ่านส่วนหัวของไฟล์ MKV ที่มีคำบรรยาย ASS อีกครั้ง สำหรับไฟล์ที่สแกนไว้ก่อนที่ Silo จะเลิกนับฟอนต์ที่ฝังอยู่รวมในบิตเรต เพื่อไม่ให้ต้องแปลงรหัสไฟล์เหล่านี้เพราะบิตเรตที่ไม่ได้ใช้สตรีมจริง"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "แก้ไขบิตเรตของไฟล์ที่มีฟอนต์ฝังอยู่"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

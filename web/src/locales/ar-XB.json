@@ -13906,7 +13906,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the collection they show isn't here or in the backup\u202C"
+              "value": "\u202E can't be restored — the collection it shows isn't here or in the backup\u202C"
             }
           ]
         },
@@ -13948,7 +13948,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their settings are encrypted with a different SECRET_KEY\u202C"
+              "value": "\u202E can't be restored — its settings are encrypted with a different SECRET_KEY\u202C"
             }
           ]
         },
@@ -13990,7 +13990,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — this server can't take them\u202C"
+              "value": "\u202E can't be restored — this server can't take it\u202C"
             }
           ]
         },
@@ -14074,7 +14074,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their files are missing on this server\u202C"
+              "value": "\u202E can't be restored — its files are missing on this server\u202C"
             }
           ]
         },
@@ -14116,7 +14116,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their folders aren't on this server\u202C"
+              "value": "\u202E can't be restored — its folders aren't on this server\u202C"
             }
           ]
         },
@@ -14158,7 +14158,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their access group isn't on this server\u202C"
+              "value": "\u202E can't be restored — its access group isn't on this server\u202C"
             }
           ]
         },
@@ -14200,7 +14200,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their title isn't in this server's catalog\u202C"
+              "value": "\u202E can't be restored — its title isn't in this server's catalog\u202C"
             }
           ]
         },
@@ -14242,7 +14242,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they would widen access, so this server keeps its stricter values\u202C"
+              "value": "\u202E can't be restored — it would widen access, so this server keeps its own stricter values\u202C"
             }
           ]
         },
@@ -14284,7 +14284,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their library isn't on this server\u202C"
+              "value": "\u202E can't be restored — its library isn't on this server\u202C"
             }
           ]
         },
@@ -14326,7 +14326,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their library can't be restored here\u202C"
+              "value": "\u202E can't be restored — its library can't be restored here\u202C"
             }
           ]
         },
@@ -14452,7 +14452,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they're encrypted with a different SECRET_KEY\u202C"
+              "value": "\u202E can't be restored — it's encrypted with a different SECRET_KEY\u202C"
             }
           ]
         },
@@ -14494,7 +14494,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they need to be installed from a plugin catalog first\u202C"
+              "value": "\u202E can't be restored — it needs to be installed from a plugin catalog first\u202C"
             }
           ]
         },
@@ -14536,7 +14536,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their primary profile has to be restored with them\u202C"
+              "value": "\u202E can't be restored — its primary profile has to be restored with it\u202C"
             }
           ]
         },
@@ -14578,7 +14578,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the backup doesn't have them\u202C"
+              "value": "\u202E can't be restored — the backup doesn't have it\u202C"
             }
           ]
         },
@@ -14746,7 +14746,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — this server would give them more access than the backup did\u202C"
+              "value": "\u202E can't be restored — this server would give it more access than the backup did\u202C"
             }
           ]
         },
@@ -14830,7 +14830,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they're already the same here\u202C"
+              "value": "\u202E can't be restored — it's already the same here\u202C"
             }
           ]
         },
@@ -14914,7 +14914,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the backup's copy of them can't be read\u202C"
+              "value": "\u202E can't be restored — the backup's copy of it can't be read\u202C"
             }
           ]
         },
@@ -14956,7 +14956,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they connect to outside services and this server can't verify the backup\u202C"
+              "value": "\u202E can't be restored — it connects to outside services and this server can't verify the backup\u202C"
             }
           ]
         },
@@ -15625,8 +15625,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "\u200F\u202EHide them\u202C"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EHide it\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EHide them\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15799,8 +15819,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "\u200F\u202EShow them\u202C"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShow it\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShow them\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -20487,6 +20527,20 @@
     {
       "type": 0,
       "value": "\u200F\u202EIn the server's time zone.\u202C"
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the server's time zone. That's \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "\u202E where you are.\u202C"
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -63781,6 +63835,12 @@
       "value": "\u200F\u202EConnection check failed.\u202C"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t check whether the server’s environment sets this. Reload to edit.\u202C"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -64348,7 +64408,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EReload to see the current values. Your edits to settings that changed, and to saved passwords and keys, are undone; your other edits are kept.\u202C"
+      "value": "\u200F\u202EReload to see the current values. Your edits to settings that changed, and to saved passwords and keys with their related settings, are undone; your other edits are kept.\u202C"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -79485,6 +79545,20 @@
       "value": "\u202E).\u202C"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStorage can’t be moved here while the environment sets storage settings (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "\u202E). Unset those variables and restart every API server first.\u202C"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -81463,6 +81537,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EAutoscan webhook retry\u202C"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERe-reads the header of MKV files with ASS subtitles scanned before Silo left embedded fonts out of the bitrate, so they are not transcoded for a bitrate they do not stream.\u202C"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECorrect Bitrate of Files with Embedded Fonts\u202C"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

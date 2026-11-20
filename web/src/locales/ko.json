@@ -12995,7 +12995,7 @@
             },
             {
               "type": 0,
-              "value": "개를 복원할 수 없어요 — 액세스가 넓어지므로 이 서버의 더 엄격한 값을 유지해요"
+              "value": "개를 복원할 수 없어요 — 액세스 범위가 넓어지므로 이 서버의 더 엄격한 값을 유지해요"
             }
           ]
         }
@@ -13838,8 +13838,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "숨기기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "숨기기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13960,8 +13972,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "표시"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "표시"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17694,6 +17718,20 @@
     {
       "type": 0,
       "value": "서버의 시간대 기준이에요."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "서버 시간대 기준이에요. 현재 시간대로는 "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 해당해요."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -54256,6 +54294,12 @@
       "value": "연결 확인에 실패했어요."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "서버 환경에서 이 설정을 지정하는지 확인할 수 없어요. 수정하려면 페이지를 새로고침하세요."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54799,7 +54843,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "현재 값을 보려면 새로고침하세요. 변경된 설정과 저장된 비밀번호 및 키에 대한 수정 사항은 취소되고, 나머지 수정 사항은 유지돼요."
+      "value": "현재 값을 보려면 새로고침하세요. 변경된 설정, 저장된 비밀번호와 키 및 관련 설정에 대한 수정 사항은 취소되고, 나머지 수정 사항은 유지돼요."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -69282,6 +69326,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "환경 변수가 스토리지 설정을 지정하고 있어서("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") 스토리지를 이곳으로 이동할 수 없어요. 먼저 해당 변수를 해제하고 모든 API 서버를 다시 시작하세요."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -71106,6 +71164,18 @@
     {
       "type": 0,
       "value": "Autoscan 웹훅 재시도"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Silo가 내장 글꼴을 비트레이트에서 제외하기 전에 스캔한, ASS 자막이 있는 MKV 파일의 헤더를 다시 읽어, 실제로 스트리밍하지 않는 비트레이트 때문에 트랜스코딩되지 않게 해요."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "내장 글꼴이 있는 파일의 비트레이트 보정"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

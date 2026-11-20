@@ -17155,8 +17155,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Slėpti"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17393,8 +17429,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Rodyti"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -23369,6 +23441,20 @@
     {
       "type": 0,
       "value": "Serverio laiko juostoje."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Serverio laiko juostoje. Jūsų laiku tai "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -74644,6 +74730,12 @@
       "value": "Nepavyko patikrinti ryšio."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti, ar serverio aplinka nustato šią parinktį. Įkelkite puslapį iš naujo, kad galėtumėte ją redaguoti."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -75235,7 +75327,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Pakeitimai, kuriuos atlikote pasikeitusiuose nustatymuose ir išsaugotuose slaptažodžiuose bei raktuose, atšaukiami; kiti jūsų pakeitimai išlaikomi."
+      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Jūsų pakeitimai pasikeitusiuose nustatymuose, išsaugotuose slaptažodžiuose ir raktuose bei su jais susijusiuose nustatymuose atšaukiami; kiti jūsų pakeitimai išlaikomi."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -90480,6 +90572,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Saugyklos negalima perkelti čia, kol saugyklos nustatymai nustatyti aplinkoje ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Pirmiausia panaikinkite šiuos kintamuosius ir iš naujo paleiskite kiekvieną API serverį."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -92590,6 +92696,18 @@
     {
       "type": 0,
       "value": "„Autoscan“ webhook pakartojimas"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Iš naujo perskaito MKV failų su ASS subtitrais antraštę, jei failai nuskaityti anksčiau, nei „Silo“ ėmė neįtraukti įterptų šriftų į bitų spartą, kad jie nebūtų perkoduojami dėl bitų spartos, kurios jie iš tikrųjų netransliuoja."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Failų su įterptais šriftais bitų spartos taisymas"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

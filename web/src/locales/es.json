@@ -14405,7 +14405,7 @@
             },
             {
               "type": 0,
-              "value": " no se puede restaurar — ampliaría el acceso, así que este servidor mantiene sus valores más estrictos"
+              "value": " no se puede restaurar — ampliaría el acceso, así que este servidor mantiene sus propios valores más estrictos"
             }
           ]
         },
@@ -15924,8 +15924,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ocultarlos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultarlo"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultarlos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultarlos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16110,8 +16138,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Mostrarlos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrarlo"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrarlos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrarlos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -21216,6 +21272,20 @@
     {
       "type": 0,
       "value": "En la zona horaria del servidor."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "En la zona horaria del servidor. En tu zona horaria son las "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -67017,6 +67087,12 @@
       "value": "No se pudo comprobar la conexión."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "No se pudo comprobar si el entorno del servidor define este ajuste. Vuelve a cargar la página para editarlo."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67592,7 +67668,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Recarga para ver los valores actuales. Se deshacen tus cambios en las opciones que cambiaron y en las contraseñas y claves guardadas; se conservan tus demás cambios."
+      "value": "Recarga para ver los valores actuales. Se deshacen tus cambios en los ajustes que cambiaron y en las contraseñas y claves guardadas junto con sus ajustes relacionados; se conservan tus demás cambios."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -82511,6 +82587,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "No se puede mover el almacenamiento aquí mientras el entorno define opciones de almacenamiento ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Primero elimina esas variables y reinicia todos los servidores de API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -84503,6 +84593,18 @@
     {
       "type": 0,
       "value": "Reintento de webhooks de Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Vuelve a leer el encabezado de los archivos MKV con subtítulos ASS analizados antes de que Silo dejara de incluir las fuentes incrustadas en la tasa de bits, para que no se transcodifiquen por una tasa de bits que no transmiten."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Corregir tasa de bits de archivos con fuentes incrustadas"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

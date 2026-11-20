@@ -14413,7 +14413,7 @@
             },
             {
               "type": 0,
-              "value": " no es pot restaurar — ampliaria l’accés, així que aquest servidor manté els seus valors més restrictius"
+              "value": " no es pot restaurar — ampliaria l’accés, així que aquest servidor manté els seus propis valors més restrictius"
             }
           ]
         },
@@ -15920,8 +15920,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Amaga’ls"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Amaga’l"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Amaga’ls"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Amaga’ls"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16106,8 +16134,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Mostra’ls"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra’l"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra’ls"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra’ls"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -21204,6 +21260,20 @@
     {
       "type": 0,
       "value": "En la zona horària del servidor."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "A la zona horària del servidor. A la teva zona horària, correspon a les "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -67121,6 +67191,12 @@
       "value": "Ha fallat la comprovació de la connexió."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut comprovar si l’entorn del servidor defineix aquesta opció. Torna a carregar la pàgina per editar-la."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67696,7 +67772,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Torna a carregar per veure els valors actuals. Es desfaran els canvis que hagis fet a les opcions que han canviat i a les contrasenyes i claus desades; la resta de canvis es mantenen."
+      "value": "Torna a carregar per veure els valors actuals. Es desfan els canvis que hagis fet a les opcions que han canviat i a les contrasenyes i claus desades, juntament amb les opcions relacionades; la resta de canvis es mantenen."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -82631,6 +82707,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "No es pot moure l’emmagatzematge aquí mentre l’entorn defineixi la configuració d’emmagatzematge ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Primer, elimina la definició d’aquestes variables i reinicia tots els servidors d’API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -84611,6 +84701,18 @@
     {
       "type": 0,
       "value": "Reintent de webhooks d’Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Torna a llegir la capçalera dels fitxers MKV amb subtítols ASS escanejats abans que Silo deixés fora de la taxa de bits els tipus de lletra incrustats, perquè no es transcodifiquin a causa d’una taxa de bits que en realitat no transmeten."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Correcció de la taxa de bits dels fitxers amb tipus de lletra incrustats"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

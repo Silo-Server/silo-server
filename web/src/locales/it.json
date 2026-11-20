@@ -14021,7 +14021,7 @@
             },
             {
               "type": 0,
-              "value": " non si può ripristinare — la raccolta in cui compare non è qui né nel backup"
+              "value": " non si può ripristinare — la raccolta che mostra non è qui né nel backup"
             }
           ]
         },
@@ -14033,7 +14033,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — la raccolta in cui compaiono non è qui né nel backup"
+              "value": " non si possono ripristinare — la raccolta che mostrano non è qui né nel backup"
             }
           ]
         },
@@ -14045,7 +14045,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — la raccolta in cui compaiono non è qui né nel backup"
+              "value": " non si possono ripristinare — la raccolta che mostrano non è qui né nel backup"
             }
           ]
         }
@@ -14067,7 +14067,7 @@
             },
             {
               "type": 0,
-              "value": " non si può ripristinare — le impostazioni sono crittografate con una SECRET_KEY diversa"
+              "value": " non si può ripristinare — le relative impostazioni sono crittografate con una SECRET_KEY diversa"
             }
           ]
         },
@@ -14079,7 +14079,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — le impostazioni sono crittografate con una SECRET_KEY diversa"
+              "value": " non si possono ripristinare — le relative impostazioni sono crittografate con una SECRET_KEY diversa"
             }
           ]
         },
@@ -14091,7 +14091,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — le impostazioni sono crittografate con una SECRET_KEY diversa"
+              "value": " non si possono ripristinare — le relative impostazioni sono crittografate con una SECRET_KEY diversa"
             }
           ]
         }
@@ -14343,7 +14343,7 @@
             },
             {
               "type": 0,
-              "value": " non si può ripristinare — il titolo non è nel catalogo di questo server"
+              "value": " non si può ripristinare — il relativo titolo non è nel catalogo di questo server"
             }
           ]
         },
@@ -14355,7 +14355,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — il titolo non è nel catalogo di questo server"
+              "value": " non si possono ripristinare — il relativo titolo non è nel catalogo di questo server"
             }
           ]
         },
@@ -14367,7 +14367,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — il titolo non è nel catalogo di questo server"
+              "value": " non si possono ripristinare — il relativo titolo non è nel catalogo di questo server"
             }
           ]
         }
@@ -14711,7 +14711,7 @@
             },
             {
               "type": 0,
-              "value": " non si può ripristinare — il profilo principale deve essere ripristinato insieme"
+              "value": " non si può ripristinare — il relativo profilo principale deve essere ripristinato insieme"
             }
           ]
         },
@@ -14723,7 +14723,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — il profilo principale deve essere ripristinato insieme"
+              "value": " non si possono ripristinare — il relativo profilo principale deve essere ripristinato insieme"
             }
           ]
         },
@@ -14735,7 +14735,7 @@
             },
             {
               "type": 0,
-              "value": " non si possono ripristinare — il profilo principale deve essere ripristinato insieme"
+              "value": " non si possono ripristinare — il relativo profilo principale deve essere ripristinato insieme"
             }
           ]
         }
@@ -15896,8 +15896,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Nascondi"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nascondi"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nascondi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nascondi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16082,8 +16110,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Mostra"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -21160,6 +21216,20 @@
     {
       "type": 0,
       "value": "Nel fuso orario del server."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Nel fuso orario del server. Nel tuo fuso orario corrisponde alle ore "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -66889,6 +66959,12 @@
       "value": "Verifica della connessione non riuscita."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Impossibile verificare se l’ambiente del server imposta questa opzione. Ricarica la pagina per modificarla."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67464,7 +67540,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Ricarica per vedere i valori attuali. Le modifiche alle impostazioni cambiate e alle password e chiavi salvate vengono annullate; le altre modifiche vengono mantenute."
+      "value": "Ricarica per vedere i valori attuali. Le modifiche alle impostazioni cambiate vengono annullate, così come quelle a password e chiavi salvate e alle impostazioni collegate; le altre modifiche vengono mantenute."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -82411,6 +82487,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Impossibile spostare qui lo spazio di archiviazione mentre l’ambiente imposta le opzioni di archiviazione ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Rimuovi prima queste variabili e riavvia ogni server API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -84415,6 +84505,18 @@
     {
       "type": 0,
       "value": "Nuovo tentativo webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Rilegge l’intestazione dei file MKV con sottotitoli ASS scansionati prima che Silo escludesse i font incorporati dal bitrate, così non vengono transcodificati per un bitrate che in realtà non trasmettono in streaming."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Correzione bitrate dei file con font incorporati"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

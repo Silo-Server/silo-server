@@ -28,6 +28,10 @@ type EnvSettingVar struct {
 	Scope EnvScope
 }
 
+// BackupEnabledEnvVar sets backup.enabled. A migration job reads it alone,
+// for the backup before migrations.
+const BackupEnabledEnvVar = "SILO_BACKUP_ENABLED"
+
 // envSettingVars is the one list of settings an operator can set from the
 // environment. API servers (integrated and api mode) read it; proxies and
 // transcode nodes do not. A key belongs here only when setting it needs
@@ -39,6 +43,7 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_SERVER_NAME", "branding.server_name", EnvScopeStored},
 	{"SILO_PUBLIC_URL", "server.public_url", EnvScopeStored},
 	{"SILO_LOCAL_URL", ServerLocalURLSettingKey, EnvScopeStored},
+	{"SILO_WEB_MEDIA_URL", WebMediaURLSettingKey, EnvScopeStored},
 	{"SILO_LAN_DISCOVERY", ServerLANDiscoverySettingKey, EnvScopeStored},
 	{"SILO_LOG_LEVEL", "server.log_level", EnvScopeStored},
 	{"SILO_LOG_FORMAT", serverLogFormatSettingKey, EnvScopeStored},
@@ -53,6 +58,7 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_SEARCH_PROVIDER", "catalog.search.provider", EnvScopeStored},
 	{"SILO_MEILISEARCH_URL", "catalog.search.meilisearch.url", EnvScopeStored},
 	{"SILO_MEILISEARCH_API_KEY", "catalog.search.meilisearch.api_key", EnvScopeStored},
+	{"SILO_MEILISEARCH_INDEX", "catalog.search.meilisearch.index", EnvScopeStored},
 
 	{"SILO_ARTWORK_STORAGE", "artwork.storage_backend", EnvScopeStored},
 	{"SILO_ARTWORK_PATH", "artwork.local_path", EnvScopeStored},
@@ -85,14 +91,28 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_SMTP_FROM_ADDRESS", "email.from_address", EnvScopeStored},
 	{"SILO_SMTP_FROM_NAME", "email.from_name", EnvScopeStored},
 
+	{"SILO_DISCORD_CLIENT_ID", "discord.client_id", EnvScopeStored},
+	{"SILO_DISCORD_CLIENT_SECRET", "discord.client_secret", EnvScopeStored},
+	{"SILO_DISCORD_BOT_TOKEN", "discord.bot_token", EnvScopeStored},
+
 	{"SILO_FFMPEG_PATH", "playback.ffmpeg_path", EnvScopeStored},
 	{"SILO_HW_ACCEL", "playback.hw_accel", EnvScopeStored},
 	{"SILO_HW_DEVICE", "playback.hw_device", EnvScopeStored},
 	{"SILO_TRANSCODE_DIR", playbackTranscodeDirSettingKey, EnvScopeStored},
 	{"SILO_TRANSCODE_ENABLED", "playback.transcode_enabled", EnvScopeStored},
 	{"SILO_DOWNLOAD_ARTIFACT_DIR", downloadArtifactDirSettingKey, EnvScopeStored},
+	{"SILO_DOWNLOAD_ARTIFACT_MAX_BYTES", "download.artifact_max_bytes", EnvScopeStored},
+
+	{"SILO_SCANNER_REALTIME_MONITORING", "scanner.realtime_monitoring", EnvScopeStored},
+
+	{BackupEnabledEnvVar, BackupEnabledSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_TIME", BackupTimeSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_KEEP", BackupKeepSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_INCLUDE_SUBTITLES", BackupIncludeSubtitlesSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_INCLUDE_INTRO_FINGERPRINTS", BackupIncludeIntroFingerprintsSettingKey, EnvScopeStored},
 
 	{"SILO_TMDB_API_KEY", "tmdb.api_key", EnvScopeStored},
+	{"SILO_MDBLIST_API_KEY", "mdblist.api_key", EnvScopeStored},
 
 	{"SILO_DB_MAX_CONNECTIONS", "database.max_connections", EnvScopeProcess},
 	{"SILO_USERDB_POOL_MAX_OPEN", "userdb.pool_max_open", EnvScopeProcess},

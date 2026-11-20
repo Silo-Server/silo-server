@@ -14964,7 +14964,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         },
@@ -14980,7 +14980,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         },
@@ -14996,7 +14996,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         },
@@ -15012,7 +15012,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         }
@@ -15408,7 +15408,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         },
@@ -15424,7 +15424,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         },
@@ -15440,7 +15440,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         },
@@ -15456,7 +15456,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         }
@@ -17659,8 +17659,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ukryj je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj to"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17897,8 +17933,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Pokaż je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż to"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -23693,6 +23765,20 @@
     {
       "type": 0,
       "value": "W strefie czasowej serwera."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "W strefie czasowej serwera. U ciebie to "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -74583,6 +74669,12 @@
       "value": "Nie udało się sprawdzić połączenia."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić, czy środowisko serwera ustawia tę opcję. Odśwież stronę, aby ją edytować."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -75174,7 +75266,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Twoje zmiany w ustawieniach, które się zmieniły, oraz w zapisanych hasłach i kluczach zostaną cofnięte; pozostałe zmiany zostaną zachowane."
+      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Twoje zmiany w ustawieniach, które się zmieniły, oraz w zapisanych hasłach i kluczach wraz z powiązanymi z nimi ustawieniami zostaną cofnięte; pozostałe zmiany zostaną zachowane."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -90375,6 +90467,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Nie można tu przenieść magazynu, dopóki ustawienia magazynu są określone w środowisku ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najpierw usuń te zmienne i uruchom ponownie każdy serwer API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -92453,6 +92559,18 @@
     {
       "type": 0,
       "value": "Ponawianie webhooków Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Ponownie odczytuje nagłówek plików MKV z napisami ASS zeskanowanych przed wprowadzeniem w Silo pomijania osadzonych czcionek w przepływności, aby pliki te nie były transkodowane ze względu na przepływność, której w rzeczywistości nie przesyłają."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Korygowanie przepływności plików z osadzonymi czcionkami"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

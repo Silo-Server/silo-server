@@ -13618,7 +13618,7 @@
             },
             {
               "type": 0,
-              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва по-строгите си стойности"
+              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва собствените си по-строги стойности"
             }
           ]
         },
@@ -14785,8 +14785,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Скриване"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14935,8 +14955,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Показване"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19315,6 +19355,20 @@
     {
       "type": 0,
       "value": "В часовата зона на сървъра."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "В часовата зона на сървъра. Във вашата часова зона това е "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -60593,6 +60647,12 @@
       "value": "Проверката на връзката е неуспешна."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Не можа да се провери дали средата на сървъра задава тази настройка. Презаредете страницата, за да я редактирате."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -61152,7 +61212,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Презаредете, за да видите текущите стойности. Промените ви в настройките, които са се променили, както и в запазените пароли и ключове, се отменят; другите ви промени се запазват."
+      "value": "Презаредете, за да видите текущите стойности. Промените ви в настройките, които са се променили, както и в запазените пароли и ключове заедно със свързаните с тях настройки, се отменят; другите ви промени се запазват."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -75909,6 +75969,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Хранилището не може да се премести тук, докато средата задава настройки за хранилището ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Първо премахнете тези променливи и рестартирайте всички API сървъри."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -77815,6 +77889,18 @@
     {
       "type": 0,
       "value": "Нов опит за уебхукове на Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Прочита отново заглавната част на MKV файловете с ASS субтитри, сканирани преди Silo да изключва вградените шрифтове от битрейта, така че да не се транскодират заради битрейт, който не предават поточно."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Коригиране на битрейта на файлове с вградени шрифтове"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

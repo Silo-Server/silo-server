@@ -13386,7 +13386,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden näyttämää kokoelmaa ei ole täällä eikä varmuuskopiossa"
+              "value": " ei palautettavissa — sen näyttämää kokoelmaa ei ole täällä eikä varmuuskopiossa"
             }
           ]
         },
@@ -13420,7 +13420,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden asetukset on salattu eri SECRET_KEY-avaimella"
+              "value": " ei palautettavissa — sen asetukset on salattu eri SECRET_KEY-avaimella"
             }
           ]
         },
@@ -13454,7 +13454,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — tämä palvelin ei voi ottaa niitä vastaan"
+              "value": " ei palautettavissa — tämä palvelin ei voi ottaa sitä vastaan"
             }
           ]
         },
@@ -13522,7 +13522,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden tiedostot puuttuvat tältä palvelimelta"
+              "value": " ei palautettavissa — sen tiedostot puuttuvat tältä palvelimelta"
             }
           ]
         },
@@ -13556,7 +13556,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden kansioita ei ole tällä palvelimella"
+              "value": " ei palautettavissa — sen kansioita ei ole tällä palvelimella"
             }
           ]
         },
@@ -13590,7 +13590,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden käyttöoikeusryhmää ei ole tällä palvelimella"
+              "value": " ei palautettavissa — sen käyttöoikeusryhmää ei ole tällä palvelimella"
             }
           ]
         },
@@ -13624,7 +13624,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden nimikettä ei ole tämän palvelimen luettelossa"
+              "value": " ei palautettavissa — sen nimikettä ei ole tämän palvelimen luettelossa"
             }
           ]
         },
@@ -13658,7 +13658,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne laajentaisivat käyttöoikeuksia, joten tämä palvelin säilyttää tiukemmat arvonsa"
+              "value": " ei palautettavissa — se laajentaisi käyttöoikeuksia, joten tämä palvelin säilyttää omat tiukemmat arvonsa"
             }
           ]
         },
@@ -13692,7 +13692,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden kirjastoa ei ole tällä palvelimella"
+              "value": " ei palautettavissa — sen kirjastoa ei ole tällä palvelimella"
             }
           ]
         },
@@ -13726,7 +13726,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden kirjastoa ei voi palauttaa tänne"
+              "value": " ei palautettavissa — sen kirjastoa ei voi palauttaa tänne"
             }
           ]
         },
@@ -13828,7 +13828,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne on salattu eri SECRET_KEY-avaimella"
+              "value": " ei palautettavissa — se on salattu eri SECRET_KEY-avaimella"
             }
           ]
         },
@@ -13862,7 +13862,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne on ensin asennettava laajennusluettelosta"
+              "value": " ei palautettavissa — se on ensin asennettava laajennusluettelosta"
             }
           ]
         },
@@ -13896,7 +13896,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden pääprofiili on palautettava samalla"
+              "value": " ei palautettavissa — sen pääprofiili on palautettava samalla"
             }
           ]
         },
@@ -13930,7 +13930,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — varmuuskopiossa ei ole niitä"
+              "value": " ei palautettavissa — varmuuskopiossa ei ole sitä"
             }
           ]
         },
@@ -14066,7 +14066,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — tämä palvelin antaisi niille enemmän käyttöoikeuksia kuin varmuuskopio"
+              "value": " ei palautettavissa — tämä palvelin antaisi sille enemmän käyttöoikeuksia kuin varmuuskopio"
             }
           ]
         },
@@ -14134,7 +14134,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne ovat täällä jo samat"
+              "value": " ei palautettavissa — se on täällä jo sama"
             }
           ]
         },
@@ -14202,7 +14202,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — varmuuskopion kopiota niistä ei voi lukea"
+              "value": " ei palautettavissa — varmuuskopion kopiota siitä ei voi lukea"
             }
           ]
         },
@@ -14236,7 +14236,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne yhdistävät ulkoisiin palveluihin, eikä tämä palvelin voi varmentaa varmuuskopiota"
+              "value": " ei palautettavissa — se yhdistää ulkoisiin palveluihin, eikä tämä palvelin voi varmentaa varmuuskopiota"
             }
           ]
         },
@@ -14825,8 +14825,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Piilota ne"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Piilota se"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Piilota ne"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14975,8 +14995,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Näytä ne"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä se"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä ne"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19399,6 +19439,20 @@
     {
       "type": 0,
       "value": "Palvelimen aikavyöhykkeellä."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Palvelimen aikavyöhykkeellä. Sinun aikavyöhykkeelläsi se on "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -60397,6 +60451,12 @@
       "value": "Yhteyden tarkistus epäonnistui."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Ei voitu tarkistaa, määrittääkö palvelimen ympäristö tämän asetuksen. Lataa sivu uudelleen, jos haluat muokata sitä."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60956,7 +61016,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Lataa uudelleen, niin näet nykyiset arvot. Muokkauksesi muuttuneisiin asetuksiin sekä tallennettuihin salasanoihin ja avaimiin kumotaan; muut muokkauksesi säilyvät."
+      "value": "Lataa uudelleen, niin näet nykyiset arvot. Muokkauksesi muuttuneisiin asetuksiin sekä tallennettuihin salasanoihin ja avaimiin ja niihin liittyviin asetuksiin kumotaan; muut muokkauksesi säilyvät."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -75685,6 +75745,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Tallennustilaa ei voi siirtää tänne niin kauan kuin ympäristömuuttujat määrittävät tallennusasetuksia ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Poista ensin näiden muuttujien määritykset ja käynnistä jokainen API-palvelin uudelleen."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -77571,6 +77645,18 @@
     {
       "type": 0,
       "value": "Autoscan-webhookin uudelleenyritys"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Lukee uudelleen otsaketiedot MKV-tiedostoista, joissa on ASS-tekstitys ja jotka on skannattu ennen kuin Silo jätti upotetut fontit pois bittinopeudesta, jotta niitä ei transkoodata sellaisen bittinopeuden takia, jota ne eivät suoratoistossa käytä."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Upotettuja fontteja sisältävien tiedostojen bittinopeuden korjaus"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

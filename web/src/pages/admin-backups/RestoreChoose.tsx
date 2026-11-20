@@ -272,9 +272,12 @@ function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group
           {group.title}
         </span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open
-            ? t("web.admin.backups.restore.choose.hideThem")
-            : t("web.admin.backups.restore.choose.showThem")}
+          {t(
+            open
+              ? "web.admin.backups.restore.choose.hideThem"
+              : "web.admin.backups.restore.choose.showThem",
+            { count: group.items.length },
+          )}
         </Disclosure>
       </div>
       {open ? (
@@ -332,9 +335,12 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
           {t("web.admin.backups.restore.choose.neverRestored")}
         </span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open
-            ? t("web.admin.backups.restore.choose.hideThem")
-            : t("web.admin.backups.restore.choose.showThem")}
+          {t(
+            open
+              ? "web.admin.backups.restore.choose.hideThem"
+              : "web.admin.backups.restore.choose.showThem",
+            { count: keys.length },
+          )}
         </Disclosure>
       </div>
       {open ? (
@@ -449,9 +455,12 @@ function SectionBlock({
                 {nothingToRestoreText(counts)}
               </span>
               <Disclosure open={showAll} onOpenChange={setShowAll} controls={sameListId}>
-                {showAll
-                  ? t("web.admin.backups.restore.choose.hideThem")
-                  : t("web.admin.backups.restore.choose.showThem")}
+                {t(
+                  showAll
+                    ? "web.admin.backups.restore.choose.hideThem"
+                    : "web.admin.backups.restore.choose.showThem",
+                  { count: section.items.length },
+                )}
               </Disclosure>
             </div>
           ) : null}

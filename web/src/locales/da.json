@@ -13354,7 +13354,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — samlingen, de viser, findes ikke her eller i backuppen"
+              "value": " kan ikke gendannes — samlingen, der vises, findes ikke her eller i backuppen"
             }
           ]
         },
@@ -13388,7 +13388,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres indstillinger er krypteret med en anden SECRET_KEY"
+              "value": " kan ikke gendannes — indstillingerne er krypteret med en anden SECRET_KEY"
             }
           ]
         },
@@ -13422,7 +13422,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — denne server kan ikke modtage dem"
+              "value": " kan ikke gendannes — denne server kan ikke modtage elementet"
             }
           ]
         },
@@ -13490,7 +13490,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres filer mangler på denne server"
+              "value": " kan ikke gendannes — filerne mangler på denne server"
             }
           ]
         },
@@ -13524,7 +13524,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres mapper findes ikke på denne server"
+              "value": " kan ikke gendannes — mapperne findes ikke på denne server"
             }
           ]
         },
@@ -13558,7 +13558,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres adgangsgruppe findes ikke på denne server"
+              "value": " kan ikke gendannes — adgangsgruppen findes ikke på denne server"
             }
           ]
         },
@@ -13592,7 +13592,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres titel er ikke i denne servers katalog"
+              "value": " kan ikke gendannes — titlen er ikke i denne servers katalog"
             }
           ]
         },
@@ -13626,7 +13626,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de ville udvide adgangen, så denne server beholder sine strengere værdier"
+              "value": " kan ikke gendannes — elementet ville udvide adgangen, så denne server beholder sine egne strengere værdier"
             }
           ]
         },
@@ -13660,7 +13660,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres bibliotek findes ikke på denne server"
+              "value": " kan ikke gendannes — biblioteket findes ikke på denne server"
             }
           ]
         },
@@ -13694,7 +13694,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres bibliotek kan ikke gendannes her"
+              "value": " kan ikke gendannes — biblioteket kan ikke gendannes her"
             }
           ]
         },
@@ -13796,7 +13796,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de er krypteret med en anden SECRET_KEY"
+              "value": " kan ikke gendannes — elementet er krypteret med en anden SECRET_KEY"
             }
           ]
         },
@@ -13830,7 +13830,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de skal først installeres fra et pluginkatalog"
+              "value": " kan ikke gendannes — elementet skal først installeres fra et pluginkatalog"
             }
           ]
         },
@@ -13864,7 +13864,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres primære profil skal gendannes sammen med dem"
+              "value": " kan ikke gendannes — dens primære profil skal gendannes sammen med den"
             }
           ]
         },
@@ -13898,7 +13898,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — backuppen indeholder dem ikke"
+              "value": " kan ikke gendannes — elementet findes ikke i backuppen"
             }
           ]
         },
@@ -14034,7 +14034,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — denne server ville give dem mere adgang, end backuppen gjorde"
+              "value": " kan ikke gendannes — denne server ville give elementet mere adgang, end backuppen gjorde"
             }
           ]
         },
@@ -14102,7 +14102,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de er allerede ens her"
+              "value": " kan ikke gendannes — elementet er allerede det samme her"
             }
           ]
         },
@@ -14170,7 +14170,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — backuppens kopi af dem kan ikke læses"
+              "value": " kan ikke gendannes — backuppens kopi af elementet kan ikke læses"
             }
           ]
         },
@@ -14204,7 +14204,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de forbinder til eksterne tjenester, og denne server kan ikke bekræfte backuppen"
+              "value": " kan ikke gendannes — elementet forbinder til eksterne tjenester, og denne server kan ikke bekræfte backuppen"
             }
           ]
         },
@@ -14785,8 +14785,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skjul dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14935,8 +14955,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Vis dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19315,6 +19355,20 @@
     {
       "type": 0,
       "value": "I serverens tidszone."
+    }
+  ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "I serverens tidszone. Det svarer til kl. "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " i din tidszone."
     }
   ],
   "web.admin.backups.schedule.unknown": [
@@ -60341,6 +60395,12 @@
       "value": "Forbindelsestjekket mislykkedes."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kunne ikke tjekke, om serverens miljø angiver denne indstilling. Genindlæs siden for at redigere den."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60900,7 +60960,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Genindlæs for at se de aktuelle værdier. Dine ændringer af indstillinger, der er blevet ændret, og af gemte adgangskoder og nøgler fortrydes; dine øvrige ændringer bevares."
+      "value": "Genindlæs for at se de aktuelle værdier. Dine ændringer af indstillinger, der er blevet ændret, og af gemte adgangskoder og nøgler samt de indstillinger, der hører til dem, fortrydes; dine øvrige ændringer bevares."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -75577,6 +75637,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Lageret kan ikke flyttes hertil, så længe miljøet angiver lagerindstillinger ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Fjern først disse variabler, og genstart alle API-servere."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -77491,6 +77565,18 @@
     {
       "type": 0,
       "value": "Autoscan-webhookgenforsøg"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Genlæser headeren i MKV-filer med ASS-undertekster, der blev scannet, før Silo holdt indlejrede skrifttyper uden for bitraten, så de ikke transkodes på grund af en bitrate, de ikke streamer med."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Ret bitrate for filer med indlejrede skrifttyper"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
