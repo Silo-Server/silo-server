@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -22,13 +23,15 @@ const (
 	// Each candidate costs one header read, often on a network mount, so a
 	// few at a time keeps the pass from competing with playback.
 	attachmentBitrateBackfillWorkers = 4
-	// attachmentBitrateBackfillMaxFailures probes in a row that timed out or
-	// could not read their file mean the storage is stalled or ffprobe cannot
-	// run, not that a few files are bad. The pass stops without moving its
-	// cursor past the batch, and the next run resumes there.
-	attachmentBitrateBackfillMaxFailures = 8
+	// attachmentBitrateBackfillMaxTimeouts probes in a row that timed out
+	// mean the storage is stalled, not that a few files are slow. The run
+	// stops without moving its cursor past the batch, and the next run
+	// resumes there. A read that fails fast (an offline library root) does
+	// not count: its file is read again on a later run instead.
+	attachmentBitrateBackfillMaxTimeouts = 8
 	// attachmentBitrateProbeTimeout bounds one header read: format and stream
-	// entries only, no packets or frames.
+	// entries only, the same stream analysis a scan's probe does, with no
+	// packets or frames printed.
 	attachmentBitrateProbeTimeout = 30 * time.Second
 )
 
@@ -39,7 +42,7 @@ const (
 var attachmentBitrateBackfillSubtitleCodecs = []string{ffmpegCodecASS, "ssa"}
 
 var (
-	errAttachmentBitrateStorageStalled = errors.New("media storage is not responding or ffprobe cannot read it")
+	errAttachmentBitrateStorageStalled = errors.New("media storage is not responding")
 	errAttachmentBitrateProbeTimeout   = errors.New("ffprobe timed out")
 )
 
@@ -55,13 +58,17 @@ type AttachmentBitrateBackfillResult struct {
 	// rewritten during the pass. The scan that reprobes them stores the
 	// corrected rate itself.
 	Changed int `json:"changed"`
-	// Failed files could not be probed. They keep their stored rate until a
-	// scan reprobes them.
+	// Failed files could not be probed. A file ffprobe read and refused keeps
+	// its stored rate until a scan reprobes it; any other failure is read
+	// again on a later run.
 	Failed int `json:"failed"`
 	// TimedOut files did not answer within attachmentBitrateProbeTimeout.
+	// They are read again on a later run.
 	TimedOut int `json:"timed_out"`
-	// Done reports that the pass has covered every file, now or on an
-	// earlier run.
+	// Pending is the number of files listed to read again on a later run.
+	Pending int `json:"pending"`
+	// Done reports that the pass has covered every file and has no file left
+	// to read again, now or on an earlier run.
 	Done bool `json:"done"`
 }
 
@@ -72,14 +79,18 @@ type AttachmentBitrateBackfillResult struct {
 //
 // The stored probe does not keep the format bitrate or attachment sizes, so
 // each candidate's header is read again: ffprobe's format and stream entries,
-// no packets. Candidates are present MKV files with an ASS or SSA subtitle
+// from the same stream analysis a scan runs, so the rate matches what a scan
+// stores. Candidates are present MKV files with an ASS or SSA subtitle
 // track. Only the bitrate column is written, and only over the row exactly as
 // it was read.
 //
 // It runs once per deployment. attachment_bitrate_backfill_state holds the
 // last media file ID a finished batch covered, so a restart or a stop on
-// stalled storage resumes after it, and marks the pass done once it reaches
-// the end. Files scanned after that already store the corrected rate.
+// stalled storage resumes after it, and marks the walk finished once it
+// reaches the end. It also lists the files a run could not read, such as
+// those under an offline library root; each later run reads them again until
+// they answer or stop being candidates. Files scanned after the walk already
+// store the corrected rate.
 type AttachmentBitrateBackfiller struct {
 	pool        *pgxpool.Pool
 	ffprobePath string
@@ -130,9 +141,11 @@ const (
 	attachmentBitrateOutcomeTimedOut
 )
 
-// Run makes the pass, or resumes it, unless an earlier run finished it.
-// progress, when non-nil, is called after each batch with the running totals
-// and the share of media_files IDs covered, from 0 to 100.
+// Run makes the pass, or resumes it, unless an earlier run finished it: it
+// first reads again the files earlier runs could not read, then walks on from
+// the cursor. progress, when non-nil, is called after each batch of the walk
+// with the running totals and the share of media_files IDs covered, from 0 to
+// 100.
 func (b *AttachmentBitrateBackfiller) Run(ctx context.Context, progress func(AttachmentBitrateBackfillResult, float64)) (AttachmentBitrateBackfillResult, error) {
 	var result AttachmentBitrateBackfillResult
 	if b == nil || b.pool == nil {
@@ -140,43 +153,125 @@ func (b *AttachmentBitrateBackfiller) Run(ctx context.Context, progress func(Att
 	}
 	var (
 		afterID   int
+		retryIDs  []int64
 		completed *time.Time
 	)
-	if err := b.pool.QueryRow(ctx, `SELECT last_media_file_id, completed_at FROM attachment_bitrate_backfill_state WHERE id = 1`).
-		Scan(&afterID, &completed); err != nil {
+	if err := b.pool.QueryRow(ctx, `SELECT last_media_file_id, retry_media_file_ids, completed_at FROM attachment_bitrate_backfill_state WHERE id = 1`).
+		Scan(&afterID, &retryIDs, &completed); err != nil {
 		return result, fmt.Errorf("reading attachment bitrate backfill state: %w", err)
 	}
-	if completed != nil {
+	if completed != nil && len(retryIDs) == 0 {
 		result.Done = true
 		return result, nil
 	}
+	err := b.run(ctx, afterID, retryIDs, completed == nil, progress, &result)
+	logAttachmentBitrateFailures(ctx, result)
+	if pendingErr := b.pool.QueryRow(ctx, `SELECT cardinality(retry_media_file_ids) FROM attachment_bitrate_backfill_state WHERE id = 1`).
+		Scan(&result.Pending); pendingErr != nil {
+		return result, errors.Join(err, fmt.Errorf("reading attachment bitrate backfill retries: %w", pendingErr))
+	}
+	result.Done = err == nil && result.Pending == 0
+	return result, err
+}
+
+// run reads the listed files again and then, unless the walk has finished,
+// walks on from afterID.
+func (b *AttachmentBitrateBackfiller) run(ctx context.Context, afterID int, retryIDs []int64, walk bool, progress func(AttachmentBitrateBackfillResult, float64), result *AttachmentBitrateBackfillResult) error {
+	// Timed-out reads in a row, in completion order.
+	timeouts := 0
+	if len(retryIDs) > 0 {
+		// Each finished batch drops the listed files in its ID range that
+		// answered or are no longer candidates. A stall keeps the rest
+		// listed and goes on to the walk: one slow root must not hold up the
+		// others, and a stall that is not the root's stops the walk too.
+		var prunedThrough int64
+		err := b.eachBatch(ctx, 0, retryIDs, result, &timeouts, func(lastID int, failed []int64) error {
+			from := prunedThrough
+			prunedThrough = int64(lastID)
+			return b.pruneRetries(ctx, from, prunedThrough, failed)
+		})
+		switch {
+		case err == nil:
+			// Listed files after the last batch are no longer candidates.
+			if err := b.pruneRetries(ctx, prunedThrough, math.MaxInt64, nil); err != nil {
+				return err
+			}
+		case errors.Is(err, errAttachmentBitrateStorageStalled):
+			slog.WarnContext(ctx, "scanner: attachment bitrate backfill stopped reading listed files again; the rest stay listed for the next run",
+				"component", "scanner", "error", err)
+		default:
+			return err
+		}
+		timeouts = 0
+	}
+	if !walk {
+		return nil
+	}
 	var maxID int
 	if err := b.pool.QueryRow(ctx, `SELECT COALESCE(MAX(id), 0) FROM media_files`).Scan(&maxID); err != nil {
-		return result, fmt.Errorf("reading media_files id range: %w", err)
+		return fmt.Errorf("reading media_files id range: %w", err)
 	}
-	// Failed reads in a row, in completion order across all workers, and
-	// the cursor of the batch the run began in: a stop resumes there, so
-	// files that failed before the stop was certain are read again.
-	consecutiveFailures, streakFrom := 0, afterID
+	// A stop leaves the cursor before the batch it stopped in, and the files
+	// earlier batches could not read are already listed.
+	if err := b.eachBatch(ctx, afterID, nil, result, &timeouts, func(lastID int, failed []int64) error {
+		if _, err := b.pool.Exec(ctx, `
+			UPDATE attachment_bitrate_backfill_state
+			SET last_media_file_id = $1,
+			    retry_media_file_ids = ARRAY(SELECT DISTINCT unnest(retry_media_file_ids || $2::bigint[]) ORDER BY 1),
+			    updated_at = now()
+			WHERE id = 1`, lastID, failed); err != nil {
+			return fmt.Errorf("recording attachment bitrate backfill progress: %w", err)
+		}
+		if progress != nil && maxID > 0 {
+			progress(*result, min(100, float64(lastID)*100/float64(maxID)))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if _, err := b.pool.Exec(ctx, `
+		UPDATE attachment_bitrate_backfill_state
+		SET completed_at = now(), updated_at = now()
+		WHERE id = 1`); err != nil {
+		return fmt.Errorf("recording attachment bitrate backfill completion: %w", err)
+	}
+	return nil
+}
+
+// pruneRetries drops the listed files after afterID up to throughID, except
+// failed, the ones that failed again.
+func (b *AttachmentBitrateBackfiller) pruneRetries(ctx context.Context, afterID, throughID int64, failed []int64) error {
+	if _, err := b.pool.Exec(ctx, `
+		UPDATE attachment_bitrate_backfill_state
+		SET retry_media_file_ids = ARRAY(
+		        SELECT id FROM unnest(retry_media_file_ids) id
+		        WHERE id <= $1 OR id > $2 OR id = ANY($3::bigint[])
+		        ORDER BY id),
+		    updated_at = now()
+		WHERE id = 1`, afterID, throughID, failed); err != nil {
+		return fmt.Errorf("recording attachment bitrate backfill retries: %w", err)
+	}
+	return nil
+}
+
+// eachBatch probes the candidates after afterID, only those in onlyIDs when
+// it is non-nil, a batch at a time, and calls finished after each batch with
+// the batch's last ID and the IDs of the files it could not read but may
+// later. It stops with errAttachmentBitrateStorageStalled once *timeouts
+// reaches attachmentBitrateBackfillMaxTimeouts.
+func (b *AttachmentBitrateBackfiller) eachBatch(ctx context.Context, afterID int, onlyIDs []int64, result *AttachmentBitrateBackfillResult, timeouts *int, finished func(lastID int, failed []int64) error) error {
 	for {
-		batchFrom := afterID
-		candidates, lastID, err := b.loadCandidates(ctx, afterID)
+		candidates, lastID, err := b.loadCandidates(ctx, afterID, onlyIDs)
 		if err != nil {
-			return result, err
+			return err
 		}
 		if len(candidates) == 0 {
-			if _, err := b.pool.Exec(ctx, `
-				UPDATE attachment_bitrate_backfill_state
-				SET completed_at = now(), updated_at = now()
-				WHERE id = 1`); err != nil {
-				return result, fmt.Errorf("recording attachment bitrate backfill completion: %w", err)
-			}
-			result.Done = true
-			logAttachmentBitrateFailures(ctx, result)
-			return result, nil
+			return nil
 		}
-
-		var mu sync.Mutex
+		var (
+			mu     sync.Mutex
+			failed []int64
+		)
 		group, groupCtx := errgroup.WithContext(ctx)
 		group.SetLimit(b.workers)
 		for _, candidate := range candidates {
@@ -188,7 +283,11 @@ func (b *AttachmentBitrateBackfiller) Run(ctx context.Context, progress func(Att
 				mu.Lock()
 				defer mu.Unlock()
 				result.Checked++
-				failed := false
+				if outcome == attachmentBitrateOutcomeTimedOut {
+					*timeouts++
+				} else {
+					*timeouts = 0
+				}
 				switch outcome {
 				case attachmentBitrateOutcomeUpdated:
 					result.Updated++
@@ -200,65 +299,35 @@ func (b *AttachmentBitrateBackfiller) Run(ctx context.Context, progress func(Att
 					result.Failed++
 				case attachmentBitrateOutcomeUnreadable:
 					result.Failed++
-					failed = true
+					failed = append(failed, int64(candidate.id))
 				case attachmentBitrateOutcomeTimedOut:
 					result.TimedOut++
-					failed = true
+					failed = append(failed, int64(candidate.id))
 				}
-				if failed {
-					if consecutiveFailures == 0 {
-						streakFrom = batchFrom
-					}
-					consecutiveFailures++
-				} else {
-					consecutiveFailures = 0
-				}
-				if consecutiveFailures >= attachmentBitrateBackfillMaxFailures {
-					return fmt.Errorf("%w: %d probes in a row failed or timed out", errAttachmentBitrateStorageStalled, consecutiveFailures)
+				if *timeouts >= attachmentBitrateBackfillMaxTimeouts {
+					return fmt.Errorf("%w: %d probes in a row timed out", errAttachmentBitrateStorageStalled, *timeouts)
 				}
 				return nil
 			})
 		}
 		if err := group.Wait(); err != nil {
-			logAttachmentBitrateFailures(ctx, result)
-			if errors.Is(err, errAttachmentBitrateStorageStalled) {
-				// Re-reading from where the failures began writes nothing
-				// already written: a corrected row no longer matches.
-				if saveErr := b.saveCursor(ctx, streakFrom); saveErr != nil {
-					return result, errors.Join(err, saveErr)
-				}
-			}
-			return result, err
+			return err
+		}
+		if err := finished(lastID, failed); err != nil {
+			return err
 		}
 		afterID = lastID
-		if err := b.saveCursor(ctx, afterID); err != nil {
-			return result, err
-		}
-		if progress != nil && maxID > 0 {
-			progress(result, min(100, float64(afterID)*100/float64(maxID)))
-		}
 	}
 }
 
-// saveCursor records afterID as the point the next run resumes after. One
-// runner holds the cluster lock, so the cursor may move back.
-func (b *AttachmentBitrateBackfiller) saveCursor(ctx context.Context, afterID int) error {
-	if _, err := b.pool.Exec(ctx, `
-		UPDATE attachment_bitrate_backfill_state
-		SET last_media_file_id = $1, updated_at = now()
-		WHERE id = 1`, afterID); err != nil {
-		return fmt.Errorf("recording attachment bitrate backfill progress: %w", err)
-	}
-	return nil
-}
-
-// loadCandidates returns the next batch of candidates after afterID and the
-// last ID among them.
-func (b *AttachmentBitrateBackfiller) loadCandidates(ctx context.Context, afterID int) ([]attachmentBitrateCandidate, int, error) {
+// loadCandidates returns the next batch of candidates after afterID, only
+// those in onlyIDs when it is non-nil, and the last ID among them.
+func (b *AttachmentBitrateBackfiller) loadCandidates(ctx context.Context, afterID int, onlyIDs []int64) ([]attachmentBitrateCandidate, int, error) {
 	rows, err := b.pool.Query(ctx, `
 		SELECT mf.id, mf.file_path, mf.file_size, mf.file_modified_at, mf.bitrate
 		FROM media_files mf
 		WHERE mf.id > $1
+		  AND ($4::bigint[] IS NULL OR mf.id = ANY($4::bigint[]))
 		  AND mf.container = 'mkv'
 		  AND mf.missing_since IS NULL
 		  AND mf.file_size IS NOT NULL
@@ -269,7 +338,7 @@ func (b *AttachmentBitrateBackfiller) loadCandidates(ctx context.Context, afterI
 			WHERE lower(COALESCE(t->>'codec', '')) = ANY($3::text[])
 		  )
 		ORDER BY mf.id
-		LIMIT $2`, afterID, b.batch, attachmentBitrateBackfillSubtitleCodecs)
+		LIMIT $2`, afterID, b.batch, attachmentBitrateBackfillSubtitleCodecs, onlyIDs)
 	if err != nil {
 		return nil, afterID, fmt.Errorf("loading attachment bitrate backfill candidates: %w", err)
 	}
@@ -309,8 +378,8 @@ func (b *AttachmentBitrateBackfiller) backfillFile(ctx context.Context, c attach
 		slog.DebugContext(ctx, "scanner: attachment bitrate backfill could not probe file",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
 		// A file ffprobe read and refused fails the same way every time.
-		// Anything else is the storage or the binary, which a run of them
-		// turns into a stop instead of skipping the library.
+		// Anything else is the storage or the binary, so the file is read
+		// again on a later run.
 		if IsProbeRejection(ctx, c.path, err) {
 			return attachmentBitrateOutcomeRejected, nil
 		}
@@ -374,7 +443,7 @@ func probeContainerBitrate(ctx context.Context, ffprobePath, filePath string) (c
 // probe, so a misconfigured ffprobe or unreachable storage is visible.
 func logAttachmentBitrateFailures(ctx context.Context, result AttachmentBitrateBackfillResult) {
 	if result.Failed > 0 || result.TimedOut > 0 {
-		slog.WarnContext(ctx, "scanner: attachment bitrate backfill could not probe some files; they keep their stored bitrate until a scan reprobes them",
+		slog.WarnContext(ctx, "scanner: attachment bitrate backfill could not probe some files; it reads unreadable and timed-out files again on its next run",
 			"component", "scanner", "failed", result.Failed, "timed_out", result.TimedOut, "checked", result.Checked)
 	}
 }

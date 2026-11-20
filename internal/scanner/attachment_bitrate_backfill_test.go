@@ -7,12 +7,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// otherTestsFile is the fake probe's answer for a row another test stored: a
+// size no row has, so the pass leaves the row to a scan and never reads it
+// again.
+var otherTestsFile = containerBitrate{size: -1}
 
 // attachmentBitrateRow is one stored file and the fake probe's answer for it.
 type attachmentBitrateRow struct {
@@ -31,7 +37,7 @@ type attachmentBitrateRow struct {
 
 func resetAttachmentBitrateBackfill(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `UPDATE attachment_bitrate_backfill_state SET last_media_file_id = 0, completed_at = NULL`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE attachment_bitrate_backfill_state SET last_media_file_id = 0, retry_media_file_ids = '{}', completed_at = NULL`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -67,7 +73,9 @@ func storedBitrate(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id int
 
 // The pass re-probes only present MKV files with ASS subtitles, the releases
 // that carry fonts, and writes the attachment-free rate over the row it read.
-// Once it has covered every file it is done for good.
+// Files it could not read, more in a row than a stall takes when they time
+// out (an offline library root), neither stop it nor drop out of it: later
+// runs read them again until they answer, and then the pass is done for good.
 func TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB(t *testing.T) {
 	pool := newScannerTestPool(t)
 	ctx := context.Background()
@@ -81,10 +89,13 @@ func TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB(t *testing.T) {
 		{name: "no-attachments", container: "mkv", subtitles: ass, stored: 4047, probed: containerBitrate{kbps: 4047, size: 1000}, want: 4047, read: true},
 		// Replaced on disk since the scan: the next scan reprobes it.
 		{name: "changed", container: "mkv", subtitles: ass, stored: 8710, probed: containerBitrate{kbps: 4047, size: 2000}, want: 8710, read: true},
-		{name: "unreadable", container: "mkv", subtitles: ass, stored: 8710, probeErr: errors.New("ffprobe failed"), want: 8710, read: true},
 		{name: "srt-only", container: "mkv", subtitles: `[{"index":2,"codec":"subrip"}]`, stored: 8710, want: 8710},
 		{name: "mp4", container: "mp4", subtitles: ass, stored: 8710, want: 8710},
 		{name: "missing", container: "mkv", subtitles: ass, missing: true, stored: 8710, want: 8710},
+	}
+	for i := range attachmentBitrateBackfillMaxTimeouts + 1 {
+		rows = append(rows, attachmentBitrateRow{name: fmt.Sprintf("offline-%02d", i), container: "mkv", subtitles: ass, stored: 8710,
+			probed: containerBitrate{kbps: 4047, size: 1000}, probeErr: errors.New("no such file or directory"), want: 8710, read: true})
 	}
 	dir := t.TempDir()
 	byPath := map[string]attachmentBitrateRow{}
@@ -97,24 +108,23 @@ func TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB(t *testing.T) {
 
 	var mu sync.Mutex
 	reads := map[string]int{}
+	offline := true
 	backfiller := NewAttachmentBitrateBackfiller(NewFileRepository(pool), "ffprobe")
 	backfiller.probe = func(_ context.Context, _, filePath string) (containerBitrate, error) {
 		row, ok := byPath[filePath]
 		if !ok {
-			return containerBitrate{}, errors.New("not this test's file")
+			return otherTestsFile, nil
 		}
 		mu.Lock()
+		defer mu.Unlock()
 		reads[row.name]++
-		mu.Unlock()
+		if !offline {
+			return row.probed, nil
+		}
 		return row.probed, row.probeErr
 	}
-
-	result, err := backfiller.Run(ctx, nil)
-	if err != nil {
-		t.Fatalf("first pass: %v", err)
-	}
-	if result.Updated != 2 {
-		t.Fatalf("updated = %d, want 2 (%+v)", result.Updated, result)
+	if result, err := backfiller.Run(ctx, nil); err != nil || result.Updated != 2 || result.Done {
+		t.Fatalf("first pass = %+v, %v; want 2 updated and not done while files are unread", result, err)
 	}
 	for _, row := range rows {
 		want := 0
@@ -129,17 +139,50 @@ func TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB(t *testing.T) {
 		}
 	}
 
+	// Still offline: only the unread files are read again.
+	clear(reads)
+	if result, err := backfiller.Run(ctx, nil); err != nil || result.Done {
+		t.Fatalf("second pass = %+v, %v; want not done", result, err)
+	}
+	for _, row := range rows {
+		want := 0
+		if row.probeErr != nil {
+			want = 1
+		}
+		if reads[row.name] != want {
+			t.Errorf("second pass read %s %d times, want only each offline file, once", row.name, reads[row.name])
+		}
+	}
+
+	offline = false
+	clear(reads)
+	if result, err := backfiller.Run(ctx, nil); err != nil || !result.Done || result.Updated != attachmentBitrateBackfillMaxTimeouts+1 {
+		t.Fatalf("pass after the root returned = %+v, %v; want every offline file corrected and done", result, err)
+	}
+	for _, row := range rows {
+		want := row.want
+		if row.probeErr != nil {
+			want = row.probed.kbps
+		}
+		if got := storedBitrate(t, ctx, pool, ids[row.name]); got != want {
+			t.Errorf("%s bitrate = %d, want %d", row.name, got, want)
+		}
+	}
+
 	clear(reads)
 	if _, err := backfiller.Run(ctx, nil); err != nil {
-		t.Fatalf("second pass: %v", err)
+		t.Fatalf("last pass: %v", err)
 	}
 	if len(reads) != 0 {
-		t.Fatalf("second pass read %v, want nothing: the pass is done", reads)
+		t.Fatalf("last pass read %v, want nothing: the pass is done", reads)
 	}
 }
 
 // A pass that stops on stalled storage keeps what it finished and resumes
-// after it, without re-reading the files before the stall.
+// after it, without re-reading the files that answered before the stall.
+// Files that timed out one at a time are listed together and stall when read
+// back to back; that keeps what the retries before it finished, and must not
+// hold up the walk over the files after them.
 func TestAttachmentBitrateBackfillResumesAfterStorageStallDB(t *testing.T) {
 	pool := newScannerTestPool(t)
 	ctx := context.Background()
@@ -148,7 +191,7 @@ func TestAttachmentBitrateBackfillResumesAfterStorageStallDB(t *testing.T) {
 	dir := t.TempDir()
 	var paths []string
 	ids := map[string]int{}
-	for i := range attachmentBitrateBackfillMaxFailures + 4 {
+	for i := range attachmentBitrateBackfillMaxTimeouts + 4 {
 		path := fmt.Sprintf("%s/file-%02d.mkv", dir, i)
 		paths = append(paths, path)
 		ids[path] = insertAttachmentBitrateRow(t, ctx, pool, folderID, path, attachmentBitrateRow{
@@ -162,24 +205,25 @@ func TestAttachmentBitrateBackfillResumesAfterStorageStallDB(t *testing.T) {
 
 	backfiller := NewAttachmentBitrateBackfiller(NewFileRepository(pool), "ffprobe")
 	backfiller.workers, backfiller.batch = 1, 2
-	stalled := true
+	// The first batch answers; storage stalls after it.
+	timesOut := func(path string) bool { return path != paths[0] && path != paths[1] }
 	reads := map[string]int{}
 	backfiller.probe = func(_ context.Context, _, filePath string) (containerBitrate, error) {
 		if !ours[filePath] {
-			return containerBitrate{}, errors.New("not this test's file")
+			return otherTestsFile, nil
 		}
 		reads[filePath]++
-		// The first batch answers; storage stalls after it.
-		if stalled && filePath != paths[0] && filePath != paths[1] {
+		if timesOut(filePath) {
 			return containerBitrate{}, fmt.Errorf("%w after 30s", errAttachmentBitrateProbeTimeout)
 		}
 		return containerBitrate{kbps: 4047, size: 1000}, nil
 	}
-	if _, err := backfiller.Run(ctx, nil); !errors.Is(err, errAttachmentBitrateStorageStalled) {
-		t.Fatalf("Run error = %v, want the stalled-storage stop", err)
+	// Batches before the stalled one each listed their timed-out files.
+	if result, err := backfiller.Run(ctx, nil); !errors.Is(err, errAttachmentBitrateStorageStalled) || result.Pending != 6 {
+		t.Fatalf("Run = %+v, %v; want the stalled-storage stop with 6 files pending", result, err)
 	}
 
-	stalled = false
+	timesOut = func(string) bool { return false }
 	clear(reads)
 	if _, err := backfiller.Run(ctx, nil); err != nil {
 		t.Fatalf("resumed pass: %v", err)
@@ -191,6 +235,42 @@ func TestAttachmentBitrateBackfillResumesAfterStorageStallDB(t *testing.T) {
 		if got := storedBitrate(t, ctx, pool, ids[p]); got != 4047 {
 			t.Fatalf("%s bitrate = %d after the resumed pass, want 4047", p, got)
 		}
+	}
+
+	// The first listed batch answers, then the slow files stall.
+	slow := paths[2 : 2+attachmentBitrateBackfillMaxTimeouts]
+	var all []int64
+	for _, p := range paths {
+		all = append(all, int64(ids[p]))
+	}
+	listed := all[:2+len(slow)]
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET bitrate = 8710 WHERE id = ANY($1)`, all); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE attachment_bitrate_backfill_state
+		SET retry_media_file_ids = $1, last_media_file_id = $2, completed_at = NULL`, listed, listed[len(listed)-1]); err != nil {
+		t.Fatal(err)
+	}
+	timesOut = func(path string) bool { return slices.Contains(slow, path) }
+	result, err := backfiller.Run(ctx, nil)
+	if err != nil || result.Done || result.Pending != len(slow) {
+		t.Fatalf("Run over a slow retry list = %+v, %v; want the slow files pending", result, err)
+	}
+	for _, p := range paths {
+		want := 4047
+		if slices.Contains(slow, p) {
+			want = 8710
+		}
+		if got := storedBitrate(t, ctx, pool, ids[p]); got != want {
+			t.Errorf("%s bitrate = %d after a stalled retry, want %d", p, got, want)
+		}
+	}
+	var stillListed []int64
+	if err := pool.QueryRow(ctx, `SELECT retry_media_file_ids FROM attachment_bitrate_backfill_state`).Scan(&stillListed); err != nil {
+		t.Fatal(err)
+	}
+	if want := listed[2:]; !slices.Equal(stillListed, want) {
+		t.Fatalf("retry list = %v after a stalled retry, want the slow files %v", stillListed, want)
 	}
 }
 

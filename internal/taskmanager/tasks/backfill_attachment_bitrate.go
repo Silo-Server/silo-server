@@ -28,9 +28,10 @@ type AttachmentBitrateBackfiller interface {
 // what this task covers.
 //
 // The pass runs once per deployment and records when it finished. It runs at
-// startup and daily so a pass stopped by stalled storage resumes; once done,
-// a run is a single query. Every API process runs the task manager, so an
-// advisory lock keeps one pass reading media across the cluster.
+// startup and daily so a pass stopped by stalled storage resumes and files it
+// could not read are read again; once done, a run is a single query. Every
+// API process runs the task manager, so an advisory lock keeps one pass
+// reading media across the cluster.
 type BackfillAttachmentBitrateTask struct {
 	backfiller AttachmentBitrateBackfiller
 	lock       clusterLock
@@ -49,7 +50,7 @@ func (t *BackfillAttachmentBitrateTask) Name() string {
 	return "Correct Bitrate of Files with Embedded Fonts"
 }
 func (t *BackfillAttachmentBitrateTask) Description() string {
-	return "Re-reads the header of MKV files with ASS subtitles scanned before Silo left embedded fonts out of the bitrate, once, so they are not transcoded for a bitrate they do not stream."
+	return "Re-reads the header of MKV files with ASS subtitles scanned before Silo left embedded fonts out of the bitrate, so they are not transcoded for a bitrate they do not stream."
 }
 func (t *BackfillAttachmentBitrateTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
@@ -95,6 +96,9 @@ func (t *BackfillAttachmentBitrateTask) Execute(ctx context.Context, progress ta
 func attachmentBitrateBackfillMessage(r scanner.AttachmentBitrateBackfillResult) string {
 	if r.Done && r.Checked == 0 {
 		return "Bitrates already corrected"
+	}
+	if r.Pending > 0 {
+		return fmt.Sprintf("Checked %d MKV files, corrected %d; %d could not be read and are read again on the next run", r.Checked, r.Updated, r.Pending)
 	}
 	return fmt.Sprintf("Checked %d MKV files, corrected %d", r.Checked, r.Updated)
 }
