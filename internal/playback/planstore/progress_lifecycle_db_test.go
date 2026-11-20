@@ -171,3 +171,86 @@ func TestSampleAcceptedAtDB(t *testing.T) {
 		t.Fatalf("after a stop without a sample: sample at %v, want %v", got.SampleAcceptedAt, accepted)
 	}
 }
+
+// TestAdminStopMarkDB: the stop that wins an attempt with an administrator
+// stop pending records that in its receipt, and the receipt keeps it through
+// finalization. Only the command that set the mark clears it. The mark
+// leaves updated_at alone (the idle expiry reads it as activity) and
+// survives a replan commit.
+func TestAdminStopMarkDB(t *testing.T) {
+	const commandA, commandB = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	updatedAt := func(t *testing.T, ctx context.Context, pool *pgxpool.Pool, session string) time.Time {
+		t.Helper()
+		var at time.Time
+		if err := pool.QueryRow(ctx, `SELECT updated_at FROM playback_v3_attempts WHERE session_id = $1`, session).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	t.Run("pending when the client stop wins", func(t *testing.T) {
+		ctx, pool, store, session := newLifecycleAttemptDB(t)
+		before := updatedAt(t, ctx, pool, session)
+		if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
+			t.Fatal(err)
+		}
+		if got := updatedAt(t, ctx, pool, session); !got.Equal(before) {
+			t.Fatalf("marking moved updated_at from %v to %v", before, got)
+		}
+		record, err := store.GetAttempt(ctx, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err := store.BeginReplan(ctx, session, "replan-1", "digest", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := record.CurrentReplanRequestID
+		record.CurrentReplanRequestID = "replan-1"
+		if err := store.CompleteReplan(ctx, session, "replan-1", lease.LeaseToken, base, json.RawMessage(`{}`), *record); err != nil {
+			t.Fatal(err)
+		}
+		// A second stop takes the mark over; the first one's refusal leaves it.
+		if err := store.MarkAdminStop(ctx, session, commandB); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ClearAdminStop(ctx, session, commandA); err != nil {
+			t.Fatal(err)
+		}
+		receipt, first, err := store.StopAttempt(ctx, session, uuid.NewString(), nil)
+		if err != nil || !first || !receipt.AdminStopRequested {
+			t.Fatalf("client stop = %+v first=%v err=%v; want a first stop with the administrator's stop pending", receipt, first, err)
+		}
+		receipt.Finalized = true
+		if err := store.RecordStopReceipt(ctx, session, receipt); err != nil {
+			t.Fatal(err)
+		}
+		if replay, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || !replay.AdminStopRequested || !replay.Finalized {
+			t.Fatalf("replay = %+v, %v; want the finalized receipt with the administrator's stop pending", replay, err)
+		}
+	})
+	t.Run("lapsed after the window", func(t *testing.T) {
+		ctx, pool, store, session := newLifecycleAttemptDB(t)
+		if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET admin_stop_requested_at = NOW() - $2::interval WHERE session_id = $1`,
+			session, (playback.AdminStopPendingFor + time.Second).String()); err != nil {
+			t.Fatal(err)
+		}
+		if receipt, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || receipt.AdminStopRequested {
+			t.Fatalf("client stop = %+v, %v; want the lapsed administrator stop ignored", receipt, err)
+		}
+	})
+	t.Run("cleared by the command that set it", func(t *testing.T) {
+		ctx, _, store, session := newLifecycleAttemptDB(t)
+		if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ClearAdminStop(ctx, session, commandA); err != nil {
+			t.Fatal(err)
+		}
+		if receipt, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || receipt.AdminStopRequested {
+			t.Fatalf("client stop = %+v, %v; want no administrator stop pending", receipt, err)
+		}
+	})
+}

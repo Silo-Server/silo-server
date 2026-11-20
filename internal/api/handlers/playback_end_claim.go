@@ -153,7 +153,7 @@ func (c nativeEndClaim) reason(sessionID string, fallback PlaybackEndReason) Pla
 	if c.store == nil {
 		return fallback
 	}
-	return endReasonForStop(sessionID, c.receipt.StopID)
+	return endReasonForStop(sessionID, c.receipt.StopID, c.receipt.AdminStopRequested)
 }
 
 // finish records the end's receipt as finalized, with the watch-history row

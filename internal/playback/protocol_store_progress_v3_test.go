@@ -3,6 +3,7 @@ package playback
 import (
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -93,5 +94,37 @@ func TestMemoryPlanStoreClaimStopFinalizationIsExclusive(t *testing.T) {
 	}
 	if err := store.CompleteReplan(ctx, sessionID, "r1", lease.LeaseToken, "", []byte(`{}`), progressTestAttempt(sessionID)); !errors.Is(err, ErrAttemptStoppedV3) {
 		t.Fatalf("complete after stop: %v", err)
+	}
+}
+
+// TestMemoryAdminStopPendingWindow: a stop that wins while an administrator's
+// stop is pending records it, but only within AdminStopPendingFor of the
+// command being sent, so a mark whose command was lost lapses.
+func TestMemoryAdminStopPendingWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		after time.Duration
+		want  bool
+	}{
+		{"right after the command", time.Second, true},
+		{"after the window", AdminStopPendingFor + time.Second, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := NewMemoryPlanStoreV3()
+				sessionID := uuid.NewString()
+				if err := store.SaveAttempt(t.Context(), progressTestAttempt(sessionID)); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.MarkAdminStop(t.Context(), sessionID, uuid.NewString()); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(tc.after) //nolint:forbidigo // advances the synctest clock past (or within) the pending window
+				receipt, _, err := store.StopAttempt(t.Context(), sessionID, uuid.NewString(), nil)
+				if err != nil || receipt.AdminStopRequested != tc.want {
+					t.Fatalf("stop = %+v, %v; want admin stop pending %v", receipt, err, tc.want)
+				}
+			})
+		})
 	}
 }

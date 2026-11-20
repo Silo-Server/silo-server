@@ -95,6 +95,10 @@ type StopReceiptV3 struct {
 	// effects (see ProgressStoreV3.ClaimStopFinalization). Zero when nobody
 	// holds the claim.
 	FinalizingUntil time.Time `json:"finalizing_until,omitempty"`
+	// AdminStopRequested records that an administrator's stop was pending
+	// when this stop won the attempt (see MarkAdminStop): a client stop then
+	// is the player carrying out the administrator's.
+	AdminStopRequested bool `json:"admin_stop_requested,omitempty"`
 }
 
 // ProgressStoreV3 is the durable per-attempt progress and stop sequencing.
@@ -273,8 +277,22 @@ type MemoryPlanStoreV3 struct {
 	attempts     map[string]AttemptRecordV3
 	replans      map[string]memoryReplanV3
 	stopReceipts map[string]StopReceiptV3
-	events       []RouteEventRecordV3
+	// adminStops is each live session's pending administrator stop.
+	adminStops map[string]memoryAdminStopV3
+	events     []RouteEventRecordV3
 }
+
+type memoryAdminStopV3 struct {
+	commandID string
+	at        time.Time
+}
+
+// AdminStopPendingFor is how long an administrator's stop counts as pending
+// after it was sent (MarkAdminStop). The player's own stop follows the
+// command within moments; the bound keeps a mark whose command was lost (a
+// server restart, a failed fallback, a refusal that reached another server)
+// from turning a much later viewer stop into the administrator's.
+const AdminStopPendingFor = 30 * time.Second
 
 func NewMemoryPlanStoreV3() *MemoryPlanStoreV3 {
 	return &MemoryPlanStoreV3{attempts: make(map[string]AttemptRecordV3), replans: make(map[string]memoryReplanV3)}
@@ -343,6 +361,7 @@ func (s *MemoryPlanStoreV3) deleteAttemptLocked(attemptID string) {
 		return
 	}
 	delete(s.stopReceipts, record.SessionID)
+	delete(s.adminStops, record.SessionID)
 	for key := range s.replans {
 		if strings.HasPrefix(key, record.SessionID+":") {
 			delete(s.replans, key)
@@ -568,7 +587,9 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	record.StopID = stopID
 	record.LastSampleAt = now
 	s.attempts[attemptID] = *record
-	receipt := StopReceiptV3{StopID: stopID}
+	pending, ok := s.adminStops[sessionID]
+	receipt := StopReceiptV3{StopID: stopID, AdminStopRequested: ok && now.Sub(pending.at) < AdminStopPendingFor}
+	delete(s.adminStops, sessionID)
 	if record.LastSample != nil {
 		accepted := *record.LastSample
 		receipt.Accepted = &accepted
@@ -578,6 +599,34 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	}
 	s.stopReceipts[sessionID] = receipt
 	return receipt, true, nil
+}
+
+// MarkAdminStop records that commandID, an administrator's stop, was sent
+// to the player of a live attempt. A gone or stopped attempt is left alone.
+func (s *MemoryPlanStoreV3) MarkAdminStop(_ context.Context, sessionID, commandID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, record := s.findAttemptLocked(sessionID); record == nil || record.StoppedAt != nil {
+		return nil
+	}
+	if s.adminStops == nil {
+		s.adminStops = make(map[string]memoryAdminStopV3)
+	}
+	s.adminStops[sessionID] = memoryAdminStopV3{commandID: commandID, at: time.Now()}
+	return nil
+}
+
+// ClearAdminStop withdraws commandID's mark, and no later command's.
+func (s *MemoryPlanStoreV3) ClearAdminStop(_ context.Context, sessionID, commandID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, record := s.findAttemptLocked(sessionID); record == nil || record.StoppedAt != nil {
+		return nil
+	}
+	if s.adminStops[sessionID].commandID == commandID {
+		delete(s.adminStops, sessionID)
+	}
+	return nil
 }
 
 func (s *MemoryPlanStoreV3) RecordStopReceipt(_ context.Context, sessionID string, receipt StopReceiptV3) error {
