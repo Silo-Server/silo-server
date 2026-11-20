@@ -220,7 +220,7 @@ function TaskRow({
       <div className="min-w-0 flex-1">
         <Link
           to={`/admin/tasks/${task.key}`}
-          className="text-foreground hover:text-primary text-sm font-medium transition-colors"
+          className="text-foreground hover:text-primary text-sm font-medium transition-colors hover:underline"
         >
           {taskText(serverText, task, "name")}
         </Link>
