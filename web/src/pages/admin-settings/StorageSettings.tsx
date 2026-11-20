@@ -59,16 +59,14 @@ const PUBLIC_S3_KEYS = [
   "s3.public_token_ttl",
 ];
 
-// The Cloudflare token settings, shown only for that link mode.
-const PUBLIC_S3_TOKEN_KEYS = [
+// Shown only for the link modes that use them, behind public storage's
+// Advanced disclosure.
+const PUBLIC_S3_ADVANCED_KEYS = [
+  "s3.public_read_endpoint",
   "s3.public_token_secret",
   "s3.public_token_param",
   "s3.public_token_ttl",
 ];
-
-// Shown only for the link modes that use them, behind public storage's
-// Advanced disclosure.
-const PUBLIC_S3_ADVANCED_KEYS = ["s3.public_read_endpoint", ...PUBLIC_S3_TOKEN_KEYS];
 
 // Changing any of these moves where cached artwork objects live. Once artwork
 // has been stored in S3, direct settings writes are rejected and this page
@@ -273,14 +271,18 @@ function S3Group({
 
   // Everything that reaches the bucket is shown. Only public storage has an
   // Advanced tier: the CDN address and the Cloudflare token settings, which
-  // show for the link modes that use them, and while they hold an unsaved
-  // edit, so Save never writes a value the admin can't see.
-  const showReadEndpoint =
-    scope === "public" && (urlAuth !== "presigned" || form.isDirty("s3.public_read_endpoint"));
-  const showTokenSettings =
-    scope === "public" &&
-    (urlAuth === "cloudflare_token" || countDirty(form, PUBLIC_S3_TOKEN_KEYS) > 0);
-  const advancedCount = (showReadEndpoint ? 1 : 0) + (showTokenSettings ? 3 : 0);
+  // exist only for the link modes that use them. A row the selected mode
+  // doesn't use stays, marked as changed, while it holds an unsaved edit, so
+  // Save never writes a value the admin can't see.
+  const linkModeUses = (advancedKey: string) =>
+    advancedKey === "s3.public_read_endpoint"
+      ? urlAuth !== "presigned"
+      : urlAuth === "cloudflare_token";
+  const keptForEdit = (advancedKey: string) =>
+    !linkModeUses(advancedKey) && form.isDirty(advancedKey);
+  const showsAdvanced = (advancedKey: string) =>
+    scope === "public" && (linkModeUses(advancedKey) || form.isDirty(advancedKey));
+  const advancedCount = PUBLIC_S3_ADVANCED_KEYS.filter(showsAdvanced).length;
   const advancedChanged = countDirty(form, PUBLIC_S3_ADVANCED_KEYS);
 
   async function handleCheckConnection() {
@@ -436,9 +438,10 @@ function S3Group({
               count={advancedCount}
               forceOpen={advancedChanged > 0}
             >
-              {showReadEndpoint && (
+              {showsAdvanced("s3.public_read_endpoint") && (
                 <SettingField
                   label={t("web.admin.settings.storage.s3.readEndpoint")}
+                  dirty={keptForEdit("s3.public_read_endpoint")}
                   // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
                   hint="https://cdn.example.com"
                   value={form.getValue("s3.public_read_endpoint")}
@@ -447,44 +450,49 @@ function S3Group({
                   managedByEnv={form.envVar("s3.public_read_endpoint")}
                 />
               )}
-              {showTokenSettings && (
-                <>
-                  {/*
-                    Cloudflare token auth requires this secret, so a clear only
-                    saves alongside a switch back to another mode. The staged
-                    clear keeps these rows in view after that switch.
-                  */}
-                  <SecretField
-                    label={t("web.admin.settings.storage.s3.tokenSecret")}
-                    value={form.getValue("s3.public_token_secret")}
-                    configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
-                    onKeep={() => secrets.keepSaved("s3.public_token_secret")}
-                    onClear={() => secrets.clearSaved("s3.public_token_secret")}
-                    cleared={form.isClearStaged("s3.public_token_secret")}
-                    onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
-                    hint={t("web.admin.settings.storage.s3.tokenSecretHint")}
-                    disabled={secrets.disabled}
-                    restartRequired={restartKeys.has("s3.public_token_secret")}
-                    managedByEnv={form.envVar("s3.public_token_secret")}
-                  />
-                  <SettingField
-                    label={t("web.admin.settings.storage.s3.tokenParam")}
-                    description={t("web.admin.settings.storage.s3.tokenParamDescription")}
-                    value={form.getValue("s3.public_token_param") || "verify"}
-                    onChange={(v) => form.setValue("s3.public_token_param", v)}
-                    restartRequired={restartKeys.has("s3.public_token_param")}
-                    managedByEnv={form.envVar("s3.public_token_param")}
-                  />
-                  <SettingField
-                    label={t("web.admin.settings.storage.s3.tokenTtl")}
-                    type="number"
-                    unit={t("web.admin.settings.storage.unitSeconds")}
-                    value={form.getValue("s3.public_token_ttl") || "10800"}
-                    onChange={(v) => form.setValue("s3.public_token_ttl", v)}
-                    restartRequired={restartKeys.has("s3.public_token_ttl")}
-                    managedByEnv={form.envVar("s3.public_token_ttl")}
-                  />
-                </>
+              {/*
+                Cloudflare token auth requires this secret, so a clear only
+                saves alongside a switch back to another mode. The staged clear
+                keeps the row in view after that switch.
+              */}
+              {showsAdvanced("s3.public_token_secret") && (
+                <SecretField
+                  label={t("web.admin.settings.storage.s3.tokenSecret")}
+                  dirty={keptForEdit("s3.public_token_secret")}
+                  value={form.getValue("s3.public_token_secret")}
+                  configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+                  onKeep={() => secrets.keepSaved("s3.public_token_secret")}
+                  onClear={() => secrets.clearSaved("s3.public_token_secret")}
+                  cleared={form.isClearStaged("s3.public_token_secret")}
+                  onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
+                  hint={t("web.admin.settings.storage.s3.tokenSecretHint")}
+                  disabled={secrets.disabled}
+                  restartRequired={restartKeys.has("s3.public_token_secret")}
+                  managedByEnv={form.envVar("s3.public_token_secret")}
+                />
+              )}
+              {showsAdvanced("s3.public_token_param") && (
+                <SettingField
+                  label={t("web.admin.settings.storage.s3.tokenParam")}
+                  dirty={keptForEdit("s3.public_token_param")}
+                  description={t("web.admin.settings.storage.s3.tokenParamDescription")}
+                  value={form.getValue("s3.public_token_param") || "verify"}
+                  onChange={(v) => form.setValue("s3.public_token_param", v)}
+                  restartRequired={restartKeys.has("s3.public_token_param")}
+                  managedByEnv={form.envVar("s3.public_token_param")}
+                />
+              )}
+              {showsAdvanced("s3.public_token_ttl") && (
+                <SettingField
+                  label={t("web.admin.settings.storage.s3.tokenTtl")}
+                  dirty={keptForEdit("s3.public_token_ttl")}
+                  type="number"
+                  unit={t("web.admin.settings.storage.unitSeconds")}
+                  value={form.getValue("s3.public_token_ttl") || "10800"}
+                  onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+                  restartRequired={restartKeys.has("s3.public_token_ttl")}
+                  managedByEnv={form.envVar("s3.public_token_ttl")}
+                />
               )}
             </AdvancedSection>
           )}

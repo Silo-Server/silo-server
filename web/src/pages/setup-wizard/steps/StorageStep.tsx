@@ -40,13 +40,6 @@ const PUBLIC_S3_KEYS = [
   "s3.public_token_ttl",
 ];
 
-// The Cloudflare token settings, shown only for that link mode.
-const PUBLIC_S3_TOKEN_KEYS = [
-  "s3.public_token_secret",
-  "s3.public_token_param",
-  "s3.public_token_ttl",
-];
-
 const PRIVATE_S3_KEYS = [
   "s3.private_endpoint",
   "s3.private_region",
@@ -205,11 +198,15 @@ function S3Fields({
   const t = useT();
   const key = (name: string) => `s3.${prefix}_${name}`;
   const urlAuth = form.getValue(key("url_auth")) || "presigned";
-  // Link-mode settings show for the modes that use them, and while they hold
-  // an unsaved edit, so Continue never saves a value the admin can't see.
-  const showReadEndpoint = urlAuth !== "presigned" || form.isDirty("s3.public_read_endpoint");
-  const showTokenSettings =
-    urlAuth === "cloudflare_token" || PUBLIC_S3_TOKEN_KEYS.some(form.isDirty);
+  // Link-mode settings show for the modes that use them. One the selected mode
+  // doesn't use stays, marked as changed, while it holds an unsaved edit, so
+  // Continue never saves a value the admin can't see.
+  const linkModeUses = (linkKey: string) =>
+    linkKey === "s3.public_read_endpoint"
+      ? urlAuth !== "presigned"
+      : urlAuth === "cloudflare_token";
+  const keptForEdit = (linkKey: string) => !linkModeUses(linkKey) && form.isDirty(linkKey);
+  const showsLinkSetting = (linkKey: string) => linkModeUses(linkKey) || form.isDirty(linkKey);
   return (
     <>
       <SettingField
@@ -288,9 +285,10 @@ function S3Fields({
             disabled={disabled}
             managedByEnv={form.envVar("s3.public_url_auth")}
           />
-          {showReadEndpoint ? (
+          {showsLinkSetting("s3.public_read_endpoint") ? (
             <SettingField
               label={t("web.setup.storage.readEndpointLabel")}
+              dirty={keptForEdit("s3.public_read_endpoint")}
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
               hint="https://cdn.example.com"
               value={form.getValue("s3.public_read_endpoint")}
@@ -298,33 +296,38 @@ function S3Fields({
               managedByEnv={form.envVar("s3.public_read_endpoint")}
             />
           ) : null}
-          {showTokenSettings ? (
-            <>
-              <SettingField
-                label={t("web.setup.storage.tokenSecretLabel")}
-                type="password"
-                hint={t("web.setup.storage.tokenSecretHint")}
-                value={form.getValue("s3.public_token_secret")}
-                onChange={(v) => form.setValue("s3.public_token_secret", v)}
-                sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
-                managedByEnv={form.envVar("s3.public_token_secret")}
-              />
-              <SettingField
-                label={t("web.setup.storage.tokenParamLabel")}
-                description={t("web.setup.storage.tokenParamDescription")}
-                value={form.getValue("s3.public_token_param") || "verify"}
-                onChange={(v) => form.setValue("s3.public_token_param", v)}
-                managedByEnv={form.envVar("s3.public_token_param")}
-              />
-              <SettingField
-                label={t("web.setup.storage.tokenTtlLabel")}
-                type="number"
-                unit={t("web.setup.storage.seconds")}
-                value={form.getValue("s3.public_token_ttl") || "10800"}
-                onChange={(v) => form.setValue("s3.public_token_ttl", v)}
-                managedByEnv={form.envVar("s3.public_token_ttl")}
-              />
-            </>
+          {showsLinkSetting("s3.public_token_secret") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenSecretLabel")}
+              dirty={keptForEdit("s3.public_token_secret")}
+              type="password"
+              hint={t("web.setup.storage.tokenSecretHint")}
+              value={form.getValue("s3.public_token_secret")}
+              onChange={(v) => form.setValue("s3.public_token_secret", v)}
+              sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+              managedByEnv={form.envVar("s3.public_token_secret")}
+            />
+          ) : null}
+          {showsLinkSetting("s3.public_token_param") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenParamLabel")}
+              dirty={keptForEdit("s3.public_token_param")}
+              description={t("web.setup.storage.tokenParamDescription")}
+              value={form.getValue("s3.public_token_param") || "verify"}
+              onChange={(v) => form.setValue("s3.public_token_param", v)}
+              managedByEnv={form.envVar("s3.public_token_param")}
+            />
+          ) : null}
+          {showsLinkSetting("s3.public_token_ttl") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenTtlLabel")}
+              dirty={keptForEdit("s3.public_token_ttl")}
+              type="number"
+              unit={t("web.setup.storage.seconds")}
+              value={form.getValue("s3.public_token_ttl") || "10800"}
+              onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+              managedByEnv={form.envVar("s3.public_token_ttl")}
+            />
           ) : null}
         </>
       ) : null}

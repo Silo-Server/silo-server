@@ -39,6 +39,8 @@ export interface SecretFieldProps {
   hint?: string;
   /** Extra line under the description, e.g. a save error for this field. */
   status?: ReactNode;
+  /** Marks the row as holding an unsaved change, as `SettingField` does. */
+  dirty?: boolean;
   disabled?: boolean;
   restartRequired?: boolean;
   /** The environment variable that sets this secret; disables the control. */
@@ -67,6 +69,7 @@ export function SecretField({
   cleared = false,
   hint,
   status,
+  dirty,
   disabled: disabledProp = false,
   restartRequired = false,
   managedByEnv,
@@ -104,6 +107,7 @@ export function SecretField({
     <SettingFieldRow
       label={label}
       htmlFor={controlId}
+      dirty={dirty}
       description={description}
       descriptionId={hintId}
       status={status}

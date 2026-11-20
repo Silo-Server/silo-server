@@ -78,13 +78,14 @@ export default function PlaybackSettings() {
   const hwDevice = form.getValue("playback.hw_device");
   const hwDeviceEnv = form.envVar("playback.hw_device");
   const selectedDevices = parseHWDeviceList(hwDevice);
-  // Saved paths keep their rows when the draft drops them, so switching off a
-  // device that detection doesn't list leaves its row in view to undo.
+  // Saved paths keep their rows, in their saved order, when the draft drops
+  // them, so switching off a device that detection doesn't list leaves its row
+  // in place, and switching it back on restores the saved list.
   const deviceRows = buildHWDeviceRows(
     hwDetection.data,
-    `${hwDevice},${form.getPersistedValue("playback.hw_device")}`,
+    `${form.getPersistedValue("playback.hw_device")},${hwDevice}`,
   );
-  const detectedPaths = deviceRows.filter((row) => row.detected).map((row) => row.path);
+  const deviceOrder = deviceRows.map((row) => row.path);
   // Balancing is QSV/VAAPI-only: NVENC addresses GPUs by CUDA index/UUID, so
   // the multi-select picker is hidden for it (the server uses the first
   // configured entry).
@@ -142,12 +143,12 @@ export default function PlaybackSettings() {
   const anyDirty = (keys: readonly string[]) => keys.some((key) => isDirty(key));
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
 
-  // Each of these rows also stays in view while it holds an unsaved edit.
-  const showThrottleSeconds =
-    form.getValue("enable_transcode_throttle") === "true" || isDirty("transcode_throttle_seconds");
-  const showPreferLower =
-    form.getValue("allow_4k_transcode") === "true" ||
-    isDirty("playback.prefer_lower_version_transcode");
+  // Each of these rows also stays in view, marked as changed, while it holds
+  // an unsaved edit after its switch is turned off.
+  const throttleOn = form.getValue("enable_transcode_throttle") === "true";
+  const throttleSecondsKept = !throttleOn && isDirty("transcode_throttle_seconds");
+  const allow4KTranscode = form.getValue("allow_4k_transcode") === "true";
+  const preferLowerKept = !allow4KTranscode && isDirty("playback.prefer_lower_version_transcode");
   // Every advanced transcoding key has one row, except the device picker,
   // which renders only when it applies.
   const transcodingAdvancedCount = TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1);
@@ -292,9 +293,10 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
-          {showPreferLower && (
+          {(allow4KTranscode || preferLowerKept) && (
             <SettingField
               label={t("web.admin.settings.playback.transcoding.preferLower")}
+              dirty={preferLowerKept}
               type="toggle"
               description={t("web.admin.settings.playback.transcoding.preferLowerDescription")}
               value={form.getValue("playback.prefer_lower_version_transcode")}
@@ -332,9 +334,10 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("enable_transcode_throttle", v)}
             restartRequired={restartKeys.has("enable_transcode_throttle")}
           />
-          {showThrottleSeconds && (
+          {(throttleOn || throttleSecondsKept) && (
             <SettingField
               label={t("web.admin.settings.playback.transcoding.bufferAhead")}
+              dirty={throttleSecondsKept}
               type="number"
               unit={t("web.admin.settings.playback.unitSeconds")}
               value={form.getValue("transcode_throttle_seconds")}
@@ -433,7 +436,7 @@ export default function PlaybackSettings() {
                           toggleHWDevice(
                             form.getValue("playback.hw_device"),
                             row.path,
-                            detectedPaths,
+                            deviceOrder,
                           ),
                         )
                       }
