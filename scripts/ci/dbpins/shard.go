@@ -299,7 +299,7 @@ func preflightClones(ctx context.Context, template string) (string, error) {
 	}
 	name, _, err := cloneDatabase(ctx, template, run, "preflight")
 	if err != nil {
-		return "", err
+		return run, err
 	}
 	if err := dropDatabase(ctx, template, name); err != nil {
 		return run, err
@@ -337,33 +337,7 @@ func runOneShard(
 	}()
 
 	start := time.Now()
-	cmd := exec.CommandContext( //nolint:gosec // fixed go tool test2json running a freshly compiled test binary
-		ctx,
-		"go", "tool", "test2json", "-p", pkg.importPath, "-t",
-		pkg.binary,
-		"-test.v=test2json",
-		"-test.count=1",
-		"-test.timeout=10m",
-		"-test.run="+s.runPattern(),
-	)
-	var stderr bytes.Buffer
-	cmd.Dir = s.dir
-	cmd.Env = cloneEnv(os.Environ(), template, cloneURL)
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("%s: %w", s.label(), err)
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("%s: %w", s.label(), err)
-	}
-
-	var passthrough strings.Builder
-	shardRes, readErr := readEvents(stdout, func(line string) { passthrough.WriteString(line) })
-	if readErr != nil {
-		_, _ = io.Copy(io.Discard, stdout)
-	}
-	waitErr := cmd.Wait()
+	shardRes, passthrough, convStderr, runErr := execShardBinary(ctx, s, pkg, cloneEnv(os.Environ(), template, cloneURL))
 	elapsed := time.Since(start)
 
 	resMu.Lock()
@@ -371,26 +345,97 @@ func runOneShard(
 	resMu.Unlock()
 
 	outMu.Lock()
-	if passthrough.Len() > 0 {
-		fmt.Print(passthrough.String())
+	if passthrough != "" {
+		fmt.Print(passthrough)
 	}
-	if stderr.Len() > 0 {
-		_, _ = os.Stderr.Write(stderr.Bytes())
+	if convStderr != "" {
+		_, _ = io.WriteString(os.Stderr, convStderr)
 	}
 	status := "ok  "
-	if waitErr != nil {
+	if runErr != nil {
 		status = "FAIL"
 	}
 	fmt.Printf("%s\t%s\t%.3fs\n", status, shardSummaryName(pkg.importPath, s), elapsed.Seconds())
 	outMu.Unlock()
 
+	return runErr
+}
+
+// execShardBinary runs the compiled test binary directly and pipes its output
+// through `go tool test2json`. Running the test binary as a direct child
+// ensures cancellation signals and reaps the test binary before the caller
+// drops its cloned database.
+func execShardBinary(ctx context.Context, s testShard, pkg compiledPackage, env []string) (*results, string, string, error) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, "", "", fmt.Errorf("%s: pipe: %w", s.label(), err)
+	}
+
+	testCmd := exec.CommandContext( //nolint:gosec // freshly compiled repository test binary
+		ctx,
+		pkg.binary,
+		"-test.v=test2json",
+		"-test.count=1",
+		"-test.timeout=10m",
+		"-test.run="+s.runPattern(),
+	)
+	testCmd.Dir = s.dir
+	testCmd.Env = env
+	testCmd.Stdout = pw
+	testCmd.Stderr = pw
+	testCmd.Cancel = func() error {
+		if sigErr := testCmd.Process.Signal(os.Interrupt); sigErr != nil && !errors.Is(sigErr, os.ErrProcessDone) {
+			return testCmd.Process.Kill()
+		}
+		return nil
+	}
+	testCmd.WaitDelay = 10 * time.Second
+
+	convCmd := exec.CommandContext( //nolint:gosec // fixed go tool test2json reading piped test output
+		context.Background(),
+		"go", "tool", "test2json", "-p", pkg.importPath, "-t",
+	)
+	var convStderr bytes.Buffer
+	convCmd.Stdin = pr
+	convCmd.Stderr = &convStderr
+	convStdout, err := convCmd.StdoutPipe()
+	if err != nil {
+		_ = pr.Close()
+		_ = pw.Close()
+		return nil, "", "", fmt.Errorf("%s: %w", s.label(), err)
+	}
+	if err := convCmd.Start(); err != nil {
+		_ = pr.Close()
+		_ = pw.Close()
+		return nil, "", "", fmt.Errorf("%s: %w", s.label(), err)
+	}
+	_ = pr.Close()
+
+	if err := testCmd.Start(); err != nil {
+		_ = pw.Close()
+		_ = convCmd.Wait()
+		return nil, "", convStderr.String(), fmt.Errorf("%s: %w", s.label(), err)
+	}
+	_ = pw.Close()
+
+	var passthrough strings.Builder
+	shardRes, readErr := readEvents(convStdout, func(line string) { passthrough.WriteString(line) })
 	if readErr != nil {
-		return fmt.Errorf("%s: %w", s.label(), readErr)
+		_, _ = io.Copy(io.Discard, convStdout)
 	}
-	if waitErr != nil {
-		return fmt.Errorf("%s: %w", s.label(), waitErr)
+	testWaitErr := testCmd.Wait()
+	convWaitErr := convCmd.Wait()
+
+	switch {
+	case readErr != nil:
+		return shardRes, passthrough.String(), convStderr.String(), fmt.Errorf("%s: %w", s.label(), readErr)
+	case testWaitErr != nil:
+		return shardRes, passthrough.String(), convStderr.String(), fmt.Errorf("%s: %w", s.label(), testWaitErr)
+	case convWaitErr != nil:
+		return shardRes, passthrough.String(), convStderr.String(), fmt.Errorf("%s: test2json: %w", s.label(), convWaitErr)
+	default:
+		return shardRes, passthrough.String(), convStderr.String(), nil
 	}
-	return nil
 }
 
 func shardSummaryName(importPath string, s testShard) string {
