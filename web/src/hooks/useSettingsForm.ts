@@ -35,9 +35,11 @@ interface UseSettingsFormOptions {
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
+  // Only a list that never loaded leaves the status unknown. A failed re-read
+  // keeps the last list, so a page keeps its editor and the drafts in it.
   const {
     data: sensitiveData,
-    isError: sensitiveStatusError,
+    isLoadingError: sensitiveStatusError,
     refetch: refetchSensitiveStatus,
   } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
@@ -95,6 +97,35 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       dismissConflict();
     };
   }, [dismissConflict]);
+
+  // The server refuses a whole save that writes a key the environment sets,
+  // and that key's field is disabled. A server can restart with the variable
+  // set while the page holds a draft for the key, so drop that draft: it can
+  // be neither saved nor undone, and the rest of the page has to save. The
+  // server still accepts one such write, clearing redis.db under REDIS_URL,
+  // which is how a saved number is removed, so that draft stays.
+  const envVars = sensitiveData?.managed_by_env_vars;
+  const envLockedDrafts = envVars
+    ? Array.from(dirty).filter(
+        (key) =>
+          Object.hasOwn(envVars, key) &&
+          !(key === "redis.db" && (localValues[key] ?? "").trim() === ""),
+      )
+    : [];
+  if (envLockedDrafts.length > 0) {
+    for (const key of envLockedDrafts) editedOver.current.delete(key);
+    setDirty((prev) => {
+      const next = new Set(prev);
+      for (const key of envLockedDrafts) next.delete(key);
+      return next;
+    });
+    // Without a draft the field shows the settings snapshot again.
+    setLocalValues((prev) => {
+      const next = { ...prev };
+      for (const key of envLockedDrafts) delete next[key];
+      return next;
+    });
+  }
 
   // Treat equivalent key lists as stable even if a caller constructs the
   // array inline. This keeps server hydration tied to actual query/key changes
@@ -459,7 +490,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
   const sensitiveManagedByEnv = sensitiveData?.managed_by_env ?? [];
-  const envVars = sensitiveData?.managed_by_env_vars;
   /**
    * The environment variable that sets `key` on the server, or undefined when
    * an admin can save it. Pass it to a field's `managedByEnv`.

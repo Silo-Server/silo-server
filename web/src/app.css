@@ -28,6 +28,11 @@
    at a `dir="ltr"` box (Tailwind's own variant matches anything inside an rtl
    root, and uses `:dir()`, which older browsers drop). */
 @custom-variant rtl (&:where([dir="rtl"], [dir="rtl"] *):not(:where([dir="ltr"], [dir="ltr"] *)));
+/* `dark:` means the Silo theme on screen is dark. Tailwind's own variant asks
+   the operating system (`prefers-color-scheme`), which picks the light-surface
+   shades over Cinema Dark whenever the system is set to light. List every dark
+   theme here; a theme left out gets the base shades. */
+@custom-variant dark (&:where([data-theme="midnight-cinema"], [data-theme="midnight-cinema"] *));
 
 /* ================================================================
    § 1  THEME BRIDGE — Tailwind ↔ CSS Custom Properties
