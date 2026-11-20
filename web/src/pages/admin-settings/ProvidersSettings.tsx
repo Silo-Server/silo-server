@@ -478,7 +478,10 @@ function MDBListTile({
 
   const configured = sensitiveConfigured.includes("mdblist.api_key");
   const managed = managedByEnv != null;
-  const hasDraft = apiKey.trim() !== "";
+  // A key typed before the environment took it over is ignored where it is
+  // read, so the field, Test and the unsaved guard all use the environment's.
+  const draft = managed ? "" : apiKey;
+  const hasDraft = draft.trim() !== "";
   useReportUnsavedChanges(hasDraft);
 
   async function save() {
@@ -487,7 +490,7 @@ function MDBListTile({
       return;
     }
     try {
-      await updateSettings.mutateAsync({ "mdblist.api_key": apiKey });
+      await updateSettings.mutateAsync({ "mdblist.api_key": draft });
       setApiKey("");
       onTested(undefined);
       toast.success(t("web.admin.settings.providers.mdblist.saved"));
@@ -514,7 +517,7 @@ function MDBListTile({
         checkConnection.mutateAsync({
           kind: "mdblist",
           body: {
-            values: { "mdblist.api_key": apiKey },
+            values: { "mdblist.api_key": draft },
             dirty_keys: hasDraft ? ["mdblist.api_key"] : [],
           },
         }),
@@ -576,7 +579,7 @@ function MDBListTile({
       </p>
       <SecretField
         label={t("web.admin.settings.providers.mdblist.apiKey")}
-        value={apiKey}
+        value={draft}
         configured={configured}
         onChange={(next) => {
           // The failure describes the key that was tested, not the new one.
