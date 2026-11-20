@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/migrations"
@@ -67,7 +68,8 @@ const (
 	envBackupS3PathStyle = "SILO_BACKUP_S3_PATH_STYLE"
 
 	backupS3EnvUsage = envBackupS3Endpoint + ", " + envBackupS3Region + ", " + envBackupS3AccessKey + ", " +
-		envBackupS3SecretKey + ", and " + envBackupS3PathStyle + " (true or false), from the environment or the .env file"
+		envBackupS3SecretKey + ", and " + envBackupS3PathStyle + " (true or false), from the environment or the .env file " +
+		"(the keys can come from files named by their _FILE variants)"
 )
 
 // acceptSuperuserUsage describes --accept-superuser.
@@ -217,7 +219,8 @@ func parseS3Address(where string) (bucket, key string, isS3 bool, err error) {
 	return bucket, strings.Trim(key, "/"), true, nil
 }
 
-// backupS3Client opens bucket with the credentials in the environment.
+// backupS3Client opens bucket with the credentials in the environment. The
+// access and secret keys can each come from the file their _FILE variant names.
 func backupS3Client(bucket, keyPrefix string) (*s3client.Client, error) {
 	endpoint := os.Getenv(envBackupS3Endpoint)
 	if endpoint == "" {
@@ -230,9 +233,17 @@ func backupS3Client(bucket, keyPrefix string) (*s3client.Client, error) {
 			return nil, fmt.Errorf("%s must be true or false", envBackupS3PathStyle)
 		}
 	}
+	accessKey, err := backupSecretEnv(envBackupS3AccessKey)
+	if err != nil {
+		return nil, err
+	}
+	secretKey, err := backupSecretEnv(envBackupS3SecretKey)
+	if err != nil {
+		return nil, err
+	}
 	return backup.S3Config{
 		Endpoint: endpoint, Region: os.Getenv(envBackupS3Region), Bucket: bucket, KeyPrefix: keyPrefix,
-		AccessKey: os.Getenv(envBackupS3AccessKey), SecretKey: os.Getenv(envBackupS3SecretKey), PathStyle: pathStyle,
+		AccessKey: accessKey, SecretKey: secretKey, PathStyle: pathStyle,
 	}.Client(), nil
 }
 
@@ -286,6 +297,14 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Read before anything changes: a REDIS_URL_FILE that cannot be read
+	// stops the restore here rather than after the swap.
+	var redisURL string
+	if !f.keepRedis {
+		if redisURL, err = backupSecretEnv(envRedisURL); err != nil {
+			return err
+		}
+	}
 	cipher, err := secret.New(masterKey)
 	if err != nil {
 		return err
@@ -323,7 +342,7 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	}); err != nil {
 		return err
 	}
-	clearRedisAfterRestore(ctx, restoredRedisPlan(ctx, f.keepRedis, liveURL, cipher), dialRedis, out)
+	clearRedisAfterRestore(ctx, restoredRedisPlan(ctx, f.keepRedis, liveURL, redisURL, cipher), dialRedis, out)
 	return nil
 }
 
@@ -333,12 +352,12 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 // When that read fails the plan clears nothing and says so, because the
 // Redis the live database named before the swap need not be the restored
 // server's.
-func restoredRedisPlan(ctx context.Context, keep bool, liveURL string, cipher *secret.Cipher) redisPlan {
+func restoredRedisPlan(ctx context.Context, keep bool, liveURL, redisURL string, cipher *secret.Cipher) redisPlan {
 	if keep {
 		return redisPlan{keep: true}
 	}
-	if os.Getenv("REDIS_URL") != "" {
-		return redisPlan{config: liveRedisConfig(&config.Config{})}
+	if redisURL != "" {
+		return redisPlan{config: config.RedisConfig{}.WithBootstrapURL(redisURL)}
 	}
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
@@ -346,18 +365,21 @@ func restoredRedisPlan(ctx context.Context, keep bool, liveURL string, cipher *s
 	if err != nil {
 		return redisPlan{readErr: err}
 	}
-	return redisPlan{config: liveRedisConfig(cfg)}
+	return redisPlan{config: cfg.Redis}
 }
 
 // runSeparateRestore restores into --into and --blobs-into, aimed away
 // from the live server named by DATABASE_URL, when set.
 func runSeparateRestore(ctx context.Context, f backupRestoreFlags, src *backup.Source, loader backup.PGLoader,
 	validate backup.ValidateOptions, masterKey []byte, out io.Writer) error {
+	liveURL, err := backupSecretEnv(envDatabaseURL)
+	if err != nil {
+		return err
+	}
 	opts := backup.SeparateOptions{
 		Validate: validate, Into: f.into, BlobsInto: f.blobsInto, DatabaseOnly: f.databaseOnly, Out: out,
-		LiveURL: os.Getenv("DATABASE_URL"),
+		LiveURL: liveURL,
 	}
-	var err error
 	if opts.Cipher, err = optionalCipher(masterKey); err != nil {
 		return err
 	}
@@ -549,7 +571,10 @@ func decryptInput(input string) (backup.Objects, string, error) {
 // liveDatabaseURL reads DATABASE_URL, the database a replace or recovery
 // works on.
 func liveDatabaseURL() (string, error) {
-	liveURL := os.Getenv("DATABASE_URL")
+	liveURL, err := backupSecretEnv(envDatabaseURL)
+	if err != nil {
+		return "", err
+	}
 	if liveURL == "" {
 		return "", errors.New("DATABASE_URL is required (set in .env or environment)")
 	}
@@ -558,7 +583,10 @@ func liveDatabaseURL() (string, error) {
 
 // backupMasterKey reads SECRET_KEY and its check value.
 func backupMasterKey(required bool) ([]byte, string, error) {
-	key := os.Getenv("SECRET_KEY")
+	key, err := backupSecretEnv(envSecretKey)
+	if err != nil {
+		return nil, "", err
+	}
 	if key == "" && !required {
 		return nil, "", nil
 	}
@@ -763,4 +791,11 @@ func runSecretCommand(args []string, in io.Reader, out io.Writer) error {
 	}
 	_, err = fmt.Fprintln(out, check)
 	return err
+}
+
+// backupSecretEnv reads a secret the backup commands take from the
+// environment, or from the file its _FILE variant names, as the server does.
+func backupSecretEnv(name string) (string, error) {
+	value, _, err := envutil.LookupSecret(os.Getenv, name)
+	return value, err
 }

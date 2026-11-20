@@ -78,11 +78,16 @@ order:
 3. `init-config` lays out `/config`, decides which bundled services run, and
    exports the connection settings Silo reads for them: `DATABASE_URL`,
    `REDIS_URL`, and the search variables below. An explicit `DATABASE_URL` or
-   `REDIS_URL` turns the matching bundled service off. With the bundled
+   `REDIS_URL`, or its `_FILE` variant, turns the matching bundled service
+   off, and a `SILO_MEILISEARCH_API_KEY_FILE` stands in for the generated
+   Meilisearch key. Silo reads a `_FILE` variant itself, as the `silo`
+   account at `PUID`, so unlike a `FILE__` path the file must be readable by
+   that account; it removes one trailing line ending, where `FILE__` removes
+   every trailing newline. With the bundled
    PostgreSQL it defaults `POSTGRES_TUNE` to `auto` with a 50% memory budget;
    a deployment's own database keeps Silo's default, tuning off. A proxy or
    transcode `MODE` turns them all off; a proxy `MODE` also requires both
-   URLs.
+   URLs, directly or as `_FILE` variants.
 4. `init-postgres` creates the cluster on first start and writes the image's
    settings and `pg_hba.conf` on every start; `svc-postgres` runs it;
    `init-postgres-db` creates the `silo` database and rebuilds
@@ -130,6 +135,8 @@ none of the init, so code in the binary must not rely on what the init does:
   storage refuses a root reached through the dangling `/var/lib/silo` link
   rather than writing somewhere else.
 - No bundled services, `FILE__` loading, GPU group discovery, or supervisor.
+  Silo's own `_FILE` variables (`DATABASE_URL_FILE`, `SECRET_KEY_FILE`, and
+  the rest) still work, since the binary reads them.
 - The working directory is `/`, and Docker sets `HOME` to `/` for a uid with no
   passwd entry. That is why the Jellyfin Web installer keeps npm's cache in its
   own workspace.

@@ -55,7 +55,7 @@ dev-proxy:
 # defaults to 8090 so it does not collide with dev-backend on 8080.
 dev-transcode:
 	@test -n "$$SILO_CORE_URL" || { echo 'dev-transcode: set SILO_CORE_URL to the main server URL, e.g. http://localhost:8080' >&2; exit 1; }
-	@test -n "$$SILO_NODE_KEY" || { echo 'dev-transcode: set SILO_NODE_KEY to the key issued for this node on the admin nodes page' >&2; exit 1; }
+	@test -n "$$SILO_NODE_KEY$$SILO_NODE_KEY_FILE" || { echo 'dev-transcode: set SILO_NODE_KEY (or SILO_NODE_KEY_FILE) to the key issued for this node on the admin nodes page' >&2; exit 1; }
 	MODE=transcode PORT=$${PORT:-8090} go run ./cmd/silo/
 
 # Lint Go and frontend code

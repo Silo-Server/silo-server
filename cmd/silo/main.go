@@ -682,7 +682,8 @@ func settingsLoadError(err error, secretKey []byte) string {
 		"This server's SECRET_KEY has check value %s. "+
 		"Every API server and proxy node that uses this database needs the SECRET_KEY it was encrypted with; "+
 		"a transcode node's node key is a different credential. Restore the original key and restart. "+
-		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check", err, check)
+		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check, "+
+		"or with SECRET_KEY_FILE: silo secret check < \"$SECRET_KEY_FILE\"", err, check)
 }
 
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
@@ -783,16 +784,17 @@ func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
 // here and the values in effect. REDIS_URL names the database number too, so
 // redis.db is one of them and reports the number in use. With a value the
 // parser cannot read, a server that stays up has only the event bus connected,
-// to a bare address and on database 0.
-func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values, vars map[string]string) {
+// to a bare address and on database 0. redisURLVar is the variable that
+// supplied it: REDIS_URL, or REDIS_URL_FILE.
+func addRedisBootstrapSettings(redisURL, redisURLVar string, configured map[string]bool, values, vars map[string]string) {
 	if redisURL == "" {
 		return
 	}
 	configured["redis.url"] = true
 	values["redis.url"] = redisURL
-	vars["redis.url"] = "REDIS_URL"
+	vars["redis.url"] = redisURLVar
 	configured[config.RedisDBSettingKey] = true
-	vars[config.RedisDBSettingKey] = "REDIS_URL"
+	vars[config.RedisDBSettingKey] = redisURLVar
 	db, _ := (config.RedisConfig{URL: redisURL}).Database()
 	values[config.RedisDBSettingKey] = strconv.Itoa(db)
 }
@@ -931,7 +933,7 @@ func main() {
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	var envSettings config.EnvSettings
 	if isPrimaryNode && !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 {
-		envSettings, err = config.ReadEnvSettings(os.Getenv)
+		envSettings, err = config.ReadEnvSettings(os.Getenv, catalog.SensitiveSettingKeys)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -1433,7 +1435,7 @@ func main() {
 	bootstrapSensitiveConfigured := map[string]bool{}
 	bootstrapSensitiveValues := map[string]string{}
 	bootstrapEnvVars := map[string]string{}
-	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
+	addRedisBootstrapSettings(bc.RedisURL, bc.RedisURLVar, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
 	addEnvSettingLocks(envSettings, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
 
 	// Shared Redis client for components needing raw Redis beyond the event

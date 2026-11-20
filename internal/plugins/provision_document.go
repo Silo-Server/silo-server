@@ -23,6 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	provisioningv1 "github.com/Silo-Server/silo-server/contracts/plugins/provisioning/v1"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 )
 
 // ProvisionDocument holds the declaration and a snapshot of its local secret
@@ -72,7 +73,7 @@ func ReadProvisionDocument() (*ProvisionDocument, error) {
 	case inline != "" && path != "":
 		return nil, errors.New("set only one of SILO_PLUGINS and SILO_PLUGINS_FILE")
 	case path != "":
-		data, err := readProvisionFile(path)
+		data, err := envutil.ReadRegularFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("SILO_PLUGINS_FILE: %w", err)
 		}
@@ -82,23 +83,6 @@ func ReadProvisionDocument() (*ProvisionDocument, error) {
 	default:
 		return nil, nil
 	}
-}
-
-func readProvisionFile(path string) ([]byte, error) {
-	info, err := os.Stat(path) //nolint:gosec // The operator selects the declaration or credential mount.
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, errors.New("expected a readable regular file")
-	}
-	f, err := os.Open(path) //nolint:gosec // The deployment selects its declaration and mounted credential paths.
-	if err != nil {
-		return nil, errors.New("could not open file")
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, maxProvisionBytes+1))
-	if err != nil || len(data) > maxProvisionBytes {
-		return nil, errors.New("could not read file within the 1 MiB limit")
-	}
-	return data, nil
 }
 
 var provisionSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
@@ -341,14 +325,13 @@ func (d *ProvisionDocument) captureSecret(ref provisionReference, total *int) er
 	}
 	var secret string
 	if ref.source == "fromFile" {
-		data, err := readProvisionFile(ref.name)
+		// The same reader as the server's _FILE variables, so a secret file
+		// means the same value wherever it is referenced.
+		value, err := envutil.ReadSecretFile(ref.name)
 		if err != nil {
 			return fmt.Errorf("secret file: %w", err)
 		}
-		secret = string(data)
-		if line, ended := strings.CutSuffix(secret, "\n"); ended {
-			secret = strings.TrimSuffix(line, "\r")
-		}
+		secret = value
 	} else {
 		secret = os.Getenv(ref.name)
 	}

@@ -195,11 +195,11 @@ cipher or event bus.
 | Variable | |
 |---|---|
 | `SILO_CORE_URL` | Required. Absolute `http` or `https` URL of the API. With several API replicas, use their load-balanced address. A plain-HTTP URL that is not loopback logs a warning at startup. |
-| `SILO_NODE_KEY` | Required. A malformed key refuses startup (`transcodeNodeKey`). |
+| `SILO_NODE_KEY` | Required, or `SILO_NODE_KEY_FILE` naming a file that holds it (one trailing line ending is removed). A malformed key, or both variables set, refuses startup (`transcodeNodeKey`). |
 | `PORT` | Listen port, default `8080`. |
 | `SILO_NODE_DRAIN_TIMEOUT` | See [node drain](node-drain.md). |
 | `SILO_NODE_NAME`, `SILO_NODE_URL`, `SILO_NODE_GROUP`, `SILO_NODE_MAX_TRANSCODES`, `SILO_NODE_SOURCE_ACCESS`, `SILO_NODE_HW_ACCEL`, `SILO_NODE_HW_DEVICE`, `SILO_NODE_DOWNLOAD_ARTIFACT_DIR`, `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | Optional. The node's declaration of its own row; see [Registration](#registration). A bad value refuses startup, naming the variable (`nodedeclare.FromEnv`). |
-| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. `NODE_URL` and `NODE_NAME` stay ignored although the node declares a URL and name: an env file shared with a proxy sets them, and honoring them would rewrite rows on upgrade. |
+| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY` (and their `_FILE` variants), `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. `NODE_URL` and `NODE_NAME` stay ignored although the node declares a URL and name: an env file shared with a proxy sets them, and honoring them would rewrite rows on upgrade. |
 
 Before its first configuration read the node sends its declaration
 ([Registration](#registration)), so the configuration it loads already

@@ -208,6 +208,9 @@ func restoreOldSchemaBackup(t *testing.T, db oldSchemaDatabase, secretKey []byte
 	t.Setenv("SECRET_KEY", string(secretKey))
 	t.Setenv("DATABASE_URL", db.url)
 	t.Setenv("REDIS_URL", "")
+	for _, name := range []string{"SECRET_KEY_FILE", "DATABASE_URL_FILE", "REDIS_URL_FILE"} {
+		t.Setenv(name, "")
+	}
 	noEnv := filepath.Join(t.TempDir(), "no.env")
 	run := func(args ...string) string {
 		t.Helper()

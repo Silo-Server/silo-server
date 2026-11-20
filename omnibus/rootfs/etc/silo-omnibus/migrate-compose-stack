@@ -153,6 +153,14 @@ fi
 
 # --- An earlier install is here. ---------------------------------------------
 
+# This step reads the URLs to tell where Silo's data is; a file variant hides
+# them, and the earlier stack never read one.
+for name in DATABASE_URL_FILE REDIS_URL_FILE; do
+  if [[ -n "${!name:-}" ]]; then
+    fail "$name is set in .env, and this step needs the URL itself. Remove $name while the earlier install moves, then set it again"
+  fi
+done
+
 # The earlier file set these for Silo itself, hiding any in .env; this one
 # passes .env through, and the services they named are gone.
 if [[ -n "${DATABASE_URL:-}" ]]; then

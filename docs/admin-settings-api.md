@@ -20,7 +20,10 @@ and `managed_by_env_vars` maps each of them to the variable that sets it, such
 as `{"server.public_url": "SILO_PUBLIC_URL", "redis.db": "REDIS_URL"}`. The web
 settings pages show that name on a read-only field instead of keeping their own
 list. The variables are `REDIS_URL` (for `redis.url` and `redis.db`) and the
-table in `internal/config/env_settings.go`, which gives each variable a scope:
+table in `internal/config/env_settings.go`, which gives each variable a scope.
+`REDIS_URL` and each secret in the table (a key stored encrypted) can instead
+be read from the file its `_FILE` variant names, such as `REDIS_URL_FILE` or
+`SILO_SMTP_PASSWORD_FILE`; the map then names that variable.
 
 - Stored: an API server that starts with the variable set checks the value the
   way an admin save does (per-key normalization, the cross-field validation
