@@ -127,11 +127,13 @@ func (p *planner) planSettings(ctx context.Context) ([]settingPlan, error) {
 }
 
 // keepEnvironmentBundles keeps every outbound bundle (outboundBundles) that
-// this server's environment sets any setting of as it is here: restoring the
-// rest of it from the backup would pair the environment's address,
-// credentials, or transport with the backup's, which the full restore never
-// does either. Each of its settings that differs is marked
-// managed_by_environment.
+// this server's environment sets any setting of as it is here, as the full
+// restore carries a bundle whole: restoring the rest of it from the backup
+// would mix the environment's settings with the backup's, such as an
+// environment's plain-text transport with the backup's host and password.
+// The rule holds even when the environment sets only part of the bundle
+// that is neither an address nor a credential (a sender name, the switch).
+// Each of its settings that differs is marked managed_by_environment.
 func keepEnvironmentBundles(plans []settingPlan, setByEnvironment func(key string) bool) {
 	for _, b := range outboundBundles {
 		if !slices.ContainsFunc(b.keys, setByEnvironment) {
