@@ -3227,10 +3227,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if itemRepo != nil {
 		v2deps.AdminCatalogItems = itemRepo
 	}
+	// Catalog poster links and request posters share one fetcher, so its
+	// download slots and result memory bound both.
+	v2deps.RemotePosters = imagecache.NewRemoteFetcher()
 	if itemPosters != nil && deps.DB != nil {
 		v2deps.ItemPosters = itemPosters
 		v2deps.ItemPosterSource = metadata.NewImageCacheJobRepository(deps.DB)
-		v2deps.RemotePosters = imagecache.NewRemoteFetcher()
 	}
 	if adminImageHandler != nil {
 		v2deps.AdminCatalogImages = adminImageHandler
