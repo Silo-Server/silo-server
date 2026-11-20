@@ -221,12 +221,8 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </SettingFieldStatus>
     ) : null,
     item.restart_required ? (
-      <p key="restart" className="text-muted-foreground flex items-start gap-2 text-xs">
-        <RestartBadge />
-        {/* Lowered by the badge's padding and border, so it starts level with its label. */}
-        <span className="pt-[calc(0.125rem+1px)]">
-          {t("web.admin.backups.restore.rows.restart")}
-        </span>
+      <p key="restart" className="text-muted-foreground flex items-baseline gap-2 text-xs">
+        <RestartBadge /> {t("web.admin.backups.restore.rows.restart")}
       </p>
     ) : null,
     changes.length > 0 ? (
