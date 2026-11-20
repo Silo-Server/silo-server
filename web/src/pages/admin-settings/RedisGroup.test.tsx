@@ -60,6 +60,8 @@ describe("RedisGroup", () => {
   it("shows the connection REDIS_URL sets once it takes over a staged switch-off", async () => {
     sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
     const { rerender } = render(<Harness />);
+    // The number stays staged after the environment takes the URL over.
+    await userEvent.type(screen.getByLabelText("Database number"), "2");
     await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
     expect(screen.queryByLabelText("Connection URL")).not.toBeInTheDocument();
 

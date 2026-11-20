@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -179,6 +179,16 @@ export default function CompatibilityProxiesSettings() {
   const removeWeb = useRemoveJellyfinCompatWeb();
   const updateCompatSettings = useUpdateJellyfinCompatSettings();
   const status = statusQuery.data;
+  // The Jellyfin Web switch-off staged with an API switch-off (see
+  // setJellyfinAPIEnabled) has no field here, so it goes when that draft goes
+  // some other way, as when the environment takes the API switch over and the
+  // form drops its draft.
+  const webOffAlone =
+    form.isDirty("jellyfin_compat.web_enabled") && !form.isDirty("jellyfin_compat.enabled");
+  const { resetValue } = form;
+  useEffect(() => {
+    if (webOffAlone) resetValue("jellyfin_compat.web_enabled");
+  }, [webOffAlone, resetValue]);
 
   if (form.isLoading || statusQuery.isLoading)
     return (
