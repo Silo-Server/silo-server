@@ -92,6 +92,11 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 			return playback.ErrInvalidRealtimePayload
 		}
 		h.touchSessionActivity(sessionID)
+		// An administrator's message waits for this to report that the
+		// player received it (admin_playback_commands.go).
+		if result.Status == playback.RealtimeResultStatusCompleted {
+			h.signalRealtimeResult(sessionID, result.CommandID)
+		}
 		// Establish ownership before mutating anything: a result naming another
 		// session's command must be rejected without canceling that command's
 		// deadline or dropping its record. An unknown command_id is not an

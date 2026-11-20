@@ -345,6 +345,47 @@ func (h *PlaybackHandler) forgetRealtimeCommand(commandID string) {
 	h.realtimeCommandMu.Unlock()
 }
 
+// realtimeResultKey names one command on one session. Command ids are chosen
+// by administrators and are only unique within a session's ledger, so a
+// waiter never matches another session's result.
+type realtimeResultKey struct {
+	sessionID string
+	commandID string
+}
+
+// awaitRealtimeResult registers interest in the player's completed result for
+// one command. The returned channel closes when that result arrives; release
+// removes the registration. Register before the command is written, so a
+// result that arrives before the caller starts waiting is not missed.
+func (h *PlaybackHandler) awaitRealtimeResult(sessionID, commandID string) (<-chan struct{}, func()) {
+	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
+	answered := make(chan struct{})
+	h.realtimeCommandMu.Lock()
+	if h.realtimeResultWaiters == nil {
+		h.realtimeResultWaiters = map[realtimeResultKey]chan struct{}{}
+	}
+	h.realtimeResultWaiters[key] = answered
+	h.realtimeCommandMu.Unlock()
+	return answered, func() {
+		h.realtimeCommandMu.Lock()
+		if h.realtimeResultWaiters[key] == answered {
+			delete(h.realtimeResultWaiters, key)
+		}
+		h.realtimeCommandMu.Unlock()
+	}
+}
+
+// signalRealtimeResult wakes the waiter for this session's command, if any.
+func (h *PlaybackHandler) signalRealtimeResult(sessionID, commandID string) {
+	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
+	h.realtimeCommandMu.Lock()
+	if answered, ok := h.realtimeResultWaiters[key]; ok {
+		close(answered)
+		delete(h.realtimeResultWaiters, key)
+	}
+	h.realtimeCommandMu.Unlock()
+}
+
 func (h *PlaybackHandler) getRealtimeCommand(commandID string) (playbackCommandRecord, bool) {
 	if h == nil || commandID == "" {
 		return playbackCommandRecord{}, false

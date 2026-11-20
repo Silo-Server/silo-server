@@ -19674,10 +19674,10 @@ export interface components {
       /** @description The command identity this receipt belongs to */
       command_id: string;
       /**
-       * @description dispatched: sent on the session's realtime lane. fallback_scheduled: no lane; the server ends the session after the deadline (stop only)
+       * @description dispatched: written to the session's realtime lane; the player has not confirmed it, and a lane whose player went away without closing it still takes the write. fallback_scheduled: no lane; the server ends the session after the deadline (stop only). acknowledged: the player answered that it received the message within the server's short wait (message only); a player may answer before showing it
        * @enum {string}
        */
-      delivery: "dispatched" | "fallback_scheduled";
+      delivery: "dispatched" | "fallback_scheduled" | "acknowledged";
       /**
        * @description applied: this request dispatched the command once (202). replayed: the identity was already applied and this is its recorded receipt (200)
        * @enum {string}

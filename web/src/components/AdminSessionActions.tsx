@@ -196,11 +196,21 @@ export function AdminSessionActions({
         { sessionId: session.session_id, action: "message", message: trimmed },
         profileContext,
       );
-      if (receipt.outcome === "replayed") {
-        toast.success(t("web.admin.sessions.playback.toast.messageReplayed"));
-        return;
+      // A message is received only when the player answered it; any other
+      // delivery, including one from an older server, may not have been shown.
+      const replayed = receipt.outcome === "replayed";
+      if (receipt.delivery !== "acknowledged") {
+        toast.warning(t("web.admin.sessions.playback.toast.messageUnconfirmed"));
+      } else {
+        toast.success(
+          t(
+            replayed
+              ? "web.admin.sessions.playback.toast.messageReplayed"
+              : "web.admin.sessions.playback.toast.messageSent",
+          ),
+        );
       }
-      toast.success(t("web.admin.sessions.playback.toast.messageSent"));
+      if (replayed) return;
       setMessage("");
       setMessageOpen(false);
     } catch (error) {

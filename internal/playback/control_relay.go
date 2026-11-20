@@ -67,8 +67,9 @@ const (
 	controlRelayRefreshInterval = 10 * time.Second
 	// controlRelayReplyTimeout bounds the wait for the owner's reply. The
 	// owner's work is one bounded lane write (5 s socket write deadline) plus,
-	// for a terminate, the session stop; the margin covers the bus.
-	controlRelayReplyTimeout = 8 * time.Second
+	// for a message, up to 3 s waiting for the player's result and, for a
+	// terminate, the session stop; the margin covers the bus.
+	controlRelayReplyTimeout = 11 * time.Second
 	// controlRelayHandlerTimeout bounds a relayed request on the owner. It is
 	// longer than the reply wait because a request served there is not
 	// abandoned when its caller stops waiting, as a local administrator
