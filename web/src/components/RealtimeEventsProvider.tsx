@@ -904,6 +904,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           activeProfileIDRef.current,
           allowDashboardRealtimeUpdatesRef.current,
           (playbackStopped) => {
+            if (!realtimeAuthority?.profileId) return;
             const pending = homeProgressRefreshRef.current;
             if (pending) {
               if (
