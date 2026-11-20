@@ -682,8 +682,7 @@ func settingsLoadError(err error, secretKey []byte) string {
 		"This server's SECRET_KEY has check value %s. "+
 		"Every API server and proxy node that uses this database needs the SECRET_KEY it was encrypted with; "+
 		"a transcode node's node key is a different credential. Restore the original key and restart. "+
-		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check, "+
-		"or with SECRET_KEY_FILE: silo secret check < \"$SECRET_KEY_FILE\"", err, check)
+		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check", err, check)
 }
 
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {

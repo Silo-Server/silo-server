@@ -1775,12 +1775,10 @@ create and list, so it does not depend on nightly backups running.
 ## Full restore
 
 Full restore is the offline `silo backup restore` command, never an API
-operation. `SECRET_KEY`, `DATABASE_URL`, and bucket credentials come from the
-environment (or `-env`); nothing comes from the database being replaced.
-`SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `SILO_BACKUP_S3_ACCESS_KEY` and
-`SILO_BACKUP_S3_SECRET_KEY` can each be read from the file their `_FILE`
-variant names, as the server reads them; setting both forms stops the
-command.
+operation. `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL` and bucket credentials
+come from the environment (or `-env`), each from the file its `_FILE` variant
+names when that is set, as the server reads them; nothing comes from the
+database being replaced.
 `--from` is a local backup folder (the folder at a local destination, or a
 downloaded copy), or a bucket folder,
 `s3://<bucket>/<key prefix>/backups/<server-id>/<id>`, reached with

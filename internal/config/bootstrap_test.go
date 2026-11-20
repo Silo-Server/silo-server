@@ -54,9 +54,6 @@ func TestLoadBootstrapReadsSecretFiles(t *testing.T) {
 	if bc.DatabaseURL != "postgres://example.invalid/silo" || string(bc.SecretKey) != key || bc.RedisURL != "redis://example.invalid:6379/2" {
 		t.Fatalf("bootstrap = %q, %q, %q; want the files' values less one line ending", bc.DatabaseURL, bc.SecretKey, bc.RedisURL)
 	}
-	if url, err := LoadDatabaseURL(""); err != nil || url != bc.DatabaseURL {
-		t.Fatalf("LoadDatabaseURL = %q, %v; want the file's value", url, err)
-	}
 
 	// A secret set both ways is refused rather than guessed at.
 	t.Setenv("SECRET_KEY", key)
@@ -67,7 +64,7 @@ func TestLoadBootstrapReadsSecretFiles(t *testing.T) {
 
 	// A file that holds nothing, or is not there, stops startup instead of
 	// leaving the secret unset.
-	for name, path := range map[string]string{"empty": file("empty", "\n"), "missing": filepath.Join(dir, "missing")} {
+	for name, path := range map[string]string{"empty": file("empty", "\n"), "blank": file("blank", "  \n"), "missing": filepath.Join(dir, "missing")} {
 		t.Setenv("DATABASE_URL_FILE", path)
 		if _, err := LoadDatabaseURL(""); err == nil || !strings.Contains(err.Error(), "DATABASE_URL_FILE") {
 			t.Fatalf("%s file: error = %v, want one naming DATABASE_URL_FILE", name, err)

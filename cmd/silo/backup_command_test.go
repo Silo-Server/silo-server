@@ -163,6 +163,8 @@ func TestBackupCommandsReadS3DB(t *testing.T) {
 	for k, v := range map[string]string{
 		"SECRET_KEY": b.masterKey, envBackupS3Endpoint: b.srv.URL, envBackupS3Region: "us-east-1",
 		envBackupS3AccessKey: "a", envBackupS3SecretKey: "s", envBackupS3PathStyle: "true",
+		// A shell that sets the file variants would make each read ambiguous.
+		"SECRET_KEY_FILE": "", envBackupS3AccessKey + "_FILE": "", envBackupS3SecretKey + "_FILE": "",
 	} {
 		t.Setenv(k, v)
 	}

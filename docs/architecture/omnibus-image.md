@@ -79,11 +79,14 @@ order:
    exports the connection settings Silo reads for them: `DATABASE_URL`,
    `REDIS_URL`, and the search variables below. An explicit `DATABASE_URL` or
    `REDIS_URL`, or its `_FILE` variant, turns the matching bundled service
-   off, and a `SILO_MEILISEARCH_API_KEY_FILE` stands in for the generated
-   Meilisearch key. Silo reads a `_FILE` variant itself, as the `silo`
-   account at `PUID`, so unlike a `FILE__` path the file must be readable by
-   that account; it removes one trailing line ending, where `FILE__` removes
-   every trailing newline. With the bundled
+   off. A `SILO_MEILISEARCH_API_KEY_FILE`, like `SILO_MEILISEARCH_API_KEY`,
+   replaces the key Silo uses to reach Meilisearch, so the init exports none;
+   the bundled Meilisearch keeps its own master key. Silo reads a `_FILE`
+   variant itself, as the `silo` account at `PUID`, so unlike a `FILE__` path
+   the file must be readable by that account; it removes one trailing line
+   ending, where `FILE__` removes every trailing newline. Only the container's
+   environment counts here: the `.env` in `/config/silo` is read by Silo after
+   the init has chosen its services. With the bundled
    PostgreSQL it defaults `POSTGRES_TUNE` to `auto` with a 50% memory budget;
    a deployment's own database keeps Silo's default, tuning off. A proxy or
    transcode `MODE` turns them all off; a proxy `MODE` also requires both
@@ -402,6 +405,9 @@ here. It refuses, before anything is moved into place, when:
   earlier install behind unannounced. The message says to move
   `config/postgres/data` aside and start again if it holds nothing needed, or
   to delete the earlier stack's directories to keep it.
+- An earlier install is here and `.env` sets `DATABASE_URL_FILE` or
+  `REDIS_URL_FILE`, which hides the URL this step has to check; the URL goes
+  in `DATABASE_URL` or `REDIS_URL` while the install moves.
 - An earlier install is here and `.env` holds a `DATABASE_URL` or `REDIS_URL`
   naming the old services or `localhost` (the old file overrode them for Silo,
   and this one passes `.env` through), or a `SILO_MEILISEARCH_URL` naming the

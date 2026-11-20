@@ -15,9 +15,9 @@ import (
 // SECRET_KEY_FILE for SECRET_KEY. Only secret variables have one.
 const SecretFileSuffix = "_FILE"
 
-// MaxFileBytes bounds a file read from a path the environment names, so a
+// maxFileBytes bounds a file read from a path the environment names, so a
 // mistaken path cannot make startup read a large file into memory.
-const MaxFileBytes = 1 << 20
+const maxFileBytes = 1 << 20
 
 // LookupSecret returns the secret variable name's value, read from the file
 // that name+"_FILE" names when that is set instead. usedVar is the variable
@@ -46,8 +46,8 @@ func LookupSecret(getenv func(string) string, name string) (value, usedVar strin
 
 // ReadSecretFile reads a secret from a mounted file. One trailing line ending
 // is removed, since editors and `echo` add one; anything else in the file is
-// the secret. The file must be a regular file of at most 1 MiB holding a
-// nonempty UTF-8 value. Errors never quote the file's content.
+// the secret. The file must be a regular file of at most 1 MiB holding UTF-8
+// text that is not blank. Errors never quote the file's content.
 func ReadSecretFile(path string) (string, error) {
 	data, err := ReadRegularFile(path)
 	if err != nil {
@@ -57,13 +57,13 @@ func ReadSecretFile(path string) (string, error) {
 	if line, ended := strings.CutSuffix(secret, "\n"); ended {
 		secret = strings.TrimSuffix(line, "\r")
 	}
-	if secret == "" || !utf8.ValidString(secret) {
+	if strings.TrimSpace(secret) == "" || !utf8.ValidString(secret) {
 		return "", errors.New("the file must hold a nonempty UTF-8 value")
 	}
 	return secret, nil
 }
 
-// ReadRegularFile reads a regular file of at most MaxFileBytes from a path
+// ReadRegularFile reads a regular file of at most maxFileBytes from a path
 // the deployment chose. A FIFO or device is refused before it is opened, so it
 // cannot block startup. Errors say what is wrong without quoting the content.
 func ReadRegularFile(path string) ([]byte, error) {
@@ -79,8 +79,8 @@ func ReadRegularFile(path string) ([]byte, error) {
 		return nil, fileError(err)
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
-	if err != nil || len(data) > MaxFileBytes {
+	data, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+	if err != nil || len(data) > maxFileBytes {
 		return nil, errors.New("could not read file within the 1 MiB limit")
 	}
 	return data, nil
