@@ -37,7 +37,7 @@ type attachmentBitrateRow struct {
 
 func resetAttachmentBitrateBackfill(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `UPDATE attachment_bitrate_backfill_state SET last_media_file_id = 0, retry_media_file_ids = '{}', completed_at = NULL`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE attachment_bitrate_backfill_state SET last_media_file_id = 0, retry_media_file_ids = '{}', retry_after_id = 0, completed_at = NULL`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -179,10 +179,9 @@ func TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB(t *testing.T) {
 }
 
 // A pass that stops on stalled storage keeps what it finished and resumes
-// after it, without re-reading the files that answered before the stall.
-// Files that timed out one at a time are listed together and stall when read
-// back to back; that keeps what the retries before it finished, and must not
-// hold up the walk over the files after them.
+// after it, without re-reading the files that answered before the stall. A
+// root whose reads keep stalling holds up neither the walk over the files
+// after it nor the files listed after its own.
 func TestAttachmentBitrateBackfillResumesAfterStorageStallDB(t *testing.T) {
 	pool := newScannerTestPool(t)
 	ctx := context.Background()
@@ -198,79 +197,93 @@ func TestAttachmentBitrateBackfillResumesAfterStorageStallDB(t *testing.T) {
 			container: "mkv", subtitles: `[{"index":2,"codec":"ass"}]`, stored: 8710,
 		})
 	}
+	// failing maps a path to how its read fails; others answer.
+	failing := map[string]error{}
+	timeout := fmt.Errorf("%w after 30s", errAttachmentBitrateProbeTimeout)
+	for _, p := range paths[2:] {
+		failing[p] = timeout
+	}
 	ours := map[string]bool{}
 	for _, p := range paths {
 		ours[p] = true
 	}
-
 	backfiller := NewAttachmentBitrateBackfiller(NewFileRepository(pool), "ffprobe")
 	backfiller.workers, backfiller.batch = 1, 2
-	// The first batch answers; storage stalls after it.
-	timesOut := func(path string) bool { return path != paths[0] && path != paths[1] }
 	reads := map[string]int{}
 	backfiller.probe = func(_ context.Context, _, filePath string) (containerBitrate, error) {
 		if !ours[filePath] {
 			return otherTestsFile, nil
 		}
 		reads[filePath]++
-		if timesOut(filePath) {
-			return containerBitrate{}, fmt.Errorf("%w after 30s", errAttachmentBitrateProbeTimeout)
+		if err := failing[filePath]; err != nil {
+			return containerBitrate{}, err
 		}
 		return containerBitrate{kbps: 4047, size: 1000}, nil
 	}
-	// Batches before the stalled one each listed their timed-out files.
-	if result, err := backfiller.Run(ctx, nil); !errors.Is(err, errAttachmentBitrateStorageStalled) || result.Pending != 6 {
-		t.Fatalf("Run = %+v, %v; want the stalled-storage stop with 6 files pending", result, err)
+	check := func(step string, wantPending int, corrected ...string) {
+		t.Helper()
+		var listed []int64
+		if err := pool.QueryRow(ctx, `SELECT retry_media_file_ids FROM attachment_bitrate_backfill_state`).Scan(&listed); err != nil {
+			t.Fatal(err)
+		}
+		if len(listed) != wantPending {
+			t.Errorf("%s: %d files listed, want %d", step, len(listed), wantPending)
+		}
+		for _, p := range paths {
+			want := 8710
+			if slices.Contains(corrected, p) {
+				want = 4047
+			}
+			if got := storedBitrate(t, ctx, pool, ids[p]); got != want {
+				t.Errorf("%s: %s bitrate = %d, want %d", step, p, got, want)
+			}
+		}
 	}
 
-	timesOut = func(string) bool { return false }
+	// The walk stalls in its fifth batch; it lists that batch and the three
+	// before it and moves on, so the next run starts after them.
+	if _, err := backfiller.Run(ctx, nil); !errors.Is(err, errAttachmentBitrateStorageStalled) {
+		t.Fatalf("first run error = %v, want the stalled-storage stop", err)
+	}
+	check("stalled walk", 8, paths[0], paths[1])
+
+	// The listed files' root still stalls, one file after it is gone for
+	// now, and the last answers: the walk reaches both.
+	hung := paths[2:10]
+	delete(failing, paths[11])
+	failing[paths[10]] = errors.New("no such file or directory")
+	if result, err := backfiller.Run(ctx, nil); err != nil || result.Done {
+		t.Fatalf("run past a hung root = %+v, %v; want the walk finished and files pending", result, err)
+	}
+	check("walk past a hung root", 9, paths[0], paths[1], paths[11])
+
+	// The gone file is back, listed in one batch behind the hung files. The
+	// stall stops that batch before it reaches the file; the next run starts
+	// there and reads it.
+	delete(failing, paths[10])
+	if _, err := pool.Exec(ctx, `UPDATE attachment_bitrate_backfill_state SET retry_after_id = 0`); err != nil {
+		t.Fatal(err)
+	}
+	backfiller.batch = 20
 	clear(reads)
-	if _, err := backfiller.Run(ctx, nil); err != nil {
-		t.Fatalf("resumed pass: %v", err)
-	}
-	if reads[paths[0]] != 0 || reads[paths[1]] != 0 {
-		t.Fatalf("resumed pass re-read the batch finished before the stall: %v", reads)
-	}
-	for _, p := range paths {
-		if got := storedBitrate(t, ctx, pool, ids[p]); got != 4047 {
-			t.Fatalf("%s bitrate = %d after the resumed pass, want 4047", p, got)
+	for range 2 {
+		if _, err := backfiller.Run(ctx, nil); err != nil {
+			t.Fatalf("retry past a hung root: %v", err)
 		}
 	}
+	if reads[paths[10]] != 1 {
+		t.Fatalf("file listed behind the hung root read %d times, want once, by the second run", reads[paths[10]])
+	}
+	check("retry past a hung root", len(hung), paths[0], paths[1], paths[10], paths[11])
 
-	// The first listed batch answers, then the slow files stall.
-	slow := paths[2 : 2+attachmentBitrateBackfillMaxTimeouts]
-	var all []int64
-	for _, p := range paths {
-		all = append(all, int64(ids[p]))
+	clear(failing)
+	clear(reads)
+	if result, err := backfiller.Run(ctx, nil); err != nil || !result.Done {
+		t.Fatalf("run after the root returned = %+v, %v; want done", result, err)
 	}
-	listed := all[:2+len(slow)]
-	if _, err := pool.Exec(ctx, `UPDATE media_files SET bitrate = 8710 WHERE id = ANY($1)`, all); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE attachment_bitrate_backfill_state
-		SET retry_media_file_ids = $1, last_media_file_id = $2, completed_at = NULL`, listed, listed[len(listed)-1]); err != nil {
-		t.Fatal(err)
-	}
-	timesOut = func(path string) bool { return slices.Contains(slow, path) }
-	result, err := backfiller.Run(ctx, nil)
-	if err != nil || result.Done || result.Pending != len(slow) {
-		t.Fatalf("Run over a slow retry list = %+v, %v; want the slow files pending", result, err)
-	}
-	for _, p := range paths {
-		want := 4047
-		if slices.Contains(slow, p) {
-			want = 8710
-		}
-		if got := storedBitrate(t, ctx, pool, ids[p]); got != want {
-			t.Errorf("%s bitrate = %d after a stalled retry, want %d", p, got, want)
-		}
-	}
-	var stillListed []int64
-	if err := pool.QueryRow(ctx, `SELECT retry_media_file_ids FROM attachment_bitrate_backfill_state`).Scan(&stillListed); err != nil {
-		t.Fatal(err)
-	}
-	if want := listed[2:]; !slices.Equal(stillListed, want) {
-		t.Fatalf("retry list = %v after a stalled retry, want the slow files %v", stillListed, want)
+	check("root returned", 0, paths...)
+	if reads[paths[0]] != 0 || reads[paths[1]] != 0 || reads[paths[10]] != 0 || reads[paths[11]] != 0 {
+		t.Fatalf("last run re-read files corrected before it: %v", reads)
 	}
 }
 
