@@ -59,8 +59,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const mounted = useRef(true);
   const reloading = useRef(false);
   const editedOver = useRef(new Map<string, EditedOver>());
-  // The validator the last refused save was sent with.
-  const refusedWith = useRef<string | undefined>(undefined);
   const dismissConflict = useCallback(() => {
     if (!conflictShown.current) return;
     conflictShown.current = false;
@@ -313,10 +311,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     const baseline = editBaseline.current;
     reloading.current = true;
     try {
-      const [settingsResult, statusResult] = await Promise.all([
-        refetch(),
-        refetchSensitiveStatus(),
-      ]);
+      // The status is read after the settings, so a secret set by the time of
+      // that read shows in it. A later change only makes the next save refused
+      // again.
+      const settingsFrom = Date.now();
+      const settingsResult = await refetch();
+      const statusFrom = Date.now();
+      const statusResult = await refetchSensitiveStatus();
       // Discard, a profile switch, unmount, a save started meanwhile, or a
       // baseline another path advanced: this result no longer applies.
       if (
@@ -330,13 +331,18 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         dismissConflict();
         return;
       }
-      const fresh = settingsResult.isError ? undefined : settingsResult.data;
-      const freshTag = validatorOf(fresh);
-      // Unknown when the status can't be read: then a secret may be set.
-      const configured = statusResult.isError ? undefined : statusResult.data?.configured;
-      // A read that settled with the refused version (a cancelled refetch
-      // keeps the old record) has not reloaded anything.
-      if (!fresh || !freshTag || freshTag === refusedWith.current) {
+      // Only data read during this reload counts: a refetch that another read
+      // cancelled settles with the record it already had.
+      const fresh =
+        !settingsResult.isError && settingsResult.dataUpdatedAt >= settingsFrom
+          ? settingsResult.data
+          : undefined;
+      // Unknown when the status wasn't read: then a secret may be set.
+      const configured =
+        !statusResult.isError && statusResult.dataUpdatedAt >= statusFrom
+          ? statusResult.data?.configured
+          : undefined;
+      if (!fresh || !validatorOf(fresh)) {
         toast.error(t("web.admin.settings.hooks.settings.conflict.reloadFailed"));
         return;
       }
@@ -388,7 +394,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         throw error;
       }
       const generation = draftGeneration.current;
-      const guardedBy = validatorOf(editBaseline.current ?? settings);
       saveEpoch.current++;
       savePending.current = true;
       let result;
@@ -405,7 +410,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
           generation === draftGeneration.current &&
           dirtyRef.current.size > 0
         ) {
-          refusedWith.current = guardedBy;
           conflictShown.current = true;
           const closed = () => {
             conflictShown.current = false;
