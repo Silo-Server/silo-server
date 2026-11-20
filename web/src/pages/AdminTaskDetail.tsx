@@ -422,10 +422,11 @@ function HistoryRow({
   onToggle: () => void;
 }) {
   const t = useT();
+  const serverText = useServerText();
   const hasResultData = result.result_data && Object.keys(result.result_data).length > 0;
   const failedSteps = (result.steps ?? [])
     .filter((step) => step.status === "failed")
-    .map((step) => step.name);
+    .map((step) => taskText(serverText, step, "name"));
   const errorText =
     failedSteps.length > 0
       ? t("web.admin.tasks.detail.history.failedSteps", { steps: joinList(failedSteps) })
@@ -454,7 +455,11 @@ function HistoryRow({
         <td className="px-4 py-2">
           <TaskStatusBadge result={result} />
         </td>
-        <td className="text-muted-foreground max-w-xs truncate px-4 py-2" title={errorText}>
+        {/* Wraps where the table fits its panel; translated step names run long. */}
+        <td
+          className="text-muted-foreground max-w-xs truncate px-4 py-2 sm:text-pretty sm:whitespace-normal"
+          title={errorText}
+        >
           {errorText}
         </td>
       </tr>
