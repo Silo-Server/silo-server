@@ -26,16 +26,9 @@ interface RelatedRailProps {
   meta?: string;
   items: RelatedRailItem[];
   coverAspect?: "square" | "poster";
-  libraryId?: number;
 }
 
-export function RelatedRail({
-  heading,
-  meta,
-  items,
-  coverAspect = "square",
-  libraryId,
-}: RelatedRailProps) {
+export function RelatedRail({ heading, meta, items, coverAspect = "square" }: RelatedRailProps) {
   const { cardPresentation } = useUICustomization();
   if (items.length === 0) return null;
   const square = coverAspect === "square";
@@ -56,7 +49,7 @@ export function RelatedRail({
       {items.map((item) => (
         <ViewTransitionLink
           key={item.content_id}
-          to={buildItemHref({ contentId: item.content_id, libraryId })}
+          to={buildItemHref({ contentId: item.content_id })}
           aria-current={item.highlight ? "page" : undefined}
           className={`media-card group/related block ${widthClasses}`}
         >

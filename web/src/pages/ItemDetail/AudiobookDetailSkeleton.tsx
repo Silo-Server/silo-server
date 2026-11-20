@@ -24,7 +24,10 @@ export default function AudiobookDetailSkeleton({
   return (
     <div
       aria-hidden="true"
-      className="page-shell-wide audiobook-detail-grid pt-16 pb-14 sm:pt-20 lg:pt-24"
+      className={cn(
+        "page-shell-wide audiobook-detail-grid pt-16 pb-14 sm:pt-20 lg:pt-24",
+        isEbook && "audiobook-detail-grid--ebook",
+      )}
     >
       <div className="audiobook-detail-side">
         <div
@@ -53,7 +56,12 @@ export default function AudiobookDetailSkeleton({
         </div>
       </div>
 
-      <div className="audiobook-detail-head grid grid-cols-[minmax(0,1fr)] gap-1.5 md:pt-1 lg:gap-2 lg:pt-3">
+      <div
+        className={cn(
+          "audiobook-detail-head grid grid-cols-[minmax(0,1fr)] gap-1.5 lg:gap-2 lg:pt-3",
+          isEbook && "md:pt-1",
+        )}
+      >
         <div className={block("h-5 w-44 rounded-md")} />
         <div className={block("h-7 w-full max-w-lg rounded-lg sm:h-10 lg:mb-1 lg:h-[3.25rem]")} />
         <div className={block("h-5 w-48 rounded-md sm:h-6")} />

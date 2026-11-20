@@ -50,9 +50,10 @@
       );
   }
 
-  /* Book page. Below lg the cover and the title sit side by side with the
-     listening controls under them; from lg the cover and controls form a
-     sticky column beside everything else. */
+  /* Book page. Below the two-column breakpoint (md for ebooks, lg for
+     audiobooks) the cover and title sit side by side with actions under them;
+     from that breakpoint the cover and actions form a sticky column beside
+     everything else. */
   .audiobook-detail-grid {
     display: grid;
     grid-template-columns: 7rem minmax(0, 1fr);
@@ -95,13 +96,41 @@
   }
 
   @media (min-width: 48rem) {
-    .audiobook-detail-grid {
+    .audiobook-detail-grid--ebook {
       grid-template-columns: 13.5rem minmax(0, 1fr);
       grid-template-rows: auto 1fr;
       grid-template-areas:
         "side head"
         "side body";
       gap: 1.75rem 2.5rem;
+      align-items: start;
+    }
+
+    .audiobook-detail-grid--ebook .audiobook-detail-side {
+      grid-area: side;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 1rem;
+      position: sticky;
+      /* Clear Layout's sticky mobile header (hidden at lg). */
+      top: calc(var(--detail-header-height, 4.75rem) + 0.75rem);
+      align-self: start;
+    }
+
+    .audiobook-detail-grid--ebook .audiobook-detail-cover,
+    .audiobook-detail-grid--ebook .audiobook-detail-actions {
+      grid-area: auto;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .audiobook-detail-grid {
+      grid-template-columns: 16.25rem minmax(0, 1fr);
+      grid-template-rows: auto 1fr;
+      grid-template-areas:
+        "side head"
+        "side body";
+      gap: 2rem 3.5rem;
       align-items: start;
     }
 
@@ -118,13 +147,6 @@
     .audiobook-detail-cover,
     .audiobook-detail-actions {
       grid-area: auto;
-    }
-  }
-
-  @media (min-width: 64rem) {
-    .audiobook-detail-grid {
-      grid-template-columns: 16.25rem minmax(0, 1fr);
-      gap: 2rem 3.5rem;
     }
   }
 }

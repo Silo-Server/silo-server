@@ -71,7 +71,7 @@ function uniqueFormats(versions: FileVersion[]): string {
     seen.add(raw);
     formats.push(raw);
   }
-  return formats.join(", ");
+  return formats.length > 0 ? joinList(formats) : "";
 }
 
 function clampInProgressPercent(ratio: number): number {
@@ -105,7 +105,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  * partway through, else its publication year.
  */
 function relatedStatus(t: Translate, entry: AudiobookRelatedItem): string | undefined {
-  if (entry.played) return t("web.audiobooks.detail.finished");
+  if (entry.played) return t("web.detail.manga.readStatus");
   if (entry.progress_ratio != null && entry.progress_ratio > 0) {
     return t("web.home.continueWatching.percentRead", {
       percent: clampInProgressPercent(entry.progress_ratio),
@@ -202,7 +202,7 @@ export default function EbookContent({
       {item.poster_thumbhash && <div aria-hidden="true" className="audiobook-tint" />}
       <PageBack />
 
-      <div className="page-shell-wide audiobook-detail-grid pt-16 pb-14 sm:pt-20 lg:pt-24">
+      <div className="page-shell-wide audiobook-detail-grid audiobook-detail-grid--ebook pt-16 pb-14 sm:pt-20 lg:pt-24">
         <div className="audiobook-detail-side">
           <div className="audiobook-detail-cover overflow-hidden rounded-xl shadow-[0_24px_48px_-20px_rgb(0_0_0/0.85)] lg:rounded-2xl">
             <MediaCardArtwork
@@ -241,7 +241,7 @@ export default function EbookContent({
               )
             )}
 
-            {canRead && (hasInProgress || isRead) && (
+            {(hasInProgress || isRead) && (
               <div>
                 <div className="bg-foreground/15 h-1.5 w-full overflow-hidden rounded-full">
                   <div
@@ -253,7 +253,7 @@ export default function EbookContent({
                   {isRead ? (
                     <span className="text-foreground inline-flex min-w-0 items-center gap-1.5 font-medium">
                       <Check className="text-success size-3.5 shrink-0" aria-hidden="true" />
-                      <span className="truncate">{t("web.audiobooks.detail.finished")}</span>
+                      <span className="truncate">{t("web.detail.manga.readStatus")}</span>
                     </span>
                   ) : (
                     <span className="text-foreground/70 truncate">
@@ -271,7 +271,7 @@ export default function EbookContent({
               <Button
                 type="button"
                 variant="secondary"
-                className="h-10 flex-[1_0_auto] gap-2 rounded-full px-3.5 md:h-9"
+                className="h-10 max-w-full flex-[1_0_auto] gap-2 rounded-full px-3.5 md:h-9"
                 onClick={() => watchedMutation.mutate(!isRead)}
                 disabled={watchedMutation.isPending}
               >
@@ -280,17 +280,17 @@ export default function EbookContent({
                 ) : (
                   <Check className="h-4 w-4 shrink-0" />
                 )}
-                <span>{getWatchedActionLabel(item)}</span>
+                <span className="truncate">{getWatchedActionLabel(item)}</span>
               </Button>
               {canRead && canDownload && (
                 <Button
                   type="button"
                   variant="secondary"
-                  className="h-10 flex-[1_0_auto] gap-2 rounded-full px-3.5 md:h-9"
+                  className="h-10 max-w-full flex-[1_0_auto] gap-2 rounded-full px-3.5 md:h-9"
                   onClick={() => setDownloadOpen(true)}
                 >
                   <Download className="h-4 w-4 shrink-0" />
-                  <span>{t("web.detail.actions.download")}</span>
+                  <span className="truncate">{t("web.detail.actions.download")}</span>
                 </Button>
               )}
             </div>
@@ -306,7 +306,7 @@ export default function EbookContent({
               >
                 <span>{seriesLabel}</span>
                 <ChevronRight
-                  className="text-muted-foreground size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5 rtl:rotate-180"
+                  className="text-muted-foreground size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
                   aria-hidden="true"
                 />
               </Link>
@@ -388,13 +388,13 @@ export default function EbookContent({
 
           {series && seriesEntries.length > 0 && (
             <RelatedRail
+              key={series.name || item.content_id}
               heading={
                 series.name
                   ? t("web.detail.books.inSeries", { series: series.name })
                   : t("web.detail.books.inThisSeries")
               }
               coverAspect="poster"
-              libraryId={libraryId}
               items={seriesEntries.map((entry) => ({
                 ...relatedRailItem(t, entry),
                 kicker:
@@ -408,22 +408,22 @@ export default function EbookContent({
 
           {alsoByAuthor.length > 0 && (
             <RelatedRail
+              key={item.content_id}
               heading={
                 authors[0]
                   ? t("web.detail.books.alsoByAuthor", { author: authors[0] })
                   : t("web.detail.books.alsoByThisAuthor")
               }
               coverAspect="poster"
-              libraryId={libraryId}
               items={alsoByAuthor.map((entry) => relatedRailItem(t, entry))}
             />
           )}
 
           {similar.length > 0 && (
             <RelatedRail
+              key={item.content_id}
               heading={t("web.detail.books.youMightAlsoLike")}
               coverAspect="poster"
-              libraryId={libraryId}
               items={similar.map((entry) => relatedRailItem(t, entry))}
             />
           )}

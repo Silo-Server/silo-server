@@ -170,11 +170,12 @@ describe("EbookContent", () => {
 
     cleanup();
 
-    renderEbook(makeEbook({ versions: [] }), 3);
+    renderEbook(makeEbook({ versions: [], user_data: { played: true } }), 3);
     expect(screen.getByText("No ebook files found.")).toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
-  it("links series, genres, and related rail items to the library when libraryId is set, and avoids dead-end links without it", () => {
+  it("links series and genres to the library when libraryId is set, keeps related books unscoped, and avoids dead-end links without libraryId", () => {
     renderEbook(makeEbook(), 3);
     const seriesLink = screen.getByRole("link", { name: "The Meridian Chronicles, book 1" });
     expect(seriesLink.getAttribute("href")).toContain("/library/3?");
@@ -186,7 +187,7 @@ describe("EbookContent", () => {
       "/library/3?tab=library&genre=Science+Fiction",
     );
     const relatedLink = screen.getByRole("link", { name: /A Map of Salt and Ash/i });
-    expect(relatedLink).toHaveAttribute("href", "/item/book-2?libraryId=3");
+    expect(relatedLink).toHaveAttribute("href", "/item/book-2");
 
     cleanup();
 
@@ -275,11 +276,11 @@ describe("EbookContent", () => {
     expect(screen.getByRole("heading", { name: "You might also like" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Notes from an Inland Sea/i })).toHaveAttribute(
       "href",
-      "/item/book-3?libraryId=3",
+      "/item/book-3",
     );
     expect(screen.getByRole("link", { name: /The Paper Observatory/i })).toHaveAttribute(
       "href",
-      "/item/book-4?libraryId=3",
+      "/item/book-4",
     );
   });
 });
