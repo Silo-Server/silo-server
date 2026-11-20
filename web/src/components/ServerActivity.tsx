@@ -442,7 +442,7 @@ function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void 
         <Link
           to={`/admin/tasks/${task.key}`}
           onClick={onNavigate}
-          className="hover:text-primary truncate text-[12px] font-medium transition-colors"
+          className="hover:text-primary truncate text-[12px] font-medium transition-colors hover:underline"
         >
           {taskText(serverText, task, "name")}
         </Link>
@@ -559,7 +559,7 @@ function PreparationRow({
         <Link
           to={PREPARATIONS_HREF}
           onClick={onNavigate}
-          className="hover:text-primary truncate text-[12px] font-medium transition-colors"
+          className="hover:text-primary truncate text-[12px] font-medium transition-colors hover:underline"
         >
           {preparationCompactTitle(prep)}
         </Link>
