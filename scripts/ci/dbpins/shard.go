@@ -225,7 +225,7 @@ func compileTestBinaries(ctx context.Context, shards []testShard, binRoot string
 func runSharded(ctx context.Context, pins []pin, template string) (*results, string, error) {
 	run, err := preflightClones(ctx, template)
 	if err != nil {
-		return nil, "", err
+		return nil, run, err
 	}
 
 	shards := planShards(pins)
@@ -261,17 +261,34 @@ func runSharded(ctx context.Context, pins []pin, template string) (*results, str
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for s := range work {
-				pkg := compiled[s.dir]
-				if err := runOneShard(ctx, template, run, s, pkg, &cloneMu, &resMu, &outMu, res); err != nil {
-					errMu.Lock()
-					runErrs = append(runErrs, err)
-					errMu.Unlock()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case s, ok := <-work:
+					if !ok {
+						return
+					}
+					if ctx.Err() != nil {
+						return
+					}
+					pkg := compiled[s.dir]
+					if err := runOneShard(ctx, template, run, s, pkg, &cloneMu, &resMu, &outMu, res); err != nil {
+						errMu.Lock()
+						runErrs = append(runErrs, err)
+						errMu.Unlock()
+					}
 				}
 			}
 		}()
 	}
 	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		runErrs = append(runErrs, err)
+	}
 	return res, run, errors.Join(runErrs...)
 }
 
@@ -285,7 +302,7 @@ func preflightClones(ctx context.Context, template string) (string, error) {
 		return "", err
 	}
 	if err := dropDatabase(ctx, template, name); err != nil {
-		return "", err
+		return run, err
 	}
 	return run, nil
 }

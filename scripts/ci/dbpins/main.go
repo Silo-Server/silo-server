@@ -86,10 +86,11 @@ func main() {
 	case *shared:
 		res, waitErr = runDirect(pins, true)
 	default:
-		// Ctrl-C reaches test binaries through the process group; stay up to
-		// drop this run's database copies once they exit.
-		signal.Notify(make(chan os.Signal, 1), os.Interrupt)
-		res, run, waitErr = runSharded(context.Background(), pins, template)
+		// Cancel queued shard starts on Ctrl-C while staying alive to drop
+		// this run's database copies once active test binaries exit.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		res, run, waitErr = runSharded(ctx, pins, template)
+		stop()
 		if run != "" {
 			if dropErr := dropRunClones(template, run); dropErr != nil {
 				fmt.Fprintf(os.Stderr, "dbpins: %v\n", dropErr)
