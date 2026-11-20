@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdminSession } from "@/api/types";
 import { sendAdminPlaybackCommand } from "@/api/v2/adminPlaybackCommands";
+import { v2Fixture } from "@/api/v2/testing";
 import { AdminSessionActions } from "./AdminSessionActions";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
@@ -48,12 +49,14 @@ describe("AdminSessionActions message receipt", () => {
     },
     { outcome: "replayed", delivery: "acknowledged", kind: "success", text: replayed, open: true },
   ] as const)("$outcome $delivery", async ({ outcome, delivery, kind, text, open }) => {
-    vi.mocked(sendAdminPlaybackCommand).mockResolvedValue({
-      command_id: "c1",
-      sequence: 1,
-      outcome,
-      delivery,
-    });
+    vi.mocked(sendAdminPlaybackCommand).mockResolvedValue(
+      v2Fixture<"POST /api/v2/admin/sessions/{session_id}/message">({
+        command_id: "c1",
+        sequence: 1,
+        outcome,
+        delivery,
+      }),
+    );
     const user = userEvent.setup();
     render(<AdminSessionActions session={session} />);
     await user.click(screen.getByRole("button", { name: "Session actions" }));
