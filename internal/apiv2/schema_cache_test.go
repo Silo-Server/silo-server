@@ -47,12 +47,22 @@ func TestRuntimeSchemaRegistryIsolation(t *testing.T) {
 		t.Fatalf("testRegister probe %q missing from instance schema map", probeName)
 	}
 
-	// Mutating a schema obtained from Map() must not alter the shared snapshot.
+	// Mutating a schema (including nested property schemas) obtained from Map()
+	// must not alter the shared snapshot.
 	baseReqBefore := slices.Clone(base.schemas["Problem"].Required)
+	baseTitleDescBefore := base.schemas["Problem"].Properties["title"].Description
 	copiedProblem := probeSchemas.Map()["Problem"]
 	copiedProblem.Required = append(copiedProblem.Required, "mutated-field")
+	copiedProblem.Properties["title"].Description = "mutated-description"
+	copiedProblem.Properties["injected"] = &huma.Schema{Type: huma.TypeString}
 	if !slices.Equal(base.schemas["Problem"].Required, baseReqBefore) {
 		t.Fatalf("Map mutation leaked into sharedRuntimeSchemas: got %v, want %v", base.schemas["Problem"].Required, baseReqBefore)
+	}
+	if base.schemas["Problem"].Properties["title"].Description != baseTitleDescBefore {
+		t.Fatalf("nested property mutation leaked into sharedRuntimeSchemas: got %q, want %q", base.schemas["Problem"].Properties["title"].Description, baseTitleDescBefore)
+	}
+	if _, leaked := base.schemas["Problem"].Properties["injected"]; leaked {
+		t.Fatal("injected property map entry leaked into sharedRuntimeSchemas")
 	}
 
 	// Registering a duplicate multipart form schema name must still panic.

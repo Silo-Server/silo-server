@@ -227,21 +227,95 @@ func (r *runtimeSchemaRegistry) TypeFromRef(ref string) reflect.Type {
 
 func (r *runtimeSchemaRegistry) Map() map[string]*huma.Schema {
 	if !r.copied {
+		seen := make(map[*huma.Schema]*huma.Schema, len(r.base.schemas))
 		merged := make(map[string]*huma.Schema, len(r.base.schemas)+len(r.schemas))
 		for name, s := range r.base.schemas {
-			if s == nil {
-				merged[name] = nil
-				continue
-			}
-			cp := *s
-			cp.Required = slices.Clone(s.Required)
-			merged[name] = &cp
+			merged[name] = cloneSchema(s, seen)
 		}
 		maps.Copy(merged, r.schemas)
 		r.schemas = merged
 		r.copied = true
 	}
 	return r.schemas
+}
+
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+func cloneSchema(s *huma.Schema, seen map[*huma.Schema]*huma.Schema) *huma.Schema {
+	if s == nil {
+		return nil
+	}
+	if existing, ok := seen[s]; ok {
+		return existing
+	}
+	cp := *s
+	seen[s] = &cp
+	cp.Examples = slices.Clone(s.Examples)
+	cp.Enum = slices.Clone(s.Enum)
+	cp.Required = slices.Clone(s.Required)
+	cp.Minimum = clonePtr(s.Minimum)
+	cp.ExclusiveMinimum = clonePtr(s.ExclusiveMinimum)
+	cp.Maximum = clonePtr(s.Maximum)
+	cp.ExclusiveMaximum = clonePtr(s.ExclusiveMaximum)
+	cp.MultipleOf = clonePtr(s.MultipleOf)
+	cp.MinLength = clonePtr(s.MinLength)
+	cp.MaxLength = clonePtr(s.MaxLength)
+	cp.MinItems = clonePtr(s.MinItems)
+	cp.MaxItems = clonePtr(s.MaxItems)
+	cp.MinProperties = clonePtr(s.MinProperties)
+	cp.MaxProperties = clonePtr(s.MaxProperties)
+	cp.Items = cloneSchema(s.Items, seen)
+	cp.Not = cloneSchema(s.Not, seen)
+	if addSchema, ok := s.AdditionalProperties.(*huma.Schema); ok {
+		cp.AdditionalProperties = cloneSchema(addSchema, seen)
+	}
+	cp.Properties = cloneSchemaMap(s.Properties, seen)
+	cp.OneOf = cloneSchemaSlice(s.OneOf, seen)
+	cp.AnyOf = cloneSchemaSlice(s.AnyOf, seen)
+	cp.AllOf = cloneSchemaSlice(s.AllOf, seen)
+	if s.Extensions != nil {
+		cp.Extensions = maps.Clone(s.Extensions)
+	}
+	if s.DependentRequired != nil {
+		cp.DependentRequired = make(map[string][]string, len(s.DependentRequired))
+		for k, v := range s.DependentRequired {
+			cp.DependentRequired[k] = slices.Clone(v)
+		}
+	}
+	if s.Discriminator != nil {
+		disc := *s.Discriminator
+		disc.Mapping = maps.Clone(s.Discriminator.Mapping)
+		cp.Discriminator = &disc
+	}
+	return &cp
+}
+
+func cloneSchemaMap(src map[string]*huma.Schema, seen map[*huma.Schema]*huma.Schema) map[string]*huma.Schema {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]*huma.Schema, len(src))
+	for k, v := range src {
+		dst[k] = cloneSchema(v, seen)
+	}
+	return dst
+}
+
+func cloneSchemaSlice(src []*huma.Schema, seen map[*huma.Schema]*huma.Schema) []*huma.Schema {
+	if src == nil {
+		return nil
+	}
+	dst := make([]*huma.Schema, len(src))
+	for i, v := range src {
+		dst[i] = cloneSchema(v, seen)
+	}
+	return dst
 }
 
 func (r *runtimeSchemaRegistry) RegisterTypeAlias(t reflect.Type, alias reflect.Type) {
