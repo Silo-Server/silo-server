@@ -18,10 +18,15 @@ const DeliveryTypeEpisodeAvailable = "episode.available"
 // before keep it.
 const SuppressedReasonSeriesBurst = "series_burst"
 
-// SuppressedReasonStale marks release events that aged past the fanout
-// staleness horizon before they could fan out (fanout disabled for a stretch,
-// extended downtime); delivering them long after the fact would be noise.
+// SuppressedReasonStale marks release events that aged past maxReleaseEventAge
+// before they could fan out (extended downtime); delivering them long after
+// the fact would be noise.
 const SuppressedReasonStale = "stale"
+
+// maxReleaseEventAge is the staleness horizon: an unprocessed release event
+// older than this is suppressed instead of fanned out or posted, and
+// retention deletes it.
+const maxReleaseEventAge = 72 * time.Hour
 
 // Release event kinds. Episode events carry the series/episode columns and
 // fan out to interested profiles; flat item kinds (movie, audiobook, ebook)

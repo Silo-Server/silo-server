@@ -71380,136 +71380,10 @@
       "value": "Neizdevās ielādēt paziņojumu iestatījumus"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Jauns saturs netiek reģistrēts, tāpēc neko nevar nosūtīt. Ieslēdziet to atkal sadaļā „Apstrāde”."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Sūtīšana ir pauzēta; jaunais saturs gaida rindā. Ieslēdziet to atkal sadaļā „Apstrāde”."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Ja izslēgts, tā vietā tiek sūtīts ikdienas kopsavilkums."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Kā Silo pamana jaunu saturu, grupē to ziņojumos un cik ilgi tos glabā."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Noteikt, kas to vēlas"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Salīdzināt katru vienumu ar visu lietotāju preferencēm."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Grupēšana un pārslodzes ierobežošana"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Apstrāde"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maksimālais satura vecums"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Vecāki vienumi tiek atmesti, lai tie nepienāktu kā novecojušas ziņas."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maks. ziņojumu skaits vienam seriālam"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Viss, kas pārsniedz šo skaitu, šajā paketē tiek izlaists."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Pamanīt jaunu saturu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Reģistrēt jaunus vienumus bibliotēku skenēšanas laikā."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Konveijers"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Izlasītie paziņojumi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Glabāšana"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Nosūtīšanas vēsture"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Ieraksts par to, par ko Silo jau ir paziņojis."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Nogaidīšanas logs"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Vienumi, kuru skenēšana beidzas vienlaikus, pienāk kā viens paziņojums."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neizlasītie paziņojumi"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -72438,18 +72312,6 @@
     {
       "type": 0,
       "value": "Paziņojumi"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dienas"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "stundas"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -79162,7 +79024,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Piegādes kanāli, servera kanāli un tas, kā no jauna satura rodas paziņojumi."
+      "value": "Piegādes kanāli un servera kanāli."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -79261,12 +79123,6 @@
       "value": "E-pasts"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Grupēšana un pārpludināšanas kontrole"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -79285,28 +79141,10 @@
       "value": "Ļaut lietotājiem izvēlēties e-pasta ziņojumu par katru epizodi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maksimālais satura vecums"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maksimālais ziņojumu skaits seriālam"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Pieminēt pieprasītāju Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Pamanīt jaunu saturu"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -79315,46 +79153,16 @@
       "value": "Personīgie webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Apstrāde"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Izlasītie paziņojumi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Retranslatora URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Glabāšana"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Nosūtīto vēsture"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Servera kanāli"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Nostabilizēšanās laika logs"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -79369,12 +79177,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Nelasītie paziņojumi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -79385,12 +79187,6 @@
     {
       "type": 0,
       "value": "Webhook uz personu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Noskaidrot, kas to vēlas"
     }
   ],
   "web.admin.settings.search.playback.description": [

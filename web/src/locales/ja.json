@@ -57156,136 +57156,10 @@
       "value": "通知の設定を読み込めませんでした"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "新しいコンテンツが記録されていないため、何も送信できません。「処理」で再びオンにしてください。"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "送信が一時停止されています。新しいコンテンツはキューで待機しています。「処理」で再びオンにしてください。"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "オフの場合は、代わりに毎日のまとめを送信します。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Siloが新しいコンテンツを検出してメッセージにまとめる方法と、メッセージを保持する期間です。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "通知対象のユーザーを判定"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "各項目を全員の設定と照合します。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "グループ化と大量送信の制御"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "処理"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "コンテンツの最大経過期間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "これより古い項目は、古いお知らせとして届く代わりに破棄されます。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "シリーズごとの最大メッセージ数"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "これを超えた分は、そのバッチではスキップされます。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "新しいコンテンツを検出"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "ライブラリのスキャン中に新しい項目を記録します。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "パイプライン"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "既読の通知"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "保持期間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "送信履歴"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Siloが通知済みの内容の記録です。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "待機時間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "同時にスキャンが完了した項目は、1件の通知にまとめて届きます。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未読の通知"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58170,18 +58044,6 @@
     {
       "type": 0,
       "value": "通知"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "日"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "時間"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -64708,7 +64570,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "配信チャンネル、サーバーチャンネル、新しいコンテンツを通知にする方法。"
+      "value": "配信チャンネルとサーバーチャンネル。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -64807,12 +64669,6 @@
       "value": "メール"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "グループ化と大量送信の抑制"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -64831,28 +64687,10 @@
       "value": "エピソードごとのメールを選択可能にする"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "コンテンツの最大経過期間"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "シリーズあたりの最大メッセージ数"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Discordでリクエストした人にメンション"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "新しいコンテンツを検出"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -64861,46 +64699,16 @@
       "value": "個人用Webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "処理"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "既読の通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "リレーURL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "保持"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "送信履歴"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "サーバーチャンネル"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "待機期間"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -64915,12 +64723,6 @@
       "value": "Siloプッシュリレー"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未読の通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -64931,12 +64733,6 @@
     {
       "type": 0,
       "value": "1人あたりのWebhook数"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "受け取る人を判定"
     }
   ],
   "web.admin.settings.search.playback.description": [

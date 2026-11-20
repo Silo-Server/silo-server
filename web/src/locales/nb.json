@@ -63617,136 +63617,10 @@
       "value": "Kunne ikke laste inn varslingsinnstillingene"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nytt innhold registreres ikke, så ingenting kan sendes. Slå det på igjen under Behandling."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Sending er satt på pause; nytt innhold venter i køen. Slå det på igjen under Behandling."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Av sender dem det daglige sammendraget i stedet."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hvordan Silo oppdager nytt innhold, grupperer det i meldinger og hvor lenge meldingene beholdes."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Finn ut hvem som vil ha det"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Sammenlign hvert element med alles preferanser."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gruppering og flombegrensning"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maks alder på innhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Eldre elementer forkastes i stedet for å komme frem som gamle nyheter."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maks meldinger per serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Alt utover dette hoppes over for den runden."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Oppdag nytt innhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registrer nye elementer under biblioteksskanninger."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Leste varsler"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Oppbevaring"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sendehistorikk"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Oversikt over hva Silo allerede har varslet om."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Ventevindu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementer som blir ferdig skannet samtidig, kommer som ett varsel."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Uleste varsler"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64651,18 +64525,6 @@
     {
       "type": 0,
       "value": "Varsler"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dager"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "timer"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71248,7 +71110,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Leveringskanaler, serverkanaler og hvordan nytt innhold blir til varsler."
+      "value": "Leveringskanaler og serverkanaler."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71347,12 +71209,6 @@
       "value": "E-post"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gruppering og flombegrensning"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71371,28 +71227,10 @@
       "value": "La folk velge en e-post per episode"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maks alder på innhold"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maks antall meldinger per serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Nevn den som ba om det, på Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Oppdag nytt innhold"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71401,46 +71239,16 @@
       "value": "Personlige webhooks"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Leste varsler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Relé-URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Oppbevaring"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sendehistorikk"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverkanaler"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Stabiliseringsvindu"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71455,12 +71263,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Uleste varsler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71471,12 +71273,6 @@
     {
       "type": 0,
       "value": "Webhooks per person"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Finn ut hvem som vil ha det"
     }
   ],
   "web.admin.settings.search.playback.description": [

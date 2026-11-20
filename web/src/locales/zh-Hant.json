@@ -57674,136 +57674,10 @@
       "value": "無法載入通知設定"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "目前未記錄新內容，因此無法傳送任何通知。請在「處理」中重新開啟。"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "傳送已暫停；新內容會在佇列中等候。請在「處理」中重新開啟。"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "關閉時會改為傳送每日摘要。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo 如何偵測新內容、將其分組為訊息，以及保留訊息的時間。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "找出想收到通知的使用者"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "將每個項目與所有人的偏好設定進行比對。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "分組與流量控制"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "處理"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "內容最長時效"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "較舊的項目會被捨棄，不會以過時消息送達。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "每部影集的訊息上限"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "超過此數量的項目會在該批次中略過。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "偵測新內容"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "在媒體庫掃描期間記錄新項目。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "處理流程"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "已讀通知"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "保留期限"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "傳送記錄"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo 已發出通知的項目記錄。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "等候時間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "一起完成掃描的項目會合併為一則通知。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未讀通知"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58672,18 +58546,6 @@
     {
       "type": 0,
       "value": "通知"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "天"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "小時"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -65266,7 +65128,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "傳送管道、伺服器管道，以及新內容如何轉為通知。"
+      "value": "傳送管道和伺服器管道。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -65365,12 +65227,6 @@
       "value": "電子郵件"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "分組與流量控制"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -65389,28 +65245,10 @@
       "value": "讓使用者選擇每集傳送一封電子郵件"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "內容時效上限"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "每部影集的訊息數上限"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "在 Discord 上提及請求者"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "偵測新內容"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -65419,46 +65257,16 @@
       "value": "個人 Webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "處理"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "已讀通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "中繼網址"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "保留期限"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "傳送記錄"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "伺服器管道"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "穩定等待時間"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -65473,12 +65281,6 @@
       "value": "Silo 推播中繼"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未讀通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -65489,12 +65291,6 @@
     {
       "type": 0,
       "value": "每人 Webhook 數量"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "判斷誰想收到"
     }
   ],
   "web.admin.settings.search.playback.description": [

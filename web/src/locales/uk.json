@@ -76980,136 +76980,10 @@
       "value": "Не вдалося завантажити налаштування сповіщень"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Новий вміст не записується, тож нічого не можна надіслати. Увімкніть це знову в розділі «Обробка»."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Надсилання призупинено; новий вміст чекає в черзі. Увімкніть його знову в розділі «Обробка»."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Якщо вимкнено, натомість надсилається щоденний підсумок."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Як Silo помічає новий вміст, групує його в повідомлення та скільки часу їх зберігає."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Визначати, кому це цікаво"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Зіставляти кожен елемент із вподобаннями всіх користувачів."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Групування й захист від надміру повідомлень"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Обробка"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Макс. вік вмісту"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Старіші елементи відкидаються, щоб не надходити як застарілі новини."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Макс. повідомлень на серіал"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Усе понад це значення пропускається в цьому пакеті."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Помічати новий вміст"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Записувати нові елементи під час сканування бібліотек."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Конвеєр"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочитані сповіщення"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Зберігання"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Історія надсилання"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Запис того, про що Silo вже сповістив."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Вікно очікування"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Елементи, сканування яких завершилося одночасно, надходять одним сповіщенням."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочитані сповіщення"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -78062,18 +77936,6 @@
     {
       "type": 0,
       "value": "Сповіщення"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "дн."
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "год"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -84849,7 +84711,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Канали доставки, канали сервера й те, як новий вміст стає сповіщеннями."
+      "value": "Канали доставки й канали сервера."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -84948,12 +84810,6 @@
       "value": "Ел. пошта"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Групування й захист від надмірних сповіщень"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -84972,28 +84828,10 @@
       "value": "Дозволити вибирати лист для кожного епізоду"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Максимальний вік вмісту"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Максимум повідомлень на серіал"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Згадувати автора запиту в Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Виявлення нового вмісту"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -85002,46 +84840,16 @@
       "value": "Особисті вебхуки"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Обробка"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочитані сповіщення"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL-адреса ретранслятора"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Зберігання"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Історія надісланих"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Канали сервера"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Вікно стабілізації"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -85056,12 +84864,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочитані сповіщення"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -85072,12 +84874,6 @@
     {
       "type": 0,
       "value": "Вебхуків на особу"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Визначення зацікавлених"
     }
   ],
   "web.admin.settings.search.playback.description": [
