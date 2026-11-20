@@ -20,6 +20,8 @@ type deliveryRecorder struct {
 	record    func(sessionID string)
 	sessionID string
 	status    int
+	// delivered is set once media bytes went out under a 2xx status.
+	delivered bool
 }
 
 type deliveryRecorderKey struct{}
@@ -52,5 +54,14 @@ func (d *deliveryRecorder) wroteBody(n int64) {
 	if d.status >= http.StatusMultipleChoices {
 		return
 	}
+	d.delivered = true
 	d.record(d.sessionID)
+}
+
+// deliveredMedia reports whether the response to r has sent playback media
+// bytes under a 2xx status: false for a HEAD, a refusal, an unsatisfiable range
+// and a request no handler marked with noteDelivery.
+func deliveredMedia(r *http.Request) bool {
+	d, ok := r.Context().Value(deliveryRecorderKey{}).(*deliveryRecorder)
+	return ok && d.delivered
 }

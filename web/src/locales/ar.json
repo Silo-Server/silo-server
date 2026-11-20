@@ -88966,136 +88966,10 @@
       "value": "تعذّر تحميل إعدادات الإشعارات"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "لا يُسجَّل المحتوى الجديد، لذا لا يمكن إرسال أي شيء. أعد تفعيله ضمن «المعالجة»."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "الإرسال متوقف مؤقتًا؛ ينتظر المحتوى الجديد في قائمة الانتظار. أعد تفعيله ضمن «المعالجة»."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "عند تعطيله، يُرسَل إليهم الملخص اليومي بدلًا من ذلك."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "كيف يلاحظ Silo المحتوى الجديد، ويجمعه في رسائل، ومدة احتفاظه بها."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "تحديد المهتمين به"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "مطابقة كل عنصر مع تفضيلات الجميع."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "التجميع والحد من الإغراق"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "المعالجة"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "الحد الأقصى لعمر المحتوى"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "تُتجاهل العناصر الأقدم بدلًا من وصولها كأخبار قديمة."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "الحد الأقصى للرسائل لكل مسلسل"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "يُتخطى ما يتجاوز ذلك في تلك الدفعة."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "ملاحظة المحتوى الجديد"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "تسجيل العناصر الجديدة أثناء فحص المكتبات."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "مسار المعالجة"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات المقروءة"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "الاحتفاظ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "سجل المُرسَل"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "سجل بما سبق أن أرسل Silo إشعارًا عنه."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "مهلة الاستقرار"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "العناصر التي ينتهي فحصها معًا تصل في إشعار واحد."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات غير المقروءة"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -90088,18 +89962,6 @@
     {
       "type": 0,
       "value": "الإشعارات"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "أيام"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ساعات"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -97012,7 +96874,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "قنوات التسليم، وقنوات الخادم، وكيف يتحول المحتوى الجديد إلى إشعارات."
+      "value": "قنوات التسليم وقنوات الخادم."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -97111,12 +96973,6 @@
       "value": "البريد الإلكتروني"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "التجميع والتحكم في الإغراق"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -97135,28 +96991,10 @@
       "value": "السماح للأشخاص باختيار رسالة بريد إلكتروني لكل حلقة"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "أقصى عمر للمحتوى"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "أقصى عدد للرسائل لكل مسلسل"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "الإشارة إلى صاحب الطلب على Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "رصد المحتوى الجديد"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -97165,46 +97003,16 @@
       "value": "خطافات الويب الشخصية"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "المعالجة"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات المقروءة"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "عنوان URL للمُرحِّل"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "الاحتفاظ"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "سجل المُرسَل"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "قنوات الخادم"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "نافذة الاستقرار"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -97219,12 +97027,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات غير المقروءة"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -97235,12 +97037,6 @@
     {
       "type": 0,
       "value": "خطافات الويب لكل شخص"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "تحديد من يريده"
     }
   ],
   "web.admin.settings.search.playback.description": [

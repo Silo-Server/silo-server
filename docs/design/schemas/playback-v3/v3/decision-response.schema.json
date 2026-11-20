@@ -403,6 +403,11 @@
         },
         "header_refresh_url": {
           "type": "string"
+        },
+        "parallel_range_url": {
+          "type": "string",
+          "format": "uri-reference",
+          "description": "Where the client may read the file's byte ranges over several connections: the plan's own stream relative to the API root, the same stream on the admin's media origin (server.web_media_url), or the proxy node's own URL. Present only on an original_http plan whose attempt sent client feature parallel_range_origin_v1 without header_authenticated_media_v1. The URL authorizes itself: the client uses it exactly as given and adds no account token."
         }
       },
       "additionalProperties": true
