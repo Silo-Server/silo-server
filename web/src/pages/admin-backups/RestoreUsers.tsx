@@ -191,7 +191,7 @@ export const AccountRow = memo(function AccountRow({
             htmlFor={controlId}
             title={item.label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
               !item.selectable && "text-muted-foreground",
             )}
           >
