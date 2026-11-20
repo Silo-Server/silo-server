@@ -14009,7 +14009,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — kolekcija koju prikazuju nije ni ovdje ni u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — kolekcija koju prikazuje nije ni ovdje ni u sigurnosnoj kopiji"
             }
           ]
         },
@@ -14055,7 +14055,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove su postavke šifrirane drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — postavke su šifrirane drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14101,7 +14101,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj ih poslužitelj ne može prihvatiti"
+              "value": " nije moguće vratiti — ovaj poslužitelj to ne može prihvatiti"
             }
           ]
         },
@@ -14193,7 +14193,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove datoteke nedostaju na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće datoteke nedostaju na ovom poslužitelju"
             }
           ]
         },
@@ -14239,7 +14239,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove mape nisu na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće mape nisu na ovom poslužitelju"
             }
           ]
         },
@@ -14285,7 +14285,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova grupa pristupa nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća grupa pristupa nije na ovom poslužitelju"
             }
           ]
         },
@@ -14331,7 +14331,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov naslov nije u katalogu ovog poslužitelja"
+              "value": " nije moguće vratiti — pripadajući naslov nije u katalogu ovog poslužitelja"
             }
           ]
         },
@@ -14377,7 +14377,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — proširili bi pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
+              "value": " nije moguće vratiti — to bi proširilo pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
             }
           ]
         },
@@ -14423,7 +14423,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova medijateka nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća medijateka nije na ovom poslužitelju"
             }
           ]
         },
@@ -14469,7 +14469,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu medijateku ovdje nije moguće vratiti"
+              "value": " nije moguće vratiti — pripadajuću medijateku ovdje nije moguće vratiti"
             }
           ]
         },
@@ -14548,6 +14548,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14561,7 +14607,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — šifrirani su drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — šifrirano je drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14607,7 +14653,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — najprije ih treba instalirati iz kataloga dodataka"
+              "value": " nije moguće vratiti — najprije to treba instalirati iz kataloga dodataka"
             }
           ]
         },
@@ -14653,7 +14699,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov glavni profil mora se vratiti zajedno s njima"
+              "value": " nije moguće vratiti — zajedno s tim mora se vratiti i pripadajući glavni profil"
             }
           ]
         },
@@ -14699,7 +14745,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — nema ih u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — sigurnosna kopija to ne sadrži"
             }
           ]
         },
@@ -14883,7 +14929,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj bi im poslužitelj dao veći pristup nego sigurnosna kopija"
+              "value": " nije moguće vratiti — ovaj bi poslužitelj tome dao veći pristup nego sigurnosna kopija"
             }
           ]
         },
@@ -14975,7 +15021,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovdje su već isti"
+              "value": " nije moguće vratiti — ovdje je već isto"
             }
           ]
         },
@@ -15067,7 +15113,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu kopiju u sigurnosnoj kopiji nije moguće pročitati"
+              "value": " nije moguće vratiti — pripadajuću kopiju u sigurnosnoj kopiji nije moguće pročitati"
             }
           ]
         },
@@ -15113,7 +15159,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — povezuju se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
+              "value": " nije moguće vratiti — povezuje se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
             }
           ]
         },
@@ -15238,6 +15284,52 @@
     {
       "type": 0,
       "value": "Adresa usluge mijenja se bez njezinih vjerodajnica u sigurnosnoj kopiji pa ih vraćanje ovdje briše i isključuje uslugu dok ih ponovno ne unesete."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavka zadržava trenutačnu vrijednost jer okruženje ovog poslužitelja postavlja nju ili dio njezine veze."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavke zadržavaju trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavki zadržava trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15804,8 +15896,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sakrij ih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15990,8 +16110,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Prikaži ih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18666,6 +18814,12 @@
       "value": "Drugi se račun ovdje prijavljuje istim korisničkim imenom ili e-adresom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze pa ovaj poslužitelj zadržava svoje trenutačne vrijednosti."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19900,6 +20054,16 @@
     {
       "type": 0,
       "value": " (zadržano: strože)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (zadržano: okruženje)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -56346,7 +56510,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Postavlja konfiguracija implementacije poslužitelja. Uklonite ga ondje da biste ga izbrisali ovdje."
+      "value": "Postavlja ga konfiguracija implementacije poslužitelja. Uklonite ga ondje i ponovno pokrenite API poslužitelje da biste ga izbrisali ovdje."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -59113,6 +59277,130 @@
       "value": "Generiranje je zaustavljeno. Spremljene preporuke ostaju vidljive u odjeljku Otkrij do ponovnog pokretanja poslužitelja."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rangiranje profila ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Dohvaćanje TMDB popisa ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Pretraživanje naslova i izrada embeddinga ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjen je "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istekli naslov"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjena su "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istekla naslova"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjeno je "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " isteklih naslova"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59157,6 +59445,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Prije izrade preporuka za Otkrij riješite sukob zaključavanja embeddinga u nastavku."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najprije pokrenite posao Embeddingi kako bi Silo imao vektore medijateke za usporedbu."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Prije izrade preporuka za Otkrij povežite pružatelja embeddinga u odjeljku AI usluge."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nijedan profil još nema profil ukusa. Pokrenite posao Profili ukusa kad netko pogleda ili ocijeni naslove."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61367,6 +61679,32 @@
       "value": "Ostaje prazno dok se ne uključe preporuke za Otkrij pod Administracija → Preporuke."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Preporučeni retci ostaju prazni dok se ne uključe preporuke za Otkrij pod "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administracija → Preporuke"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Isključeno u odjeljku Preporuke"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62974,6 +63312,12 @@
       "value": "Novi retci dodaju se na dno stranice Otkrij"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otvori postavke preporuka"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62986,6 +63330,12 @@
       "value": "MDBList u svom feedu ne prenosi redoslijed spremljen na stranici popisa. Odaberite onaj koji se tamo prikazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Vaš profil još nema preporuka za Otkrij. Pokrenite posao Preporuke za Otkrij ili pogledajte i ocijenite nekoliko naslova kako biste pregledali ovaj redak."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62996,6 +63346,12 @@
     {
       "type": 0,
       "value": "Odaberite popis ili zalijepite njegovu poveznicu da biste vidjeli njegove naslove."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Uključite preporuke za Otkrij pod Administracija → Preporuke kako biste pregledali ovaj redak."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -66829,6 +67185,12 @@
       "value": "Provjera veze nije uspjela."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nije moguće provjeriti postavlja li ovo okruženje poslužitelja. Ponovno učitajte stranicu da biste to uredili."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67399,6 +67761,30 @@
     {
       "type": 0,
       "value": "Ažuriranje kanala nije uspjelo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Vaše izmjene postavki koje su se promijenile te spremljenih lozinki i ključeva poništavaju se; ostale izmjene ostaju."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ponovno učitaj"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće ponovno učitati postavke. Pokušajte ponovno."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Postavke su promijenjene drugdje"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -72985,6 +73371,24 @@
       "value": "Prelazak na drugi model zahtijeva ponovno postavljanje embeddinga, čime se svi brišu. Drugi pružatelj koji poslužuje isti model primjenjuje se nakon ponovnog pokretanja."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Dodaj u Otkrij"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće dodati preporučene retke na stranicu Otkrij."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Preporučeni retci dodani su na stranicu Otkrij."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -73007,6 +73411,44 @@
     {
       "type": 0,
       "value": "Koliko naslova koji nisu u medijateci poslužitelj čuva za preporuke. Svaki se traži na TMDB-u i pretvara u embedding. Izrada embeddinga obično je jeftina, ali veći broj može koštati više ili trajati dulje, ovisno o vašem pružatelju embeddinga, i zauzima više prostora za pohranu."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaša stranica Otkrij još ne prikazuje nijedan redak tipa Preporuke."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Uključite postavku „Omogući preporuke“ iznad i ponovno pokrenite poslužitelj kako bi se preporuke za Otkrij mogle pokrenuti."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Zahtjevi su trenutačno isključeni. Uključite ih u "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Postavkama zahtjeva"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kako bi gledatelji mogli vidjeti stranicu Otkrij."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otvori stranicu Otkrij"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -82271,6 +82713,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Pohranu nije moguće premjestiti ovamo dok okruženje postavlja postavke pohrane ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprije uklonite te varijable i ponovno pokrenite sve API poslužitelje."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -83463,6 +83919,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ovaj raspored dolazi iz postavki sigurnosnih kopija. Promijenite ga na stranici "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Poslužitelj › Sigurnosne kopije"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

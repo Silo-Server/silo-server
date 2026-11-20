@@ -13610,7 +13610,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — återställningen skulle ge bredare åtkomst, så den här servern behåller sina striktare värden"
+              "value": " kan inte återställas — det skulle ge bredare åtkomst, så den här servern behåller sina striktare värden"
             }
           ]
         },
@@ -13622,7 +13622,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — återställningen skulle ge bredare åtkomst, så den här servern behåller sina striktare värden"
+              "value": " kan inte återställas — de skulle ge bredare åtkomst, så den här servern behåller sina striktare värden"
             }
           ]
         }
@@ -13733,6 +13733,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan inte återställas — den här serverns miljö anger inställningarna som skiljer sig, eller en del av anslutningen de hör till"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan inte återställas — den här serverns miljö anger inställningarna som skiljer sig, eller en del av anslutningen de hör till"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13746,7 +13780,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — krypteringen gjordes med en annan SECRET_KEY"
+              "value": " kan inte återställas — det är krypterat med en annan SECRET_KEY"
             }
           ]
         },
@@ -13758,7 +13792,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — krypteringen gjordes med en annan SECRET_KEY"
+              "value": " kan inte återställas — de är krypterade med en annan SECRET_KEY"
             }
           ]
         }
@@ -13848,7 +13882,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — saknas i säkerhetskopian"
+              "value": " kan inte återställas — det finns inte i säkerhetskopian"
             }
           ]
         },
@@ -13860,7 +13894,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — saknas i säkerhetskopian"
+              "value": " kan inte återställas — de finns inte i säkerhetskopian"
             }
           ]
         }
@@ -13984,7 +14018,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — den här servern skulle ge mer åtkomst än säkerhetskopian gjorde"
+              "value": " kan inte återställas — den här servern skulle ge det mer åtkomst än säkerhetskopian gjorde"
             }
           ]
         },
@@ -13996,7 +14030,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — den här servern skulle ge mer åtkomst än säkerhetskopian gjorde"
+              "value": " kan inte återställas — den här servern skulle ge dem mer åtkomst än säkerhetskopian gjorde"
             }
           ]
         }
@@ -14052,7 +14086,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — ingen skillnad mot den här servern"
+              "value": " kan inte återställas — det är redan likadant här"
             }
           ]
         },
@@ -14064,7 +14098,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — ingen skillnad mot den här servern"
+              "value": " kan inte återställas — de är redan likadana här"
             }
           ]
         }
@@ -14120,7 +14154,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — säkerhetskopians kopia kan inte läsas"
+              "value": " kan inte återställas — säkerhetskopians kopia av det kan inte läsas"
             }
           ]
         },
@@ -14132,7 +14166,7 @@
             },
             {
               "type": 0,
-              "value": " kan inte återställas — säkerhetskopians kopia kan inte läsas"
+              "value": " kan inte återställas — säkerhetskopians kopia av dem kan inte läsas"
             }
           ]
         }
@@ -14255,6 +14289,40 @@
     {
       "type": 0,
       "value": "En tjänsts adress ändras utan att dess inloggningsuppgifter finns i säkerhetskopian, så återställningen rensar dem här och stänger av tjänsten tills de har angetts igen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " inställning behåller sitt nuvarande värde eftersom den här serverns miljö anger den, eller en del av anslutningen den hör till."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " inställningar behåller sina nuvarande värden eftersom den här serverns miljö anger dem, eller en del av anslutningen de hör till."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14701,8 +14769,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Dölj dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dölj det"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dölj dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14851,8 +14939,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Visa dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Visa det"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Visa dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17079,6 +17187,12 @@
       "value": "Ett annat konto här loggar in med dess användarnamn eller e-postadress."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Den här serverns miljö anger inställningarna som skiljer sig, eller en del av anslutningen de hör till, så den här servern behåller sina nuvarande värden."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18153,6 +18267,16 @@
     {
       "type": 0,
       "value": " (behålls: striktare)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (behålls: miljö)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50399,7 +50523,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Anges av serverns driftsättningskonfiguration. Ta bort den där för att kunna radera den här."
+      "value": "Anges av serverns driftsättningskonfiguration. Ta bort den där och starta om API-servrarna för att radera den här."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52993,6 +53117,114 @@
       "value": "Genereringen har stoppats. Sparade rekommendationer visas i Utforska tills servern startas om."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rankar profiler ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Hämtar TMDB-listor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Slår upp titlar och skapar embeddings ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rensade "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " utgången titel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rensade "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " utgångna titlar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53025,6 +53257,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Lös konflikten med embeddinglåset nedan innan rekommendationer i Utforska byggs."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Kör jobbet Embeddings först så att Silo har biblioteksvektorer att jämföra med."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Anslut en embeddingleverantör under AI-tjänster innan rekommendationer i Utforska byggs."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Inga profiler har smakprofiler än. Kör Smakprofiler när någon har sett eller betygsatt titlar."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54867,6 +55123,32 @@
       "value": "Förblir tom tills rekommendationer i Utforska slås på i Admin → Rekommendationer."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rekommendationsrader förblir tomma tills rekommendationer i Utforska slås på i "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Admin → Rekommendationer"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Av i Rekommendationer"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56345,6 +56627,12 @@
       "value": "Nya rader hamnar längst ned i Utforska"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Öppna inställningar för Rekommendationer"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56357,6 +56645,12 @@
       "value": "MDBList-flödet innehåller inte sorteringen som sparats på listans sida. Välj den som visas där."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Din profil har inga rekommendationer i Utforska än. Kör Rekommendationer i Utforska eller titta på och betygsätt några titlar för att förhandsgranska den här raden."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56367,6 +56661,12 @@
     {
       "type": 0,
       "value": "Välj en lista eller klistra in länken för att se dess titlar."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Slå på rekommendationer i Utforska i Admin → Rekommendationer för att förhandsgranska den här raden."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60025,6 +60325,12 @@
       "value": "Anslutningskontrollen misslyckades."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Det gick inte att kontrollera om serverns miljö anger den här inställningen. Läs in sidan igen för att redigera den."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60579,6 +60885,30 @@
     {
       "type": 0,
       "value": "Det gick inte att uppdatera kanalen"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Läs in igen för att se de aktuella värdena. Dina ändringar av inställningar som har ändrats, och av sparade lösenord och nycklar, ångras. Dina övriga ändringar behålls."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Läs in igen"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Det gick inte att läsa in inställningarna igen. Försök igen."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Inställningarna har ändrats någon annanstans"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66045,6 +66375,24 @@
       "value": "Om du byter till en annan modell måste inbäddningarna återställas, vilket raderar alla. En annan leverantör som hanterar samma modell börjar gälla efter en omstart."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Lägg till i Utforska"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Det gick inte att lägga till rekommendationsrader på sidan Utforska."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Rekommendationsrader har lagts till på sidan Utforska."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66067,6 +66415,44 @@
     {
       "type": 0,
       "value": "Hur många titlar som inte finns i biblioteket som servern sparar att rekommendera från. Varje titel slås upp på TMDB och får en embedding. Att skapa embeddings är oftast billigt, men ett högre antal kan kosta mer eller ta längre tid beroende på din embedding-leverantör, och tar mer lagringsutrymme."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Sidan Utforska visar ännu inga rader av typen Rekommendationer."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Slå på Aktivera rekommendationer ovan och starta om servern innan Rekommendationer i Utforska kan köras."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Förfrågningar är avstängda just nu. Slå på dem i "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "inställningarna för förfrågningar"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " så att tittarna kan se sidan Utforska."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Öppna sidan Utforska"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75189,6 +75575,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Det går inte att flytta lagringen här medan miljön anger lagringsinställningar ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Ta först bort de variablerna och starta om alla API-servrar."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76323,6 +76723,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Det här schemat kommer från inställningarna för säkerhetskopior. Ändra det under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Säkerhetskopior"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

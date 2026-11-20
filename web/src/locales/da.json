@@ -13354,7 +13354,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — samlingen, de viser, findes ikke her eller i backuppen"
+              "value": " kan ikke gendannes — samlingen, der vises, findes ikke her eller i backuppen"
             }
           ]
         },
@@ -13388,7 +13388,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres indstillinger er krypteret med en anden SECRET_KEY"
+              "value": " kan ikke gendannes — indstillingerne er krypteret med en anden SECRET_KEY"
             }
           ]
         },
@@ -13422,7 +13422,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — denne server kan ikke modtage dem"
+              "value": " kan ikke gendannes — denne server kan ikke modtage elementet"
             }
           ]
         },
@@ -13490,7 +13490,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres filer mangler på denne server"
+              "value": " kan ikke gendannes — filerne mangler på denne server"
             }
           ]
         },
@@ -13524,7 +13524,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres mapper findes ikke på denne server"
+              "value": " kan ikke gendannes — mapperne findes ikke på denne server"
             }
           ]
         },
@@ -13558,7 +13558,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres adgangsgruppe findes ikke på denne server"
+              "value": " kan ikke gendannes — adgangsgruppen findes ikke på denne server"
             }
           ]
         },
@@ -13592,7 +13592,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres titel er ikke i denne servers katalog"
+              "value": " kan ikke gendannes — titlen er ikke i denne servers katalog"
             }
           ]
         },
@@ -13626,7 +13626,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de ville udvide adgangen, så denne server beholder sine strengere værdier"
+              "value": " kan ikke gendannes — elementet ville udvide adgangen, så denne server beholder sine egne strengere værdier"
             }
           ]
         },
@@ -13660,7 +13660,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres bibliotek findes ikke på denne server"
+              "value": " kan ikke gendannes — biblioteket findes ikke på denne server"
             }
           ]
         },
@@ -13694,7 +13694,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres bibliotek kan ikke gendannes her"
+              "value": " kan ikke gendannes — biblioteket kan ikke gendannes her"
             }
           ]
         },
@@ -13749,6 +13749,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gendannes — denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gendannes — denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13762,7 +13796,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de er krypteret med en anden SECRET_KEY"
+              "value": " kan ikke gendannes — elementet er krypteret med en anden SECRET_KEY"
             }
           ]
         },
@@ -13796,7 +13830,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de skal først installeres fra et pluginkatalog"
+              "value": " kan ikke gendannes — elementet skal først installeres fra et pluginkatalog"
             }
           ]
         },
@@ -13830,7 +13864,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — deres primære profil skal gendannes sammen med dem"
+              "value": " kan ikke gendannes — dens primære profil skal gendannes sammen med den"
             }
           ]
         },
@@ -13864,7 +13898,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — backuppen indeholder dem ikke"
+              "value": " kan ikke gendannes — elementet findes ikke i backuppen"
             }
           ]
         },
@@ -14000,7 +14034,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — denne server ville give dem mere adgang, end backuppen gjorde"
+              "value": " kan ikke gendannes — denne server ville give elementet mere adgang, end backuppen gjorde"
             }
           ]
         },
@@ -14068,7 +14102,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de er allerede ens her"
+              "value": " kan ikke gendannes — elementet er allerede det samme her"
             }
           ]
         },
@@ -14136,7 +14170,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — backuppens kopi af dem kan ikke læses"
+              "value": " kan ikke gendannes — backuppens kopi af elementet kan ikke læses"
             }
           ]
         },
@@ -14170,7 +14204,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gendannes — de forbinder til eksterne tjenester, og denne server kan ikke bekræfte backuppen"
+              "value": " kan ikke gendannes — elementet forbinder til eksterne tjenester, og denne server kan ikke bekræfte backuppen"
             }
           ]
         },
@@ -14271,6 +14305,40 @@
     {
       "type": 0,
       "value": "En tjenestes adresse ændres uden dens loginoplysninger i backuppen, så gendannelsen rydder dem her og slår tjenesten fra, indtil de indtastes igen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indstilling beholder sin nuværende værdi, fordi denne servers miljø angiver den eller en del af dens forbindelse."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indstillinger beholder deres nuværende værdier, fordi denne servers miljø angiver dem eller en del af deres forbindelse."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14717,8 +14785,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skjul dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14867,8 +14955,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Vis dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17087,6 +17195,12 @@
       "value": "En anden konto her logger ind med samme brugernavn eller e-mail."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse, så denne server beholder sine nuværende værdier."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18161,6 +18275,16 @@
     {
       "type": 0,
       "value": " (beholdt: strengere)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beholdt: miljø)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50455,7 +50579,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Angivet af serverens udrulningskonfiguration. Fjern den dér for at slette den her."
+      "value": "Angivet af serverens udrulningskonfiguration. Fjern den dér, og genstart API-serverne for at slette den her."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53049,6 +53173,114 @@
       "value": "Genereringen er stoppet. Gemte anbefalinger forbliver synlige i Opdag, indtil serveren genstartes."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rangerer profiler ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Henter TMDB-lister ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Slår titler op og gemmer embeddings ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ryddede "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " udløbet titel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ryddede "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " udløbne titler"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53081,6 +53313,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Løs konflikten med embedding-låsen nedenfor, før du opbygger Opdag-anbefalinger."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Kør jobbet Embeddings først, så Silo har biblioteksvektorer at sammenligne med."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Forbind en embedding-udbyder under AI-tjenester, før du opbygger Opdag-anbefalinger."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ingen profiler har smagsprofiler endnu. Kør Smagsprofiler, når nogen har set eller bedømt titler."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54923,6 +55179,32 @@
       "value": "Forbliver tom, indtil Opdag-anbefalinger er slået til under Admin → Anbefalinger."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Anbefalede rækker forbliver tomme, indtil Opdag-anbefalinger er slået til under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Admin → Anbefalinger"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Fra i Anbefalinger"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56401,6 +56683,12 @@
       "value": "Nye rækker placeres nederst i Opdag"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Åbn indstillinger for Anbefalinger"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56413,6 +56701,12 @@
       "value": "MDBLists feed indeholder ikke den sortering, der er gemt på listens side. Vælg den, som siden viser."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Din profil har ingen Opdag-anbefalinger endnu. Kør Opdag-anbefalinger, eller se og bedøm nogle titler for at forhåndsvise denne række."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56423,6 +56717,12 @@
     {
       "type": 0,
       "value": "Vælg en liste, eller indsæt dens link for at se dens titler."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Slå Opdag-anbefalinger til under Admin → Anbefalinger for at forhåndsvise denne række."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60081,6 +60381,12 @@
       "value": "Forbindelsestjekket mislykkedes."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kunne ikke tjekke, om serverens miljø angiver denne indstilling. Genindlæs siden for at redigere den."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60635,6 +60941,30 @@
     {
       "type": 0,
       "value": "Kanalen kunne ikke opdateres"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Genindlæs for at se de aktuelle værdier. Dine ændringer af indstillinger, der er blevet ændret, og af gemte adgangskoder og nøgler fortrydes; dine øvrige ændringer bevares."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Genindlæs"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke genindlæse indstillingerne. Prøv igen."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Indstillingerne er ændret et andet sted"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66097,6 +66427,24 @@
       "value": "Skift til en anden model kræver, at embeddings nulstilles, hvilket sletter dem alle. En anden udbyder, der leverer samme model, træder i kraft efter en genstart."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Tilføj til Opdag"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke tilføje anbefalede rækker til Opdag-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Anbefalede rækker er tilføjet til Opdag-siden."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66119,6 +66467,44 @@
     {
       "type": 0,
       "value": "Hvor mange titler, der ikke er i biblioteket, serveren gemmer at anbefale fra. Hver titel slås op på TMDB og får en embedding. Embedding er normalt billigt, men et højere antal kan koste mere eller tage længere tid afhængigt af din embedding-udbyder og bruger mere lagerplads."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Din Opdag-side viser endnu ingen anbefalingsrækker."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Slå Aktivér anbefalinger til ovenfor, og genstart serveren, før Opdag-anbefalinger kan køre."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Anmodninger er slået fra lige nu. Slå dem til under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Anmodningsindstillinger"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", så seerne kan se Opdag-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Åbn Opdag-siden"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75237,6 +75623,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Lageret kan ikke flyttes hertil, så længe miljøet angiver lagerindstillinger ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Fjern først disse variabler, og genstart alle API-servere."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76371,6 +76771,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Denne tidsplan kommer fra backupindstillingerne. Rediger den under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Backups"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
