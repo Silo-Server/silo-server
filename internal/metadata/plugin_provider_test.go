@@ -281,3 +281,43 @@ func TestPluginProvider_DropsLocalArtworkSources(t *testing.T) {
 		t.Fatalf("person detail = %+v, want the local photo dropped", person)
 	}
 }
+
+func TestPluginProviderSendsAndReadsISBNsAsISBN13(t *testing.T) {
+	ids, err := structpb.NewStruct(map[string]any{"isbn": "978-0-306-40615-7", "openlibrary": "OL1M"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakePluginMetadataClient{
+		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{{Title: "Book", ProviderIds: ids}}},
+		response:       &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{Title: "Book", ProviderIds: ids}},
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		"plugin_installation_id": "1",
+		"capability_id":          "openlibrary",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+	}
+	stored := map[string]string{"openlibrary": "OL1M", "isbn": "ISBN 0-306-40615-2"}
+	sent := map[string]string{"openlibrary": "OL1M", "isbn": "9780306406157"}
+
+	results, err := provider.Search(context.Background(), SearchQuery{Title: "Book", ContentType: "ebook", ProviderIDs: stored})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	assertStructStringMap(t, client.searchReq.GetProviderIds(), sent)
+	if len(results) != 1 || results[0].ProviderIDs["isbn"] != "9780306406157" {
+		t.Fatalf("Search() results = %+v, want the ISBN-13", results)
+	}
+
+	result, err := provider.GetMetadata(context.Background(), MetadataRequest{ContentType: "ebook", ProviderIDs: stored})
+	if err != nil {
+		t.Fatalf("GetMetadata() error = %v", err)
+	}
+	assertStructStringMap(t, client.getMetadataReq.GetProviderIds(), sent)
+	if result == nil || result.ProviderIDs["isbn"] != "9780306406157" {
+		t.Fatalf("GetMetadata() result = %+v, want the ISBN-13", result)
+	}
+}
