@@ -234,16 +234,16 @@ func TestBackfillLocksImportedEmbeddings(t *testing.T) {
 	}
 }
 
-var testRefusal = &embeddings.StatusError{API: "embedding", StatusCode: 400, Body: "invalid input"}
+var errTestRefusal = &embeddings.StatusError{API: "embedding", StatusCode: 400, Body: "invalid input"}
 
-// refusingEmbedder answers a call with testRefusal when bad reports one of
+// refusingEmbedder answers a call with errTestRefusal when bad reports one of
 // its texts, and counts its calls.
 func refusingEmbedder(bad func(text string) bool, calls *int) quotaTestEmbedder {
 	return func(_ context.Context, texts []string) ([][]float32, error) {
 		*calls++
 		for _, text := range texts {
 			if bad(text) {
-				return nil, testRefusal
+				return nil, errTestRefusal
 			}
 		}
 		out := make([][]float32, len(texts))

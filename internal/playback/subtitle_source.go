@@ -101,22 +101,6 @@ func admitDemux() (release func(), err error) {
 	}
 }
 
-// admitted runs extract in a demux slot when it reads the source file. A
-// conversion of packets reads none and runs as it is.
-func admitted(extract SUPExtractFunc) SUPExtractFunc {
-	return func(ctx context.Context, opts StreamExtractOpts) error {
-		if opts.Packets != nil {
-			return extract(ctx, opts)
-		}
-		release, err := admitDemux()
-		if err != nil {
-			return err
-		}
-		defer release()
-		return extract(ctx, opts)
-	}
-}
-
 // ErrSubtitleReadsBusy means the node already admits as many whole-track
 // subtitle reads as it allows. A request can retry after
 // SubtitleReadsRetryAfter seconds.

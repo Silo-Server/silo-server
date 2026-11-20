@@ -324,7 +324,7 @@ func newTestUserStore(t *testing.T) (userstore.UserStore, *sql.DB) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	if err := userdb.InitSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		t.Fatalf("InitSchema: %v", err)
 	}
 	return userdb.NewSQLiteUserStore(db), db

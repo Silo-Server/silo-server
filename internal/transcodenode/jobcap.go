@@ -4,18 +4,15 @@ import (
 	"maps"
 	"math"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 // Vio keeps the node's job cap and the refusals it publishes, but not
 // upstream's admission lifecycle (preparations, starts, remux notes), which
 // the fork's DB-backed node does not use.
-
-const (
-	errNodeAtCapacity = "node is at its job limit"
-)
 
 // SetJobCap sets the node's own job cap, 0 for none. A cap above the int32
 // range is clamped: the value only ever guards an admission counter.

@@ -61,14 +61,6 @@ Error opening input files: No such file or directory
 [concat @ 0x569d5e853f00] Impossible to open 'http://127.0.0.1:9/src/00000000000000000000000000000000'
 [in#0 @ 0x569d5e853e00] Error opening input: Connection refused
 `
-	// relayedConcatNoHTTPFixture is how FFmpeg 6.1 fails the relayed concat
-	// check for a protocol it was built without.
-	relayedConcatNoHTTPFixture = `[concat @ 0x5b7a51208f00] Impossible to open 'http://127.0.0.1:9/src/00000000000000000000000000000000'
-[in#0 @ 0x5b7a51208e00] Error opening input: Protocol not found
-[in#0 @ 0x5b7a51208e00] Did you mean file:pipe:0?
-Error opening input file pipe:0.
-Error opening input files: Protocol not found
-`
 	// concatUnknownKeywordFixture is how an ffmpeg that lacks a list
 	// directive fails it.
 	concatUnknownKeywordFixture = `[concat @ 0x7a82810000] Line 3: unknown keyword 'file_packet_meta'
