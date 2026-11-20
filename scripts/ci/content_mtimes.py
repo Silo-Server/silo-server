@@ -48,6 +48,23 @@ def tracked_worktree_files(root):
     return paths
 
 
-if __name__ == '__main__':
-    root = Path.cwd()
+def refresh_index(root):
+    # Re-sync .git/index stat metadata with the stamped mtimes so downstream
+    # `git diff --name-only` on blob:none clones neither hits the Git < 2.53
+    # diffcore_skip_stat_unmatch segfault nor prefetches excluded blobs.
+    res = subprocess.run(
+        ['git', 'update-index', '-q', '--ignore-submodules', '--refresh'],
+        cwd=root,
+        check=False,
+    )
+    if res.returncode not in (0, 1):
+        raise subprocess.CalledProcessError(res.returncode, res.args)
+
+
+def normalize(root):
     stamp(root, tracked_worktree_files(root))
+    refresh_index(root)
+
+
+if __name__ == '__main__':
+    normalize(Path.cwd())

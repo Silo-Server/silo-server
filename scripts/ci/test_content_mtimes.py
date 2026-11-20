@@ -63,6 +63,65 @@ class ContentMtimesTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             content_mtimes.stamp(self.origin, tracked)
 
+    def test_partial_sparse_clone_diff_name_only_after_normalize(self):
+        # Modify both a checked-out file and a sparse-excluded file while
+        # keeping an alphabetically earlier tracked file (go.mod) unchanged.
+        self.write(self.origin / "internal/a.go", "package internal\n// v2\n")
+        self.write(self.origin / "web/src/locales/fr.json", '{"v":2}\n')
+        self.git(self.origin, "add", "--all")
+        self.git(self.origin, "commit", "-qm", "second")
+
+        bare = self.root / "origin.git"
+        self.git(self.root, "clone", "-q", "--bare", str(self.origin), str(bare))
+        self.git(bare, "config", "uploadpack.allowfilter", "true")
+
+        clone = self.root / "partial"
+        self.git(
+            self.root,
+            "clone",
+            "-q",
+            "--no-checkout",
+            "--filter=blob:none",
+            f"file://{bare}",
+            str(clone),
+        )
+        self.git(clone, "sparse-checkout", "init", "--no-cone")
+        self.git(clone, "sparse-checkout", "set", "/*", "!/web/assets-source/", "!/web/src/locales/")
+        self.git(clone, "checkout", "-q", "HEAD")
+
+        content_mtimes.normalize(clone)
+        file_mtime = (clone / "internal/a.go").lstat().st_mtime_ns
+        self.assertEqual(file_mtime, content_mtimes.timestamp((clone / "internal/a.go").read_bytes()))
+
+        # Point origin at a nonexistent path so any unintended promisor blob
+        # fetch during `git diff --name-only` fails immediately.
+        self.git(clone, "remote", "set-url", "origin", f"file://{self.root / 'missing.git'}")
+        diff = subprocess.check_output(
+            [
+                GIT,
+                "diff",
+                "--color=never",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                "HEAD~1",
+                "--",
+            ],
+            cwd=clone,
+        ).decode()
+        changed = [name for name in diff.split("\0") if name]
+        self.assertEqual(sorted(changed), ["internal/a.go", "web/src/locales/fr.json"])
+
+        # Excluded base and head locale blobs must remain absent locally.
+        missing = self.git(clone, "rev-list", "--objects", "--missing=print", "HEAD~1", "HEAD")
+        missing_oids = {line[1:] for line in missing.splitlines() if line.startswith("?")}
+        for rev in ("HEAD~1", "HEAD"):
+            entry = self.git(clone, "ls-tree", rev, "--", "web/src/locales/fr.json").strip()
+            oid = entry.split()[2]
+            self.assertIn(oid, missing_oids)
+
 
 if __name__ == "__main__":
     unittest.main()
