@@ -7,13 +7,14 @@ import (
 )
 
 type userStateEventPayload struct {
-	ProfileID   string `json:"profile_id"`
-	ContentID   string `json:"content_id,omitempty"`
-	SeriesID    string `json:"series_id,omitempty"`
-	Change      string `json:"change"`
-	Played      *bool  `json:"played,omitempty"`
-	IsFavorite  *bool  `json:"is_favorite,omitempty"`
-	InWatchlist *bool  `json:"in_watchlist,omitempty"`
+	ProfileID       string `json:"profile_id"`
+	ContentID       string `json:"content_id,omitempty"`
+	SeriesID        string `json:"series_id,omitempty"`
+	Change          string `json:"change"`
+	PlaybackStopped bool   `json:"playback_stopped,omitempty"`
+	Played          *bool  `json:"played,omitempty"`
+	IsFavorite      *bool  `json:"is_favorite,omitempty"`
+	InWatchlist     *bool  `json:"in_watchlist,omitempty"`
 	// NotInterested accompanies change "not_interested".
 	NotInterested *bool `json:"not_interested,omitempty"`
 }

@@ -93,6 +93,7 @@ interface UserStatePayload {
   profile_id: string;
   content_id?: string;
   series_id?: string;
+  playback_stopped?: boolean;
   change:
     | "progress"
     | "favorite"
@@ -457,6 +458,7 @@ function handleUserStateEvent(
   payload: UserStatePayload,
   activeProfileID: string | null | undefined,
   allowDashboardRefetch: boolean,
+  scheduleHomeProgress: (playbackStopped: boolean) => void,
 ) {
   if (payload.profile_id && activeProfileID && payload.profile_id !== activeProfileID) {
     return;
@@ -524,13 +526,15 @@ function handleUserStateEvent(
           // A mark changes which titles More like this lists.
           skipSimilarItems: payload.change !== "not_interested",
           knownRelatedIds,
-          cancelHomeReads: payload.change === "progress",
+          skipHomeRefresh: payload.change === "progress",
         }
-      : { skipSimilarItems: true, cancelHomeReads: payload.change === "progress" },
+      : { skipSimilarItems: true, skipHomeRefresh: payload.change === "progress" },
   );
-  // Membership changes refresh immediately. Progress uses the coalesced
-  // media surface invalidation above, which already refreshes Home.
-  if (userStateChangeAffectsSectionMembership(payload.change)) {
+  // Bulk progress sync can emit one event per title. Keep one Home refresh
+  // for the whole burst, while finalized playback can advance its deadline.
+  if (payload.change === "progress") {
+    scheduleHomeProgress(payload.playback_stopped === true);
+  } else if (userStateChangeAffectsSectionMembership(payload.change)) {
     void queryClient
       .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
       .then(() => bumpHomeRefreshSignal(queryClient));
@@ -576,6 +580,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   // next return from a hide catches up the frames it lost.
   const droppedSinceCatchUpRef = useRef(false);
   const watchStateCatchUpRef = useRef<ProfileRequestContextSnapshot | null>(null);
+  const homeProgressRefreshRef = useRef<{
+    timer: number;
+    authority: ProfileRequestContextSnapshot;
+    playbackStopped: boolean;
+  } | null>(null);
   const watchStateScopeRef = useRef<ProfileRequestContextSnapshot | null>(null);
   // A focus read can land before a connection comes back. It cannot see a
   // stop later in that gap, so only the subscription clears this obligation.
@@ -894,6 +903,31 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           message.data as UserStatePayload,
           activeProfileIDRef.current,
           allowDashboardRealtimeUpdatesRef.current,
+          (playbackStopped) => {
+            const pending = homeProgressRefreshRef.current;
+            if (pending) {
+              if (
+                isEventsAuthorityActive(pending.authority) &&
+                (!playbackStopped || pending.playbackStopped)
+              ) {
+                return;
+              }
+              window.clearTimeout(pending.timer);
+            }
+            homeProgressRefreshRef.current = {
+              authority: realtimeAuthority,
+              playbackStopped,
+              timer: window.setTimeout(
+                () => {
+                  homeProgressRefreshRef.current = null;
+                  if (!isEventsAuthorityActive(realtimeAuthority)) return;
+                  watchStateCatchUpRef.current = realtimeAuthority;
+                  setCatchUpSignal((signal) => signal + 1);
+                },
+                playbackStopped ? 600 : 30_000,
+              ),
+            };
+          },
         );
         break;
       case "notifications":
@@ -967,6 +1001,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     const homeAuthority = catchUpWatchState ? watchStateAuthority : captureEventsAuthority();
     watchStateCatchUpRef.current = null;
     if (homeAuthority?.profileId) {
+      if (homeProgressRefreshRef.current) {
+        window.clearTimeout(homeProgressRefreshRef.current.timer);
+        homeProgressRefreshRef.current = null;
+      }
       watchStateScopeRef.current = homeAuthority;
       // Home's row queries have no live observers. Mark them stale before
       // restarting its load queue, including a first read that raced the gap.
@@ -1008,6 +1046,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     queryClient,
     refreshAccount,
   ]);
+
+  useEffect(
+    () => () => {
+      const pending = homeProgressRefreshRef.current;
+      if (pending) window.clearTimeout(pending.timer);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!authenticatedUserID) {

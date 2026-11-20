@@ -297,7 +297,7 @@ func TestNativePlaybackStopPublishesSavedProgressToProfile(t *testing.T) {
 				if event.Channel != evt.ChannelUserState || event.Event != userStateChangedEvent ||
 					event.UserID != f.caller.UserID || event.ProfileID != f.caller.ProfileID ||
 					payload.ProfileID != f.caller.ProfileID || payload.ContentID != "episode-1" ||
-					payload.SeriesID != "series-1" || payload.Change != "progress" {
+					payload.SeriesID != "series-1" || payload.Change != "progress" || !payload.PlaybackStopped {
 					t.Fatalf("unexpected watch-state event: %+v, payload %+v", event, payload)
 				}
 			default:
@@ -317,6 +317,69 @@ func TestNativePlaybackStopPublishesSavedProgressToProfile(t *testing.T) {
 			default:
 			}
 		})
+	}
+}
+
+func TestCompatibilityPlaybackStopPublishesV2WatchState(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	f.handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
+	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{
+		ID: 100, ContentID: "movie-1", Duration: 3600,
+	}}
+	f.handler.EventsHub = evt.NewHub("playback-test", nil)
+	events, unsubscribe := f.handler.EventsHub.Subscribe()
+	t.Cleanup(unsubscribe)
+
+	session := &playback.Session{
+		ID: f.session.ID, UserID: f.caller.UserID, ProfileID: f.caller.ProfileID,
+		MediaFileID: 100, Position: 900, IsJellyfinCompat: true,
+	}
+	if result := f.handler.persistStopAndHistory(t.Context(), session); result.HistoryID == "" {
+		t.Fatalf("compatibility stop did not write history: %+v", result)
+	}
+	select {
+	case event := <-events:
+		var payload userStateEventPayload
+		if err := jsonv2.Unmarshal(event.Data, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !event.V2Only || payload.ContentID != "movie-1" || !payload.PlaybackStopped {
+			t.Fatalf("unexpected compatibility stop event: %+v, payload %+v", event, payload)
+		}
+	default:
+		t.Fatal("compatibility stop did not publish a watch-state event")
+	}
+	if result := f.handler.persistStopAndHistory(t.Context(), session); !result.AlreadyRecorded {
+		t.Fatalf("compatibility replay was recorded again: %+v", result)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("replayed compatibility stop published %s", event.Event)
+	default:
+	}
+}
+
+func TestSQLitePlaybackStopReplayPreservesLaterProgress(t *testing.T) {
+	ctx := t.Context()
+	store := newPlaybackTestStore(t)
+	stop := userstore.PlaybackStopWrite{
+		Entry: userstore.WatchHistoryEntry{
+			ID: "final-stop", ProfileID: "profile-1", MediaItemID: "movie-1", DurationSeconds: 3600,
+		},
+		PositionSeconds: 900,
+	}
+	if _, replay, err := userstore.CommitPlaybackStop(ctx, store, stop); err != nil || replay {
+		t.Fatalf("initial stop: replay=%t, err=%v", replay, err)
+	}
+	if err := store.SetProgress(ctx, "profile-1", "movie-1", 1800, 3600, stop.Thresholds); err != nil {
+		t.Fatal(err)
+	}
+	if _, replay, err := userstore.CommitPlaybackStop(ctx, store, stop); err != nil || !replay {
+		t.Fatalf("retried stop: replay=%t, err=%v", replay, err)
+	}
+	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
+	if err != nil || progress == nil || progress.PositionSeconds != 1800 {
+		t.Fatalf("later progress: %+v, %v", progress, err)
 	}
 }
 

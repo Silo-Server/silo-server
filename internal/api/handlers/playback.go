@@ -1146,11 +1146,12 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	// repeated stop of a play already in history marks it again, so a range
 	// an earlier stop failed to mark is not lost; the mark skips episodes
 	// already completed.
+	var spanWritten bool
 	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded && duration > 0 &&
 		session.Position/duration > userstore.WatchedFraction(thresholds.WatchedPct))) {
 		targets, spanErr := h.spannedEpisodeTargets(ctx, file)
 		if spanErr == nil {
-			spanErr = watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, stoppedAt)
+			spanWritten, spanErr = watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, stoppedAt)
 		}
 		if spanErr != nil {
 			slog.ErrorContext(ctx, "failed to mark multi-episode file episodes watched", "component", "api", "session", session.ID, "error", spanErr)
@@ -1158,14 +1159,15 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	}
 	// Let other clients re-read after the final writes, including when an
 	// earlier progress sample already marked the first episode watched.
-	if result.ProgressWritten && h.EventsHub != nil && session.UserID > 0 && session.ProfileID != "" {
+	if (result.ProgressWritten || result.HistoryID != "" || spanWritten) && h.EventsHub != nil && session.UserID > 0 && session.ProfileID != "" {
 		publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		publishErr := h.EventsHub.PublishJSON(publishCtx, evt.ChannelUserState, userStateChangedEvent, userStateEventPayload{
-			ProfileID: session.ProfileID,
-			ContentID: targetID,
-			SeriesID:  h.resolveSeriesID(publishCtx, file),
-			Change:    userStateChangeProgress,
+			ProfileID:       session.ProfileID,
+			ContentID:       targetID,
+			SeriesID:        h.resolveSeriesID(publishCtx, file),
+			Change:          userStateChangeProgress,
+			PlaybackStopped: true,
 		}, evt.PublishOptions{UserID: session.UserID, ProfileID: session.ProfileID, V2Only: true})
 		if publishErr != nil {
 			slog.WarnContext(publishCtx, "failed to publish playback watch-state change", "component", "api", "session", session.ID, "error", publishErr)

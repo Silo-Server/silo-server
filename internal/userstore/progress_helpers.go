@@ -46,26 +46,11 @@ type PlaybackStopWriter interface {
 }
 
 func CommitPlaybackStop(ctx context.Context, store UserStore, stop PlaybackStopWrite) ([]WatchHistoryEntry, bool, error) {
-	if writer, ok := store.(PlaybackStopWriter); ok {
-		return writer.CommitPlaybackStop(ctx, stop)
+	writer, ok := store.(PlaybackStopWriter)
+	if !ok {
+		return nil, false, errors.New("user store must commit playback stops atomically")
 	}
-	entry := stop.Entry
-	if err := store.SetProgress(ctx, entry.ProfileID, entry.MediaItemID, stop.PositionSeconds, entry.DurationSeconds, stop.Thresholds); err != nil {
-		return nil, false, err
-	}
-	if err := store.UpdateProgressHints(ctx, entry.ProfileID, entry.MediaItemID, stop.Hints); err != nil {
-		return nil, false, err
-	}
-	spanned, err := MarkWatchedBatch(ctx, store, entry.ProfileID, stop.SpannedTargets, stop.SpannedHistory)
-	if err != nil {
-		return nil, false, err
-	}
-	if _, err := AddVisibleHistory(ctx, store, entry); errors.Is(err, ErrHistoryEntryExists) {
-		return spanned, true, nil
-	} else if err != nil {
-		return nil, false, err
-	}
-	return spanned, false, nil
+	return writer.CommitPlaybackStop(ctx, stop)
 }
 
 type HistoryVisibilityStore interface {

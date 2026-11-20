@@ -940,6 +940,8 @@ describe("RealtimeEventsProvider", () => {
   });
 
   it("refreshes the series a progress event names for an uncached episode", async () => {
+    setProfileId("profile-1");
+    mockState.profile = { id: "profile-1", has_pin: false };
     const queryClient = new QueryClient();
     const homeRow = sectionKeys.homeItems("next-up");
     queryClient.setQueryData(homeRow, { items: [] });
@@ -977,6 +979,7 @@ describe("RealtimeEventsProvider", () => {
           content_id: "episode-elsewhere",
           series_id: "series-1",
           change: "progress",
+          playback_stopped: true,
         },
       });
     });
@@ -995,6 +998,43 @@ describe("RealtimeEventsProvider", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
+  });
+
+  it("coalesces ordinary progress events for several titles into one Home refresh", async () => {
+    setProfileId("profile-1");
+    mockState.profile = { id: "profile-1", has_pin: false };
+    const queryClient = new QueryClient();
+    const homeRow = sectionKeys.homeItems("continue-watching");
+    const refreshSignal = mediaSurfaceKeys.refreshSignal();
+    queryClient.setQueryData(homeRow, { items: [] });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+    await act(async () => {});
+
+    await act(async () => {
+      for (const contentId of ["movie-1", "movie-2", "movie-3"]) {
+        FakeWebSocket.instances[0]?.emitMessage({
+          type: "event",
+          channel: "user_state",
+          event: "user_state.changed",
+          data: { profile_id: "profile-1", content_id: contentId, change: "progress" },
+        });
+      }
+      await vi.advanceTimersByTimeAsync(29_000);
+    });
+    expect(queryClient.getQueryData(refreshSignal)).toBeUndefined();
+    expect(queryClient.getQueryState(homeRow)?.isInvalidated).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(queryClient.getQueryData(refreshSignal)).toBe(1);
+    expect(queryClient.getQueryState(homeRow)?.isInvalidated).toBe(true);
   });
 
   it("refetches request state once per burst of request notifications, for any profile", async () => {
