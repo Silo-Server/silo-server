@@ -938,135 +938,151 @@ func TestLifecycleSweepRecordsTheAttemptsSubtitle(t *testing.T) {
 	}
 }
 
-// TestLifecycleSweepKeepsARecordedSubtitleDB pins that a sweep ending a play
-// whose attempt is gone orders the subtitle it read from the play's start or
-// live row by when that row was synced: the start's never replaces the
-// subtitle a finalization recorded, a live row synced after it does, and
-// neither moves the end to sweep time. A play the sweep is the first to
-// record still gets the start's subtitle.
-func TestLifecycleSweepKeepsARecordedSubtitleDB(t *testing.T) {
+// sweepSubtitleFixture ends plays through the lifecycle sweep with their
+// attempts gone, so the sweep only has the subtitle the play's start or live
+// row synced.
+type sweepSubtitleFixture struct {
+	t       *testing.T
+	pool    *pgxpool.Pool
+	admin   *PGPlaybackAdminStore
+	h       *PlaybackHandler
+	account int
+	started time.Time
+	// teardownEnd is when a recoverable teardown recorded a play.
+	teardownEnd time.Time
+}
+
+var (
+	sweepStartSubtitle    = &playback.SessionSubtitle{TrackID: "file:42:subtitle:0", Source: "embedded", Delivery: "sidecar"}
+	sweepRecordedSubtitle = &playback.SessionSubtitle{TrackID: "file:42:subtitle:1", Source: "embedded", Delivery: "sidecar"}
+	sweepLaterSubtitle    = &playback.SessionSubtitle{TrackID: "file:42:subtitle:2", Source: "embedded", Delivery: "sidecar"}
+)
+
+func newSweepSubtitleFixture(t *testing.T) *sweepSubtitleFixture {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	var account int
-	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "sweep-subtitle-"+uuid.NewString()).Scan(&account); err != nil {
+	if err = pool.QueryRow(t.Context(), `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "sweep-subtitle-"+uuid.NewString()).Scan(&account); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
-
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) })
 	admin := NewPGPlaybackAdminStore(pool, nil)
 	h := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile()).handler
 	h.PlanStoreV3 = playback.NewMemoryPlanStoreV3() // the attempt is gone
-	startSubtitle := &playback.SessionSubtitle{TrackID: "file:42:subtitle:0", Source: "embedded", Delivery: "sidecar"}
-	ended := &playback.SessionSubtitle{TrackID: "file:42:subtitle:1", Source: "embedded", Delivery: "sidecar"}
 	started := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
-	start := func() string {
-		t.Helper()
-		id := uuid.NewString()
-		row, err := worker.SessionSyncRowJSON(worker.SessionSync{SessionID: id, UserID: account, ProfileID: "p-1", Subtitle: startSubtitle}, "node-1")
+	return &sweepSubtitleFixture{t: t, pool: pool, admin: admin, h: h, account: account, started: started, teardownEnd: started.Add(30 * time.Minute)}
+}
+
+// start records a play's start with the start subtitle, synced when the play
+// started; withFacts false records a start row that kept no facts.
+func (f *sweepSubtitleFixture) start(withFacts bool) string {
+	f.t.Helper()
+	id := uuid.NewString()
+	var row json.RawMessage
+	if withFacts {
+		raw, err := worker.SessionSyncRowJSON(worker.SessionSync{SessionID: id, UserID: f.account, ProfileID: "p-1", Subtitle: sweepStartSubtitle}, "node-1")
 		if err != nil {
-			t.Fatal(err)
+			f.t.Fatal(err)
 		}
-		// The start row is synced when the play starts.
 		var facts map[string]any
-		if err := json.Unmarshal(row, &facts); err != nil {
-			t.Fatal(err)
+		if err := json.Unmarshal(raw, &facts); err != nil {
+			f.t.Fatal(err)
 		}
-		facts["last_sync_at"] = started
+		facts["last_sync_at"] = f.started
 		if row, err = json.Marshal(facts); err != nil {
-			t.Fatal(err)
+			f.t.Fatal(err)
 		}
-		if _, ok, err := admin.StartLifecycle(ctx, LifecycleStart{SessionID: id, Frontend: LifecycleFrontendNative, UserID: account,
-			ProfileID: "p-1", MediaFileID: 42, RequestedMediaFileID: 42, StartedAt: started, LiveRow: row}); err != nil || !ok {
-			t.Fatalf("start lifecycle: ok=%v err=%v", ok, err)
-		}
-		return id
 	}
-	read := func(id string) (*playback.SessionSubtitle, time.Time) {
-		t.Helper()
-		var got *playback.SessionSubtitle
-		var endedAt time.Time
-		if err := pool.QueryRow(ctx, `SELECT subtitle, ended_at FROM admin_playback_history WHERE session_id=$1`, id).Scan(&got, &endedAt); err != nil {
-			t.Fatal(err)
-		}
-		return got, endedAt
+	if _, ok, err := f.admin.StartLifecycle(f.t.Context(), LifecycleStart{SessionID: id, Frontend: LifecycleFrontendNative, UserID: f.account,
+		ProfileID: "p-1", MediaFileID: 42, RequestedMediaFileID: 42, StartedAt: f.started, LiveRow: row}); err != nil || !ok {
+		f.t.Fatalf("start lifecycle: ok=%v err=%v", ok, err)
 	}
+	return id
+}
 
-	// A teardown the client could have recovered from recorded the play,
-	// on the second subtitle, without ending it; the client never came back.
-	teardownEnd := started.Add(30 * time.Minute)
-	tornDown := func() string {
-		t.Helper()
-		id := start()
-		if err := admin.RecordHistory(ctx, AdminPlaybackHistoryEntry{SessionID: id, UserID: account, ProfileID: "p-1",
-			MediaFileID: 42, PlayMethod: "direct_play", StartedAt: started.Format(time.RFC3339Nano),
-			EndedAt: teardownEnd.Format(time.RFC3339Nano), Subtitle: ended}); err != nil {
-			t.Fatal(err)
-		}
-		return id
+// tearDown records the play the way a teardown the client could have
+// recovered from does: on the recorded subtitle, without ending it.
+func (f *sweepSubtitleFixture) tearDown(id string) {
+	f.t.Helper()
+	if err := f.admin.RecordHistory(f.t.Context(), AdminPlaybackHistoryEntry{SessionID: id, UserID: f.account, ProfileID: "p-1",
+		MediaFileID: 42, PlayMethod: "direct_play", StartedAt: f.started.Format(time.RFC3339Nano),
+		EndedAt: f.teardownEnd.Format(time.RFC3339Nano), Subtitle: sweepRecordedSubtitle}); err != nil {
+		f.t.Fatal(err)
 	}
-	recorded := tornDown()
-	h.endLifecycleWith(ctx, pool, recorded, PlaybackEndExpired, time.Now(), nil)
-	if got, endedAt := read(recorded); !reflect.DeepEqual(got, ended) || !endedAt.Equal(teardownEnd) {
-		t.Errorf("swept play = subtitle %+v ended %v; want the recorded %+v ended %v", got, endedAt, ended, teardownEnd)
-	}
+}
 
+// sync leaves a live row that synced the later subtitle at position, after
+// the teardown.
+func (f *sweepSubtitleFixture) sync(id string, position float64) {
+	f.t.Helper()
+	if _, err := f.pool.Exec(f.t.Context(), `INSERT INTO playback_sessions_sync (session_id, user_id, profile_id, media_file_id, started_at, last_sync_at, position_seconds, subtitle)
+		VALUES ($1, $2, 'p-1', 42, $3, $4, $5, $6)`, id, f.account, f.started, f.started.Add(40*time.Minute), position, sweepLaterSubtitle); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// sweep ends the play and reads the subtitle and end its history row holds.
+func (f *sweepSubtitleFixture) sweep(id string) (*playback.SessionSubtitle, time.Time) {
+	f.t.Helper()
+	f.h.endLifecycleWith(f.t.Context(), f.pool, id, PlaybackEndExpired, time.Now(), nil)
+	var got *playback.SessionSubtitle
+	var endedAt time.Time
+	if err := f.pool.QueryRow(f.t.Context(), `SELECT subtitle, ended_at FROM admin_playback_history WHERE session_id=$1`, id).Scan(&got, &endedAt); err != nil {
+		f.t.Fatal(err)
+	}
+	return got, endedAt
+}
+
+// TestLifecycleSweepKeepsARecordedSubtitleDB pins that a sweep ending a play
+// whose attempt is gone orders the subtitle it read from the play's start row
+// by when the play started: it never replaces the subtitle a finalization
+// recorded, with or without the start's facts, nor moves the end to sweep
+// time. A play the sweep is the first to record still gets the start's
+// subtitle.
+func TestLifecycleSweepKeepsARecordedSubtitleDB(t *testing.T) {
+	f := newSweepSubtitleFixture(t)
+	for name, withFacts := range map[string]bool{"start row": true, "start row without facts": false} {
+		id := f.start(withFacts)
+		f.tearDown(id)
+		if got, endedAt := f.sweep(id); !reflect.DeepEqual(got, sweepRecordedSubtitle) || !endedAt.Equal(f.teardownEnd) {
+			t.Errorf("%s: swept play = subtitle %+v ended %v; want the recorded %+v ended %v", name, got, endedAt, sweepRecordedSubtitle, f.teardownEnd)
+		}
+	}
+	if got, _ := f.sweep(f.start(true)); !reflect.DeepEqual(got, sweepStartSubtitle) {
+		t.Errorf("first record of a swept play = subtitle %+v, want the start's %+v", got, sweepStartSubtitle)
+	}
+}
+
+// TestLifecycleSweepTakesALaterSyncedSubtitleDB pins that a live row synced
+// after a finalization recorded the play replaces its subtitle when the sweep
+// ends it: without moving the end when the play got no further, and on a
+// row recorded before the subtitle had its own order when it did.
+func TestLifecycleSweepTakesALaterSyncedSubtitleDB(t *testing.T) {
+	f := newSweepSubtitleFixture(t)
 	// The play came back under the same session, switched subtitles again
 	// and synced that before its server went away.
-	resumed := tornDown()
-	later := &playback.SessionSubtitle{TrackID: "file:42:subtitle:2", Source: "embedded", Delivery: "sidecar"}
-	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync (session_id, user_id, profile_id, media_file_id, started_at, last_sync_at, subtitle)
-		VALUES ($1, $2, 'p-1', 42, $3, $4, $5)`, resumed, account, started, started.Add(40*time.Minute), later); err != nil {
+	resumed := f.start(true)
+	f.tearDown(resumed)
+	f.sync(resumed, 0)
+	if got, endedAt := f.sweep(resumed); !reflect.DeepEqual(got, sweepLaterSubtitle) || !endedAt.Equal(f.teardownEnd) {
+		t.Errorf("swept resumed play = subtitle %+v ended %v; want the live row's %+v ended %v", got, endedAt, sweepLaterSubtitle, f.teardownEnd)
+	}
+	// Recorded before the subtitle had its own order, then got further.
+	beforeOrder := f.start(true)
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds,subtitle)
+		VALUES($1,$2,'p-1',42,'direct_play',$3,$4,300,$5)`, beforeOrder, f.account, f.started, f.teardownEnd, sweepRecordedSubtitle); err != nil {
 		t.Fatal(err)
 	}
-	h.endLifecycleWith(ctx, pool, resumed, PlaybackEndExpired, time.Now(), nil)
-	if got, endedAt := read(resumed); !reflect.DeepEqual(got, later) || !endedAt.Equal(teardownEnd) {
-		t.Errorf("swept resumed play = subtitle %+v ended %v; want the live row's %+v ended %v", got, endedAt, later, teardownEnd)
-	}
-
-	// A start row that kept no facts counts from the play's start.
-	bare := uuid.NewString()
-	if _, ok, err := admin.StartLifecycle(ctx, LifecycleStart{SessionID: bare, Frontend: LifecycleFrontendNative, UserID: account,
-		ProfileID: "p-1", MediaFileID: 42, RequestedMediaFileID: 42, StartedAt: started}); err != nil || !ok {
-		t.Fatalf("start lifecycle: ok=%v err=%v", ok, err)
-	}
-	if err = admin.RecordHistory(ctx, AdminPlaybackHistoryEntry{SessionID: bare, UserID: account, ProfileID: "p-1",
-		MediaFileID: 42, PlayMethod: "direct_play", StartedAt: started.Format(time.RFC3339Nano),
-		EndedAt: teardownEnd.Format(time.RFC3339Nano), Subtitle: ended}); err != nil {
-		t.Fatal(err)
-	}
-	h.endLifecycleWith(ctx, pool, bare, PlaybackEndExpired, time.Now(), nil)
-	if got, endedAt := read(bare); !reflect.DeepEqual(got, ended) || !endedAt.Equal(teardownEnd) {
-		t.Errorf("swept play without start facts = subtitle %+v ended %v; want the recorded %+v ended %v", got, endedAt, ended, teardownEnd)
-	}
-
-	// A row recorded before the subtitle had its own order, whose play then
-	// synced a later subtitle and got further: the sweep moves the end, and
-	// the subtitle synced after the recorded one still replaces it.
-	beforeOrder := start()
-	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds,subtitle)
-		VALUES($1,$2,'p-1',42,'direct_play',$3,$4,300,$5)`, beforeOrder, account, started, teardownEnd, ended); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync (session_id, user_id, profile_id, media_file_id, started_at, last_sync_at, position_seconds, subtitle)
-		VALUES ($1, $2, 'p-1', 42, $3, $4, 400, $5)`, beforeOrder, account, started, started.Add(40*time.Minute), later); err != nil {
-		t.Fatal(err)
-	}
-	h.endLifecycleWith(ctx, pool, beforeOrder, PlaybackEndExpired, time.Now(), nil)
-	if got, _ := read(beforeOrder); !reflect.DeepEqual(got, later) {
-		t.Errorf("swept play recorded before subtitle ordering = subtitle %+v, want the live row's %+v", got, later)
-	}
-
-	fresh := start()
-	h.endLifecycleWith(ctx, pool, fresh, PlaybackEndExpired, time.Now(), nil)
-	if got, _ := read(fresh); !reflect.DeepEqual(got, startSubtitle) {
-		t.Errorf("first record of a swept play = subtitle %+v, want the start's %+v", got, startSubtitle)
+	f.sync(beforeOrder, 400)
+	if got, _ := f.sweep(beforeOrder); !reflect.DeepEqual(got, sweepLaterSubtitle) {
+		t.Errorf("swept play recorded before subtitle ordering = subtitle %+v, want the live row's %+v", got, sweepLaterSubtitle)
 	}
 }
