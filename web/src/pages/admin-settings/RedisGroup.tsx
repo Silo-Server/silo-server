@@ -42,15 +42,22 @@ export function RedisGroup({
   const urlEnv = form.envVar("redis.url");
   const configured = form.sensitiveConfigured.includes("redis.url");
   const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
-  // Once no Redis edit is staged (saved, discarded, or replaced by a reload
-  // after a refused save) the toggle follows the stored URL again. Adjusting
+  // The toggle follows the stored URL again once the page is clean (saved or
+  // discarded), or once its Redis edits are gone while other edits stay (a
+  // reload after a refused save replaced them). Switching Redis on with no
+  // URL saved stages nothing, so the clean page is what clears that. Adjusting
   // during render (rather than in an effect) keeps the override alive while
   // the admin is still editing.
   const redisStaged = REDIS_KEYS.some((key) => form.isDirty(key));
+  const formClean = form.dirtyCount === 0;
   const [lastRedisStaged, setLastRedisStaged] = useState(redisStaged);
-  if (lastRedisStaged !== redisStaged) {
+  const [lastFormClean, setLastFormClean] = useState(formClean);
+  if (lastRedisStaged !== redisStaged || lastFormClean !== formClean) {
     setLastRedisStaged(redisStaged);
-    if (!redisStaged) setEnabledOverride(null);
+    setLastFormClean(formClean);
+    if ((lastRedisStaged && !redisStaged) || (!lastFormClean && formClean)) {
+      setEnabledOverride(null);
+    }
   }
   const enabled = enabledOverride ?? (redisUrl.trim() !== "" || configured);
   // URL edits go through the page's editors, which drop a keystroke that

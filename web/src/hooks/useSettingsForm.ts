@@ -34,7 +34,14 @@ interface UseSettingsFormOptions {
 }
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
-  const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
+  // Like the status below: only a snapshot that never loaded is an error. A
+  // failed re-read (a reload after a refused save) keeps the page and drafts.
+  const {
+    data: settings,
+    isLoading,
+    isLoadingError: loadError,
+    refetch,
+  } = useAdminServerSettings();
   // Only a list that never loaded leaves the status unknown. A failed re-read
   // keeps the last list, so a page keeps its editor and the drafts in it.
   const {
