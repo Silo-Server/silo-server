@@ -54,6 +54,28 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     dirtyRef.current = dirty;
   }, [dirty]);
 
+  // The server refuses a whole save that writes a key the environment sets,
+  // and that key's field is disabled. A server can restart with the variable
+  // set while the page holds a draft for the key, so drop that draft: it can
+  // be neither saved nor undone, and the rest of the page has to save.
+  const envVars = sensitiveData?.managed_by_env_vars;
+  const envLockedDrafts = envVars
+    ? Array.from(dirty).filter((key) => Object.hasOwn(envVars, key))
+    : [];
+  if (envLockedDrafts.length > 0) {
+    setDirty((prev) => {
+      const next = new Set(prev);
+      for (const key of envLockedDrafts) next.delete(key);
+      return next;
+    });
+    // Without a draft the field shows the settings snapshot again.
+    setLocalValues((prev) => {
+      const next = { ...prev };
+      for (const key of envLockedDrafts) delete next[key];
+      return next;
+    });
+  }
+
   // Treat equivalent key lists as stable even if a caller constructs the
   // array inline. This keeps server hydration tied to actual query/key changes
   // instead of every render.
@@ -283,7 +305,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
   const sensitiveManagedByEnv = sensitiveData?.managed_by_env ?? [];
-  const envVars = sensitiveData?.managed_by_env_vars;
   /**
    * The environment variable that sets `key` on the server, or undefined when
    * an admin can save it. Pass it to a field's `managedByEnv`.

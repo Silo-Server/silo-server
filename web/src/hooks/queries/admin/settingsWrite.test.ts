@@ -111,6 +111,62 @@ it("keeps the original displayed guard after a background refetch and a 412", as
   for (const [, init] of puts) expect(init.headers["If-Match"]).toBe('"displayed-v1"');
 });
 
+it("saves the other edits after a refusal shows an edited key is set by the environment", async () => {
+  let envManaged = false;
+  const writes: Array<Record<string, string>> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        const values = JSON.parse(String(init.body)).values as Record<string, string>;
+        writes.push(values);
+        if (envManaged && "branding.server_name" in values)
+          return response(
+            {
+              type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+              title: "Validation failed",
+              status: 422,
+              detail: "branding.server_name is managed by an environment variable",
+            },
+            422,
+          );
+        return response({ values, restart_required: false });
+      }
+      if (url.endsWith("/sensitive-status"))
+        return response({
+          configured: [],
+          managed_by_env: envManaged ? ["branding.server_name"] : [],
+          managed_by_env_vars: envManaged ? { "branding.server_name": "SILO_SERVER_NAME" } : {},
+        });
+      return response({ "branding.server_name": "Silo", "branding.login_subtitle": "" });
+    }),
+  );
+  const { result } = renderHook(
+    () => useSettingsForm({ keys: ["branding.server_name", "branding.login_subtitle"] }),
+    fixture(),
+  );
+  await waitFor(() => expect(result.current.getValue("branding.server_name")).toBe("Silo"));
+  act(() => {
+    result.current.setValue("branding.server_name", "Casa");
+    result.current.setValue("branding.login_subtitle", "Welcome home");
+  });
+
+  // The server restarted with SILO_SERVER_NAME set to the stored name while
+  // the page stayed open, so the settings revision is unchanged.
+  envManaged = true;
+  await act(async () => {
+    await expect(result.current.save()).rejects.toThrow();
+  });
+  await waitFor(() => expect(result.current.dirtyKeys).toEqual(["branding.login_subtitle"]));
+  expect(result.current.getValue("branding.server_name")).toBe("Silo");
+
+  await act(async () => {
+    await result.current.save();
+  });
+  expect(writes.at(-1)).toEqual({ "branding.login_subtitle": "Welcome home" });
+  expect(result.current.dirtyCount).toBe(0);
+});
+
 it("rejects a decoded completion after the acting profile changes", async () => {
   let release: ((value: unknown) => void) | undefined;
   const decoded = new Promise((resolve) => {

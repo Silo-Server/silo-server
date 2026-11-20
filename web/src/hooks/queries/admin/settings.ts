@@ -305,6 +305,14 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       toast.error(
         err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateFailed"),
       );
+      // A validation refusal can mean a restart left one of these keys set by
+      // the environment. Read the list again so the form drops that draft and
+      // the next save can go through.
+      if (err instanceof V2ProblemError && err.problemType === "validation_failed") {
+        void queryClient.invalidateQueries({
+          queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
+        });
+      }
     },
   });
   const capture = (values: SettingsValues) => ({
