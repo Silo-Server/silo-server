@@ -185,7 +185,11 @@ it("keeps the environment list when its refresh after a refused save fails", asy
       if (url.endsWith("/sensitive-status")) {
         statusReads += 1;
         return statusReads === 1
-          ? response({ configured: [], managed_by_env: [], managed_by_env_vars: {} })
+          ? response({
+              configured: [],
+              managed_by_env: ["server.log_level"],
+              managed_by_env_vars: { "server.log_level": "SILO_LOG_LEVEL" },
+            })
           : response({ title: "Bad gateway", status: 502 }, 502);
       }
       return response({ "artwork.local_path": "/srv/artwork" });
@@ -207,6 +211,7 @@ it("keeps the environment list when its refresh after a refused save fails", asy
   // The Storage page trades its editor for a reload notice when the list
   // errors, which would strand this draft.
   expect(result.current.sensitiveStatusError).toBe(false);
+  expect(result.current.envVar("server.log_level")).toBe("SILO_LOG_LEVEL");
   expect(result.current.dirtyKeys).toEqual(["artwork.local_path"]);
 });
 
