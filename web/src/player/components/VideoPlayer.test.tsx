@@ -4428,6 +4428,63 @@ describe("VideoPlayer source timeline", () => {
       expect(hlsJS.startLoad).not.toHaveBeenCalled();
     });
 
+    // Stopping the fenced transport must not strand the generation the server
+    // kept: an in-place reanchor reuses the same stream URL and transport
+    // revision, so no transport effect reruns. The stopped instance refetches
+    // its playlist once with the live token and resumes at the seek target.
+    it("restarts a stopped transport when the reanchor reuses the same generation", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => true);
+      const { container, rerenderPlayer } = renderPlayer({
+        plan: anchoredPlan,
+        onReanchorSeek,
+        transportRevision: 1,
+      });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+
+      const instance = hlsJS.latest!;
+      Object.defineProperty(instance, "url", {
+        configurable: true,
+        value: "/api/v1/stream/session-1?token=token",
+      });
+      Object.defineProperty(instance, "config", {
+        configurable: true,
+        value: { startPosition: 0 },
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 0, start: () => 0, end: () => 0 },
+      });
+      act(() => controls.current!.onSeek(690));
+      expect(onReanchorSeek).toHaveBeenCalledWith(690);
+
+      hlsJS.stopLoad.mockClear();
+      hlsJS.loadSource.mockClear();
+      act(() =>
+        instance.emit("error", {
+          fatal: true,
+          type: "networkError",
+          details: "fragLoadError",
+          response: { code: 412 },
+          frag: { sn: 163, url: "/playback/transcode/session-1/seg_00163.ts" },
+        }),
+      );
+      expect(hlsJS.stopLoad).toHaveBeenCalledOnce();
+
+      // Same stream URL and transport revision: the server reused it.
+      rerenderPlayer({ plan: anchoredPlan, planRevision: 2, transportRevision: 1 });
+      await waitFor(() => expect(hlsJS.loadSource).toHaveBeenCalledOnce());
+      expect(hlsJS.loadSource).toHaveBeenCalledWith("/api/v1/stream/session-1?token=token");
+      // 690 s of media is 596 s on a transport whose clock zero is source 94.
+      expect((instance.config as { startPosition?: number }).startPosition).toBeCloseTo(596);
+    });
+
     it("reloads the playlist for a fenced segment during playback", async () => {
       hlsJS.supported = true;
       vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
