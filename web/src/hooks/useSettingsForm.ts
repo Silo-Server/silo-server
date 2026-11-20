@@ -282,7 +282,10 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, [settings, keys]);
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
-  const sensitiveManagedByEnv = sensitiveData?.managed_by_env ?? [];
+  const sensitiveManagedByEnv = useMemo(
+    () => sensitiveData?.managed_by_env ?? [],
+    [sensitiveData?.managed_by_env],
+  );
   /**
    * The environment variable that sets `key` on the server, or undefined when
    * an admin can save it. Pass it to a field's `managedByEnv`.
