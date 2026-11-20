@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"math/big"
 	"reflect"
 
@@ -207,10 +206,7 @@ func MergeRestoreConfig(key string, owned []string, current, backup map[string]a
 	if len(owned) == 0 {
 		return backup, nil
 	}
-	merged := make(map[string]any, len(current)+len(backup))
-	maps.Copy(merged, current)
-	maps.Copy(merged, backup)
-	return preserveOwnedConfig(owned, current, merged), requireUnchangedOwnedConfig(key, owned, current, backup)
+	return preserveOwnedConfig(owned, current, backup), requireUnchangedOwnedConfig(key, owned, current, backup)
 }
 
 // storedConfigs reads an installation's configuration in tx, decrypted.

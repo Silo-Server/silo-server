@@ -106,16 +106,26 @@ export function PluginConfigForm({
   const editableClears = (keys: Set<string>) =>
     Array.from(keys).filter((key) => !managedFields.includes(key));
 
-  const [values, setValues] = useState<PluginConfigValue>(() =>
-    formValuesFromConfig(fields, value),
-  );
+  const savedValues = useMemo(() => formValuesFromConfig(fields, value), [fields, value]);
+  const [values, setValues] = useState<PluginConfigValue>(savedValues);
   const [testResult, setTestResult] = useState<ConnectionCheckResponse | null>(null);
   const [clearSecrets, setClearSecrets] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setValues(formValuesFromConfig(fields, value));
+    setValues(savedValues);
     setClearSecrets(new Set());
-  }, [fields, value]);
+  }, [savedValues]);
+
+  // A later release of ownership must not restore an edit or a secret clear.
+  if (managedFields.some((key) => values[key] !== savedValues[key])) {
+    setValues({
+      ...values,
+      ...Object.fromEntries(managedFields.map((key) => [key, savedValues[key]])),
+    });
+  }
+  if (managedFields.some((key) => clearSecrets.has(key))) {
+    setClearSecrets(new Set(editableClears(clearSecrets)));
+  }
 
   function handleChange(next: PluginConfigValue) {
     setTestResult(null);

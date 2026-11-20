@@ -769,6 +769,10 @@ func (h *PluginHandler) buildInstallationResponses(
 	if err != nil {
 		return nil, err
 	}
+	ownership, err := h.installations.ListProvisionOwnership(ctx)
+	if err != nil {
+		return nil, err
+	}
 	response := make([]PluginInstallationView, 0, len(installations))
 	for _, installation := range installations {
 		// The reserved builtin row is not a manageable plugin: old web builds
@@ -784,6 +788,7 @@ func (h *PluginHandler) buildInstallationResponses(
 			authBindings,
 			taskBindings,
 			repositoriesByID,
+			ownership[installation.ID],
 		)
 		if err != nil {
 			return nil, err
@@ -817,6 +822,10 @@ func (h *PluginHandler) buildInstallationResponse(
 	if err != nil {
 		return PluginInstallationView{}, err
 	}
+	ownership, err := h.installations.GetProvisionOwnership(ctx, installation.ID)
+	if err != nil {
+		return PluginInstallationView{}, err
+	}
 	return h.buildInstallationResponseWithBindings(
 		ctx,
 		installation,
@@ -824,6 +833,7 @@ func (h *PluginHandler) buildInstallationResponse(
 		authBindings,
 		taskBindings,
 		repositoriesByID,
+		ownership,
 	)
 }
 
@@ -845,6 +855,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	authBindings []*plugins.AuthBinding,
 	taskBindings []*plugins.TaskBinding,
 	repositoriesByID map[int]*plugins.Repository,
+	ownership plugins.ProvisionOwnership,
 ) (PluginInstallationView, error) {
 	var unreadableArchive string
 	if manifest == nil {
@@ -874,11 +885,6 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		return PluginInstallationView{}, err
 	}
 	configs, err := h.configs.ListGlobalConfigs(ctx, installation.ID)
-	if err != nil {
-		return PluginInstallationView{}, err
-	}
-
-	ownership, err := h.installations.GetProvisionOwnership(ctx, installation.ID)
 	if err != nil {
 		return PluginInstallationView{}, err
 	}

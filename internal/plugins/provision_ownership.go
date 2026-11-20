@@ -40,6 +40,25 @@ func (s *InstallationStore) GetProvisionOwnership(ctx context.Context, installat
 	return loadProvisionOwnership(ctx, s.pool, installationID)
 }
 
+// ListProvisionOwnership returns one snapshot of the managed installations for list views and update checks.
+func (s *InstallationStore) ListProvisionOwnership(ctx context.Context) (map[int]ProvisionOwnership, error) {
+	rows, err := s.pool.Query(ctx, `SELECT plugin_installation_id, version_pin, config_fields, binding_fields FROM plugin_provision_ownership`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byID := make(map[int]ProvisionOwnership)
+	for rows.Next() {
+		var id int
+		ownership := ProvisionOwnership{Managed: true}
+		if err := rows.Scan(&id, &ownership.VersionPin, &ownership.ConfigFields, &ownership.BindingFields); err != nil {
+			return nil, err
+		}
+		byID[id] = ownership
+	}
+	return byID, rows.Err()
+}
+
 // LoadProvisionOwnership reads ownership using the caller's transaction.
 func LoadProvisionOwnership(ctx context.Context, tx pgx.Tx, installationID int) (ProvisionOwnership, error) {
 	return loadProvisionOwnership(ctx, tx, installationID)

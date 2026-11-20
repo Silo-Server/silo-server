@@ -369,6 +369,16 @@ func checkProvisionOfflineReuse(t *testing.T, repositories *RepositoryStore, ins
 			t.Fatalf("offline reuse at pin %q = %+v, %v", pin, reuse, err)
 		}
 	}
+	// A server API change prevents reuse, but must allow a different pin to be fetched.
+	catalog.siloAPIVersion = "test-next"
+	request := ProvisionPackageRequest{PluginID: provisionTestPluginID, Existing: existing, Offline: true}
+	if _, err := catalog.PrepareProvisionPackage(t.Context(), installer, request); err == nil || errors.Is(err, ErrProvisionPackageNeedsFetch) {
+		t.Fatalf("incompatible archive reuse returned %v", err)
+	}
+	request.Version = provisionTestCurrent
+	if _, err := catalog.PrepareProvisionPackage(t.Context(), installer, request); !errors.Is(err, ErrProvisionPackageNeedsFetch) {
+		t.Fatalf("replacement of an incompatible archive returned %v, want fetch", err)
+	}
 	untrusted := *existing
 	untrusted.Signature.State = SignatureStateUnknown
 	if _, err := catalog.PrepareProvisionPackage(t.Context(), installer, ProvisionPackageRequest{

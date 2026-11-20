@@ -519,8 +519,9 @@ func (w *ProvisionWriter) validateRetainedConfig(ctx context.Context, q provisio
 }
 
 func (item preparedProvision) protectSavedConfig(key string, current, prospective map[string]any) error {
-	paths := removedCredentialPaths(item.pkg.previousManifest, item.pkg.Manifest, key)
-	if err := protectRetainedCredentials(key, paths, current, prospective); err != nil {
+	protected := GlobalConfigSecretPaths(item.pkg.Manifest, key)
+	paths := removedCredentialPaths(item.pkg.previousManifest, key, protected)
+	if err := protectRetainedCredentials(key, paths, protected, current, prospective); err != nil {
 		return &provisionRefusalError{pluginID: item.pluginID, detail: unsafeReplacementConfigMessage(err)}
 	}
 	return nil

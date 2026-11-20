@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,8 +16,7 @@ import (
 // removedCredentialPaths finds saved credential paths the next manifest no
 // longer protects. Keep them protected even if the next release drops an
 // entry altogether: a later release could declare it public again.
-func removedCredentialPaths(before, after *pluginv1.PluginManifest, key string) [][]string {
-	protected := GlobalConfigSecretPaths(after, key)
+func removedCredentialPaths(before *pluginv1.PluginManifest, key string, protected [][]string) [][]string {
 	paths := GlobalConfigSecretPaths(before, key)
 	return slices.DeleteFunc(paths, func(path []string) bool {
 		return slices.ContainsFunc(protected, func(next []string) bool {
@@ -25,43 +25,70 @@ func removedCredentialPaths(before, after *pluginv1.PluginManifest, key string) 
 	})
 }
 
-func protectRetainedCredentials(key string, paths [][]string, before, after map[string]any) error {
-	for _, path := range paths {
-		saved := configAtPath(before, path)
-		prospective := after[path[0]]
-		if !populatedCredential(saved) || !populatedCredential(prospective) {
+func protectRetainedCredentials(key string, removed, protected [][]string, before, after map[string]any) error {
+	var exposed map[any]bool
+	for _, path := range removed {
+		saved, _ := configPathValue(before, path)
+		if !populatedCredential(saved) {
 			continue
 		}
-		// Arrays and dynamic schema properties can mark a whole container
-		// sensitive. Only addressable scalar paths let us prove replacement
-		// removed the prior value while keeping the surrounding field.
+		if exposed == nil {
+			exposed = make(map[any]bool)
+			collectCredentialValues(exposed, after, protected)
+		}
+		values := make(map[any]bool)
+		collectCredentialValues(values, saved, nil)
+		retained := false
 		switch saved.(type) {
 		case map[string]any, []any:
-		default:
-			if !containsConfigValue(prospective, saved) {
-				continue
+			// A schema with dynamic properties or arrays can mark an opaque
+			// container sensitive. Keep requiring it to be cleared as a unit.
+			retained = populatedCredential(after[path[0]])
+		}
+		for value := range values {
+			if exposed[value] {
+				retained = true
+				break
 			}
 		}
-		return fmt.Errorf("config entry %q has a saved credential at %q that this release no longer protects",
-			key, strings.Join(path, "."))
+		if retained {
+			return fmt.Errorf("config entry %q has a saved credential at %q that this release no longer protects",
+				key, strings.Join(path, "."))
+		}
 	}
 	return nil
 }
 
-func unsafeReplacementConfigMessage(err error) string {
-	return "Silo rejected this release because " + err.Error() + ". Clear that value or choose a compatible release."
+// Index scalar values wherever they occur in the config, skipping paths that
+// the replacement still protects. Include undeclared fields because a later
+// release could make them public without another change to the config.
+func collectCredentialValues(values map[any]bool, value any, protected [][]string) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			nested, whole := childSecretPaths(protected, key)
+			if !whole {
+				collectCredentialValues(values, child, nested)
+			}
+		}
+	case []any:
+		for _, child := range v {
+			collectCredentialValues(values, child, nil)
+		}
+	case json.Number:
+		// Equivalent numeric spellings must match. If double precision
+		// cannot distinguish two values, conservatively keep them protected.
+		number, _ := v.Float64()
+		values[number] = true
+	default:
+		if populatedCredential(v) {
+			values[v] = true
+		}
+	}
 }
 
-func configAtPath(config map[string]any, path []string) any {
-	var value any = config
-	for _, segment := range path {
-		object, ok := value.(map[string]any)
-		if !ok {
-			return nil
-		}
-		value = object[segment]
-	}
-	return value
+func unsafeReplacementConfigMessage(err error) string {
+	return "Silo rejected this release because " + err.Error() + ". Clear that value or choose a compatible release."
 }
 
 func populatedCredential(value any) bool {
@@ -77,22 +104,6 @@ func populatedCredential(value any) bool {
 	default:
 		return true
 	}
-}
-
-func containsConfigValue(value, target any) bool {
-	switch value := value.(type) {
-	case map[string]any:
-		for _, child := range value {
-			if containsConfigValue(child, target) {
-				return true
-			}
-		}
-	case []any:
-		return slices.ContainsFunc(value, func(child any) bool { return containsConfigValue(child, target) })
-	default:
-		return sameConfigValue(value, target)
-	}
-	return false
 }
 
 // guardReplacementCredentials runs under the parent installation lock while
@@ -124,7 +135,8 @@ func (s *InstallationStore) guardReplacementCredentials(ctx context.Context, tx 
 	}
 	for _, schema := range previous.GetGlobalConfigSchema() {
 		key := schema.GetKey()
-		paths := removedCredentialPaths(previous, candidate, key)
+		protected := GlobalConfigSecretPaths(candidate, key)
+		paths := removedCredentialPaths(previous, key, protected)
 		if len(paths) == 0 {
 			continue
 		}
@@ -132,7 +144,7 @@ func (s *InstallationStore) guardReplacementCredentials(ctx context.Context, tx 
 		if err != nil {
 			return err
 		}
-		if err := protectRetainedCredentials(key, paths, current, current); err != nil {
+		if err := protectRetainedCredentials(key, paths, protected, current, current); err != nil {
 			return &PackageError{Message: unsafeReplacementConfigMessage(err)}
 		}
 	}

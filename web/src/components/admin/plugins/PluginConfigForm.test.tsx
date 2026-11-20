@@ -106,6 +106,28 @@ describe("PluginConfigForm secrets", () => {
     expect(onSave).toHaveBeenCalledWith("account", { region: "eu" }, []);
   });
 
+  it("drops drafts and secret clears for newly managed fields and keeps neighboring edits", async () => {
+    const onSave = vi.fn();
+    const props = { schema, value: { region: "saved" }, configuredSecrets: ["api_key"], onSave };
+    const form = (managedFields: string[]) => (
+      <PluginConfigForm {...props} managedFields={managedFields} />
+    );
+    const { rerender } = render(form([]));
+    const region = screen.getByLabelText("Region");
+    await userEvent.clear(region);
+    await userEvent.type(region, "draft");
+    await userEvent.click(screen.getByRole("button", { name: "Clear saved secret" }));
+    rerender(form(["api_key"]));
+    rerender(form([]));
+    await userEvent.click(screen.getByRole("button", { name: "Save config" }));
+    expect(onSave).toHaveBeenLastCalledWith("account", { region: "draft" }, []);
+    rerender(form(["region"]));
+    expect(region).toHaveValue("saved");
+    rerender(form([]));
+    await userEvent.click(screen.getByRole("button", { name: "Save config" }));
+    expect(onSave).toHaveBeenLastCalledWith("account", { region: "saved" }, []);
+  });
+
   it("sends an emptied field as an explicit clear so the stored value goes", async () => {
     const onSave = vi.fn();
     render(

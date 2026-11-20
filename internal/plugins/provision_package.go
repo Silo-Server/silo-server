@@ -71,10 +71,11 @@ func (s *CatalogService) PrepareProvisionPackage(ctx context.Context, installer 
 		if err != nil {
 			return nil, err
 		}
-		if manifest.GetSiloApiVersion() != s.siloAPIVersion {
+		reuse := req.Version == "" || req.Version == existing.Version
+		if reuse && manifest.GetSiloApiVersion() != s.siloAPIVersion {
 			return nil, unsupportedAPIVersionError(manifest.GetSiloApiVersion(), s.siloAPIVersion)
 		}
-		if req.Version == "" || req.Version == existing.Version {
+		if reuse {
 			prepared.Manifest = manifest
 			prepared.Version = existing.Version
 			return prepared, nil

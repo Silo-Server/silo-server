@@ -75,25 +75,32 @@ func TestSelectivePluginRestorePreviewsOwnedConfigDB(t *testing.T) {
 			t.Fatalf("report of stale selection: %+v", item)
 		}
 	})
-	t.Run("editable neighbor", func(t *testing.T) {
-		storeConfig(t, "live endpoint", "live label")
-		p, item := preview(t)
-		if item.Status != ItemDiffers || !item.Selectable || !strings.Contains(item.Message, ownedPath) {
-			t.Fatalf("preview of editable neighbor: %+v", item)
-		}
-		report := restore(t, p)
-		if report.Outcome != OutcomeRestored || !strings.Contains(strings.Join(report.Notes, " "), ownedPath) {
-			t.Fatalf("report of editable neighbor: %+v", report)
-		}
-		current, err := configs.ListGlobalConfigs(ctx, installation.ID)
-		if err != nil || len(current) != 1 || !plugins.SameConfig(current[0].Value, map[string]any{"endpoint": "live endpoint", "label": "backup label"}) {
-			t.Fatalf("config after restoring editable neighbor: %+v, %v", current, err)
-		}
-		_, item = preview(t)
-		if item.Selectable || !strings.Contains(item.Message, ownedPath) {
-			t.Fatalf("preview after restoring editable neighbor: %+v", item)
-		}
-	})
+	for name, live := range map[string]map[string]any{
+		"editable neighbor":                 {"endpoint": "live endpoint", "label": "live label"},
+		"unowned field missing from backup": {"endpoint": "live endpoint", "label": "backup label", "region": "live only"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := configs.PutGlobalConfig(ctx, installation.ID, key, live); err != nil {
+				t.Fatal(err)
+			}
+			p, item := preview(t)
+			if item.Status != ItemDiffers || !item.Selectable || !strings.Contains(item.Message, ownedPath) {
+				t.Fatalf("preview of editable neighbor: %+v", item)
+			}
+			report := restore(t, p)
+			if report.Outcome != OutcomeRestored || !strings.Contains(strings.Join(report.Notes, " "), ownedPath) {
+				t.Fatalf("report of editable neighbor: %+v", report)
+			}
+			current, err := configs.ListGlobalConfigs(ctx, installation.ID)
+			if err != nil || len(current) != 1 || !plugins.SameConfig(current[0].Value, map[string]any{"endpoint": "live endpoint", "label": "backup label"}) {
+				t.Fatalf("config after restoring editable neighbor: %+v, %v", current, err)
+			}
+			_, item = preview(t)
+			if item.Selectable || !strings.Contains(item.Message, ownedPath) {
+				t.Fatalf("preview after restoring editable neighbor: %+v", item)
+			}
+		})
+	}
 }
 
 func seedSelectivePlugin(t *testing.T, installations *plugins.InstallationStore) *plugins.Installation {
@@ -107,7 +114,7 @@ func seedSelectivePlugin(t *testing.T, installations *plugins.InstallationStore)
 		SupportedPlatforms: []*pluginv1.SupportedPlatform{{Os: "linux", Arch: "amd64"}},
 		Capabilities:       []*pluginv1.CapabilityDescriptor{{Id: "metadata", Type: "metadata_provider.v1", DisplayName: "Restore fixture"}},
 		GlobalConfigSchema: []*pluginv1.ConfigSchema{{
-			Key: "connection", JsonSchema: `{"type":"object","properties":{"endpoint":{"type":"string"},"label":{"type":"string"}},"additionalProperties":false}`,
+			Key: "connection", JsonSchema: `{"type":"object","properties":{"endpoint":{"type":"string"},"label":{"type":"string"},"region":{"type":"string"}},"additionalProperties":false}`,
 		}},
 	})
 	if err != nil {

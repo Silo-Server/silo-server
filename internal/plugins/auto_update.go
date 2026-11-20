@@ -244,18 +244,20 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		installedPluginIDs[inst.PluginID] = struct{}{}
 	}
 
+	var ownership map[int]ProvisionOwnership
+	if store, ok := s.installations.(*InstallationStore); ok {
+		ownership, err = store.ListProvisionOwnership(ctx)
+		if err != nil {
+			return summary, fmt.Errorf("read plugin update ownership: %w", err)
+		}
+	}
 	latestByRepositoryPlugin := latestCatalogEntriesByRepository(entries)
 	clearedNotice := false
 	for _, existing := range installed {
 		if existing == nil {
 			continue
 		}
-		pinned, err := s.versionPinned(ctx, existing.ID)
-		if err != nil {
-			summary.recordFailuref("read plugin update ownership for %s: %v", existing.PluginID, err)
-			continue
-		}
-		if pinned {
+		if ownership[existing.ID].VersionPin != "" {
 			continue
 		}
 
