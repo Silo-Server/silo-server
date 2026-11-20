@@ -1187,12 +1187,17 @@ func TestTranscodeOutputBoundsClient(t *testing.T) {
 		// restarting is a restart between FFmpeg processes: nothing runs, and
 		// the client waits on the server.
 		restarting bool
-		want       bool
+		// failed is an FFmpeg that exited with an error: the client waits on
+		// a server fault, not the link.
+		failed bool
+		want   bool
 	}{
 		{name: "client at produced head", running: true, produced: 4, completed: 4, want: true},
 		{name: "head segment not yet fetched", running: true, produced: 5, completed: 4, want: true},
 		{name: "encoder ahead of the client", running: true, produced: 40, completed: 4, want: false},
 		{name: "encoder finished", running: false, produced: 4, completed: 4, want: false},
+		{name: "encoder failed with the client at its output", running: false, failed: true, produced: 4, completed: 4, want: true},
+		{name: "encoder failed far ahead of the client", running: false, failed: true, produced: 40, completed: 4, want: false},
 		{name: "restart with both new segments still undelivered", running: true, start: 100, produced: 101, completed: 99, want: false},
 		{name: "restart whose first segment is still being encoded", running: true, start: 100, produced: -1, completed: 99, want: true},
 		{name: "restart in flight", restarting: true, produced: 40, completed: 9, want: true},
@@ -1212,6 +1217,9 @@ func TestTranscodeOutputBoundsClient(t *testing.T) {
 			}
 			if tc.restarting {
 				session.restarting = &restartFlight{}
+			}
+			if tc.failed {
+				session.waitErr = errors.New("exit status 1")
 			}
 			if got := session.OutputBoundsClient(); got != tc.want {
 				t.Fatalf("OutputBoundsClient() = %v, want %v", got, tc.want)

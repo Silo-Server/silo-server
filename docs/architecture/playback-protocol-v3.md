@@ -2680,8 +2680,9 @@ profile check the account's registry after their delete commits.
 Only a start or replan that the client sent with
 `bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
 recording restarts its 24 hours. `observed_throughput_kbps` is the throughput
-the plan that kept buffering received, measured as `plan_summary`
-`throughput_kbps`; the server plans with, and records, the lower of it and
+the plan that kept buffering received, timed from first byte to last as
+`plan_summary` `throughput_kbps` is, even where the client sends no such
+sample; the server plans with, and records, the lower of it and
 `bandwidth_estimate_kbps`. An estimate without a source, which is how a
 client repeats its kept step-down estimate on later replans, records nothing.
 A seek reanchor reuses the playing recipe and a seek failure recovery replays
@@ -2703,7 +2704,8 @@ same whichever API replica or proxy relays the stream.
 
 A segment counts as fetched once its download completed, output an earlier
 FFmpeg generation left behind is no lead, and a client whose transcode is
-restarting is waiting on the server. A progressive remux has no
+restarting is waiting on the server. An FFmpeg that failed is judged like a
+running one, by its output's lead over the client. A progressive remux has no
 segment lead and is never judged bound.
 
 When the remote answer is unknown, the stall counts as the server's and

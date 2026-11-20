@@ -434,6 +434,9 @@ type SegmentProgress struct {
 	// LastCompletedSegment is the highest segment the client finished
 	// downloading in the current generation, read with the rest.
 	LastCompletedSegment int
+	// Failed is a stopped FFmpeg that exited with an error, read with the
+	// rest so a restart cannot clear it between reads.
+	Failed bool
 }
 
 // SegmentRecoveryDecision tells the segment handler whether to briefly wait
@@ -3158,6 +3161,7 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		SegmentDuration:      opts.SegmentDuration,
 		LastRequestedSegment: s.lastRequestedSegment,
 		LastCompletedSegment: s.lastCompletedSegment,
+		Failed:               !s.running && s.waitErr != nil,
 		GenerationStartedAt:  s.generationStartedAt,
 	}
 	s.mu.Unlock()
@@ -3211,15 +3215,20 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 // throttle window; one that is slower than real time, such as a heavy
 // subtitle burn-in, never gets ahead. Output left by an earlier FFmpeg
 // generation is not this encoder's lead: until the running one writes its
-// own, and while a restart replaces it, the client is waiting on it.
+// own, and while a restart replaces it, the client is waiting on it. An
+// encoder that failed counts like one that runs: a client that caught up
+// with its output waits on a server fault.
 func (s *TranscodeSession) OutputBoundsClient() bool {
 	progress := s.SegmentProgress(time.Now())
 	if progress.Restarting {
 		return true
 	}
-	if !progress.Running {
+	if !progress.Running && !progress.Failed {
+		// A finished encoder left every segment for the client to fetch.
 		return false
 	}
+	// A running encoder, or one that failed, paces a client that has caught
+	// up with its output.
 	if progressPredatesGeneration(progress) {
 		return true
 	}

@@ -219,8 +219,9 @@ end client. Runtime acknowledgement and pruning behavior remain unchanged.
 
 The transcode `GET /transcode/{session_id}/output-bound` answers
 `{"output_bound": bool}` for a transport the node runs: `true` while a restart
-replaces its FFmpeg, or while FFmpeg runs and the client has fetched every
-produced segment but at most the newest, so playback is paced by the encoder. Those fetches are the acknowledgements
+replaces its FFmpeg, or while FFmpeg runs (or has failed) and the client has
+fetched every produced segment but at most the newest, so playback is paced by
+the encoder. Those fetches are the acknowledgements
 above, so the answer is the same whichever relay delivered the segments. A
 progressive remux answers `false`, and the core does not ask about one. A
 transport the node does not run is 404; the read reconstructs nothing and does
