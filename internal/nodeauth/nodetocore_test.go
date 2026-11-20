@@ -262,11 +262,15 @@ func TestSignWithUsesTheKeyringKey(t *testing.T) {
 			t.Fatalf("SignWith with %v = %v, Authorization %q", keyErr, err, req.Header.Get("Authorization"))
 		}
 	}
-	for _, keys := range []Keyring{nil, sharedSecret("")} {
-		req := httptest.NewRequest(http.MethodGet, "/status", nil)
-		if err := SignTranscode(req, "http://node.test", keys); !errors.Is(err, ErrNoSecret) || req.Header.Get("Authorization") != "" {
-			t.Fatalf("SignTranscode(%v) = %v, Authorization %q; want ErrNoSecret and no signature", keys, err, req.Header.Get("Authorization"))
-		}
+	// A missing keyring is a wiring error. An empty shared secret is the fork's
+	// node auth disabled: the request goes out unsigned, as Sign does.
+	req = httptest.NewRequest(http.MethodGet, "/status", nil)
+	if err := SignTranscode(req, "http://node.test", nil); !errors.Is(err, ErrNoSecret) || req.Header.Get("Authorization") != "" {
+		t.Fatalf("SignTranscode(nil) = %v, Authorization %q; want ErrNoSecret and no signature", err, req.Header.Get("Authorization"))
+	}
+	req = httptest.NewRequest(http.MethodGet, "/status", nil)
+	if err := SignTranscode(req, "http://node.test", sharedSecret("")); err != nil || req.Header.Get("Authorization") != "" {
+		t.Fatalf("SignTranscode(empty secret) = %v, Authorization %q; want no error and no signature", err, req.Header.Get("Authorization"))
 	}
 	req = httptest.NewRequest(http.MethodGet, "/status", nil)
 	if err := SignProxy(req, "http://node.test", sharedSecret(testSecret)); err != nil || Verify(req, testSecret) != nil {

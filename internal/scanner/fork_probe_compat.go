@@ -8,7 +8,6 @@ import (
 	"os/exec"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
-	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // Fork-compatible probe helpers. The fork's repair and audiobook code still
@@ -19,7 +18,7 @@ import (
 // deadline or a stop kills the wrapper's children too, decoding an fspath-
 // encoded binary path and arguments for non-UTF-8 file names.
 func toolCommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return procgroup.CommandContext(ctx, fspath.Decode(name), fspath.DecodeAll(args)...)
+	return fspath.CommandContext(ctx, fspath.Decode(name), args...)
 }
 
 type boundedProbeBuffer struct {

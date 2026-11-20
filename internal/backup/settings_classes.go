@@ -36,7 +36,7 @@ const (
 // among what its own AI providers and ChatGPT account offer, which only
 // they can validate.
 var serverSpecificSettings = strings.Fields(`
-	server.identity_id server.public_url server.local_url server.web_media_url
+	server.identity_id server.public_url server.local_url
 	database. redis. userdb. storage. artwork. s3. backup. setup.
 	auth.jwt_secret audiobooks.abs.jwt_secret
 	ratelimit.
@@ -94,6 +94,8 @@ var restoredFlagSettings = map[string]string{
 	"notifications.discord.allow_per_episode":              "message granularity on a channel its own switch gates",
 	"notifications.email.allow_per_episode":                "message granularity on a channel its own switch gates",
 	"notifications.server_channels.mention_requesters":     "message content on channels their own switch gates",
+	"notifications.fanout_enabled":                         "fanout to the destinations the backup names",
+	"notifications.release_events_enabled":                 "release announcements on the channels their own switches gate",
 	"overlays.enabled":                                     "presentation",
 	"playback.allow_hevc_encoding":                         whyCapacity,
 	"playback.bandwidth_probe_automatic":                   whyTuning,

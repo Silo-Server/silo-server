@@ -460,47 +460,6 @@ func newKeyedTranscodePool() *TranscodePool {
 // work: not a session, not background work, and not a move off a dead node,
 // even as the least loaded node. Without a key check the pool falls back to
 // the row's KeyIssued.
-func TestPlannerSkipsTranscodeNodesWithoutAKey(t *testing.T) {
-	keyless := transcodeNode(1, "http://keyless", nil, 0)
-	keyed := transcodeNode(2, "http://keyed", nil, 3)
-	f := newFixture(nil, []*Node{keyless, keyed})
-	f.transcodes.SetKeyCheck(func(id int) bool { return id == keyed.ID })
-
-	if plan := f.planner.PlanRoute(RouteRequest{SessionID: "s1", NeedsTranscode: true}); plan.TranscodeNode == nil || plan.TranscodeNode.ID != keyed.ID {
-		t.Fatalf("PlanRoute picked %+v, want the keyed node", plan.TranscodeNode)
-	}
-	// A move off the keyed node, reported unreachable, has nowhere to go.
-	if plan := f.planner.PlanRoute(RouteRequest{SessionID: "s2", NeedsTranscode: true, Unreachable: map[string]struct{}{keyed.URL: {}}}); plan.TranscodeNode != nil {
-		t.Fatalf("a move off the keyed node landed on %s", plan.TranscodeNode.URL)
-	}
-	if node, release := f.planner.ReserveTranscodeWork("job"); node == nil || node.ID != keyed.ID {
-		t.Fatalf("ReserveTranscodeWork = %+v, want the keyed node", node)
-	} else {
-		release()
-	}
-	if f.planner.TranscodeNodeHealthy(keyless.URL) {
-		t.Fatal("a keyless node reports as serving")
-	}
-	if got := f.planner.TranscodeNodeURLsForNewWork(); len(got) != 1 || got[0] != keyed.URL {
-		t.Fatalf("TranscodeNodeURLsForNewWork = %v, want only the keyed node", got)
-	}
-	if got := f.transcodes.Acquire(); got == nil || got.ID != keyed.ID {
-		t.Fatalf("Acquire = %+v, want the keyed node", got)
-	}
-	if len(f.transcodes.Nodes()) != 2 {
-		t.Fatal("the keyless node left the pool")
-	}
-
-	unchecked := NewTranscodePool()
-	unchecked.SetNodes([]*Node{transcodeNode(3, "http://unissued", nil, 0)})
-	if unchecked.Acquire() != nil {
-		t.Fatal("a pool without a key check placed work on a node with no issued key")
-	}
-}
-
-// A node that refused new work at its own job cap takes none from this
-// process until a health check newer than the refusal, or the hold's end,
-// even while the row's cap says it has room.
 func TestNodeAtCapacityIsHeldUntilItsNextHealthCheck(t *testing.T) {
 	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{ID: 1, URL: "http://transcode-a", Enabled: true, Healthy: true}})

@@ -30,7 +30,7 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 				if r.Method != tc.upstream {
 					t.Errorf("node asked with %s, want %s", r.Method, tc.upstream)
 				}
-				if r.URL.Path != "/transcode/transport/"+tc.suffix || r.URL.RawQuery != "opaque=1" || !nodeauthtest.Signed(r, secret) || r.Header.Get("X-Silo-Stream-Token") == "" {
+				if r.URL.Path != "/transcode/transport/"+tc.suffix || r.URL.RawQuery != "opaque=1" || !nodeauthtest.Signed(r, secret) || r.Header.Get("X-Vio-Stream-Token") == "" {
 					t.Error("relay identity/query lost")
 				}
 				segment := strings.HasPrefix(tc.suffix, "segment/")

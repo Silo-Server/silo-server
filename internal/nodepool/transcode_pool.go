@@ -96,13 +96,17 @@ func (p *TranscodePool) HasKey(n *Node) bool {
 	if n == nil {
 		return false
 	}
+	// Vio signs worker calls with the shared auth secret rather than issuing
+	// each transcode node its own key, so every pooled node is signable here.
+	// A deployment that starts issuing node keys wires a key check, which then
+	// answers for each node.
 	if p == nil {
-		return n.KeyIssued
+		return true
 	}
 	if check := p.keyCheck.Load(); check != nil && *check != nil {
 		return (*check)(n.ID)
 	}
-	return n.KeyIssued
+	return true
 }
 
 // KeyedNodes returns the pooled nodes a request can be signed for: the only

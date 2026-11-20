@@ -10,7 +10,7 @@ func newSnapshot(name string) Snapshot {
 }
 
 func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
-	in := []byte(`<title>Silo</title></head>`)
+	in := []byte(`<title>Vio</title></head>`)
 	out := string(RenderIndexHTML(in, newSnapshot(`A&B<script>`)))
 	if strings.Contains(out, "<script>") {
 		t.Fatalf("title not escaped: %q", out)

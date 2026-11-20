@@ -12,7 +12,6 @@
       "max_content_rating": "",
       "max_advisory_age": null,
       "require_advisory_age": false,
-      "requests_allowed": true,
       "quality_preference": "auto",
       "language": "en",
       "preferred_metadata_language": "",
@@ -34,6 +33,5 @@
   ],
   "avatar_upload_enabled": false,
   "max_advisory_age_supported": true,
-  "require_advisory_age_supported": true,
-  "requests_allowed_supported": true
+  "require_advisory_age_supported": true
 }

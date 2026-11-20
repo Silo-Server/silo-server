@@ -52,6 +52,10 @@ const ffmpegCopyTS = "-copyts"
 // on the source file's timeline: -copyts keeps the stream's timestamps and
 // -itsoffset subtracts the source's start time from them, as a demux of the
 // source does.
+// packetStreamInputPath is the FFmpeg input spec for a packet stream fed on
+// stdin: the caller writes the packets and FFmpeg reads the pipe.
+const packetStreamInputPath = "pipe:0"
+
 func (in *SubtitlePacketInput) inputArgs() []string {
 	format := in.StreamFormat
 	if in.Stream == nil {
@@ -59,7 +63,7 @@ func (in *SubtitlePacketInput) inputArgs() []string {
 	}
 	return []string{
 		ffmpegCopyTS, "-itsoffset", formatMicroseconds(-in.SourceStartTime),
-		"-f", format, "-i", "pipe:0",
+		"-f", format, "-i", packetStreamInputPath,
 	}
 }
 

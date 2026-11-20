@@ -71,14 +71,6 @@
       "count": 1
     }
   },
-  "src/components/admin/libraries/LibraryFormSections.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 1
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
   "src/components/admin/plugins/PluginConfigForm.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -155,22 +147,7 @@
       "count": 2
     }
   },
-  "src/hooks/queries/items.ts": {
-    "no-restricted-syntax": {
-      "count": 9
-    }
-  },
   "src/hooks/queries/notInterested.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/hooks/queries/profiles.ts": {
-    "no-restricted-syntax": {
-      "count": 5
-    }
-  },
-  "src/hooks/queries/useRequests.test.tsx": {
     "no-restricted-syntax": {
       "count": 1
     }
@@ -197,11 +174,6 @@
   },
   "src/pages/AdminCollections.tsx": {
     "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/pages/AdminLibraries.tsx": {
-    "react-hooks/exhaustive-deps": {
       "count": 1
     }
   },
@@ -335,21 +307,7 @@
     }
   },
   "src/pages/settings/DeviceSettings.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 41
-    },
-    "no-restricted-syntax": {
-      "count": 2
-    },
     "react-hooks/set-state-in-effect": {
-      "count": 1
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/pages/settings/HistoryImportSettings.test.tsx": {
-    "no-restricted-syntax": {
       "count": 1
     }
   },
@@ -406,16 +364,6 @@
       "count": 4
     }
   },
-  "src/pages/setup-wizard/steps/ServerStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 12
-    }
-  },
-  "src/pages/setup-wizard/steps/StorageStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 59
-    }
-  },
   "src/pages/setup-wizard/steps/StreamingStep.tsx": {
     "formatjs/no-literal-string-in-jsx": {
       "count": 24
@@ -446,11 +394,6 @@
   "src/pages/watchtogether/hooks/useRecentRooms.ts": {
     "react-hooks/set-state-in-effect": {
       "count": 1
-    }
-  },
-  "src/pages/watchtogether/room/browse/BrowseShelf.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 2
     }
   },
   "src/pages/watchtogether/room/picker/SeriesDrilldown.tsx": {

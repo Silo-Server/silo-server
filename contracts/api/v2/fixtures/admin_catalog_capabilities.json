@@ -1,13 +1,10 @@
 {
-  "revision": "a67a713464a15b9c6de44e1479336bce046681cf1e962d1d9016304696e0d15a",
+  "revision": "058ec3415bfd2d430bbc7bc5fcb423a5766e631e4fe440249a49e80d981a4637",
   "state": "available",
   "allowed": true,
   "item_listing": true,
   "item_listing_max_content_ids": 200,
   "item_change_events": true,
   "item_match_hints": true,
-  "item_metadata": true,
-  "item_metadata_reset": true,
-  "item_file_paths": true,
-  "item_posters": false
+  "item_metadata": true
 }

@@ -280,9 +280,9 @@ func TestHTTPPreparerStatRecoversToneMapAttestationFromHeaders(t *testing.T) {
 			t.Fatalf("method = %s, want HEAD", r.Method)
 		}
 		w.Header().Set("Content-Length", "42")
-		w.Header().Set("X-Silo-Tone-Map-Recipe-Version", "1")
-		w.Header().Set("X-Silo-Tone-Map-Mode", "software")
-		w.Header().Set("X-Silo-Tone-Map-Source-Revision-Fingerprint", "0123456789abcdef")
+		w.Header().Set("X-Vio-Tone-Map-Recipe-Version", "1")
+		w.Header().Set("X-Vio-Tone-Map-Mode", "software")
+		w.Header().Set("X-Vio-Tone-Map-Source-Revision-Fingerprint", "0123456789abcdef")
 	}))
 	defer server.Close()
 
@@ -305,7 +305,7 @@ func TestHTTPPreparerStatRecoversToneMapAttestationFromHeaders(t *testing.T) {
 func TestHTTPPreparerStatRejectsOversizedAttestationHeader(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "42")
-		w.Header().Set("X-Silo-Tone-Map-Recipe-Version", strings.Repeat("x", 1025))
+		w.Header().Set("X-Vio-Tone-Map-Recipe-Version", strings.Repeat("x", 1025))
 	}))
 	defer server.Close()
 
