@@ -14552,6 +14552,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ne peut pas être restauré — l’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de sa connexion"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ne peuvent pas être restaurés — l’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de leur connexion"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ne peuvent pas être restaurés — l’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de leur connexion"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15242,6 +15288,52 @@
     {
       "type": 0,
       "value": "L’adresse d’un service change sans ses identifiants dans la sauvegarde : la restauration les efface donc ici et désactive le service jusqu’à ce qu’ils soient saisis de nouveau."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paramètre conserve sa valeur actuelle, car l’environnement de ce serveur le définit, ou définit une partie de sa connexion."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de paramètres conservent leurs valeurs actuelles, car l’environnement de ce serveur les définit, ou définit une partie de leur connexion."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paramètres conservent leurs valeurs actuelles, car l’environnement de ce serveur les définit, ou définit une partie de leur connexion."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18638,6 +18730,12 @@
       "value": "Un autre compte de ce serveur se connecte avec son nom d’utilisateur ou son e-mail."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "L’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de leur connexion : ce serveur conserve donc ses valeurs actuelles."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19848,6 +19946,16 @@
     {
       "type": 0,
       "value": " (conservé : plus strict)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (conservé : environnement)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

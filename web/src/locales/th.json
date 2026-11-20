@@ -13138,6 +13138,32 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "กู้คืน "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการไม่ได้ — สภาพแวดล้อมของเซิร์ฟเวอร์นี้กำหนดการตั้งค่าที่ต่างกัน หรือกำหนดการเชื่อมต่อบางส่วนของรายการเหล่านี้"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13548,6 +13574,32 @@
     {
       "type": 0,
       "value": "ที่อยู่ของบริการเปลี่ยนไปโดยไม่มีข้อมูลเข้าสู่ระบบในข้อมูลสำรอง การกู้คืนจึงจะล้างข้อมูลเข้าสู่ระบบที่นี่และปิดบริการไว้จนกว่าจะป้อนข้อมูลอีกครั้ง"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "การตั้งค่า "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการจะคงค่าปัจจุบันไว้ เนื่องจากสภาพแวดล้อมของเซิร์ฟเวอร์นี้กำหนดการตั้งค่าเหล่านี้ หรือกำหนดการเชื่อมต่อบางส่วนของการตั้งค่าเหล่านี้"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15828,6 +15880,12 @@
       "value": "มีบัญชีอื่นที่นี่ที่ลงชื่อเข้าใช้ด้วยชื่อผู้ใช้หรืออีเมลของบัญชีนี้"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "สภาพแวดล้อมของเซิร์ฟเวอร์นี้กำหนดการตั้งค่าที่ต่างกัน หรือกำหนดการเชื่อมต่อบางส่วนของการตั้งค่าเหล่านั้น เซิร์ฟเวอร์นี้จึงคงค่าปัจจุบันไว้"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16778,6 +16836,16 @@
     {
       "type": 0,
       "value": " (คงไว้: เข้มงวดกว่า)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (คงไว้: สภาพแวดล้อม)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

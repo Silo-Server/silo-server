@@ -14548,6 +14548,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15238,6 +15284,52 @@
     {
       "type": 0,
       "value": "Adresa usluge mijenja se bez njezinih vjerodajnica u sigurnosnoj kopiji pa ih vraćanje ovdje briše i isključuje uslugu dok ih ponovno ne unesete."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavka zadržava trenutačnu vrijednost jer okruženje ovog poslužitelja postavlja nju ili dio njezine veze."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavke zadržavaju trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavki zadržava trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18666,6 +18758,12 @@
       "value": "Drugi se račun ovdje prijavljuje istim korisničkim imenom ili e-adresom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze pa ovaj poslužitelj zadržava svoje trenutačne vrijednosti."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19900,6 +19998,16 @@
     {
       "type": 0,
       "value": " (zadržano: strože)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (zadržano: okruženje)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

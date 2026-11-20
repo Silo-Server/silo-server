@@ -13801,6 +13801,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14323,6 +14357,40 @@
     {
       "type": 0,
       "value": "Địa chỉ của một dịch vụ thay đổi nhưng bản sao lưu không có thông tin xác thực đi kèm, nên khi khôi phục, thông tin xác thực ở đây sẽ bị xóa và dịch vụ sẽ tắt cho đến khi nhập lại."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt cài đặt đó, hoặc một phần kết nối của cài đặt đó."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt các cài đặt đó, hoặc một phần kết nối của chúng."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17167,6 +17235,12 @@
       "value": "Một tài khoản khác tại đây đăng nhập bằng tên người dùng hoặc email này."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng, nên máy chủ này giữ các giá trị hiện tại."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18253,6 +18327,16 @@
     {
       "type": 0,
       "value": " (giữ lại: chặt chẽ hơn)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (giữ nguyên: môi trường)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

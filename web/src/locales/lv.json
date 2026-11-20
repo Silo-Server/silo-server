@@ -14868,6 +14868,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumus – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumu – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumus – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15726,6 +15784,52 @@
     {
       "type": 0,
       "value": "Pakalpojuma adrese mainās, bet dublējumā nav tā akreditācijas datu, tāpēc atjaunošana tos šeit notīra un izslēdz pakalpojumu, līdz tie tiek ievadīti vēlreiz."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījumi saglabā pašreizējās vērtības, jo šī servera vide nosaka tos vai daļu no to savienojuma."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījums saglabā pašreizējo vērtību, jo šī servera vide nosaka to vai daļu no tā savienojuma."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījumi saglabā pašreizējās vērtības, jo šī servera vide nosaka tos vai daļu no to savienojuma."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -19226,6 +19330,12 @@
       "value": "Šeit ar tā lietotājvārdu vai e-pasta adresi pierakstās cits konts."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder, tāpēc šis serveris saglabā pašreizējās vērtības."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -20484,6 +20594,16 @@
     {
       "type": 0,
       "value": " (saglabāts: stingrāks)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (saglabāts: vide)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

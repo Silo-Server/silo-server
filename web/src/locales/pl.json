@@ -15687,6 +15687,80 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16769,6 +16843,64 @@
     {
       "type": 0,
       "value": "Adres usługi się zmienia, a kopia zapasowa nie zawiera jej danych logowania, więc przywracanie usunie je tutaj i wyłączy usługę do czasu ich ponownego wprowadzenia."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawienie zachowuje bieżącą wartość, bo środowisko tego serwera określa je lub część jego połączenia."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawienia zachowują bieżące wartości, bo środowisko tego serwera określa je lub część ich połączenia."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawień zachowuje bieżące wartości, bo środowisko tego serwera określa je lub część ich połączenia."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawienia zachowuje bieżące wartości, bo środowisko tego serwera określa je lub część ich połączenia."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20869,6 +21001,12 @@
       "value": "Inne konto na tym serwerze loguje się tą samą nazwą użytkownika lub tym samym e-mailem."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Środowisko tego serwera określa różniące się ustawienia lub część ich połączenia, więc ten serwer zachowuje bieżące wartości."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -22263,6 +22401,16 @@
     {
       "type": 0,
       "value": " (zachowano: bardziej restrykcyjne)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (zachowano: środowisko)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

@@ -14560,6 +14560,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " non si può ripristinare — l’ambiente di questo server definisce le impostazioni che differiscono, o parte della relativa connessione"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " non si possono ripristinare — l’ambiente di questo server definisce le impostazioni che differiscono, o parte della relativa connessione"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " non si possono ripristinare — l’ambiente di questo server definisce le impostazioni che differiscono, o parte della relativa connessione"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15250,6 +15296,52 @@
     {
       "type": 0,
       "value": "L’indirizzo di un servizio cambia senza le relative credenziali nel backup, quindi il ripristino le cancella qui e disattiva il servizio finché non vengono reinserite."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " impostazione mantiene il valore attuale perché l’ambiente di questo server la definisce, o definisce parte della sua connessione."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di impostazioni mantengono i valori attuali perché l’ambiente di questo server le definisce, o definisce parte della loro connessione."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " impostazioni mantengono i valori attuali perché l’ambiente di questo server le definisce, o definisce parte della loro connessione."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18646,6 +18738,12 @@
       "value": "Un altro account su questo server accede con il suo nome utente o la sua email."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "L’ambiente di questo server definisce le impostazioni che differiscono, o parte della relativa connessione, quindi questo server mantiene i suoi valori attuali."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19856,6 +19954,16 @@
     {
       "type": 0,
       "value": " (mantenuto: più restrittivo)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (resta: ambiente)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

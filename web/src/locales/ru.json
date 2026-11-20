@@ -15751,6 +15751,80 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16833,6 +16907,64 @@
     {
       "type": 0,
       "value": "Адрес сервиса меняется, а его учётных данных в резервной копии нет, поэтому при восстановлении они здесь будут удалены, а сервис будет выключен, пока их не введут снова."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройка сохраняет текущее значение, так как её или часть её подключения задаёт окружение этого сервера."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройки сохраняют текущие значения, так как их или часть их подключения задаёт окружение этого сервера."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настроек сохраняют текущие значения, так как их или часть их подключения задаёт окружение этого сервера."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройки сохраняют текущие значения, так как их или часть их подключения задаёт окружение этого сервера."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20913,6 +21045,12 @@
       "value": "На этом сервере уже есть другой аккаунт, который входит с таким же именем пользователя или эл. почтой."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Окружение этого сервера задаёт отличающиеся настройки или часть их подключения, поэтому сервер сохраняет текущие значения."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -22279,6 +22417,16 @@
     {
       "type": 0,
       "value": " (сохранено: строже)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (сохранено: окружение)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

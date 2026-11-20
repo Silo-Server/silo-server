@@ -13038,6 +13038,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個無法還原——不同的設定項目或其連線的一部分由此伺服器的環境設定"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13392,6 +13414,28 @@
     {
       "type": 0,
       "value": "某項服務的位址已變更，但備份中沒有其憑證，因此還原時會清除此處的憑證並關閉該服務，直到重新輸入為止。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個設定項目保留目前的值，因為這些項目或其連線的一部分由此伺服器的環境設定。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15764,6 +15808,12 @@
       "value": "此處已有其他帳號使用其使用者名稱或電子郵件登入。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "不同的設定項目或其連線的一部分由此伺服器的環境設定，因此此伺服器保留目前的值。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16722,6 +16772,16 @@
     {
       "type": 0,
       "value": "（保留：較嚴格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（保留：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [

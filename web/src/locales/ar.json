@@ -17209,6 +17209,112 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -18739,6 +18845,80 @@
     {
       "type": 0,
       "value": "يتغيّر عنوان إحدى الخدمات دون بيانات اعتمادها في النسخة الاحتياطية، لذا تمسح الاستعادة بيانات الاعتماد هنا وتعطّل الخدمة حتى يُعاد إدخالها."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعداد تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إعداد واحد يحتفظ بقيمته الحالية لأن بيئة هذا الخادم تضبطه، أو تضبط جزءًا من اتصاله."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إعدادان يحتفظان بقيمتيهما الحاليتين لأن بيئة هذا الخادم تضبطهما، أو تضبط جزءًا من اتصالهما."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعدادات تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعدادًا تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعداد تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -23631,6 +23811,12 @@
       "value": "يسجّل حساب آخر هنا الدخول باسم المستخدم أو البريد الإلكتروني الخاص به."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها، لذا يحتفظ هذا الخادم بقيمه الحالية."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -25221,6 +25407,16 @@
     {
       "type": 0,
       "value": " (مُبقى: أكثر صرامة)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (دون تغيير: البيئة)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

@@ -13753,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14275,6 +14309,40 @@
     {
       "type": 0,
       "value": "Bir hizmetin adresi, yedekte kimlik bilgileri olmadan değişiyor; bu nedenle geri yükleme buradaki kimlik bilgilerini temizler ve bunlar yeniden girilene kadar hizmeti kapatır."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerini koruyor: bu ayarı veya ait olduğu bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerlerini koruyor: bu ayarları veya ait oldukları bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17063,6 +17131,12 @@
       "value": "Buradaki başka bir hesap, bunun kullanıcı adı veya e-postasıyla oturum açıyor."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Farklı olan ayarları veya bunların bağlantısının bir kısmını bu sunucunun ortamı belirlediğinden bu sunucu mevcut değerlerini korur."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18137,6 +18211,16 @@
     {
       "type": 0,
       "value": " (korundu: daha katı)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (korundu: ortam)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

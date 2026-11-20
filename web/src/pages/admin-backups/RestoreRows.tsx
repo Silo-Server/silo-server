@@ -85,6 +85,14 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
       backup,
     };
   }
+  if (setting.status === "managed_by_environment") {
+    return {
+      now: t("web.admin.backups.restore.setting.managedByEnvironment", {
+        value: setting.masked ? set : current,
+      }),
+      backup: setting.masked ? t("web.admin.backups.restore.setting.differentEncrypted") : backup,
+    };
+  }
   if (setting.masked) {
     return { now: set, backup: t("web.admin.backups.restore.setting.differentEncrypted") };
   }

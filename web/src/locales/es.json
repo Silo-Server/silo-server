@@ -14576,6 +14576,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no se puede restaurar — el entorno de este servidor define los ajustes que difieren, o parte de su conexión"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no se pueden restaurar — el entorno de este servidor define los ajustes que difieren, o parte de su conexión"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no se pueden restaurar — el entorno de este servidor define los ajustes que difieren, o parte de su conexión"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15266,6 +15312,52 @@
     {
       "type": 0,
       "value": "La dirección de un servicio cambia sin sus credenciales en la copia de seguridad, así que al restaurar se borran aquí y el servicio se desactiva hasta que se vuelvan a introducir."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ajuste mantiene su valor actual porque lo define el entorno de este servidor, o parte de su conexión."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de ajustes mantienen sus valores actuales porque los define el entorno de este servidor, o parte de su conexión."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ajustes mantienen sus valores actuales porque los define el entorno de este servidor, o parte de su conexión."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18678,6 +18770,12 @@
       "value": "Otra cuenta de aquí inicia sesión con su nombre de usuario o correo electrónico."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "El entorno de este servidor define los ajustes que difieren, o parte de su conexión, así que este servidor mantiene sus valores actuales."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19912,6 +20010,16 @@
     {
       "type": 0,
       "value": " (se mantiene: más estricto)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (se mantiene: entorno)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

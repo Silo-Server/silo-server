@@ -14789,6 +14789,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çåñ'ţ ƀé ŕéšţöŕéđ — ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥé šéţţîñĝš ţĥåţ đîƒƒéŕ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çåñ'ţ ƀé ŕéšţöŕéđ — ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥé šéţţîñĝš ţĥåţ đîƒƒéŕ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15423,6 +15465,48 @@
     {
       "type": 0,
       "value": "⟦Å šéŕṽîçé'š åđđŕéšš çĥåñĝéš ŵîţĥöûţ îţš çŕéđéñţîåļš îñ ţĥé ƀåçķûþ, šö ŕéšţöŕîñĝ çļéåŕš ţĥéɱ ĥéŕé åñđ ţûŕñš ţĥé šéŕṽîçé öƒƒ ûñţîļ ţĥéý'ŕé éñţéŕéđ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéţţîñĝ ķééþš îţš çûŕŕéñţ ṽåļûé ƀéçåûšé ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš îţ, öŕ þåŕţ öƒ îţš çöññéçţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéţţîñĝš ķééþ ţĥéîŕ çûŕŕéñţ ṽåļûéš ƀéçåûšé ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥéɱ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18623,6 +18707,12 @@
       "value": "⟦Åñöţĥéŕ åççöûñţ ĥéŕé šîĝñš îñ ŵîţĥ îţš ûšéŕñåɱé öŕ éɱåîļ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥé šéţţîñĝš ţĥåţ đîƒƒéŕ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ, šö ţĥîš šéŕṽéŕ ķééþš îţš çûŕŕéñţ ṽåļûéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19833,6 +19923,20 @@
     {
       "type": 0,
       "value": " (ķéþţ: šţŕîçţéŕ)~~~~~~~⟧"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ķéþţ: éñṽîŕöñɱéñţ)~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.restore.setting.now": [

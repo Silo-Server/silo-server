@@ -12954,6 +12954,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tidak boleh dipulihkan — persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13308,6 +13330,28 @@
     {
       "type": 0,
       "value": "Alamat satu perkhidmatan berubah tanpa bukti kelayakannya dalam sandaran, jadi pemulihan mengosongkan bukti kelayakan itu di sini dan mematikan perkhidmatan tersebut sehingga dimasukkan semula."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tetapan mengekalkan nilai semasa kerana persekitaran pelayan ini menetapkannya, atau sebahagian sambungannya."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15572,6 +15616,12 @@
       "value": "Akaun lain di sini log masuk dengan nama pengguna atau e-mel akaun ini."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya, jadi pelayan ini mengekalkan nilai semasanya."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16506,6 +16556,16 @@
     {
       "type": 0,
       "value": " (dikekalkan: lebih ketat)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (dikekalkan: persekitaran)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

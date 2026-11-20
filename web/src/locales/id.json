@@ -12954,6 +12954,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tidak dapat dipulihkan — environment server ini mengatur pengaturan yang berbeda, atau sebagian koneksi tempat pengaturan itu berada"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13308,6 +13330,28 @@
     {
       "type": 0,
       "value": "Alamat layanan berubah tanpa kredensialnya di cadangan, jadi pemulihan akan menghapus kredensial itu di sini dan menonaktifkan layanan hingga kredensial dimasukkan lagi."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pengaturan tetap memakai nilai saat ini karena environment server ini mengaturnya, atau mengatur sebagian koneksi tempat pengaturan itu berada."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15572,6 +15616,12 @@
       "value": "Akun lain di sini masuk dengan nama pengguna atau email yang sama."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Environment server ini mengatur pengaturan yang berbeda, atau sebagian koneksi tempat pengaturan itu berada, jadi server ini mempertahankan nilainya saat ini."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16506,6 +16556,16 @@
     {
       "type": 0,
       "value": " (dipertahankan: lebih ketat)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (dipertahankan: environment)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

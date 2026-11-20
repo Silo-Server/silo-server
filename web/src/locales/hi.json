@@ -13757,6 +13757,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " रीस्टोर नहीं किया जा सकता — जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " रीस्टोर नहीं किए जा सकते — जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14279,6 +14313,40 @@
     {
       "type": 0,
       "value": "बैकअप में एक सेवा का पता उसके क्रेडेंशियल के बिना बदलता है, इसलिए रीस्टोर करने पर यहाँ वे क्रेडेंशियल साफ़ हो जाते हैं और उन्हें फिर से डालने तक सेवा बंद रहती है।"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेटिंग अपनी मौजूदा वैल्यू रखती है, क्योंकि इसे, या इसके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है।"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेटिंग अपनी मौजूदा वैल्यू रखती हैं, क्योंकि इन्हें, या इनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है।"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17131,6 +17199,12 @@
       "value": "यहाँ एक दूसरा खाता इसी यूज़रनेम या ईमेल से साइन इन करता है।"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है, इसलिए यह सर्वर अपनी मौजूदा वैल्यू रखता है।"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18205,6 +18279,16 @@
     {
       "type": 0,
       "value": " (रखा गया: ज़्यादा सख़्त)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (बरकरार: एनवायरनमेंट)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
