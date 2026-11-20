@@ -3,13 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { useNavigate } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
-import {
-  bodiesSentTo,
-  json,
-  openLink,
-  problemResponse,
-  renderRoutes,
-} from "./authPage.test-support";
+import { json, problemResponse, renderRoutes } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
 import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
@@ -31,7 +25,7 @@ const linkInvitation = { ...invitation, email: "", email_required: true, note: "
 const emailProblem = (type: string, status: number, errors?: unknown[]) =>
   problemResponse(status, type, { errors });
 function posts() {
-  return fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/v2/invitations/accept"));
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 }
 function problem(status: number) {
   return new Response(
@@ -44,14 +38,13 @@ let lookup: () => Promise<Response>;
 const fetchMock = vi.fn<typeof fetch>();
 function Move() {
   const navigate = useNavigate();
-  return <button onClick={() => navigate("/login")}>Leave invitation</button>;
+  return <button onClick={() => navigate("/invite/second-secret")}>Change invitation</button>;
 }
-function mount(link = "/invite#first-secret") {
-  openLink(link);
+function mount() {
   return renderRoutes(
-    "/invite",
+    "/invite/first-secret",
     {
-      "/invite": <InviteClaim />,
+      "/invite/:token": <InviteClaim />,
       "/household-setup": <p>Household setup</p>,
       "/login": <p>Ordinary login</p>,
     },
@@ -73,8 +66,8 @@ beforeEach(() => {
   setRefreshToken("existing-refresh");
   submit = async () => json(accepted, 201);
   lookup = async () => json(invitation);
-  fetchMock.mockImplementation(async (url) => {
-    if (String(url).endsWith("/accept")) return submit();
+  fetchMock.mockImplementation(async (url, options) => {
+    if (options?.method === "POST") return submit();
     if (String(url).endsWith("/capabilities"))
       return json({ revision: "1", state: "available", default_profile: true, profileless: true });
     return lookup();
@@ -93,16 +86,7 @@ it("installs the nested v2 session and continues household setup", async () => {
   expect(screen.getByLabelText("Email")).toBeDisabled();
   send();
   await screen.findByText("Household setup");
-  expect(bodiesSentTo(fetchMock, "/api/v2/invitations/lookup")).toEqual([
-    { token: "first-secret" },
-  ]);
-  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({
-    token: "first-secret",
-    password: "password123",
-  });
-  // The token travels only in request bodies, and the address no longer has it.
-  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("first-secret"))).toBe(false);
-  expect(window.location.href).not.toContain("first-secret");
+  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({ password: "password123" });
   expect(auth.completeLogin).toHaveBeenCalledWith(
     expect.objectContaining({
       access_token: accepted.tokens.access_token,
@@ -119,7 +103,7 @@ it("treats sign-in-required as committed, clears passwords, and offers ordinary 
   await screen.findByText(/Your account was created/);
   expect(screen.queryByLabelText("Password", { exact: true })).toBeNull();
   expect(auth.completeLogin).not.toHaveBeenCalled();
-  expect(posts()).toHaveLength(1);
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   fireEvent.click(screen.getAllByRole("link", { name: "Sign in" })[0]!);
   await screen.findByText("Ordinary login");
 });
@@ -130,7 +114,7 @@ it("does not refresh or replay a 401 accept and requires explicit reload before 
   send();
   await screen.findByText(/We could not confirm the result/);
   send();
-  expect(posts()).toHaveLength(1);
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   expect(screen.getByLabelText("Password", { exact: true })).toHaveValue("password123");
   fireEvent.click(screen.getByRole("button", { name: "Reload invitation" }));
   await screen.findByLabelText("Email");
@@ -163,7 +147,7 @@ it("blocks unsupported per-invitation profile creation", async () => {
   mount();
   await fill();
   send();
-  expect(posts()).toHaveLength(0);
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 });
 it.each(["account", "route"])(
   "rejects delayed installation after a %s change and blocks double submit",
@@ -178,11 +162,13 @@ it.each(["account", "route"])(
     const form = screen.getByRole("button", { name: "Create account" }).closest("form")!;
     fireEvent.submit(form);
     fireEvent.submit(form);
-    await waitFor(() => expect(posts()).toHaveLength(1));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1),
+    );
     if (change === "account") {
       setAccessToken("other-account");
       setAccessToken(null);
-    } else fireEvent.click(screen.getByRole("button", { name: "Leave invitation" }));
+    } else fireEvent.click(screen.getByRole("button", { name: "Change invitation" }));
     await act(async () => {
       resolve(json(accepted, 201));
     });
@@ -204,7 +190,7 @@ it("rejects a submit when credentials arrived before auth context rerender", asy
   await fill();
   setAccessToken("new-account");
   send();
-  expect(posts()).toHaveLength(0);
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   expect(auth.completeLogin).not.toHaveBeenCalled();
 });
 it("asks for an address on a link invitation and sends it with the password", async () => {
@@ -224,15 +210,9 @@ it("asks for an address on a link invitation and sends it with the password", as
   send();
   await screen.findByText("Household setup");
   expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({
-    token: "first-secret",
     email: "sam@example.test",
     password: "password123",
   });
-});
-it("treats a link that lost its token as unavailable without asking the server", async () => {
-  mount("/invite");
-  await screen.findByText("Invitation unavailable");
-  expect(fetchMock).not.toHaveBeenCalled();
 });
 it("keeps a link invitation usable when the address already has an account", async () => {
   lookup = async () => json(linkInvitation);
@@ -252,36 +232,4 @@ it("keeps a link invitation usable when the address already has an account", asy
   await screen.findByText("Enter a valid email address, like name@example.com");
   expect(posts()).toHaveLength(2);
   expect(auth.completeLogin).not.toHaveBeenCalled();
-});
-
-// None of these refusals creates an account or spends the invitation, so the
-// page says why and keeps Create account available (#4161).
-it.each([
-  { status: 429, type: "rate_limited", message: /Too many requests from this network/ },
-  { status: 501, type: "capability_unsupported", message: /cannot create the profile required/ },
-  { status: 409, type: "conflict", message: /An account already uses this email address/ },
-  { status: 422, type: "validation_failed", message: /Password must not exceed 72 bytes/ },
-])("lets the invitee retry after a $status $type refusal", async ({ status, type, message }) => {
-  submit = async () =>
-    problemResponse(status, type, { detail: "Password must not exceed 72 bytes." });
-  mount();
-  await fill();
-  send();
-  await screen.findByText(message);
-  expect(screen.queryByText(/We could not confirm the result/)).toBeNull();
-  expect(screen.getByRole("button", { name: "Create account" })).not.toBeDisabled();
-
-  submit = async () => json(accepted, 201);
-  send();
-  await screen.findByText("Household setup");
-  expect(posts()).toHaveLength(2);
-});
-
-it("still treats a server error as an unconfirmed result", async () => {
-  submit = async () => problem(500);
-  mount();
-  await fill();
-  send();
-  await screen.findByText(/We could not confirm the result/);
-  expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
 });

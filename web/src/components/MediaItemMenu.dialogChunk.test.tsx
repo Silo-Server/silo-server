@@ -9,10 +9,7 @@ vi.mock("@/components/EditMetadataDialog", () => {
 });
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
-  useFreshCatalogItemDetail: () => ({
-    item: { content_id: "series-1", title: "Silo" },
-    error: null,
-  }),
+  useCatalogItemDetail: () => ({ data: { content_id: "series-1", title: "Silo" } }),
 }));
 
 it("keeps a failed dialog chunk inside the host and offers a reload", async () => {

@@ -2,13 +2,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
-import {
-  bodiesSentTo,
-  json,
-  openLink,
-  problemResponse,
-  renderRoutes,
-} from "./authPage.test-support";
+import { json, problemResponse, renderRoutes } from "./authPage.test-support";
 import PasswordReset from "./PasswordReset";
 import completed from "../../../contracts/api/v2/fixtures/password_reset_completed.json";
 import lookupFixture from "../../../contracts/api/v2/fixtures/password_reset_lookup.json";
@@ -36,10 +30,9 @@ let lookup: () => Promise<Response>;
 let selfService: string;
 const fetchMock = vi.fn<typeof fetch>();
 
-function mount(link = "/reset-password#secret-token") {
-  openLink(link);
-  return renderRoutes("/reset-password", {
-    "/reset-password": <PasswordReset />,
+function mount() {
+  return renderRoutes("/reset-password/secret-token", {
+    "/reset-password/:token": <PasswordReset />,
     "/profiles": <p>Profile picker</p>,
     "/login": <p>Ordinary login</p>,
     "/forgot-password": <p>Request a link</p>,
@@ -54,8 +47,7 @@ async function fill(password = "new-password", confirmation = password) {
 function send() {
   fireEvent.submit(screen.getByRole("button", { name: "Save password" }).closest("form")!);
 }
-const completions = () => bodiesSentTo(fetchMock, "/api/v2/password-resets/complete");
-const lookups = () => bodiesSentTo(fetchMock, "/api/v2/password-resets/lookup");
+const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 
 beforeEach(() => {
   auth.user = null;
@@ -68,7 +60,7 @@ beforeEach(() => {
     if (String(url).includes("/capabilities/password-reset")) {
       return json({ ...capabilityFixture, state: selfService });
     }
-    return options?.method === "POST" && !String(url).endsWith("/lookup") ? submit() : lookup();
+    return options?.method === "POST" ? submit() : lookup();
   });
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -87,18 +79,9 @@ it("sets the password through the link, signs in, and continues to the profiles"
   expect(auth.completeLogin).toHaveBeenCalledWith(
     expect.objectContaining({ access_token: completed.tokens.access_token }),
   );
-  expect(lookups()).toEqual([{ token: "secret-token" }]);
-  expect(completions()).toEqual([{ token: "secret-token", password: "new-password" }]);
-  // The token travels only in request bodies: no URL the page asked for, and
-  // not the address its requests name as their Referer, carries it.
-  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("secret-token"))).toBe(false);
-  expect(window.location.href).not.toContain("secret-token");
-});
-
-it("sends a link that lost its token to the forgot-password page", async () => {
-  mount("/reset-password");
-  await screen.findByText("Request a link");
-  expect(lookups()).toHaveLength(0);
+  const [url, init] = posts()[0]!;
+  expect(String(url)).toContain("/api/v2/password-resets/secret-token/complete");
+  expect(JSON.parse(String(init?.body))).toEqual({ password: "new-password" });
 });
 
 it("checks the new password before spending the link", async () => {
@@ -109,7 +92,7 @@ it("checks the new password before spending the link", async () => {
   await fill("short");
   send();
   await screen.findByText("Use at least 8 characters.");
-  expect(completions()).toHaveLength(0);
+  expect(posts()).toHaveLength(0);
 });
 
 it("reports a committed reset whose sign-in failed without replaying it", async () => {
@@ -124,7 +107,7 @@ it("reports a committed reset whose sign-in failed without replaying it", async 
   send();
   await screen.findByText(new RegExp(`Sign in as ${lookupFixture.username}`));
   expect(auth.completeLogin).not.toHaveBeenCalled();
-  expect(completions()).toHaveLength(1);
+  expect(posts()).toHaveLength(1);
 });
 
 it("shows a field problem and keeps the link usable", async () => {
