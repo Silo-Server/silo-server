@@ -169,6 +169,9 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 				THEN COALESCE(EXCLUDED.duration_seconds, admin_playback_history.duration_seconds)
 				ELSE admin_playback_history.duration_seconds END,
 			completed = admin_playback_history.completed OR EXCLUDED.completed,
+			-- A row recorded before subtitle_at existed ordered its subtitle
+			-- by ended_at; keep that order before ended_at moves.
+			subtitle_at = COALESCE(admin_playback_history.subtitle_at, admin_playback_history.ended_at),
 			ended_at = GREATEST(admin_playback_history.ended_at, EXCLUDED.ended_at),
 			start_position_seconds = CASE
 				WHEN NOT admin_playback_history.measured THEN EXCLUDED.start_position_seconds
@@ -397,7 +400,7 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 	// after the upsert.
 	const laterReason = `$8::text IS NOT NULL AND (end_reason_at IS NULL OR $9::timestamptz >= end_reason_at)`
 	// A row written before subtitle_at existed ordered its subtitle by
-	// ended_at.
+	// ended_at (the upsert keeps that order when it moves ended_at).
 	const laterSubtitle = `$11::timestamptz >= COALESCE(subtitle_at, ended_at)`
 	batch.Queue(`
 		UPDATE admin_playback_history SET
