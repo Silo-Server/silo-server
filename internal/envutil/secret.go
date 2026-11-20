@@ -24,8 +24,8 @@ const maxFileBytes = 1 << 20
 // that supplied the value: name+"_FILE" for a file, otherwise name. A
 // variable counts as set when it is not empty, as the omnibus image's init
 // scripts count it.
-// Setting both is an error, and so is a file that cannot be read or holds no
-// value. A value set directly is returned unchanged.
+// Setting both is an error, and so is a file that cannot be read or holds
+// only whitespace. A value set directly is returned unchanged.
 func LookupSecret(getenv func(string) string, name string) (value, usedVar string, err error) {
 	fileVar := name + SecretFileSuffix
 	path := getenv(fileVar)
@@ -38,6 +38,9 @@ func LookupSecret(getenv func(string) string, name string) (value, usedVar strin
 		if err != nil {
 			return "", "", fmt.Errorf("%s: %w", fileVar, err)
 		}
+		if strings.TrimSpace(secret) == "" {
+			return "", "", fmt.Errorf("%s: the file holds only whitespace", fileVar)
+		}
 		return secret, fileVar, nil
 	default:
 		return direct, name, nil
@@ -46,8 +49,8 @@ func LookupSecret(getenv func(string) string, name string) (value, usedVar strin
 
 // ReadSecretFile reads a secret from a mounted file. One trailing line ending
 // is removed, since editors and `echo` add one; anything else in the file is
-// the secret. The file must be a regular file of at most 1 MiB holding UTF-8
-// text that is not blank. Errors never quote the file's content.
+// the secret. The file must be a regular file of at most 1 MiB holding a
+// nonempty UTF-8 value. Errors never quote the file's content.
 func ReadSecretFile(path string) (string, error) {
 	data, err := ReadRegularFile(path)
 	if err != nil {
@@ -57,7 +60,7 @@ func ReadSecretFile(path string) (string, error) {
 	if line, ended := strings.CutSuffix(secret, "\n"); ended {
 		secret = strings.TrimSuffix(line, "\r")
 	}
-	if strings.TrimSpace(secret) == "" || !utf8.ValidString(secret) {
+	if secret == "" || !utf8.ValidString(secret) {
 		return "", errors.New("the file must hold a nonempty UTF-8 value")
 	}
 	return secret, nil
