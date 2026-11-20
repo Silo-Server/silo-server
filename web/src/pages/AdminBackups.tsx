@@ -44,6 +44,7 @@ import {
   backUpNowBlocker,
   backupErrorMessage,
   backupSchedulePhrases,
+  backupsPaused,
   defaultBackupLocation,
   isBucketLocation,
   isFinished,
@@ -169,7 +170,9 @@ export default function AdminBackups() {
   const keep = list?.keep ?? (Number(form.getPersistedValue(BACKUP_KEEP_KEY)) || 7);
   const enabled = list?.enabled ?? form.getPersistedValue(BACKUP_ENABLED_KEY) !== "false";
   const taskNextRunAt = backupTask.data?.next_run_at;
-  const next = enabled ? nextBackupRun(now, taskNextRunAt) : null;
+  const paused = backupsPaused(warnings);
+  // A paused server's next run fails, so neither line names it.
+  const next = enabled && !paused ? nextBackupRun(now, taskNextRunAt) : null;
   // Once the scheduled time passes, read the schedule again instead of
   // showing the next run as unknown until something else refreshes it.
   useEffect(() => {
@@ -180,6 +183,7 @@ export default function AdminBackups() {
   const phrases = backupSchedulePhrases({
     lastSuccessAt: list?.last_success_at,
     enabled,
+    paused,
     busy,
     next,
     now,
