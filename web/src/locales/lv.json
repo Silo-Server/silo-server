@@ -449,6 +449,12 @@
       "value": "Lai turpinātu, pierakstieties, izmantojot sava tīkla pierakstīšanos."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Šo mezglu iestata servera izvietošanas konfigurācija. Noņemiet to tur un restartējiet API serverus, lai to pārvaldītu šeit."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -34348,7 +34354,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Nesen sākto atskaņošanas sesiju plūsma"
+      "value": "Jaunākie atskaņojumi visos kontos"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -36152,6 +36158,88 @@
     {
       "type": 0,
       "value": "Neizdevās ielādēt aktivitāti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " atskaņoja vienumu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "”"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " atskaņoja vienumu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "”"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -56186,6 +56274,12 @@
       "value": "Ievadiet servera adresi, lai pabeigtu iestatījumus."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Atslēga iestatīta servera izvietošanas konfigurācijā"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -57130,6 +57224,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Šo mezglu iestata servera izvietošanas konfigurācija. Noņemiet to tur, lai to dzēstu šeit."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64789,6 +64889,12 @@
     {
       "type": 0,
       "value": "Ziņojums nosūtīts"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Atskaņotājs neapstiprināja ziņojuma saņemšanu. Ziņojums var parādīties ar aizkavi vai neparādīties nemaz."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -121099,6 +121205,12 @@
       "value": "Notiek tulkošana…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Paslēpt servera rindas, kas pievienotas pēc šī eksporta:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -121117,6 +121229,12 @@
     {
       "type": 0,
       "value": ", aizstājot sadaļas, ko iepriekš pievienojāt šeit. Jūsu izmaiņas šī servera sadaļās saglabāsies."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Šī servera rindas ir mainījušās, kopš šis fails tika eksportēts, tāpēc tālāk izvēlieties, kuras rindas paslēpt."
     }
   ],
   "web.home.layout.checking": [
@@ -121167,6 +121285,26 @@
     {
       "type": 0,
       "value": "Ieslēdz iestatījumu „Paslēpt skatītos vienumus”."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Paslēpj atlasītās rindas lapās: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", nemainot pārējās jūsu rindas tajās."
     }
   ],
   "web.home.layout.import": [
@@ -121271,6 +121409,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -121490,6 +121646,12 @@
     {
       "type": 0,
       "value": "Sadaļa bez nosaukuma"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Paslēpt servera rindas, kuru nav šajā failā:"
     }
   ],
   "web.home.page.customize": [

@@ -485,6 +485,7 @@ export const v2Operations = {
   "GET /api/v2/policy/capability": "getPolicyCapability",
   "GET /api/v2/profile/export": "exportProfile",
   "GET /api/v2/profile/sections": "listProfileSectionOverrides",
+  "GET /api/v2/profile/sections/baseline": "getProfileSectionBaseline",
   "GET /api/v2/profile/sections/flags": "getProfileSectionFlags",
   "GET /api/v2/profile/sections/settings": "getProfileSectionSettings",
   "GET /api/v2/profiles": "listProfiles",

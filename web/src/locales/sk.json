@@ -449,6 +449,12 @@
       "value": "Ak chcete pokračovať, prihláste sa prostredníctvom prihlásenia vo vašej sieti."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tento uzol je nastavený v konfigurácii nasadenia servera. Odstráňte ho tam a reštartujte servery API, aby ste ho mohli spravovať tu."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -36830,7 +36836,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Zoznam nedávno spustených relácií prehrávania"
+      "value": "Najnovšie prehratia zo všetkých účtov"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38809,6 +38815,80 @@
     {
       "type": 0,
       "value": "Nepodarilo sa načítať aktivitu."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Používateľ "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " prehral titul "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Používateľ "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " prehral titul "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61214,6 +61294,12 @@
       "value": "Ak chcete dokončiť nastavenia, zadajte adresu servera."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kľúč je nastavený v konfigurácii nasadenia servera"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62186,6 +62272,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastavené v konfigurácii nasadenia servera. Ak ho chcete odstrániť tu, odstráňte ho tam."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -70583,6 +70675,12 @@
     {
       "type": 0,
       "value": "Správa bola odoslaná"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Prehrávač nepotvrdil prijatie správy. Môže sa zobraziť s oneskorením alebo sa nezobrazí vôbec."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -130090,6 +130188,12 @@
       "value": "Prekladá sa…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skryť rady servera pridané od tohto exportu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -130108,6 +130212,12 @@
     {
       "type": 0,
       "value": " a nahradia sekcie, ktoré ste sem pridali predtým. Vaše zmeny sekcií tohto servera zostanú zachované."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Rady tohto servera sa od exportu tohto súboru zmenili, preto nižšie vyberte rady, ktoré chcete skryť."
     }
   ],
   "web.home.layout.checking": [
@@ -130158,6 +130268,26 @@
     {
       "type": 0,
       "value": "Zapne možnosť Skryť pozreté položky."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skryje vybrané rady na: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " bez zmeny vašich ostatných radov na týchto stránkach."
     }
   ],
   "web.home.layout.import": [
@@ -130262,6 +130392,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -130488,6 +130636,12 @@
     {
       "type": 0,
       "value": "Sekcia bez názvu"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skryť rady servera, ktoré nie sú v tomto súbore:"
     }
   ],
   "web.home.page.customize": [

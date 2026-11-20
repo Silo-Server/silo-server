@@ -449,6 +449,12 @@
       "value": "יש להתחבר דרך מערכת ההתחברות של הרשת כדי להמשיך."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "הצומת הזה מוגדר בתצורת הפריסה של השרת. כדי לנהל אותו כאן, יש להסיר אותו משם ולהפעיל מחדש את שרתי ה-API."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33463,7 +33469,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "פיד של סשני הפעלה שהתחילו לאחרונה"
+      "value": "ההפעלות האחרונות בכל החשבונות"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35211,6 +35217,80 @@
     {
       "type": 0,
       "value": "לא ניתן היה לטעון את הפעילות."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "הפריט "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " הופעל על ידי "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "הפריט "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " הופעל על ידי "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -54662,6 +54742,12 @@
       "value": "יש להזין את כתובת השרת כדי להשלים את ההגדרות."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "המפתח מוגדר בתצורת הפריסה של השרת"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -55618,6 +55704,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "הצומת מוגדר בתצורת הפריסה של השרת. כדי למחוק אותו כאן, יש להסיר אותו משם."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63141,6 +63233,12 @@
     {
       "type": 0,
       "value": "ההודעה נשלחה"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "הנגן לא אישר את קבלת ההודעה. ייתכן שהיא תוצג באיחור או שלא תוצג בכלל."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -118350,6 +118448,12 @@
       "value": "מתבצע תרגום…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "הסתרת שורות שרת שנוספו מאז הייצוא הזה:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -118368,6 +118472,12 @@
     {
       "type": 0,
       "value": ", ויחליפו אזורים שהוספת כאן בעבר. השינויים שביצעת באזורים של השרת הזה יישמרו."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "השורות של השרת הזה השתנו מאז שהקובץ הזה יוצא, ולכן יש לבחור למטה את השורות להסתרה."
     }
   ],
   "web.home.layout.checking": [
@@ -118418,6 +118528,26 @@
     {
       "type": 0,
       "value": "האפשרות ”הסתרת פריטים שנצפו” תופעל."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "השורות שנבחרו יוסתרו בדפים: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", בלי לשנות את השורות האחרות שלך בהם."
     }
   ],
   "web.home.layout.import": [
@@ -118522,6 +118652,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -118738,6 +118886,12 @@
     {
       "type": 0,
       "value": "אזור ללא שם"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "הסתרת שורות שרת שלא נמצאות בקובץ הזה:"
     }
   ],
   "web.home.page.customize": [

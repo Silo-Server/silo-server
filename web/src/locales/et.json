@@ -449,6 +449,12 @@
       "value": "Jätkamiseks logige sisse oma võrgu sisselogimise kaudu."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Selle sõlme määrab serveri juurutuskonfiguratsioon. Et seda siin hallata, eemaldage see sealt ja taaskäivitage API-serverid."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30886,7 +30892,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Hiljuti alustatud esitusseansside loend"
+      "value": "Kõigi kontode viimased esitused"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32515,6 +32521,72 @@
     {
       "type": 0,
       "value": "Tegevuse laadimine ebaõnnestus."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " esitas pealkirja "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " esitas pealkirja "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49964,6 +50036,12 @@
       "value": "Seadistuse lõpuleviimiseks sisestage serveri aadress."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Võtme määrab serveri juurutuskonfiguratsioon"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50888,6 +50966,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Selle määrab serveri juurutuskonfiguratsioon. Et see siin kustutada, eemaldage see sealt."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57717,6 +57801,12 @@
     {
       "type": 0,
       "value": "Sõnum saadetud"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Mängija ei kinnitanud sõnumi kättesaamist. Sõnum võib ilmuda hilinemisega või jääda üldse näitamata."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -110098,6 +110188,12 @@
       "value": "Tõlkimine…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Peida pärast seda eksporti lisatud serveri read:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -110116,6 +110212,12 @@
     {
       "type": 0,
       "value": ", asendades jaotised, mille olete siia varem lisanud. Teie muudatused selle serveri jaotistes jäävad alles."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Selle serveri read on pärast selle faili eksportimist muutunud, seega valige allpool read, mida peita."
     }
   ],
   "web.home.layout.checking": [
@@ -110166,6 +110268,26 @@
     {
       "type": 0,
       "value": "Lülitab valiku „Peida vaadatud üksused“ sisse."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Peidab valitud read lehtedel: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", muutmata teie teisi ridu seal."
     }
   ],
   "web.home.layout.import": [
@@ -110270,6 +110392,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110478,6 +110618,12 @@
     {
       "type": 0,
       "value": "Nimeta jaotis"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Peida serveri read, mida selles failis pole:"
     }
   ],
   "web.home.page.customize": [

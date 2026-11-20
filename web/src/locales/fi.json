@@ -449,6 +449,12 @@
       "value": "Kirjaudu sisään verkkosi kirjautumispalvelun kautta jatkaaksesi."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tämä solmu on asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä ja käynnistä API-palvelimet uudelleen, jotta voit hallita sitä täällä."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30554,7 +30560,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Syöte äskettäin aloitetuista toistoistunnoista"
+      "value": "Viimeisimmät toistot kaikilla tileillä"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32191,6 +32197,72 @@
     {
       "type": 0,
       "value": "Toiminnan lataaminen epäonnistui."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " toisti kohteen "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " toisti kohteen "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49468,6 +49540,12 @@
       "value": "Viimeistele asetukset antamalla palvelimen osoite."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Avain asetettu palvelimen käyttöönottomäärityksissä"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50388,6 +50466,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä, jotta voit poistaa sen täällä."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57169,6 +57253,12 @@
     {
       "type": 0,
       "value": "Viesti lähetetty"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Soitin ei vahvistanut viestin vastaanottamista. Viesti voi näkyä myöhässä tai jäädä kokonaan näkymättä."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -109516,6 +109606,12 @@
       "value": "Käännetään…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Piilota palvelimen rivit, jotka on lisätty tämän viennin jälkeen:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109534,6 +109630,12 @@
     {
       "type": 0,
       "value": ", ja ne korvaavat osiot, jotka lisäsit tänne aiemmin. Tämän palvelimen osioihin tekemäsi muutokset säilyvät."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Tämän palvelimen rivit ovat muuttuneet tiedoston viennin jälkeen, joten valitse alta piilotettavat rivit."
     }
   ],
   "web.home.layout.checking": [
@@ -109584,6 +109686,26 @@
     {
       "type": 0,
       "value": "Asettaa Piilota katsotut kohteet -asetuksen päälle."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Piilottaa valitut rivit sivuilla: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " muuttamatta muita rivejäsi niillä."
     }
   ],
   "web.home.layout.import": [
@@ -109688,6 +109810,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109896,6 +110036,12 @@
     {
       "type": 0,
       "value": "Nimetön osio"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Piilota palvelimen rivit, jotka eivät ole tässä tiedostossa:"
     }
   ],
   "web.home.page.customize": [
