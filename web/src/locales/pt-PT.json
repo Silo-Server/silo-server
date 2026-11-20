@@ -449,6 +449,12 @@
       "value": "Inicie sessão através do início de sessão da sua rede para continuar."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Este nó é definido pela configuração de implementação do servidor. Remova-o aí e reinicie os servidores da API para o gerir aqui."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33916,7 +33922,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Lista das sessões de reprodução iniciadas recentemente"
+      "value": "Reproduções mais recentes em todas as contas"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35712,6 +35718,72 @@
     {
       "type": 0,
       "value": "Não foi possível carregar a atividade."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reproduziu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reproduziu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55455,6 +55527,12 @@
       "value": "Introduza o endereço do servidor para completar as definições."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Chave definida pela configuração de implementação do servidor"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56379,6 +56457,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Definido pela configuração de implementação do servidor. Remova-o aí para o eliminar aqui."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63994,6 +64078,12 @@
     {
       "type": 0,
       "value": "Mensagem enviada"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "O leitor não confirmou a receção da mensagem. Pode ser mostrada com atraso ou nem chegar a ser mostrada."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -94806,25 +94896,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Não foi possível iniciar sessão na TV. Tente novamente."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Confirme que a sua app mostra"
+      "value": "Não foi possível aprovar o início de sessão. Tente novamente."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Confirme que a sua TV mostra"
+      "value": "Confirme que este código coincide"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Introduza o código da sua TV ou app"
+      "value": "Introduza o código apresentado no seu dispositivo"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94836,13 +94920,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Inicie sessão numa TV ou noutro dispositivo com a sua conta."
+      "value": "Inicie sessão numa TV, numa app ou noutro dispositivo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Iniciar sessão numa TV"
+      "value": "Aprovar início de sessão"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94862,13 +94946,13 @@
     },
     {
       "type": 0,
-      "value": " para aprovar uma TV. Só a própria conta pode iniciar sessão numa TV."
+      "value": " para aprovar este início de sessão. Só a própria conta pode aprovar dispositivos."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Deixe de ver como este utilizador para aprovar uma TV. Só a própria conta pode iniciar sessão numa TV."
+      "value": "Deixe de ver como este utilizador para aprovar este início de sessão. Só a própria conta pode aprovar dispositivos."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94886,39 +94970,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Não foi possível encontrar esse código. Verifique o código na sua TV."
+      "value": "Não foi possível encontrar esse código. Verifique o código e tente novamente."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Agora não"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "As apps de TV mais antigas mostram "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " em vez disso."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Aprove apenas um dispositivo que esteja à sua frente neste momento."
+      "value": "Recusar"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Aprove apenas uma TV que esteja à sua frente neste momento."
+      "value": "Aprove apenas se o início de sessão tiver sido pedido por si."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94944,7 +95008,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Qualquer pessoa que use esta TV pode escolher entre os seus perfis. Os perfis com PIN continuam bloqueados."
+      "value": "Isto dá ao dispositivo acesso aos seus perfis. Os perfis com PIN continuam bloqueados."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94991,6 +95055,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Pedido "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -95004,7 +95078,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Esta TV deixou de esperar. Comece novamente na TV."
+      "value": "Este dispositivo deixou de esperar. Volte a iniciar sessão no dispositivo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -95013,10 +95087,34 @@
       "value": "Este início de sessão foi recusado."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Concluído. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " está a iniciar sessão."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " tem sessão iniciada."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Este código expirou. A sua TV está a mostrar um novo. Use esse código."
+      "value": "Este código expirou. Obtenha um novo código no dispositivo e tente novamente."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -95100,25 +95198,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Essa TV já tem sessão iniciada."
+      "value": "Este dispositivo já tem sessão iniciada."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Esta TV foi aprovada e está a concluir o início de sessão."
+      "value": "Este dispositivo foi aprovado e está a concluir o início de sessão."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Concluído. A sua TV está a iniciar sessão."
+      "value": "Concluído. O seu dispositivo está a iniciar sessão."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "A sua TV tem sessão iniciada."
+      "value": "O seu dispositivo tem sessão iniciada."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -95162,7 +95260,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Iniciar sessão no dispositivo "
+      "value": "Permitir que "
     },
     {
       "type": 1,
@@ -95170,13 +95268,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " inicie sessão?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Iniciar sessão neste dispositivo?"
+      "value": "Permitir que este dispositivo inicie sessão?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95196,13 +95294,13 @@
     },
     {
       "type": 0,
-      "value": " para aprovar esta TV."
+      "value": " para aprovar este início de sessão."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Iniciar sessão na TV"
+      "value": "Aprovar início de sessão"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96248,7 +96346,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Não foi possível iniciar sessão no dispositivo. Tente novamente."
+      "value": "Não foi possível aprovar o início de sessão. Tente novamente."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119571,6 +119669,12 @@
       "value": "A traduzir…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar as filas do servidor adicionadas desde esta exportação:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119589,6 +119693,12 @@
     {
       "type": 0,
       "value": ", substituindo as secções que adicionou aqui anteriormente. As suas alterações às secções deste servidor mantêm-se."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "As filas deste servidor mudaram desde que este ficheiro foi exportado, por isso escolha abaixo as filas que quer ocultar."
     }
   ],
   "web.home.layout.checking": [
@@ -119639,6 +119749,26 @@
     {
       "type": 0,
       "value": "Ativa Ocultar itens vistos."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Oculta as filas selecionadas em: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sem alterar as suas outras filas aí."
     }
   ],
   "web.home.layout.import": [
@@ -119743,6 +119873,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119962,6 +120110,12 @@
     {
       "type": 0,
       "value": "Secção sem título"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar as filas do servidor que não estão neste ficheiro:"
     }
   ],
   "web.home.page.customize": [

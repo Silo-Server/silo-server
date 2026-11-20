@@ -449,6 +449,12 @@
       "value": "続行するには、ネットワークのサインインからサインインしてください。"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "このノードはサーバーのデプロイ構成で設定されています。ここで管理するには、デプロイ構成からノードを削除して、APIサーバーを再起動してください。"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27600,7 +27606,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近開始した再生セッションのフィード"
+      "value": "全アカウントの最近の再生"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29042,6 +29048,80 @@
     {
       "type": 0,
       "value": "アクティビティを読み込めませんでした。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -43912,6 +43992,12 @@
       "value": "設定を完成させるには、サーバーアドレスを入力してください。"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されたキー"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -44800,6 +44886,12 @@
     {
       "type": 0,
       "value": "を削除"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されています。ここで削除するには、デプロイ構成から削除してください。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -50867,6 +50959,12 @@
     {
       "type": 0,
       "value": "メッセージを送信しました"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "プレーヤーからメッセージの受信確認がありませんでした。メッセージの表示が遅れるか、表示されない可能性があります。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -78965,25 +79063,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "テレビをサインインできませんでした。もう一度お試しください。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "アプリに次の表示があることを確認してください"
+      "value": "サインインを承認できませんでした。もう一度お試しください。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "テレビに次の表示があることを確認してください"
+      "value": "このコードが一致することを確認してください"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "テレビまたはアプリに表示されたコードを入力"
+      "value": "デバイスに表示されたコードを入力"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -78995,13 +79087,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "アカウントでテレビやその他のデバイスにサインインします。"
+      "value": "テレビ、アプリ、その他のデバイスをサインインします。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "テレビにサインイン"
+      "value": "サインインを承認"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79013,7 +79105,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "テレビを承認するには、"
+      "value": "このサインインを承認するには、"
     },
     {
       "type": 1,
@@ -79021,13 +79113,13 @@
     },
     {
       "type": 0,
-      "value": "としての表示を終了してください。テレビをサインインできるのはそのアカウント本人だけです。"
+      "value": "としての表示を終了してください。デバイスを承認できるのはそのアカウント本人だけです。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "テレビを承認するには、このユーザーとしての表示を終了してください。テレビをサインインできるのはそのアカウント本人だけです。"
+      "value": "このサインインを承認するには、このユーザーとしての表示を終了してください。デバイスを承認できるのはそのアカウント本人だけです。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79045,39 +79137,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "そのコードが見つかりませんでした。テレビに表示されたコードを確認してください。"
+      "value": "そのコードが見つかりませんでした。コードを確認して、もう一度お試しください。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "今はしない"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "古いテレビアプリでは、代わりに"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "と表示されます。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "今目の前にあるデバイスだけを承認してください。"
+      "value": "拒否"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "今目の前にあるテレビだけを承認してください。"
+      "value": "自分でサインインを始めた場合にのみ承認してください。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -79099,7 +79171,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "このテレビを使う人は誰でも、あなたのプロフィールから選択できます。PINが設定されたプロフィールはロックされたままです。"
+      "value": "承認すると、このデバイスからプロフィールにアクセスできるようになります。PINが設定されたプロフィールはロックされたままです。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79146,6 +79218,16 @@
       "value": "にリクエスト"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "リクエスト："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 1,
@@ -79159,7 +79241,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "このテレビは待機を終了しました。テレビでもう一度始めてください。"
+      "value": "このデバイスは待機を終了しました。デバイスでもう一度サインインを始めてください。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79168,10 +79250,34 @@
       "value": "このサインインは拒否されました。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完了しました。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "がサインインしています。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "のサインインが完了しました。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "このコードは期限切れです。テレビに新しいコードが表示されています。そのコードを使用してください。"
+      "value": "このコードは有効期限が切れました。デバイスで新しいコードを取得して、もう一度お試しください。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79255,25 +79361,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "そのテレビはすでにサインインしています。"
+      "value": "このデバイスはすでにサインインしています。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "このテレビは承認され、サインインを完了しています。"
+      "value": "このデバイスは承認済みで、サインインを完了しています。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完了しました。テレビがサインインしています。"
+      "value": "完了しました。デバイスがサインインしています。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "テレビがサインインしました。"
+      "value": "デバイスのサインインが完了しました。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79317,13 +79423,13 @@
     },
     {
       "type": 0,
-      "value": "をサインインしますか？"
+      "value": "のサインインを許可しますか？"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "このデバイスをサインインしますか？"
+      "value": "このデバイスのサインインを許可しますか？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -79335,7 +79441,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "このテレビを承認するには、"
+      "value": "このサインインを承認するには、"
     },
     {
       "type": 1,
@@ -79349,7 +79455,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "テレビをサインイン"
+      "value": "サインインを承認"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80379,7 +80485,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "デバイスをサインインできませんでした。もう一度お試しください。"
+      "value": "サインインを承認できませんでした。もう一度お試しください。"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -99191,6 +99297,12 @@
       "value": "翻訳中…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "このエクスポート以降に追加されたサーバーの行を非表示："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99209,6 +99321,12 @@
     {
       "type": 0,
       "value": "に追加され、以前ここで追加したセクションは置き換えられます。このサーバーのセクションに加えた変更はそのまま残ります。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "このファイルのエクスポート後にこのサーバーの行が変更されたため、非表示にする行を下で選択してください。"
     }
   ],
   "web.home.layout.checking": [
@@ -99259,6 +99377,22 @@
     {
       "type": 0,
       "value": "「視聴済みを非表示」をオンにします。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "で選択した行を非表示にします。そこにあるほかの行は変更されません。"
     }
   ],
   "web.home.layout.import": [
@@ -99363,6 +99497,24 @@
     {
       "type": 0,
       "value": "のレイアウトを置き換えます。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99564,6 +99716,12 @@
     {
       "type": 0,
       "value": "無題のセクション"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "このファイルにないサーバーの行を非表示："
     }
   ],
   "web.home.page.customize": [

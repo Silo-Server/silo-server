@@ -449,6 +449,12 @@
       "value": "जारी रखने के लिए अपने नेटवर्क के साइन इन से साइन इन करें।"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "यह नोड सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मैनेज करने के लिए इसे वहाँ से हटाएँ और API सर्वर रीस्टार्ट करें।"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30406,7 +30412,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "हाल ही में शुरू हुए प्लेबैक सेशन की फ़ीड"
+      "value": "सभी खातों के सबसे हाल के प्ले"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32035,6 +32041,80 @@
     {
       "type": 0,
       "value": "गतिविधि लोड नहीं की जा सकी।"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49128,6 +49208,12 @@
       "value": "सेटिंग पूरी करने के लिए सर्वर का पता डालें।"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "कुंजी सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -50032,6 +50118,12 @@
     {
       "type": 0,
       "value": " मिटाएँ"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "यह सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मिटाने के लिए वहाँ से हटाएँ।"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56869,6 +56961,12 @@
     {
       "type": 0,
       "value": "मैसेज भेजा गया"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "प्लेयर ने मैसेज मिलने की पुष्टि नहीं की। हो सकता है कि यह देर से दिखे या बिल्कुल न दिखे।"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -86272,25 +86370,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन नहीं किया जा सका। फिर से कोशिश करें।"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "जाँच लें कि आपके ऐप पर यह दिख रहा है"
+      "value": "साइन-इन को मंज़ूरी नहीं दी जा सकी। फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "जाँच लें कि आपके टीवी पर यह दिख रहा है"
+      "value": "पक्का करें कि यह कोड मेल खाता है"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "अपने टीवी या ऐप पर दिख रहा कोड डालें"
+      "value": "अपने डिवाइस पर दिख रहा कोड डालें"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86302,13 +86394,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "अपने खाते से किसी टीवी या दूसरे डिवाइस में साइन इन करें।"
+      "value": "किसी टीवी, ऐप या दूसरे डिवाइस में साइन इन करें।"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन करें"
+      "value": "साइन-इन को मंज़ूरी दें"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86320,7 +86412,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "टीवी को मंज़ूरी देने के लिए "
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए "
     },
     {
       "type": 1,
@@ -86328,13 +86420,13 @@
     },
     {
       "type": 0,
-      "value": " के रूप में देखना बंद करें। सिर्फ़ वही खाता खुद टीवी में साइन इन कर सकता है।"
+      "value": " के रूप में देखना बंद करें। डिवाइसों को सिर्फ़ वही खाता खुद मंज़ूरी दे सकता है।"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "टीवी को मंज़ूरी देने के लिए इस उपयोगकर्ता के रूप में देखना बंद करें। सिर्फ़ वही खाता खुद टीवी में साइन इन कर सकता है।"
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए इस उपयोगकर्ता के रूप में देखना बंद करें। डिवाइसों को सिर्फ़ वही खाता खुद मंज़ूरी दे सकता है।"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86352,39 +86444,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "वह कोड नहीं मिला। अपने टीवी पर कोड जाँच लें।"
+      "value": "वह कोड नहीं मिला। कोड जाँचें और फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "अभी नहीं"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "पुराने टीवी ऐप इसके बजाय "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " दिखाते हैं।"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "सिर्फ़ उसी डिवाइस को मंज़ूरी दें जो इस समय आपके सामने है।"
+      "value": "अस्वीकार करें"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "सिर्फ़ उसी टीवी को मंज़ूरी दें जो इस समय आपके सामने है।"
+      "value": "इसे सिर्फ़ तभी मंज़ूरी दें, जब साइन-इन आपने खुद शुरू किया हो।"
     }
   ],
   "web.auth.activate.playOn": [
@@ -86406,7 +86478,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "इस टीवी का इस्तेमाल करने वाला कोई भी व्यक्ति आपकी प्रोफ़ाइलों में से चुन सकता है। PIN वाली प्रोफ़ाइलें लॉक रहती हैं।"
+      "value": "इससे उसे आपकी प्रोफ़ाइलों का ऐक्सेस मिल जाता है। PIN वाली प्रोफ़ाइलें लॉक रहती हैं।"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86453,6 +86525,16 @@
       "value": " अनुरोध किया गया"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "अनुरोध किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 1,
@@ -86466,7 +86548,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "इस टीवी ने इंतज़ार करना बंद कर दिया। टीवी पर फिर से शुरू करें।"
+      "value": "इस डिवाइस ने इंतज़ार करना बंद कर दिया। उस पर फिर से साइन इन शुरू करें।"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86475,10 +86557,38 @@
       "value": "यह साइन-इन अस्वीकार कर दिया गया।"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "हो गया। डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " में साइन इन हो रहा है।"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " में साइन इन हो गया है।"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "इस कोड की समय-सीमा खत्म हो गई। आपका टीवी नया कोड दिखा रहा है। इसके बजाय वह कोड इस्तेमाल करें।"
+      "value": "इस कोड की समय-सीमा खत्म हो गई। डिवाइस पर नया कोड पाएँ और फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86562,25 +86672,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "उस टीवी में पहले से साइन इन है।"
+      "value": "इस डिवाइस में पहले से साइन इन है।"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "इस टीवी को मंज़ूरी मिल गई है और यह साइन-इन पूरा कर रहा है।"
+      "value": "इस डिवाइस को मंज़ूरी मिल गई है और यह साइन-इन पूरा कर रहा है।"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "हो गया। आपके टीवी में साइन इन हो रहा है।"
+      "value": "हो गया। आपके डिवाइस में साइन इन हो रहा है।"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "आपके टीवी में साइन इन हो गया है।"
+      "value": "आपके डिवाइस में साइन इन हो गया है।"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86623,18 +86733,22 @@
   ],
   "web.auth.activate.signInDevice": [
     {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
       "type": 1,
       "value": "device"
     },
     {
       "type": 0,
-      "value": " में साइन इन करें?"
+      "value": " को साइन इन करने दें?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "इस डिवाइस में साइन इन करें?"
+      "value": "इस डिवाइस को साइन इन करने दें?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86646,7 +86760,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "इस टीवी को मंज़ूरी देने के लिए "
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए "
     },
     {
       "type": 1,
@@ -86660,7 +86774,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन करें"
+      "value": "साइन-इन को मंज़ूरी दें"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87698,7 +87812,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "डिवाइस में साइन इन नहीं किया जा सका। फिर से कोशिश करें।"
+      "value": "साइन-इन को मंज़ूरी नहीं दी जा सकी। फिर से कोशिश करें।"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108734,6 +108848,12 @@
       "value": "अनुवाद हो रहा है…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "इस एक्सपोर्ट के बाद जोड़ी गई सर्वर पंक्तियाँ छिपाएँ:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108752,6 +108872,12 @@
     {
       "type": 0,
       "value": ", और ये उन सेक्शन की जगह ले लेते हैं जो आपने यहाँ पहले जोड़े थे। इस सर्वर के सेक्शन में आपके बदलाव बने रहते हैं।"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "यह फ़ाइल एक्सपोर्ट होने के बाद इस सर्वर की पंक्तियाँ बदल गई हैं, इसलिए छिपाने के लिए नीचे से पंक्तियाँ चुनें।"
     }
   ],
   "web.home.layout.checking": [
@@ -108802,6 +108928,26 @@
     {
       "type": 0,
       "value": "“देखे गए आइटम छिपाएँ” चालू करता है।"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "इन पर चुनी गई पंक्तियाँ छिपाता है: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", और वहाँ आपकी दूसरी पंक्तियों को नहीं बदलता।"
     }
   ],
   "web.home.layout.import": [
@@ -108906,6 +109052,24 @@
     {
       "type": 0,
       "value": "।"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109122,6 +109286,12 @@
     {
       "type": 0,
       "value": "बिना नाम का सेक्शन"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "वे सर्वर पंक्तियाँ छिपाएँ जो इस फ़ाइल में नहीं हैं:"
     }
   ],
   "web.home.page.customize": [

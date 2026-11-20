@@ -449,6 +449,12 @@
       "value": "Влезте чрез входа на вашата мрежа, за да продължите."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Този възел е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам и рестартирайте API сървърите, за да го управлявате тук."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30510,7 +30516,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Поток от наскоро започнати сесии за възпроизвеждане"
+      "value": "Последните пускания във всички акаунти"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32143,6 +32149,72 @@
     {
       "type": 0,
       "value": "Не можа да се зареди активността."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49576,6 +49648,12 @@
       "value": "Въведете адреса на сървъра, за да завършите настройките."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключът е зададен от конфигурацията за внедряване на сървъра"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50492,6 +50570,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Възелът е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам, за да го изтриете тук."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57369,6 +57453,12 @@
     {
       "type": 0,
       "value": "Съобщението е изпратено"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плейърът не потвърди получаването на съобщението. То може да се покаже по-късно или изобщо да не се покаже."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -86888,25 +86978,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Не можа да се влезе в телевизора. Опитайте отново."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Проверете дали приложението ви показва"
+      "value": "Не можа да се одобри входът. Опитайте отново."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Проверете дали телевизорът ви показва"
+      "value": "Проверете дали този код съвпада"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Въведете кода от телевизора или приложението"
+      "value": "Въведете кода, показан на устройството ви"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86918,13 +87002,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Влезте с акаунта си в телевизор или друго устройство."
+      "value": "Вход в телевизор, приложение или друго устройство."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Вход в телевизор"
+      "value": "Одобряване на входа"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86944,13 +87028,13 @@
     },
     {
       "type": 0,
-      "value": ", за да одобрите телевизор. Само от самия акаунт може да се влезе в телевизор."
+      "value": ", за да одобрите този вход. Само от самия акаунт могат да се одобряват устройства."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Спрете да преглеждате като този потребител, за да одобрите телевизор. Само от самия акаунт може да се влезе в телевизор."
+      "value": "Спрете да преглеждате като този потребител, за да одобрите този вход. Само от самия акаунт могат да се одобряват устройства."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86968,39 +87052,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Не намерихме този код. Проверете кода на телевизора си."
+      "value": "Не намерихме този код. Проверете кода и опитайте отново."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Не сега"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "По-старите приложения за телевизор показват вместо това "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Одобрявайте само устройство, което е пред вас в момента."
+      "value": "Отхвърляне"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Одобрявайте само телевизор, който е пред вас в момента."
+      "value": "Одобрявайте само ако сами сте започнали входа."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87026,7 +87090,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Всеки, който използва този телевизор, може да избира от вашите профили. Профилите с PIN остават заключени."
+      "value": "Така устройството получава достъп до профилите ви. Профилите с PIN остават заключени."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87073,6 +87137,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Заявено "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87086,7 +87160,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Този телевизор спря да чака. Започнете отново от телевизора."
+      "value": "Това устройство спря да чака. Започнете входа отново от него."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87095,10 +87169,38 @@
       "value": "Този вход беше отхвърлен."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Готово. Извършва се вход на "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "…"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Входът на "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " е извършен."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Този код изтече. Телевизорът ви показва нов. Използвайте него."
+      "value": "Този код е изтекъл. Генерирайте нов код на устройството и опитайте отново."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87182,25 +87284,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Входът на този телевизор вече е завършен."
+      "value": "В това устройство вече е извършен вход."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Този телевизор е одобрен и завършва входа."
+      "value": "Това устройство е одобрено и завършва входа."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Готово. Телевизорът ви влиза."
+      "value": "Готово. Извършва се вход в устройството ви…"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Входът на телевизора ви е завършен."
+      "value": "Входът в устройството ви е извършен."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87244,7 +87346,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Да влезе ли устройството "
+      "value": "Да се разреши ли вход на "
     },
     {
       "type": 1,
@@ -87258,7 +87360,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Да влезе ли това устройство?"
+      "value": "Да се разреши ли вход на това устройство?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87278,13 +87380,13 @@
     },
     {
       "type": 0,
-      "value": ", за да одобрите този телевизор."
+      "value": ", за да одобрите този вход."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Вход на телевизора"
+      "value": "Одобряване на входа"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88330,7 +88432,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Не можа да се извърши вход на устройството. Опитайте отново."
+      "value": "Не можа да се одобри входът. Опитайте отново."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109776,6 +109878,12 @@
       "value": "Превежда се…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скриване на редовете на сървъра, добавени след този експорт:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109794,6 +109902,12 @@
     {
       "type": 0,
       "value": ", като заменят разделите, които сте добавили тук преди. Промените ви в разделите на този сървър се запазват."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Редовете на този сървър са се променили, откакто този файл е експортиран, затова изберете по-долу редовете, които да се скрият."
     }
   ],
   "web.home.layout.checking": [
@@ -109844,6 +109958,26 @@
     {
       "type": 0,
       "value": "Включва „Скриване на гледаните елементи“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Скрива избраните редове в: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", без да променя другите ви редове там."
     }
   ],
   "web.home.layout.import": [
@@ -109948,6 +110082,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110156,6 +110308,12 @@
     {
       "type": 0,
       "value": "Раздел без име"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скриване на редовете на сървъра, които не са в този файл:"
     }
   ],
   "web.home.page.customize": [

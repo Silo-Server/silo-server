@@ -449,6 +449,12 @@
       "value": "Za nadaljevanje se prijavite prek prijavnega sistema svojega omrežja."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "To vozlišče je nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam in znova zaženite strežnike API, da ga boste lahko upravljali tukaj."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -36774,7 +36780,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Vir nedavno začetih sej predvajanja"
+      "value": "Najnovejša predvajanja v vseh računih"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38749,6 +38755,80 @@
     {
       "type": 0,
       "value": "Dejavnosti ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -60977,6 +61057,12 @@
       "value": "Vnesite naslov strežnika, da dokončate nastavitve."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ je nastavljen v konfiguraciji namestitve strežnika"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -61917,6 +62003,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam, da ga boste lahko izbrisali tukaj."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -70278,6 +70370,12 @@
     {
       "type": 0,
       "value": "Sporočilo je poslano"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Predvajalnik ni potrdil prejema sporočila. Morda bo prikazano pozneje ali pa sploh ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -102423,25 +102521,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Televizorja ni bilo mogoče prijaviti. Poskusite znova."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Preverite, ali aplikacija prikazuje"
+      "value": "Prijave ni bilo mogoče odobriti. Poskusite znova."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Preverite, ali televizor prikazuje"
+      "value": "Preverite, ali se ta koda ujema"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Vnesite kodo s televizorja ali iz aplikacije"
+      "value": "Vnesite kodo, prikazano na vaši napravi"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102453,13 +102545,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prijavite televizor ali drugo napravo s svojim računom."
+      "value": "Prijavite televizor, aplikacijo ali drugo napravo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prijava televizorja"
+      "value": "Odobritev prijave"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102471,7 +102563,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Za odobritev televizorja prenehajte z ogledom kot uporabnik "
+      "value": "Za odobritev te prijave prenehajte z ogledom kot uporabnik "
     },
     {
       "type": 1,
@@ -102479,13 +102571,13 @@
     },
     {
       "type": 0,
-      "value": ". Televizor lahko prijavi samo lastnik tega računa."
+      "value": ". Naprave lahko odobri samo lastnik računa."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Za odobritev televizorja prenehajte z ogledom kot ta uporabnik. Televizor lahko prijavi samo lastnik tega računa."
+      "value": "Za odobritev te prijave prenehajte z ogledom kot ta uporabnik. Naprave lahko odobri samo lastnik računa."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102503,39 +102595,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Te kode ni bilo mogoče najti. Preverite kodo na televizorju."
+      "value": "Te kode ni bilo mogoče najti. Preverite kodo in poskusite znova."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne zdaj"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starejše aplikacije za TV namesto tega prikažejo "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Odobrite samo napravo, ki je ta trenutek pred vami."
+      "value": "Zavrni"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Odobrite samo televizor, ki je ta trenutek pred vami."
+      "value": "To odobrite samo, če ste prijavo začeli sami."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102561,7 +102633,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kdor uporablja ta televizor, lahko izbira med vašimi profili. Profili s PIN-kodo ostanejo zaklenjeni."
+      "value": "S tem ji omogočite dostop do vaših profilov. Profili s PIN-kodo ostanejo zaklenjeni."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -102608,6 +102680,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Zahtevano: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -102621,7 +102703,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ta televizor je prenehal čakati. Začnite znova na televizorju."
+      "value": "Ta naprava ne čaka več. V njej znova začnite prijavo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -102630,10 +102712,38 @@
       "value": "Ta prijava je bila zavrnjena."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Končano. Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se prijavlja."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je prijavljena."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ta koda je potekla. Televizor prikazuje novo. Uporabite to kodo."
+      "value": "Ta koda je potekla. V napravi pridobite novo kodo in poskusite znova."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -102717,25 +102827,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Ta televizor je že prijavljen."
+      "value": "Ta naprava je že prijavljena."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ta televizor je bil odobren in zaključuje prijavo."
+      "value": "Ta naprava je bila odobrena in zaključuje prijavo."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Končano. Televizor se prijavlja."
+      "value": "Končano. Vaša naprava se prijavlja."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televizor je prijavljen."
+      "value": "Vaša naprava je prijavljena."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -102779,7 +102889,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Želite prijaviti napravo "
+      "value": "Želite dovoliti prijavo naprave "
     },
     {
       "type": 1,
@@ -102793,7 +102903,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Želite prijaviti to napravo?"
+      "value": "Želite dovoliti prijavo te naprave?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -102813,13 +102923,13 @@
     },
     {
       "type": 0,
-      "value": ", da odobrite ta televizor."
+      "value": ", da odobrite to prijavo."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prijavi televizor"
+      "value": "Odobri prijavo"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -103869,7 +103979,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Naprave ni bilo mogoče prijaviti. Poskusite znova."
+      "value": "Prijave ni bilo mogoče odobriti. Poskusite znova."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -129482,6 +129592,12 @@
       "value": "Prevajanje …"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, dodane po tem izvozu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -129500,6 +129616,12 @@
     {
       "type": 0,
       "value": " in bodo nadomestili razdelke, ki ste jih tu dodali prej. Vaše spremembe razdelkov tega strežnika ostanejo."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Vrstice tega strežnika so se od izvoza te datoteke spremenile, zato spodaj izberite vrstice, ki jih želite skriti."
     }
   ],
   "web.home.layout.checking": [
@@ -129550,6 +129672,26 @@
     {
       "type": 0,
       "value": "Vklopi možnost „Skrij ogledane elemente“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skrije izbrane vrstice na straneh: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ne da bi spremenil vaše druge vrstice tam."
     }
   ],
   "web.home.layout.import": [
@@ -129654,6 +129796,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -129884,6 +130044,12 @@
     {
       "type": 0,
       "value": "Razdelek brez naslova"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, ki jih ni v tej datoteki:"
     }
   ],
   "web.home.page.customize": [

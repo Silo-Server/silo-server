@@ -449,6 +449,12 @@
       "value": "Prisijunkite per savo tinklo prisijungimo sistemą, kad tęstumėte."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Šis mazgas nustatytas serverio diegimo konfigūracijoje. Pašalinkite jį iš ten ir paleiskite API serverius iš naujo, kad galėtumėte jį tvarkyti čia."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -37182,7 +37188,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Neseniai pradėtų atkūrimo seansų sąrašas"
+      "value": "Naujausi paleidimai visose paskyrose"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -39169,6 +39175,88 @@
     {
       "type": 0,
       "value": "Nepavyko įkelti veiklos."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " paleido kūrinį "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "“"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " paleido kūrinį "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "“"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61737,6 +61825,12 @@
       "value": "Įveskite serverio adresą, kad užbaigtumėte nustatymus."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Raktas nustatytas serverio diegimo konfigūracijoje"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62693,6 +62787,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nustatyta serverio diegimo konfigūracijoje. Pašalinkite mazgą iš ten, kad galėtumėte jį ištrinti čia."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -71174,6 +71274,12 @@
     {
       "type": 0,
       "value": "Žinutė išsiųsta"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Leistuvas nepatvirtino, kad gavo žinutę. Ji gali būti parodyta vėliau arba visai neparodyta."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -103531,25 +103637,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Nepavyko patvirtinti televizoriaus prisijungimo. Bandykite dar kartą."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Patikrinkite, ar programėlėje rodoma"
+      "value": "Nepavyko patvirtinti prisijungimo. Bandykite dar kartą."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Patikrinkite, ar televizoriuje rodoma"
+      "value": "Įsitikinkite, kad šis kodas sutampa"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Įveskite kodą, rodomą televizoriuje ar programėlėje"
+      "value": "Įveskite įrenginyje rodomą kodą"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -103561,13 +103661,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prisijunkite prie savo paskyros televizoriuje ar kitame įrenginyje."
+      "value": "Prisijunkite televizoriuje, programoje ar kitame įrenginyje."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Televizoriaus prisijungimas"
+      "value": "Prisijungimo patvirtinimas"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -103587,13 +103687,13 @@
     },
     {
       "type": 0,
-      "value": ", kad galėtumėte patvirtinti televizorių. Televizoriaus prisijungimą gali patvirtinti tik pati paskyra."
+      "value": ", kad galėtumėte patvirtinti šį prisijungimą. Įrenginius gali patvirtinti tik pati paskyra."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Nustokite peržiūrėti kaip šis naudotojas, kad galėtumėte patvirtinti televizorių. Televizoriaus prisijungimą gali patvirtinti tik pati paskyra."
+      "value": "Nustokite peržiūrėti kaip šis naudotojas, kad galėtumėte patvirtinti šį prisijungimą. Įrenginius gali patvirtinti tik pati paskyra."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -103611,39 +103711,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Tokio kodo neradome. Patikrinkite kodą televizoriuje."
+      "value": "Nepavyko rasti šio kodo. Patikrinkite kodą ir bandykite dar kartą."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne dabar"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Senesnėse TV programėlėse vietoj jo rodoma "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Tvirtinkite tik tą įrenginį, kuris šiuo metu yra priešais jus."
+      "value": "Atmesti"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Tvirtinkite tik tą televizorių, kuris šiuo metu yra priešais jus."
+      "value": "Patvirtinkite, tik jei prisijungimą pradėjote jūs."
     }
   ],
   "web.auth.activate.playOn": [
@@ -103669,7 +103749,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Bet kas, naudojantis šiuo televizoriumi, galės rinktis iš jūsų profilių. Profiliai su PIN liks užrakinti."
+      "value": "Taip jis gaus prieigą prie jūsų profilių. PIN kodu apsaugoti profiliai lieka užrakinti."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -103716,6 +103796,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Užklausta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -103729,7 +103819,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Šis televizorius nustojo laukti. Pradėkite iš naujo televizoriuje."
+      "value": "Šis įrenginys nebelaukia. Pradėkite prisijungimą jame iš naujo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -103738,10 +103828,38 @@
       "value": "Šis prisijungimas atmestas."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Atlikta. Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ prisijungia."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ prisijungė."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Šio kodo galiojimas baigėsi. Televizoriuje rodomas naujas kodas. Naudokite jį."
+      "value": "Šio kodo galiojimas baigėsi. Gaukite naują kodą įrenginyje ir bandykite dar kartą."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -103825,25 +103943,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tas televizorius jau prisijungė."
+      "value": "Šiame įrenginyje jau prisijungta."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Šis televizorius patvirtintas ir baigia prisijungti."
+      "value": "Šis įrenginys patvirtintas ir baigia prisijungti."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Atlikta. Televizorius prisijungia."
+      "value": "Atlikta. Jūsų įrenginys prisijungia."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televizorius prisijungė."
+      "value": "Jūsų įrenginys prisijungė."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -103921,13 +104039,13 @@
     },
     {
       "type": 0,
-      "value": ", kad patvirtintumėte šį televizorių."
+      "value": ", kad patvirtintumėte šį prisijungimą."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Patvirtinti TV prisijungimą"
+      "value": "Patvirtinti prisijungimą"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -104989,7 +105107,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nepavyko prisijungti įrenginyje. Bandykite dar kartą."
+      "value": "Nepavyko patvirtinti prisijungimo. Bandykite dar kartą."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -131054,6 +131172,12 @@
       "value": "Verčiama…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Slėpti serverio eilutes, pridėtas po šio eksporto:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -131072,6 +131196,12 @@
     {
       "type": 0,
       "value": " ir pakeičia skiltis, kurias anksčiau čia pridėjote. Jūsų šio serverio skilčių pakeitimai išlieka."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Šio serverio eilutės pasikeitė po to, kai šis failas buvo eksportuotas, todėl toliau pasirinkite eilutes, kurias norite slėpti."
     }
   ],
   "web.home.layout.checking": [
@@ -131122,6 +131252,26 @@
     {
       "type": 0,
       "value": "Įjungia parinktį „Slėpti žiūrėtus elementus“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Paslepia pasirinktas eilutes puslapiuose: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", nekeisdamas kitų jūsų eilučių juose."
     }
   ],
   "web.home.layout.import": [
@@ -131226,6 +131376,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -131456,6 +131624,12 @@
     {
       "type": 0,
       "value": "Skiltis be pavadinimo"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Slėpti serverio eilutes, kurių nėra šiame faile:"
     }
   ],
   "web.home.page.customize": [

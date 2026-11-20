@@ -449,6 +449,12 @@
       "value": "Devam etmek için ağınızın oturum açma sayfası üzerinden oturum açın."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Bu düğüm, sunucunun dağıtım yapılandırması tarafından ayarlanır. Düğümü burada yönetmek için oradan kaldırıp API sunucularını yeniden başlatın."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30274,7 +30280,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Yakın zamanda başlatılan oynatma oturumlarının listesi"
+      "value": "Tüm hesaplardaki en son oynatmalar"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -31891,6 +31897,80 @@
     {
       "type": 0,
       "value": "Etkinlik yüklenemedi."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -48928,6 +49008,12 @@
       "value": "Ayarları tamamlamak için sunucu adresini girin."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Anahtar, sunucunun dağıtım yapılandırması tarafından ayarlanır"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -49832,6 +49918,12 @@
     {
       "type": 0,
       "value": " düğümünü sil"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Sunucunun dağıtım yapılandırması tarafından ayarlanır. Burada silmek için oradan kaldırın."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56621,6 +56713,12 @@
     {
       "type": 0,
       "value": "Mesaj gönderildi"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Oynatıcı mesajı onaylamadı. Mesaj geç gösterilebilir veya hiç gösterilmeyebilir."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -85932,25 +86030,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "TV’de oturum açılamadı. Tekrar deneyin."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Uygulamanızın şunu gösterdiğini kontrol edin"
+      "value": "Oturum açma onaylanamadı. Tekrar deneyin."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "TV’nizin şunu gösterdiğini kontrol edin"
+      "value": "Bu kodun eşleştiğinden emin olun"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "TV’nizdeki veya uygulamanızdaki kodu girin"
+      "value": "Cihazınızda gösterilen kodu girin"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -85962,13 +86054,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Hesabınızla bir TV’de veya başka bir cihazda oturum açın."
+      "value": "Bir TV’de, uygulamada veya başka bir cihazda oturum açın."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "TV’de oturum aç"
+      "value": "Oturum açmayı onayla"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -85980,7 +86072,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Bir TV’yi onaylamak için "
+      "value": "Bu oturum açmayı onaylamak için "
     },
     {
       "type": 1,
@@ -85988,13 +86080,13 @@
     },
     {
       "type": 0,
-      "value": " kullanıcısı olarak görüntülemeyi bırakın. TV’de yalnızca hesabın kendisi oturum açabilir."
+      "value": " kullanıcısı olarak görüntülemeyi bırakın. Cihazları yalnızca hesabın kendisi onaylayabilir."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Bir TV’yi onaylamak için bu kullanıcı olarak görüntülemeyi bırakın. TV’de yalnızca hesabın kendisi oturum açabilir."
+      "value": "Bu oturum açmayı onaylamak için bu kullanıcı olarak görüntülemeyi bırakın. Cihazları yalnızca hesabın kendisi onaylayabilir."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86012,39 +86104,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Bu kod bulunamadı. TV’nizdeki kodu kontrol edin."
+      "value": "Bu kod bulunamadı. Kodu kontrol edip tekrar deneyin."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Şimdi değil"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Eski TV uygulamaları bunun yerine şunu gösterir: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Yalnızca şu anda önünüzde olan bir cihazı onaylayın."
+      "value": "Reddet"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Yalnızca şu anda önünüzde olan bir TV’yi onaylayın."
+      "value": "Bunu yalnızca oturum açma işlemini kendiniz başlattıysanız onaylayın."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86066,7 +86138,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Bu TV’yi kullanan herkes profillerinizden birini seçebilir. PIN’li profiller kilitli kalır."
+      "value": "Bu, cihaza profillerinize erişim izni verir. PIN korumalı profiller kilitli kalır."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86113,6 +86185,16 @@
       "value": " istendi"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "İstendi: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86126,7 +86208,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Bu TV beklemeyi bıraktı. TV’de yeniden başlayın."
+      "value": "Bu cihaz beklemeyi bıraktı. Cihazda oturum açmayı yeniden başlatın."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86135,10 +86217,34 @@
       "value": "Bu oturum açma isteği reddedildi."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Tamamlandı. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " oturum açıyor."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " oturum açtı."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Bu kodun süresi doldu. TV’niz yeni bir kod gösteriyor. Bunun yerine o kodu kullanın."
+      "value": "Bu kodun süresi doldu. Cihazdan yeni bir kod alıp tekrar deneyin."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86222,25 +86328,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Bu TV’de zaten oturum açılmış."
+      "value": "Bu cihazda zaten oturum açık."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Bu TV onaylandı ve oturum açma işlemini tamamlıyor."
+      "value": "Bu cihaz onaylandı ve oturum açma işlemini tamamlıyor."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Tamamlandı. TV’nizde oturum açılıyor."
+      "value": "Tamamlandı. Cihazınızda oturum açılıyor."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV’nizde oturum açıldı."
+      "value": "Cihazınızda oturum açıldı."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86288,13 +86394,13 @@
     },
     {
       "type": 0,
-      "value": " cihazında oturum açılsın mı?"
+      "value": " için oturum açmaya izin verilsin mi?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Bu cihazda oturum açılsın mı?"
+      "value": "Bu cihazın oturum açmasına izin verilsin mi?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86306,7 +86412,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Bu TV’yi onaylamak için "
+      "value": "Bu oturum açmayı onaylamak için "
     },
     {
       "type": 1,
@@ -86320,7 +86426,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "TV’de oturum aç"
+      "value": "Oturum açmayı onayla"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87354,7 +87460,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Cihazda oturum açılamadı. Tekrar deneyin."
+      "value": "Oturum açma onaylanamadı. Tekrar deneyin."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108200,6 +108306,12 @@
       "value": "Çevriliyor…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Bu dışa aktarımdan sonra eklenen sunucu satırlarını gizle:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108218,6 +108330,12 @@
     {
       "type": 0,
       "value": " ve daha önce burada eklediğiniz kısımların yerini alır. Bu sunucunun kısımlarında yaptığınız değişiklikler korunur."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Bu dosya dışa aktarıldıktan sonra bu sunucunun satırları değişti. Gizlemek istediğiniz satırları aşağıdan seçin."
     }
   ],
   "web.home.layout.checking": [
@@ -108268,6 +108386,26 @@
     {
       "type": 0,
       "value": "İzlenen öğeleri gizle ayarını açar."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Seçili satırları şu sayfalarda gizler: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ". Oradaki diğer satırlarınız değişmez."
     }
   ],
   "web.home.layout.import": [
@@ -108372,6 +108510,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -108588,6 +108744,12 @@
     {
       "type": 0,
       "value": "Adsız kısım"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Bu dosyada olmayan sunucu satırlarını gizle:"
     }
   ],
   "web.home.page.customize": [

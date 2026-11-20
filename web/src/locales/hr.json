@@ -449,6 +449,12 @@
       "value": "Prijavite se putem prijave svoje mreže da biste nastavili."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ovaj čvor postavlja konfiguracija implementacije poslužitelja. Uklonite ga ondje i ponovno pokrenite API poslužitelje da biste njime upravljali ovdje."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33612,7 +33618,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Feed nedavno pokrenutih sesija reprodukcije"
+      "value": "Najnovije reprodukcije na svim računima"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35420,6 +35426,72 @@
     {
       "type": 0,
       "value": "Učitavanje aktivnosti nije uspjelo."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55335,6 +55407,12 @@
       "value": "Unesite adresu poslužitelja da biste dovršili postavke."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ postavlja konfiguracija implementacije poslužitelja"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56263,6 +56341,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Postavlja konfiguracija implementacije poslužitelja. Uklonite ga ondje da biste ga izbrisali ovdje."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63798,6 +63882,12 @@
     {
       "type": 0,
       "value": "Poruka je poslana"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Reproduktor nije potvrdio primitak poruke. Možda će se prikazati sa zakašnjenjem ili se uopće neće prikazati."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -94614,25 +94704,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Prijava TV-a nije uspjela. Pokušajte ponovno."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Provjerite prikazuje li vaša aplikacija"
+      "value": "Nije moguće odobriti prijavu. Pokušajte ponovno."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Provjerite prikazuje li vaš TV"
+      "value": "Provjerite podudara li se ovaj kôd"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Unesite kod s TV-a ili aplikacije"
+      "value": "Unesite kôd prikazan na vašem uređaju"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94644,13 +94728,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prijavite TV ili drugi uređaj svojim računom."
+      "value": "Prijavite TV, aplikaciju ili drugi uređaj."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prijava TV-a"
+      "value": "Odobrenje prijave"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94670,13 +94754,13 @@
     },
     {
       "type": 0,
-      "value": " da biste odobrili TV. Samo taj račun može prijaviti TV."
+      "value": " da biste odobrili ovu prijavu. Samo sam vlasnik računa može odobravati uređaje."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Prestanite pregledavati kao ovaj korisnik da biste odobrili TV. Samo taj račun može prijaviti TV."
+      "value": "Prestanite pregledavati kao ovaj korisnik da biste odobrili ovu prijavu. Samo sam vlasnik računa može odobravati uređaje."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94694,39 +94778,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Nismo pronašli taj kod. Provjerite kod na TV-u."
+      "value": "Nismo pronašli taj kôd. Provjerite kôd i pokušajte ponovno."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne sada"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starije TV aplikacije umjesto toga prikazuju "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Odobrite samo uređaj koji je upravo ispred vas."
+      "value": "Odbij"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Odobrite samo TV koji je upravo ispred vas."
+      "value": "Odobrite ovo samo ako ste sami pokrenuli prijavu."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94752,7 +94816,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Svatko tko koristi ovaj TV može odabrati neki od vaših profila. Profili s PIN-om ostaju zaključani."
+      "value": "Tako uređaj dobiva pristup vašim profilima. Profili s PIN-om ostaju zaključani."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94799,6 +94863,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Zatraženo "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94812,7 +94886,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ovaj TV više ne čeka. Počnite ponovno na TV-u."
+      "value": "Ovaj uređaj više ne čeka. Ponovno pokrenite prijavu na njemu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94821,10 +94895,34 @@
       "value": "Ova je prijava odbijena."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Gotovo. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ": prijava je u tijeku."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ": prijava je dovršena."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ovaj je kod istekao. Vaš TV prikazuje novi. Upotrijebite taj kod."
+      "value": "Ovaj je kôd istekao. Zatražite novi kôd na uređaju i pokušajte ponovno."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94908,25 +95006,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Taj je TV već prijavljen."
+      "value": "Ovaj je uređaj već prijavljen."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ovaj je TV odobren i dovršava prijavu."
+      "value": "Ovaj je uređaj odobren i dovršava prijavu."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Gotovo. Vaš se TV prijavljuje."
+      "value": "Gotovo. Vaš se uređaj prijavljuje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Vaš je TV prijavljen."
+      "value": "Vaš je uređaj prijavljen."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94970,7 +95068,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Prijaviti uređaj "
+      "value": "Dopustiti da se "
     },
     {
       "type": 1,
@@ -94978,13 +95076,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " prijavi?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Prijaviti ovaj uređaj?"
+      "value": "Dopustiti prijavu ovog uređaja?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95004,13 +95102,13 @@
     },
     {
       "type": 0,
-      "value": " da biste odobrili ovaj TV."
+      "value": " da biste odobrili ovu prijavu."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prijavi TV"
+      "value": "Odobri prijavu"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96056,7 +96154,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nije moguće prijaviti uređaj. Pokušajte ponovno."
+      "value": "Nije moguće odobriti prijavu. Pokušajte ponovno."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119573,6 +119671,12 @@
       "value": "Prevođenje…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sakrij retke poslužitelja dodane nakon ovog izvoza:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119591,6 +119695,12 @@
     {
       "type": 0,
       "value": " i zamjenjuju odjeljke koje ste ovdje prethodno dodali. Vaše promjene odjeljaka ovog poslužitelja ostaju."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Retci ovog poslužitelja promijenili su se nakon izvoza ove datoteke pa u nastavku odaberite retke koje želite sakriti."
     }
   ],
   "web.home.layout.checking": [
@@ -119641,6 +119751,26 @@
     {
       "type": 0,
       "value": "Uključuje opciju Sakrij pogledane stavke."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Sakriva odabrane retke na: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " bez mijenjanja vaših ostalih redaka ondje."
     }
   ],
   "web.home.layout.import": [
@@ -119745,6 +119875,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119964,6 +120112,12 @@
     {
       "type": 0,
       "value": "Odjeljak bez naziva"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sakrij retke poslužitelja kojih nema u ovoj datoteci:"
     }
   ],
   "web.home.page.customize": [
