@@ -313,10 +313,8 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     try {
       // The status is read after the settings, so a secret set by the time of
       // that read shows in it. A later change only makes the next save refused
-      // again.
-      const settingsFrom = Date.now();
+      // again. A refetch another read cancels settles with that newer read.
       const settingsResult = await refetch();
-      const statusFrom = Date.now();
       const statusResult = await refetchSensitiveStatus();
       // Discard, a profile switch, unmount, a save started meanwhile, or a
       // baseline another path advanced: this result no longer applies.
@@ -331,17 +329,9 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         dismissConflict();
         return;
       }
-      // Only data read during this reload counts: a refetch that another read
-      // cancelled settles with the record it already had.
-      const fresh =
-        !settingsResult.isError && settingsResult.dataUpdatedAt >= settingsFrom
-          ? settingsResult.data
-          : undefined;
-      // Unknown when the status wasn't read: then a secret may be set.
-      const configured =
-        !statusResult.isError && statusResult.dataUpdatedAt >= statusFrom
-          ? statusResult.data?.configured
-          : undefined;
+      const fresh = settingsResult.isError ? undefined : settingsResult.data;
+      // Unknown when the status can't be read: then a secret may be set.
+      const configured = statusResult.isError ? undefined : statusResult.data?.configured;
       if (!fresh || !validatorOf(fresh)) {
         toast.error(t("web.admin.settings.hooks.settings.conflict.reloadFailed"));
         return;
@@ -353,8 +343,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         return now === undefined && (was.secretSet || (configured?.includes(key) ?? true));
       };
       const drafts = [...dirtyRef.current];
-      // The Redis URL and database number save as a pair (`stageRedisUrl`).
-      const redisReplaced = drafts.some((key) => REDIS_KEYS.includes(key) && changed(key));
+      // The Redis URL and database number save as a pair (`stageRedisUrl`),
+      // and a database number means nothing without the server it is on. A
+      // saved URL is a secret, so with one set the pair can't be checked.
+      const redisDrafts = drafts.filter((key) => REDIS_KEYS.includes(key));
+      const redisReplaced =
+        redisDrafts.length > 0 &&
+        (redisDrafts.some(changed) || (configured?.includes("redis.url") ?? true));
       const replaced = drafts.filter(
         (key) => changed(key) || (redisReplaced && REDIS_KEYS.includes(key)),
       );
@@ -401,9 +396,8 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         result = await updateSettings.mutateAsync(values);
       } catch (error) {
         // 412: settings changed after editing began. The drafts stay, and
-        // every later save is refused the same way, and shows this again,
-        // until the admin reloads. It stays longer than the default toast, to
-        // leave time to read it.
+        // every later save is refused the same way until the admin reloads, so
+        // the toast stays until then (or Discard, or no edits left).
         if (
           isSettingsSaveConflict(error) &&
           mounted.current &&
@@ -417,7 +411,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
           toast.error(t("web.admin.settings.hooks.settings.conflict.title"), {
             id: conflictToastId,
             description: t("web.admin.settings.hooks.settings.conflict.description"),
-            duration: 10_000,
+            duration: Infinity,
             action: {
               label: t("web.admin.settings.hooks.settings.conflict.reload"),
               onClick: (event) => {
@@ -433,6 +427,12 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         throw error;
       } finally {
         savePending.current = false;
+      }
+      // Discard during the save threw these drafts away, so what it wrote no
+      // longer describes an edit on screen.
+      if (generation !== draftGeneration.current) {
+        if (result.restart_required) setRestartRequired(true);
+        return;
       }
       // An acknowledged save changes the validator even when newer local edits
       // remain dirty. Reconcile only with a refresh matching that write's revision;

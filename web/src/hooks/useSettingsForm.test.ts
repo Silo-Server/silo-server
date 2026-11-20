@@ -7,9 +7,11 @@ import { useHasUnsavedChanges } from "./useUnsavedChanges";
 import { useSettingsForm } from "./useSettingsForm";
 import { useStepSubmit } from "@/pages/setup-wizard/useStep";
 
-const { mutateAsync, markDone, snapshot, authority } = vi.hoisted(() => ({
+const { mutateAsync, markDone, snapshot, authority, guard } = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   markDone: vi.fn(),
+  // The snapshot the form last asked the mutation to guard a save with.
+  guard: { displayed: undefined as Record<string, string> | undefined },
   snapshot: { loaded: true, values: undefined as Record<string, string> | undefined },
   authority: { profileId: "profile-a" },
 }));
@@ -37,7 +39,10 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
     isLoading: false,
   }),
   useAdminSensitiveStatus: () => ({ data: sensitiveData }),
-  useUpdateServerSettings: () => ({ mutateAsync, isPending: false }),
+  useUpdateServerSettings: (displayed?: Record<string, string>) => {
+    guard.displayed = displayed;
+    return { mutateAsync, isPending: false };
+  },
 }));
 
 afterEach(() => {
@@ -215,6 +220,38 @@ describe("useSettingsForm save()", () => {
 
     expect(result.current.getValue("branding.server_name")).toBe("Villa");
     expect(result.current.dirtyCount).toBe(1);
+  });
+
+  it("guards the next edit with the current snapshot after a save that settles after Discard", async () => {
+    let resolveMutation: ((value: unknown) => void) | undefined;
+    mutateAsync.mockReturnValue(
+      new Promise((resolve) => {
+        resolveMutation = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => result.current.setValue("database.max_connections", "40"));
+    let savePromise: Promise<void> | undefined;
+    act(() => {
+      savePromise = result.current.save();
+    });
+    act(() => result.current.discard());
+    await act(async () => {
+      resolveMutation?.({
+        values: { "database.max_connections": "40" },
+        restart_required: false,
+        settingsSnapshot: { ...settingsData, "database.max_connections": "40" },
+      });
+      await savePromise;
+    });
+    // Another administrator saves meanwhile, and this page reads it.
+    const current = { ...settingsData, "database.max_connections": "60" };
+    snapshot.values = current;
+    rerender();
+    act(() => result.current.setValue("database.max_connections", "80"));
+
+    expect(guard.displayed).toBe(current);
   });
 
   it("keeps a change back to the old value staged while that save is in flight", async () => {
