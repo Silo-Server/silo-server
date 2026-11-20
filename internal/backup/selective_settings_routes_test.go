@@ -97,24 +97,27 @@ func TestRoutesAreRecheckedUnderTheLock(t *testing.T) {
 // password. Settings outside the connection still restore.
 func TestEnvironmentKeepsWholeConnections(t *testing.T) {
 	const username, subtitle = "email.smtp_username", "branding.login_subtitle"
-	mail := []string{settingSMTPHost, settingSMTPPassword, username}
+	// Email's switch is an access setting: turning it on is kept stricter.
+	before := map[string]string{subtitle: ItemDiffers, settingSMTPHost: ItemDiffers, settingSMTPPassword: ItemDiffers,
+		username: ItemDiffers, settingEmailEnabled: SettingKeptStricter}
+	mail := []string{settingSMTPHost, settingSMTPPassword, username, settingEmailEnabled}
 	for name, tc := range map[string]struct {
-		env      string
-		restored []string
+		env       string
+		untouched []string
 	}{
-		"the mail transport from the environment": {env: settingSMTPSecurity, restored: []string{subtitle}},
-		"nothing from the environment":            {restored: append([]string{subtitle}, mail...)},
+		"the mail transport from the environment": {env: settingSMTPSecurity, untouched: []string{subtitle}},
+		"nothing from the environment":            {untouched: append([]string{subtitle}, mail...)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var plans []settingPlan
-			for _, key := range append([]string{subtitle}, mail...) {
-				plans = append(plans, settingPlan{preview: PreviewSetting{Key: key, Status: ItemDiffers}})
+			for key, status := range before {
+				plans = append(plans, settingPlan{preview: PreviewSetting{Key: key, Status: status}})
 			}
 			keepEnvironmentBundles(plans, func(key string) bool { return key == tc.env })
 			for _, p := range plans {
 				want := SettingManagedByEnvironment
-				if slices.Contains(tc.restored, p.preview.Key) {
-					want = ItemDiffers
+				if slices.Contains(tc.untouched, p.preview.Key) {
+					want = before[p.preview.Key]
 				}
 				if p.preview.Status != want {
 					t.Fatalf("%s = %s, want %s", p.preview.Key, p.preview.Status, want)
