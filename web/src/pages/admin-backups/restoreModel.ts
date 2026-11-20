@@ -50,6 +50,7 @@ export const REASON_SENTENCES: Record<RestoreReason, MessageKey> = {
   kept_stricter: "web.admin.backups.restore.reason.keptStricter",
   unverified_backup: "web.admin.backups.restore.reason.unverifiedBackup",
   over_restore_budget: "web.admin.backups.restore.reason.overRestoreBudget",
+  managed_by_environment: "web.admin.backups.restore.reason.managedByEnvironment",
 };
 
 export const SECTION_TITLES: Record<RestoreSectionId, MessageKey> = {
@@ -716,6 +717,15 @@ export function restoreCaveats(set: RestoreSet, selection: SelectionKeys): Cavea
     }
     if (stricter > 0) {
       add("stricter", counted("web.admin.backups.restore.caveat.stricterSettings", stricter));
+    }
+    const environment = (item.settings ?? []).filter(
+      (setting) => setting.status === "managed_by_environment",
+    ).length;
+    if (environment > 0) {
+      add(
+        "environment",
+        counted("web.admin.backups.restore.caveat.environmentSettings", environment),
+      );
     }
     const unknown = item.collection?.unknown_items ?? 0;
     if (unknown > 0) {
