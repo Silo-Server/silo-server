@@ -124,18 +124,24 @@ secrets do not. The operator chooses each node's id by the key it writes:
 `silo node-key generate --id <n>` prints one, or a secret store can template
 `snk1_<n>_` followed by 43 base64url characters of 32 random bytes. A declared
 id is at most 2147483646, so the identity sequence always has room. The node
-gets the same key in `SILO_NODE_KEY`. Parse errors name the variable and the
-node, never a key.
+gets the same key in `SILO_NODE_KEY`. Field names match exactly and an unknown
+one is refused. Parse errors name the variable and the node, never a key or an
+unknown field's name, where a misplaced key could sit.
 
 `nodepool.ProvisionTranscodeNodes` applies the document at startup, before the
 first pool and credential loads, in one transaction under the transcode URL
-lock and a `SHARE ROW EXCLUSIVE` lock on `stream_nodes` (writes and `nextval`
-wait; reads go on; API servers starting together run one after the other).
+lock and an `EXCLUSIVE` lock on `stream_nodes`. Row locks, writes and
+`nextval` wait; plain reads go on; API servers starting together run one after
+the other. A weaker mode admits the `SELECT ... FOR UPDATE` that admin edits and
+node declarations take without the URL lock, and the two deadlock when both then
+write that row.
 Every decision is made before anything is written, so a refusal changes
 nothing, and any refusal stops startup:
 
 - A declared id with no row is created: transcode, enabled, with the declared
-  name and URL and the key, and the identity sequence is moved past it first.
+  name and URL and the key, and the identity sequence is moved past it first
+  with `ALTER SEQUENCE ... RESTART`, which rolls back with a failed pass (a
+  `setval` would not, and the retry would refuse the ids as used).
   Only an id the sequence has never handed out is created, so no id ever names
   two machines. The URL is checked against every row, proxies included, as a
   node's own declaration is.
@@ -144,7 +150,9 @@ nothing, and any refusal stops startup:
   key that no longer decrypts after a `SECRET_KEY` change).
 - An unmanaged transcode row is adopted only when it already holds the declared
   key. A proxy row, a keyless row, or one with another key stops startup: a
-  declaration never takes over a row it did not create.
+  declaration never takes over a row it did not create. To bring an existing
+  node under the document, issue it a key in the admin API and reference that
+  key; a key from `silo node-key generate` suits only an id never used.
 - A managed row the document no longer lists is released. `nodes: {}` releases
   every node; an API server with neither variable set leaves them as they are.
 

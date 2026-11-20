@@ -13801,6 +13801,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14323,6 +14357,40 @@
     {
       "type": 0,
       "value": "Địa chỉ của một dịch vụ thay đổi nhưng bản sao lưu không có thông tin xác thực đi kèm, nên khi khôi phục, thông tin xác thực ở đây sẽ bị xóa và dịch vụ sẽ tắt cho đến khi nhập lại."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt cài đặt đó, hoặc một phần kết nối của cài đặt đó."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt các cài đặt đó, hoặc một phần kết nối của chúng."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17167,6 +17235,12 @@
       "value": "Một tài khoản khác tại đây đăng nhập bằng tên người dùng hoặc email này."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng, nên máy chủ này giữ các giá trị hiện tại."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18253,6 +18327,16 @@
     {
       "type": 0,
       "value": " (giữ lại: chặt chẽ hơn)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (giữ nguyên: môi trường)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50615,7 +50699,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó để xóa node tại đây."
+      "value": "Được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó và khởi động lại các máy chủ API để xóa node tại đây."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53217,6 +53301,114 @@
       "value": "Đã dừng tạo đề xuất. Các đề xuất đã lưu vẫn hiển thị trong Khám phá cho đến khi máy chủ khởi động lại."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Đang xếp hạng cho hồ sơ… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Đang tải danh sách TMDB… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Đang tra cứu và tạo embedding cho tựa… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã xóa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa hết hạn"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã xóa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa hết hạn"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53257,6 +53449,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Giải quyết xung đột khóa embedding bên dưới trước khi tạo đề xuất Khám phá."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Chạy công việc Embedding trước để Silo có vector thư viện dùng để so sánh."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Kết nối một nhà cung cấp embedding trong Dịch vụ AI trước khi tạo đề xuất Khám phá."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Chưa có hồ sơ nào có hồ sơ sở thích. Chạy Hồ sơ sở thích khi đã có người xem hoặc đánh giá tựa phim."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55115,6 +55331,32 @@
       "value": "Sẽ trống cho đến khi bật đề xuất Khám phá trong Quản trị → Đề xuất."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Các hàng đề xuất sẽ trống cho đến khi bật Đề xuất Khám phá trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Quản trị → Đề xuất"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Đã tắt trong Đề xuất"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56593,6 +56835,12 @@
       "value": "Hàng mới được thêm vào cuối Khám phá"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Mở cài đặt Đề xuất"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56605,6 +56853,12 @@
       "value": "Nguồn cấp của MDBList không mang theo cách sắp xếp đã lưu trên trang danh sách. Hãy chọn cách sắp xếp mà trang đó hiển thị."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Hồ sơ của bạn chưa có đề xuất Khám phá nào. Chạy Đề xuất Khám phá hoặc xem và đánh giá vài tựa phim để xem trước hàng này."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56615,6 +56869,12 @@
     {
       "type": 0,
       "value": "Chọn một danh sách hoặc dán liên kết của nó để xem các nội dung trong đó."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Bật Đề xuất Khám phá trong Quản trị → Đề xuất để xem trước hàng này."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -66373,6 +66633,24 @@
       "value": "Chuyển sang mô hình khác cần đặt lại embedding, thao tác này sẽ xóa toàn bộ embedding. Nhà cung cấp khác phục vụ cùng mô hình sẽ được áp dụng sau khi khởi động lại."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Thêm vào Khám phá"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Không thể thêm các hàng đề xuất vào trang Khám phá."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Đã thêm các hàng đề xuất vào trang Khám phá."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66395,6 +66673,44 @@
     {
       "type": 0,
       "value": "Số tựa chưa có trong thư viện mà máy chủ lưu giữ để đề xuất. Mỗi tựa được tra cứu trên TMDB và tạo embedding. Việc tạo embedding thường rẻ, nhưng con số cao hơn có thể tốn kém hơn hoặc mất nhiều thời gian hơn tùy theo nhà cung cấp embedding của bạn, và dùng nhiều dung lượng lưu trữ hơn."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Trang Khám phá của bạn chưa hiển thị hàng Đề xuất nào."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Bật Bật đề xuất ở trên và khởi động lại máy chủ trước khi Đề xuất Khám phá có thể chạy."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Yêu cầu hiện đang tắt. Bật trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Cài đặt yêu cầu"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " để người xem có thể thấy trang Khám phá."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Mở trang Khám phá"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -76747,6 +77063,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Lịch này lấy từ cài đặt sao lưu. Thay đổi lịch trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Máy chủ › Sao lưu"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

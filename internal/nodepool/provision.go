@@ -69,10 +69,12 @@ type provisionRow struct {
 // node's own declaration and the administrator. The caller publishes
 // node_pool_changed when the result changed anything.
 //
-// It takes the transcode URL lock, then a SHARE ROW EXCLUSIVE lock on
-// stream_nodes, which waits for every write in flight and holds off inserts
-// (and the nextval they draw), updates and deletes until it commits. Reads go
-// on. Two API servers starting together run one after the other.
+// It takes the transcode URL lock, then an EXCLUSIVE lock on stream_nodes,
+// which waits for every transaction holding a row lock or a write and holds
+// off new ones (and the nextval an insert draws) until it commits. A weaker
+// mode would admit an admin edit's SELECT ... FOR UPDATE, and the two would
+// deadlock when both then write that row. Plain reads go on. Two API servers
+// starting together run one after the other.
 func ProvisionTranscodeNodes(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, nodes []ProvisionedNode) (ProvisionResult, error) {
 	if cipher == nil {
 		return ProvisionResult{}, errors.New("provision transcode nodes: no data cipher")
@@ -85,7 +87,7 @@ func ProvisionTranscodeNodes(ctx context.Context, pool *pgxpool.Pool, cipher *se
 	if err = lockTranscodeURLs(ctx, tx); err != nil {
 		return ProvisionResult{}, err
 	}
-	if _, err = tx.Exec(ctx, `LOCK TABLE stream_nodes IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+	if _, err = tx.Exec(ctx, `LOCK TABLE stream_nodes IN EXCLUSIVE MODE`); err != nil {
 		return ProvisionResult{}, err
 	}
 	rows, err := tx.Query(ctx, `SELECT id, type, node_key_ciphertext, deployment_managed FROM stream_nodes`)
@@ -212,10 +214,14 @@ func (p *provisionPlan) existing(cipher *secret.Cipher, node ProvisionedNode, ro
 
 // apply writes the plan. The identity sequence moves past every created id
 // before they exist; the table lock holds off every nextval until commit.
+// ALTER SEQUENCE ... RESTART rolls back with the transaction, where setval
+// does not: a pass that fails after it leaves its ids free for the next try.
 func (p *provisionPlan) apply(ctx context.Context, tx pgx.Tx, sequence string) error {
 	if len(p.creates) > 0 {
-		highest := p.creates[len(p.creates)-1].node.ID
-		if _, err := tx.Exec(ctx, `SELECT setval($1::regclass, $2, true)`, sequence, highest); err != nil {
+		// The name comes from PostgreSQL, already quoted where it needs to
+		// be; the id is at most MaxProvisionedNodeID, so the next one fits.
+		next := p.creates[len(p.creates)-1].node.ID + 1
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`ALTER SEQUENCE %s RESTART WITH %d`, sequence, next)); err != nil {
 			return fmt.Errorf("advance node id sequence: %w", err)
 		}
 	}

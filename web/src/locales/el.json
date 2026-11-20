@@ -13773,6 +13773,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορεί να επαναφερθεί – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορούν να επαναφερθούν – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14295,6 +14329,40 @@
     {
       "type": 0,
       "value": "Η διεύθυνση μιας υπηρεσίας αλλάζει χωρίς τα διαπιστευτήριά της στο αντίγραφο ασφαλείας, οπότε η επαναφορά τα διαγράφει εδώ και απενεργοποιεί την υπηρεσία μέχρι να εισαχθούν ξανά."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρύθμιση διατηρεί την τρέχουσα τιμή της, επειδή την ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής της."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρυθμίσεις διατηρούν τις τρέχουσες τιμές τους, επειδή τις ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής τους."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17119,6 +17187,12 @@
       "value": "Ένας άλλος λογαριασμός εδώ συνδέεται με το ίδιο όνομα χρήστη ή email."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους, οπότε αυτός ο διακομιστής διατηρεί τις τρέχουσες τιμές του."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18201,6 +18275,16 @@
     {
       "type": 0,
       "value": " (διατηρείται: αυστηρότερη)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (διατηρείται: περιβάλλον)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50703,7 +50787,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον κόμβο από εκεί για να τον διαγράψετε εδώ."
+      "value": "Ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον κόμβο από εκεί και επανεκκινήστε τους διακομιστές API για να τον διαγράψετε εδώ."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53325,6 +53409,114 @@
       "value": "Η δημιουργία προτάσεων σταμάτησε. Οι αποθηκευμένες προτάσεις παραμένουν ορατές στην Ανακάλυψη μέχρι την επανεκκίνηση του διακομιστή."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Κατάταξη προφίλ ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Ανάκτηση λιστών TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Αναζήτηση και ενσωμάτωση τίτλων ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εκκαθαρίστηκε "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλος που έληξε"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εκκαθαρίστηκαν "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλοι που έληξαν"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53357,6 +53549,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Επιλύστε την παρακάτω διένεξη κλειδώματος ενσωματώσεων πριν από τη δημιουργία προτάσεων Ανακάλυψης."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Εκτελέστε πρώτα τη διεργασία «Ενσωματώσεις», ώστε το Silo να έχει διανύσματα της βιβλιοθήκης για σύγκριση."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Συνδέστε έναν πάροχο ενσωματώσεων στην ενότητα «Υπηρεσίες AI» πριν από τη δημιουργία προτάσεων Ανακάλυψης."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Κανένα προφίλ δεν έχει ακόμα προφίλ προτιμήσεων. Εκτελέστε τη διεργασία «Προφίλ προτιμήσεων» μόλις κάποιος παρακολουθήσει ή βαθμολογήσει τίτλους."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55215,6 +55431,32 @@
       "value": "Παραμένει κενή μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές προτάσεων παραμένουν κενές μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Διαχείριση → Προτάσεις"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Ανενεργό στις Προτάσεις"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56693,6 +56935,12 @@
       "value": "Οι νέες γραμμές προστίθενται στο κάτω μέρος της Ανακάλυψης"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα των ρυθμίσεων Προτάσεων"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56705,6 +56953,12 @@
       "value": "Η ροή του MDBList δεν περιλαμβάνει την ταξινόμηση που έχει αποθηκευτεί στη σελίδα της λίστας. Επιλέξτε αυτήν που εμφανίζεται εκεί."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Το προφίλ σας δεν έχει ακόμα προτάσεις Ανακάλυψης. Εκτελέστε τη διεργασία «Προτάσεις Ανακάλυψης» ή παρακολουθήστε και βαθμολογήστε μερικούς τίτλους για να δείτε προεπισκόπηση αυτής της γραμμής."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56715,6 +56969,12 @@
     {
       "type": 0,
       "value": "Επιλέξτε μια λίστα ή επικολλήστε τον σύνδεσμό της για να δείτε τους τίτλους της."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ενεργοποιήστε τις προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις για να δείτε προεπισκόπηση αυτής της γραμμής."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -66409,6 +66669,24 @@
       "value": "Η αλλαγή σε άλλο μοντέλο απαιτεί επαναφορά των ενσωματώσεων, η οποία τις διαγράφει όλες. Ένας άλλος πάροχος που εξυπηρετεί το ίδιο μοντέλο εφαρμόζεται μετά από επανεκκίνηση."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Προσθήκη στην Ανακάλυψη"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η προσθήκη γραμμών προτάσεων στη σελίδα Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές προτάσεων προστέθηκαν στη σελίδα Ανακάλυψης."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66431,6 +66709,44 @@
     {
       "type": 0,
       "value": "Πόσους τίτλους που δεν υπάρχουν στη βιβλιοθήκη διατηρεί ο διακομιστής για να κάνει προτάσεις. Για τον καθένα γίνεται αναζήτηση στο TMDB και δημιουργείται ενσωμάτωση. Η ενσωμάτωση είναι συνήθως φθηνή, αλλά ένας μεγαλύτερος αριθμός μπορεί να κοστίσει περισσότερο ή να διαρκέσει περισσότερο, ανάλογα με τον πάροχο ενσωματώσεων, και χρησιμοποιεί περισσότερο χώρο αποθήκευσης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Η σελίδα Ανακάλυψης δεν εμφανίζει ακόμα καμία γραμμή Προτάσεων."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Ενεργοποιήστε την επιλογή «Ενεργοποίηση προτάσεων» παραπάνω και επανεκκινήστε τον διακομιστή, για να μπορούν να εκτελεστούν οι προτάσεις Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Τα αιτήματα είναι προς το παρόν ανενεργά. Ενεργοποιήστε τα στις "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ρυθμίσεις αιτημάτων"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ώστε οι θεατές να βλέπουν τη σελίδα Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα σελίδας Ανακάλυψης"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -76755,6 +77071,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Αυτό το πρόγραμμα προέρχεται από τις ρυθμίσεις αντιγράφων ασφαλείας. Αλλάξτε το στη σελίδα "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Διακομιστής › Αντίγραφα ασφαλείας"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

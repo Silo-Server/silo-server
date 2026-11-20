@@ -58,7 +58,10 @@ func TestReadNodeProvisioning(t *testing.T) {
 		`{"apiVersion":1,"nodes":{"a":{"url":"gpu:8090","key":{"fromEnv":"GPU7_KEY"}}}}`:                                                      "url",
 		`{"apiVersion":1,"nodes":{"a":{"url":"http://a","key":{"fromEnv":"GPU7_KEY","fromFile":"/x"}}}}`:                                      "fromFile",
 		`{"apiVersion":1,"nodes":{"a":{"url":"http://a","key":{"fromEnv":"UNSET"}}}}`:                                                         "empty",
-		`{"apiVersion":1,"nodes":{"a":{"url":"http://a","key":{"fromEnv":"GPU7_KEY"},"group":"x"}}}`:                                          "unknown field",
+		`{"apiVersion":1,"nodes":{"a":{"url":"http://a","key":{"fromEnv":"GPU7_KEY"},"group":"x"}}}`:                                          "field other than",
+		// Member names match exactly: "Nodes" is not "nodes".
+		`{"apiVersion":1,"nodes":null,"Nodes":{}}`: "field other than",
+		`{"apiVersion":1.0,"nodes":{}}`:            "apiVersion",
 	} {
 		if msg := inline(doc); !strings.Contains(msg, want) {
 			t.Errorf("%s: %q does not mention %q", doc, msg, want)
@@ -71,6 +74,17 @@ func TestReadNodeProvisioning(t *testing.T) {
 	}
 	if msg := inline("apiVersion: 1\nnodes:\n  a: {url: http://a, key: " + key7 + "}\n"); strings.Contains(msg, key7) {
 		t.Fatalf("the error quotes the key: %s", msg)
+	}
+	if msg := inline(`{"apiVersion":1,"nodes":{"a":{"url":"http://a","key":{"` + key7 + `":true}}}}`); strings.Contains(msg, key7) {
+		t.Fatalf("the error quotes the key: %s", msg)
+	}
+	// yaml.v3 rounds this to 1.
+	roundedFile := filepath.Join(dir, "rounded.yaml")
+	if err := os.WriteFile(roundedFile, []byte("apiVersion: 1.00000000000000001\nnodes: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadNodeProvisioning(env(map[string]string{EnvTranscodeNodesFile: roundedFile})); err == nil {
+		t.Fatal("accepted a fractional apiVersion")
 	}
 	if _, err := ReadNodeProvisioning(env(map[string]string{EnvTranscodeNodes: "{}", EnvTranscodeNodesFile: yamlFile})); err == nil {
 		t.Fatal("accepted both variables")

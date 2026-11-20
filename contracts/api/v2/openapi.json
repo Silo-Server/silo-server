@@ -14232,7 +14232,7 @@
             "type": "string"
           },
           "deployment_managed": {
-            "description": "The API servers' deployment configuration (SILO_TRANSCODE_NODES) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until that configuration no longer lists it. Requires the deployment_nodes node capability.",
+            "description": "The API servers' deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until an API server starts with a document that no longer lists it (nodes: {} releases every node). An API server started with neither variable set leaves it managed. Requires the deployment_nodes node capability.",
             "type": "boolean"
           },
           "download_artifact_dir_override": {
@@ -14395,7 +14395,7 @@
             "type": "boolean"
           },
           "deployment_nodes": {
-            "description": "API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed.",
+            "description": "API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed.",
             "type": "boolean"
           },
           "drain": {

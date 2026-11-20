@@ -13138,6 +13138,32 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "กู้คืน "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการไม่ได้ — สภาพแวดล้อมของเซิร์ฟเวอร์นี้กำหนดการตั้งค่าที่ต่างกัน หรือกำหนดการเชื่อมต่อบางส่วนของรายการเหล่านี้"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13548,6 +13574,32 @@
     {
       "type": 0,
       "value": "ที่อยู่ของบริการเปลี่ยนไปโดยไม่มีข้อมูลเข้าสู่ระบบในข้อมูลสำรอง การกู้คืนจึงจะล้างข้อมูลเข้าสู่ระบบที่นี่และปิดบริการไว้จนกว่าจะป้อนข้อมูลอีกครั้ง"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "การตั้งค่า "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการจะคงค่าปัจจุบันไว้ เนื่องจากสภาพแวดล้อมของเซิร์ฟเวอร์นี้กำหนดการตั้งค่าเหล่านี้ หรือกำหนดการเชื่อมต่อบางส่วนของการตั้งค่าเหล่านี้"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15828,6 +15880,12 @@
       "value": "มีบัญชีอื่นที่นี่ที่ลงชื่อเข้าใช้ด้วยชื่อผู้ใช้หรืออีเมลของบัญชีนี้"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "สภาพแวดล้อมของเซิร์ฟเวอร์นี้กำหนดการตั้งค่าที่ต่างกัน หรือกำหนดการเชื่อมต่อบางส่วนของการตั้งค่าเหล่านั้น เซิร์ฟเวอร์นี้จึงคงค่าปัจจุบันไว้"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16778,6 +16836,16 @@
     {
       "type": 0,
       "value": " (คงไว้: เข้มงวดกว่า)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (คงไว้: สภาพแวดล้อม)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -45623,7 +45691,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "โหนดนี้กำหนดโดยการกำหนดค่าการติดตั้งใช้งานของเซิร์ฟเวอร์ โปรดนำโหนดออกจากการกำหนดค่านั้นเพื่อลบโหนดที่นี่"
+      "value": "โหนดนี้กำหนดไว้ในการกำหนดค่าการติดตั้งใช้งานของเซิร์ฟเวอร์ โปรดนำโหนดออกจากการกำหนดค่านั้นแล้วรีสตาร์ตเซิร์ฟเวอร์ API เพื่อลบโหนดที่นี่"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -48060,6 +48128,98 @@
       "value": "หยุดการสร้างแล้ว คำแนะนำที่จัดเก็บไว้จะยังแสดงในหน้าสำรวจจนกว่าเซิร์ฟเวอร์จะรีสตาร์ท"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "กำลังจัดอันดับโปรไฟล์ ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "กำลังดึงรายการ TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "กำลังค้นข้อมูลและเอ็มเบดเรื่อง ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ล้างเรื่องที่หมดอายุแล้ว "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " เรื่อง"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -48084,6 +48244,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "แก้ไขข้อขัดแย้งของการล็อกเอ็มเบดดิงด้านล่างก่อนสร้างคำแนะนำในหน้าสำรวจ"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "เรียกใช้งานเอ็มเบดดิงก่อน เพื่อให้ Silo มีเวกเตอร์ของคลังไว้เปรียบเทียบ"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "เชื่อมต่อผู้ให้บริการเอ็มเบดดิงในบริการ AI ก่อนสร้างคำแนะนำในหน้าสำรวจ"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "ยังไม่มีโปรไฟล์ใดที่มีโปรไฟล์ความชอบ เรียกใช้งานโปรไฟล์ความชอบเมื่อมีผู้ดูหรือให้คะแนนเรื่องแล้ว"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -49590,6 +49774,28 @@
       "value": "จะว่างอยู่จนกว่าจะเปิดคำแนะนำในหน้าสำรวจใน ผู้ดูแลระบบ → คำแนะนำ"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "แถวแนะนำจะว่างอยู่จนกว่าจะเปิดคำแนะนำในหน้าสำรวจใน "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "ผู้ดูแลระบบ → คำแนะนำ"
+        }
+      ]
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "ปิดอยู่ในคำแนะนำ"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50963,6 +51169,12 @@
       "value": "แถวใหม่จะอยู่ด้านล่างสุดของหน้าสำรวจ"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "เปิดการตั้งค่าคำแนะนำ"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50975,6 +51187,12 @@
       "value": "ฟีดของ MDBList ไม่มีการจัดเรียงที่บันทึกไว้ในหน้าของรายการ เลือกลำดับที่หน้านั้นแสดง"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์ของคุณยังไม่มีคำแนะนำในหน้าสำรวจ เรียกใช้งานคำแนะนำในหน้าสำรวจ หรือดูและให้คะแนนเรื่องสักสองสามเรื่องเพื่อแสดงตัวอย่างแถวนี้"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50985,6 +51203,12 @@
     {
       "type": 0,
       "value": "เลือกรายการหรือวางลิงก์ของรายการเพื่อดูเรื่องในรายการ"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "เปิดคำแนะนำในหน้าสำรวจใน ผู้ดูแลระบบ → คำแนะนำ เพื่อแสดงตัวอย่างแถวนี้"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60464,6 +60688,24 @@
       "value": "การเปลี่ยนไปใช้โมเดลอื่นต้องรีเซ็ตเอ็มเบดดิง ซึ่งจะลบเอ็มเบดดิงทั้งหมด ผู้ให้บริการอื่นที่ให้บริการโมเดลเดียวกันจะมีผลหลังจากรีสตาร์ต"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "เพิ่มในหน้าสำรวจ"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "เพิ่มแถวแนะนำลงในหน้าสำรวจไม่ได้"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "เพิ่มแถวแนะนำลงในหน้าสำรวจแล้ว"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -60486,6 +60728,44 @@
     {
       "type": 0,
       "value": "จำนวนเรื่องที่ยังไม่มีในคลังซึ่งเซิร์ฟเวอร์เก็บไว้ใช้แนะนำ แต่ละเรื่องจะค้นข้อมูลใน TMDB และสร้างเอ็มเบดดิง โดยทั่วไปการสร้างเอ็มเบดดิงมีค่าใช้จ่ายต่ำ แต่จำนวนที่สูงขึ้นอาจมีค่าใช้จ่ายมากขึ้นหรือใช้เวลานานขึ้นโดยขึ้นอยู่กับผู้ให้บริการเอ็มเบดดิง และใช้พื้นที่จัดเก็บมากขึ้น"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "หน้าสำรวจยังไม่แสดงแถวคำแนะนำ"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "เปิด “เปิดใช้คำแนะนำ” ด้านบนและรีสตาร์ทเซิร์ฟเวอร์ เพื่อให้คำแนะนำในหน้าสำรวจทำงานได้"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "ขณะนี้ปิดคำขออยู่ เปิดได้ใน "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "การตั้งค่าคำขอ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " เพื่อให้ผู้ชมเห็นหน้าสำรวจ"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "เปิดหน้าสำรวจ"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -70626,6 +70906,22 @@
     {
       "type": 0,
       "value": " ครั้ง"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "กำหนดการนี้มาจากการตั้งค่าข้อมูลสำรอง เปลี่ยนได้ใน"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "เซิร์ฟเวอร์ › ข้อมูลสำรอง"
+        }
+      ]
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

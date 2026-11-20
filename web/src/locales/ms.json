@@ -12954,6 +12954,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tidak boleh dipulihkan — persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13308,6 +13330,28 @@
     {
       "type": 0,
       "value": "Alamat satu perkhidmatan berubah tanpa bukti kelayakannya dalam sandaran, jadi pemulihan mengosongkan bukti kelayakan itu di sini dan mematikan perkhidmatan tersebut sehingga dimasukkan semula."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tetapan mengekalkan nilai semasa kerana persekitaran pelayan ini menetapkannya, atau sebahagian sambungannya."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15572,6 +15616,12 @@
       "value": "Akaun lain di sini log masuk dengan nama pengguna atau e-mel akaun ini."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya, jadi pelayan ini mengekalkan nilai semasanya."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16506,6 +16556,16 @@
     {
       "type": 0,
       "value": " (dikekalkan: lebih ketat)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (dikekalkan: persekitaran)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -44787,7 +44847,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana untuk memadamnya di sini."
+      "value": "Ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana dan mulakan semula pelayan API untuk memadamnya di sini."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -47212,6 +47272,94 @@
       "value": "Penjanaan telah dihentikan. Cadangan yang disimpan kekal kelihatan dalam Teroka sehingga pelayan dimulakan semula."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Menyusun kedudukan profil ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Mengambil senarai TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Mencari dan membenamkan tajuk ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tajuk tamat tempoh dikosongkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47232,6 +47380,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Selesaikan konflik kunci pembenaman di bawah sebelum membina cadangan Teroka."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Jalankan kerja Pembenaman dahulu supaya Silo mempunyai vektor pustaka untuk dibandingkan."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Sambungkan pembekal pembenaman dalam Perkhidmatan AI sebelum membina cadangan Teroka."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Belum ada profil yang mempunyai profil citarasa. Jalankan Profil citarasa setelah seseorang menonton atau memberi penarafan kepada tajuk."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -48706,6 +48878,32 @@
       "value": "Kekal kosong sehingga cadangan Teroka dihidupkan dalam Pentadbir → Cadangan."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Baris cadangan kekal kosong sehingga Cadangan Teroka dihidupkan dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pentadbir → Cadangan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Mati dalam Cadangan"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50067,6 +50265,12 @@
       "value": "Baris baharu diletakkan di bahagian bawah Teroka"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Buka tetapan Cadangan"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50079,6 +50283,12 @@
       "value": "Suapan MDBList tidak membawa isihan yang disimpan pada halaman senarai. Pilih isihan yang dipaparkannya."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profil anda belum mempunyai cadangan Teroka. Jalankan Cadangan Teroka atau tonton dan beri penarafan kepada beberapa tajuk untuk melihat pratonton baris ini."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50089,6 +50299,12 @@
     {
       "type": 0,
       "value": "Pilih senarai atau tampal pautannya untuk melihat tajuknya."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Hidupkan Cadangan Teroka dalam Pentadbir → Cadangan untuk melihat pratonton baris ini."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -59496,6 +59712,24 @@
       "value": "Beralih kepada model lain memerlukan penetapan semula pembenaman, yang memadam kesemuanya. Pembekal lain yang menyediakan model yang sama berkuat kuasa selepas dimulakan semula."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Tambah ke Teroka"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menambah baris cadangan ke halaman Teroka."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Baris cadangan ditambah ke halaman Teroka."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -59518,6 +59752,44 @@
     {
       "type": 0,
       "value": "Bilangan tajuk yang belum ada dalam pustaka yang disimpan oleh pelayan untuk dicadangkan. Setiap tajuk dicari di TMDB dan dijadikan embedding. Embedding biasanya murah, tetapi bilangan yang lebih tinggi boleh menelan kos lebih tinggi atau mengambil masa lebih lama bergantung pada pembekal embedding anda, dan menggunakan lebih banyak storan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Halaman Teroka anda belum memaparkan sebarang baris Cadangan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Hidupkan “Dayakan cadangan” di atas dan mulakan semula pelayan sebelum Cadangan Teroka boleh dijalankan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Permintaan kini dimatikan. Hidupkannya dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Tetapan permintaan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " supaya penonton boleh melihat halaman Teroka."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Buka halaman Teroka"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -69590,6 +69862,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Jadual ini datang daripada tetapan sandaran. Ubah jadual ini di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pelayan › Sandaran"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

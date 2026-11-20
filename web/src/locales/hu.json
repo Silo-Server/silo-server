@@ -13725,6 +13725,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nem állítható vissza – ennek a szervernek a környezete határozza meg az eltérő beállításokat vagy a kapcsolatuk egy részét"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nem állítható vissza – ennek a szervernek a környezete határozza meg az eltérő beállításokat vagy a kapcsolatuk egy részét"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14247,6 +14281,40 @@
     {
       "type": 0,
       "value": "Egy szolgáltatás címe megváltozik, de a hitelesítő adatai nincsenek a biztonsági mentésben, ezért a visszaállítás itt törli őket, és kikapcsolja a szolgáltatást, amíg újra meg nem adják őket."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " beállítás megtartja a jelenlegi értékét, mert ennek a szervernek a környezete határozza meg azt vagy a kapcsolatának egy részét."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " beállítás megtartja a jelenlegi értékét, mert ennek a szervernek a környezete határozza meg őket vagy a kapcsolatuk egy részét."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17191,6 +17259,12 @@
       "value": "Itt egy másik fiók jelentkezik be a felhasználónevével vagy e-mail-címével."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Ennek a szervernek a környezete határozza meg az eltérő beállításokat vagy a kapcsolatuk egy részét, ezért ez a szerver megtartja a jelenlegi értékeit."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18249,6 +18323,16 @@
     {
       "type": 0,
       "value": " (megtartva: szigorúbb)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (megtartva: környezet)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50295,7 +50379,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "A szerver telepítési konfigurációja állítja be. Távolítsa el onnan, hogy itt törölhesse."
+      "value": "A szerver telepítési konfigurációja állítja be. Ha itt törölni szeretné, távolítsa el onnan, majd indítsa újra az API-szervereket."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52909,6 +52993,106 @@
       "value": "A generálás leállt. A tárolt ajánlások a szerver újraindításáig láthatók maradnak a Felfedezés oldalon."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profilok rangsorolása ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB-listák lekérése ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Címek lekérése és beágyazása ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " lejárt cím törölve"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " lejárt cím törölve"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52941,6 +53125,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "A felfedezési ajánlások összeállítása előtt oldja fel az alábbi beágyazási zárolási ütközést."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Először futtassa a Beágyazások műveletet, hogy a Silónak legyenek könyvtárvektorai az összehasonlításhoz."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "A felfedezési ajánlások összeállítása előtt csatlakoztasson egy beágyazási szolgáltatót az MI-szolgáltatások oldalon."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Még egyik profilnak sincs ízlésprofilja. Futtassa az Ízlésprofilok műveletet, ha valaki már megtekintett vagy értékelt címeket."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54767,6 +54975,32 @@
       "value": "Üres marad, amíg be nem kapcsolja a felfedezési ajánlásokat itt: Adminisztráció → Ajánlások."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Az ajánlott sorok üresek maradnak, amíg be nem kapcsolja a felfedezési ajánlásokat itt: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Adminisztráció → Ajánlások"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Kikapcsolva az Ajánlások oldalon"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56237,6 +56471,12 @@
       "value": "Az új sorok a Felfedezés oldal aljára kerülnek"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Ajánlások beállításainak megnyitása"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56249,6 +56489,12 @@
       "value": "Az MDBList hírcsatornája nem tartalmazza a lista oldalán mentett rendezést. Válassza ki azt, amelyet az oldal mutat."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "A profiljához még nincsenek felfedezési ajánlások. A sor előnézetéhez futtassa a Felfedezési ajánlások műveletet, vagy tekintsen meg és értékeljen néhány címet."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56259,6 +56505,12 @@
     {
       "type": 0,
       "value": "Válasszon listát, vagy illessze be a hivatkozását a címek megtekintéséhez."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "A sor előnézetéhez kapcsolja be a felfedezési ajánlásokat itt: Adminisztráció → Ajánlások."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -65953,6 +66205,24 @@
       "value": "Másik modellre váltáshoz alaphelyzetbe kell állítani a beágyazásokat, ami mindet törli. Ha egy másik szolgáltató ugyanazt a modellt szolgálja ki, az újraindítás után lép érvénybe."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Hozzáadás a Felfedezés oldalhoz"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült hozzáadni az ajánlott sorokat a Felfedezés oldalhoz."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Ajánlott sorok hozzáadva a Felfedezés oldalhoz."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65975,6 +66245,44 @@
     {
       "type": 0,
       "value": "Hány, a könyvtárban nem szereplő címet tárol a szerver, amelyekből ajánlani lehet. Mindegyiket lekéri a TMDB-ből, és beágyazást készít hozzá. A beágyazás általában olcsó, de nagyobb szám a beágyazási szolgáltatótól függően többe kerülhet vagy tovább tarthat, és több tárhelyet használ."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "A Felfedezés oldalon még egyetlen Ajánlások típusú sor sem jelenik meg."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "A felfedezési ajánlások futtatásához kapcsolja be fent az Ajánlások engedélyezése beállítást, és indítsa újra a szervert."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "A kérések jelenleg ki vannak kapcsolva. Kapcsolja be őket itt: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Kérések beállításai"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", hogy a nézők láthassák a Felfedezés oldalt."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Felfedezés oldal megnyitása"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -76267,6 +76575,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ez az ütemezés a biztonsági mentési beállításokból származik. A "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Szerver › Biztonsági mentések"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " oldalon módosíthatja."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

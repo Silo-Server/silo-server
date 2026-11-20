@@ -1,7 +1,6 @@
 package nodepool
 
 import (
-	"bytes"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
@@ -47,21 +46,6 @@ type NodeProvisioning struct {
 	Nodes  []ProvisionedNode
 }
 
-type nodeDocument struct {
-	APIVersion *int                  `json:"apiVersion"`
-	Nodes      map[string]*nodeEntry `json:"nodes"`
-}
-
-type nodeEntry struct {
-	URL string          `json:"url"`
-	Key *nodeSecretFrom `json:"key"`
-}
-
-type nodeSecretFrom struct {
-	FromFile string `json:"fromFile"`
-	FromEnv  string `json:"fromEnv"`
-}
-
 // ReadNodeProvisioning reads SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE
 // and every key the declaration references. It returns nil when neither is
 // set: that server leaves deployment-managed nodes as they are. A blank value
@@ -100,8 +84,11 @@ func parseNodeDocument(data []byte, allowYAML bool, getenv func(string) string) 
 		return nil, errors.New("expected UTF-8 input up to 1 MiB")
 	}
 	if allowYAML && !jsontext.Value(data).IsValid() {
+		// The document has no fractional numbers, and yaml.v3 rounds a long
+		// one: 1.00000000000000001 would pass as apiVersion 1.
+		noFloats := func(string) bool { return false }
 		var err error
-		if data, err = provisiondoc.YAMLToJSON(data, provisiondoc.MaxBytes, nil); err != nil {
+		if data, err = provisiondoc.YAMLToJSON(data, provisiondoc.MaxBytes, noFloats); err != nil {
 			return nil, err
 		}
 	}
@@ -109,24 +96,23 @@ func parseNodeDocument(data []byte, allowYAML bool, getenv func(string) string) 
 	if !jsontext.Value(data).IsValid() {
 		return nil, errors.New("invalid JSON: check syntax and duplicate keys")
 	}
-	var document nodeDocument
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil {
-		return nil, nodeDocumentDecodeError(err)
+	document, err := exactMembers(data, "the declaration", "apiVersion", "nodes")
+	if err != nil {
+		return nil, err
 	}
-	if document.APIVersion == nil || *document.APIVersion != 1 {
+	if string(document["apiVersion"]) != "1" {
 		return nil, errors.New("apiVersion must be 1")
 	}
-	if document.Nodes == nil {
-		return nil, errors.New("nodes is required; an empty map releases every node")
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(document["nodes"], &entries); err != nil || entries == nil {
+		return nil, errors.New("nodes is required, as a map of node names; an empty map releases every node")
 	}
-	nodes := make([]ProvisionedNode, 0, len(document.Nodes))
-	byID := make(map[int]string, len(document.Nodes))
-	byURL := make(map[string]string, len(document.Nodes))
+	nodes := make([]ProvisionedNode, 0, len(entries))
+	byID := make(map[int]string, len(entries))
+	byURL := make(map[string]string, len(entries))
 	var secretBytes int
-	for _, name := range slices.Sorted(maps.Keys(document.Nodes)) {
-		node, err := provisionedNode(name, document.Nodes[name], getenv, &secretBytes)
+	for _, name := range slices.Sorted(maps.Keys(entries)) {
+		node, err := provisionedNode(name, entries[name], getenv, &secretBytes)
 		if err != nil {
 			return nil, fmt.Errorf("nodes.%s: %w", name, err)
 		}
@@ -145,35 +131,41 @@ func parseNodeDocument(data []byte, allowYAML bool, getenv func(string) string) 
 	return nodes, nil
 }
 
-// nodeDocumentDecodeError describes a decode failure without its value: a
-// decode error can quote one, and a key placed inline where a reference
-// belongs is a value. It names the field only.
-func nodeDocumentDecodeError(err error) error {
-	typeErr, ok := errors.AsType[*json.UnmarshalTypeError](err)
-	switch {
-	case ok && strings.HasSuffix(typeErr.Field, ".key"):
-		return fmt.Errorf("%s must be { fromFile: <path> } or { fromEnv: <variable> }, not the key itself", typeErr.Field)
-	case ok && typeErr.Field != "":
-		return fmt.Errorf("unexpected value at %s", typeErr.Field)
-	case strings.HasPrefix(err.Error(), "json: unknown field "):
-		return errors.New(strings.TrimPrefix(err.Error(), "json: "))
-	default:
-		return errors.New("not a transcode node declaration")
+// exactMembers decodes a JSON object whose member names must be among
+// allowed, compared exactly: the standard decoder matches struct fields
+// without regard to case, so "Nodes" would stand in for "nodes". The error
+// never names an unknown member, which could be a key pasted in the wrong
+// place.
+func exactMembers(raw []byte, what string, allowed ...string) (map[string]json.RawMessage, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
+		return nil, fmt.Errorf("%s must be an object", what)
 	}
+	for name := range object {
+		if !slices.Contains(allowed, name) {
+			return nil, fmt.Errorf("%s has a field other than %s", what, strings.Join(allowed, ", "))
+		}
+	}
+	return object, nil
 }
 
-func provisionedNode(name string, entry *nodeEntry, getenv func(string) string, secretBytes *int) (ProvisionedNode, error) {
+func provisionedNode(name string, raw json.RawMessage, getenv func(string) string, secretBytes *int) (ProvisionedNode, error) {
 	if strings.TrimSpace(name) != name || name == "" || len(name) > maxNodeNameBytes {
 		return ProvisionedNode{}, fmt.Errorf("the name must be 1 to %d bytes without surrounding spaces", maxNodeNameBytes)
 	}
-	if entry == nil {
-		return ProvisionedNode{}, errors.New("url and key are required")
+	entry, err := exactMembers(raw, "the entry", "url", "key")
+	if err != nil {
+		return ProvisionedNode{}, err
 	}
-	nodeURL := strings.TrimSpace(entry.URL)
+	nodeURL, ok := optionalString(entry["url"])
+	if !ok {
+		return ProvisionedNode{}, errors.New("url must be a string")
+	}
+	nodeURL = strings.TrimSpace(nodeURL)
 	if len(nodeURL) > maxNodeURLBytes || !absoluteHTTPURL(nodeURL) {
 		return ProvisionedNode{}, fmt.Errorf("url %s", detailAbsoluteURL)
 	}
-	key, err := readNodeSecret(entry.Key, getenv, secretBytes)
+	key, err := readNodeSecret(entry["key"], getenv, secretBytes)
 	if err != nil {
 		return ProvisionedNode{}, fmt.Errorf("key: %w", err)
 	}
@@ -190,18 +182,28 @@ func provisionedNode(name string, entry *nodeEntry, getenv func(string) string, 
 // readNodeSecret reads a key from the file or variable a reference names. A
 // key is never written into the declaration itself, so the declaration can
 // live where secrets do not.
-func readNodeSecret(ref *nodeSecretFrom, getenv func(string) string, total *int) (string, error) {
-	if ref == nil || (ref.FromFile == "") == (ref.FromEnv == "") {
-		return "", errors.New("must be { fromFile: <path> } or { fromEnv: <variable> }")
+func readNodeSecret(raw json.RawMessage, getenv func(string) string, total *int) (string, error) {
+	const form = "must be { fromFile: <path> } or { fromEnv: <variable> }"
+	var inline string
+	if json.Unmarshal(raw, &inline) == nil {
+		return "", errors.New(form + ", not the key itself")
+	}
+	ref, err := exactMembers(raw, "the reference", "fromFile", "fromEnv")
+	if err != nil {
+		return "", errors.New(form)
+	}
+	fromFile, fileOK := optionalString(ref["fromFile"])
+	fromEnv, envOK := optionalString(ref["fromEnv"])
+	if !fileOK || !envOK || (fromFile == "") == (fromEnv == "") {
+		return "", errors.New(form)
 	}
 	var secret string
-	if ref.FromFile != "" {
-		var err error
-		if secret, err = provisiondoc.ReadSecretFile(ref.FromFile); err != nil {
+	if fromFile != "" {
+		if secret, err = provisiondoc.ReadSecretFile(fromFile); err != nil {
 			return "", fmt.Errorf("fromFile: %w", err)
 		}
 	} else {
-		secret = getenv(ref.FromEnv)
+		secret = getenv(fromEnv)
 	}
 	// As the node reads its own SILO_NODE_KEY.
 	secret = strings.TrimSpace(secret)
@@ -213,4 +215,13 @@ func readNodeSecret(ref *nodeSecretFrom, getenv func(string) string, total *int)
 	}
 	*total += len(secret)
 	return secret, nil
+}
+
+// optionalString decodes a member that is absent or a string.
+func optionalString(raw json.RawMessage) (string, bool) {
+	var value string
+	if raw != nil && json.Unmarshal(raw, &value) != nil {
+		return "", false
+	}
+	return value, true
 }

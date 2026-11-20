@@ -13014,6 +13014,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件は復元できません — 異なる設定、またはその接続の一部がこのサーバーの環境で設定されています"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13368,6 +13390,28 @@
     {
       "type": 0,
       "value": "サービスのアドレスが変わりますが、バックアップに認証情報が含まれていないため、復元するとここの認証情報がクリアされ、再入力するまでサービスはオフになります。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件の設定は、設定自体またはその接続の一部がこのサーバーの環境で設定されているため、現在の値を維持します。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15744,6 +15788,12 @@
       "value": "このサーバーの別のアカウントが、同じユーザー名またはメールアドレスでサインインしています。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "異なる設定、またはその接続の一部がこのサーバーの環境で設定されているため、このサーバーは現在の値を維持します。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16678,6 +16728,16 @@
     {
       "type": 0,
       "value": "（維持：より厳格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（維持：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -44891,7 +44951,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "サーバーのデプロイ構成で設定されています。ここで削除するには、デプロイ構成から削除してください。"
+      "value": "サーバーのデプロイ構成で設定されています。ここで削除するには、デプロイ構成から削除してAPIサーバーを再起動してください。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -47296,6 +47356,98 @@
       "value": "生成は停止しました。保存済みのおすすめは、サーバーが再起動するまでディスカバーに表示されます。"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "プロフィールをランク付け中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDBリストを取得中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "タイトルを検索してエンベディング中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "期限切れのタイトル"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件をクリアしました"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47316,6 +47468,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを作成する前に、下のエンベディングのロックの競合を解決してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Siloが比較に使うライブラリのベクトルを用意するため、先に「エンベディング」ジョブを実行してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを作成する前に、AIサービスでエンベディングプロバイダーを接続してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "嗜好プロフィールを持つプロフィールはまだありません。誰かがタイトルを視聴または評価したら、「嗜好プロフィール」を実行してください。"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -48838,6 +49014,28 @@
       "value": "「管理 → おすすめ」でディスカバーのおすすめをオンにするまで空のままです。"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → おすすめ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でディスカバーのおすすめをオンにするまで、おすすめの行は空のままです。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "「おすすめ」でオフ"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50219,6 +50417,12 @@
       "value": "新しい行はディスカバーの最下部に追加されます"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "「おすすめ」の設定を開く"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50231,6 +50435,12 @@
       "value": "MDBListのフィードには、リストのページで保存された並び順が含まれません。そのページで表示されている並び順を選択してください。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "このプロフィールにはまだディスカバーのおすすめがありません。この行をプレビューするには、「ディスカバーのおすすめ」を実行するか、いくつかのタイトルを視聴して評価してください。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50241,6 +50451,12 @@
     {
       "type": 0,
       "value": "リストを選択するかリンクを貼り付けると、タイトルが表示されます。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "この行をプレビューするには、「管理 → おすすめ」でディスカバーのおすすめをオンにしてください。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -59644,6 +59860,24 @@
       "value": "別のモデルに切り替えるには埋め込みをリセットする必要があり、すべての埋め込みが削除されます。同じモデルを提供する別のプロバイダーへの変更は、再起動後に適用されます。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "ディスカバーに追加"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "おすすめの行をディスカバーページに追加できませんでした。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "おすすめの行をディスカバーページに追加しました。"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -59666,6 +59900,44 @@
     {
       "type": 0,
       "value": "ライブラリにないタイトルのうち、サーバーがおすすめ候補として保持する数です。各タイトルはTMDBで検索され、エンベディングされます。エンベディングは通常低コストですが、数を増やすとエンベディングプロバイダーによってはコストや時間が増え、ストレージも多く使用します。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "ディスカバーページにはまだおすすめの行が表示されていません。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを実行するには、上の「おすすめを有効にする」をオンにしてサーバーを再起動してください。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "リクエストは現在オフです。視聴者がディスカバーページを見られるように、"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "リクエストの設定"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でオンにしてください。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "ディスカバーページを開く"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -69766,6 +70038,26 @@
     {
       "type": 0,
       "value": "回"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "このスケジュールはバックアップの設定で決まります。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "サーバー › バックアップ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "で変更してください。"
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

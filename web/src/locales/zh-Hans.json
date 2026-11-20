@@ -13010,6 +13010,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "项无法恢复——此服务器的环境设置了存在差异的设置项或其所属连接的一部分"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13364,6 +13386,28 @@
     {
       "type": 0,
       "value": "某个服务的地址发生变化，但备份中没有其凭据，因此恢复会清除此处的凭据并关闭该服务，直到重新输入凭据。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "项设置保留当前值，因为此服务器的环境设置了这些项或其所属连接的一部分。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15708,6 +15752,12 @@
       "value": "此处另一个账户已使用其用户名或电子邮件登录。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "此服务器的环境设置了存在差异的设置项或其所属连接的一部分，因此此服务器保留当前值。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16666,6 +16716,16 @@
     {
       "type": 0,
       "value": "（已保留：更严格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（已保留：环境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -45183,7 +45243,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "由服务器的部署配置设置。请在部署配置中移除它，即可在此处删除。"
+      "value": "由服务器的部署配置设置。请在部署配置中移除它并重启API服务器，即可在此处删除。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -47608,6 +47668,98 @@
       "value": "生成已停止。在服务器重启之前，已存储的推荐仍会显示在发现中。"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "正在为个人资料排序（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "正在获取TMDB列表（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "正在查询并嵌入作品（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已清除"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "部过期作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47632,6 +47784,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "请先解决下方的嵌入锁定冲突，再构建发现推荐。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "请先运行嵌入作业，让Silo有可供比较的媒体库向量。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "请先在AI服务中连接嵌入提供商，再构建发现推荐。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "还没有任何个人资料拥有口味画像。有人观看或评分作品后，请运行口味画像。"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -49122,6 +49298,32 @@
       "value": "在管理 → 推荐中开启发现推荐之前，此行会保持为空。"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → 推荐"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启发现推荐之前，推荐行会保持为空。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "已在推荐中关闭"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50495,6 +50697,12 @@
       "value": "新行将添加到发现底部"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "打开推荐设置"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50507,6 +50715,12 @@
       "value": "MDBList的订阅源不包含列表页面上保存的排序方式。请选择列表页面显示的排序。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "你的个人资料还没有发现推荐。请运行发现推荐，或观看并评分几部作品，以预览此行。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50517,6 +50731,12 @@
     {
       "type": 0,
       "value": "选择一个列表或粘贴其链接以查看其中的作品。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "在管理 → 推荐中开启发现推荐，即可预览此行。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60016,6 +60236,24 @@
       "value": "切换到其他模型需要重置嵌入，这会删除所有嵌入。改用提供相同模型的其他提供商会在重启后生效。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "添加到发现"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "无法将推荐行添加到发现页面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "已将推荐行添加到发现页面。"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -60038,6 +60276,44 @@
     {
       "type": 0,
       "value": "服务器保留多少部不在媒体库中的作品用于推荐。每部作品都会在TMDB上查询并进行嵌入。嵌入通常成本很低，但数值越高，视你的嵌入提供商而定，可能花费更多或耗时更长，并占用更多存储空间。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "你的发现页面还没有显示任何推荐行。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "请先开启上方的启用推荐并重启服务器，发现推荐才能运行。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "请求目前已关闭。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "请求设置"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启，让观众可以看到发现页面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "打开发现页面"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -70202,6 +70478,26 @@
     {
       "type": 0,
       "value": "次"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "此计划来自备份设置。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "服务器 › 备份"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中更改。"
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

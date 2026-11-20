@@ -38,7 +38,7 @@ type AdminNodeCapabilities struct {
 	EnvDeclarations bool `json:"env_declarations" doc:"Nodes can declare their own configuration from their environment: env_managed on node rows names the fields a node declares, and updateAdminNode refuses a change to them with field code managed_by_environment."`
 	// DeploymentNodes needs both key issuance and the configuration store:
 	// those are the two operations that refuse a deployment-managed node.
-	DeploymentNodes bool `json:"deployment_nodes" doc:"API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed."`
+	DeploymentNodes bool `json:"deployment_nodes" doc:"API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed."`
 }
 type AdminNodeCapabilitiesOutput struct {
 	Status       int

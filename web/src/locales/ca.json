@@ -14584,6 +14584,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no es pot restaurar — l’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no es poden restaurar — l’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no es poden restaurar — l’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15274,6 +15320,52 @@
     {
       "type": 0,
       "value": "L’adreça d’un servei canvia sense les seves credencials a la còpia de seguretat, així que la restauració les esborra aquí i desactiva el servei fins que es tornin a introduir."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opció manté el valor actual perquè l’entorn d’aquest servidor la defineix, o defineix part de la seva connexió."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " d’opcions mantenen els valors actuals perquè l’entorn d’aquest servidor les defineix, o defineix part de la seva connexió."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opcions mantenen els valors actuals perquè l’entorn d’aquest servidor les defineix, o defineix part de la seva connexió."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18674,6 +18766,12 @@
       "value": "Un altre compte d’aquí inicia la sessió amb el seu nom d’usuari o correu electrònic."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "L’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió, així que aquest servidor manté els valors actuals."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19912,6 +20010,16 @@
     {
       "type": 0,
       "value": " (es manté: més estricte)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (es manté: entorn)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -56330,7 +56438,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Node definit per la configuració de desplegament del servidor. Treu-lo d’allà per eliminar-lo aquí."
+      "value": "Aquest node el defineix la configuració de desplegament del servidor. Treu-lo d’allà i reinicia els servidors d’API per poder eliminar-lo aquí."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -59089,6 +59197,130 @@
       "value": "La generació s’ha aturat. Les recomanacions desades continuen visibles a Descobreix fins que es reinicia el servidor."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "S’estan classificant els perfils ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "S’estan obtenint les llistes de TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "S’estan consultant els títols i generant-ne les incrustacions ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S’ha esborrat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " títol caducat"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S’han esborrat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de títols caducats"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S’han esborrat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " títols caducats"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59133,6 +59365,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Resol el conflicte del bloqueig d’incrustacions que hi ha a sota abans de generar les recomanacions de Descobreix."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Executa primer el treball Incrustacions perquè Silo tingui vectors de la biblioteca amb què comparar."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Connecta un proveïdor d’incrustacions a Serveis d’IA abans de generar les recomanacions de Descobreix."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Encara no hi ha cap perfil amb perfil de gustos. Executa Perfils de gustos quan algú hagi vist o valorat títols."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61367,6 +61623,32 @@
       "value": "Es mantindrà buida fins que s’activin les recomanacions de Descobreix a Administració → Recomanacions."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Les files recomanades es mantindran buides fins que s’activin les Recomanacions de Descobreix a "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administració → Recomanacions"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Desactivat a Recomanacions"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62962,6 +63244,12 @@
       "value": "Les files noves van a la part inferior de Descobreix"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Obre la configuració de Recomanacions"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62974,6 +63262,12 @@
       "value": "El feed de MDBList no inclou l’ordenació desada a la pàgina de la llista. Tria la que s’hi mostra."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "El teu perfil encara no té recomanacions de Descobreix. Executa Recomanacions de Descobreix o mira i valora uns quants títols per previsualitzar aquesta fila."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62984,6 +63278,12 @@
     {
       "type": 0,
       "value": "Tria una llista o enganxa’n l’enllaç per veure’n els títols."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Activa les Recomanacions de Descobreix a Administració → Recomanacions per previsualitzar aquesta fila."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -72965,6 +73265,24 @@
       "value": "Per canviar a un altre model cal restablir els embeddings, cosa que els elimina tots. Si un altre proveïdor serveix el mateix model, el canvi s’aplica després de reiniciar."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Afegeix a Descobreix"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut afegir les files recomanades a la pàgina Descobreix."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "S’han afegit les files recomanades a la pàgina Descobreix."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72987,6 +73305,44 @@
     {
       "type": 0,
       "value": "Quants títols que no són a la biblioteca conserva el servidor per fer recomanacions. Cadascun es consulta a TMDB i se’n genera un embedding. Generar embeddings sol ser barat, però un nombre més alt pot costar més o trigar més segons el teu proveïdor d’embeddings, i ocupa més emmagatzematge."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "La teva pàgina Descobreix encara no mostra cap fila de Recomanacions."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Activa l’opció Activa les recomanacions de més amunt i reinicia el servidor perquè les Recomanacions de Descobreix es puguin executar."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Les sol·licituds estan desactivades. Activa-les a "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Configuració de sol·licituds"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " perquè els usuaris puguin veure la pàgina Descobreix."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Obre la pàgina Descobreix"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -83443,6 +83799,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Aquesta programació prové de la configuració de les còpies de seguretat. Canvia-la a "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Servidor › Còpies de seguretat"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

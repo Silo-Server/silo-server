@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -168,5 +169,92 @@ func TestProvisionTranscodeNodesRefusesOtherRowsDB(t *testing.T) {
 	}
 	if _, err = f.repo.IssueNodeKey(ctx, f.cipher, admin.ID); !errors.Is(err, ErrNodeDeploymentManaged) {
 		t.Fatalf("issue on an adopted node: %v", err)
+	}
+}
+
+// An admin edit holding a managed row's lock when a pass starts finishes
+// first: the pass's table lock waits for it rather than both deadlocking when
+// they write the row.
+func TestProvisionWaitsForAdminRowLockDB(t *testing.T) {
+	f := newProvisionFixture(t)
+	ctx := t.Context()
+	id := f.fresh
+	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM stream_nodes WHERE id = $1`, id) })
+	declared := ProvisionedNode{ID: id, Name: "locked", URL: nodeKeyTestURL("locked"), Key: f.key(id)}
+	if _, err := f.provision(declared); err != nil {
+		t.Fatal(err)
+	}
+
+	admin, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Rollback(context.Background()) }()
+	if _, err = readConfigurationRevision(ctx, admin, id); err != nil {
+		t.Fatal(err)
+	}
+	var adminPID int
+	if err = admin.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&adminPID); err != nil {
+		t.Fatal(err)
+	}
+	rotated := declared
+	rotated.Key = f.key(id)
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.provision(rotated)
+		done <- err
+	}()
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		var blocked bool
+		if err = f.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY (pg_blocking_pids(pid)))`, adminPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the pass never waited for the admin transaction")
+		}
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_blocking_pids, an observable lock wait
+	}
+	if _, err = admin.Exec(ctx, `UPDATE stream_nodes SET name = name WHERE id = $1`, id); err != nil {
+		t.Fatalf("admin write: %v", err)
+	}
+	if err = admin.Commit(ctx); err != nil {
+		t.Fatalf("admin commit: %v", err)
+	}
+	if err = <-done; err != nil {
+		t.Fatalf("pass: %v", err)
+	}
+	if _, key := f.storedKey(id); key != rotated.Key {
+		t.Fatal("the pass did not rotate the key")
+	}
+}
+
+// A pass that fails after moving the identity sequence leaves its ids
+// unused: the next start creates them.
+func TestProvisionRetriesAFailedPassDB(t *testing.T) {
+	f := newProvisionFixture(t)
+	ctx := t.Context()
+	id := f.fresh
+	dropTrigger := func() {
+		_, _ = f.pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS provision_test_fail ON stream_nodes;
+			DROP FUNCTION IF EXISTS provision_test_fail()`)
+	}
+	t.Cleanup(func() {
+		dropTrigger()
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM stream_nodes WHERE id = $1`, id)
+	})
+	if _, err := f.pool.Exec(ctx, `CREATE FUNCTION provision_test_fail() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'injected'; END$$;
+		CREATE TRIGGER provision_test_fail BEFORE INSERT ON stream_nodes FOR EACH ROW EXECUTE FUNCTION provision_test_fail()`); err != nil {
+		t.Fatal(err)
+	}
+	declared := ProvisionedNode{ID: id, Name: "retried", URL: nodeKeyTestURL("retried"), Key: f.key(id)}
+	if _, err := f.provision(declared); err == nil {
+		t.Fatal("the injected insert failure did not fail the pass")
+	}
+	dropTrigger()
+	if result, err := f.provision(declared); err != nil || len(result.Created) != 1 {
+		t.Fatalf("retry: %+v, %v", result, err)
 	}
 }

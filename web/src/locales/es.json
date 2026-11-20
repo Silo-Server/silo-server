@@ -14576,6 +14576,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no se puede restaurar — el entorno de este servidor define los ajustes que difieren, o parte de su conexión"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no se pueden restaurar — el entorno de este servidor define los ajustes que difieren, o parte de su conexión"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no se pueden restaurar — el entorno de este servidor define los ajustes que difieren, o parte de su conexión"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15266,6 +15312,52 @@
     {
       "type": 0,
       "value": "La dirección de un servicio cambia sin sus credenciales en la copia de seguridad, así que al restaurar se borran aquí y el servicio se desactiva hasta que se vuelvan a introducir."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ajuste mantiene su valor actual porque lo define el entorno de este servidor, o parte de su conexión."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de ajustes mantienen sus valores actuales porque los define el entorno de este servidor, o parte de su conexión."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ajustes mantienen sus valores actuales porque los define el entorno de este servidor, o parte de su conexión."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18678,6 +18770,12 @@
       "value": "Otra cuenta de aquí inicia sesión con su nombre de usuario o correo electrónico."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "El entorno de este servidor define los ajustes que difieren, o parte de su conexión, así que este servidor mantiene sus valores actuales."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19912,6 +20010,16 @@
     {
       "type": 0,
       "value": " (se mantiene: más estricto)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (se mantiene: entorno)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -56290,7 +56398,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Lo define la configuración de implementación del servidor. Quítalo de allí para eliminarlo aquí."
+      "value": "Lo define la configuración de implementación del servidor. Quítalo de allí y reinicia los servidores API para eliminarlo aquí."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -59049,6 +59157,130 @@
       "value": "La generación se detuvo. Las recomendaciones almacenadas siguen visibles en Descubrir hasta que se reinicie el servidor."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Clasificando perfiles ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Descargando listas de TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Consultando títulos y generando embeddings ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Se borró "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " título caducado"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Se borraron "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de títulos caducados"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Se borraron "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " títulos caducados"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59093,6 +59325,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Resuelve el conflicto del bloqueo de embeddings que aparece abajo antes de generar las recomendaciones de Descubrir."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Ejecuta primero el trabajo de Embeddings para que Silo tenga vectores de la biblioteca con los que comparar."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Conecta un proveedor de embeddings en Servicios de IA antes de generar las recomendaciones de Descubrir."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ningún perfil tiene todavía un perfil de gustos. Ejecuta Perfiles de gustos cuando alguien haya visto o calificado títulos."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61303,6 +61559,32 @@
       "value": "Seguirá vacía hasta que se activen las recomendaciones de Descubrir en Administración → Recomendaciones."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Las filas de recomendaciones seguirán vacías hasta que se activen las Recomendaciones de Descubrir en "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administración → Recomendaciones"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Desactivado en Recomendaciones"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62898,6 +63180,12 @@
       "value": "Las filas nuevas se añaden al final de Descubrir"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Abrir la configuración de Recomendaciones"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62910,6 +63198,12 @@
       "value": "El feed de MDBList no incluye el orden guardado en la página de la lista. Elige el que muestra."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Tu perfil aún no tiene recomendaciones de Descubrir. Ejecuta Recomendaciones de Descubrir o mira y califica algunos títulos para ver la vista previa de esta fila."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62920,6 +63214,12 @@
     {
       "type": 0,
       "value": "Elige una lista o pega su enlace para ver sus títulos."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Activa las Recomendaciones de Descubrir en Administración → Recomendaciones para ver la vista previa de esta fila."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -72861,6 +73161,24 @@
       "value": "Cambiar a otro modelo requiere restablecer los embeddings, lo que los elimina todos. Otro proveedor que ofrezca el mismo modelo se aplica tras un reinicio."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Añadir a Descubrir"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "No se pudieron añadir las filas de recomendaciones a la página Descubrir."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Se añadieron las filas de recomendaciones a la página Descubrir."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72883,6 +73201,44 @@
     {
       "type": 0,
       "value": "Cuántos títulos que no están en la biblioteca guarda el servidor para recomendar. Cada uno se consulta en TMDB y se procesa con embeddings. Generar embeddings suele ser barato, pero un número mayor puede costar más o tardar más según tu proveedor de embeddings, y ocupa más almacenamiento."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Tu página Descubrir aún no muestra ninguna fila de Recomendaciones."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Activa Activar recomendaciones más arriba y reinicia el servidor para que las Recomendaciones de Descubrir puedan ejecutarse."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Las solicitudes están desactivadas. Actívalas en "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Configuración de solicitudes"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " para que los espectadores puedan ver la página Descubrir."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Abrir la página Descubrir"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -83335,6 +83691,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Esta programación proviene de la configuración de copias de seguridad. Cámbiala en "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Servidor › Copias de seguridad"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

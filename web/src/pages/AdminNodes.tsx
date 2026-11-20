@@ -734,27 +734,30 @@ function NodeUnit({
           >
             <Pencil className="h-3 w-3" aria-hidden="true" />
           </Button>
-          {/* A disabled button takes no pointer events, so the span carries the reason. */}
-          <span
-            className="inline-flex"
+          {/* A node the deployment configuration owns cannot be deleted here.
+              The button stays focusable (aria-disabled, not disabled) so
+              keyboard and touch users can reach the reason, which a press
+              shows. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-7 w-7", node.deployment_managed && "cursor-not-allowed opacity-50")}
+            aria-label={t("web.admin.nodes.unit.delete", { name: node.name })}
+            aria-disabled={node.deployment_managed || undefined}
+            aria-describedby={node.deployment_managed ? `node-${node.id}-deployment` : undefined}
             title={
               node.deployment_managed
                 ? t("web.admin.nodes.unit.deleteDeploymentManaged")
                 : undefined
             }
+            onClick={() => {
+              if (node.deployment_managed)
+                toast.info(t("web.admin.nodes.unit.deleteDeploymentManaged"));
+              else onDelete(node);
+            }}
           >
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              aria-label={t("web.admin.nodes.unit.delete", { name: node.name })}
-              aria-describedby={node.deployment_managed ? `node-${node.id}-deployment` : undefined}
-              disabled={node.deployment_managed}
-              onClick={() => onDelete(node)}
-            >
-              <Trash2 className="h-3 w-3" aria-hidden="true" />
-            </Button>
-          </span>
+            <Trash2 className="h-3 w-3" aria-hidden="true" />
+          </Button>
           {node.deployment_managed && (
             <span id={`node-${node.id}-deployment`} className="sr-only">
               {t("web.admin.nodes.unit.deleteDeploymentManaged")}
