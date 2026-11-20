@@ -223,7 +223,7 @@ func (p *platformArchives) recentFailure(key platformBuildKey) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	failure, ok := p.failed[key]
-	if !ok || time.Now().Sub(failure.at) >= platformFetchRetryAfter {
+	if !ok || time.Since(failure.at) >= platformFetchRetryAfter {
 		return nil
 	}
 	return failure.err

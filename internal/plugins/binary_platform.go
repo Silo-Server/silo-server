@@ -20,7 +20,7 @@ const (
 // from its executable header. ok is false for formats this host does not
 // recognize; callers treat that as "unknown" rather than as a mismatch.
 func binaryPlatform(path string) (goos, goarch string, ok bool) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // the plugin cache's own binary path, which the caller derived.
 	if err != nil {
 		return "", "", false
 	}

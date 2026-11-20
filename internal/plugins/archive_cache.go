@@ -301,7 +301,7 @@ func (c *ArchiveCache) rehydratedMeanwhile(installation *Installation, trustVeri
 	}
 	if c.checksPlatform(trustVerified) && checkBinaryPlatform(binaryPath) != nil {
 		// A manifest read verified another platform's build: rehydrate.
-		return nil, nil
+		return nil, nil //nolint:nilerr // another platform's build: rehydrate
 	}
 	c.markVerified(installation.ID, binaryPath, manifest, info)
 	return manifest, nil
