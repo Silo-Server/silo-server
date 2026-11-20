@@ -72,15 +72,26 @@ export function resolveLeafPrimaryAction(
 }
 
 export function getSeasonDisplayTitle(season: Season): string {
-  if (season.is_specials || season.season_number === 0) {
+  if (season.is_specials) {
+    return t("web.detail.seasons.specials");
+  }
+  return seasonDisplayName(season.season_number, season.title);
+}
+
+/**
+ * A season's name in the interface language: its own title, or the translated
+ * default when it has none or only the default English name the server stores.
+ */
+export function seasonDisplayName(seasonNumber: number, title?: string): string {
+  if (seasonNumber === 0) {
     return t("web.detail.seasons.specials");
   }
 
-  if (season.title && season.title !== `Season ${season.season_number}`) {
-    return season.title;
+  if (title && title !== `Season ${seasonNumber}`) {
+    return title;
   }
 
-  return t("web.detail.seasons.numbered", { season: season.season_number });
+  return t("web.detail.seasons.numbered", { season: seasonNumber });
 }
 
 export function formatEpisodeCount(count: number): string {

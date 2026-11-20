@@ -30,6 +30,8 @@ import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
 import { TASK_CATEGORY_LABELS, taskText } from "@/lib/taskText";
 import { TriggerFormRow } from "./AdminTaskTriggerForm";
+import { seasonDisplayName } from "./ItemDetail/itemDetailLayout";
+import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 
 const EM_DASH = "—";
 
@@ -72,6 +74,31 @@ function formatDateTime(dateStr: string): string {
 
 function formatOptionalDateTime(dateStr?: string | null): string {
   return dateStr ? formatDateTime(dateStr) : EM_DASH;
+}
+
+type RefreshDebtSample = MetadataRefreshMetrics["due_samples"][number];
+
+/**
+ * A due or failed target's title in the interface language. Seasons and
+ * episodes are named from their parts, as the item pages name them; a target
+ * that no longer exists shows its content ID.
+ */
+function refreshSampleTitle(t: Translate, entry: RefreshDebtSample): string {
+  const season = entry.season_number;
+  if (season == null) return entry.title || entry.content_id;
+  const episode = entry.episode_number;
+  let name: string;
+  if (episode == null) {
+    name = seasonDisplayName(season, entry.title);
+  } else {
+    const code = formatEpisodeCode(season, episode);
+    name = entry.title
+      ? t("web.admin.tasks.detail.sampleEpisode", { code, title: entry.title })
+      : code;
+  }
+  return entry.series_title
+    ? t("web.admin.tasks.detail.sampleTitle", { series: entry.series_title, name })
+    : name;
 }
 
 function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
@@ -163,7 +190,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium">
-                      {entry.title || entry.content_id}
+                      {refreshSampleTitle(t, entry)}
                     </div>
                     <div className="text-muted-foreground text-xs">
                       {t("web.admin.tasks.detail.recentErrorAttempts", {
@@ -178,7 +205,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                   </div>
                 </div>
                 <div className="text-muted-foreground mt-2 line-clamp-2 text-xs">
-                  {entry.last_error}
+                  {t("web.admin.tasks.detail.refreshFailed")}
                 </div>
               </div>
             ))}
@@ -218,7 +245,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
             {metrics.due_samples.map((entry) => (
               <tr key={entry.content_id} className="border-border border-b last:border-b-0">
                 <td className="px-4 py-2">
-                  <div className="font-medium">{entry.title || entry.content_id}</div>
+                  <div className="font-medium">{refreshSampleTitle(t, entry)}</div>
                   <div className="text-muted-foreground text-xs">
                     {refreshItemTypeLabel(t, entry.type)}
                   </div>
@@ -435,7 +462,9 @@ function HistoryRow({
   const errorText =
     failedSteps.length > 0
       ? t("web.admin.tasks.detail.history.failedSteps", { steps: joinList(failedSteps) })
-      : result.error_message || EM_DASH;
+      : result.status === "failed"
+        ? t("web.admin.common.taskStatus.failedDetails")
+        : result.error_message || EM_DASH;
 
   return (
     <>

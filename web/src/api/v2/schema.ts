@@ -22481,6 +22481,11 @@ export interface components {
        */
       content_id: string;
       /**
+       * Format: int64
+       * @description Episode number for an episode; absent otherwise
+       */
+      episode_number?: number;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
@@ -22493,7 +22498,15 @@ export interface components {
       next_refresh_at: string;
       /** Format: int64 */
       reason_mask: number;
+      /**
+       * Format: int64
+       * @description Season number for a season or episode; absent otherwise
+       */
+      season_number?: number;
+      /** @description Series title for a season or episode; absent otherwise */
+      series_title?: string;
       target_type: string;
+      /** @description The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target no longer exists */
       title: string;
       type: string;
     };
