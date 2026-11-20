@@ -229,9 +229,13 @@ func (s *Server) handleGrantTranscodeSegment(w http.ResponseWriter, r *http.Requ
 // refuseSupersededGrantTransport answers a request from a playlist whose
 // transport a replan has replaced. The grant names the current transport; the
 // request must not be relayed to it, where an old segment number would
-// seek-restart the stream the client is switching to.
+// seek-restart the stream the client is switching to. A grant that names no
+// transport (a replan away from HLS) supersedes every marked HLS URL.
 func refuseSupersededGrantTransport(w http.ResponseWriter, r *http.Request, card *playback.RecipeCard) bool {
-	if !playback.TransportSuperseded(card.SessionID, card.TranscodeTransportID, r.URL.Query()) {
+	query := r.URL.Query()
+	superseded := playback.TransportSuperseded(card.SessionID, card.TranscodeTransportID, query) ||
+		(card.TranscodeTransportID == "" && query.Get(playback.TransportQueryParam) != "")
+	if !superseded {
 		return false
 	}
 	w.Header().Set(playback.ErrorHeader, playback.TransportSupersededCode)

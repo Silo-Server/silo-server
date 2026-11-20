@@ -5353,3 +5353,22 @@ func TestReplanPlaybackV2SupersedesThePreviousTransportsURLs(t *testing.T) {
 		t.Fatal("a superseded HLS request revived a transcode after the move to direct play")
 	}
 }
+
+// A replan that reuses the running HLS transport republishes the URL the
+// current player holds. When the session lost its recorded generation (a
+// session rebuilt after an API restart), the reused transport must still name
+// that URL's transport, or the server would refuse the player it just kept.
+func TestReusedHLSTransportKeepsTheMarkerOfTheURLItRepublishes(t *testing.T) {
+	const sessionID = "6f8a2c1e-0b3d-4e5f-9a7b-1c2d3e4f5a6b"
+	streamURL := "/api/v2/playback/transcode/" + sessionID + "/master.m3u8?" + playback.TransportQueryParam + "=planaaaaaaaa-cccc1111"
+	for _, recorded := range []string{"", sessionID + "-planaaaaaaaa-cccc1111"} {
+		transport := reusedHLSTransportV3(&playback.Session{ID: sessionID, TransportGeneration: recorded}, streamURL)
+		parsed, err := url.Parse(transport.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if transport.generation == "" || playback.TransportSuperseded(sessionID, transport.generation, parsed.Query()) {
+			t.Fatalf("recorded generation %q: reused transport generation %q does not match the URL it republishes", recorded, transport.generation)
+		}
+	}
+}

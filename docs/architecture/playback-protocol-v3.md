@@ -1350,15 +1350,22 @@ URL to its transport:
 - A media request whose `silo_transport` names any other transport than the
   session's current one answers `404` with the code
   `playback_transport_superseded` (on `/api/v2`, the problem type of that
-  name), before it can wait for, restart, relay to or reconstruct a transport.
-  The API origin and the proxy's `/stream/v3/{session_id}` family enforce it;
-  a token route (`/stream/transcode/{token}/...`) is already bound to its
+  name; outside `/api/v2` the response also carries `X-Silo-Playback-Error`
+  with the code), before it can wait for, restart, relay to or reconstruct a
+  transport. The API origin and the proxy's `/stream/v3/{session_id}` family
+  enforce it. A proxy can only do so while it holds the session's grant: after
+  a replan moves egress to another origin, the old proxy answers the stale
+  request as it answers any grant it no longer holds, and still relays nothing.
+  A token route (`/stream/transcode/{token}/...`) is already bound to its
   transport by the token. The answer is terminal for that URL, not for the
   session: the client stops the superseded player and plays the current plan.
   It must not treat the code as `playback_session_ended`.
 - A request without the marker (a URL issued before this rule) and a session
   without a recorded transport keep the old behavior: the request is served
-  by, and can restart, the session's current transport.
+  by, and can restart, the session's current transport. A session rebuilt
+  after an API restart has no recorded transport until its next replan; a
+  replan that reuses the running transport takes it from the URL it
+  republishes.
 
 ### 6.1 `plan_invalidated_v1` — the server withdraws a plan
 

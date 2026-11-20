@@ -92,6 +92,11 @@ func TestPlaybackDeliveryProblemTypes(t *testing.T) {
 			if w.Code != test.wantStatus || !strings.Contains(w.Body.String(), `"`+test.want.URI()+`"`) {
 				t.Fatalf("status %d = %d %s, want %d %s", test.status, w.Code, w.Body.String(), test.wantStatus, test.want.ID)
 			}
+			// The problem type carries the code on v2; the v1 side channel
+			// is not part of the v2 contract.
+			if got := w.Header().Get(playback.ErrorHeader); got != "" {
+				t.Fatalf("%s = %q on a v2 problem", playback.ErrorHeader, got)
+			}
 		})
 	}
 }

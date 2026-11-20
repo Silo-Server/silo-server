@@ -6865,6 +6865,12 @@ func reusedHLSTransportV3(session *playback.Session, streamURL string) preparedT
 		transport.nodeURL = session.TranscodeNodeURL
 		transport.transportID = session.TranscodeTransportID
 		transport.generation = session.TransportGeneration
+		if transport.generation == "" {
+			// The URL is republished unchanged, so its marker names the
+			// running transport; recording any other generation would
+			// refuse the player this replan keeps.
+			transport.generation = playback.TransportGenerationFromURL(session.ID, streamURL)
+		}
 		transport.hwAccel = session.TranscodeHWAccel
 		transport.toneMapMode = session.ToneMapMode
 	}

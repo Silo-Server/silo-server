@@ -33,6 +33,21 @@ func TransportMarker(sessionID, generation string) string {
 	return strings.TrimPrefix(generation, sessionID+"-")
 }
 
+// TransportGenerationFromURL recovers the transport generation an HLS stream
+// URL names, for a session that lost its recorded one (a session rebuilt after
+// an API restart). Empty when the URL carries no marker.
+func TransportGenerationFromURL(sessionID, rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	marker := parsed.Query().Get(TransportQueryParam)
+	if marker == "" {
+		return ""
+	}
+	return sessionID + "-" + marker
+}
+
 // TransportSuperseded reports whether a media request names a transport other
 // than generation, the one the session's current plan published. A request
 // without the marker, or a session without a recorded generation, is never

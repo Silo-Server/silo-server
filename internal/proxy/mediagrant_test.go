@@ -320,6 +320,16 @@ func TestProxyGrantTranscodeRefusesASupersededTransport(t *testing.T) {
 	if current.Code != http.StatusOK || !relayed {
 		t.Fatalf("current transport: status = %d, relayed = %v, body = %s", current.Code, relayed, current.Body.String())
 	}
+
+	// A replan away from HLS replaces the grant with one that names no
+	// transport; the last HLS playlist's requests are superseded all the same.
+	direct := newGrantProxyServer(t, map[string]playback.RecipeCard{
+		"session-hls": {SessionID: "session-hls", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: "/media/movie.mkv"},
+	})
+	rr := grantRequest(t, direct, http.MethodGet, "/stream/v3/session-hls/segment/seg_00072.m4s?"+playback.TransportQueryParam+"=plan-b", grantAccessToken(t, 7, "login-1"))
+	if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), "playback_transport_superseded") {
+		t.Fatalf("after a move to direct play: status = %d, body = %s, want 404 playback_transport_superseded", rr.Code, rr.Body.String())
+	}
 }
 
 // A transcode session has no progressive body to serve, and answering one from

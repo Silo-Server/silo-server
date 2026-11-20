@@ -143,6 +143,9 @@ func registerPlaybackDelivery(reg *Registry) {
 		if route.protocol == playbackMediaBytesProtocol {
 			params = append(params, &huma.Param{Name: playback.RemuxRangeQueryParam, In: playbackParamQuery, Description: "Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{playback.RemuxRangeRefuse}}})
 		}
+		if route.protocol == "hls" {
+			params = append(params, &huma.Param{Name: playback.TransportQueryParam, In: playbackParamQuery, Description: "Opaque transport generation the plan's HLS URL carries and the playlist echoes into its URIs; clients must not compose, strip or move it. A request naming a transport a replan replaced answers 404 playback_transport_superseded. Absent, the request is served by the session's current transport.", Schema: &huma.Schema{Type: huma.TypeString}})
+		}
 		if route.id == playbackSegmentOperation {
 			params = append(params, &huma.Param{Name: playbackSegmentName, In: playbackParamPath, Required: true, Description: "Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document. sub_<track>_NNNNN.vtt names a segment of the on-demand rendition of container track <track> (hls_subtitle_renditions_all_v1), read from the source when it is requested.", Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}})
 		}
@@ -260,9 +263,17 @@ type playbackDeliveryWriter struct {
 
 func (w *playbackDeliveryWriter) transport() *streamResponseWriter {
 	if w.inner == nil {
-		w.inner = &streamResponseWriter{ResponseWriter: w.ResponseWriter, request: w.request, problemType: func(status int) ProblemType { return playbackDeliveryProblemType(status, w.Header()) }, redactHeaders: []string{playbackContentLength, playbackContentEncoding, directDisposition, jobLocationHeader, etagField, playbackLastModified}}
+		w.inner = &streamResponseWriter{ResponseWriter: w.ResponseWriter, request: w.request, problemType: w.problemType, redactHeaders: []string{playbackContentLength, playbackContentEncoding, directDisposition, jobLocationHeader, etagField, playbackLastModified}}
 	}
 	return w.inner
+}
+
+// problemType maps a pre-body failure and drops playback.ErrorHeader: on v2 the
+// problem type carries that code, and the header is not part of the contract.
+func (w *playbackDeliveryWriter) problemType(status int) ProblemType {
+	kind := playbackDeliveryProblemType(status, w.Header())
+	w.Header().Del(playback.ErrorHeader)
+	return kind
 }
 
 // playbackDeliveryProblemType maps a pre-body failure status of a v1 media
