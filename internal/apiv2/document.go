@@ -767,6 +767,7 @@ func registerAll(reg *Registry) {
 	registerPolicyCapability(reg)
 	registerArtwork(reg)
 	registerItemPosters(reg)
+	registerAdminRequestPoster(reg)
 	registerBranding(reg)
 	registerAdminInviteCodes(reg)
 	registerInvitations(reg)

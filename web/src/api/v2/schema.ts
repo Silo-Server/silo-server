@@ -4904,6 +4904,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/requests/{id}/poster": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a media request's poster through the server, from the path admin request reads return in poster_url. */
+    get: operations["getAdminRequestPoster"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/requests/{id}/retry": {
     parameters: {
       query?: never;
@@ -21240,6 +21257,8 @@ export interface components {
       /** @description Whether an mdblist Discover row takes list.order. Send it only when true */
       discover_list_order: boolean;
       guarded_configuration: boolean;
+      /** @description Whether admin request reads return poster_url, a path on this server that serves the request's TMDB poster (getAdminRequestPoster) */
+      request_posters: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /** @description Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing */
@@ -29993,6 +30012,12 @@ export interface components {
       overview?: string;
       /** @description TMDB image path */
       poster_path?: string;
+      /**
+       * Format: uri-reference
+       * @description Admin request reads only (listAdminRequests and the admin request actions): the poster as a root-relative path on this server, getAdminRequestPoster, which serves the TMDB poster through the server. Fetch it with the credentials that read the row. It does not expire. Absent when the request has no TMDB poster, and on a server that cannot fetch posters (the admin request capabilities then report request_posters false)
+       * @example /api/v2/admin/requests/1834729/poster
+       */
+      poster_url?: string;
       /** @example tmdb */
       provider: string;
       /**
@@ -82873,6 +82898,97 @@ export interface operations {
         };
       };
       /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminRequestPoster: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The request */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Poster bytes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/*": string;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description No such request, the request has no TMDB poster, or TMDB refused or failed */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Poster fetches are busy or not configured; retry after Retry-After */
       503: {
         headers: {
           [name: string]: unknown;
