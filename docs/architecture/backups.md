@@ -620,7 +620,11 @@ lock still held through `Up`, when:
 - `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true` is set. It applies to the process it
   is set on; remove it after that start. A value that is not a boolean does
   not skip;
-- `backup.enabled` is `false`;
+- `backup.enabled` is `false`, or `SILO_BACKUP_ENABLED=false` is set, which
+  wins over the stored value here as it will once startup stores it (an API
+  server and `--migrate-only` both read it; the other `SILO_BACKUP_*`
+  variables wait for startup, so a lower `SILO_BACKUP_KEEP` rotates nothing
+  away before the migrations succeed);
 - the user store is SQLite (backups refuse there, and the upgrade that imports
   it must not be blocked; the warning tells the admin to back up the database
   and the SQLite file themselves);

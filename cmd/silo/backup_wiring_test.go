@@ -268,13 +268,15 @@ func (s storedBackupSettings) Get(_ context.Context, key string) (string, error)
 // A SILO_BACKUP_* variable set in the deploy that also upgrades applies to the
 // backup taken before the migrations, which runs before startup stores it.
 func TestEnvBackupSettingsOverlayStored(t *testing.T) {
-	values := map[string]string{"SILO_BACKUP_ENABLED": "false", "SILO_SMTP_HOST": "smtp.example.com"}
+	values := map[string]string{"SILO_BACKUP_ENABLED": "false", "SILO_BACKUP_KEEP": "1"}
 	env, err := config.ReadEnvSettings(func(name string) string { return values[name] })
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := withEnvBackupSettings(storedBackupSettings{"backup.enabled": "true", "backup.keep": "9", "email.smtp_host": "stored"}, env)
-	for key, want := range map[string]string{"backup.enabled": "false", "backup.keep": "9", "email.smtp_host": "stored"} {
+	// Only SILO_BACKUP_ENABLED applies before startup stores the rest: a
+	// lower keep must not rotate copies away before the migrations succeed.
+	settings := withEnvBackupSettings(storedBackupSettings{"backup.enabled": "true", "backup.keep": "9"}, env)
+	for key, want := range map[string]string{"backup.enabled": "false", "backup.keep": "9"} {
 		if got, _ := settings.Get(t.Context(), key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}

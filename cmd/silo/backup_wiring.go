@@ -95,33 +95,30 @@ func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher 
 	}
 }
 
-// envBackupSettings lays the backup settings the environment sets
-// (SILO_BACKUP_*) over the stored ones. The backup before migrations runs
-// before startup stores the environment's values, so without it a variable
-// set in the same deploy, such as SILO_BACKUP_ENABLED=false, would not apply
-// to that backup. A --migrate-only run reads no environment settings, as no
-// maintenance command does, so it backs up by the stored ones.
-type envBackupSettings struct {
+// envBackupEnabled lays SILO_BACKUP_ENABLED over the stored backup.enabled
+// for the backup before migrations, which runs before startup stores the
+// environment's values. Without it, SILO_BACKUP_ENABLED=false set in the same
+// deploy as an upgrade would not skip that backup, nor =true take one. The
+// other SILO_BACKUP_* values wait for startup to store them: that backup holds
+// only the database at no scheduled time, and its rotation keeps by the
+// stored count, so a lower SILO_BACKUP_KEEP removes nothing before the
+// migrations succeed.
+type envBackupEnabled struct {
 	backup.SettingsReader
-	values map[string]string
+	value string
 }
 
 func withEnvBackupSettings(stored backup.SettingsReader, env config.EnvSettings) backup.SettingsReader {
-	values := map[string]string{}
-	for key, value := range env.Values(config.EnvScopeStored) {
-		if strings.HasPrefix(key, "backup.") {
-			values[key] = value
-		}
-	}
-	if len(values) == 0 {
+	value, ok := env.Values(config.EnvScopeStored)[config.BackupEnabledSettingKey]
+	if !ok {
 		return stored
 	}
-	return envBackupSettings{SettingsReader: stored, values: values}
+	return envBackupEnabled{SettingsReader: stored, value: value}
 }
 
-func (s envBackupSettings) Get(ctx context.Context, key string) (string, error) {
-	if value, ok := s.values[key]; ok {
-		return value, nil
+func (s envBackupEnabled) Get(ctx context.Context, key string) (string, error) {
+	if key == config.BackupEnabledSettingKey {
+		return s.value, nil
 	}
 	return s.SettingsReader.Get(ctx, key)
 }

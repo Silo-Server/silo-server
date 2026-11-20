@@ -976,9 +976,17 @@ func main() {
 	// server's, back up the database when migrations are pending, then
 	// migrate (database.MigrateAtStartup, docs/architecture/backups.md).
 	migrationWait := database.MigrationWait()
+	// A migration job reads the environment's settings only for that backup
+	// (SILO_BACKUP_ENABLED), so a bad value elsewhere doesn't stop it.
+	backupEnv := envSettings
+	if *migrateOnly {
+		if backupEnv, err = config.ReadEnvSettings(os.Getenv); err != nil {
+			slog.Warn("the backup before migrations uses the stored settings, not the environment's", "error", err)
+		}
+	}
 	startupMigrations := database.StartupOptions{
 		Wait:          migrationWait,
-		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait, envSettings),
+		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait, backupEnv),
 	}
 
 	if *migrateOnly {

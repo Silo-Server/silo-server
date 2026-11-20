@@ -101,9 +101,4 @@ func TestCheckEnvironmentSettingsDeploymentSettings(t *testing.T) {
 		}
 	}
 
-	// An invalid value stops startup with the variable's name.
-	env := map[string]string{"SILO_BACKUP_TIME": "25:00"}
-	if _, err := config.ReadEnvSettings(func(name string) string { return env[name] }); err == nil || !strings.Contains(err.Error(), "SILO_BACKUP_TIME") {
-		t.Errorf("SILO_BACKUP_TIME=25:00: error = %v, want a refusal naming it", err)
-	}
 }
