@@ -280,9 +280,9 @@ export default function MediaCarousel({
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
         <div className="flex min-w-0 items-center gap-2">
           {titleHref ? (
-            <Link to={titleHref} className="group/title hover:text-primary transition-colors">
-              {/* The heading sets its own color, so without "View" an underline
-                  is the only hover cue. */}
+            <Link to={titleHref} className="group/title">
+              {/* The heading and "View" set their own colors, so without "View"
+                  an underline is the only hover cue. */}
               <h2
                 className={
                   hasExploreAll
