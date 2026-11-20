@@ -167,6 +167,49 @@ it("saves the other edits after a refusal shows an edited key is set by the envi
   expect(result.current.dirtyCount).toBe(0);
 });
 
+it("keeps the environment list when its refresh after a refused save fails", async () => {
+  let statusReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT")
+        return response(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+            title: "Validation failed",
+            status: 422,
+            detail: "artwork.local_path must be an absolute path",
+          },
+          422,
+        );
+      if (url.endsWith("/sensitive-status")) {
+        statusReads += 1;
+        return statusReads === 1
+          ? response({ configured: [], managed_by_env: [], managed_by_env_vars: {} })
+          : response({ title: "Bad gateway", status: 502 }, 502);
+      }
+      return response({ "artwork.local_path": "/srv/artwork" });
+    }),
+  );
+  const { client, wrapper } = fixture();
+  const { result } = renderHook(() => useSettingsForm({ keys: ["artwork.local_path"] }), {
+    wrapper,
+  });
+  await waitFor(() => expect(result.current.sensitiveStatusReady).toBe(true));
+  act(() => result.current.setValue("artwork.local_path", "relative/path"));
+
+  await act(async () => {
+    await expect(result.current.save()).rejects.toThrow();
+  });
+  await waitFor(() => expect(statusReads).toBeGreaterThanOrEqual(2));
+  await waitFor(() => expect(client.isFetching()).toBe(0));
+
+  // The Storage page trades its editor for a reload notice when the list
+  // errors, which would strand this draft.
+  expect(result.current.sensitiveStatusError).toBe(false);
+  expect(result.current.dirtyKeys).toEqual(["artwork.local_path"]);
+});
+
 it("rejects a decoded completion after the acting profile changes", async () => {
   let release: ((value: unknown) => void) | undefined;
   const decoded = new Promise((resolve) => {
