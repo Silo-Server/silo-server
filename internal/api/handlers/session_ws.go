@@ -109,6 +109,11 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		}
 		h.forgetRealtimeCommand(result.CommandID)
 		if result.Status != playback.RealtimeResultStatusCompleted {
+			if record.Name == playback.CommandStop {
+				// The player refused the administrator's stop and plays on,
+				// so a stop it makes later is its own again.
+				h.markAdminStop(sessionID, result.CommandID, false)
+			}
 			// A rejected plan_invalidated leaves the client running a route the
 			// server has withdrawn, and the tracker's deadline was already
 			// canceled by the result. Fall back to the same session stop an

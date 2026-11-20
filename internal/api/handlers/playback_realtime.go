@@ -230,7 +230,7 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
 			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
 	}
-	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
+	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID, receipt.AdminStopRequested), notify: notify}
 }
 
 // finalizeRealtimeStop runs stop finalization for the one queued realtime
@@ -320,6 +320,42 @@ func (c *CopySafetyPlaybackControl) StopSession(ctx context.Context, sessionID s
 		return playback.ErrSessionNotFound
 	}
 	return c.playback.stopPlaybackSessionByID(ctx, sessionID, "")
+}
+
+// adminStopMarker records an administrator's stop while the player carries
+// it out. The player confirms over its control socket and may send its own
+// HTTP stop as it leaves; that stop can win the attempt before the server
+// stops it under the administrator's stop id. The stop that wins copies the
+// mark into its receipt, so either end records the administrator's
+// (endReasonForStop). Neither write counts as progress.
+type adminStopMarker interface {
+	// MarkAdminStop records that commandID was sent to the player.
+	MarkAdminStop(ctx context.Context, sessionID, commandID string) error
+	// ClearAdminStop withdraws commandID's mark, and no later command's.
+	ClearAdminStop(ctx context.Context, sessionID, commandID string) error
+}
+
+// markAdminStop sets the attempt's administrator stop mark for commandID, or
+// clears it when requested is false and commandID still holds it. The write
+// is bounded like the other store calls on the command and socket paths; a
+// failure only leaves the player's own stop recorded as its own, as before
+// the mark existed.
+func (h *PlaybackHandler) markAdminStop(sessionID, commandID string, requested bool) {
+	marker, ok := h.PlanStoreV3.(adminStopMarker)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), realtimeReceiptReadBudget)
+	defer cancel()
+	var err error
+	if requested {
+		err = marker.MarkAdminStop(ctx, sessionID, commandID)
+	} else {
+		err = marker.ClearAdminStop(ctx, sessionID, commandID)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "failed to record an administrator's pending stop", "session", sessionID, "playback_session_id", sessionID, "command", commandID, "requested", requested, "error", err)
+	}
 }
 
 func (h *PlaybackHandler) rememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {

@@ -1850,7 +1850,8 @@ delivered on the transport the attempt ended on, with the live rows' values: `di
 `remux` (copied into a new container) or `transcode`. These describe the play, so the
 first finalization that knows one records it and later ones never change it, even one
 that did not get further. `end_reason` is why the attempt ended: `stopped` (the viewer's
-client stopped it), `terminated` (an administrator stopped or terminated it), `expired`
+client stopped it), `terminated` (an administrator stopped or terminated it, including a
+stop the player carried out whose own stop reached the server first), `expired`
 (the liveness reaper ended it after the client went quiet), `aborted` (the server
 abandoned it) or `replaced` (a Jellyfin client switched play method, and the play
 continues under a new session with its own row). Every end records a row, including a

@@ -600,7 +600,7 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 			}
 		}
 	}
-	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID))
+	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID, receipt.AdminStopRequested))
 	receipt.Finalized = true
 	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
 		slog.WarnContext(ctx, "failed to record playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
@@ -854,8 +854,10 @@ func adminStopID(sessionID string) string {
 
 // endReasonForStop is the end reason a winning stop id records: the
 // server-minted ids name who ended the attempt, and any other id is the
-// client's own stop.
-func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
+// client's own stop. A client stop that won while an administrator's stop
+// was pending (adminStopRequested, from the stop receipt) is the player
+// carrying that stop out, so it records the administrator's end.
+func endReasonForStop(sessionID, stopID string, adminStopRequested bool) PlaybackEndReason {
 	switch stopID {
 	case adminStopID(sessionID):
 		return PlaybackEndTerminated
@@ -863,9 +865,11 @@ func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
 		return PlaybackEndExpired
 	case abortStopID(sessionID):
 		return PlaybackEndAborted
-	default:
-		return PlaybackEndStopped
 	}
+	if adminStopRequested {
+		return PlaybackEndTerminated
+	}
+	return PlaybackEndStopped
 }
 
 // serverStopID reports whether stopID is one the server mints for an end it
