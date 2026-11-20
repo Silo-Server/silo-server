@@ -3,6 +3,7 @@ package handlers
 import (
 	"cmp"
 	"context"
+	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -111,7 +112,7 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 		return nil, nil
 	}
 	if clientSent && req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 && req.BandwidthEstimateKbps != nil && req.QualityPreference == playback.QualityAutoV3 {
-		if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
+		if err := h.observeLearnedLimit(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
 			return nil, err
 		}
 	}
@@ -129,6 +130,32 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	req.BandwidthEstimateKbps = new(limit.Kbps)
 	req.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
 	return &playback.BandwidthLimitV3{Kbps: limit.Kbps, Source: playback.BandwidthEstimateObservedRebufferV3, ExpiresAt: limit.ExpiresAt.UTC().Format(time.RFC3339)}, nil
+}
+
+// observeLearnedLimit records a lowering as the connection's learned limit
+// unless the connection's current reading contradicts it. A start that stalls
+// because the server is slow (a disk spinning up, a probe that took seconds)
+// looks like a slow link to the client, but a link that a recent speed test or
+// playback sample measured many times faster did not cause it. The request
+// still plans at its lowered estimate; only the next titles go without it. A
+// provider path follows the device across networks, so its reading does not
+// speak for the network that stalled and the lowering is always recorded.
+func (h *PlaybackHandler) observeLearnedLimit(ctx context.Context, user int, device, key string, kbps int) error {
+	if connectionstore.SpansNetworks(key) {
+		return h.Connections.Observe(ctx, user, device, key, kbps)
+	}
+	c, err := h.Connections.Connection(ctx, user, device, key)
+	if err != nil {
+		return err
+	}
+	if c != nil {
+		if reading := connectionstore.Reading(h.currentReadings(c.Probe, c.PlaybackSample)); connectionstore.Contradicts(reading, kbps) {
+			slog.InfoContext(ctx, "learned limit not recorded: the connection's reading contradicts it", logComponentKey, "playback",
+				"connection", c.Connection, "limit_kbps", kbps, "reading_kbps", reading)
+			return nil
+		}
+	}
+	return h.Connections.Observe(ctx, user, device, key, kbps)
 }
 
 func markLearnedLimit(result *playback.PlannerResultV3, limit *playback.BandwidthLimitV3, source *models.MediaFile, request playback.StartRequestV3, serverCap int) {
