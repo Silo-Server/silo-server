@@ -27,7 +27,7 @@ import { describeTrigger } from "@/lib/taskTrigger";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
-import { taskText } from "@/lib/taskText";
+import { TASK_CATEGORY_LABELS, taskText } from "@/lib/taskText";
 import { TriggerFormRow } from "./AdminTaskTriggerForm";
 
 const EM_DASH = "—";
@@ -557,7 +557,7 @@ export default function AdminTaskDetail() {
         subtitle={taskText(serverText, task, "description")}
         actions={
           <>
-            <Badge variant="outline">{task.category}</Badge>
+            <Badge variant="outline">{t(TASK_CATEGORY_LABELS[task.category])}</Badge>
             {isRunning ? (
               <Button
                 variant="outline"
