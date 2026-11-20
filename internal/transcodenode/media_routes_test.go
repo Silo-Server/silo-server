@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -18,7 +19,7 @@ func TestMediaRouteManifest(t *testing.T) {
 	makeRouter := func() chi.Routes {
 		// Handler's idle reaper is guarded by reaperOnce, so repeated fixtures
 		// start only the single process-wide goroutine existing tests already use.
-		return NewServer(newTestRuntime(nil), nodesessions.NewLocalTracker()).router()
+		return NewServer(nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{}), nodesessions.NewTracker(nil, "", "", "")).router()
 	}
 	actual, err := streamtelemetry.BuildRouteManifest([]chi.Routes{makeRouter(), makeRouter()}, transcodeNodeMediaRoutes)
 	if err != nil {

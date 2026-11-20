@@ -38,6 +38,8 @@ type handshakeCompleter struct {
 	links int
 }
 
+func (f *handshakeCompleter) ProviderAnswerFence(context.Context) (int64, error) { return 0, nil }
+
 func (f *handshakeCompleter) ResolveOAuthLogin(_ context.Context, in auth.OAuthLoginInput) (*models.User, int64, error) {
 	f.in = in
 	f.calls++
@@ -97,7 +99,7 @@ func (rig *handshakeRig) serve(method, target string, cookies ...*http.Cookie) *
 func binderCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	for _, c := range rec.Result().Cookies() {
-		if strings.HasPrefix(c.Name, "vio_oauth_") && c.MaxAge > 0 {
+		if strings.HasPrefix(c.Name, "silo_oauth_") && c.MaxAge > 0 {
 			return c
 		}
 	}

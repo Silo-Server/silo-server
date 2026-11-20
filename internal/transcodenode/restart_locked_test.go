@@ -62,7 +62,7 @@ exec sleep 30
 	}
 
 	server := &Server{sessions: map[string]*playback.TranscodeSession{sessionID: session}}
-	target, ok, err := server.restartSegmentLocked(context.Background(), sessionID, session, 10, time.Time{})
+	target, ok, err := server.restartSegmentLocked(context.Background(), sessionID, session, 10)
 	if err != nil {
 		t.Fatalf("restartSegmentLocked: %v", err)
 	}
