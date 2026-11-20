@@ -664,7 +664,10 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	}
 	if durationIsReasonable(formatDuration) && !durationLooksImplausible(raw, formatDuration) {
 		if span, ok := audioVideoSpan(raw, formatDuration); ok && !durationLooksImplausible(raw, span) {
-			return truncatedDuration(span), true
+			// Rounded up: the container's length no longer covers a partial
+			// last second, and truncating it would drop that segment from a
+			// transcode's playlist.
+			return int(math.Ceil(span)), true
 		}
 		return truncatedDuration(formatDuration), true
 	}

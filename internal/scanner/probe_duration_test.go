@@ -53,19 +53,21 @@ func TestDurationFromProbeMetadataIgnoresSubtitleStretch(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		format   string
+		audio    string
 		subtitle string
 		want     int
 	}{
-		{"subtitle stretches by seconds", "154.390000", "00:02:34.390000000", 150},
-		{"subtitle ends before the video", "152.000000", "00:02:28.000000000", 152},
-		{"nothing accounts for the stretch", "154.390000", "00:02:00.000000000", 154},
+		{"subtitle stretches by seconds", "154.390000", "00:02:30.000000000", "00:02:34.390000000", 150},
+		{"a partial last second stays listed", "154.390000", "00:02:30.900000000", "00:02:34.390000000", 151},
+		{"subtitle ends before the video", "152.000000", "00:02:30.000000000", "00:02:28.000000000", 152},
+		{"nothing accounts for the stretch", "154.390000", "00:02:30.000000000", "00:02:00.000000000", 154},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := &ffprobeOutput{
 				Format: ffprobeFormat{Duration: tt.format, StartTime: "0.000000"},
 				Streams: []ffprobeStream{
 					tagged("video", "00:02:29.999000000"),
-					tagged("audio", "00:02:30.000000000"),
+					tagged("audio", tt.audio),
 					tagged("subtitle", tt.subtitle),
 				},
 			}
