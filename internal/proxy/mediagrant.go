@@ -235,7 +235,7 @@ func refuseSupersededGrantTransport(w http.ResponseWriter, r *http.Request, card
 		return false
 	}
 	w.Header().Set(playback.ErrorHeader, playback.TransportSupersededCode)
-	writeGrantError(w, http.StatusNotFound, playback.TransportSupersededCode, "The playback plan that published this URL was superseded")
+	writeGrantError(w, http.StatusNotFound, playback.TransportSupersededCode, playback.TransportSupersededMessage)
 	return true
 }
 

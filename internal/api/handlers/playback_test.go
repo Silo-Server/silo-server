@@ -1360,9 +1360,9 @@ func TestTranscodeServeRefusesSupersededTransport(t *testing.T) {
 			}
 
 			rr := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/api/v2/playback/transcode/"+sessionID+"/segment/seg_00072.ts?"+playback.TransportQueryParam+"="+test.marker, nil)
+			req := playbackTestRequest(http.MethodGet, "/api/v2/playback/transcode/"+sessionID+"/segment/seg_00072.ts?"+playback.TransportQueryParam+"="+test.marker, nil, map[string]string{"session_id": sessionID, "name": "seg_00072.ts"})
 			started := time.Now()
-			handler.HandleGetTranscodeSegment(rr, withPlaybackRouteParams(req, map[string]string{"session_id": sessionID, "name": "seg_00072.ts"}))
+			handler.HandleGetTranscodeSegment(rr, req)
 			if elapsed := time.Since(started); elapsed > 2*time.Second {
 				t.Fatalf("request took %v; a superseded transport must be refused without waiting", elapsed)
 			}
@@ -1381,12 +1381,4 @@ func TestTranscodeServeRefusesSupersededTransport(t *testing.T) {
 			}
 		})
 	}
-}
-
-func withPlaybackRouteParams(req *http.Request, params map[string]string) *http.Request {
-	routeCtx := chi.NewRouteContext()
-	for key, value := range params {
-		routeCtx.URLParams.Add(key, value)
-	}
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }

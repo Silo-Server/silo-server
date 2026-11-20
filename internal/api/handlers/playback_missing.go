@@ -99,7 +99,7 @@ func writePlaybackTransportSupersededError(w http.ResponseWriter, err error) boo
 		return false
 	}
 	w.Header().Set(playback.ErrorHeader, playback.TransportSupersededCode)
-	writeError(w, http.StatusNotFound, playback.TransportSupersededCode, "The playback plan that published this URL was superseded")
+	writeError(w, http.StatusNotFound, playback.TransportSupersededCode, playback.TransportSupersededMessage)
 	return true
 }
 

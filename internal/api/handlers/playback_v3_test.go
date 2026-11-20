@@ -5317,9 +5317,9 @@ func TestReplanPlaybackV2SupersedesThePreviousTransportsURLs(t *testing.T) {
 	requireSuperseded := func(marker string) {
 		t.Helper()
 		rr := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(newAuthorizedPlaybackContext(), http.MethodGet,
-			"/api/v2/playback/transcode/"+started.SessionID+"/segment/seg_00072.ts?"+playback.TransportQueryParam+"="+marker, nil)
-		handler.HandleGetTranscodeSegment(rr, withPlaybackRouteParams(req, map[string]string{"session_id": started.SessionID, "name": "seg_00072.ts"}))
+		req := playbackTestRequest(http.MethodGet, "/api/v2/playback/transcode/"+started.SessionID+"/segment/seg_00072.ts?"+playback.TransportQueryParam+"="+marker,
+			nil, map[string]string{"session_id": started.SessionID, "name": "seg_00072.ts"})
+		handler.HandleGetTranscodeSegment(rr, req)
 		if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), playback.TransportSupersededCode) {
 			t.Fatalf("superseded segment status = %d body = %s, want 404 %s", rr.Code, rr.Body.String(), playback.TransportSupersededCode)
 		}

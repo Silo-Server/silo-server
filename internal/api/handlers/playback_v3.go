@@ -5055,11 +5055,7 @@ func withTransportMarkerV3(rawURL, sessionID, generation string) string {
 	if marker == "" {
 		return rawURL
 	}
-	sep := "?"
-	if strings.ContainsRune(rawURL, '?') {
-		sep = "&"
-	}
-	return rawURL + sep + playback.TransportQueryParam + "=" + url.QueryEscape(marker)
+	return appendPlaybackQueryV3(rawURL, playback.TransportQueryParam, url.QueryEscape(marker))
 }
 
 func transportGenerationV3(sessionID, planID string) string {

@@ -18,6 +18,10 @@ const TransportQueryParam = "silo_transport"
 // mapping sees only the response status and headers.
 const TransportSupersededCode = "playback_transport_superseded"
 
+// TransportSupersededMessage is the human-readable detail sent with
+// TransportSupersededCode.
+const TransportSupersededMessage = "The playback plan that published this URL was superseded"
+
 // ErrorHeader names a media error the response status alone does not
 // distinguish.
 const ErrorHeader = "X-Silo-Playback-Error"
