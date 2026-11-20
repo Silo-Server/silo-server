@@ -327,13 +327,20 @@ export function retentionNote({
 }
 
 /**
- * Whether the server refuses every backup until the admin acts: the SQLite
- * user store, or encryption with an unconfirmed key. The nightly run still
- * fires and fails, so the page forecasts no run while this holds.
+ * Whether the server refuses every backup until the admin acts: no storage
+ * to write them to (capabilities `not_configured`), the SQLite user store,
+ * or encryption with an unconfirmed key. The nightly run still fires and
+ * fails, so the page forecasts no run while this holds.
  */
-export function backupsPaused(warnings: readonly AdminBackupWarning[]): boolean {
-  return warnings.some(
-    (warning) => warning.code === "sqlite_user_store" || warning.code === "key_not_confirmed",
+export function backupsPaused(
+  configured: boolean,
+  warnings: readonly AdminBackupWarning[],
+): boolean {
+  return (
+    !configured ||
+    warnings.some(
+      (warning) => warning.code === "sqlite_user_store" || warning.code === "key_not_confirmed",
+    )
   );
 }
 

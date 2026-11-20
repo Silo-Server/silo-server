@@ -170,7 +170,7 @@ export default function AdminBackups() {
   const keep = list?.keep ?? (Number(form.getPersistedValue(BACKUP_KEEP_KEY)) || 7);
   const enabled = list?.enabled ?? form.getPersistedValue(BACKUP_ENABLED_KEY) !== "false";
   const taskNextRunAt = backupTask.data?.next_run_at;
-  const paused = backupsPaused(warnings);
+  const paused = backupsPaused(configured, warnings);
   // A paused server's next run fails, so neither line names it.
   const next = enabled && !paused ? nextBackupRun(now, taskNextRunAt) : null;
   // Once the scheduled time passes, read the schedule again instead of

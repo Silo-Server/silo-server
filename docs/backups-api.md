@@ -145,8 +145,9 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
   `key_not_confirmed` (backups are `encrypted` and the current `SECRET_KEY`
   was never confirmed, or changed since: encrypted backups, and uploads to a
   bucket, are paused). While `sqlite_user_store` or `key_not_confirmed` is
-  present the server refuses every backup, scheduled ones included, so don't
-  present the backup task's `next_run_at` as an upcoming backup.
+  present, or the capabilities `state` is `not_configured`, the server
+  refuses every backup, scheduled ones included, so don't present the backup
+  task's `next_run_at` as an upcoming backup.
 
 `status` is one of:
 
